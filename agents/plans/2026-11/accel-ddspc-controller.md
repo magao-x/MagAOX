@@ -4796,3 +4796,45 @@ by `AGENTS.md`. This work does not switch branches, commit, or push.
   compute allowance. No install, staging/commit, push or deployment was performed.
 - Exact modified-file manifest and operator commands:
   `apps/loPredCtrlAcc/NATIVE_APPLICATION.md`.
+
+## Compact native diagnostics and ADC forwarding — 2026-11-14
+
+- Native default registration is reduced to 11 application properties / 59
+  elements. Framework FSM/log properties remain. `ddspc_mode` is the only writable
+  app property and retains request-only behavior; training/readiness and all
+  compile-time output guards remain. Detailed metadata and disabled Legacy
+  controls require startup `diagnostics.debug_indi=true`; schema changes on reload
+  are refused. Periodic updates remain bounded by the existing 250-ms setting.
+- Reader capture rate and actual native forwarding rate are separate. The old
+  observer froze an availability cutoff before acquiring the ADC mutex. Regression
+  tests demonstrate healthy capture with retained samples withheld beyond an old
+  cutoff. The new observation-only `AdcReader::copy_ready()` measures the cutoff
+  under that lock and reuses actual bounded copying; frozen-cutoff replay/control
+  semantics are unchanged. Exact cursor/generation/segment, pending receipt and
+  cutoff evidence are available in debug mode and health-transition logs.
+- Diagnostic snapshots refresh local receipt-based silence rather than leaving
+  worker-cached health current indefinitely. The recorded exao2 counters alone do
+  not prove the precise sustained-stall trigger. Different observation (10-ms) and
+  capture (20-ms) health thresholds can also produce a transient mismatch. Require
+  a new operator-run test and retain cursor/cutoff evidence if the stall recurs;
+  do not manufacture rates or declare the live fault eliminated offline.
+- Retention occupancy/eviction, ADC forwarding pending work, recorder backlog/
+  overflow, source counter gaps, resets, timestamp breaks and reader races now
+  have separate operator labels. Modal association remains explicitly unavailable
+  because the camera-origin/exposure/clock contract is missing. Expected lack of
+  association and clock qualification is not counted as a hardware failure.
+- Local validation: 56 focused native C++ cases plus 44 Python checks pass;
+  ASan/UBSan pass the focused suite. The broad existing regression passes 133
+  cases and confirmed-input replay passes 6. A 120-second virtual ADC test forwards
+  all 960,000 individual samples, including a 150-ms consumer delay near the
+  reported counter. The initial cached broad build aborted due to mixed absolute/
+  relative dependency targets; canonical build roots and Makefile prerequisites
+  resolve that ABI-cache issue. No numerical-controller changes were made.
+- Normal installed defaults, the explicitly detailed finite-observer example,
+  tests/build support, and `NATIVE_APPLICATION.md` are updated. Exact property
+  schema, affected files, honest diagnostic limitations and operator-only commands
+  are in `apps/loPredCtrlAcc/NATIVE_DIAGNOSTICS.md`. No change to loPredCtrl,
+  calibration, producers, installed files, running services, DM output, staging,
+  commits or pushes. Native Linux/broker behavior and the live fault remain
+  operator qualifications; clocks, exposures, applied intervals and synco slot
+  deadlines remain unqualified.

@@ -7,6 +7,7 @@ APP_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 TEST_DIR := $(APP_DIR)/tests
 ROOT_DIR := $(abspath $(APP_DIR)/../..)
 BUILD_DIR ?= $(APP_DIR)/build/offline
+override BUILD_DIR := $(abspath $(BUILD_DIR))
 CXX = c++
 DEPENDENCY_INCLUDES := $(shell pkg-config --cflags-only-I eigen3 mxlib)
 CPPFLAGS += -I$(TEST_DIR)/native_stubs $(DEPENDENCY_INCLUDES) -DEIGEN_DONT_PARALLELIZE
@@ -60,6 +61,9 @@ OBJECTS += $(PHASE8_OBJECTS) $(BUILD_DIR)/phase8_async_shadow.o
 ifeq ($(DDSPC_MINIMAL_APP_TESTS),yes)
 OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
 endif
+
+# Rebuild older dependency files once when this build contract changes (including relative/absolute cache migration).
+$(OBJECTS): $(TEST_DIR)/Makefile.offline
 
 $(PHASE8_STAMP): $(TEST_DIR)/prepare_phase8.py $(TEST_DIR)/prepare_phase6.py
 	python3 $(TEST_DIR)/prepare_phase8.py --output $(PHASE8_ROOT)

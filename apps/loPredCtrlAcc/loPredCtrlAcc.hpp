@@ -189,8 +189,30 @@ class loPredCtrlAcc : public MagAOXApp<true>,
         m_indiP_nativeInterlocks;                                                   ///< Output and timing gates.
     std::array<std::uint64_t, DDSPC::observationSources> m_nativeReportedSamples{}; ///< New-sample diagnostic pulses.
     std::array<bool, DDSPC::observationSources> m_nativeReportedConnections{}; ///< Log connection transitions once.
+    std::array<std::string, 4> m_nativeReportedHealth; ///< Rate-limited compact health-transition logging.
     double m_nativeDiagnosticsMs{ 250 }; ///< Maximum periodic diagnostic rate, independent of acquisition workers.
     std::int64_t m_nativeNextDiagnosticNs{ 0 }; ///< Steady-clock deadline for the next periodic property update.
+
+    bool m_nativeDebugINDI{ false }; ///< Startup-only opt-in to the full native metadata/Legacy diagnostic schema.
+    pcf::IndiProperty m_indiP_adcForwarding; ///< Opt-in exact cursor/cutoff evidence; never grants input validity.
+
+    /// Compact native operator groups; detailed source records remain in the optional journal/debug interface.
+    enum class NativeOperator : std::size_t
+    {
+        Health,
+        Inputs,
+        Rates,
+        Adc,
+        Losses,
+        Buffers,
+        Timing,
+        Control,
+        Performance,
+        Safety,
+        Count
+    };
+    std::array<pcf::IndiProperty, std::size_t( NativeOperator::Count )>
+        m_indiP_nativeOperator; ///< Operator-only schema.
 
     /// ADC-only numbers and provenance; separate from synchronized DDSPC validity.
     pcf::IndiProperty m_indiP_adc, m_indiP_adcSource;
@@ -549,6 +571,15 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     /// Admit a bounded-rate diagnostic update without changing acquisition or model state.
     bool nativeDiagnosticsDue( std::int64_t nowNs /**< [in] Current local steady-clock nanoseconds. */ );
 
+    /// Select the compact native schema without changing the historical non-native test/controller interface.
+    bool compactNativeINDI() const;
+
+    /// Register the bounded operator schema; metadata is available only through explicit debug opt-in.
+    int setupNativeOperatorINDI();
+
+    /// Publish one coherent native snapshot at the diagnostic cadence; never qualify clocks or model inputs.
+    void updateNativeOperatorINDI();
+
     /// Publish a bounded ADC health snapshot at ordinary application cadence.
     void updateAdcINDI();
 
@@ -728,6 +759,15 @@ inline void loPredCtrlAcc::setupConfig()
                 false,
                 "double",
                 "Periodic INDI update interval, 50 to 10000 ms." );
+    config.add( "diagnostics.debug_indi",
+                "",
+                "diagnostics.debug_indi",
+                argType::Optional,
+                "diagnostics",
+                "debug_indi",
+                false,
+                "bool",
+                "Startup-only detailed native INDI schema; default false." );
     for( const char *role : { "modal", "camera", "dm", "completion", "sdk" } )
         for( const char *field : { "stream", "acquisition_clock", "publication_clock" } )
         {
@@ -1154,6 +1194,13 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
             _config( m_nativeShadowConfig.m_record, "native_shadow.record" );
             _config( m_nativeShadowConfig.m_historyCapacity, "native_shadow.history_capacity" );
             _config( m_nativeDiagnosticsMs, "diagnostics.period_ms" );
+            const bool debugBefore = m_nativeDebugINDI;
+            _config( m_nativeDebugINDI, "diagnostics.debug_indi" );
+            if( m_nativeObserver && debugBefore != m_nativeDebugINDI )
+            {
+                m_nativeDebugINDI = debugBefore;
+                throw std::invalid_argument( "Changing diagnostic INDI schema requires an application restart" );
+            }
             if( !std::isfinite( m_nativeDiagnosticsMs ) || m_nativeDiagnosticsMs < 50 || m_nativeDiagnosticsMs > 10000 )
                 throw std::invalid_argument( "Native diagnostic period must be between 50 and 10000 ms" );
             _config( m_nativeShadowConfig.m_pollUs, "native_shadow.poll_us" );
@@ -1383,6 +1430,8 @@ inline bool loPredCtrlAcc::shadowCandidate( DDSPC::Matrix &output )
 
 inline int loPredCtrlAcc::setupAdcINDI()
 {
+    if( compactNativeINDI() )
+        return 0;
     if( createROIndiNumber( m_indiP_adc, "adc" ) < 0 )
     {
         return -1;
@@ -1422,6 +1471,8 @@ inline int loPredCtrlAcc::setupAdcINDI()
 
 inline void loPredCtrlAcc::updateAdcINDI()
 {
+    if( compactNativeINDI() )
+        return;
     auto status = m_adcReader ? m_adcReader->status() : DDSPC::AdcStatus{};
     if( !m_adcEnabled )
     {
@@ -1493,6 +1544,8 @@ inline void loPredCtrlAcc::updateAdcINDI()
 
 inline int loPredCtrlAcc::setupNativeShadowINDI()
 {
+    if( compactNativeINDI() )
+        return setupNativeOperatorINDI();
     if( createROIndiNumber( m_indiP_nativeShadow, "native_shadow" ) < 0 )
         return -1;
     for( const char *name : { "enabled",
@@ -1520,6 +1573,22 @@ inline int loPredCtrlAcc::setupNativeShadowINDI()
         m_indiP_nativeShadow.add( pcf::IndiElement( name, 0.0 ) );
     if( registerIndiPropertyReadOnly( m_indiP_nativeShadow ) < 0 )
         return -1;
+    if( createROIndiText( m_indiP_adcForwarding, "native_adc_forwarding", "reason" ) < 0 )
+        return -1;
+    for( const char *field : { "reader_counter",
+                               "cursor_counter",
+                               "reader_generation",
+                               "cursor_generation",
+                               "reader_segment",
+                               "cursor_segment",
+                               "pending",
+                               "pending_receipt_ns",
+                               "cutoff_ns",
+                               "reader_receipt_ns",
+                               "forward_available_ns" } )
+        m_indiP_adcForwarding.add( pcf::IndiElement( field, "" ) );
+    if( registerIndiPropertyReadOnly( m_indiP_adcForwarding ) < 0 )
+        return -1;
     for( std::size_t i = 0; i < DDSPC::observationSources; ++i )
     {
         auto      &property = m_indiP_nativeSources[i];
@@ -1537,8 +1606,8 @@ inline int loPredCtrlAcc::setupNativeShadowINDI()
                                      "timestamp_metadata_valid",
                                      "timestamp_discontinuities",
                                      "clock_qualified",
-                                     "input_queue_occupancy",
-                                     "input_queue_capacity",
+                                     "history_retained",
+                                     "history_capacity",
                                      "history_evictions",
                                      "samples",
                                      "counter",
@@ -1612,6 +1681,252 @@ inline int loPredCtrlAcc::setupNativeShadowINDI()
     return 0;
 }
 
+inline bool loPredCtrlAcc::compactNativeINDI() const
+{
+    return m_nativeShadowEnabled && !m_nativeDebugINDI;
+}
+
+inline int loPredCtrlAcc::setupNativeOperatorINDI()
+{
+    auto add = [&]( NativeOperator index, const char *name, bool numeric, std::initializer_list<const char *> elements )
+    {
+        auto &p = m_indiP_nativeOperator[std::size_t( index )];
+        if( numeric ? createROIndiNumber( p, name ) < 0 : createROIndiText( p, name, *elements.begin() ) < 0 )
+            return -1;
+        for( const auto *element : elements )
+        {
+            if( numeric )
+                p.add( pcf::IndiElement( element, 0.0 ) );
+            else if( !p.find( element ) )
+                p.add( pcf::IndiElement( element, "" ) );
+        }
+        return registerIndiPropertyReadOnly( p );
+    };
+    if( add(
+            NativeOperator::Health, "app_health", false, { "state", "uptime_s", "inputs", "shadow", "error_events" } ) <
+            0 ||
+        add( NativeOperator::Inputs, "input_health", false, { "adc", "modal", "camera", "dm" } ) < 0 ||
+        add( NativeOperator::Rates,
+             "input_rates",
+             true,
+             { "adc_capture_hz", "adc_forward_hz", "modal_hz", "camera_hz", "dm_hz" } ) < 0 ||
+        add( NativeOperator::Adc,
+             "adc_values",
+             true,
+             { "raw0", "raw1", "acceleration0", "acceleration1", "invalid", "rail_rejected" } ) < 0 ||
+        add( NativeOperator::Losses,
+             "input_losses",
+             true,
+             { "adc_dropped",
+               "adc_forward_missing",
+               "modal_gaps",
+               "camera_gaps",
+               "dm_gaps",
+               "counter_discontinuities",
+               "reader_races",
+               "adc_breaks",
+               "timing_breaks" } ) < 0 ||
+        add( NativeOperator::Buffers,
+             "input_buffers",
+             false,
+             { "history_occupancy",
+               "history_evictions",
+               "adc_forward_pending",
+               "recorder_backlog",
+               "recorder_overflow" } ) < 0 ||
+        add( NativeOperator::Timing,
+             "timing",
+             false,
+             { "phase_offset_us", "phase_jitter_us", "clock", "exposure", "modal_association", "slots_per_wfs" } ) <
+            0 ||
+        add( NativeOperator::Control,
+             "ddspc_control",
+             false,
+             { "requested_mode", "effective_mode", "training", "prediction", "standard_ready", "assisted_ready" } ) <
+            0 ||
+        add( NativeOperator::Performance,
+             "ddspc_performance",
+             true,
+             { "standard_updates",
+               "standard_predictions",
+               "standard_rmse",
+               "assisted_updates",
+               "assisted_predictions",
+               "assisted_rmse",
+               "compute_us" } ) < 0 ||
+        add( NativeOperator::Safety,
+             "safety",
+             false,
+             { "dm_write_enabled", "output_reason", "timing_interlock", "model_interlock" } ) < 0 )
+        return -1;
+    return 0;
+}
+
+inline void loPredCtrlAcc::updateNativeOperatorINDI()
+{
+    const auto          s       = m_nativeObserver->status();
+    const auto          adc     = m_adcReader->status();
+    const auto         &sources = s.m_sources;
+    const auto         &forward = sources[0];
+    DDSPC::ShadowStatus standard, assisted;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_shadowMutex );
+        if( m_shadowController )
+        {
+            standard = m_shadowController->status( DDSPC::ShadowMode::Standard );
+            assisted = m_shadowController->status( DDSPC::ShadowMode::AccelAssisted );
+        }
+    }
+    const bool adcGood   = adc.m_valid && forward.m_valid;
+    const bool inputGood = adcGood && sources[1].m_valid && sources[2].m_valid;
+    auto       text =
+        [&]( NativeOperator index, const std::vector<const char *> &keys, const std::vector<std::string> &values )
+    { updatesIfChanged<std::string>( m_indiP_nativeOperator[std::size_t( index )], keys, values ); };
+    auto number = [&]( NativeOperator index, const std::vector<const char *> &keys, const std::vector<double> &values )
+    { updatesIfChanged<double>( m_indiP_nativeOperator[std::size_t( index )], keys, values ); };
+    std::uint64_t errors =
+        adc.m_dropped + s.m_adcMissing + s.m_queueDrops + s.m_commandDrops + s.m_commandOversize + s.m_ioError;
+    std::uint64_t races = adc.m_races, resets = adc.m_restarts;
+    std::uint64_t timingBreaks = adc.m_timingGaps + adc.m_timestampRejected;
+    for( std::size_t i = 1; i < DDSPC::observationSources; ++i )
+    {
+        errors += sources[i].m_counterGaps + sources[i].m_invalid + sources[i].m_protocolInvalid;
+        races += sources[i].m_races;
+        resets += sources[i].m_restarts;
+        timingBreaks += sources[i].m_timestampDiscontinuities;
+    }
+    text( NativeOperator::Health,
+          { "state", "uptime_s", "inputs", "shadow", "error_events" },
+          { s.m_ioError ? "worker_error" : "observing",
+            s.m_nowNs >= s.m_startedNs && s.m_startedNs >= 0
+                ? std::to_string( ( s.m_nowNs - s.m_startedNs ) / 1000000000 )
+                : "unavailable",
+            inputGood ? "adc_wfs_healthy_dm_independent" : "adc_wfs_degraded",
+            "true",
+            std::to_string( errors ) } );
+    for( std::size_t i = 0; i < 4; ++i )
+    {
+        const auto &v     = sources[i];
+        std::string state = !v.m_connected ? "disconnected"
+                            : v.m_stale    ? "stale_or_invalid"
+                            : v.m_idle     ? "idle_valid"
+                            : v.m_valid    ? "valid"
+                                           : "awaiting_sample";
+        if( i == 0 && adc.m_valid && !v.m_valid )
+            state = !v.m_samples ? "awaiting_first_forward"
+                    : v.m_stale  ? "reader_healthy_forwarding_stale"
+                                 : "reader_healthy_forwarding_invalid";
+        if( i == 0 && !adc.m_valid )
+            state = std::string( "reader_" ) + DDSPC::adc_state( adc.m_state );
+        if( i == 3 && v.m_idle && !v.m_valid )
+            state = "idle_no_command_yet";
+        state += ";restarts=" + std::to_string( i == 0 ? adc.m_restarts : v.m_restarts );
+        text( NativeOperator::Inputs, { DDSPC::observation_source_name( DDSPC::ObservationSource( i ) ) }, { state } );
+        if( state != m_nativeReportedHealth[i] )
+        {
+            log<text_log>( std::string( "native_input_health source=" ) + m_nativeShadowConfig.m_streams[i].m_name +
+                           " state=" + state + " counter=" + std::to_string( v.m_latest.m_counter ) +
+                           " generation=" + std::to_string( v.m_latest.m_generation ) +
+                           " segment=" + std::to_string( v.m_latest.m_segment ) +
+                           " adc_cursor=" + std::to_string( s.m_adcCursor.m_counter ) +
+                           " adc_pending=" + std::to_string( s.m_adcPending ) +
+                           " copy_cutoff_mono_ns=" + std::to_string( s.m_adcCutoffNs ) +
+                           " pending_receipt_mono_ns=" + std::to_string( s.m_adcPendingReceiptNs ) );
+            m_nativeReportedHealth[i] = state;
+        }
+        m_nativeReportedConnections[i] = v.m_connected;
+    }
+    number( NativeOperator::Rates,
+            { "adc_capture_hz", "adc_forward_hz", "modal_hz", "camera_hz", "dm_hz" },
+            { adc.m_rateHz,
+              forward.m_receivedRateHz,
+              sources[1].m_receivedRateHz,
+              sources[2].m_receivedRateHz,
+              sources[3].m_publicationRateHz } );
+    number( NativeOperator::Adc,
+            { "raw0", "raw1", "acceleration0", "acceleration1", "invalid", "rail_rejected" },
+            { double( adc.m_latest.m_frame.m_raw[0] ),
+              double( adc.m_latest.m_frame.m_raw[1] ),
+              adc.m_latest.m_acceleration[0],
+              adc.m_latest.m_acceleration[1],
+              double( adc.m_invalid ),
+              double( adc.m_railRejected ) } );
+    number( NativeOperator::Losses,
+            { "adc_dropped",
+              "adc_forward_missing",
+              "modal_gaps",
+              "camera_gaps",
+              "dm_gaps",
+              "counter_discontinuities",
+              "reader_races",
+              "adc_breaks",
+              "timing_breaks" },
+            { double( adc.m_dropped ),
+              double( s.m_adcMissing ),
+              double( sources[1].m_counterGaps ),
+              double( sources[2].m_counterGaps ),
+              double( sources[3].m_counterGaps ),
+              double( resets ),
+              double( races ),
+              double( s.m_adcBreaks ),
+              double( timingBreaks ) } );
+    std::string occupancy, evictions;
+    for( std::size_t i = 0; i < 4; ++i )
+    {
+        const auto prefix =
+            std::string( i ? ";" : "" ) + DDSPC::observation_source_name( DDSPC::ObservationSource( i ) ) + "=";
+        occupancy += prefix + std::to_string( i == 3 ? s.m_dmCommandsRetained : sources[i].m_retained ) + "/" +
+                     std::to_string( i == 3 ? m_nativeShadowConfig.m_commandQueueCapacity
+                                            : m_nativeShadowConfig.m_historyCapacity );
+        evictions += prefix + std::to_string( i == 3 ? s.m_dmCommandEvictions : sources[i].m_historyEvictions );
+    }
+    text( NativeOperator::Buffers,
+          { "history_occupancy", "history_evictions", "adc_forward_pending", "recorder_backlog", "recorder_overflow" },
+          { occupancy,
+            evictions,
+            std::to_string( s.m_adcPending ),
+            "metadata=" + std::to_string( s.m_queueOccupancy ) +
+                ";commands=" + std::to_string( s.m_commandQueueOccupancy ),
+            "metadata=" + std::to_string( s.m_queueDrops ) + ";commands=" + std::to_string( s.m_commandDrops ) } );
+    text( NativeOperator::Timing,
+          { "phase_offset_us", "phase_jitter_us", "clock", "exposure", "modal_association", "slots_per_wfs" },
+          { "unqualified",
+            "unqualified",
+            "source_host_mapping_unqualified",
+            "exposure_boundaries_unavailable",
+            "camera_origin_and_exposure_contract_missing",
+            "4_nominal_individual_adc_samples" } );
+    text( NativeOperator::Control,
+          { "requested_mode", "effective_mode", "training", "prediction", "standard_ready", "assisted_ready" },
+          { m_shadowRequested,
+            "unavailable",
+            "inhibited",
+            "inhibited",
+            standard.m_ready ? "true" : "false",
+            assisted.m_ready ? "true" : "false" } );
+    number( NativeOperator::Performance,
+            { "standard_updates",
+              "standard_predictions",
+              "standard_rmse",
+              "assisted_updates",
+              "assisted_predictions",
+              "assisted_rmse",
+              "compute_us" },
+            { double( standard.m_updates ),
+              double( standard.m_predictions ),
+              standard.m_predictions ? standard.m_rmse : -1,
+              double( assisted.m_updates ),
+              double( assisted.m_predictions ),
+              assisted.m_predictions ? assisted.m_rmse : -1,
+              -1 } );
+    text( NativeOperator::Safety,
+          { "dm_write_enabled", "output_reason", "timing_interlock", "model_interlock" },
+          { "false",
+            "compile_time_shadow_only",
+            "exposure_clock_and_applied_input_unqualified",
+            "native_training_inhibited" } );
+}
+
 inline bool loPredCtrlAcc::nativeDiagnosticsDue( std::int64_t nowNs )
 {
     const auto interval = std::int64_t( m_nativeDiagnosticsMs * 1000000 );
@@ -1625,7 +1940,43 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
 {
     if( !m_nativeShadowEnabled || !m_nativeObserver )
         return;
-    const auto s = m_nativeObserver->status();
+    if( compactNativeINDI() )
+    {
+        updateNativeOperatorINDI();
+        return;
+    }
+    const auto        s      = m_nativeObserver->status();
+    const auto        adc    = m_adcReader->status();
+    const std::string reason = !adc.m_valid                                ? "reader_invalid"
+                               : s.m_adcPendingReceiptNs > s.m_adcCutoffNs ? "receipt_beyond_copy_cutoff"
+                               : s.m_adcPending                            ? "bounded_forward_backlog"
+                               : s.m_sources[0].m_stale                    ? "reader_healthy_forwarding_stale"
+                                                                           : "up_to_date";
+    updatesIfChanged<std::string>( m_indiP_adcForwarding,
+                                   { "reason",
+                                     "reader_counter",
+                                     "cursor_counter",
+                                     "reader_generation",
+                                     "cursor_generation",
+                                     "reader_segment",
+                                     "cursor_segment",
+                                     "pending",
+                                     "pending_receipt_ns",
+                                     "cutoff_ns",
+                                     "reader_receipt_ns",
+                                     "forward_available_ns" },
+                                   { reason,
+                                     std::to_string( adc.m_latest.m_frame.m_counter ),
+                                     std::to_string( s.m_adcCursor.m_counter ),
+                                     std::to_string( adc.m_generation ),
+                                     std::to_string( s.m_adcCursor.m_generation ),
+                                     std::to_string( adc.m_segment ),
+                                     std::to_string( s.m_adcCursor.m_segment ),
+                                     std::to_string( s.m_adcPending ),
+                                     std::to_string( s.m_adcPendingReceiptNs ),
+                                     std::to_string( s.m_adcCutoffNs ),
+                                     std::to_string( adc.m_latest.m_receivedNs ),
+                                     std::to_string( s.m_sources[0].m_latest.m_availableNs ) } );
     updatesIfChanged<double>(
         m_indiP_nativeShadow,
         { "enabled",
@@ -1688,8 +2039,8 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
               "timestamp_metadata_valid",
               "timestamp_discontinuities",
               "clock_qualified",
-              "input_queue_occupancy",
-              "input_queue_capacity",
+              "history_retained",
+              "history_capacity",
               "history_evictions",
               "samples",
               "counter",
@@ -1835,6 +2186,9 @@ inline int loPredCtrlAcc::setupShadowINDI()
     if( registerIndiPropertyNew( m_indiP_ddspcMode, INDI_NEWCALLBACK( m_indiP_ddspcMode ) ) < 0 )
         return -1;
 
+    if( compactNativeINDI() )
+        return 0;
+
     if( createStandardIndiSelectionSw( m_indiP_ddspcTrain,
                                        "ddspc_train",
                                        { "standard", "accel_assisted" },
@@ -1923,6 +2277,15 @@ inline int loPredCtrlAcc::setupShadowINDI()
 
 inline void loPredCtrlAcc::updateShadowINDI()
 {
+    if( compactNativeINDI() )
+    {
+        indi::updateSelectionSwitchIfChanged(
+            m_indiP_ddspcMode, m_shadowRequested, m_indiDriver, m_shadowModeRejected ? INDI_ALERT : INDI_IDLE );
+        auto &control = m_indiP_nativeOperator[std::size_t( NativeOperator::Control )];
+        if( !control.getName().empty() )
+            updatesIfChanged<std::string>( control, { "requested_mode" }, { m_shadowRequested } );
+        return;
+    }
     DDSPC::ShadowPipelineStatus pipeline;
     bool                        pipelineConfigured = false;
     DDSPC::ShadowStatus         standard, assisted;
@@ -2170,59 +2533,65 @@ inline int loPredCtrlAcc::appStartup()
         }
     }
 
-    CREATE_REG_INDI_NEW_TEXT( m_indiP_exploration, "exploration_sequence", "", "" );
-
-    CREATE_REG_INDI_NEW_TEXT( m_indiP_filename, "filename", "", "" );
+    if( !compactNativeINDI() )
+    {
+        CREATE_REG_INDI_NEW_TEXT( m_indiP_exploration, "exploration_sequence", "", "" );
+        CREATE_REG_INDI_NEW_TEXT( m_indiP_filename, "filename", "", "" );
+    }
 
     if( setupShadowINDI() < 0 || ( m_shadowMode && setupAdcINDI() < 0 ) )
     {
         return -1;
     }
 
-    createStandardIndiToggleSw( m_indiP_learningToggle, "learn", "Learning State", "Learn Controls" );
-    registerIndiPropertyNew( m_indiP_learningToggle, INDI_NEWCALLBACK( m_indiP_learningToggle ) );
-
-    createStandardIndiToggleSw( m_indiP_learningStdToggle, "learn_std", "Learning State", "Learn Controls" );
-    registerIndiPropertyNew( m_indiP_learningStdToggle, INDI_NEWCALLBACK( m_indiP_learningStdToggle ) );
-
-    createStandardIndiToggleSw( m_indiP_predictingToggle, "predict", "Predict State", "Predictive Controls" );
-    registerIndiPropertyNew( m_indiP_predictingToggle, INDI_NEWCALLBACK( m_indiP_predictingToggle ) );
-
-    createStandardIndiToggleSw( m_indiP_integratingToggle, "integrate", "Integration State", "Integration Controls" );
-    registerIndiPropertyNew( m_indiP_integratingToggle, INDI_NEWCALLBACK( m_indiP_integratingToggle ) );
-
-    createStandardIndiRequestSw( m_indiP_resetToggle, "reset_model", "Reset the RLS model", "Reset Model" );
-    registerIndiPropertyNew( m_indiP_resetToggle, INDI_NEWCALLBACK( m_indiP_resetToggle ) );
-
-    createStandardIndiRequestSw( m_indiP_saveToggle, "save_state", "Save the controller state", "Save State" );
-    registerIndiPropertyNew( m_indiP_saveToggle, INDI_NEWCALLBACK( m_indiP_saveToggle ) );
-
-    createStandardIndiRequestSw( m_indiP_loadToggle, "load_state", "Load the controller state", "Load State" );
-    registerIndiPropertyNew( m_indiP_loadToggle, INDI_NEWCALLBACK( m_indiP_loadToggle ) );
-
-    if( m_nativeShadowEnabled )
-        for( auto *property : { &m_indiP_learningToggle,
-                                &m_indiP_learningStdToggle,
-                                &m_indiP_predictingToggle,
-                                &m_indiP_integratingToggle,
-                                &m_indiP_resetToggle,
-                                &m_indiP_saveToggle,
-                                &m_indiP_loadToggle,
-                                &m_indiP_exploration,
-                                &m_indiP_filename } )
-            property->setPerm( pcf::IndiProperty::ReadOnly );
-
-    if( !m_nativeShadowEnabled )
+    if( !compactNativeINDI() )
     {
-        REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsSource, std::string( "fps" ) );
-    }
+        createStandardIndiToggleSw( m_indiP_learningToggle, "learn", "Learning State", "Learn Controls" );
+        registerIndiPropertyNew( m_indiP_learningToggle, INDI_NEWCALLBACK( m_indiP_learningToggle ) );
 
-    createROIndiNumber( m_indiP_fps, "fps" );
-    m_indiP_fps.add( pcf::IndiElement( "current" ) );
-    if( registerIndiPropertyReadOnly( m_indiP_fps ) < 0 )
-    {
-        log<software_error>( { "" } );
-        return -1;
+        createStandardIndiToggleSw( m_indiP_learningStdToggle, "learn_std", "Learning State", "Learn Controls" );
+        registerIndiPropertyNew( m_indiP_learningStdToggle, INDI_NEWCALLBACK( m_indiP_learningStdToggle ) );
+
+        createStandardIndiToggleSw( m_indiP_predictingToggle, "predict", "Predict State", "Predictive Controls" );
+        registerIndiPropertyNew( m_indiP_predictingToggle, INDI_NEWCALLBACK( m_indiP_predictingToggle ) );
+
+        createStandardIndiToggleSw(
+            m_indiP_integratingToggle, "integrate", "Integration State", "Integration Controls" );
+        registerIndiPropertyNew( m_indiP_integratingToggle, INDI_NEWCALLBACK( m_indiP_integratingToggle ) );
+
+        createStandardIndiRequestSw( m_indiP_resetToggle, "reset_model", "Reset the RLS model", "Reset Model" );
+        registerIndiPropertyNew( m_indiP_resetToggle, INDI_NEWCALLBACK( m_indiP_resetToggle ) );
+
+        createStandardIndiRequestSw( m_indiP_saveToggle, "save_state", "Save the controller state", "Save State" );
+        registerIndiPropertyNew( m_indiP_saveToggle, INDI_NEWCALLBACK( m_indiP_saveToggle ) );
+
+        createStandardIndiRequestSw( m_indiP_loadToggle, "load_state", "Load the controller state", "Load State" );
+        registerIndiPropertyNew( m_indiP_loadToggle, INDI_NEWCALLBACK( m_indiP_loadToggle ) );
+
+        if( m_nativeShadowEnabled )
+            for( auto *property : { &m_indiP_learningToggle,
+                                    &m_indiP_learningStdToggle,
+                                    &m_indiP_predictingToggle,
+                                    &m_indiP_integratingToggle,
+                                    &m_indiP_resetToggle,
+                                    &m_indiP_saveToggle,
+                                    &m_indiP_loadToggle,
+                                    &m_indiP_exploration,
+                                    &m_indiP_filename } )
+                property->setPerm( pcf::IndiProperty::ReadOnly );
+
+        if( !m_nativeShadowEnabled )
+        {
+            REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsSource, std::string( "fps" ) );
+        }
+
+        createROIndiNumber( m_indiP_fps, "fps" );
+        m_indiP_fps.add( pcf::IndiElement( "current" ) );
+        if( registerIndiPropertyReadOnly( m_indiP_fps ) < 0 )
+        {
+            log<software_error>( { "" } );
+            return -1;
+        }
     }
 
     if( !m_shadowMode && sem_init( &m_smSemaphore, 0, 0 ) < 0 )
@@ -2340,6 +2709,9 @@ inline int loPredCtrlAcc::appLogic()
     {
         updateAdcINDI();
     }
+
+    if( compactNativeINDI() )
+        return 0;
 
     updatesIfChanged<std::string>(
         m_indiP_exploration, { "current", "target" }, { m_exploration_sequence, m_exploration_sequence } );

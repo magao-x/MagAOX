@@ -18,6 +18,16 @@ ROOT = APP.parents[1]
 class NativeDeploymentTest(unittest.TestCase):
     """Verify real deployment inputs using private fixtures and read-only Make dry runs."""
 
+    def test_offline_dependency_targets_use_one_absolute_build_root(self):
+        """Relative and absolute overrides must identify the same .o/.d targets after a header/ABI change."""
+        with tempfile.TemporaryDirectory(prefix="ddspc-build-root-") as temporary:
+            wrapper = Path(temporary) / "Makefile"
+            wrapper.write_text(f"include {APP / 'tests/Makefile.offline'}\nprint-root:\n\t@echo $(BUILD_DIR)\n")
+            command = ["make", "-s", "-f", str(wrapper), "BUILD_DIR=relative-build", "print-root"]
+            result = subprocess.check_output(command, cwd=temporary, text=True).strip()
+            self.assertEqual(result, str(Path(temporary).resolve() / "relative-build"))
+            self.assertFalse((Path(temporary) / "relative-build").exists())
+
     def test_default_config_is_continuous_and_preserves_calibration(self):
         """Installed defaults acquire all inputs without a journal directory, output or automatic learning."""
         config, original = configparser.ConfigParser(), configparser.ConfigParser()
@@ -30,6 +40,7 @@ class NativeDeploymentTest(unittest.TestCase):
         self.assertFalse(config.getboolean("native_shadow", "record"))
         self.assertEqual(config.getfloat("native_shadow", "duration_sec"), 0)
         self.assertGreaterEqual(config.getfloat("diagnostics", "period_ms"), 50)
+        self.assertFalse(config.getboolean("diagnostics", "debug_indi"))
         for flag in ("own_shmim", "accel_enabled", "shadow_pipeline", "is_integrating"):
             self.assertFalse(config.getboolean("parameters", flag))
         self.assertEqual(config["native_shadow"]["dm_stream"], "dm01disp")

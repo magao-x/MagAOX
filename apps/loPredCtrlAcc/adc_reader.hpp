@@ -39,6 +39,10 @@ class AdcReader
     AdcBatch copy_after( const AdcCursor     &cursor /**< [in] Caller-owned consumer position. */,
                          std::span<AdcSample> output /**< [out] Nonempty owned destination. */,
                          std::int64_t         availableByNs /**< [in] Frozen decoder-availability cutoff. */ ) const;
+
+    /// Observe through a fresh cutoff measured after acquiring the reader lock; never use as a frozen control origin.
+    AdcBatch copy_ready( const AdcCursor     &cursor /**< [in] Caller-owned observation cursor. */,
+                         std::span<AdcSample> output /**< [out] Bounded owned destination. */ ) const;
 };
 
 } // namespace DDSPC

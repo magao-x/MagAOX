@@ -166,24 +166,28 @@ Useful `cursesINDI` properties under device `loPredCtrlAcc`:
 
 | Property | Meaning |
 | --- | --- |
-| `adc`, `adc_source` | Raw counts, acceleration, rate, age, rail/range/time rejection, capture losses and exact timestamp/identity strings |
-| `native_adc`, `native_modal`, `native_camera`, `native_dm` | Connection, stable payload validity, received/publication rates, age, counters, source gaps, timestamp regressions, history occupancy/eviction and polling failures |
-| `native_*_identity` | Exact counter/source/timestamp strings, declared clock names and human-readable stream state |
-| `native_shadow` | Acquisition/journal state, recorder occupancies/losses, complete-command retention and oversize counts |
+| `app_health`, `input_health` | Observation health, uptime, independent stream states/restarts and idle DM |
+| `input_rates`, `adc_values` | Capture/forwarding rates, modal/camera/DM rates, raw/calibrated ADC values and rejection |
+| `input_losses`, `input_buffers` | Source/forwarding loss, races, timing breaks, retained history, pending ADC and recorder queues |
+| `timing` | Explicit unavailable clock/exposure/association/phase contracts and four nominal slots |
 | `ddspc_mode` | Standard or assisted request; a request never grants model readiness or output authority |
-| `ddspc_standard`, `ddspc_accel_assisted`, `ddspc_train` | Independent model states; native adaptation remains inhibited/read-only |
-| `ddspc_safety`, `ddspc_interlocks` | Shadow/active state, effective write enable and explicit inhibition reasons |
-| `ddspc_timing` | Nominal 125 us ADC intervals, 500 us WFS frames, four slots per WFS frame, and unqualified phase/deadline fields |
+| `ddspc_control`, `ddspc_performance`, `safety` | Independent model state/counts, unavailable metrics and mandatory output interlocks |
+
+The default is 59 app-specific elements; framework properties remain. See
+[NATIVE_DIAGNOSTICS.md](NATIVE_DIAGNOSTICS.md) for the exact list, ADC forwarding
+investigation, loss semantics, debug migration and the extended verification test.
+The earlier detailed metadata properties are available only through explicit
+startup `[diagnostics] debug_indi=true`.
 
 Periodic updates are capped by `[diagnostics] period_ms=250`, independently of
 the input workers. The main application loop is 100 ms; effective reporting may
 be slower than the 4 Hz maximum. Acknowledging an explicit mode request is immediate.
-`new_sample` means a new source publication was observed since the preceding
+In debug mode, `new_sample` means a new source publication was observed since the preceding
 diagnostic update. `received_rate_hz` counts copied samples; `publication_rate_hz`
 uses source counter advances over observer time. Both use bounded rate windows
 and report zero during source silence. They do not qualify producer clocks.
 
-For DM: `connected=1, valid=1, idle=1, stale=0, publication_rate_hz=0` is a healthy
+For DM in debug mode: `connected=1, valid=1, idle=1, stale=0, publication_rate_hz=0` is a healthy
 static request. An attached stream with no first publication can be idle but not
 yet valid. Missing/replaced mappings, malformed payloads and a persistently busy
 producer remain distinct from idle. Source absence or idle does not stop ADC/WFS
@@ -207,7 +211,7 @@ change the already validated accelSim injection/calibration for this acceptance.
 2. Start the app with xctrl. In `cursesINDI`, select device `loPredCtrlAcc`.
 3. After a 2-second warmup, observe for 60 seconds. Require ADC received rate within
    2% of 8000 Hz and modal/camera within 2% of 2000 Hz, advancing counters, sensible
-   ADC conversion, `valid=1` and stable connections. These are acquisition
+   ADC conversion, valid `input_health` states and stable connections. These are acquisition
    acceptance bounds, not phase or real-time deadline qualification.
 4. Confirm no additional ADC capture loss, invalids, timestamp rejection or
    unexpected restart. Require no unexpected WFS/camera counter gaps or timestamp
@@ -216,10 +220,10 @@ change the already validated accelSim injection/calibration for this acceptance.
 5. Leave DM static if appropriate: its idle state and zero frequency must not
    produce an application error or make healthy ADC/WFS streams invalid. If DM
    updates are present, confirm the source counter and command history advance.
-6. Confirm `ddspc_safety.shadow=1`, `active=0`, `dm_write_enabled=0`, and native
+6. Confirm `app_health.shadow=true`, `safety.dm_write_enabled=false`, and native
    model updates/readiness/predictions remain zero. Change `ddspc_mode`: requests
    may change, but no interlock, fit or physical output is enabled. Legacy controls
-   and training are read-only in this installed native path.
+   and training are not exposed in the compact native path.
 7. Stop only this app with `xctrl stop loPredCtrlAcc`, check its PID status, and
    start it again. Confirm reconnection, safe defaults, and continued diagnostics.
 
@@ -248,7 +252,7 @@ do not overwrite global files with the backup if other operators have changed th
 The native input histories and complete-command copy API prepare causal multirate
 association. They do not yet supply qualified WFS exposure boundaries, verified
 cross-source clocks, applied-command intervals, or modal command projections.
-Phase offset/jitter remain unavailable (`phase_valid=0`, values -1) until an actual
+Phase offset/jitter remain `unqualified` in compact mode (debug: `phase_valid=0`, values -1) until an actual
 synchronization reference and source-clock mapping are supplied. Camera publication
 time is not substituted for exposure time. The 20 ms ADC observation-health
 threshold is not an 8 kHz control freshness threshold.
@@ -280,7 +284,7 @@ make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j2 \
   check-native-observation
 ```
 
-Local results: 51 C++ cases / 11,007 assertions and 43 Python checks pass in the
+Previous integration checkpoint: 51 C++ cases / 11,007 assertions and 43 Python checks passed in the
 optimized and sanitizer runs. The existing confirmed-input replay also passes
 6 cases / 40,049 assertions. The 15 historical `loPredCtrl` source files match the
 restored reference byte-for-byte. One existing Clang warning in

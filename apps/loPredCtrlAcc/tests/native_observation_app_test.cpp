@@ -34,7 +34,8 @@ class NativeApplication : public MagAOX::app::loPredCtrlAcc_native_observe
 };
 int NativeApplication::load( const std::map<std::string, std::string> &values )
 {
-    config.m_values = values;
+    config.m_values                           = values;
+    config.m_values["diagnostics.debug_indi"] = "1"; // Exercise the explicitly retained metadata interface.
     setupConfig();
     return loadConfigImpl( config );
 }
