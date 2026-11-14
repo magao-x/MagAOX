@@ -1,5 +1,5 @@
 /** \file ar_controller.cpp
- * \brief Legacy-compatible DDSPC and offline causal history/reference-control calculations.
+ * \brief Legacy-compatible DDSPC and qualified causal history/reference-control calculations.
  */
 
 #include "ar_controller.hpp"
@@ -12,16 +12,18 @@
 namespace DDSPC
 {
 
-CausalWorkspace::CausalWorkspace( int outputs, int features, int stateFeatures )
+CausalWorkspace::CausalWorkspace( int outputs, int features, int stateFeatures, int futureInputs )
 {
-    if( outputs < 1 || stateFeatures < 1 || features != outputs + stateFeatures )
+    if( outputs < 1 || futureInputs < 1 || stateFeatures < 1 || features != futureInputs + stateFeatures )
         throw std::invalid_argument( "Invalid causal workspace dimensions" );
-    m_phi    = Matrix::Zero( features, 1 );
-    m_target = Matrix::Zero( outputs, 1 );
-    m_state  = Matrix::Zero( stateFeatures, 1 );
-    m_theta  = Matrix::Zero( outputs, features );
-    m_c = m_hessian = Matrix::Zero( outputs, outputs );
-    m_known = m_rhs = m_gain = Matrix::Zero( outputs, stateFeatures );
+    m_phi     = Matrix::Zero( features, 1 );
+    m_target  = Matrix::Zero( outputs, 1 );
+    m_state   = Matrix::Zero( stateFeatures, 1 );
+    m_theta   = Matrix::Zero( outputs, features );
+    m_c       = Matrix::Zero( outputs, futureInputs );
+    m_hessian = Matrix::Zero( futureInputs, futureInputs );
+    m_known   = Matrix::Zero( outputs, stateFeatures );
+    m_rhs = m_gain = Matrix::Zero( futureInputs, stateFeatures );
     m_hessian.setIdentity();
     m_solver.compute( m_hessian );
     m_hessian.setZero();
@@ -90,8 +92,11 @@ PredictiveController::PredictiveController( int         num_actuators,
                                             realT       initial_covariance,
                                             int         num_accel_channels,
                                             int         accel_history,
-                                            HistoryMode history_mode )
+                                            HistoryMode history_mode,
+                                            int         command_slots )
 {
+    if( command_slots < 1 || command_slots > 4 || ( history_mode == HistoryMode::Legacy && command_slots != 1 ) )
+        throw std::invalid_argument( "Unsupported command lift; Legacy requires one command per WFS frame" );
     m_historyMode = history_mode;
     if( m_historyMode == HistoryMode::Causal &&
         ( num_actuators < 1 || num_history < 1 || num_future < 1 || num_accel_channels < 0 || accel_history < 0 ||
@@ -103,9 +108,10 @@ PredictiveController::PredictiveController( int         num_actuators,
     if( m_historyMode == HistoryMode::Causal )
     {
         // Validate before the legacy integer dimension and power-of-two calculations below.
-        const double features = ( double( num_future ) - 1 + 2 * double( num_history ) ) * num_actuators +
-                                double( num_accel_channels ) * accel_history;
-        const double slots    = 2 * ( double( num_history ) + num_future + accel_history + 1 );
+        const double features =
+            ( ( double( num_future ) + num_history - 1 ) * command_slots + num_history ) * num_actuators +
+            double( num_accel_channels ) * accel_history;
+        const double slots = 2 * ( double( num_history ) + num_future + accel_history + 1 );
         if( features > std::numeric_limits<int>::max() || slots >= ( 1 << 30 ) )
         {
             throw std::invalid_argument( "Causal DDSPC dimensions exceed the legacy storage index range" );
@@ -113,6 +119,7 @@ PredictiveController::PredictiveController( int         num_actuators,
     }
     // Settable properties
     m_numModes         = num_actuators;
+    m_numCommands      = num_actuators * command_slots;
     m_numHistory       = num_history;
     m_numFuture        = num_future;
     m_numAccelChannels = std::max( 0, num_accel_channels );
@@ -124,9 +131,9 @@ PredictiveController::PredictiveController( int         num_actuators,
     // Derived properties
     m_numPredictors    = m_numFuture * m_numModes;
     m_numAccelFeatures = m_numAccelHistory * m_numAccelChannels;
-    m_numFeatures      = ( m_numFuture - 1 + 2 * m_numHistory ) * m_numModes + m_numAccelFeatures;
-    m_numStateFeatures = ( 2 * m_numHistory - 1 ) * m_numModes + m_numAccelFeatures;
-    m_numCorrelations  = m_numFuture * m_numModes;
+    m_numFeatures = ( m_numFuture + m_numHistory - 1 ) * m_numCommands + m_numHistory * m_numModes + m_numAccelFeatures;
+    m_numStateFeatures = ( m_numHistory - 1 ) * m_numCommands + m_numHistory * m_numModes + m_numAccelFeatures;
+    m_numCorrelations  = m_numFuture * m_numCommands;
 
     // Data buffers
     m_bufferSize = find_next_power_of_2( 2 * ( num_history + num_future + m_numAccelHistory + 1 ) );
@@ -136,7 +143,7 @@ PredictiveController::PredictiveController( int         num_actuators,
     m_measurementBuffer.setZero();
 
     m_commandHead = 0;
-    m_commandBuffer.resize( m_bufferSize, m_numModes );
+    m_commandBuffer.resize( m_bufferSize, m_numCommands );
     m_commandBuffer.setZero();
 
     m_accelHead = 0;
@@ -212,7 +219,7 @@ void PredictiveController::reset_buffers()
     m_measurementBuffer.setZero();
 
     m_commandHead = 0;
-    m_commandBuffer.resize( m_bufferSize, m_numModes );
+    m_commandBuffer.resize( m_bufferSize, m_numCommands );
     m_commandBuffer.setZero();
 
     m_accelHead = 0;
@@ -281,14 +288,14 @@ Matrix PredictiveController::get_command_future( int skip_cmds )
     {
         throw std::invalid_argument( "Invalid future-command skip" );
     }
-    Matrix future_vec( ( m_numFuture - skip_cmds ) * m_numModes, 1 );
+    Matrix future_vec( ( m_numFuture - skip_cmds ) * m_numCommands, 1 );
     for( int i = 0; i < ( m_numFuture - skip_cmds ); i++ )
     {
-        const int offset = m_historyMode == HistoryMode::Causal ? skip_cmds : skip_cmds * m_numModes;
+        const int offset = m_historyMode == HistoryMode::Causal ? skip_cmds : skip_cmds * m_numCommands;
         auto      dat    = m_commandBuffer.row( ( m_commandHead - i - 1 - offset ) & ( m_bufferSize - 1 ) );
-        for( int j = 0; j < m_numModes; j++ )
+        for( int j = 0; j < m_numCommands; j++ )
         {
-            future_vec( i * m_numModes + j, 0 ) = dat( 0, j );
+            future_vec( i * m_numCommands + j, 0 ) = dat( 0, j );
         }
     }
 
@@ -298,14 +305,14 @@ Matrix PredictiveController::get_command_future( int skip_cmds )
 Matrix PredictiveController::get_command_past()
 {
     Matrix past_vec;
-    past_vec.resize( m_numHistory * m_numModes, 1 );
+    past_vec.resize( m_numHistory * m_numCommands, 1 );
 
     for( int i = 0; i < m_numHistory; i++ )
     {
         auto dat = m_commandBuffer.row( ( m_commandHead - i - m_numFuture - 1 ) & ( m_bufferSize - 1 ) );
-        for( int j = 0; j < m_numModes; j++ )
+        for( int j = 0; j < m_numCommands; j++ )
         {
-            past_vec( i * m_numModes + j ) = dat( 0, j );
+            past_vec( i * m_numCommands + j ) = dat( 0, j );
         }
     }
 
@@ -382,14 +389,14 @@ Matrix PredictiveController::get_current_measurement_past( int num_steps )
 Matrix PredictiveController::get_current_command_past( int num_steps )
 {
     Matrix past_vec;
-    past_vec.resize( num_steps * m_numModes, 1 );
+    past_vec.resize( num_steps * m_numCommands, 1 );
 
     for( int i = 0; i < num_steps; i++ )
     {
         auto dat = m_commandBuffer.row( ( m_commandHead - i - 1 ) & ( m_bufferSize - 1 ) );
-        for( int j = 0; j < m_numModes; j++ )
+        for( int j = 0; j < m_numCommands; j++ )
         {
-            past_vec( i * m_numModes + j ) = dat( 0, j );
+            past_vec( i * m_numCommands + j ) = dat( 0, j );
         }
     }
 
@@ -406,7 +413,7 @@ void PredictiveController::append_sample( std::uint64_t index,
         throw std::logic_error( "append_sample requires Causal history mode" );
     }
     if( index != m_measurementHead || measurement.rows() != m_numModes || measurement.cols() != 1 ||
-        applied_command.rows() != m_numModes || applied_command.cols() != 1 || !measurement.allFinite() ||
+        applied_command.rows() != m_numCommands || applied_command.cols() != 1 || !measurement.allFinite() ||
         !applied_command.allFinite() || !acceleration.allFinite() ||
         ( m_numAccelFeatures > 0 && ( acceleration.rows() != m_numAccelChannels || acceleration.cols() != 1 ) ) ||
         ( m_numAccelFeatures == 0 && acceleration.size() != 0 ) )
@@ -440,9 +447,9 @@ bool PredictiveController::get_training_example( Matrix &regressor, Matrix &targ
         int offset = 0;
         for( int j = 0; j < m_numFuture + m_numHistory - 1; ++j )
         {
-            regressor.middleRows( offset, m_numModes ) =
+            regressor.middleRows( offset, m_numCommands ) =
                 m_commandBuffer.row( ( m_commandHead - j - 2 ) & ( m_bufferSize - 1 ) ).transpose();
-            offset += m_numModes;
+            offset += m_numCommands;
         }
         if( m_numAccelFeatures )
             for( int j = 0; j < m_numAccelHistory; ++j )
@@ -488,7 +495,7 @@ Matrix PredictiveController::get_prediction_state()
     const int command_offset = m_numHistory * m_numModes;
     for( int i = 0; i < m_numHistory - 1; ++i )
     {
-        state.middleRows( command_offset + i * m_numModes, m_numModes ) =
+        state.middleRows( command_offset + i * m_numCommands, m_numCommands ) =
             m_commandBuffer.row( ( m_commandHead - i - 2 ) & ( m_bufferSize - 1 ) ).transpose();
     }
     state.bottomRows( m_numAccelFeatures ) = get_accelerometer_past();
@@ -510,9 +517,9 @@ void PredictiveController::get_prediction_state( Matrix &state ) const
     }
     for( int j = 0; j < m_numHistory - 1; ++j )
     {
-        state.middleRows( offset, m_numModes ) =
+        state.middleRows( offset, m_numCommands ) =
             m_commandBuffer.row( ( m_commandHead - j - 2 ) & ( m_bufferSize - 1 ) ).transpose();
-        offset += m_numModes;
+        offset += m_numCommands;
     }
     if( m_numAccelFeatures )
         for( int j = 0; j < m_numAccelHistory; ++j )
@@ -523,12 +530,51 @@ void PredictiveController::get_prediction_state( Matrix &state ) const
         }
 }
 
+void PredictiveController::next_prediction_state( const Matrix &measurement,
+                                                  const Matrix &acceleration,
+                                                  Matrix       &state ) const
+{
+    if( m_historyMode != HistoryMode::Causal || measurement.rows() != m_numModes || measurement.cols() != 1 ||
+        !measurement.allFinite() || !acceleration.allFinite() || state.rows() != m_numStateFeatures ||
+        state.cols() != 1 ||
+        ( m_numAccelFeatures ? acceleration.rows() != m_numAccelChannels || acceleration.cols() != 1
+                             : acceleration.size() != 0 ) ||
+        m_measurementHead <
+            std::uint64_t( std::max( m_numHistory - 1, m_numAccelFeatures ? m_numAccelHistory - 1 : 0 ) ) )
+        throw std::invalid_argument( "Incomplete next-origin causal state" );
+    state.topRows( m_numModes ) = measurement;
+    int offset                  = m_numModes;
+    for( int j = 0; j < m_numHistory - 1; ++j )
+    {
+        state.middleRows( offset, m_numModes ) =
+            m_measurementBuffer.row( ( m_measurementHead - j - 1 ) & ( m_bufferSize - 1 ) ).transpose();
+        offset += m_numModes;
+    }
+    for( int j = 0; j < m_numHistory - 1; ++j )
+    {
+        state.middleRows( offset, m_numCommands ) =
+            m_commandBuffer.row( ( m_commandHead - j - 1 ) & ( m_bufferSize - 1 ) ).transpose();
+        offset += m_numCommands;
+    }
+    if( m_numAccelFeatures )
+    {
+        state.middleRows( offset, m_numAccelChannels ) = acceleration;
+        offset += m_numAccelChannels;
+        for( int j = 0; j < m_numAccelHistory - 1; ++j )
+        {
+            state.middleRows( offset, m_numAccelChannels ) =
+                m_accelBuffer.row( ( m_accelHead - j - 1 ) & ( m_bufferSize - 1 ) ).transpose();
+            offset += m_numAccelChannels;
+        }
+    }
+}
+
 std::unique_ptr<CausalWorkspace> PredictiveController::make_workspace() const
 {
     if( m_historyMode != HistoryMode::Causal )
         throw std::logic_error( "Fixed workspaces are causal only" );
-    auto result =
-        std::unique_ptr<CausalWorkspace>( new CausalWorkspace( m_numPredictors, m_numFeatures, m_numStateFeatures ) );
+    auto result = std::unique_ptr<CausalWorkspace>(
+        new CausalWorkspace( m_numPredictors, m_numFeatures, m_numStateFeatures, m_numCorrelations ) );
     m_rls->xtP.resize( 1, m_numFeatures );
     result->m_owner = this;
     return result;
@@ -576,7 +622,7 @@ const Matrix &PredictiveController::get_reference_controller( CausalWorkspace &w
     if( !internal.allFinite() )
         throw std::runtime_error( "Nonfinite causal model" );
     const int a = m_numHistory * m_numModes;
-    const int b = ( m_numHistory - 1 ) * m_numModes;
+    const int b = ( m_numHistory - 1 ) * m_numCommands;
     workspace.m_theta << internal.rightCols( a ), internal.middleCols( m_numCorrelations, b ),
         internal.middleCols( m_numCorrelations + b, m_numAccelFeatures ), internal.leftCols( m_numCorrelations );
     workspace.m_c                 = workspace.m_theta.rightCols( m_numCorrelations );
@@ -614,7 +660,7 @@ Matrix PredictiveController::get_reference_prediction_matrix()
     Matrix    internal = get_prediction_matrix();
     Matrix    result( m_numPredictors, m_numFeatures );
     const int a_cols = m_numHistory * m_numModes;
-    const int b_cols = ( m_numHistory - 1 ) * m_numModes;
+    const int b_cols = ( m_numHistory - 1 ) * m_numCommands;
     result << internal.rightCols( a_cols ), internal.middleCols( m_numCorrelations, b_cols ),
         internal.middleCols( m_numCorrelations + b_cols, m_numAccelFeatures ), internal.leftCols( m_numCorrelations );
     return result;
@@ -624,7 +670,7 @@ Matrix PredictiveController::get_reference_controller( realT lambda )
 {
     Matrix    model  = get_reference_prediction_matrix();
     const int a_cols = m_numHistory * m_numModes;
-    const int b_cols = ( m_numHistory - 1 ) * m_numModes;
+    const int b_cols = ( m_numHistory - 1 ) * m_numCommands;
     return reference_controller( model.leftCols( a_cols ),
                                  model.middleCols( a_cols, b_cols ),
                                  model.middleCols( a_cols + b_cols, m_numAccelFeatures ),
@@ -661,7 +707,7 @@ void PredictiveController::update_controller()
 {
     if( m_historyMode == HistoryMode::Causal )
     {
-        throw std::logic_error( "Causal offline control uses get_reference_controller" );
+        throw std::logic_error( "Causal control uses get_reference_controller" );
     }
     Matrix H   = get_prediction_matrix().transpose() * get_prediction_matrix();
     Matrix H11 = H.block( 0, 0, m_numCorrelations, m_numCorrelations );

@@ -1,6 +1,18 @@
 # Offline DDSPC validation
 
-The default native INDI display is now a compact 59-element operator interface.
+## Qualified online multirate shadow tests
+
+The current native worker and its strict input gates are described in
+[ONLINE_SHADOW.md](../ONLINE_SHADOW.md). Run `make -f tests/Makefile.offline
+check-multirate` from the app directory for actual rectangular DDSPC/RLS/QR,
+causal ADC histories, independent model readiness/fallback, source/clock loss,
+deadline, resource-bound and installed-header safety tests. This does not launch
+a native app or use a live stream. The default configuration leaves the worker
+disabled; its opt-in example cannot qualify missing physical input evidence.
+The historical single-rate replay targets below remain regression tests, not a
+substitute for the new multirate path or native timestamp qualification.
+
+The default native INDI display is now a compact 60-element operator interface.
 See [NATIVE_DIAGNOSTICS.md](../NATIVE_DIAGNOSTICS.md) for its schema, opt-in debug
 mode, ADC forwarding cutoff investigation and regression/acceptance procedure.
 

@@ -173,7 +173,7 @@ Useful `cursesINDI` properties under device `loPredCtrlAcc`:
 | `ddspc_mode` | Standard or assisted request; a request never grants model readiness or output authority |
 | `ddspc_control`, `ddspc_performance`, `safety` | Independent model state/counts, unavailable metrics and mandatory output interlocks |
 
-The default is 59 app-specific elements; framework properties remain. See
+The default is 60 app-specific elements; framework properties remain. See
 [NATIVE_DIAGNOSTICS.md](NATIVE_DIAGNOSTICS.md) for the exact list, ADC forwarding
 investigation, loss semantics, debug migration and the extended verification test.
 The earlier detailed metadata properties are available only through explicit

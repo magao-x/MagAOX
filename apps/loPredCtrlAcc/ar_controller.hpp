@@ -1,5 +1,5 @@
 /** \file ar_controller.hpp
- * \brief Modal DDSPC with operational compatibility and explicit offline causal histories.
+ * \brief Modal DDSPC with operational compatibility and explicit causal histories.
  */
 
 #ifndef PCARC_HPP
@@ -16,11 +16,11 @@
 namespace DDSPC
 {
 
-/// Select the existing app convention or the explicitly synchronized offline convention.
+/// Select the existing app convention or the explicitly qualified causal convention.
 enum class HistoryMode
 {
     Legacy, ///< Preserve app indexing, startup, scaled regularization, and added feedback, including known defects.
-    Causal  ///< Require complete indexed offline records and use the separate reference controller.
+    Causal  ///< Require complete indexed qualified records and use the separate reference controller.
 };
 
 class PredictiveController;
@@ -55,7 +55,8 @@ class CausalWorkspace
     /// Allocate fixed-size numerical scratch; ordinary callers use make_workspace().
     CausalWorkspace( int outputs /**< [in] F*m target rows. */,
                      int features /**< [in] Full internal regressor rows. */,
-                     int stateFeatures /**< [in] Canonical state rows, features-outputs. */ );
+                     int stateFeatures /**< [in] Canonical known-state rows. */,
+                     int futureInputs /**< [in] Future-command columns, independent of output rows. */ );
 
   public:
     /// Inspect the prepared internal [u_f;u_p;a_p;y_p] regressor without copying.
@@ -88,15 +89,18 @@ Matrix reference_controller( const Matrix &A /**< [in] Past-WFS prediction block
                              realT         lambda /**< [in] Literal command penalty in the reference cost. */ );
 
 /// Coupled modal predictor retaining the existing internal column order [C B D A].
-/** For m modes, N WFS history steps, F future steps, and a accelerometer features,
- * Theta is F*m by (F+2*N-1)*m+a. B uses N-1 past command blocks; A uses N WFS blocks.
+/** For m measured modes, q command slots per WFS frame, N WFS history steps, F future steps,
+ * and a total accelerometer features, nu=q*m. Theta is F*m by (F+N-1)*nu+N*m+a.
+ * B uses N-1 past command lifts; A uses N measured WFS blocks. C is F*m by F*nu.
  * All blocks stack newest time first, then mode/channel within each time.
  *
  * Legacy remains the default app compatibility path, including its known indexing defects.
- * Causal is offline only: append_sample() records y_i, a_i, and actual synthetic u_i held for [i,i+1).
+ * Causal append_sample() records y_i, a_i, and independently qualified actual u_i over frame [i,i+1).
+ * A lifted u_i stacks individual command slots newest first; no WFS samples are invented.
  * The nominal one-step plant produces y_(i+1) from u_i. At t=i+F the matured example uses
  * y_f=[y_t,...,y_(i+1)], u_f=[u_(t-1),...,u_i], and the state available at i.
- * Causal mode never appends calculated proposals implicitly. This is not instrument command readback.
+ * Causal mode never appends calculated proposals implicitly. The caller must establish physical or explicitly synthetic
+ * input provenance.
  */
 class PredictiveController
 {
@@ -125,7 +129,7 @@ class PredictiveController
     /// WFS samples by time row and mode column.
     Matrix m_measurementBuffer;
 
-    /// Command samples by time row and mode column.
+    /// Confirmed command lifts by WFS time row and slot/mode column.
     Matrix m_commandBuffer;
 
     /// Synchronized accelerometer features by time row and channel column.
@@ -161,7 +165,7 @@ class PredictiveController
     /// WFS history length; the command state is one block shorter.
     int m_numHistory;
 
-    /// Channels per synchronized accelerometer record.
+    /// Features per qualified accelerometer record; native four-slot input retains eight raw channel values.
     int m_numAccelChannels;
 
     /// Accelerometer history length, independent of WFS history.
@@ -188,7 +192,7 @@ class PredictiveController
     /// Total accelerometer feature count.
     int m_numAccelFeatures;
 
-    /// Future-command count F*m.
+    /// Future-command count F*nu, independent of the F*m measured target rows.
     int m_numCorrelations;
 
     /// Indexing/recording convention selected at construction.
@@ -208,7 +212,8 @@ class PredictiveController
                           realT       initial_covariance     = 1e5 /**< [in] Prior information rho; P0=I/rho. */,
                           int         num_accel_channels     = 2 /**< [in] Synchronized accelerometer channel count. */,
                           int         accel_history          = 20 /**< [in] Accelerometer history length. */,
-                          HistoryMode history_mode = HistoryMode::Legacy /**< [in] Explicit offline opt-in. */ );
+                          HistoryMode history_mode           = HistoryMode::Legacy /**< [in] Explicit causal opt-in. */,
+                          int command_slots = 1 /**< [in] Causal commands per WFS frame; Legacy requires one. */ );
 
     /// Release the owned learners.
     ~PredictiveController();
@@ -243,6 +248,11 @@ class PredictiveController
 
     /// Fill a pre-sized canonical state without temporary history vectors; causal only.
     void get_prediction_state( Matrix &state /**< [out] Already sized state-feature-by-one column. */ ) const;
+
+    /// Construct the next origin from a new WFS/ADC measurement and already confirmed past commands, without u_i.
+    void next_prediction_state( const Matrix &measurement /**< [in] New measured y_i, never interpolated. */,
+                                const Matrix &acceleration /**< [in] Individual frozen-origin sensor features. */,
+                                Matrix       &state /**< [out] Pre-sized [y_p;u_p;a_p] state. */ ) const;
 
     /// Refresh only the current state when an unchanged model version can reuse its reference gain.
     void
@@ -279,14 +289,14 @@ class PredictiveController
     /// Legacy-only append of an already synchronized accelerometer sample.
     void push_accelerometer_sample( const Matrix &new_acceleration /**< [in] Channel-count by one column. */ );
 
-    /// Append one finite, contiguous offline record without calculating a command.
-    /** Causal only. Invalid data throw before mutation. u_i is the synthetic applied input after y_i,
-     * held over [i,i+1), not a candidate proposal. Accelerometers must already be synchronized;
-     * no raw-stream ingestion or timestamp alignment is performed here.
+    /// Append one finite, contiguous qualified record without calculating a command.
+    /** Causal only. Invalid data throw before mutation. u_i is the confirmed input lift over frame [i,i+1), not a
+     * candidate proposal. Accelerometers must already be synchronized; no raw-stream ingestion or timestamp alignment
+     * is performed here.
      */
     void append_sample( std::uint64_t index /**< [in] Contiguous zero-based decision index; reset restarts at zero. */,
                         const Matrix &measurement /**< [in] Residual y_i, m by one. */,
-                        const Matrix &applied_command /**< [in] Synthetic applied input u_i, m by one. */,
+                        const Matrix &applied_command /**< [in] Confirmed input lift u_i, nu by one. */,
                         const Matrix &acceleration /**< [in] Features a_i available at i; empty when disabled. */ );
 
     /// Copy a matured [u_f;u_p;a_p;y_p] regressor and newest-first future-WFS target.
@@ -322,6 +332,9 @@ class PredictiveController
   private:
     /// Causal reset identity; appended after existing data to preserve their layout.
     std::uint64_t m_historyEpoch{ 0 };
+
+    /// Command-vector width per WFS frame; one modal vector or a newest-slot-first lift.
+    int m_numCommands{ 0 };
 };
 
 } // namespace DDSPC

@@ -50,7 +50,7 @@ inline void loPredCtrlAcc_native::loadConfig()
         log<software_error>( { __FILE__,
                                __LINE__,
                                "Installed native entrypoint requires ADC/native shadow acquisition and prohibits "
-                               "Legacy, training and output ownership." } );
+                               "Legacy control and output ownership; online training requires qualified telemetry." } );
     }
 }
 

@@ -16,7 +16,7 @@ CXXFLAGS ?= -O2 -g
 CXXFLAGS += -std=c++20 -Wall -Wextra -fno-fast-math
 SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
            $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
-           $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(APP_DIR)/native_observation.cpp $(APP_DIR)/native_observer.cpp $(TEST_DIR)/adc_transport_fixture.cpp \
+           $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(APP_DIR)/native_observation.cpp $(APP_DIR)/native_observer.cpp $(APP_DIR)/multirate_shadow.cpp $(APP_DIR)/online_shadow.cpp $(TEST_DIR)/adc_transport_fixture.cpp \
            $(TEST_DIR)/shadow_replay.cpp $(TEST_DIR)/offline_adc.cpp $(TEST_DIR)/offline_control.cpp $(TEST_DIR)/offline_ddspc.cpp \
            $(TEST_DIR)/comparison.cpp $(TEST_DIR)/vibration.cpp $(TEST_DIR)/stability.cpp \
            $(TEST_DIR)/phase6_adapter.cpp $(TEST_DIR)/operational_law.cpp \
@@ -105,7 +105,7 @@ check: check-build-tool verify-legacy $(TARGET)
 # This separate binary uses the same stream-free lifecycle doubles; it is never a native app launch.
 SHADOW_TEST_SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp \
                       $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp \
-                      $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(APP_DIR)/native_observation.cpp $(APP_DIR)/native_observer.cpp $(TEST_DIR)/adc_transport_fixture.cpp \
+                      $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(APP_DIR)/native_observation.cpp $(APP_DIR)/native_observer.cpp $(APP_DIR)/multirate_shadow.cpp $(APP_DIR)/online_shadow.cpp $(TEST_DIR)/adc_transport_fixture.cpp \
                       $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp \
                       $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_app_test.cpp $(TEST_DIR)/ddspc_shadow_pipeline_test.cpp $(TEST_DIR)/shadow_replay.cpp $(TEST_DIR)/offline_adc.cpp
 check-shadow-only:
@@ -138,6 +138,14 @@ check-native-observation:
 	python3 -m unittest discover -s $(TEST_DIR) -p native_timing_audit_test.py
 	python3 -m unittest discover -s $(TEST_DIR) -p native_deployment_test.py
 	python3 -m unittest discover -s $(TEST_DIR) -p native_linux_build_test.py
+
+.PHONY: check-multirate
+check-multirate:
+	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(BUILD_DIR)/multirate CXX=$(CXX) \
+	  DDSPC_MINIMAL_APP_TESTS=yes CXXFLAGS='$(CXXFLAGS) -DDDSPC_SHADOW_ONLY' \
+	  SOURCES='$(SHADOW_TEST_SOURCES) $(TEST_DIR)/ddspc_multirate_test.cpp $(TEST_DIR)/native_application_test.cpp' \
+	  $(BUILD_DIR)/multirate/ddspc_offline_test
+	$(BUILD_DIR)/multirate/ddspc_offline_test '[multirate],[native-observation][app]'
 
 # Ordinary-file analysis tests only; no native executable or input stream is opened.
 .PHONY: check-native-timing
@@ -174,7 +182,7 @@ LEGACY_FAST_FLAGS ?= -O3 -g -std=c++20 -Wall -Wextra -ffast-math
 check-legacy-fast:
 	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(abspath $(BUILD_DIR))/legacy-fast \
 	  CXXFLAGS='$(LEGACY_FAST_FLAGS)' \
-	  SOURCES='$(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(APP_DIR)/native_observation.cpp $(APP_DIR)/native_observer.cpp $(TEST_DIR)/adc_transport_fixture.cpp $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_legacy_test.cpp $(TEST_DIR)/ddspc_qr_compatibility_test.cpp' check
+	  SOURCES='$(ROOT_DIR)/tests/testMain.cpp $(APP_DIR)/ar_controller.cpp $(APP_DIR)/recursive_least_squares.cpp $(APP_DIR)/qrd_rls.cpp $(APP_DIR)/utils.cpp $(APP_DIR)/adc_features.cpp $(APP_DIR)/shadow_policy.cpp $(APP_DIR)/shadow_pipeline.cpp $(APP_DIR)/shadow_controller.cpp $(APP_DIR)/causal_input.cpp $(APP_DIR)/adc_input.cpp $(APP_DIR)/adc_reader.cpp $(APP_DIR)/native_observation.cpp $(APP_DIR)/native_observer.cpp $(APP_DIR)/multirate_shadow.cpp $(APP_DIR)/online_shadow.cpp $(TEST_DIR)/adc_transport_fixture.cpp $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp $(TEST_DIR)/ddspc_legacy_test.cpp $(TEST_DIR)/ddspc_qr_compatibility_test.cpp' check
 
 # Historical demonstration programs contain no assertions; run them as separate, explicitly labeled smoke checks.
 DEMO_NAMES ?= testRLS testPredCtrl

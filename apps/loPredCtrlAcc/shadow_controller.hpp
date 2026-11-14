@@ -70,6 +70,18 @@ struct ShadowConfig
 
     /// Select corrected QR RLS instead of conventional RLS for both independent learners.
     bool m_useQrd{ false };
+
+    /// Assisted command opportunities per WFS record; one preserves the existing single-rate path.
+    int m_assistedCommandSlots{ 1 };
+
+    /// Standard input lift; one retains single-rate compatibility, four gives a matched WFS-only multirate baseline.
+    int m_standardCommandSlots{ 1 };
+
+    /// Freeze forecasts only at explicit next-origin calls, not after future commands have been confirmed.
+    bool m_externalOrigins{ false };
+
+    /// Adapt/validate every Nth record; every measurement/history row is still retained. One preserves existing work.
+    unsigned m_updateStride{ 1 };
 };
 
 /// One declared synchronized record; validity assertions must come from the caller's input contract.
@@ -86,6 +98,12 @@ struct ShadowRecord
 
     /// Applied u_i column, never a model proposal.
     Matrix m_appliedCommand;
+
+    /// Optional newest-slot-first confirmed command lift; required when assistedCommandSlots exceeds one.
+    Matrix m_assistedAppliedCommand;
+
+    /// Independent complete interval/provenance assertion for the lifted input.
+    bool m_assistedAppliedValid{ false };
 
     /// Features a_i known at the decision origin.
     Matrix m_acceleration;
@@ -133,7 +151,8 @@ struct ShadowStatus
     /// Full regressor dimension, including future inputs.
     int m_features{ 0 };
 
-    /// Rank of the current normalized feature window, without an RLS prior.
+    /// Rank of the normalized feature window at the last adaptation step, without an RLS prior.
+    /// Cached for at most updateStride-1 records; input loss invalidates readiness immediately.
     int m_rank{ 0 };
 
     /// Conditional future-residual RMSE; meaningful only with predictionValid.
@@ -252,6 +271,12 @@ class ShadowController
     /// Record missing/unverified inputs without creating synthetic command or sensor values.
     void invalidate( const ShadowRecord &validity /**< [in] Latest available validity flags. */ );
 
+    /// Revoke only assisted histories/forecasts after ADC loss, leaving the WFS-only learner unchanged.
+    void invalidate_acceleration();
+
+    /// Cancel next-origin scoring when computation missed its externally established cutoff.
+    void discard_next_forecasts();
+
     /// Enable or pause one learner without changing selection or the other learner.
     void training( ShadowMode mode /**< [in] Learner to configure. */,
                    bool       enabled /**< [in] Requested adaptation state. */ );
@@ -276,6 +301,15 @@ class ShadowController
 
     /// Return a diagnostic next input only for a ready model; no history/output mutation is performed.
     Matrix proposal( ShadowMode mode /**< [in] Independent model to inspect. */ ) const;
+
+    /// Evaluate/freeze a next-origin full command plan using only current measurements and confirmed past inputs.
+    bool predict_next( ShadowMode    mode /**< [in] Independent ready model. */,
+                       std::uint64_t index /**< [in] Exactly the next external WFS index. */,
+                       const Matrix &measurement /**< [in] New real WFS record. */,
+                       const Matrix &acceleration /**< [in] Frozen raw-sample lift, empty for standard. */,
+                       Matrix       &plan /**< [out] Pre-sized F*m*commandSlots newest-first future plan. */,
+                       const Matrix *fixedPrefix =
+                           nullptr /**< [in] Independently established oldest command slots, newest first. */ );
 
     /// Evaluate the latest ready validation snapshot without adaptation, rank work or allocation.
     /** Caller serializes access and supplies a causally synchronized canonical state. Readiness refers to the
