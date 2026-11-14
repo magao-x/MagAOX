@@ -158,3 +158,12 @@ Follow these code style and documentation rules exactly.
     received value until another update or explicit invalidation.
   - Do not treat silence as stale state or introduce receipt-age expiry
     unless the source explicitly guarantees a documented heartbeat.
+
+28) Real-Time Shared-Memory Streams
+  - Loop latency is sensitive to cache-line sharing between cores, especially across L3 domains (each 8-core CCD on the RTC). Treat any new reader, writer, copy method, or placement change on a loop stream as a measurable change, not a free one.
+  - Writers should not fill a loop stream in place while doing other work: load into a private buffer, then copy into the stream (`MagAOX::streamCopy`, non-temporal). For cameras use `framegrabber.staged`.
+  - In `dev::frameGrabber`, keep `md->write = 1` before the load; setting it just before the copy cost ~2 us.
+  - Readers should copy a frame out once and work on the copy, and keep per-frame work vectorizable (e.g. `getPixFramePointer`, not per-pixel `getPix`).
+  - A spinning reader (`spin` without `spinSleep`) needs a cpuset with no SCHED_FIFO thread of the same or lower priority on that core, including the app's own framegrabber.
+  - Non-temporal stores can help or hurt (they helped the camwfs staged copy, but hurt a cbuff's copy into its large output buffer). Provide such changes as options and have the user A/B them on the instrument.
+  - Measure the writer's own time (e.g. `fg_timing.delta_aw`), not only end-to-end loop time, to locate where a cost lands. See `agents/plans/2026-11/shmim-monitor-speedups.md`.

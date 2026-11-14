@@ -13,6 +13,7 @@ INCLUDEDEPS= \
 	app/indiMacros.hpp \
 	app/indiUtils.hpp \
 	app/semUtils.hpp \
+	app/framePoll.hpp \
 	app/stateCodes.hpp \
 	app/dev/semUtilsDerived.hpp \
 	app/dev/outletController.hpp \
@@ -39,6 +40,7 @@ INCLUDEDEPS= \
 	common/dmReaderTiming.hpp \
 	common/frameGrabberTiming.hpp \
 	common/spscQueue.hpp \
+	common/streamCopy.hpp \
 	common/timingStats.hpp \
 	common/dmPipelineTiming.hpp \
 	file/fileTimes.hpp \

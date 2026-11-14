@@ -5,6 +5,7 @@
 ../libMagAOX/app/tests/MagAOXAppExecute_test
 ../libMagAOX/app/tests/stateCodes_test
 ../libMagAOX/app/tests/semUtils_test
+../libMagAOX/app/tests/framePoll_test
 ../libMagAOX/app/dev/tests/outletController_test
 ../libMagAOX/app/dev/tests/telemeter_test
 ../libMagAOX/app/dev/tests/dm_test
@@ -169,6 +170,7 @@
 
 
 ../libMagAOX/common/tests/spscQueue_test
+../libMagAOX/common/tests/streamCopy_test
 ../libMagAOX/common/tests/latestSnapshot_test
 ../libMagAOX/common/tests/common_test
 ../libMagAOX/ImageStreamIO/tests/ImageStreamIO_test

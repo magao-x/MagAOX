@@ -14,6 +14,7 @@
 #include "app/indiMacros.hpp"
 #include "app/indiUtils.hpp"
 #include "app/semUtils.hpp"
+#include "app/framePoll.hpp"
 #include "app/stateCodes.hpp"
 #include "app/dev/semUtilsDerived.hpp"
 #include "app/dev/outletController.hpp"
