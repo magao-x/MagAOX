@@ -127,11 +127,13 @@ check-confirmed-replay:
 check-native-observation:
 	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(abspath $(BUILD_DIR))/native-observation CXX=$(CXX) \
 	  DDSPC_MINIMAL_APP_TESTS=yes CXXFLAGS='$(CXXFLAGS) -DDDSPC_SHADOW_ONLY' \
-	  SOURCES='$(SHADOW_TEST_SOURCES) $(TEST_DIR)/ddspc_native_observation_test.cpp $(TEST_DIR)/native_observation_app_test.cpp' \
+	  SOURCES='$(SHADOW_TEST_SOURCES) $(TEST_DIR)/ddspc_native_observation_test.cpp $(TEST_DIR)/native_observation_app_test.cpp $(TEST_DIR)/native_application_test.cpp $(TEST_DIR)/ddspc_adc_test.cpp' \
 	  $(abspath $(BUILD_DIR))/native-observation/ddspc_offline_test
-	$(abspath $(BUILD_DIR))/native-observation/ddspc_offline_test '[native-observation],[loPredCtrlAcc][app]~[legacy]'
+	$(abspath $(BUILD_DIR))/native-observation/ddspc_offline_test '[native-observation],[loPredCtrlAcc][app]~[legacy],[loPredCtrlAcc][adc]'
 	python3 -m unittest discover -s $(TEST_DIR) -p native_observation_tools_test.py
 	python3 -m unittest discover -s $(TEST_DIR) -p native_timing_audit_test.py
+	python3 -m unittest discover -s $(TEST_DIR) -p native_deployment_test.py
+	python3 -m unittest discover -s $(TEST_DIR) -p native_linux_build_test.py
 
 # Ordinary-file analysis tests only; no native executable or input stream is opened.
 .PHONY: check-native-timing

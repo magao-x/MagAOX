@@ -50,16 +50,19 @@ NativeObservationConfig::NativeObservationConfig()
 }
 void validate_native_observation( const NativeObservationConfig &c )
 {
-    if( !std::isfinite( c.m_durationSec ) || c.m_durationSec < .01 || c.m_durationSec > 3600 || c.m_pollUs < 10 ||
-        c.m_pollUs > 10000 || c.m_queueCapacity < 2 || c.m_queueCapacity > 262144 || c.m_staleNs <= 0 ||
-        c.m_staleNs > 1000000000 || c.m_modalIndices[0] >= 65536 || c.m_modalIndices[1] >= 65536 )
+    if( !std::isfinite( c.m_durationSec ) || c.m_durationSec < 0 || ( c.m_durationSec > 0 && c.m_durationSec < .01 ) ||
+        c.m_durationSec > 3600 || c.m_pollUs < 10 || c.m_pollUs > 10000 || c.m_queueCapacity < 2 ||
+        c.m_queueCapacity > 262144 || c.m_staleNs <= 0 || c.m_staleNs > 1000000000 || c.m_modalIndices[0] >= 65536 ||
+        c.m_modalIndices[1] >= 65536 || c.m_historyCapacity < 4 || c.m_historyCapacity > 65536 ||
+        ( c.m_record && c.m_durationSec == 0 ) || ( c.m_recordDmCommands && !c.m_record ) )
         throw std::invalid_argument( "Invalid native observation limits" );
     if( c.m_commandQueueCapacity < 2 || c.m_commandQueueCapacity > 4096 || c.m_commandMaxElements < 1 ||
         c.m_commandMaxElements > 65536 || c.m_commandQueueCapacity * c.m_commandMaxElements > 16777216 )
         throw std::invalid_argument( "Invalid native full-command recording bounds" );
-    if( c.m_directory.empty() || !std::filesystem::path( c.m_directory ).is_absolute() )
+    if( c.m_record && ( c.m_directory.empty() || !std::filesystem::path( c.m_directory ).is_absolute() ) )
         throw std::invalid_argument( "Native observation requires an existing absolute private directory" );
-    const auto path = std::filesystem::weakly_canonical( c.m_directory ).string();
+    const auto path =
+        c.m_directory.empty() ? std::string{} : std::filesystem::weakly_canonical( c.m_directory ).string();
     if( path == "/opt/MagAOX" || path.starts_with( "/opt/MagAOX/" ) || path == "/milk/shm" ||
         path.starts_with( "/milk/shm/" ) || path == "/dev/shm" || path.starts_with( "/dev/shm/" ) )
         throw std::invalid_argument( "Observation files cannot use instrument installation or stream directories" );
@@ -80,6 +83,8 @@ void validate_native_observation( const NativeObservationConfig &c )
 NativeObservationCapture::NativeObservationCapture( const NativeObservationConfig &config ) : m_config( config )
 {
     validate_native_observation( config );
+    for( auto &history : m_history )
+        history.resize( config.m_historyCapacity );
 }
 NativeObservation NativeObservationCapture::accept( NativeObservation r )
 {
@@ -95,6 +100,10 @@ NativeObservation NativeObservationCapture::accept( NativeObservation r )
         s.m_connected      = false;
         s.m_stale          = true;
         s.m_latest         = r;
+        s.m_valid = s.m_idle = s.m_busyNow = s.m_incompatibleNow = false;
+        s.m_retained                                             = 0;
+        if( index < m_history.size() )
+            m_historyNext[index] = 0;
         if( r.m_source == ObservationSource::Dm )
             m_dmCount = m_dmNext = 0;
         return r;
@@ -103,10 +112,20 @@ NativeObservation NativeObservationCapture::accept( NativeObservation r )
     {
         m_status.m_adcMissing += r.m_missing;
         ++m_status.m_adcBreaks;
-        s.m_latest = r;
+        s.m_latest   = r;
+        s.m_valid    = false;
+        s.m_retained = m_historyNext[index] = 0;
+        s.m_epochSamples                    = 0;
         return r;
     }
     const bool changed = previous.m_generation && r.m_generation != previous.m_generation;
+    s.m_busyNow = s.m_incompatibleNow = false;
+    if( changed || r.m_counter < previous.m_counter || r.m_event == ObservationEvent::Attached )
+    {
+        s.m_retained = 0;
+        if( index < m_history.size() )
+            m_historyNext[index] = 0;
+    }
     if( changed )
         ++s.m_restarts;
     if( r.m_source == ObservationSource::Dm &&
@@ -118,6 +137,7 @@ NativeObservation NativeObservationCapture::accept( NativeObservation r )
         s.m_receivedRateHz = 0;
         s.m_epochSamples   = 0;
         s.m_latest         = r;
+        s.m_valid          = false;
         return r;
     }
     if( previous.m_event == ObservationEvent::Sample && previous.m_counter && !changed )
@@ -125,23 +145,49 @@ NativeObservation NativeObservationCapture::accept( NativeObservation r )
         if( r.m_counter == previous.m_counter )
             ++s.m_duplicates;
         else if( r.m_counter > previous.m_counter )
-            s.m_counterGaps += r.m_counter - previous.m_counter - 1;
+        {
+            const auto missing = r.m_counter - previous.m_counter - 1;
+            s.m_counterGaps += missing;
+            r.m_missing = std::max( r.m_missing, missing );
+        }
         else
             ++s.m_restarts;
     }
     ++s.m_samples;
-    if( !s.m_epochSamples || changed || r.m_counter < previous.m_counter || r.m_availableNs < s.m_lastReceiptNs )
+    if( previous.m_event == ObservationEvent::Sample && !changed && r.m_counter > previous.m_counter &&
+        ( ( previous.m_acquiredRawNs > 0 && r.m_acquiredRawNs > 0 && r.m_acquiredRawNs < previous.m_acquiredRawNs ) ||
+          ( previous.m_publishedRawNs > 0 && r.m_publishedRawNs > 0 &&
+            r.m_publishedRawNs < previous.m_publishedRawNs ) ) )
     {
-        s.m_epochSamples   = 1;
-        s.m_firstReceiptNs = r.m_availableNs;
-        s.m_receivedRateHz = 0;
+        ++s.m_timestampDiscontinuities;
+        r.m_flags |= ObservationTimestampDiscontinuity;
+    }
+    if( !s.m_epochSamples || changed || r.m_counter < previous.m_counter || r.m_availableNs < s.m_lastReceiptNs ||
+        r.m_availableNs - s.m_lastReceiptNs > m_config.m_staleNs )
+    {
+        s.m_epochSamples          = 1;
+        s.m_firstReceiptNs        = r.m_availableNs;
+        s.m_receivedRateHz        = 0;
+        s.m_publicationRateHz     = 0;
+        s.m_rateCounter           = r.m_counter;
+        s.m_rateWindowEstablished = false;
     }
     else if( r.m_counter > previous.m_counter )
     {
         ++s.m_epochSamples;
         const auto elapsed = r.m_availableNs - s.m_firstReceiptNs;
-        if( elapsed > 0 )
-            s.m_receivedRateHz = double( s.m_epochSamples - 1 ) * 1e9 / double( elapsed );
+        if( elapsed > 0 && ( !s.m_rateWindowEstablished || elapsed >= 250000000 ) )
+        {
+            s.m_receivedRateHz    = double( s.m_epochSamples - 1 ) * 1e9 / double( elapsed );
+            s.m_publicationRateHz = double( r.m_counter - s.m_rateCounter ) * 1e9 / double( elapsed );
+        }
+        if( elapsed >= 250000000 )
+        {
+            s.m_firstReceiptNs        = r.m_availableNs;
+            s.m_rateCounter           = r.m_counter;
+            s.m_epochSamples          = 1;
+            s.m_rateWindowEstablished = true;
+        }
     }
     s.m_lastReceiptNs   = r.m_availableNs;
     s.m_stale           = false;
@@ -239,8 +285,20 @@ NativeObservation NativeObservationCapture::accept( NativeObservation r )
             // Protocol endpoint clocks are publisher-local MONOTONIC, not metadata publication or mirror application.
         }
     }
-    if( r.m_flags & ( ObservationInvalidTime | ObservationInvalidPayload ) )
+    if( r.m_flags & ( ObservationInvalidTime | ObservationInvalidPayload | ObservationTimestampDiscontinuity ) )
         ++s.m_invalid;
+    s.m_valid = !( r.m_flags & ( ObservationInvalidPayload | ObservationPayloadUnretained | ObservationProtocolInvalid |
+                                 ObservationTimestampDiscontinuity | ObservationClockMismatch ) );
+    if( index < m_history.size() )
+    {
+        auto &next = m_historyNext[index];
+        if( s.m_retained == m_config.m_historyCapacity )
+            ++s.m_historyEvictions;
+        else
+            ++s.m_retained;
+        m_history[index][next] = r;
+        next                   = ( next + 1 ) % m_config.m_historyCapacity;
+    }
     s.m_latest = r;
     return r;
 }
@@ -250,18 +308,56 @@ void NativeObservationCapture::poll( ObservationSource source, bool busy, bool r
     s.m_busy += busy;
     s.m_races += race;
     s.m_incompatible += incompatible;
+    s.m_busyNow         = busy || race;
+    s.m_incompatibleNow = incompatible;
     s.m_duplicates += !busy && !race && !incompatible;
 }
 void NativeObservationCapture::tick( std::int64_t nowNs )
 {
     m_status.m_nowNs = nowNs;
-    for( auto &s : m_status.m_sources )
-        s.m_stale = !s.m_connected || s.m_lastReceiptNs < 0 || nowNs < s.m_lastReceiptNs ||
-                    nowNs - s.m_lastReceiptNs > m_config.m_staleNs;
+    for( std::size_t i = 0; i < observationSources; ++i )
+    {
+        auto      &s = m_status.m_sources[i];
+        const bool silent =
+            s.m_lastReceiptNs < 0 || nowNs < s.m_lastReceiptNs || nowNs - s.m_lastReceiptNs > m_config.m_staleNs;
+        if( s.m_busyNow && s.m_busySinceNs < 0 )
+            s.m_busySinceNs = nowNs;
+        if( !s.m_busyNow )
+            s.m_busySinceNs = -1;
+        const bool payload = s.m_latest.m_event == ObservationEvent::Sample && s.m_samples &&
+                             !( s.m_latest.m_flags & ( ObservationInvalidPayload | ObservationPayloadUnretained |
+                                                       ObservationProtocolInvalid | ObservationTimestampDiscontinuity |
+                                                       ObservationClockMismatch ) );
+        if( i == std::size_t( ObservationSource::Dm ) )
+        {
+            const bool stuck = s.m_busySinceNs >= 0 && nowNs - s.m_busySinceNs > m_config.m_staleNs;
+            s.m_idle         = s.m_connected && silent && !s.m_busyNow && !s.m_incompatibleNow &&
+                               ( payload || s.m_latest.m_event == ObservationEvent::Attached );
+            s.m_stale        = !s.m_connected || stuck || s.m_incompatibleNow ||
+                               ( s.m_latest.m_event == ObservationEvent::Sample && !payload );
+        }
+        else
+            s.m_stale = !s.m_connected || silent || s.m_incompatibleNow;
+        s.m_valid = s.m_connected && payload && !s.m_stale;
+        if( silent )
+            s.m_receivedRateHz = s.m_publicationRateHz = 0;
+    }
 }
 NativeObservationStatus NativeObservationCapture::status() const
 {
     return m_status;
+}
+
+std::size_t NativeObservationCapture::copy_recent( ObservationSource source, std::span<NativeObservation> output ) const
+{
+    const auto index = std::size_t( source );
+    if( index >= m_history.size() )
+        throw std::invalid_argument( "No measurement history for endpoint metadata" );
+    const auto count = std::min( output.size(), m_status.m_sources[index].m_retained );
+    for( std::size_t n = 0; n < count; ++n )
+        output[n] = m_history[index][( m_historyNext[index] + m_config.m_historyCapacity - count + n ) %
+                                     m_config.m_historyCapacity];
+    return count;
 }
 NativeObservationQueue::NativeObservationQueue( std::size_t capacity ) : m_records( capacity )
 {
@@ -292,6 +388,12 @@ bool NativeObservationQueue::pop( NativeObservation &record )
 std::uint64_t NativeObservationQueue::drops() const
 {
     return m_drops.load();
+}
+
+std::size_t NativeObservationQueue::queued() const
+{
+    const auto tail = m_tail.load( std::memory_order_acquire );
+    return std::min<std::uint64_t>( m_records.size(), m_head.load( std::memory_order_acquire ) - tail );
 }
 NativeCommandQueue::NativeCommandQueue( std::size_t capacity, std::size_t maxElements ) : m_maxElements( maxElements )
 {
@@ -336,5 +438,69 @@ bool NativeCommandQueue::pop( NativeObservation &record, std::span<float> values
 std::uint64_t NativeCommandQueue::drops() const
 {
     return m_drops.load();
+}
+
+std::size_t NativeCommandQueue::queued() const
+{
+    const auto tail = m_tail.load( std::memory_order_acquire );
+    return std::min<std::uint64_t>( m_records.size(), m_head.load( std::memory_order_acquire ) - tail );
+}
+
+NativeCommandHistory::NativeCommandHistory( std::size_t capacity, std::size_t maxElements )
+    : m_maxElements( maxElements )
+{
+    if( capacity < 2 || capacity > 4096 || maxElements < 1 || maxElements > 65536 || capacity * maxElements > 16777216 )
+        throw std::invalid_argument( "Invalid complete-command history bounds" );
+    m_records.resize( capacity );
+    m_values.resize( capacity * maxElements );
+}
+
+void NativeCommandHistory::append( const NativeObservation &record, std::span<const float> values )
+{
+    if( record.m_source != ObservationSource::Dm || record.m_event != ObservationEvent::Sample || values.empty() ||
+        values.size() != record.m_elements || values.size() > m_maxElements )
+        throw std::invalid_argument( "Incomplete retained command" );
+    if( m_count )
+    {
+        const auto &last = m_records[( m_next + m_records.size() - 1 ) % m_records.size()];
+        if( last.m_generation != record.m_generation || last.m_device != record.m_device ||
+            last.m_fileInode != record.m_fileInode || last.m_imageInode != record.m_imageInode ||
+            record.m_counter <= last.m_counter )
+            clear();
+    }
+    m_records[m_next] = record;
+    std::copy( values.begin(), values.end(), m_values.begin() + m_next * m_maxElements );
+    m_next = ( m_next + 1 ) % m_records.size();
+    if( m_count == m_records.size() )
+        ++m_evictions;
+    else
+        ++m_count;
+}
+
+bool NativeCommandHistory::copy( std::size_t age, NativeObservation &record, std::span<float> values ) const
+{
+    if( age >= m_count )
+        return false;
+    const auto index = ( m_next + m_records.size() - 1 - age ) % m_records.size();
+    if( values.size() < m_records[index].m_elements )
+        return false;
+    record = m_records[index];
+    std::copy_n( m_values.begin() + index * m_maxElements, record.m_elements, values.begin() );
+    return true;
+}
+
+std::size_t NativeCommandHistory::retained() const
+{
+    return m_count;
+}
+
+std::uint64_t NativeCommandHistory::evictions() const
+{
+    return m_evictions;
+}
+
+void NativeCommandHistory::clear()
+{
+    m_next = m_count = 0;
 }
 } // namespace DDSPC

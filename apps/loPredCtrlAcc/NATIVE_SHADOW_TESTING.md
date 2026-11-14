@@ -1,5 +1,9 @@
 # Native observation-only handoff
 
+For the normal installed, continuous MagAO-X application, use
+[NATIVE_APPLICATION.md](NATIVE_APPLICATION.md). This page retains the finite,
+private recording workflow; both entrypoints now require the compile-time guard.
+
 For the active ADC/WFS/DM input milestone with optional complete DM command
 images and per-source receipt rates, use [LIVE_INPUT_TESTING.md](LIVE_INPUT_TESTING.md).
 The original observation profile and ADC calibration below remain unchanged.

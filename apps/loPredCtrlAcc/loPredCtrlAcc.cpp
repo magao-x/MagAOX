@@ -1,16 +1,11 @@
-/** \file loPredCtrl.cpp
-  * \brief The MagAO-X low-order predictive controller main program source file.
-  *
-  * \ingroup loPredCtrl_files
-  */
+/** \file loPredCtrlAcc.cpp
+ * \brief Standard installed MagAO-X application entrypoint, with native inputs and physical output inhibited.
+ */
+#include "loPredCtrlAcc_native.hpp"
 
-#include "loPredCtrlAcc.hpp"
-
-
-int main(int argc, char **argv)
+/// Run the standard framework lifecycle using the invocation/configuration name as the INDI identity.
+int main( int argc /**< [in] Argument count. */, char **argv /**< [in] Standard MagAO-X arguments. */ )
 {
-   MagAOX::app::loPredCtrlAcc xapp;
-
-   return xapp.main(argc, argv);
-
+    MagAOX::app::loPredCtrlAcc_native app;
+    return app.main( argc, argv );
 }

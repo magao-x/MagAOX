@@ -1,8 +1,23 @@
 # Offline DDSPC validation
 
+The normal installed executable now defaults to continuous native read-only input
+acquisition with mandatory `DDSPC_SHADOW_ONLY` guards. See
+[NATIVE_APPLICATION.md](../NATIVE_APPLICATION.md) for build, xctrl/INDI registration,
+diagnostics, commissioning and qualification limits. Its focused local checks are:
+
+```sh
+make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j2 \
+  BUILD_DIR=build/native-app-integration check-native-observation
+```
+
+The numerical DDSPC implementations and historical Legacy test adapters are
+preserved. The installed native entrypoint cannot activate Legacy, training or
+physical output. Historical handoff/results descriptions below predate that
+entrypoint change; their test counts are not current native acceptance results.
+
 The reusable components and opt-in actual-application replay integration are
-covered in [SHADOW_PIPELINE.md](../SHADOW_PIPELINE.md). Default Legacy/native
-behavior is preserved; `parameters.shadow_pipeline` defaults false. Local tests
+covered in [SHADOW_PIPELINE.md](../SHADOW_PIPELINE.md). The reusable base-class
+pipeline remains opt-in; `parameters.shadow_pipeline` defaults false. Local tests
 exercise actual app/model code using stream-free lifecycle doubles and independently
 established synthetic applied-input intervals. The replay has no command writer.
 Use `make -f tests/Makefile.replay check` from the application directory for the
@@ -47,8 +62,8 @@ conditional native-build/WFS-attachment procedure, not a DM enable procedure.
 `DDSPC_SHADOW_ONLY=yes` adds a compile-time guard refusing missing/false shadow
 configuration before helpers start and implies a strict shadow build. The Linux
 build helper now stages this guarded profile and explicitly selects C++20;
-actual Linux linking remains unverified here. Normal builds keep Legacy as the
-default. The explicit optional `legacy_copy_gain_compat=false` fixes loading of
+actual Linux linking remains unverified here. Installed builds now force the guard
+and native observation defaults described above. The optional `legacy_copy_gain_compat=false` fixes loading of
 `copy_gain`; default true preserves existing Legacy output and old config behavior.
 
 ```sh

@@ -113,6 +113,9 @@ struct AdcStatus
     std::uint64_t m_device{ 0 }, m_inode{ 0 }, m_generation{ 0 }, m_segment{ 0 }; ///< Source/session identity.
     std::uint64_t m_samples{ 0 }, m_dropped{ 0 }, m_invalid{ 0 },
         m_duplicates{ 0 }; ///< Accepted/lost/rejected/poll totals.
+    std::uint64_t m_railRejected{ 0 },
+        m_rangeRejected{ 0 };               ///< Rejected raw frames, counted once if either axis fails.
+    std::uint64_t m_timestampRejected{ 0 }; ///< Rejected acquisition/publication/availability timestamp frames.
     std::uint64_t m_races{ 0 }, m_busy{ 0 }, m_restarts{ 0 }, m_overwrites{ 0 },
         m_timingGaps{ 0 };                    ///< Copy and retention accounting.
     std::size_t m_retained{ 0 };              ///< Current contiguous ring occupancy.

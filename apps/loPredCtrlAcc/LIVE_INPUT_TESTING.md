@@ -1,5 +1,10 @@
 # Live ADC/WFS/DM input milestone
 
+The normal installed application now supports continuous acquisition without a
+private journal. See [NATIVE_APPLICATION.md](NATIVE_APPLICATION.md) for the standard
+build/install/xctrl/cursesINDI workflow. This page remains the optional finite
+recording procedure.
+
 This increment prepares the existing private `loPredCtrlAcc_native_observe`
 executable for the first live-input milestone. It preserves individual 8 kHz ADC
 samples, reads the two configured WFS modal entries, and optionally records every

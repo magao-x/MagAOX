@@ -55,16 +55,18 @@ struct ObservationStream
 struct NativeObservationConfig
 {
     std::array<ObservationStream, observationSources> m_streams; ///< ADC slot name is supplied by the owning app.
-    std::string  m_directory;         ///< Existing private directory; exclusive new journal, never append/overwrite.
-    double       m_durationSec{ 60 }; ///< Finite observation duration, including absent-source time.
-    unsigned     m_pollUs{ 50 };      ///< Nominal polling delay; actual coverage/loss is measured.
-    std::size_t  m_queueCapacity{ 32768 }; ///< Fixed recording queue; overflow counts instead of blocking input.
-    std::int64_t m_staleNs{ 10000000 };    ///< Observer silence diagnostic; never a control freshness assertion.
+    std::string m_directory; ///< Existing private directory when recording; never used by diagnostics-only acquisition.
+    double      m_durationSec{ 60 }; ///< Acquisition duration; zero runs continuously only with recording disabled.
+    bool        m_record{ true }; ///< Optional finite private journal; installed native entrypoint defaults this off.
+    unsigned    m_pollUs{ 50 };   ///< Nominal polling delay; actual coverage/loss is measured.
+    std::size_t m_queueCapacity{ 32768 }; ///< Fixed recording queue; overflow counts instead of blocking input.
+    std::int64_t m_staleNs{ 10000000 };   ///< Observer silence diagnostic; never a control freshness assertion.
     std::array<std::size_t, 2> m_modalIndices{
         0, 1 };                       ///< Selected calibrated-stream entries, without asserting TT identity.
     bool m_recordDmCommands{ false }; ///< Opt-in full command snapshots; never physical-application certificates.
     std::size_t m_commandQueueCapacity{ 64 },
-        m_commandMaxElements{ 4096 }; ///< Independently bounded payload retention; no allocation in source copies.
+        m_commandMaxElements{ 4096 };      ///< Independently bounded payload retention; no allocation in source copies.
+    std::size_t m_historyCapacity{ 4096 }; ///< Per-source chronological input retention, independent of disk recording.
 
     /// Set existing source defaults without opening any input or file.
     NativeObservationConfig();
@@ -85,14 +87,16 @@ enum class ObservationEvent : unsigned
 /// Per-record diagnostics, never a measurement/application qualification.
 enum ObservationFlag : std::uint32_t
 {
-    ObservationInvalidTime        = 1,
-    ObservationUnknownClock       = 2,
-    ObservationClockMismatch      = 4,
-    ObservationInvalidPayload     = 8,
-    ObservationProtocolInvalid    = 16,
-    ObservationProtocolIncomplete = 32,
-    ObservationAssociationMissing = 64,
-    ObservationAssociationMatched = 128
+    ObservationInvalidTime            = 1,
+    ObservationUnknownClock           = 2,
+    ObservationClockMismatch          = 4,
+    ObservationInvalidPayload         = 8,
+    ObservationProtocolInvalid        = 16,
+    ObservationProtocolIncomplete     = 32,
+    ObservationAssociationMissing     = 64,
+    ObservationAssociationMatched     = 128,
+    ObservationTimestampDiscontinuity = 256,
+    ObservationPayloadUnretained      = 512
 };
 
 /// Owned fixed-size journal record; no pointer into a producer or model escapes.
@@ -127,7 +131,10 @@ struct NativeObservation
 struct NativeSourceStatus
 {
     NativeObservation m_latest; ///< Latest owned event/snapshot, without any validity promotion.
-    bool              m_connected{ false }, m_stale{ true }; ///< Mapping and local silence state only.
+    bool              m_connected{ false }, m_stale{ true }, m_valid{ false },
+        m_idle{ false }; ///< Transport validity; a static valid DM request is idle, not stale or physically applied.
+    bool          m_busyNow{ false }, m_incompatibleNow{ false }; ///< Last poll state, distinct from lifetime counters.
+    std::int64_t  m_busySinceNs{ -1 }; ///< Continuous producer-write observation for stuck-writer diagnostics.
     std::uint64_t m_samples{ 0 }, m_counterGaps{ 0 }, m_restarts{ 0 }, m_duplicates{ 0 }; ///< Publication observations.
     std::uint64_t m_busy{ 0 }, m_races{ 0 }, m_incompatible{ 0 },
         m_invalid{ 0 }; ///< Native copy/layout/payload failures.
@@ -143,6 +150,12 @@ struct NativeSourceStatus
     std::int64_t  m_firstReceiptNs{ -1 }; ///< First unique sample in the current attachment/counter epoch.
     std::uint64_t m_epochSamples{ 0 };    ///< Unique snapshots in this receipt-rate epoch, excluding duplicate polls.
     double        m_receivedRateHz{ 0 }; ///< Accepted snapshots per observer second; does not establish a source clock.
+    double        m_publicationRateHz{ 0 }; ///< Counter advances per observer second; gaps remain separately counted.
+    std::uint64_t m_rateCounter{ 0 };       ///< Counter at the receipt-rate window origin.
+    bool          m_rateWindowEstablished{ false }; ///< Once warm, rate changes are published over 250 ms windows.
+    std::uint64_t m_timestampDiscontinuities{ 0 },
+        m_historyEvictions{ 0 }; ///< Clock regressions and retention eviction.
+    std::size_t m_retained{ 0 }; ///< Bounded source-history occupancy; retention eviction is not source loss.
 };
 
 /// Thread-safe observer snapshot; every model and physical-application qualification remains false by construction.
@@ -156,6 +169,9 @@ struct NativeObservationStatus
     bool m_finished{ false }, m_ioError{ false }; ///< Finite recording completion and persistent recording failure.
     std::uint64_t m_commandsWritten{ 0 }, m_commandDrops{ 0 },
         m_commandOversize{ 0 }; ///< Full-command recording counts, separate from the metadata journal.
+    std::size_t   m_queueOccupancy{ 0 }, m_commandQueueOccupancy{ 0 }; ///< Nonblocking recorder backlog snapshots.
+    std::size_t   m_dmCommandsRetained{ 0 }; ///< Complete command images retained even with recording disabled.
+    std::uint64_t m_dmCommandEvictions{ 0 }; ///< Expected bounded full-command history eviction, not source loss.
 };
 
 /// Fixed single-producer/single-consumer journal queue; overflow never stalls source observation.
@@ -176,6 +192,9 @@ class NativeObservationQueue
 
     /// Return observed overflow, separate from ADC transport or source gaps.
     std::uint64_t drops() const;
+
+    /// Return a bounded approximate backlog without blocking either queue worker.
+    std::size_t queued() const;
 };
 
 /// Separate bounded SPSC payload queue; large DM images never enlarge individual ADC journal records.
@@ -201,6 +220,41 @@ class NativeCommandQueue
 
     /// Return payload queue overflow without combining it with source or metadata losses.
     std::uint64_t drops() const;
+
+    /// Return a bounded approximate complete-command backlog.
+    std::size_t queued() const;
+};
+
+/// Bounded complete-command history; its owner supplies serialization independently of the recording SPSC queue.
+class NativeCommandHistory
+{
+    std::vector<NativeObservation> m_records; ///< Original identities and timestamps for retained command images.
+    std::vector<float>             m_values; ///< Fixed storage for every original FLOAT element in each retained image.
+    std::size_t   m_maxElements, m_next{ 0 }, m_count{ 0 }; ///< Capacity, insertion point and retained command count.
+    std::uint64_t m_evictions{ 0 }; ///< Lifetime retention evictions, distinct from source/recorder loss.
+
+  public:
+    /// Allocate bounded retention before native acquisition starts.
+    NativeCommandHistory( std::size_t capacity /**< [in] Number of complete commands retained. */,
+                          std::size_t maxElements /**< [in] Maximum elements per command. */ );
+
+    /// Retain one complete stable command; evict the oldest only when bounded history fills.
+    void append( const NativeObservation &record /**< [in] Command publication evidence only. */,
+                 std::span<const float>   values /**< [in] Complete original producer payload. */ );
+
+    /// Copy an original command and metadata without interpreting it as a physical application certificate.
+    bool copy( std::size_t        age /**< [in] Zero selects the newest retained command. */,
+               NativeObservation &record /**< [out] Owned original metadata. */,
+               std::span<float>   values /**< [out] Caller storage for all elements of this command. */ ) const;
+
+    /// Return the number of complete retained commands.
+    std::size_t retained() const;
+
+    /// Return expected retention evictions.
+    std::uint64_t evictions() const;
+
+    /// Discard retained commands on source disconnection/replacement without changing lifetime eviction counts.
+    void clear();
 };
 
 /// Single-owner accounting reused in deterministic tests and the native worker; never calls a learner.
@@ -212,6 +266,8 @@ class NativeObservationCapture
     std::size_t m_dmNext{ 0 }, m_dmCount{ 0 }; ///< Chronological history cursor; cleared on source incarnation changes.
     std::array<MagAOX::dmCompletion::Record, 2>
         m_endpoints; ///< Per-publisher endpoint progression; never cross-join sequences.
+    std::array<std::vector<NativeObservation>, 4> m_history; ///< Individual ADC/WFS/camera/DM records, never resampled.
+    std::array<std::size_t, 4> m_historyNext{};              ///< Next chronological source-history insertion slots.
 
   public:
     /// Construct fixed accounting storage without a stream, clock, file or worker.
@@ -232,6 +288,11 @@ class NativeObservationCapture
 
     /// Return owned scalar/snapshot evidence; caller provides serialization.
     NativeObservationStatus status() const;
+
+    /// Copy recent individual source records in chronological order; call only on this capture's owning worker.
+    std::size_t
+    copy_recent( ObservationSource            source /**< [in] ADC, modal, camera or DM role. */,
+                 std::span<NativeObservation> output /**< [out] Caller-owned bounded destination. */ ) const;
 };
 } // namespace DDSPC
 #endif

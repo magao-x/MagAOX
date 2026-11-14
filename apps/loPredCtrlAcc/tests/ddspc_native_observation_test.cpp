@@ -442,6 +442,21 @@ TEST_CASE( "Full native command queue preserves payloads and reports bounded ove
     REQUIRE( queue.pop( r, output ) );
     REQUIRE_FALSE( queue.pop( r, output ) );
     REQUIRE_THROWS_AS( queue.push( r, std::span<const float>( values.data(), 3 ) ), std::invalid_argument );
+    DDSPC::NativeCommandHistory history( 2, 4 );
+    for( std::uint64_t n = 1; n <= 3; ++n )
+    {
+        r.m_counter = n;
+        history.append( r, values );
+    }
+    REQUIRE( history.retained() == 2 );
+    REQUIRE( history.evictions() == 1 );
+    REQUIRE( history.copy( 1, r, output ) );
+    REQUIRE( r.m_counter == 2 );
+    REQUIRE( output == values );
+    REQUIRE_FALSE( history.copy( 2, r, output ) );
+    ++r.m_generation;
+    history.append( r, values );
+    REQUIRE( history.retained() == 1 );
 }
 
 /** \brief Oversized command images remain metadata observations and are never serialized as truncated inputs. */
@@ -489,5 +504,137 @@ TEST_CASE( "Native observation rejects incompatible source dimensions and dataty
     observer.stop();
     REQUIRE( observer.status().m_sources[1].m_samples == 0 );
     REQUIRE_FALSE( observer.status().m_ioError );
+}
+/** \brief Individual 8 kHz ADC and measured 2 kHz WFS records retain ordering and rates with one idle DM request. */
+TEST_CASE( "Native multirate input retention preserves every fast sample and allows an idle DM",
+           "[native-observation]" )
+{
+    DDSPC::NativeObservationConfig config;
+    config.m_record          = false;
+    config.m_durationSec     = 0;
+    config.m_historyCapacity = 32;
+    DDSPC::NativeObservationCapture capture( config );
+    const bool                      dmAvailable = GENERATE( false, true );
+    auto                            dm          = observation_frame( DDSPC::ObservationSource::Dm );
+    dm.m_availableNs = dm.m_receivedNs = 1000000200;
+    if( dmAvailable )
+        capture.accept( dm );
+    for( std::uint64_t n = 0; n < 8000; ++n )
+    {
+        auto adc             = observation_frame( DDSPC::ObservationSource::Adc, n + 1 );
+        adc.m_acquiredRawNs  = 1000000000 + std::int64_t( n ) * 125000;
+        adc.m_publishedRawNs = adc.m_acquiredRawNs + 100;
+        adc.m_receivedNs = adc.m_availableNs = adc.m_acquiredRawNs + 200;
+        adc.m_clockNowNs                     = adc.m_publishedRawNs + 50;
+        adc.m_values                         = { double( n ), -double( n ) };
+        capture.accept( adc );
+        if( n % 4 == 0 )
+        {
+            for( auto role : { DDSPC::ObservationSource::Modal, DDSPC::ObservationSource::Camera } )
+            {
+                auto record      = adc;
+                record.m_source  = role;
+                record.m_counter = n / 4 + 1;
+                capture.accept( record );
+            }
+        }
+    }
+    capture.tick( 1999875200 );
+    const auto status = capture.status();
+    REQUIRE( status.m_sources[0].m_samples == 8000 );
+    REQUIRE( status.m_sources[1].m_samples == 2000 );
+    REQUIRE( status.m_sources[2].m_samples == 2000 );
+    REQUIRE( status.m_sources[0].m_receivedRateHz == Approx( 8000 ) );
+    REQUIRE( status.m_sources[1].m_receivedRateHz == Approx( 2000 ) );
+    REQUIRE( status.m_sources[0].m_valid );
+    REQUIRE( status.m_sources[1].m_valid );
+    REQUIRE( status.m_sources[3].m_connected == dmAvailable );
+    REQUIRE( status.m_sources[3].m_valid == dmAvailable );
+    REQUIRE( status.m_sources[3].m_idle == dmAvailable );
+    REQUIRE( status.m_sources[3].m_stale == !dmAvailable );
+    REQUIRE( status.m_sources[3].m_publicationRateHz == 0 );
+    std::array<DDSPC::NativeObservation, 32> recent;
+    REQUIRE( capture.copy_recent( DDSPC::ObservationSource::Adc, recent ) == 32 );
+    REQUIRE( recent.front().m_counter == 7969 );
+    REQUIRE( recent.back().m_counter == 8000 );
+    for( std::size_t n = 1; n < recent.size(); ++n )
+    {
+        REQUIRE( recent[n].m_acquiredRawNs - recent[n - 1].m_acquiredRawNs == 125000 );
+        REQUIRE( recent[n].m_values[0] - recent[n - 1].m_values[0] == 1 );
+    }
+    REQUIRE( status.m_sources[0].m_historyEvictions == 8000 - 32 );
+    REQUIRE( status.m_sources[0].m_counterGaps == 0 );
+}
+
+/** \brief Timestamp regressions, missing counters, stuck writers and reconnections remain separate diagnostics. */
+TEST_CASE( "Native input validity separates idle commands from invalid or disconnected streams",
+           "[native-observation]" )
+{
+    DDSPC::NativeObservationConfig config;
+    config.m_record      = false;
+    config.m_durationSec = 0;
+    DDSPC::NativeObservationCapture capture( config );
+    auto                            r = observation_frame( DDSPC::ObservationSource::Dm );
+    capture.accept( r );
+    capture.tick( r.m_availableNs + config.m_staleNs + 1 );
+    REQUIRE( capture.status().m_sources[3].m_idle );
+    capture.poll( DDSPC::ObservationSource::Dm, true, false, false );
+    capture.tick( r.m_availableNs + config.m_staleNs + 2 );
+    capture.tick( r.m_availableNs + 2 * config.m_staleNs + 3 );
+    REQUIRE( capture.status().m_sources[3].m_stale );
+    REQUIRE_FALSE( capture.status().m_sources[3].m_idle );
+    r.m_counter = 4;
+    r.m_acquiredRawNs -= 100;
+    r.m_availableNs += 3 * config.m_staleNs;
+    capture.accept( r );
+    REQUIRE( capture.status().m_sources[3].m_counterGaps == 2 );
+    REQUIRE( capture.status().m_sources[3].m_timestampDiscontinuities == 1 );
+    REQUIRE_FALSE( capture.status().m_sources[3].m_valid );
+    r.m_event = DDSPC::ObservationEvent::Disconnected;
+    capture.accept( r );
+    capture.tick( r.m_availableNs );
+    REQUIRE_FALSE( capture.status().m_sources[3].m_connected );
+    REQUIRE( capture.status().m_sources[3].m_stale );
+    r.m_event      = DDSPC::ObservationEvent::Sample;
+    r.m_generation = 2;
+    r.m_counter    = 1;
+    capture.accept( r );
+    capture.tick( r.m_availableNs );
+    REQUIRE( capture.status().m_sources[3].m_valid );
+}
+
+/** \brief Continuous acquisition starts without journal paths, survives an idle DM and joins before restart. */
+TEST_CASE( "Native input worker runs continuously without journal files", "[native-observation][threaded]" )
+{
+    ObservationDirectory directory;
+    auto                 config = observation_config( directory );
+    config.m_record             = false;
+    config.m_durationSec        = 0;
+    config.m_directory.clear();
+    ObservationImage      dm( DDSPC::ObservationSource::Dm );
+    AdcTransportFixture   input( config.m_streams[3].m_name, dm.m_image );
+    DDSPC::AdcReader      reader( DDSPC::AdcConfig{} );
+    DDSPC::NativeObserver observer( config );
+    for( int restart = 0; restart < 2; ++restart )
+    {
+        observer.start( reader );
+        REQUIRE( observed( [&] { return observer.status().m_sources[3].m_samples > std::uint64_t( restart ); } ) );
+        REQUIRE( observed( [&] { return observer.status().m_sources[3].m_idle; } ) );
+        REQUIRE_FALSE( observer.status().m_finished );
+        REQUIRE_FALSE( observer.status().m_ioError );
+        REQUIRE( observer.status().m_sources[3].m_valid );
+        REQUIRE_FALSE( observer.status().m_sources[3].m_stale );
+        REQUIRE( observer.status().m_queueOccupancy == 0 );
+        DDSPC::NativeObservation command;
+        std::array<float, 4>     values{};
+        REQUIRE( observer.copy_command( 0, command, values ) );
+        REQUIRE( values == dm.m_floats );
+        REQUIRE( command.m_counter == 1 );
+        REQUIRE( observer.status().m_dmCommandsRetained == 1 );
+        observer.stop();
+        REQUIRE( observer.status().m_finished );
+        REQUIRE( observer.status().m_written == 0 );
+    }
+    REQUIRE( std::filesystem::is_empty( directory.m_path ) );
 }
 } // namespace libXWCTest::loPredCtrlAccTest
