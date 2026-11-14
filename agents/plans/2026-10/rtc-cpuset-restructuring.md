@@ -700,6 +700,34 @@ Jitter is < 4e-6 (with usual variation). Haven't had to shut anything down."
 This is the reported post-migration timing result; the operator requests a PR.
 No new raw timing capture or thread-affinity readback accompanies this report.
 
+## Publish-copy migration: imWFS2 cbuff on CPU42, mfilt on acqu_mvm
+
+Requested by the operator on 2026-11-14, after the publish copies in
+[shmim-monitor-speedups](../2026-11/shmim-monitor-speedups.md) (acquWFS
+`aol1_imWFS2pub`, wfs2cmodeval `aol1_modevalWFSpub`) removed the cbuffs'
+cost to the loop, and mfilt tested well on the `acqu_mvm` core.
+
+| CPU | Previous cpuset | Updated cpuset | Purpose |
+| --- | --- | --- | --- |
+| 26 | `aol1_imWFS2_cbuff` | `spare26` | Reserve |
+| 42 | `spare42` | `aol1_imWFS2_cbuff` | Reads `aol1_imWFS2pub` in acquWFS's L3 domain |
+| 46 | `mfilt` | `spare46` | Reserve in the MVM's L3 domain |
+
+`mfilt-1` runs on `acqu_mvm` (CPU45) with acquWFS, wfs2cmodeval and mvalC2dm,
+at RTprio 48 between wfs2cmodeval (47) and mvalC2dm (49). The woofer-vispyr and
+ncpc loops' mfilt also move to `acqu_mvm` / taskset 45 (operator decision; the
+loops run independently, so this adds no work beside another loop).
+`remove_cpusets` already lists `mfilt` and `spare42` as legacy names.
+
+Config repository branch `jrmales/loop-pub-copies`:
+`aol1_imWFS2_cbuff.conf` returns from the temporary `spare42` to
+`cpuset=aol1_imWFS2_cbuff`; the tweeter-vispyr `fpssetup.setval` turns on
+`.comp.WFSpub` and `.option.outpub`; woofer-vispyr and ncpc mfilt use
+`acqu_mvm`. Deploy the config and the new map together, with the stop /
+`remove_cpusets` / `make_cpusets` procedure above: under the old map `mfilt`
+still exists and `aol1_imWFS2_cbuff` is CPU26, and under the new map `mfilt`
+no longer exists.
+
 ## Implementation dependencies and sequence
 
 1. **Complete the operator inventory.** Record deployed/uncommitted configs,
