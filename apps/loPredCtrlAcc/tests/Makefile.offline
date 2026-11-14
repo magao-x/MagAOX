@@ -131,6 +131,12 @@ check-native-observation:
 	  $(abspath $(BUILD_DIR))/native-observation/ddspc_offline_test
 	$(abspath $(BUILD_DIR))/native-observation/ddspc_offline_test '[native-observation],[loPredCtrlAcc][app]~[legacy]'
 	python3 -m unittest discover -s $(TEST_DIR) -p native_observation_tools_test.py
+	python3 -m unittest discover -s $(TEST_DIR) -p native_timing_audit_test.py
+
+# Ordinary-file analysis tests only; no native executable or input stream is opened.
+.PHONY: check-native-timing
+check-native-timing:
+	python3 -m unittest discover -s $(TEST_DIR) -p 'native_*test.py'
 
 check-build-tool:
 	python3 -m unittest discover -s $(TEST_DIR) -p native_linux_build_test.py

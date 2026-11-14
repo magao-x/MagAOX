@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "acquisition_kind": "simulator",
+  "sources": {
+    "adc": {
+      "acquisition": {
+        "clock": "realtime",
+        "same_host": true,
+        "verified": false,
+        "evidence": "Candidate from accelSim software acquisition; verify running producer revision and host",
+        "event": "simulator_sample_start"
+      },
+      "publication": {
+        "clock": "realtime",
+        "same_host": true,
+        "verified": false,
+        "evidence": "Candidate from frameGrabber; verify running producer build",
+        "event": "software_publication_marker"
+      }
+    },
+    "camera": {
+      "acquisition": {
+        "clock": "unknown",
+        "same_host": false,
+        "verified": false,
+        "evidence": "EDT timed acquisition domain/event not yet established",
+        "event": "unknown"
+      },
+      "publication": {
+        "clock": "realtime",
+        "same_host": true,
+        "verified": false,
+        "evidence": "Candidate from frameGrabber; verify running camera producer build",
+        "event": "unknown"
+      }
+    },
+    "modal": {
+      "acquisition": {
+        "clock": "unknown",
+        "same_host": false,
+        "verified": false,
+        "evidence": "Identify the modal publisher and any inherited camera timestamp contract",
+        "event": "unknown"
+      },
+      "publication": {
+        "clock": "unknown",
+        "same_host": false,
+        "verified": false,
+        "evidence": "Identify actual publisher build and CLOCK_ISIO expansion if used",
+        "event": "unknown"
+      }
+    }
+  },
+  "association": {
+    "method": "none",
+    "verified": false,
+    "evidence": "No verified frozen camera-origin/pixel association yet"
+  },
+  "synchronization": {
+    "latency_terms_ns": [
+      3000,
+      51500,
+      10000,
+      276100
+    ],
+    "post_delay_us": 0,
+    "expected_publication_phase_us": null,
+    "expected_reference": "unknown",
+    "expected_phase_evidence": "",
+    "counter_residue": null,
+    "phase_tolerance_us": 25
+  },
+  "synco": {
+    "dm_service_us": 110,
+    "ready_lead_us": 70
+  }
+}

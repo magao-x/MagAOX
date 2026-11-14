@@ -13,6 +13,21 @@ this test pass. Observe the existing repaired accelSim and the already validated
 `acc000` source depth 128. Do not enable DDSPC output or copy a production output
 configuration.
 
+## ADC/WFS-only result and timing follow-up
+
+The operator reported a successful 60-second native run on exao2 with Eigen 5:
+480,018 ADC samples at 8 kHz and 120,000 modal/camera samples each at 2 kHz,
+no reported capture/journal losses, normal exit. One inactive DM observation
+left the original four-source verifier failing its DM activity requirement.
+Use the explicit `--profile adc-wfs` analysis for this acquisition stage; DM
+qualification is deferred, not silently passed. These are operator-provided
+results, not an independent analysis of the CSV on this workstation.
+
+See [NATIVE_TIMING_AUDIT.md](NATIVE_TIMING_AUDIT.md) for read-only analysis of the
+existing recording, counter-labelled 4:1 phase, clock provenance, causal sample
+availability and future synco constraints. No new native run or rebuild is needed
+to run those Python tools. All training/output guards remain unchanged.
+
 ## What is recorded and what remains unknown
 
 | Role | Default existing input | Evidence retained | Interpretation |
@@ -140,7 +155,7 @@ mkdir -p "$DDSPC_RUN_ROOT/config" "$DDSPC_RUN_ROOT/logs" "$DDSPC_RUN_ROOT/sys" \
 "$DDSPC_CXX" --version | tee "$DDSPC_RUN_ROOT/compiler.txt"
 test "$("$DDSPC_CXX" -dumpversion | cut -d. -f1)" = 14
 pkg-config --modversion eigen3 mxlib | tee "$DDSPC_RUN_ROOT/dependencies.txt"
-case "$(pkg-config --modversion eigen3)" in 3.4.*) ;; *) exit 1 ;; esac
+# Record the installed Eigen version. The operator validated this native observer with Eigen 5; do not downgrade it.
 ```
 
 If the committed source already exists locally on exao2, replace the bundle
