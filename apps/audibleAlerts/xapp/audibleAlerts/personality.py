@@ -127,7 +127,7 @@ class Personality:
                 transitions[trans] = []
                 for action in transition['actions']:
                     if action['type'] not in ('speak', 'play'):
-                        log.warning(f"{trans}: {action} type not 'speak' or 'file'?")
+                        log.warning(f"{trans}: {action} type not 'speak' or 'play'?")
                         continue
                     transitions[trans].append(action_dict_to_playback_request(action))
             reactions.append(Reaction(indi_id=indi_id, transitions=transitions))
