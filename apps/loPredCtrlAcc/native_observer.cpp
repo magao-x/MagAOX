@@ -397,7 +397,9 @@ struct NativeObserver::Impl
     NativeObservationStatus             m_status;   ///< Ordinary-thread diagnostic copy.
     NativeObservationQueue              m_queue;    ///< Fixed SPSC recording slots; input never waits for file I/O.
     std::unique_ptr<NativeCommandQueue> m_commands; ///< Optional independent bounded complete-command queue.
-    std::vector<float> m_commandReadPayload, m_commandWritePayload; ///< Independent preallocated worker workspaces.
+    std::vector<float>   m_commandReadPayload, m_commandWritePayload; ///< Independent preallocated worker workspaces.
+    NativeCommandHistory m_commandHistory; ///< Complete commands retained independently of disk recording.
+    mutable std::mutex   m_commandMutex;   ///< Protect command copies; never held across native or file I/O.
     std::atomic<std::uint64_t> m_commandsWritten{ 0 }, m_commandOversize{ 0 }; ///< Payload results, not transport loss.
     std::atomic<std::uint64_t> m_written{ 0 }; ///< Records actually written, independent of accepted snapshots.
     std::atomic<bool>          m_running{ false }, m_reading{ false }, m_finished{ false },
@@ -421,18 +423,20 @@ struct NativeObserver::Impl
     NativeObservationStatus snapshot() const;
 };
 NativeObserver::Impl::Impl( const NativeObservationConfig &config )
-    : m_config( config ), m_capture( config ), m_queue( config.m_queueCapacity )
+    : m_config( config ), m_capture( config ), m_queue( config.m_record ? config.m_queueCapacity : 2 ),
+      m_commandHistory( config.m_commandQueueCapacity, config.m_commandMaxElements )
 {
+    m_commandReadPayload.resize( config.m_commandMaxElements );
     if( config.m_recordDmCommands )
     {
         m_commands = std::make_unique<NativeCommandQueue>( config.m_commandQueueCapacity, config.m_commandMaxElements );
-        m_commandReadPayload.resize( config.m_commandMaxElements );
         m_commandWritePayload.resize( config.m_commandMaxElements );
     }
 }
 void NativeObserver::Impl::enqueue( const NativeObservation &record )
 {
-    m_queue.push( record );
+    if( m_config.m_record )
+        m_queue.push( record );
 }
 NativeObservationStatus NativeObserver::Impl::snapshot() const
 {
@@ -445,6 +449,13 @@ NativeObservationStatus NativeObserver::Impl::snapshot() const
     s.m_commandsWritten           = m_commandsWritten.load();
     s.m_commandDrops              = m_commands ? m_commands->drops() : 0;
     s.m_commandOversize           = m_commandOversize.load();
+    s.m_queueOccupancy            = m_queue.queued();
+    s.m_commandQueueOccupancy     = m_commands ? m_commands->queued() : 0;
+    { //mutex scope
+        std::lock_guard<std::mutex> commands( m_commandMutex );
+        s.m_dmCommandsRetained = m_commandHistory.retained();
+        s.m_dmCommandEvictions = m_commandHistory.evictions();
+    }
     return s;
 }
 void NativeObserver::Impl::run()
@@ -458,10 +469,12 @@ void NativeObserver::Impl::run()
         std::array<AdcSample, 8>                        samples;
         auto                                           &payload = m_commandReadPayload;
         const auto                                      start   = mono_ns();
-        const auto                                      end     = start + std::int64_t( m_config.m_durationSec * 1e9 );
+        const auto end = m_config.m_durationSec == 0 ? std::numeric_limits<std::int64_t>::max()
+                                                     : start + std::int64_t( m_config.m_durationSec * 1e9 );
         { //mutex scope
             std::lock_guard<std::mutex> lock( m_mutex );
             m_status.m_startedNs = start;
+            m_status.m_stoppedNs = -1;
         }
         while( m_running.load( std::memory_order_acquire ) && !m_ioError.load() && mono_ns() < end )
         {
@@ -540,13 +553,26 @@ void NativeObserver::Impl::run()
                                                                       payload );
                 if( outcome == 1 )
                 {
+                    if( r.m_source == ObservationSource::Dm && r.m_event != ObservationEvent::Sample )
+                    { //mutex scope
+                        std::lock_guard<std::mutex> guard( m_commandMutex );
+                        m_commandHistory.clear();
+                    }
+                    const bool command = r.m_source == ObservationSource::Dm && r.m_event == ObservationEvent::Sample;
+                    if( command && r.m_elements > payload.size() )
+                    {
+                        ++m_commandOversize;
+                        r.m_flags |= ObservationPayloadUnretained;
+                    }
                     r = m_capture.accept( r );
                     enqueue( r );
-                    if( m_commands && r.m_source == ObservationSource::Dm && r.m_event == ObservationEvent::Sample )
+                    if( command && r.m_elements <= payload.size() )
                     {
-                        if( r.m_elements > payload.size() )
-                            ++m_commandOversize;
-                        else
+                        { //mutex scope
+                            std::lock_guard<std::mutex> guard( m_commandMutex );
+                            m_commandHistory.append( r, std::span<const float>( payload.data(), r.m_elements ) );
+                        }
+                        if( m_commands )
                             m_commands->push( r, std::span<const float>( payload.data(), r.m_elements ) );
                     }
                 }
@@ -580,6 +606,8 @@ void NativeObserver::Impl::run()
         }
     }
     m_reading.store( false, std::memory_order_release );
+    if( !m_config.m_record )
+        m_finished.store( true, std::memory_order_release );
 }
 void NativeObserver::Impl::write()
 {
@@ -725,6 +753,25 @@ void NativeObserver::start( AdcReader &adc )
 {
     if( m_impl->m_worker.joinable() || m_impl->m_writer.joinable() )
         throw std::logic_error( "Observer already started" );
+    if( !m_impl->m_config.m_record )
+    {
+        m_impl->m_adc = &adc;
+        m_impl->m_finished.store( false );
+        m_impl->m_running.store( true );
+        m_impl->m_reading.store( true );
+        try
+        {
+            m_impl->m_worker = std::thread( &Impl::run, m_impl.get() );
+        }
+        catch( ... )
+        {
+            m_impl->m_running.store( false );
+            m_impl->m_reading.store( false );
+            m_impl->m_adc = nullptr;
+            throw;
+        }
+        return;
+    }
     const int   directory = open( m_impl->m_config.m_directory.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW );
     struct stat info{};
     if( directory < 0 || fstat( directory, &info ) != 0 || info.st_uid != getuid() )
@@ -817,5 +864,11 @@ void NativeObserver::stop()
 NativeObservationStatus NativeObserver::status() const
 {
     return m_impl->snapshot();
+}
+
+bool NativeObserver::copy_command( std::size_t age, NativeObservation &record, std::span<float> values ) const
+{
+    std::lock_guard<std::mutex> guard( m_impl->m_commandMutex );
+    return m_impl->m_commandHistory.copy( age, record, values );
 }
 } // namespace DDSPC

@@ -1,0 +1,4 @@
+# Append loPredCtrlAcc to the existing role server's [local] drivers list.
+# This is a merge example, not a replacement server configuration.
+[local]
+drivers = loPredCtrlAcc

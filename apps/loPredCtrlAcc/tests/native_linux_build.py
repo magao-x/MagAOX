@@ -95,13 +95,13 @@ def main():
         run([generator, str(ROOT), str(version), "MAGAOX"], ROOT, environment, log)
     manifest["git_header_sha256"] = hashlib.sha256(version.read_bytes()).hexdigest()
     failed = False
-    for profile in (("observer",) if args.observer_only else ("legacy", "shadow")):
+    for profile in (("observer",) if args.observer_only else ("native", "observer")):
         stage = destination / profile
         shutil.copytree(snapshot, stage)
         tools = write_wrapper(stage, version)
         build_environment = dict(environment, PATH=str(tools) + os.pathsep + environment["PATH"])
-        guarded = profile != "legacy"
-        optimization = "-fno-fast-math" if guarded else "-ffast-math"
+        guarded = True
+        optimization = "-fno-fast-math"
         common = [f"CXX={compiler}", "CXXSTD=-std=c++20", "EDT=false", "NEED_CUDA=no", f"OPTIMIZE={optimization}"]
         result = {"make_variables": common, "linked": False, "status": "building"}
         manifest["profiles"][profile] = result

@@ -373,14 +373,24 @@ TEST_CASE( "ADC rail policy and invalid calibration are independent per channel"
     source.publish( 1, 1000000, { 0, 4095 } );
     REQUIRE( capture.drain( source ) == 1 );
     REQUIRE( capture.status().m_latest.m_acceleration[0] == Approx( -2048 * .0083799 / 1.02 ) );
+    REQUIRE( capture.status().m_railRejected == 0 );
     REQUIRE( capture.status().m_latest.m_acceleration[1] == Approx( 2047 * .0083799 / 1.02 ) );
     source.publish( 2, 1125000, { 5000, 2048 } );
     REQUIRE( capture.drain( source ) == 0 );
     REQUIRE( capture.samples().empty() );
+    REQUIRE( capture.status().m_rangeRejected == 1 );
     source.publish( 3, 1250000, { 2048, 2048 } );
     REQUIRE( capture.drain( source ) == 1 );
     REQUIRE( capture.samples().size() == 1 );
     REQUIRE( capture.samples()[0].m_acceleration == std::array<double, 2>{ 0, 0 } );
+    auto railsConfig          = config;
+    railsConfig.m_rejectRails = true;
+    DDSPC::AdcCapture rails( railsConfig );
+    rails.attached( 1, 2 );
+    source.publish( 1, 1000000, { 0, 4095 } );
+    REQUIRE( rails.drain( source ) == 0 );
+    REQUIRE( rails.status().m_railRejected == 1 );
+    REQUIRE( rails.status().m_rangeRejected == 0 );
     for( int axis = 0; axis < 2; ++axis )
     {
         auto bad         = config;

@@ -4756,3 +4756,43 @@ by `AGENTS.md`. This work does not switch branches, commit, or push.
   input safety gates, live `acc000` ingestion, ImageStreamIO interfaces, simulator
   worktrees, native streams or physical correction. No instrument-facing command,
   branch switch, commit, merge or push was performed during that Phase 4 review.
+
+## Native application integration — 2026-11-14
+
+- The normal `loPredCtrlAcc` entrypoint now uses the standard MagAO-X lifecycle
+  and identity with continuous read-only ADC/modal/camera/combined-DM acquisition.
+  `DDSPC_SHADOW_ONLY` and strict floating-point behavior are forced in the normal
+  Make profile. The installed configuration defaults acquisition/diagnostics on,
+  journal recording off, no Legacy or frameGrabber startup, no training and no
+  physical-output option. Unsafe configuration/reload fails closed, including
+  during shutdown. Native INDI mode changes are requests only and grant no model
+  readiness or output authority. RLS/QR/DDSPC numerical algorithms are unchanged.
+- Individual ADC records and original WFS/camera metadata remain in bounded
+  chronological histories. Complete original FLOAT command images are retained
+  independently of disk recording, with explicit bounds/eviction. Static valid
+  DM requests are healthy idle observations, separate from absent, incompatible,
+  stuck-writer or disconnected sources. Publication is never certified as mirror
+  application. New rate-limited INDI diagnostics expose raw/calibrated ADC values,
+  stream rates, identities/timestamps, loss, rejection, queue/history occupancy
+  and interlocks. Phase/deadline fields stay unqualified; the four 125-us slots
+  per 500-us WFS frame are explicit nominal timing, not measured synchronization.
+- Installation uses the existing binary installer and adds a non-overwriting
+  default-config hook. `xctrl` discovery requires the actual role process-list
+  entry, and cursesINDI requires the existing role broker's local driver list.
+  Source inspection/tests establish that `xctrl restart loPredCtrlAcc` also adds
+  the role INDI server; the commissioning guide documents approval/impact and
+  the app-only stop/start alternative. Global xctrl/deployment code is untouched.
+- Local optimized and ASan/UBSan native integration suites pass 51 C++ cases /
+  11,007 assertions plus 43 Python checks. Existing confirmed-input replay passes
+  6 cases / 40,049 assertions. All 15 historical `loPredCtrl` files still match
+  the restored source reference. Tests use explicit transport/framework doubles
+  and private ordinary files; no native process or instrument stream was opened.
+- Remaining operator qualifications: native Linux/ImageStreamIO ABI/link build,
+  approved registration and start/stop/cursesINDI acceptance, measured sustained
+  acquisition rates, producer clock/exposure provenance, command coordinate and
+  applied-interval evidence, and a genuine native multirate model/slot adapter.
+  Existing averaged replay is not enabled as the native 8-kHz predictor. Any
+  future output requires synco slot/cutoff qualification, never an assumed 15-us
+  compute allowance. No install, staging/commit, push or deployment was performed.
+- Exact modified-file manifest and operator commands:
+  `apps/loPredCtrlAcc/NATIVE_APPLICATION.md`.

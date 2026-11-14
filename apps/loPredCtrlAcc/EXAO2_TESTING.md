@@ -1,5 +1,10 @@
 # Manual exao2 handoff: shadow commissioning only
 
+The normal build is now always guarded and uses continuous native acquisition.
+Use [NATIVE_APPLICATION.md](NATIVE_APPLICATION.md) for installation and xctrl/INDI
+registration. Legacy/default-build descriptions below are historical handoff notes,
+not an instruction to enable an unguarded installed controller.
+
 **Stage 1 update:** [ADC_INPUT.md](ADC_INPUT.md) describes the new opt-in,
 read-only native UINT16 capture and its separate shadow configuration. It remains
 unqualified against the native Linux/ImageStreamIO runtime. The original

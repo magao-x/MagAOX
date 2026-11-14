@@ -60,7 +60,7 @@ class NativeBuildTest(unittest.TestCase):
         self.assertNotIn("apps/loPredCtrl", arguments)
         self.assertTrue(directory.is_relative_to(self.output))
         self.assertEqual((directory / "sample.cpp").read_text(), "original source\n")
-        if directory.name == "legacy":
+        if directory.name == "native":
             # Simulate a source edit while the first build is running: the second must use the same frozen bytes.
             (self.source / "sample.cpp").write_text("changed during build\n")
         if "apps/loPredCtrlAcc" in arguments:
@@ -81,7 +81,7 @@ class NativeBuildTest(unittest.TestCase):
         self.invoke()
         manifest = json.loads((self.output / "manifest.json").read_text())
         self.assertEqual(manifest["files"]["sample.cpp"], hashlib.sha256(b"original source\n").hexdigest())
-        for profile, flag in (("legacy", "-ffast-math"), ("shadow", "-fno-fast-math")):
+        for profile, flag in (("native", "-fno-fast-math"), ("observer", "-fno-fast-math")):
             result = manifest["profiles"][profile]
             self.assertTrue(result["linked"])
             self.assertIn("CXXSTD=-std=c++20", result["make_variables"])
@@ -89,20 +89,20 @@ class NativeBuildTest(unittest.TestCase):
             self.assertEqual((self.output / profile / "sample.cpp").read_text(), "original source\n")
         self.assertTrue(any("DDSPC_SHADOW_BUILD=yes" in command for command in self.commands))
         app_commands = [command for command in self.commands if "apps/loPredCtrlAcc" in command]
-        self.assertEqual(sum("DDSPC_SHADOW_ONLY=yes" in command for command in app_commands), 1)
-        self.assertTrue(manifest["profiles"]["shadow"]["shadow_only"])
-        self.assertFalse(manifest["profiles"]["legacy"]["shadow_only"])
+        self.assertEqual(sum("DDSPC_SHADOW_ONLY=yes" in command for command in app_commands), 2)
+        self.assertTrue(manifest["profiles"]["observer"]["shadow_only"])
+        self.assertTrue(manifest["profiles"]["native"]["shadow_only"])
 
     def test_failure_does_not_skip_other_profile(self):
-        """A failed Legacy build must remain failed while the independent shadow attempt still runs."""
-        self.fail_profile = "legacy"
+        """A failed native build remains failed while the independent observer attempt still runs."""
+        self.fail_profile = "native"
         with self.assertRaises(SystemExit) as error:
             self.invoke()
         self.assertEqual(error.exception.code, 1)
         manifest = json.loads((self.output / "manifest.json").read_text())
-        self.assertFalse(manifest["profiles"]["legacy"]["linked"])
-        self.assertEqual(manifest["profiles"]["legacy"]["status"], "failed")
-        self.assertTrue(manifest["profiles"]["shadow"]["linked"])
+        self.assertFalse(manifest["profiles"]["native"]["linked"])
+        self.assertEqual(manifest["profiles"]["native"]["status"], "failed")
+        self.assertTrue(manifest["profiles"]["observer"]["linked"])
 
     def test_observer_target_is_separate_and_guarded(self):
         """The optional private observer build must never fall through to an unguarded default target."""
@@ -133,10 +133,9 @@ class NativeBuildTest(unittest.TestCase):
             flags, optimization, standard, inherited_standard = result.stdout.splitlines()
             self.assertEqual(standard, "-std=c++20")
             self.assertEqual(inherited_standard, standard)
-            self.assertEqual("-DDDSPC_SHADOW_ONLY" in flags, mode == "yes")
+            self.assertIn("-DDDSPC_SHADOW_ONLY", flags)
             self.assertIn("-O0", flags)
-            if mode == "yes":
-                self.assertEqual(optimization, "-fno-fast-math")
+            self.assertIn("-fno-fast-math", optimization)
 
     def test_successful_make_without_binary_is_failure(self):
         """A masked make failure or missing link artifact must never produce a successful manifest."""

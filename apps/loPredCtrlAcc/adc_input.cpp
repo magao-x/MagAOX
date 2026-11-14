@@ -262,22 +262,29 @@ std::size_t AdcCapture::drain( const AdcSource &source )
         m_cursor              = frame.m_counter;
         std::int64_t acquired = 0, published = 0;
         AdcSample    sample;
+        bool         rail = false, range = false;
         bool valid = map_time( frame.m_acquiredRealNs, m_anchor, acquired ) &&
                      map_time( frame.m_writtenRealNs, m_anchor, published ) &&
                      frame.m_writtenRealNs >= frame.m_acquiredRealNs && frame.m_writtenRealNs <= clock.m_realNs &&
                      published <= clock.m_monoNs && acquired <= clock.m_monoNs &&
                      clock.m_monoNs - acquired <= m_config.m_maxAgeNs && ( m_highTime < 0 || acquired > m_highTime );
+        const bool timeValid = valid;
         for( std::size_t axis = 0; axis < 2; ++axis )
         {
             const auto raw = frame.m_raw[axis];
-            valid          = valid && raw >= m_config.m_minCode && raw <= m_config.m_maxCode &&
-                             ( !m_config.m_rejectRails || ( raw > m_config.m_minCode && raw < m_config.m_maxCode ) );
+            rail  = rail || ( m_config.m_rejectRails && ( raw == m_config.m_minCode || raw == m_config.m_maxCode ) );
+            range = range || raw < m_config.m_minCode || raw > m_config.m_maxCode;
+            valid = valid && raw >= m_config.m_minCode && raw <= m_config.m_maxCode &&
+                    ( !m_config.m_rejectRails || ( raw > m_config.m_minCode && raw < m_config.m_maxCode ) );
             sample.m_acceleration[axis] = ( double( raw ) - m_config.m_zero[axis] ) * m_config.m_polarity[axis] *
                                           m_config.m_voltsPerCount[axis] / m_config.m_sensitivity[axis];
             valid                       = valid && std::isfinite( sample.m_acceleration[axis] );
         }
         if( !valid )
         {
+            m_status.m_railRejected += rail;
+            m_status.m_rangeRejected += range;
+            m_status.m_timestampRejected += !timeValid;
             ++m_status.m_invalid;
             ++m_status.m_dropped;
             break_segment( AdcState::Invalid );
