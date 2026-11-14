@@ -389,13 +389,9 @@ The integrator change still helps every shmimIntegrator instance (all
 - `libMagAOX/ImageStreamIO/ImageStruct.hpp` uses `std::numeric_limits`
   without including `<limits>`; it compiles only because of include order.
 
-- Permanent core for `aol1_imWFS2_cbuff` in the 40-47 L3 domain:
-  `rtSetup/RTC/make_cpusets` reserves `spare42` to keep the BMC SDK worker out
-  of the MVM's domain, and 40-47 has no other free core. Needs a decision.
-- `aol1_modevalWFS_cbuff` (CPU 50, L3 48-55) reads mfilt's input (mfilt on 46)
-  across CCDs. Measured 2026-11-14: stopping it lowers the loop by ~3 us. It
-  needs a core in 40-47 along with `aol1_imWFS2_cbuff`, and `spare42` is the
-  only free one.
+- Resolved 2026-11-14, no core in 40-47 needed: `aol1_imWFS2_cbuff` and
+  `aol1_modevalWFS_cbuff` (CPU 50, ~3 us) now read the `pub` copies (last
+  section).
 - Resolved 2026-11-14: ImageStreamIO large-stream fix. Neither `xwcl/milk`
   branch had ever pinned the fix (`57cef04`, ImageStreamIO PR #70); it had been
   checked out by hand on the RTC, and setup's `git submodule update` reset it.
@@ -483,3 +479,28 @@ xwcl/milk `jrmales/mvm-outpub` (`1286da59`) adds the same pattern to
 preempted by the next stage: mfilt runs on 46 while the copy runs on 45. It is
 only `NBmodes` floats read from cache, and mvalC2dm (higher priority on 45)
 still preempts it. Point `aol1_modevalWFS_cbuff.conf` at `aol1_modevalWFSpub`.
+
+**RTC result:** with `.option.outpub` on and `aol1_modevalWFS_cbuff` reading
+`aol1_modevalWFSpub`, running the cbuff causes no detectable change in loop
+time. Both cbuffs can stay on their cores outside the loop's L3 domain.
+
+### mfilt on the acqu_mvm core (test, 2026-11-14)
+
+mfilt (RTprio 48) was moved from its own core (46) to `acqu_mvm` (45), so
+acquWFS (46), wfs2cmodeval (47), mfilt (48) and mvalC2dm (49) share one core.
+The loop was perhaps 1 us faster. The stages run strictly in sequence, so
+nothing is lost by sharing a core. Each post now wakes a higher-priority task
+on the same core: two cross-core wake-ups and cache transfers become context
+switches, and each stage's input is still in 45's cache.
+
+mfilt keeps working after publishing its output (`modalfilter.c` after line
+1500): offload, the DM history, open-loop values, stats, and every `tbuffsize`
+frames the averages/RMS/autolimit block. mvalC2dm preempts this at the post, but
+it runs before the next frame's acquWFS, which has lower priority. If it ever
+runs past the next frame's arrival, acquWFS waits. Check holoop-time's max and
+jitter, not only its mean, especially at high frame rates.
+
+With mfilt above wfs2cmodeval on the same core, wfs2cmodeval's
+`.option.outpub` copy runs only after mfilt and mvalC2dm finish, like the
+acquWFS copy. Core 46 becomes free. If kept, update `rtSetup/RTC/make_cpusets`,
+the cacao `cset` setting and `agents/plans/2026-10/rtc-cpuset-restructuring.md`.
