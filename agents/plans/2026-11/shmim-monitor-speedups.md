@@ -393,12 +393,51 @@ The integrator change still helps every shmimIntegrator instance (all
   `rtSetup/RTC/make_cpusets` reserves `spare42` to keep the BMC SDK worker out
   of the MVM's domain, and 40-47 has no other free core. Needs a decision.
 - `aol1_modevalWFS_cbuff` (CPU 50, L3 48-55) reads mfilt's input (mfilt on 46)
-  across CCDs; likely the same cost. Repeat tests A and B on it.
-- ImageStreamIO large-stream fix regression: `xwcl/milk` `magaox` still pins
-  ImageStreamIO `21a8ae1`; the fix (`57cef04`, ImageStreamIO PR #70, based on
-  `21a8ae1`) was never pinned, so opening streams over 2 GB fails
-  ("Error in the file (too small)"). Bump the submodule pointer; it is a
-  fast-forward touching only the size checks.
+  across CCDs. Measured 2026-11-14: stopping it lowers the loop by ~3 us. It
+  needs a core in 40-47 along with `aol1_imWFS2_cbuff`, and `spare42` is the
+  only free one.
+- Resolved 2026-11-14: ImageStreamIO large-stream fix. Neither `xwcl/milk`
+  branch had ever pinned the fix (`57cef04`, ImageStreamIO PR #70); it had been
+  checked out by hand on the RTC, and setup's `git submodule update` reset it.
+  xwcl/milk PR #5 merged `magaox` into `dev` and pinned ImageStreamIO `dev`
+  (`3b36650`); `magaox` was then fast-forwarded to `dev` in both xwcl/milk
+  (`7b7d99e9`) and jaredmales/cacao (`ced2187d`), so `dev` and `magaox` are
+  identical. Milk `dev` does not build against the old cacao `magaox`
+  (`compute_SVD` API). The RTC already runs milk and cacao `dev`; it needs
+  `git pull && git submodule update` and a milk rebuild. Its installed cacao
+  libraries (2026-11-01) may predate the `.comp.WFSrefsubNT` default changing
+  from 1 to 0, so check that setting after the rebuild.
 - Make the shmimMonitor semaphore index configurable only if a case appears
   where post order matters again (readers able to run in parallel with the
   writer).
+
+## Loop time check after restart (2026-11-14, paused)
+
+After a restart the loop measured 145 us against ~137 us the day before. The
+camera side was unchanged (camwfs wma 37-38 us), RT mode (`set_latency`) was on,
+and the cacao priorities were 46/47/48/49. With `aol1_imWFS2_cbuff`,
+camwfs-avg and camwfs-sw stopped, `camwfs` and `aol1_imWFS2` each had one
+reader. The MVM stages were 29 and 20 us.
+
+| Change | Loop time |
+|---|---|
+| Starting point: extra readers off, synco enabled | 145 us |
+| Stop `aol1_modevalWFS_cbuff` | 142 us |
+| Disable synco (process left running) | 140 us |
+
+- The ~137 us runs had synco disabled, so 140 us is the comparable number;
+  enabling synco costs ~2 us.
+- Stopping the synco process stops `holoop-time` from updating. This is by
+  design: with automatic synco integration the loop timing monitor needs synco's
+  main-command labels in both modes (`loop_timing_monitor.md`).
+- A full-thread listing showed every RT thread on its planned core
+  (`agents/plans/2026-10/rtc-cpuset-restructuring.md`): bmcCtrl command thread
+  on 40, post worker on 44 and SDK worker on 56; dmSyncopation on 41 and 57;
+  2x dmSpeckle (tweeterSpeck, tweeterMod) FIFO60 on 47; camwfs framegrabber
+  on 33. Nothing else was on 40-47 apart from per-CPU kernel threads.
+- The installed cacao (2026-11-01) and cacao `dev` both contain the acquWFS
+  vectorization and `.comp.WFSrefsubNT`, so the build is not the cause.
+- **Open:** ~3 us is unexplained. Placement does not show activity; the
+  modulators on CPU 47 (FIFO60, in the loop's L3) are untested. Next time,
+  record per-stage timings (acquWFS stages, MVMs, dmtweeter SDK) at the 140 us
+  baseline so a future shift can be traced to a stage.
