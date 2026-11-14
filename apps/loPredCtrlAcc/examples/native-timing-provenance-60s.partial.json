@@ -1,0 +1,89 @@
+{
+  "schema": 1,
+  "acquisition_kind": "simulator",
+  "recording_review": {
+    "observation_directory_hint": "~/ddspc-native-observe.9UlnxD/observations",
+    "observer_host_operator_report": "exao2",
+    "artifact_identity_bound": false,
+    "status": "partial source review; recorded producer-host/build attestations unavailable",
+    "documentation": "apps/loPredCtrlAcc/NATIVE_TIMESTAMP_PROVENANCE.md",
+    "limits": [
+      "same_host=false means unestablished provenance, not a proven remote host",
+      "No field is verified for the recorded interval",
+      "Public configuration is not saved runtime configuration",
+      "No exposure, physical application, real hardware phase lock or synco qualification"
+    ]
+  },
+  "sources": {
+    "adc": {
+      "stream": "acc000",
+      "expected_writer": "accelSim on RTC/exao2; runtime binding pending",
+      "acquisition": {
+        "clock": "realtime",
+        "same_host": false,
+        "verified": false,
+        "evidence": "Source candidate: MagAOX 9d4c5a99518d00da2b2cbef4773d2b9eea708666 accelSim.hpp:896-911 sets CLOCK_REALTIME before sample generation; recorded writer host/build binding unavailable",
+        "event": "simulator_software_sample_generation_start"
+      },
+      "publication": {
+        "clock": "realtime",
+        "same_host": false,
+        "verified": false,
+        "evidence": "Source candidate: matching MagAOX 9d4c5a99518d00da2b2cbef4773d2b9eea708666 frameGrabber.hpp:1105-1155 sets CLOCK_REALTIME after pixel copy, before semaphore post; accelSim has no timing relay override; recorded writer host/build binding unavailable",
+        "event": "software_publication_marker_before_semaphore_post"
+      }
+    },
+    "camera": {
+      "stream": "camwfs",
+      "expected_writer": "ocam2KCtrl on RTC/exao2; runtime binding pending",
+      "acquisition": {
+        "clock": "unknown",
+        "same_host": false,
+        "verified": false,
+        "evidence": "MagAOX-DDSPC 3f9109d1469beb4124ae9ec11cec0480e829878a edtCamera.hpp:549-558 copies pdv_wait_last_image_timed words. EDT default contract is host-system DMA-completion time; recorded library/driver, timestamp mode/units and host binding remain unestablished",
+        "event": "edt_timed_buffer_acquisition_marker_not_exposure"
+      },
+      "publication": {
+        "clock": "realtime",
+        "same_host": false,
+        "verified": false,
+        "evidence": "Source candidate: MagAOX-DDSPC 3f9109d1469beb4124ae9ec11cec0480e829878a frameGrabber.hpp:1016-1041 uses CLOCK_REALTIME; public RTC list selects ocam2KCtrl, but recorded active writer host/build and absence of a timestamp-preserving relay remain unestablished",
+        "event": "software_publication_marker_before_semaphore_post"
+      }
+    },
+    "modal": {
+      "stream": "aol1_modevalWFS",
+      "expected_writer": "CACAO wfs2cmodeval-1; NN alternative exists; active writer pending",
+      "acquisition": {
+        "clock": "unknown",
+        "same_host": false,
+        "verified": false,
+        "evidence": "Reference MILK add4f667c501392447161f35be8b9c056ed40153 delegates to ImageStreamIO fa4e66da61c596298d56d222fd5d761b462db0e6 UpdateIm_atime(NULL), setting atime to output-update CLOCK_ISIO (TAI when available unless overridden). NN alternative uses REALTIME callback arrival. Actual writer/library/build unestablished",
+        "event": "unknown"
+      },
+      "publication": {
+        "clock": "unknown",
+        "same_host": false,
+        "verified": false,
+        "evidence": "Reference ImageStreamIO fa4e66da61c596298d56d222fd5d761b462db0e6 ImageStreamIO.c:2254-2289 uses CLOCK_ISIO; NN alternative uses frameGrabber REALTIME. Recorded writer, loaded library clock macro and host unestablished; no contemporaneous TAI mapping reported",
+        "event": "unknown"
+      }
+    }
+  },
+  "association": {
+    "method": "none",
+    "verified": false,
+    "evidence": "No immutable modal-pixel to camera-origin certificate recorded; cnt1 is not an established parent-frame tag"
+  },
+  "synchronization": {
+    "expected_publication_phase_us": null,
+    "expected_reference": "unknown",
+    "expected_phase_evidence": "Simulator timer/sync configuration for this interval unavailable; no real hardware 4:1 lock claim",
+    "counter_residue": null,
+    "phase_tolerance_us": 25
+  },
+  "synco": {
+    "dm_service_us": 110,
+    "ready_lead_us": 70
+  }
+}
