@@ -518,3 +518,37 @@ With mfilt above wfs2cmodeval on the same core, wfs2cmodeval's
 `.option.outpub` copy runs only after mfilt and mvalC2dm finish, like the
 acquWFS copy. Core 46 becomes free. If kept, update `rtSetup/RTC/make_cpusets`,
 the cacao `cset` setting and `agents/plans/2026-10/rtc-cpuset-restructuring.md`.
+
+### Slow loop-time wander: capture 2026-11-14 22:15-22:35 UTC
+
+`~/tmp/looptiming-20261114-221545` (operator capture; telemetry history from
+00:00 UTC). Findings:
+
+- CPU clocks: boost is on (`/sys/.../cpufreq/boost` = 1, acpi-cpufreq,
+  performance governor), but every sampled CPU (33, 40, 41, 44-47, 56) held
+  3.990-3.993 GHz for the whole run (`scaling_cur_freq`, 10 s samples).
+  turbostat failed: it cannot migrate into the exclusive cpusets.
+- GPUs: both RTX 4090s held SM 2580 / memory 10251 MHz, P2, no clock event
+  reasons, temperatures within 1 C. GPU 1 is shared by `dmRecon` and a milk
+  process under MPS.
+- CPU temperature (sysMonRTC) has no correlation with loop time in the window
+  (r = 0.02).
+- The camera's write time (`camwfs` wma) has a recurring ~30 s event of
+  +1.3-1.6 us every ~10-12 min, all day including 00:00-03:00 and while the
+  loop is open. Each loop episode, 10 min apart, has three ~+1.3 us pulses
+  about a minute apart (22:22:35, 22:23:35, 22:24:25; 22:32:55, 22:33:55,
+  22:34:35); the camera bump comes with the last. DM command arrival jitter
+  (`dmtweeter` acq sd) rises with the loop pulses.
+- Likely source: the AOC backup loop (`scripts/loop_instrument_backup_sync`,
+  exao1), which runs `instrument_backup_sync` and then sleeps 120 s. Each pass
+  rsyncs the RTC's `rawimages`, `telem`, `cacao`, `logs` and `calib` over NFS
+  in sequence, then the ICC and AOC, so the period is the pass time plus 2 min
+  and grows as data accumulates. Not yet confirmed.
+- Over the day the loop level also moves with the configuration tests (gaps
+  are loop-open periods), so the 139-147 us range is mostly those, plus these
+  episodes.
+- A/B comparisons a few minutes apart can straddle an episode (~1.5 us). Run
+  them between episodes, or with the backup loop paused.
+
+Next: confirm on exao1 that the backup loop is running, and pause it for ~30
+min to see whether the events stop.
