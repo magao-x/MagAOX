@@ -15,7 +15,6 @@ log = logging.getLogger(__name__)
 DEFAULT_DEBOUNCE_SEC = 3
 
 def action_dict_to_playback_request(action_dict):
-    print(f"{action_dict=}")
     if action_dict['type'] == 'play':
         return Recording(action_dict['file'])
     elif action_dict['type'] == 'speak':

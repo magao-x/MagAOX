@@ -327,9 +327,6 @@ class AudibleAlerts(XDevice):
                 self.log.debug(f"Would have played: {repr(req)}, but muted")
             else:
                 if isinstance(req, Recording):
-                    self.playback_text['file'] = req.path
-                    self.playback_text['speech'] = ''
-                    self.playback_text['voice'] = ''
                     self.telem("play", {"file": req.path, "speech": "", "voice": ""})
                     src_fp = self.config.common_path_prefix / "config" / "personalities" / "data" / req.path
                     if not src_fp.exists():
@@ -338,10 +335,11 @@ class AudibleAlerts(XDevice):
                     dest_fp = self.config.playback_files_root / req.path
                     shutil.copy(src_fp, dest_fp)
                     fp = dest_fp
+                    self.playback_text['speech'] = ''
+                    self.playback_text['voice'] = ''
                 elif isinstance(req, DynamicSpeech):
                     # apply substitutions
                     new_req = req.to_speech(self._current_voice, self.client)
-                    self.playback_text['file'] = ''
                     self.playback_text['speech'] = new_req.text
                     self.playback_text['voice'] = new_req.voice.name
                     self.telem("play", {"file": "", "speech": new_req.text, "voice": new_req.voice.name})
@@ -349,6 +347,7 @@ class AudibleAlerts(XDevice):
                     fp = get_or_create_speech_file(new_req, can_cache, cache_dir=self.config.playback_files_root)
                 else:
                     raise RuntimeError(f"Unknown speech request type. What is a {req!r}?")
+                self.playback_text['file'] = f"{fp.relative_to(self.config.playback_files_root)}"
                 playback_duration_sec = duration_from_audio_file(fp)
                 self.log.info(f"Playing: {req!r} ({playback_duration_sec:1.1f} sec) ({fp})")
                 self.playback_text.timestamp = datetime.datetime.now()
