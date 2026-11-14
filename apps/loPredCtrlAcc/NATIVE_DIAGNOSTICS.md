@@ -1,6 +1,6 @@
 # Compact native input diagnostics
 
-The native application defaults to 11 application properties and 59 elements.
+The native application defaults to 11 application properties and 60 elements.
 Standard MagAO-X framework properties, including its FSM/log controls, remain.
 Only `ddspc_mode` is writable; it records a request and cannot qualify a model or
 enable training, prediction or output. Individual 8-kHz ADC records, 2-kHz WFS
@@ -13,7 +13,7 @@ records and complete observed DM command images are retained without averaging.
 | `input_rates` (number) | `adc_capture_hz`, `adc_forward_hz`, `modal_hz`, `camera_hz`, `dm_hz` |
 | `adc_values` (number) | `raw0`, `raw1`, `acceleration0`, `acceleration1`, `invalid`, `rail_rejected` |
 | `input_losses` (number) | `adc_dropped`, `adc_forward_missing`, `modal_gaps`, `camera_gaps`, `dm_gaps`, `counter_discontinuities`, `reader_races`, `adc_breaks`, `timing_breaks` |
-| `input_buffers` (text) | `history_occupancy`, `history_evictions`, `adc_forward_pending`, `recorder_backlog`, `recorder_overflow` |
+| `input_buffers` (text) | `history_occupancy`, `history_evictions`, `adc_forward_pending`, `recorder_backlog`, `recorder_overflow`, `online_queue` |
 | `timing` (text) | `phase_offset_us`, `phase_jitter_us`, `clock`, `exposure`, `modal_association`, `slots_per_wfs` |
 | `ddspc_mode` (switch) | `standard`, `accel_assisted` |
 | `ddspc_control` (text) | `requested_mode`, `effective_mode`, `training`, `prediction`, `standard_ready`, `assisted_ready` |
@@ -216,3 +216,9 @@ Documentation: this file, `NATIVE_APPLICATION.md`, and the engineering record
 `apps/loPredCtrl`, calibration, numerical controllers, operational configuration,
 producers and services are unchanged. No install, commit, push or instrument access
 was performed.
+
+The optional bounded numerical worker is documented in [ONLINE_SHADOW.md](ONLINE_SHADOW.md).
+`input_buffers.online_queue` summarizes its actual raw/qualified backlog and drops;
+it does not count retained history. Current native telemetry still leaves its
+training gates inhibited. Enabling the worker cannot qualify source clocks,
+exposures, associations or physically applied commands.

@@ -391,11 +391,12 @@ FILE *exclusive_file( int         directory /**< [in] Private owned directory de
 
 struct NativeObserver::Impl
 {
-    NativeObservationConfig             m_config;   ///< Immutable source selections and private recording limits.
-    NativeObservationCapture            m_capture;  ///< Input-worker-only diagnostics and bounded identity joins.
-    mutable std::mutex                  m_mutex;    ///< Short snapshot lock, never held for source or file I/O.
-    NativeObservationStatus             m_status;   ///< Ordinary-thread diagnostic copy.
-    NativeObservationQueue              m_queue;    ///< Fixed SPSC recording slots; input never waits for file I/O.
+    NativeObservationConfig  m_config;              ///< Immutable source selections and private recording limits.
+    NativeObservationCapture m_capture;             ///< Input-worker-only diagnostics and bounded identity joins.
+    mutable std::mutex       m_mutex;               ///< Short snapshot lock, never held for source or file I/O.
+    NativeObservationStatus  m_status;              ///< Ordinary-thread diagnostic copy.
+    NativeObservationSink   *m_sink{ nullptr };     ///< Borrowed nonblocking consumer, alive until this worker joins.
+    NativeObservationQueue   m_queue;               ///< Fixed SPSC recording slots; input never waits for file I/O.
     std::unique_ptr<NativeCommandQueue> m_commands; ///< Optional independent bounded complete-command queue.
     std::vector<float>   m_commandReadPayload, m_commandWritePayload; ///< Independent preallocated worker workspaces.
     NativeCommandHistory m_commandHistory; ///< Complete commands retained independently of disk recording.
@@ -435,6 +436,8 @@ NativeObserver::Impl::Impl( const NativeObservationConfig &config )
 }
 void NativeObserver::Impl::enqueue( const NativeObservation &record )
 {
+    if( m_sink )
+        m_sink->observe( record );
     if( m_config.m_record )
         m_queue.push( record );
 }
@@ -760,10 +763,11 @@ NativeObserver::~NativeObserver()
 {
     stop();
 }
-void NativeObserver::start( AdcReader &adc )
+void NativeObserver::start( AdcReader &adc, NativeObservationSink *sink )
 {
     if( m_impl->m_worker.joinable() || m_impl->m_writer.joinable() )
         throw std::logic_error( "Observer already started" );
+    m_impl->m_sink = sink;
     if( !m_impl->m_config.m_record )
     {
         m_impl->m_adc = &adc;

@@ -41,11 +41,27 @@ class NativeDeploymentTest(unittest.TestCase):
         self.assertEqual(config.getfloat("native_shadow", "duration_sec"), 0)
         self.assertGreaterEqual(config.getfloat("diagnostics", "period_ms"), 50)
         self.assertFalse(config.getboolean("diagnostics", "debug_indi"))
+        self.assertFalse(config.getboolean("online_shadow", "enabled"))
+        self.assertEqual(config.getint("online_shadow", "standard_slots"), 1)
+        self.assertEqual(config.getint("online_shadow", "training_stride"), 4)
         for flag in ("own_shmim", "accel_enabled", "shadow_pipeline", "is_integrating"):
             self.assertFalse(config.getboolean("parameters", flag))
         self.assertEqual(config["native_shadow"]["dm_stream"], "dm01disp")
         self.assertNotIn("directory", config["native_shadow"])
         self.assertNotIn("framegrabber", [s.lower() for s in config.sections()])
+
+    def test_online_worker_example_adds_no_trust_or_output_override(self):
+        """Example enables bounded processing, retaining unknown native clocks and all physical output guards."""
+        config = configparser.ConfigParser()
+        config.read_string("[application]\n" + (APP / "examples/loPredCtrlAcc-online-shadow.conf.example").read_text())
+        self.assertTrue(config.getboolean("online_shadow", "enabled"))
+        self.assertTrue(config.getboolean("parameters", "shadow"))
+        self.assertFalse(config.getboolean("parameters", "own_shmim"))
+        self.assertEqual(config["native_shadow"]["modal_acquisition_clock"], "unknown")
+        self.assertLessEqual(config.getint("online_shadow", "budget_us"),
+                             config.getint("online_shadow", "period_us") // 2)
+        self.assertNotIn("framegrabber", [s.lower() for s in config.sections()])
+        self.assertFalse(any("verified" in key for section in config.sections() for key in config[section]))
 
     def test_make_cannot_disable_output_guard_and_install_preserves_configuration(self):
         """Evaluate the real app Makefile with a fake include; dry-run commands never install or launch anything."""
@@ -64,6 +80,7 @@ class NativeDeploymentTest(unittest.TestCase):
                        "OPTIMIZE=-ffast-math", "CXXFLAGS=-ffast-math"]
             output = subprocess.check_output(command + ["all"], cwd=app, text=True)
             self.assertIn("-DDDSPC_SHADOW_ONLY", output)
+            self.assertIn("-DEIGEN_DONT_PARALLELIZE", output)
             self.assertIn("-std=c++20", output)
             self.assertGreater(output.rfind("-fno-fast-math"), output.rfind("-ffast-math"))
             output = subprocess.check_output(command + ["install", f"MAGAOX_PREFIX={root}/stage"], cwd=app, text=True)

@@ -5,8 +5,8 @@ NEED_CUDA = no
 # ADC records and shared windows require C++20 even when no local/common.mk sets the standard.
 CXXSTD ?= -std=c++20
 export CXXSTD
-OTHER_HEADERS = loPredCtrlAcc.hpp loPredCtrlAcc_native.hpp native_observer.hpp native_observation.hpp ../../libMagAOX/common/dmCompletion.hpp ../../libMagAOX/common/dmTiming.hpp ../../libMagAOX/common/timingStats.hpp adc_features.hpp shadow_policy.hpp shadow_pipeline.hpp adc_input.hpp adc_reader.hpp ar_controller.hpp shadow_controller.hpp causal_input.hpp
-OTHER_OBJS = native_observer.o native_observation.o adc_features.o shadow_policy.o shadow_pipeline.o adc_input.o adc_reader.o recursive_least_squares.o qrd_rls.o ar_controller.o utils.o shadow_controller.o causal_input.o
+OTHER_HEADERS = multirate_shadow.hpp online_shadow.hpp loPredCtrlAcc.hpp loPredCtrlAcc_native.hpp native_observer.hpp native_observation.hpp ../../libMagAOX/common/dmCompletion.hpp ../../libMagAOX/common/dmTiming.hpp ../../libMagAOX/common/timingStats.hpp adc_features.hpp shadow_policy.hpp shadow_pipeline.hpp adc_input.hpp adc_reader.hpp ar_controller.hpp shadow_controller.hpp causal_input.hpp
+OTHER_OBJS = multirate_shadow.o online_shadow.o native_observer.o native_observation.o adc_features.o shadow_policy.o shadow_pipeline.o adc_input.o adc_reader.o recursive_least_squares.o qrd_rls.o ar_controller.o utils.o shadow_controller.o causal_input.o
 TARGET = loPredCtrlAcc
 
 # Every installed/default build is read-only. Runtime config and command-line make overrides cannot enable output.
@@ -23,7 +23,7 @@ include ../../Make/magAOXApp.mk
 
 # Append after common flags; even an explicit CXXFLAGS override must retain the commissioning guard.
 ifeq ($(DDSPC_SHADOW_ONLY),yes)
-override CXXFLAGS += -std=c++20 -fno-fast-math -DDDSPC_SHADOW_ONLY
+override CXXFLAGS += -std=c++20 -fno-fast-math -DEIGEN_DONT_PARALLELIZE -DDDSPC_SHADOW_ONLY
 endif
 
 # Rebuild old application objects once when adopting the mandatory guarded build profile.

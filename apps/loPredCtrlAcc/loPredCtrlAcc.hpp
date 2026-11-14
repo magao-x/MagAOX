@@ -36,6 +36,7 @@ using namespace mx::improc;
 #include "causal_input.hpp"
 #include "adc_reader.hpp"
 #include "native_observer.hpp"
+#include "online_shadow.hpp"
 #include "shadow_pipeline.hpp"
 
 namespace MagAOX
@@ -178,7 +179,13 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     DDSPC::NativeObservationConfig m_nativeShadowConfig;
 
     /// Owns observation workers; stopped before its borrowed ADC reader.
-    std::unique_ptr<DDSPC::NativeObserver> m_nativeObserver;
+    bool m_onlineShadowEnabled{ false }; ///< Startup-only, disabled by default; never establishes input provenance.
+    DDSPC::OnlineShadowConfig m_onlineConfig; ///< Fixed numerical/queue/duty bounds.
+    unsigned m_onlineStride{ 4 }; ///< RLS/rank/solve cadence; every WFS and individual ADC history sample is retained.
+    unsigned m_onlineStandardSlots{
+        1 }; ///< Preserve the single-rate baseline; four enables a matched lifted comparison.
+    std::unique_ptr<DDSPC::OnlineShadowWorker> m_onlineWorker; ///< Separate ordinary-priority numerical owner.
+    std::unique_ptr<DDSPC::NativeObserver> m_nativeObserver;   ///< Stops before its borrowed online sink is destroyed.
 
     /// Private read-only run state and per-source transport diagnostics.
     pcf::IndiProperty                                        m_indiP_nativeShadow;
@@ -574,6 +581,15 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     /// Select the compact native schema without changing the historical non-native test/controller interface.
     bool compactNativeINDI() const;
 
+    /// Admit only independently established physical provenance through a future native telemetry adapter.
+    bool qualifyNativeShadow( const DDSPC::MultirateContract &contract /**< [in] Reviewed real source contract. */ );
+
+    /// Forward a verified exposure/association/origin packet; raw metadata cannot construct this automatically.
+    bool processNativeOrigin( const DDSPC::OnlineOrigin &record /**< [in] Qualified current WFS origin. */ );
+
+    /// Forward an independently confirmed total applied-input interval, never a shadow proposal.
+    bool processNativeApplied( const DDSPC::OnlineAppliedSlot &record /**< [in] Actual physical input certificate. */ );
+
     /// Register the bounded operator schema; metadata is available only through explicit debug opt-in.
     int setupNativeOperatorINDI();
 
@@ -768,6 +784,31 @@ inline void loPredCtrlAcc::setupConfig()
                 false,
                 "bool",
                 "Startup-only detailed native INDI schema; default false." );
+    config.add( "online_shadow.enabled",
+                "",
+                "online_shadow.enabled",
+                argType::Optional,
+                "online_shadow",
+                "enabled",
+                false,
+                "bool",
+                "Start a bounded shadow worker; never bypass source/exposure/applied-input interlocks." );
+    for( const char *key : { "period_us",
+                             "budget_us",
+                             "queue_capacity",
+                             "pending_capacity",
+                             "adc_capacity",
+                             "training_stride",
+                             "standard_slots" } )
+        config.add( std::string( "online_shadow." ) + key,
+                    "",
+                    std::string( "online_shadow." ) + key,
+                    argType::Optional,
+                    "online_shadow",
+                    key,
+                    false,
+                    "unsigned",
+                    "Startup-only worker resource bound." );
     for( const char *role : { "modal", "camera", "dm", "completion", "sdk" } )
         for( const char *field : { "stream", "acquisition_clock", "publication_clock" } )
         {
@@ -1020,6 +1061,12 @@ inline void loPredCtrlAcc::setupConfig()
 
 inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
 {
+    if( m_onlineWorker )
+    {
+        m_shutdown = true;
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "Online model/source settings require a fresh application session" } );
+    }
     _config( m_shadowMode, "parameters.shadow" );
 #ifdef DDSPC_SHADOW_ONLY
     if( !m_shadowMode )
@@ -1067,6 +1114,28 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
         }
     }
     _config( m_nativeShadowEnabled, "native_shadow.enabled" );
+    const bool previousOnline = m_onlineShadowEnabled;
+    _config( m_onlineShadowEnabled, "online_shadow.enabled" );
+    if( m_nativeObserver && m_onlineShadowEnabled != previousOnline )
+    {
+        m_onlineShadowEnabled = previousOnline;
+        m_shutdown            = true;
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "Online worker enable changes require an application restart" } );
+    }
+    if( m_onlineShadowEnabled && ( !m_nativeShadowEnabled || !m_shadowMode ) )
+    {
+        m_shutdown = true;
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "Online learning requires guarded native shadow acquisition" } );
+    }
+    _config( m_onlineConfig.m_periodUs, "online_shadow.period_us" );
+    _config( m_onlineConfig.m_budgetUs, "online_shadow.budget_us" );
+    _config( m_onlineConfig.m_queueCapacity, "online_shadow.queue_capacity" );
+    _config( m_onlineConfig.m_pendingCapacity, "online_shadow.pending_capacity" );
+    _config( m_onlineConfig.m_adcCapacity, "online_shadow.adc_capacity" );
+    _config( m_onlineStride, "online_shadow.training_stride" );
+    _config( m_onlineStandardSlots, "online_shadow.standard_slots" );
     m_nativeShadowConfigValid = false;
     _config( m_adcEnabled, "adc.enabled" );
     if( m_adcEnabled && !m_shadowMode )
@@ -1281,8 +1350,18 @@ inline int loPredCtrlAcc::configureShadow()
             m_shadowStopping       = false;
             m_shadowSettings       = settings;
             m_shadowPolicy.m_modes = settings.m_modes;
-            m_shadowController     = std::make_unique<DDSPC::ShadowController>( settings );
+            if( m_onlineShadowEnabled )
+                m_shadowController.reset(); // The worker owns the only two native learners.
+            else
+                m_shadowController = std::make_unique<DDSPC::ShadowController>( settings );
             m_shadowInputs.reset();
+        }
+        if( m_onlineShadowEnabled )
+        {
+            m_onlineConfig.m_model                        = settings;
+            m_onlineConfig.m_model.m_updateStride         = m_onlineStride;
+            m_onlineConfig.m_model.m_standardCommandSlots = m_onlineStandardSlots;
+            m_onlineWorker = std::make_unique<DDSPC::OnlineShadowWorker>( m_onlineConfig );
         }
     }
     catch( const std::exception &e )
@@ -1686,6 +1765,21 @@ inline bool loPredCtrlAcc::compactNativeINDI() const
     return m_nativeShadowEnabled && !m_nativeDebugINDI;
 }
 
+inline bool loPredCtrlAcc::qualifyNativeShadow( const DDSPC::MultirateContract &c )
+{
+    return m_shadowMode && m_nativeShadowEnabled && !m_shadowStopping && m_onlineWorker &&
+           c.m_inputs.m_evidence == DDSPC::InputEvidence::VerifiedApplied && m_onlineWorker->qualify( c );
+}
+inline bool loPredCtrlAcc::processNativeOrigin( const DDSPC::OnlineOrigin &r )
+{
+    return m_shadowMode && m_nativeShadowEnabled && !m_shadowStopping && m_onlineWorker && m_onlineWorker->origin( r );
+}
+inline bool loPredCtrlAcc::processNativeApplied( const DDSPC::OnlineAppliedSlot &r )
+{
+    return m_shadowMode && m_nativeShadowEnabled && !m_shadowStopping && m_onlineWorker &&
+           r.m_evidence == DDSPC::InputEvidence::VerifiedApplied && m_onlineWorker->applied( r );
+}
+
 inline int loPredCtrlAcc::setupNativeOperatorINDI()
 {
     auto add = [&]( NativeOperator index, const char *name, bool numeric, std::initializer_list<const char *> elements )
@@ -1733,7 +1827,8 @@ inline int loPredCtrlAcc::setupNativeOperatorINDI()
                "history_evictions",
                "adc_forward_pending",
                "recorder_backlog",
-               "recorder_overflow" } ) < 0 ||
+               "recorder_overflow",
+               "online_queue" } ) < 0 ||
         add( NativeOperator::Timing,
              "timing",
              false,
@@ -1764,11 +1859,12 @@ inline int loPredCtrlAcc::setupNativeOperatorINDI()
 
 inline void loPredCtrlAcc::updateNativeOperatorINDI()
 {
-    const auto          s       = m_nativeObserver->status();
-    const auto          adc     = m_adcReader->status();
-    const auto         &sources = s.m_sources;
-    const auto         &forward = sources[0];
-    DDSPC::ShadowStatus standard, assisted;
+    const auto                s       = m_nativeObserver->status();
+    const auto                adc     = m_adcReader->status();
+    const auto               &sources = s.m_sources;
+    const auto               &forward = sources[0];
+    DDSPC::ShadowStatus       standard, assisted;
+    DDSPC::OnlineShadowStatus online;
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
         if( m_shadowController )
@@ -1777,6 +1873,12 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
             assisted = m_shadowController->status( DDSPC::ShadowMode::AccelAssisted );
         }
     }
+    if( m_onlineWorker )
+    {
+        online   = m_onlineWorker->status();
+        standard = online.m_standard;
+        assisted = online.m_assisted;
+    }
     const bool adcGood   = adc.m_valid && forward.m_valid;
     const bool inputGood = adcGood && sources[1].m_valid && sources[2].m_valid;
     auto       text =
@@ -1784,8 +1886,8 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
     { updatesIfChanged<std::string>( m_indiP_nativeOperator[std::size_t( index )], keys, values ); };
     auto number = [&]( NativeOperator index, const std::vector<const char *> &keys, const std::vector<double> &values )
     { updatesIfChanged<double>( m_indiP_nativeOperator[std::size_t( index )], keys, values ); };
-    std::uint64_t errors =
-        adc.m_dropped + s.m_adcMissing + s.m_queueDrops + s.m_commandDrops + s.m_commandOversize + s.m_ioError;
+    std::uint64_t errors = adc.m_dropped + s.m_adcMissing + s.m_queueDrops + s.m_commandDrops + s.m_commandOversize +
+                           s.m_ioError + online.m_drops + online.m_overrun;
     std::uint64_t races = adc.m_races, resets = adc.m_restarts;
     std::uint64_t timingBreaks = adc.m_timingGaps + adc.m_timestampRejected;
     for( std::size_t i = 1; i < DDSPC::observationSources; ++i )
@@ -1881,27 +1983,36 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
         evictions += prefix + std::to_string( i == 3 ? s.m_dmCommandEvictions : sources[i].m_historyEvictions );
     }
     text( NativeOperator::Buffers,
-          { "history_occupancy", "history_evictions", "adc_forward_pending", "recorder_backlog", "recorder_overflow" },
+          { "history_occupancy",
+            "history_evictions",
+            "adc_forward_pending",
+            "recorder_backlog",
+            "recorder_overflow",
+            "online_queue" },
           { occupancy,
             evictions,
             std::to_string( s.m_adcPending ),
             "metadata=" + std::to_string( s.m_queueOccupancy ) +
                 ";commands=" + std::to_string( s.m_commandQueueOccupancy ),
-            "metadata=" + std::to_string( s.m_queueDrops ) + ";commands=" + std::to_string( s.m_commandDrops ) } );
+            "metadata=" + std::to_string( s.m_queueDrops ) + ";commands=" + std::to_string( s.m_commandDrops ),
+            "raw=" + std::to_string( online.m_rawQueued ) + ";qualified=" + std::to_string( online.m_qualifiedQueued ) +
+                ";drops=" + std::to_string( online.m_drops ) } );
     text( NativeOperator::Timing,
           { "phase_offset_us", "phase_jitter_us", "clock", "exposure", "modal_association", "slots_per_wfs" },
           { "unqualified",
             "unqualified",
-            "source_host_mapping_unqualified",
-            "exposure_boundaries_unavailable",
-            "camera_origin_and_exposure_contract_missing",
+            online.m_clock ? "independently_verified_contract" : "source_host_mapping_unqualified",
+            online.m_exposure ? "independently_verified_contract" : "exposure_boundaries_unavailable",
+            online.m_association ? "independently_verified_contract" : "camera_origin_and_exposure_contract_missing",
             "4_nominal_individual_adc_samples" } );
     text( NativeOperator::Control,
           { "requested_mode", "effective_mode", "training", "prediction", "standard_ready", "assisted_ready" },
           { m_shadowRequested,
-            "unavailable",
-            "inhibited",
-            "inhibited",
+            online.m_candidateValid
+                ? ( online.m_effective == DDSPC::ShadowMode::Standard ? "standard" : "accel_assisted" )
+                : "unavailable",
+            online.m_running && online.m_qualified && !online.m_overrun ? "qualified_worker_enabled" : "inhibited",
+            online.m_candidateValid ? "shadow_candidate_valid" : "inhibited",
             standard.m_ready ? "true" : "false",
             assisted.m_ready ? "true" : "false" } );
     number( NativeOperator::Performance,
@@ -1918,13 +2029,15 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
               double( assisted.m_updates ),
               double( assisted.m_predictions ),
               assisted.m_predictions ? assisted.m_rmse : -1,
-              -1 } );
+              online.m_computeUs } );
     text( NativeOperator::Safety,
           { "dm_write_enabled", "output_reason", "timing_interlock", "model_interlock" },
           { "false",
             "compile_time_shadow_only",
-            "exposure_clock_and_applied_input_unqualified",
-            "native_training_inhibited" } );
+            online.m_qualified ? ( online.m_schedule ? "source_contract_verified_slot_deadlines_required"
+                                                     : "synco_schedule_unqualified" )
+                               : "exposure_clock_and_applied_input_unqualified",
+            m_onlineWorker ? online.m_reason : "native_training_inhibited_worker_disabled" } );
 }
 
 inline bool loPredCtrlAcc::nativeDiagnosticsDue( std::int64_t nowNs )
@@ -1946,6 +2059,7 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
         return;
     }
     const auto        s      = m_nativeObserver->status();
+    const auto        online = m_onlineWorker ? m_onlineWorker->status() : DDSPC::OnlineShadowStatus{};
     const auto        adc    = m_adcReader->status();
     const std::string reason = !adc.m_valid                                ? "reader_invalid"
                                : s.m_adcPendingReceiptNs > s.m_adcCutoffNs ? "receipt_beyond_copy_cutoff"
@@ -2002,9 +2116,9 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
           "command_queue_occupancy",
           "elapsed_sec" },
         { 1,
-          1,
-          0,
-          0,
+          double( !online.m_qualified || online.m_overrun ),
+          double( online.m_exposure ),
+          double( online.m_qualified && ( online.m_standard.m_dataValid || online.m_assisted.m_dataValid ) ),
           double( s.m_finished ),
           double( s.m_ioError ),
           double( s.m_written ),
@@ -2150,7 +2264,13 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
                                 "diagnostics_enabled",
                                 "training_enabled",
                                 "native_prediction_enabled" },
-                              { 1, 0, 0, double( m_adcEnabled && m_nativeShadowEnabled ), 1, 0, 0 } );
+                              { 1,
+                                0,
+                                0,
+                                double( m_adcEnabled && m_nativeShadowEnabled ),
+                                1,
+                                double( online.m_running && online.m_qualified && !online.m_overrun ),
+                                double( online.m_candidateValid ) } );
     updatesIfChanged<double>( m_indiP_nativeTiming,
                               { "adc_period_us",
                                 "wfs_period_us",
@@ -2160,16 +2280,20 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
                                 "phase_offset_us",
                                 "phase_jitter_us",
                                 "synco_deadline_qualified" },
-                              { 125, 500, 4, 0, 0, -1, -1, 0 } );
+                              { 125, 500, 4, double( online.m_clock ), 0, -1, -1, double( online.m_schedule ) } );
     updatesIfChanged<std::string>(
         m_indiP_nativeInterlocks,
         { "output", "training", "timing", "dm_evidence", "requested_mode", "effective_mode" },
         { "compile_time_shadow_only",
-          "exposure_and_applied_input_contract_unqualified",
-          "source_clock_and_phase_reference_unqualified",
-          "command_observation_not_physical_application",
+          m_onlineWorker ? online.m_reason : "exposure_and_applied_input_contract_unqualified",
+          online.m_qualified ? "source_contract_verified_phase_statistics_unavailable"
+                             : "source_clock_and_phase_reference_unqualified",
+          online.m_qualified ? "independent_verified_applied_certificates_required_per_slot"
+                             : "command_observation_not_physical_application",
           m_shadowRequested,
-          "unavailable" } );
+          online.m_candidateValid
+              ? ( online.m_effective == DDSPC::ShadowMode::Standard ? "standard" : "accel_assisted" )
+              : "unavailable" } );
 }
 
 inline int loPredCtrlAcc::setupShadowINDI()
@@ -2287,6 +2411,7 @@ inline void loPredCtrlAcc::updateShadowINDI()
         return;
     }
     DDSPC::ShadowPipelineStatus pipeline;
+    DDSPC::OnlineShadowStatus   online;
     bool                        pipelineConfigured = false;
     DDSPC::ShadowStatus         standard, assisted;
     DDSPC::ShadowRecord         validity;
@@ -2314,6 +2439,16 @@ inline void loPredCtrlAcc::updateShadowINDI()
             inputReason   = m_shadowInputs->reason();
             inputEvidence = m_shadowInputs->evidence();
         }
+    }
+    if( m_onlineWorker )
+    {
+        online              = m_onlineWorker->status();
+        standard            = online.m_standard;
+        assisted            = online.m_assisted;
+        validity.m_wfsValid = validity.m_appliedValid = validity.m_timingValid =
+            online.m_qualified && ( standard.m_dataValid || assisted.m_dataValid );
+        validity.m_accelValid = assisted.m_dataValid;
+        inputEvidence = online.m_qualified ? DDSPC::InputEvidence::VerifiedApplied : DDSPC::InputEvidence::Unverified;
     }
     if( m_shadowPipelineEnabled )
     {
@@ -2417,7 +2552,9 @@ inline void loPredCtrlAcc::updateShadowINDI()
           isStandard ? "standard" : "accel_assisted",
           m_shadowMode ? DDSPC::shadow_reason( standard.m_reason ) : "inactive_legacy_execution",
           m_shadowMode ? DDSPC::shadow_reason( assisted.m_reason ) : "inactive_legacy_execution",
-          m_shadowMode ? DDSPC::input_reason( inputReason ) : "inactive_legacy_execution",
+          m_onlineWorker ? online.m_reason
+          : m_shadowMode ? DDSPC::input_reason( inputReason )
+                         : "inactive_legacy_execution",
           m_shadowMode ? DDSPC::input_evidence( inputEvidence ) : "inactive_legacy_execution" } );
 }
 
@@ -2442,14 +2579,16 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_ddspcMode )( const pcf::Ind
     valid = valid && onCount == 1;
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_shadowMutex );
-        valid = valid && bool( m_shadowController );
+        valid = valid && ( bool( m_shadowController ) || bool( m_onlineWorker ) );
         // A pipeline request may remain pending; only the supervisor can qualify an effective candidate.
         // In particular, switching assistance OFF must not require a ready standard model.
         if( valid && !m_shadowPipeline && !m_nativeShadowEnabled )
-            valid = m_shadowController->select( requested );
+            valid = m_shadowController && m_shadowController->select( requested );
         if( valid )
         {
             m_shadowRequested = requested == DDSPC::ShadowMode::Standard ? "standard" : "accel_assisted";
+            if( m_onlineWorker )
+                m_onlineWorker->request( requested );
             if( m_shadowPipeline )
                 m_shadowPipeline->request( requested == DDSPC::ShadowMode::Standard ? DDSPC::PolicyMode::Standard
                                                                                     : DDSPC::PolicyMode::Assisted );
@@ -2514,7 +2653,7 @@ inline int loPredCtrlAcc::appStartup()
     if( m_shadowMode )
         log<text_log>(
             "Shadow output inhibited. Native WFS callbacks are observation-only; ADC capture does not establish "
-            "applied-command or exposure timing. Live models remain invalid.",
+            "applied-command or exposure timing. Live training requires an independently qualified input contract.",
             logPrio::LOG_WARNING );
     if( !m_nativeShadowEnabled && shmimMonitorT::appStartup() < 0 )
     {
@@ -2633,8 +2772,14 @@ inline int loPredCtrlAcc::appStartup()
             return -1;
         try
         {
+            if( m_onlineShadowEnabled )
+            {
+                m_onlineWorker->start();
+                log<text_log>(
+                    "Online DDSPC worker started without a qualified source contract; training/output inhibited." );
+            }
             m_nativeObserver = std::make_unique<DDSPC::NativeObserver>( m_nativeShadowConfig );
-            m_nativeObserver->start( *m_adcReader );
+            m_nativeObserver->start( *m_adcReader, m_onlineWorker.get() );
         }
         catch( const std::exception &error )
         {
@@ -2768,6 +2913,8 @@ inline int loPredCtrlAcc::appShutdown()
     }
     if( m_nativeObserver )
         m_nativeObserver->stop();
+    if( m_onlineWorker )
+        m_onlineWorker->stop();
     if( m_adcReader )
     {
         m_adcReader->stop();

@@ -27,7 +27,10 @@ class InstalledApplication : public MagAOX::app::loPredCtrlAcc_native
     using loPredCtrlAcc::m_indiP_nativeTiming;
     using loPredCtrlAcc::m_nativeNextDiagnosticNs;
     using loPredCtrlAcc::m_nativeObserver;
+    using loPredCtrlAcc::m_onlineWorker;
     using loPredCtrlAcc::nativeDiagnosticsDue;
+    using loPredCtrlAcc::processNativeApplied;
+    using loPredCtrlAcc::qualifyNativeShadow;
 
     /// Return one registered compact property by its public name.
     const pcf::IndiProperty &property( const std::string &name /**< [in] Registered property identity. */ ) const;
@@ -91,7 +94,7 @@ TEST_CASE( "Installed native application defaults to continuous read-only acquis
             REQUIRE( property->getPerm() ==
                      ( name == "ddspc_mode" ? pcf::IndiProperty::ReadWrite : pcf::IndiProperty::ReadOnly ) );
         }
-        REQUIRE( elements == 59 );
+        REQUIRE( elements == 60 );
         REQUIRE( app.m_registered.size() == 11 );
         REQUIRE_FALSE( app.m_registered.count( "native_adc" ) );
         REQUIRE_FALSE( app.m_registered.count( "learn" ) );
@@ -232,5 +235,44 @@ TEST_CASE( "Native detailed INDI requires startup opt-in", "[native-observation]
     REQUIRE( compact.appLogic() < 0 );
     REQUIRE( compact.appShutdown() == 0 );
     REQUIRE( compact.inhibited() );
+}
+/** \brief The actual installed path feeds its separate worker but cannot turn raw observations into model evidence. */
+TEST_CASE( "Installed online shadow worker preserves all timing and output guards",
+           "[native-observation][app][multirate]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::qualifyNativeShadow;
+    MagAOX::app::loPredCtrlAcc::processNativeApplied;
+    MagAOX::app::loPredCtrlAcc::appStartup;
+#endif
+    // clang-format on
+    AdcTransportFixture  adc( "online-native-adc", 16 );
+    InstalledApplication app;
+    REQUIRE( app.load( { { "online_shadow.enabled", "1" },
+                         { "parameters.accel_history", "5" },
+                         { "adc.shmimName", "online-native-adc" } } ) );
+    REQUIRE( app.appStartup() == 0 );
+    REQUIRE( app.m_onlineWorker );
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds( 2 );
+    while( app.m_onlineWorker->status().m_raw == 0 && std::chrono::steady_clock::now() < until )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    REQUIRE( app.m_onlineWorker->status().m_raw > 0 );
+    REQUIRE( app.m_onlineWorker->status().m_standard.m_updates == 0 );
+    REQUIRE( app.m_onlineWorker->status().m_assisted.m_updates == 0 );
+    DDSPC::MultirateContract synthetic;
+    synthetic.m_inputs.m_evidence = DDSPC::InputEvidence::SyntheticApplied;
+    REQUIRE_FALSE( app.qualifyNativeShadow( synthetic ) );
+    DDSPC::OnlineAppliedSlot request;
+    request.m_evidence = DDSPC::InputEvidence::Requested;
+    REQUIRE_FALSE( app.processNativeApplied( request ) );
+    app.m_nativeNextDiagnosticNs = 0;
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.property( "ddspc_control" )["training"].get<std::string>() == "inhibited" );
+    REQUIRE( app.property( "safety" )["dm_write_enabled"].get<std::string>() == "false" );
+    REQUIRE( app.property( "safety" )["model_interlock"].get<std::string>() == "source_host_mapping_unqualified" );
+    REQUIRE( app.inhibited() );
+    REQUIRE( app.appShutdown() == 0 );
+    REQUIRE_FALSE( app.m_onlineWorker->status().m_running );
 }
 } // namespace libXWCTest::loPredCtrlAccTest

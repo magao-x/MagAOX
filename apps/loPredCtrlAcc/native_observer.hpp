@@ -8,6 +8,17 @@
 
 namespace DDSPC
 {
+/// Optional observation consumer; called only by the observer worker and forbidden from blocking or doing model work.
+class NativeObservationSink
+{
+  public:
+    /// Destroy the interface without owning any native producer.
+    virtual ~NativeObservationSink() = default;
+
+    /// Copy/enqueue an immutable record or count loss; no acquisition-thread numerical work is permitted.
+    virtual void observe( const NativeObservation &record /**< [in] Original observation. */ ) noexcept = 0;
+};
+
 /// Continuous or finite input worker, with optional bounded recording; ADC reader outlives stop()/destruction.
 class NativeObserver
 {
@@ -23,7 +34,8 @@ class NativeObserver
     ~NativeObserver();
 
     /// Start inputs and optional exclusive private recording; never create/update a shared-memory stream.
-    void start( AdcReader &adc /**< [in] Already-started, independently owned read-only ADC reader. */ );
+    void start( AdcReader             &adc /**< [in] Already-started, independently owned read-only ADC reader. */,
+                NativeObservationSink *sink = nullptr /**< [in] Optional nonblocking consumer; outlives stop(). */ );
 
     /// Stop input, drain the bounded recording queue, and join the writer before releasing the ADC reference.
     void stop();
