@@ -378,8 +378,8 @@ The integrator change still helps every shmimIntegrator instance (all
 - Deployment: set `[framegrabber] staged=true` in `camwfs.conf`, and remove
   `camera.stagedDescramble` / `camera.stagedCopyNT` if they were added for
   testing (unknown keys fail startup).
-- Apply the same private-buffer-then-copy pattern to cacao acquWFS's write of
-  `aol1_imWFS2` (milk/cacao fork), then retest cbuff away from the loop's L3.
+- Done differently 2026-11-14: acquWFS copies `aol1_imWFS2` to
+  `aol1_imWFS2pub` for readers outside the loop (see the last section).
 
 - shmimIntegrator moving-average mode (`nUpdate` > 0, not used in any deployed
   config) re-sums the whole history on every update, O(nAverage x pixels).
@@ -441,3 +441,35 @@ reader. The MVM stages were 29 and 20 us.
   modulators on CPU 47 (FIFO60, in the loop's L3) are untested. Next time,
   record per-stage timings (acquWFS stages, MVMs, dmtweeter SDK) at the 140 us
   baseline so a future shift can be traced to a stage.
+
+## acquWFS publish copy for readers outside the loop (2026-11-14)
+
+With synco disabled (140 us baseline), turning on `.comp.WFSrefsubNT` with
+`aol1_imWFS2_cbuff` running made the loop up to 5 us worse. Non-temporal
+`imWFS2` stores push the frame to DRAM, so the same-core reader
+(wfs2cmodeval's gather on 45) loses it from cache.
+
+Instead, cacao `jrmales/acquwfs-pubcopy` (jaredmales/cacao `4721359d`) adds two
+hidden acquWFS FPS settings, both default OFF:
+
+- `.comp.WFSpub`: after publishing `aol1_imWFS2`, copy it to
+  `aol1_imWFS2pub` and publish that with the same `atime`. The MVM is on the
+  same CPU at higher priority, so the copy runs only while the MVM is not using
+  it. Only CPU 45 and the GPU touch `imWFS2`.
+- `.comp.WFSpubNT`: make that copy with non-temporal AVX stores.
+
+Deployment: recreate the acquWFS-1 FPS (new parameters), turn on
+`.comp.WFSpub`, and set `shmimName=aol1_imWFS2pub` in
+`aol1_imWFS2_cbuff.conf` (a value change only). acquWFS must start before
+readers of `aol1_imWFS2pub`.
+
+**RTC result:** with `.comp.WFSpub` on and the cbuff reading `aol1_imWFS2pub`,
+the loop time does not change when `aol1_imWFS2_cbuff` is on. The cbuff no
+longer needs a core in the loop's L3 domain.
+
+Next:
+- Move the other direct readers of `aol1_imWFS2` to `aol1_imWFS2pub`:
+  `dlDataCollection`, `nnReconstructor`, `sparkOG`, `dlReconstructor`,
+  `isRTC` and the mzmq calib server/client.
+- The same pattern for `aol1_modevalWFS` (written by wfs2cmodeval in milk's
+  MVM), so `aol1_modevalWFS_cbuff` (~3 us) can also stay off the loop's L3.
