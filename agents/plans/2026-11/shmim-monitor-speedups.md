@@ -444,7 +444,11 @@ reader. The MVM stages were 29 and 20 us.
   frequency following package temperature (the performance governor does not
   disable boost), GPU clocks or other GPU work changing the MVM time, and a beat
   between the camera frame period and another periodic process on the loop's
-  L3 (the modulators on 47).
+  L3. The modulators on 47 are unlikely to be that process: `tweeterSpeck.conf`
+  and `tweeterMod.conf` set `syncopation.timingStream=dmtweeter_synco_timing`,
+  which forces `trigger` off, so they write only in slots from synco's schedule
+  and not at all while synco is disabled. While modulating they poll that
+  schedule every ~10 us (`nanoSleep(10000)`); otherwise they sleep 1 ms.
 
 ## acquWFS publish copy for readers outside the loop (2026-11-14)
 
