@@ -543,12 +543,14 @@ the cacao `cset` setting and `agents/plans/2026-10/rtc-cpuset-restructuring.md`.
   exao1), which runs `instrument_backup_sync` and then sleeps 120 s. Each pass
   rsyncs the RTC's `rawimages`, `telem`, `cacao`, `logs` and `calib` over NFS
   in sequence, then the ICC and AOC, so the period is the pass time plus 2 min
-  and grows as data accumulates. Not yet confirmed.
+  and grows as data accumulates. Ruled out: `pgrep -af instrument_backup_sync`
+  on exao1 finds nothing running.
 - Over the day the loop level also moves with the configuration tests (gaps
   are loop-open periods), so the 139-147 us range is mostly those, plus these
   episodes.
 - A/B comparisons a few minutes apart can straddle an episode (~1.5 us). Run
   them between episodes, or with the backup loop paused.
 
-Next: confirm on exao1 that the backup loop is running, and pause it for ~30
-min to see whether the events stop.
+Next: capture on the RTC during events (per-loop-CPU interrupts including
+TLB/CAL/RES IPIs, kernel memory activity such as reclaim and compaction, disk,
+network, NFS server and the busiest threads) to identify the source.
