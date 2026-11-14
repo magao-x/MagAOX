@@ -437,6 +437,14 @@ reader. The MVM stages were 29 and 20 us.
   modulators on CPU 47 (FIFO60, in the loop's L3) are untested. Next time,
   record per-stage timings (acquWFS stages, MVMs, dmtweeter SDK) at the 140 us
   baseline so a future shift can be traced to a stage.
+- Later the same day the loop time was seen to wander slowly between ~139 and
+  ~144 us over several minutes. Back-to-back A/B comparisons are still valid,
+  but a single reading compared with an earlier day's number is not. The ~3 us
+  may be this wander rather than a fixed cost. Candidates: CPU boost
+  frequency following package temperature (the performance governor does not
+  disable boost), GPU clocks or other GPU work changing the MVM time, and a beat
+  between the camera frame period and another periodic process on the loop's
+  L3 (the modulators on 47).
 
 ## acquWFS publish copy for readers outside the loop (2026-11-14)
 
@@ -483,6 +491,8 @@ still preempts it. Point `aol1_modevalWFS_cbuff.conf` at `aol1_modevalWFSpub`.
 **RTC result:** with `.option.outpub` on and `aol1_modevalWFS_cbuff` reading
 `aol1_modevalWFSpub`, running the cbuff causes no detectable change in loop
 time. Both cbuffs can stay on their cores outside the loop's L3 domain.
+Both results are with `.comp.WFSpubNT` and `.option.outpubNT` OFF, so the
+non-temporal options are not needed.
 
 ### mfilt on the acqu_mvm core (test, 2026-11-14)
 
