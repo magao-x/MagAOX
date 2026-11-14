@@ -132,3 +132,49 @@ changed. No acquisition, INDI, hardware service, output transport, deployment,
 installation, Git staging, commit or push was performed. Existing C++ guard
 qualification is unchanged; Python-only changes do not claim new native Linux
 or sanitizer qualification. Actual run attribution remains pending its artifacts.
+
+## 2026-11-14: timestamp writer and recorded-run provenance review
+
+Start 3f9109d1, same personal workstation and feature branch. The operator's
+new diagnostics reject every sample before numerical conversion: ADC lacks
+same-host provenance, camera/modal domains are unknown. The 55,427 REALTIME
+beacons and 0.05-us median full bracket are operator-reported, not locally
+reproduced. Actual recording/build/process artifacts remain absent locally;
+requested saved writer/host/build evidence without contacting the instrument.
+
+Reviewed local accelSim/camera/frameGrabber sources and pinned public MILK,
+CACAO, ImageStreamIO and reference configuration sources. Public-source reads
+and private temporary copies do not identify the installed instrument build.
+The conventional configured modal producer is wfs2cmodeval-1, using
+linalg.MVMmextrmodes on aol1_imWFS2. The reference helper passes NULL acquisition
+time to ImageStreamIO: atime/writetime become output-update CLOCK_ISIO, default
+TAI when available unless overridden. The separate CLOCK_MILK process trace is
+not the metadata writer. Camera origin is not propagated into metadata cnt1;
+trace counters are not automatically frozen input-pixel certificates.
+nnReconstructor is a possible alternate writer of the same stream, with
+REALTIME callback-arrival atime and frameGrabber publication time. Its existence
+prevents identifying the recorded active writer from the stream name alone.
+
+ADC sample-generation and camera/ADC frameGrabber publication use REALTIME in
+the reviewed paths. EDT acquisition copies its DMA-buffer SDK stamp; default
+host-system timing is documented, while active library/driver/mode need binding
+to this interval. Reference RTC placement supports exao2 as intended host but
+does not exclude a remote timestamp-preserving relay during the actual run.
+
+Added NATIVE_TIMESTAMP_PROVENANCE.md and a schema-1 partial manifest with no
+verified or same-host fields, plus a navigation link in NATIVE_TIMING_AUDIT.md.
+No arbitrary TAI offset, producer attestation, exposure, association, phase-lock
+or applied-command certificate is created. Existing REALTIME beacons can serve
+qualified same-host REALTIME fields but not unknown TAI/cross-host relations.
+The smallest next step is run-specific writer/library/host evidence, then
+offline mapping of proven fields; ADC/camera diagnosis need not await DM/modal
+qualification. Hardware 4:1 lock and future synco cutoff scheduling stay distinct.
+
+Validation: 39 existing Python cases pass. The new partial JSON loads through
+the actual audit on a private synthetic fixture, grants zero mappings, and
+leaves every readiness/training/output/physical qualification false while
+synthetic transport passes. No algorithm/test/runtime source was changed.
+Whitespace checks pass; no C++ build or sanitizer rerun is claimed for these
+documentation/JSON-only changes. Source ledger and copies are under
+/private/tmp/ddspc-provenance-sources-jmlqg8lo/. No native application, services,
+hardware, deployment, installation, staging, commit or push was performed.

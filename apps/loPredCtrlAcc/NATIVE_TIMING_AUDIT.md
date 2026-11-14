@@ -1,5 +1,10 @@
 # Offline ADC/WFS timing audit
 
+For the source-level timestamp trace, modal CLOCK_ISIO/TAI caveat and partial
+recording manifest, see [NATIVE_TIMESTAMP_PROVENANCE.md](NATIVE_TIMESTAMP_PROVENANCE.md).
+Source semantics and reference deployment are distinct from recorded writer/host
+attestation; REALTIME beacons alone cannot supply an unrecorded TAI relation.
+
 These standard-library Python tools read a completed native observation journal.
 They never load ImageStreamIO, connect to INDI, start hardware/services, train a
 model, generate corrections or publish a DM command. No application rebuild or
