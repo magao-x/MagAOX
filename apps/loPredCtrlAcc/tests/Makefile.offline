@@ -138,6 +138,12 @@ check-native-observation:
 check-native-timing:
 	python3 -m unittest discover -s $(TEST_DIR) -p 'native_*test.py'
 
+# Numerical dependencies are isolated from the standard-library native timing target.
+OFFLINE_EOF_PYTHON ?= python3
+.PHONY: check-offline-eof
+check-offline-eof:
+	PYTHONDONTWRITEBYTECODE=1 $(OFFLINE_EOF_PYTHON) -m unittest discover -s $(TEST_DIR) -p offline_eof_test.py
+
 check-build-tool:
 	python3 -m unittest discover -s $(TEST_DIR) -p native_linux_build_test.py
 
