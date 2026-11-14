@@ -473,3 +473,13 @@ Next:
   `isRTC` and the mzmq calib server/client.
 - The same pattern for `aol1_modevalWFS` (written by wfs2cmodeval in milk's
   MVM), so `aol1_modevalWFS_cbuff` (~3 us) can also stay off the loop's L3.
+
+### Same copy for `aol1_modevalWFS`
+
+xwcl/milk `jrmales/mvm-outpub` (`1286da59`) adds the same pattern to
+`MVMextractModes` (wfs2cmodeval): hidden `.option.outpub` and
+`.option.outpubNT`, both default OFF, copy the output to `<outcoeff>pub`
+(`aol1_modevalWFSpub`) after the post. Unlike acquWFS, the copy is not
+preempted by the next stage: mfilt runs on 46 while the copy runs on 45. It is
+only `NBmodes` floats read from cache, and mvalC2dm (higher priority on 45)
+still preempts it. Point `aol1_modevalWFS_cbuff.conf` at `aol1_modevalWFSpub`.
