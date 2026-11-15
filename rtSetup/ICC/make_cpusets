@@ -1,12 +1,14 @@
 #!/bin/bash
 
 #####################################################
-## MagAO-X ICC cpuset configuration
+## \file
+## \brief Configure ICC system and dedicated real-time cpusets.
 ##
 ## See https://linux.die.net/man/7/cpuset
 ##
 ## Run this as sudo at startup of the system
-## Then run rtc_procset after starting all loop processes
+## Before changing names or CPU assignments, stop instrument processes and run remove_cpusets.
+## Applications and CACAO FPS settings place their threads in these sets.
 ##
 ####################################################
 
@@ -15,7 +17,8 @@
 source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
 cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
 
-# RTC w/ AMD Threadripper 64 core / 128 threads
+# ICC: AMD Ryzen Threadripper PRO 3995WX, 64 cores / 128 threads (Zen 2).
+# Operator readback confirms L3 groups 44-47, 52-55, 56-59 and 60-63 (2026-11-15).
 
 set -xeuo pipefail
 
@@ -58,7 +61,7 @@ echo 0 > cpuset.sched_load_balance
 echo 1 > system/cpuset.sched_load_balance
 
 ###############
-# Now setup cpusets for the RTC R/T processes
+# Now setup cpusets for the ICC R/T processes
 ###############
 
 
@@ -116,7 +119,7 @@ mkdir -p $cpusetMount/camsci2
 /bin/echo 1 > $cpusetMount/camsci2/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/camsci2/cpuset.mems
 
-#camsci2_sw offload process
+#camsci2_sw: recorder acquisition thread
 mkdir -p $cpusetMount/camsci2_sw
 /bin/echo 41 > $cpusetMount/camsci2_sw/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camsci2_sw/cpuset.cpu_exclusive
@@ -140,7 +143,7 @@ mkdir -p $cpusetMount/spare44
 /bin/echo 1 > $cpusetMount/spare44/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/spare44/cpuset.mems
 
-#acqu_mvm
+#acqu_mvm: acquisition, reconstruction and modal filtering
 mkdir -p $cpusetMount/acqu_mvm
 /bin/echo 45 > $cpusetMount/acqu_mvm/cpuset.cpus
 /bin/echo 1 > $cpusetMount/acqu_mvm/cpuset.cpu_exclusive
@@ -164,7 +167,7 @@ mkdir -p $cpusetMount/mlat
 /bin/echo 1 > $cpusetMount/mlat/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/mlat/cpuset.mems
 
-#RTmon
+#RTmon: milk-shmimmon
 mkdir -p $cpusetMount/RTmon
 /bin/echo 49 > $cpusetMount/RTmon/cpuset.cpus
 /bin/echo 1 > $cpusetMount/RTmon/cpuset.cpu_exclusive
@@ -213,7 +216,8 @@ mkdir -p $cpusetMount/camscc
 /bin/echo 1 > $cpusetMount/camscc/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/camscc/cpuset.mems
 
-#shmimTCP
+#shmimTCP: intermittent CACAO network transfer; NIC IRQs also routed here by move_irqs
+# Operator accepts sharing L3 56-59 with camscc for now.
 mkdir -p $cpusetMount/shmimTCP
 /bin/echo 58 > $cpusetMount/shmimTCP/cpuset.cpus
 /bin/echo 1 > $cpusetMount/shmimTCP/cpuset.cpu_exclusive
