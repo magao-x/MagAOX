@@ -1,6 +1,5 @@
-/** \file magAOXApp.hpp
+/** \file MagAOXApp.hpp
  *  \brief The basic MagAO-X Application
- *  \author Jared R. Males (jaredmales@gmail.com)
  *  \ingroup app_files
  */
 
@@ -106,7 +105,7 @@ namespace XWCTEST_NAMESPACE
  * \image html xwcapp_loops.png "XWCApps controlling hardware in a control loop." width=1200
  */
 
- /** \page page_app_docs Adding an Application
+/** \page page_app_docs Adding an Application
  *
  * \subpage page_module_appadd
  *
@@ -549,8 +548,11 @@ class MagAOXApp : public application
       * where `impl` is the derived class, and `mThreadStart` and `myThreadExec` are members
       * of `impl`.
       *
-      * \returns 0 on success
-      * \returns -1 on error
+      * A scheduler-policy failure is logged using the returned pthread error code. The worker still starts
+      * with its inherited scheduling policy, preserving the existing startup behavior.
+      *
+      * \returns 0 when thread initialization completes, even if setting the requested scheduler failed.
+      * \returns -1 on a thread, PID or cpuset initialization error.
       */
     template <class thisPtr, class Function>
     int threadStart( std::thread &thrd,           /**< [out] The thread object to start executing */
@@ -924,10 +926,11 @@ class MagAOXApp : public application
     );
 
     /// Register an INDI property which is monitored for updates from others.
-    /**
+    /** An empty device or property name is rejected.  Neither can match a received property, and indiserver would
+     * fan a getProperties without a device out to every device, each of which replies with all of its properties.
      *
      * \returns 0 on success.
-     * \returns -1 on error.
+     * \returns -1 on error, including an empty device or property name.
      *
      */
     int registerIndiPropertySet(
@@ -2568,9 +2571,14 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
     // Now set the RT priority.
 
     if( thrdPrio < 0 )
+    {
         thrdPrio = 0;
+    }
+
     if( thrdPrio > 99 )
+    {
         thrdPrio = 99;
+    }
 
     sched_param sp;
     sp.sched_priority = thrdPrio;
@@ -2581,21 +2589,23 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
         // Get the maximum privileges available
         elevatedPrivileges elPriv( this );
 
-        // We set return value based on result from sched_setscheduler
-        // But we make sure to restore privileges no matter what happens.
-        errno = 0;
+        // pthread_setschedparam returns its error code directly; privilege restoration may change errno.
         if( thrdPrio > 0 )
+        {
             rv = pthread_setschedparam( thrd.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp );
+        }
         else
+        {
             rv = pthread_setschedparam( thrd.native_handle(), SCHED_OTHER, &sp );
+        }
     }
 
-    if( rv < 0 )
+    if( rv != 0 )
     {
         log<software_error>(
             { __FILE__,
               __LINE__,
-              errno,
+              rv,
               "Setting " + thrdName + " thread scheduler priority to " + std::to_string( thrdPrio ) + " failed." } );
     }
     else
@@ -2610,7 +2620,9 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
         {
             mx::sys::milliSleep( 100 );
             if( tpid != 0 )
+            {
                 break;
+            }
         }
     }
 
@@ -3211,6 +3223,15 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty &prop,
     if( !m_useINDI )
     {
         return 0;
+    }
+
+    if( devName.empty() || propName.empty() )
+    {
+        return log<software_error, -1>( { __FILE__,
+                                           __LINE__,
+                                           "refusing INDI set-property subscription with an empty device or property "
+                                           "name: '" +
+                                               devName + "." + propName + "'" } );
     }
 
     try

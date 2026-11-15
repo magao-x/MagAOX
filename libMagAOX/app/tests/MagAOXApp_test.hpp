@@ -1,3 +1,8 @@
+/** \file MagAOXApp_test.hpp
+ * \brief Test fixture exposing protected MagAOXApp state for the MagAOXApp unit tests.
+ * \ingroup MagAOXApp_unit_test
+ */
+
 #ifndef app_tests_MagAOXApp_test_hpp
 #define app_tests_MagAOXApp_test_hpp
 
@@ -258,49 +263,64 @@ struct MagAOXApp_test : public APP_XWCTEST_BASE
         return APP_XWCTEST_BASE::unlockPID();
     }
 
+    /// Return the subscription map key for a registered Set property.
     std::string setPropertyKey( const pcf::IndiProperty &prop )
     {
         return prop.createUniqueKey();
     }
 
+    /// Reset retry tracking for the subscription with this key.
     void resetSetPropertyRetry( const std::string &key )
     {
         APP_XWCTEST_BASE::resetIndiSetPropertyRetry( m_indiSetCallBacks.at( key ) );
     }
 
+    /// Report whether the subscription with this key would be requested at \p now.
     bool shouldRequestSetProperty( const std::string &key, bool all, const std::chrono::steady_clock::time_point &now )
     {
         return APP_XWCTEST_BASE::indiSetPropertyShouldRequest( m_indiSetCallBacks.at( key ), all, now );
     }
 
+    /// Record a request for the subscription with this key at \p now.
     void noteSetPropertyRequested( const std::string &key, const std::chrono::steady_clock::time_point &now )
     {
         APP_XWCTEST_BASE::noteIndiSetPropertyRequested( m_indiSetCallBacks.at( key ), now );
     }
 
+    /// Return the retry count of the subscription with this key.
     uint32_t setPropertyRetryCount( const std::string &key )
     {
         return m_indiSetCallBacks.at( key ).m_retryCount;
     }
 
+    /// Return the current retry delay of the subscription with this key.
     std::chrono::steady_clock::duration setPropertyRetryDelay( const std::string &key )
     {
         return m_indiSetCallBacks.at( key ).m_retryDelay;
     }
 
+    /// Return the next retry time of the subscription with this key.
     std::chrono::steady_clock::time_point setPropertyNextRetry( const std::string &key )
     {
         return m_indiSetCallBacks.at( key ).m_nextRetry;
     }
 
+    /// Report whether the subscription with this key logged that it is still unresolved.
     bool setPropertyMissingLogged( const std::string &key )
     {
         return m_indiSetCallBacks.at( key ).m_missingLogged;
     }
 
+    /// Mark whether a Def/Set has been received for the subscription with this key.
     void markSetPropertyReceived( const std::string &key, bool received )
     {
         m_indiSetCallBacks.at( key ).m_defReceived = received;
+    }
+
+    /// Return the number of registered Set-property subscriptions.
+    size_t setPropertyCount()
+    {
+        return m_indiSetCallBacks.size();
     }
 };
 
