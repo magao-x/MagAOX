@@ -219,8 +219,9 @@ establish runtime occupancy.
   were updated together; the filtering process remains enabled.
 - IRQ policy comments reversed the `pvcamPCIE_0`/`pvcamPCIE_1` camera labels
   relative to `move_irqs`. The comments now follow `move_irqs` (2026-11-15).
-  The table follows the executable routing statements; actual device
-  identities should still be confirmed on the ICC before changing that routing.
+  Operator confirmed (2026-11-15): `pvcamPCIE_1` is camflowfs and
+  `pvcamPCIE_0` is camllowfs, consistently through several reboots and power
+  cycles, so the `move_irqs` routing is correct.
 
 | Missing exact instance config | Interpretation |
 |---|---|
