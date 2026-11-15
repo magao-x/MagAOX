@@ -151,11 +151,25 @@ class dmRecon : public MagAOXApp<true>,
         bool    clockValid{ false };                ///< The local clock bracket was captured successfully.
     };
 
+    /// Outcome of the most recent calibration snapshot attempt.
+    enum class SnapshotStatus
+    {
+        unavailable,     ///< No attached pixels or no snapshot attempted yet.
+        invalidFormat,   ///< Unsupported datatype, axis count or memory location.
+        invalidShape,    ///< Empty, excessive or inconsistent image dimensions.
+        invalidCapacity, ///< Selected pixels exceed the declared payload.
+        busy,            ///< The producer has not cleared its write flag.
+        changed,         ///< Publication identity changed during the copy.
+        clockError,      ///< Acquisition timestamp could not be sampled.
+        ready            ///< A complete private snapshot was accepted.
+    };
+
     std::mutex m_snapshotMutex;    ///< Protects pending snapshots, their generations, and timing observations.
     std::mutex m_publicationMutex; ///< Serializes final publication with disable and calibration replacement.
     std::unique_lock<std::mutex> m_publicationLock; ///< FG-owned lock from final validation through post-publication.
     Frame m_pendingModes, m_pendingMask, m_pendingCommand; ///< Snapshots shared only under m_snapshotMutex.
     Frame m_modesStage, m_maskStage, m_commandStage;       ///< Each monitor's private reusable copy destination.
+    bool  m_modesRetry{ false }, m_maskRetry{ false }; ///< Owning calibration monitor must retry after reattachment.
     Frame m_currentCommand; ///< Input frozen for the FG worker's current calculation/publication.
     bool  m_modesValid{ false }, m_maskValid{ false },
         m_commandPending{ false };                                 ///< Mailbox validity under the snapshot lock.
@@ -190,6 +204,12 @@ class dmRecon : public MagAOXApp<true>,
     std::atomic<uint64_t> m_beforeNext{ 0 }, m_late{ 0 }, m_unknown{ 0 }; ///< Cumulative timing classifications.
     std::atomic<uint64_t> m_rejected{ 0 }, m_coalesced{ 0 }; ///< Invalid/torn inputs and superseded pending inputs.
     uint64_t              m_reportedLate{ 0 }, m_reportedUnknown{ 0 }; ///< App-thread warning rate limiting.
+    std::atomic<SnapshotStatus> m_modesSnapshot{ SnapshotStatus::unavailable },
+        m_maskSnapshot{ SnapshotStatus::unavailable }; ///< Calibration-monitor outcomes, readable by the app thread.
+    std::atomic<const char *> m_setupStage{ "waiting_for_calibration" }; ///< Worker stage; values are static literals.
+    const char               *m_reportedSetupStage{ nullptr };           ///< Last stage logged by the app thread.
+    SnapshotStatus            m_reportedModesSnapshot{ SnapshotStatus::unavailable },
+        m_reportedMaskSnapshot{ SnapshotStatus::unavailable }; ///< Last calibration outcomes logged by the app thread.
 
 #ifdef MXLIB_CUDA
     /// Allocations replaced as a whole on calibration changes, avoiding cudaPtr's resize/free defects.
@@ -203,10 +223,21 @@ class dmRecon : public MagAOXApp<true>,
 #endif
 
     /// Snapshot a float image once and reject an overlapping producer write.
-    static bool snapshot( Frame       &frame /**< [out] Private destination. */,
-                          const IMAGE &source /**< [in] Attached source metadata and pixels. */,
-                          const void  *pixels /**< [in] Start of the selected frame or complete cube. */,
-                          uint32_t     depth /**< [in] Number of planes to copy. */ );
+    static bool snapshot( Frame          &frame /**< [out] Private destination. */,
+                          const IMAGE    &source /**< [in] Attached source metadata and pixels. */,
+                          const void     *pixels /**< [in] Start of the selected frame or complete cube. */,
+                          uint32_t        depth /**< [in] Number of planes to copy. */,
+                          SnapshotStatus *status = nullptr /**< [out] Optional snapshot outcome. */ );
+
+    /// Describe a snapshot result for logs and INDI without inspecting a live mapping.
+    static const char *snapshotStatusName( SnapshotStatus status /**< [in] Snapshot outcome. */ );
+
+    /// Retry calibration snapshots briefly on their owning monitor thread, invalidating rejected data immediately.
+    bool captureCalibration( Frame       &frame /**< [out] Private calibration destination. */,
+                             const IMAGE &source /**< [in] Monitor-owned source mapping. */,
+                             const void  *pixels /**< [in] Start of the selected calibration payload. */,
+                             uint32_t     depth /**< [in] Number of planes to copy. */,
+                             bool         modes /**< [in] True selects modes, false selects mask. */ );
 
     /// Require an exact float modal-vector schema before accepting a passive output mapping.
     static bool outputCompatible( const IMAGE_METADATA &metadata /**< [in] Attached output schema. */,
@@ -314,6 +345,7 @@ class dmRecon : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_fps;            ///< Reported FPS.
     pcf::IndiProperty m_indiP_writeDMf;       ///< Feedback enable control.
     pcf::IndiProperty m_indiP_feedbackTiming; ///< Timing and input-quality counters.
+    pcf::IndiProperty m_indiP_reconStatus;    ///< Setup stage and calibration snapshot outcomes.
     /// Accept an FPS update without expiring silent subscriptions.
     INDI_SETCALLBACK_DECL( dmRecon, m_indiP_fpsSource );
 
@@ -524,6 +556,15 @@ inline int dmRecon::appStartup()
     }
 
     m_semaphoreInitialized = true;
+    createROIndiText( m_indiP_reconStatus, "recon_status", "stage" );
+    m_indiP_reconStatus.add( pcf::IndiElement( "modes" ) );
+    m_indiP_reconStatus.add( pcf::IndiElement( "mask" ) );
+
+    if( registerIndiPropertyReadOnly( m_indiP_reconStatus ) < 0 )
+    {
+        return -1;
+    }
+
     char outputPath[1024];
     ImageStreamIO_filename( outputPath, sizeof( outputPath ), frameGrabberT::m_shmimName.c_str() );
     m_outputPath = outputPath;
@@ -591,8 +632,22 @@ inline int dmRecon::appLogic()
         }
     }
 
-    const auto late    = m_late.load();
-    const auto unknown = m_unknown.load();
+    const auto  late          = m_late.load();
+    const auto  unknown       = m_unknown.load();
+    const char *setupStage    = m_setupStage.load();
+    const auto  modesSnapshot = m_modesSnapshot.load(), maskSnapshot = m_maskSnapshot.load();
+
+    if( setupStage != m_reportedSetupStage || modesSnapshot != m_reportedModesSnapshot ||
+        maskSnapshot != m_reportedMaskSnapshot )
+    {
+        log<text_log>( std::format( "dmRecon setup: {}; modes={}, mask={}",
+                                    setupStage,
+                                    snapshotStatusName( modesSnapshot ),
+                                    snapshotStatusName( maskSnapshot ) ) );
+        m_reportedSetupStage    = setupStage;
+        m_reportedModesSnapshot = modesSnapshot;
+        m_reportedMaskSnapshot  = maskSnapshot;
+    }
 
     if( late != m_reportedLate )
     {
@@ -622,6 +677,9 @@ inline int dmRecon::appLogic()
         updateIfChanged( m_indiP_feedbackTiming, "unverified", double( unknown ) );
         updateIfChanged( m_indiP_feedbackTiming, "rejected", double( m_rejected.load() ) );
         updateIfChanged( m_indiP_feedbackTiming, "coalesced", double( m_coalesced.load() ) );
+        updateIfChanged( m_indiP_reconStatus, "stage", std::string( setupStage ) );
+        updateIfChanged( m_indiP_reconStatus, "modes", std::string( snapshotStatusName( modesSnapshot ) ) );
+        updateIfChanged( m_indiP_reconStatus, "mask", std::string( snapshotStatusName( maskSnapshot ) ) );
         SHMIMMONITORT_UPDATE_INDI( loopTriggerSMT );
         SHMIMMONITORT_UPDATE_INDI( dmModesSMT );
         SHMIMMONITORT_UPDATE_INDI( dmMaskSMT );
@@ -798,13 +856,38 @@ inline int dmRecon::setGPU()
 #endif // MXLIB_CUDA
 }
 
-inline bool dmRecon::snapshot( Frame &frame, const IMAGE &source, const void *pixels, uint32_t depth )
+inline bool
+dmRecon::snapshot( Frame &frame, const IMAGE &source, const void *pixels, uint32_t depth, SnapshotStatus *status )
 {
-    if( !source.md || !source.array.raw || !pixels || source.md->datatype != _DATATYPE_FLOAT || source.md->naxis < 2 ||
-        source.md->naxis > 3 || source.md->location != -1 || source.md->size[0] == 0 || source.md->size[1] == 0 ||
-        depth == 0 || __atomic_load_n( &source.md->write, __ATOMIC_ACQUIRE ) )
+    auto result = [status]( SnapshotStatus value )
     {
-        return false;
+        if( status )
+        {
+            *status = value;
+        }
+
+        return value == SnapshotStatus::ready;
+    };
+
+    if( !source.md || !source.array.raw || !pixels )
+    {
+        return result( SnapshotStatus::unavailable );
+    }
+
+    if( source.md->datatype != _DATATYPE_FLOAT || source.md->naxis < 2 || source.md->naxis > 3 ||
+        source.md->location != -1 )
+    {
+        return result( SnapshotStatus::invalidFormat );
+    }
+
+    if( source.md->size[0] == 0 || source.md->size[1] == 0 || depth == 0 )
+    {
+        return result( SnapshotStatus::invalidShape );
+    }
+
+    if( __atomic_load_n( &source.md->write, __ATOMIC_ACQUIRE ) )
+    {
+        return result( SnapshotStatus::busy );
     }
 
     const uint64_t  counter = __atomic_load_n( &source.md->cnt0, __ATOMIC_ACQUIRE );
@@ -816,7 +899,7 @@ inline bool dmRecon::snapshot( Frame &frame, const IMAGE &source, const void *pi
     if( depth > availableDepth || width > SIZE_MAX / height || width * height > SIZE_MAX / depth / sizeof( float ) ||
         start < base )
     {
-        return false;
+        return result( SnapshotStatus::invalidShape );
     }
 
     const size_t count = width * height * depth, offset = start - base;
@@ -825,7 +908,7 @@ inline bool dmRecon::snapshot( Frame &frame, const IMAGE &source, const void *pi
         count * sizeof( float ) > source.md->imdatamemsize - offset || offset / sizeof( float ) > source.md->nelement ||
         count > source.md->nelement - offset / sizeof( float ) )
     {
-        return false;
+        return result( SnapshotStatus::invalidCapacity );
     }
 
     frame.pixels.resize( count );
@@ -838,15 +921,85 @@ inline bool dmRecon::snapshot( Frame &frame, const IMAGE &source, const void *pi
 
     if( clock_gettime( CLOCK_REALTIME, &frame.received ) != 0 )
     {
-        return false;
+        return result( SnapshotStatus::clockError );
     }
 
     memcpy( frame.pixels.data(), pixels, count * sizeof( float ) );
     std::atomic_thread_fence( std::memory_order_acquire );
 
-    return !__atomic_load_n( &source.md->write, __ATOMIC_ACQUIRE ) &&
-           counter == __atomic_load_n( &source.md->cnt0, __ATOMIC_ACQUIRE ) && frame.inode == source.md->inode &&
-           frame.width == source.md->size[0] && frame.height == source.md->size[1];
+    if( __atomic_load_n( &source.md->write, __ATOMIC_ACQUIRE ) ||
+        counter != __atomic_load_n( &source.md->cnt0, __ATOMIC_ACQUIRE ) || frame.inode != source.md->inode ||
+        frame.width != source.md->size[0] || frame.height != source.md->size[1] )
+    {
+        return result( SnapshotStatus::changed );
+    }
+
+    return result( SnapshotStatus::ready );
+}
+
+inline const char *dmRecon::snapshotStatusName( SnapshotStatus status )
+{
+    switch( status )
+    {
+    case SnapshotStatus::unavailable:
+        return "unavailable";
+    case SnapshotStatus::invalidFormat:
+        return "invalid_format";
+    case SnapshotStatus::invalidShape:
+        return "invalid_shape";
+    case SnapshotStatus::invalidCapacity:
+        return "invalid_capacity";
+    case SnapshotStatus::busy:
+        return "writer_busy";
+    case SnapshotStatus::changed:
+        return "changed_during_copy";
+    case SnapshotStatus::clockError:
+        return "clock_error";
+    case SnapshotStatus::ready:
+        return "ready";
+    }
+
+    return "unknown";
+}
+
+inline bool
+dmRecon::captureCalibration( Frame &frame, const IMAGE &source, const void *pixels, uint32_t depth, bool modes )
+{
+    auto          &reported = modes ? m_modesSnapshot : m_maskSnapshot;
+    SnapshotStatus status;
+
+    for( unsigned attempt = 0; attempt < 4; ++attempt )
+    {
+        const bool accepted = snapshot( frame, source, pixels, depth, &status );
+        reported            = status;
+
+        if( accepted )
+        {
+            return true;
+        }
+
+        if( attempt == 0 )
+        {
+            ++m_rejected;
+            invalidateCalibration( modes );
+        }
+
+        if( m_shutdown || ( status != SnapshotStatus::busy && status != SnapshotStatus::changed ) )
+        {
+            break;
+        }
+
+        // Some calibration writers post before clearing write; retry without requiring another post.
+        mx::sys::milliSleep( 1 );
+    }
+
+    // Back off before the owning monitor reopens; invalid schemas must not create a tight reconnect loop.
+    if( !m_shutdown )
+    {
+        mx::sys::milliSleep( 100 );
+    }
+
+    return false;
 }
 
 inline bool dmRecon::outputCompatible( const IMAGE_METADATA &metadata, size_t modes )
@@ -895,7 +1048,15 @@ inline void dmRecon::invalidateCalibration( bool modes )
 
 inline int dmRecon::allocate( const dmModesShmimT & )
 {
+    m_modesSnapshot = SnapshotStatus::unavailable;
     invalidateCalibration( true );
+
+    if( m_modesRetry )
+    {
+        m_modesRetry = false;
+        return processImage( nullptr, dmModesShmimT{} );
+    }
+
     return 0;
 }
 
@@ -904,10 +1065,12 @@ inline int dmRecon::processImage( void *, const dmModesShmimT & )
     const uint32_t depth =
         m_numModes == 0 ? dmModesSMT::m_depth : std::min<uint32_t>( m_numModes, dmModesSMT::m_depth );
 
-    if( !snapshot( m_modesStage, dmModesSMT::m_imageStream, dmModesSMT::m_imageStream.array.raw, depth ) )
+    if( !captureCalibration(
+            m_modesStage, dmModesSMT::m_imageStream, dmModesSMT::m_imageStream.array.raw, depth, true ) )
     {
-        ++m_rejected;
-        invalidateCalibration( true );
+        // Only this monitor thread changes its restart flag or touches its mapping.
+        m_modesRetry          = true;
+        dmModesSMT::m_restart = true;
         return 0;
     }
 
@@ -931,16 +1094,24 @@ inline int dmRecon::processImage( void *, const dmModesShmimT & )
 
 inline int dmRecon::allocate( const dmMaskShmimT & )
 {
+    m_maskSnapshot = SnapshotStatus::unavailable;
     invalidateCalibration( false );
+
+    if( m_maskRetry )
+    {
+        m_maskRetry = false;
+        return processImage( dmMaskSMT::m_imageStream.array.raw, dmMaskShmimT{} );
+    }
+
     return 0;
 }
 
 inline int dmRecon::processImage( void *pixels, const dmMaskShmimT & )
 {
-    if( dmMaskSMT::m_depth != 1 || !snapshot( m_maskStage, dmMaskSMT::m_imageStream, pixels, 1 ) )
+    if( !captureCalibration( m_maskStage, dmMaskSMT::m_imageStream, pixels, dmMaskSMT::m_depth == 1 ? 1 : 0, false ) )
     {
-        ++m_rejected;
-        invalidateCalibration( false );
+        m_maskRetry          = true;
+        dmMaskSMT::m_restart = true;
         return 0;
     }
 
@@ -1102,6 +1273,9 @@ inline int dmRecon::prepareCalibration()
 
         if( !m_modesValid || !m_maskValid )
         {
+            m_setupStage = !m_modesValid && !m_maskValid ? "waiting_for_modes_and_mask"
+                           : !m_modesValid               ? "waiting_for_modes"
+                                                         : "waiting_for_mask";
             return 1;
         }
 
@@ -1112,16 +1286,19 @@ inline int dmRecon::prepareCalibration()
             return m_calibrationUsable ? 0 : 1;
         }
 
-        modes = m_pendingModes;
-        mask  = m_pendingMask;
+        m_setupStage = "copying_calibration";
+        modes        = m_pendingModes;
+        mask         = m_pendingMask;
     }
 
     m_workerGeneration  = generation;
     m_calibrationUsable = false;
+    m_setupStage        = "validating_calibration";
     uint32_t width = modes.width, height = modes.height;
 
     if( m_respM.size() != 0 && !dmReconMath::squareSize( width, m_respM.rows() ) )
     {
+        m_setupStage = "calibration_error";
         return log<software_error, 1>( { "response output is not square" } );
     }
 
@@ -1136,6 +1313,7 @@ inline int dmRecon::prepareCalibration()
         mask.height != height || mask.depth != 1 || mask.pixels.size() != size_t( width ) * height ||
         !dmReconMath::maskIndices( m_maskIDX, mask.pixels.data(), mask.pixels.size() ) )
     {
+        m_setupStage = "calibration_error";
         return log<software_error, 1>( { "invalid mask or calibration dimensions" } );
     }
 
@@ -1144,10 +1322,16 @@ inline int dmRecon::prepareCalibration()
     float       condition = 1;
     int         rejected  = 0;
     std::string error;
+    m_setupStage = "building_inverse";
+    log<text_log>( std::format( "Building CMmodesDM inverse generation {}: {} active pixels, {} modes",
+                                generation,
+                                m_maskIDX.size(),
+                                modes.depth ) );
 
     if( dmReconMath::buildInverse( m_PInv, condition, rejected, cube, m_maskIDX, m_respM, m_inverseNumModes, error ) !=
         0 )
     {
+        m_setupStage = "calibration_error";
         return log<software_error, 1>( { error } );
     }
 
@@ -1160,17 +1344,20 @@ inline int dmRecon::prepareCalibration()
 #ifdef MXLIB_CUDA
     if( m_useGPU && !m_gpuReady )
     {
-        m_gpuReady = setGPU() == 0;
+        m_setupStage = "initializing_gpu";
+        m_gpuReady   = setGPU() == 0;
     }
 
     if( m_useGPU )
     {
-        auto gpu = std::make_unique<GPUData>();
+        m_setupStage = "allocating_gpu";
+        auto gpu     = std::make_unique<GPUData>();
 
         if( gpu->inverse.upload( m_PInv.data(), m_PInv.rows(), m_PInv.cols() ) != mx::error_t::noerror ||
             gpu->command.resize( m_command.size() ) != mx::error_t::noerror ||
             gpu->modevals.resize( m_modevals.size() ) != mx::error_t::noerror )
         {
+            m_setupStage = "gpu_allocation_error";
             return log<software_error, 1>( { "allocating reconstruction GPU buffers" } );
         }
 
@@ -1183,6 +1370,7 @@ inline int dmRecon::prepareCalibration()
     }
 #endif
     m_calibrationUsable = true;
+    m_setupStage        = "calibration_ready";
     log<text_log>( std::format( "Inverted CMmodesDM generation {}: rejected {} of {} modes, condition {}",
                                 generation,
                                 rejected,
@@ -1280,6 +1468,7 @@ inline int dmRecon::configureAcquisition()
     frameGrabberT::m_width    = m_modevals.rows();
     frameGrabberT::m_height   = 1;
     frameGrabberT::m_dataType = _DATATYPE_FLOAT;
+    m_setupStage              = "connecting_output";
     const int rv              = frameGrabberT::openShmim();
 
     if( rv != 0 )
@@ -1291,6 +1480,7 @@ inline int dmRecon::configureAcquisition()
 
     if( !outputCompatible( *metadata, m_modevals.size() ) )
     {
+        m_setupStage = "output_schema_mismatch";
         return 1;
     }
 
@@ -1299,6 +1489,7 @@ inline int dmRecon::configureAcquisition()
     if( fstat( frameGrabberT::m_imageStream->shmfd, &mappedStatus ) != 0 ||
         stat( m_outputPath.c_str(), &pathStatus ) != 0 || mappedStatus.st_ino != pathStatus.st_ino )
     {
+        m_setupStage = "output_identity_mismatch";
         return 1;
     }
 
@@ -1324,6 +1515,7 @@ inline int dmRecon::configureAcquisition()
         log<text_log>( std::string( "dmRecon diagnostic connection: " ) + error.what(), logPrio::LOG_WARNING );
     }
 
+    m_setupStage = m_diagnosticsReady ? "acquiring" : "acquiring_without_monitor";
     return 0;
 }
 
@@ -1367,6 +1559,7 @@ inline void dmRecon::publishDiagnostics()
     catch( const std::exception & )
     {
         m_diagnosticsReady = false;
+        m_setupStage       = "acquiring_without_monitor";
     }
 }
 

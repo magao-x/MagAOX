@@ -10,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <future>
+#include <thread>
 
 /// \cond DMRECON_APP_TEST_HARNESS
 namespace MagAOX
@@ -30,7 +31,11 @@ class dmRecon_test : public dmRecon
     using dmRecon::m_inputGeneration;
     using dmRecon::m_latestTrigger;
     using dmRecon::m_maskIDX;
+    using dmRecon::m_maskRetry;
+    using dmRecon::m_maskSnapshot;
     using dmRecon::m_maskValid;
+    using dmRecon::m_modesRetry;
+    using dmRecon::m_modesSnapshot;
     using dmRecon::m_modesValid;
     using dmRecon::m_modevals;
     using dmRecon::m_outputChanged;
@@ -40,6 +45,7 @@ class dmRecon_test : public dmRecon
     using dmRecon::m_PInv;
     using dmRecon::m_publicationLock;
     using dmRecon::m_rejected;
+    using dmRecon::m_setupStage;
     using dmRecon::m_smSemaphore;
     using dmRecon::m_triggerClock;
     using dmRecon::m_triggerClockHigh;
@@ -51,6 +57,7 @@ class dmRecon_test : public dmRecon
     using dmRecon::prepareCalibration;
     using dmRecon::reconstruct;
     using dmRecon::snapshot;
+    using dmRecon::SnapshotStatus;
     using dmRecon::takeCommand;
 
     /// Initialize only the local wake semaphore and callback property.
@@ -76,6 +83,13 @@ class dmRecon_test : public dmRecon
 
     /// Invoke the real operator-enable callback without registering or connecting INDI.
     int enable( bool value /**< [in] Requested enable state. */ );
+
+    /// Inspect the retry request belonging to one calibration monitor.
+    bool
+    calibrationRestart( bool modes /**< [in] True selects the mode-cube monitor; false selects the mask. */ ) const;
+
+    /// Simulate the monitor consuming its reconnect flag and allocating against the same borrowed source.
+    int restartCalibrationMonitor( bool modes /**< [in] True selects modes; false selects the mask. */ );
 };
 
 dmRecon_test::dmRecon_test()
@@ -131,6 +145,23 @@ int dmRecon_test::enable( bool value )
     property.add( pcf::IndiElement( "toggle" ) );
     property["toggle"].setSwitchState( value ? pcf::IndiElement::On : pcf::IndiElement::Off );
     return newCallBack_m_indiP_writeDMf( property );
+}
+
+bool dmRecon_test::calibrationRestart( bool modes ) const
+{
+    return modes ? dmModesSMT::m_restart : dmMaskSMT::m_restart;
+}
+
+int dmRecon_test::restartCalibrationMonitor( bool modes )
+{
+    if( modes )
+    {
+        dmModesSMT::m_restart = false;
+        return allocate( dmModesShmimT{} );
+    }
+
+    dmMaskSMT::m_restart = false;
+    return allocate( dmMaskShmimT{} );
 }
 
 } // namespace app
@@ -286,6 +317,57 @@ TEST_CASE( "dmRecon snapshots validate image metadata and payload bounds", "[dmR
     CHECK_FALSE( dmRecon_test::snapshot( frame, source.image, source.pixels.data(), 2 ) );
 }
 
+/// Explain rejected source states so calibration waiters can distinguish incomplete writes from invalid schemas.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon snapshots report calibration rejection reasons", "[dmRecon][app][calibration]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::snapshot;
+    #endif
+    // clang-format on
+
+    using Status = dmRecon_test::SnapshotStatus;
+    Image               source( 2, 2 );
+    dmRecon_test::Frame frame;
+    Status              status = Status::unavailable;
+    REQUIRE( dmRecon_test::snapshot( frame, source.image, source.pixels.data(), 1, &status ) );
+    REQUIRE( status == Status::ready );
+    Status expected = Status::unavailable;
+
+    SECTION( "unavailable mapping" )
+    {
+        source.image.md = nullptr;
+    }
+
+    SECTION( "invalid pixel format" )
+    {
+        source.metadata.datatype = _DATATYPE_UINT16;
+        expected                 = Status::invalidFormat;
+    }
+
+    SECTION( "invalid dimensions" )
+    {
+        source.metadata.size[0] = 0;
+        expected                = Status::invalidShape;
+    }
+
+    SECTION( "truncated payload capacity" )
+    {
+        --source.metadata.imdatamemsize;
+        expected = Status::invalidCapacity;
+    }
+
+    SECTION( "incomplete producer write" )
+    {
+        __atomic_store_n( &source.metadata.write, 1, __ATOMIC_RELEASE );
+        expected = Status::busy;
+    }
+
+    CHECK_FALSE( dmRecon_test::snapshot( frame, source.image, source.pixels.data(), 1, &status ) );
+    CHECK( status == expected );
+}
+
 /// Admit only a complete host-float modal vector with the exact reconstructed length.
 /** \ingroup dmRecon_unit_test */
 TEST_CASE( "dmRecon validates feedback destination schemas", "[dmRecon][app]" )
@@ -379,6 +461,149 @@ TEST_CASE( "dmRecon prepares complete private calibration generations", "[dmReco
     REQUIRE( app.prepareCalibration() == 1 );
     CHECK_FALSE( app.m_calibrationUsable );
     CHECK( app.m_workerGeneration > generation );
+}
+
+/// Recover the static calibration after its only notification precedes completion of the producer write.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon retries calibration until an early-notified write completes", "[dmRecon][app][calibration]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::captureCalibration;
+    MagAOX::app::dmRecon::processImage;
+    MagAOX::app::dmRecon::allocate;
+    MagAOX::app::dmRecon::prepareCalibration;
+    #endif
+    // clang-format on
+
+    const bool modes = GENERATE( true, false );
+    Fixture    fixture;
+    auto      &app    = fixture.app;
+    auto      &source = modes ? fixture.modes : fixture.mask;
+    auto      &status = modes ? app.m_modesSnapshot : app.m_maskSnapshot;
+    __atomic_store_n( &source.metadata.write, 1, __ATOMIC_RELEASE );
+    auto       callback = std::async( std::launch::async,
+                                [&]
+                                {
+                                    return modes ? app.processImage( source.pixels.data() + 4, dmModesShmimT{} )
+                                                       : app.processImage( source.pixels.data(), dmMaskShmimT{} );
+                                } );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 2 );
+
+    while( status.load() != dmRecon_test::SnapshotStatus::busy && std::chrono::steady_clock::now() < deadline )
+    {
+        std::this_thread::yield();
+    }
+
+    const bool observedBusy = status.load() == dmRecon_test::SnapshotStatus::busy;
+
+    if( modes )
+    {
+        source.pixels[0] = 4;
+    }
+    else
+    {
+        source.pixels[3] = 0.5F;
+    }
+
+    __atomic_add_fetch( &source.metadata.cnt0, 1, __ATOMIC_RELEASE );
+    __atomic_store_n( &source.metadata.write, 0, __ATOMIC_RELEASE );
+    const int result = callback.get();
+    REQUIRE( observedBusy );
+    REQUIRE( result == 0 );
+
+    if( status.load() != dmRecon_test::SnapshotStatus::ready )
+    {
+        // A descheduled test thread can exceed the short retry; the monitor then revisits its existing image.
+        REQUIRE( app.calibrationRestart( modes ) );
+        REQUIRE( app.restartCalibrationMonitor( modes ) == 0 );
+    }
+
+    CHECK( status.load() == dmRecon_test::SnapshotStatus::ready );
+    CHECK( ( modes ? app.m_modesValid : app.m_maskValid ) );
+    CHECK_FALSE( app.calibrationRestart( modes ) );
+    REQUIRE( app.prepareCalibration() == 0 );
+    REQUIRE( fixture.receive() == 0 );
+    REQUIRE( app.takeCommand() );
+    REQUIRE( app.reconstruct() == 0 );
+    CHECK( app.m_modevals( 0, 0 ) == Approx( modes ? 1.5F : 3.0F ) );
+}
+
+/// Leave the callback after a bounded retry and ask its monitor to revisit a persistently invalid calibration.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon invalid calibration requests a monitor-owned retry", "[dmRecon][app][calibration]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::captureCalibration;
+    MagAOX::app::dmRecon::processImage;
+    MagAOX::app::dmRecon::allocate;
+    MagAOX::app::dmRecon::prepareCalibration;
+    #endif
+    // clang-format on
+
+    const bool modes = GENERATE( true, false );
+    Fixture    fixture;
+    auto      &app           = fixture.app;
+    auto      &source        = modes ? fixture.modes : fixture.mask;
+    auto      &status        = modes ? app.m_modesSnapshot : app.m_maskSnapshot;
+    source.metadata.datatype = _DATATYPE_UINT16;
+    const int result         = modes ? app.processImage( source.pixels.data(), dmModesShmimT{} )
+                                     : app.processImage( source.pixels.data(), dmMaskShmimT{} );
+    REQUIRE( result == 0 );
+    CHECK( status.load() == dmRecon_test::SnapshotStatus::invalidFormat );
+    CHECK_FALSE( ( modes ? app.m_modesValid : app.m_maskValid ) );
+    CHECK( app.calibrationRestart( modes ) );
+    CHECK( ( modes ? app.m_modesRetry : app.m_maskRetry ) );
+    CHECK( app.prepareCalibration() == 1 );
+
+    // A reconnect must capture an existing corrected image without waiting for another producer notification.
+    source.metadata.datatype = _DATATYPE_FLOAT;
+    REQUIRE( app.restartCalibrationMonitor( modes ) == 0 );
+    CHECK( status.load() == dmRecon_test::SnapshotStatus::ready );
+    CHECK( ( modes ? app.m_modesValid : app.m_maskValid ) );
+    CHECK_FALSE( ( modes ? app.m_modesRetry : app.m_maskRetry ) );
+    CHECK_FALSE( app.calibrationRestart( modes ) );
+    CHECK( app.prepareCalibration() == 0 );
+}
+
+/// Distinguish missing mode and mask snapshots before any inverse or GPU work is attempted.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon reports which calibration snapshot setup is waiting for", "[dmRecon][app][calibration]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::prepareCalibration;
+    MagAOX::app::dmRecon::allocate;
+    #endif
+    // clang-format on
+
+    Fixture fixture;
+    auto   &app = fixture.app;
+    REQUIRE( std::string( app.m_setupStage.load() ) == "calibration_ready" );
+    std::string expected;
+
+    SECTION( "mode cube missing" )
+    {
+        REQUIRE( app.allocate( dmModesShmimT{} ) == 0 );
+        expected = "waiting_for_modes";
+    }
+
+    SECTION( "mask missing" )
+    {
+        REQUIRE( app.allocate( dmMaskShmimT{} ) == 0 );
+        expected = "waiting_for_mask";
+    }
+
+    SECTION( "both snapshots missing" )
+    {
+        REQUIRE( app.allocate( dmModesShmimT{} ) == 0 );
+        REQUIRE( app.allocate( dmMaskShmimT{} ) == 0 );
+        expected = "waiting_for_modes_and_mask";
+    }
+
+    CHECK( app.prepareCalibration() == 1 );
+    CHECK( std::string( app.m_setupStage.load() ) == expected );
 }
 
 /// Refuse inconsistent private payload sizes before allocating a cube or indexing its pixels.
