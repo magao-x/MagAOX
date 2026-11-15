@@ -1,5 +1,5 @@
 /** \file telem_gpu.hpp
- * \brief Identified GPU diagnostics with explicit per-field validity.
+ * \brief Indexed GPU diagnostics with explicit per-field validity and legacy identity decoding.
  * \ingroup logger_types_files
  */
 #ifndef logger_types_telem_gpu_hpp
@@ -21,7 +21,7 @@ namespace MagAOX
 namespace logger
 {
 
-/// Record a GPU query and the current validity of each identified device's measurements.
+/// Record a GPU query and the current validity of each indexed device's measurements.
 /** \ingroup logger_types */
 struct telem_gpu : public flatbuffer_log
 {
@@ -54,8 +54,8 @@ struct telem_gpu : public flatbuffer_log
     /// One device's measurements; numeric values are meaningful only when their validity bit is set.
     struct gpuT
     {
-        std::string m_uuid;   ///< Stable NVIDIA GPU UUID.
-        std::string m_pci;    ///< PCI bus address reported by the query.
+        std::string m_uuid;   ///< Stable NVIDIA GPU UUID, retained in memory and decoded from legacy records only.
+        std::string m_pci;    ///< PCI bus address, retained in memory and decoded from legacy records only.
         std::string m_status; ///< Acquisition state: ok, partial, or a collector-supplied failure state.
 
         double m_temperature{ 0 };   ///< GPU temperature in Celsius.
@@ -76,10 +76,11 @@ struct telem_gpu : public flatbuffer_log
         bool operator==( const gpuT &other /**< [in] device state to compare */ ) const;
     };
 
-    /// Serialized query state and identified measurements.
+    /// Serialized query state and indexed measurements, excluding static device identity strings.
     struct messageT : public fbMessage
     {
-        /// Serialize every device, retaining invalidation state and last successful sample times.
+        /// Serialize device indices, measurements, invalidation state, and last successful sample times.
+        /** UUID and PCI strings are omitted; discovery and mapping changes belong in separate diagnostic logs. */
         messageT( const std::string       &status /**< [in] overall query state */,
                   const std::vector<gpuT> &gpus /**< [in] identified device measurements */ );
     };
@@ -88,17 +89,17 @@ struct telem_gpu : public flatbuffer_log
     static bool verify( flatlogs::bufferPtrT &buffer /**< [in] complete log entry */,
                         flatlogs::msgLenT     len /**< [in] serialized payload length */ );
 
-    /// Format device identity, units, validity, and sample times for operator-readable logs.
+    /// Format device indices, units, validity, sample times, and any legacy identity strings.
     static std::string msgString( void             *buffer /**< [in] serialized payload */,
                                   flatlogs::msgLenT len /**< [in] unused payload length */ );
 
-    /// Decode all device measurements without discarding acquisition timestamps.
+    /// Decode all measurements and timestamps; UUID/PCI strings are empty unless present in legacy records.
     static std::vector<gpuT> gpus( void *buffer /**< [in] serialized payload */ );
 
     /// Get the overall acquisition state.
     static std::string status( void *buffer /**< [in] serialized payload */ );
 
-    /// Get metadata accessors; numeric vectors share ordering with UUIDs and validity masks.
+    /// Get metadata accessors; numeric vectors share ordering with device indices and validity masks.
     static logMetaDetail getAccessor( const std::string &member /**< [in] field name */ );
 
   private:
@@ -147,12 +148,10 @@ inline telem_gpu::messageT::messageT( const std::string &status, const std::vect
 
     for( const auto &gpu : gpus )
     {
-        auto uuid  = builder.CreateString( gpu.m_uuid );
-        auto pci   = builder.CreateString( gpu.m_pci );
         auto state = builder.CreateString( gpu.m_status );
         devices.push_back( CreateGpu_sample_fb( builder,
-                                                uuid,
-                                                pci,
+                                                0,
+                                                0,
                                                 state,
                                                 gpu.m_temperature,
                                                 gpu.m_load,
@@ -214,8 +213,8 @@ inline std::vector<telem_gpu::gpuT> telem_gpu::gpus( void *buffer )
 
         for( const auto *gpu : *devices )
         {
-            result.push_back( { gpu->uuid()->str(),
-                                gpu->pci()->str(),
+            result.push_back( { gpu->uuid() ? gpu->uuid()->str() : std::string{},
+                                gpu->pci() ? gpu->pci()->str() : std::string{},
                                 gpu->status()->str(),
                                 gpu->temperature(),
                                 gpu->load(),
@@ -242,13 +241,22 @@ inline std::string telem_gpu::msgString( void *buffer, flatlogs::msgLenT len )
 
     for( const auto &gpu : gpus( buffer ) )
     {
-        output << " [" << gpu.m_uuid
-               << " index=" << ( gpu.m_index == UnknownIndex ? "unknown" : std::to_string( gpu.m_index ) ) << " "
-               << gpu.m_pci << " " << gpu.m_status << " valid=" << gpu.m_valid
-               << " sample_time=" << std::setprecision( 17 ) << gpu.m_sampleTime << " temperature=" << gpu.m_temperature
-               << " C load=" << gpu.m_load << " memory_load=" << gpu.m_memoryLoad << " memory=" << gpu.m_memoryUsed
-               << "/" << gpu.m_memoryTotal << " MiB clocks=" << gpu.m_clockGraphics << "/" << gpu.m_clockSM << "/"
-               << gpu.m_clockMemory << " MHz]";
+        output << " [index=" << ( gpu.m_index == UnknownIndex ? "unknown" : std::to_string( gpu.m_index ) );
+
+        if( !gpu.m_uuid.empty() )
+        {
+            output << " uuid=" << gpu.m_uuid;
+        }
+
+        if( !gpu.m_pci.empty() )
+        {
+            output << " pci=" << gpu.m_pci;
+        }
+
+        output << " " << gpu.m_status << " valid=" << gpu.m_valid << " sample_time=" << std::setprecision( 17 )
+               << gpu.m_sampleTime << " temperature=" << gpu.m_temperature << " C load=" << gpu.m_load
+               << " memory_load=" << gpu.m_memoryLoad << " memory=" << gpu.m_memoryUsed << "/" << gpu.m_memoryTotal
+               << " MiB clocks=" << gpu.m_clockGraphics << "/" << gpu.m_clockSM << "/" << gpu.m_clockMemory << " MHz]";
     }
 
     return output.str();
@@ -281,7 +289,8 @@ inline std::vector<std::string> telem_gpu::strings( void *buffer )
     {
         for( const auto *gpu : *devices )
         {
-            result.push_back( ( gpu->*member )()->str() );
+            const auto *value = ( gpu->*member )();
+            result.push_back( value ? value->str() : std::string{} );
         }
     }
 
@@ -303,7 +312,7 @@ inline logMetaDetail telem_gpu::getAccessor( const std::string &member )
     if( member == "uuid" )
     {
         return { "GPU UUID",
-                 "device UUIDs in measurement order",
+                 "legacy device UUIDs in measurement order; empty in indexed records",
                  logMeta::Vector_String,
                  logMeta::State,
                  reinterpret_cast<void *>( &strings<&Gpu_sample_fb::uuid> ),
@@ -313,7 +322,7 @@ inline logMetaDetail telem_gpu::getAccessor( const std::string &member )
     if( member == "pci" )
     {
         return { "GPU PCI",
-                 "device PCI addresses in measurement order",
+                 "legacy PCI addresses in measurement order; empty in indexed records",
                  logMeta::Vector_String,
                  logMeta::State,
                  reinterpret_cast<void *>( &strings<&Gpu_sample_fb::pci> ),
@@ -323,7 +332,7 @@ inline logMetaDetail telem_gpu::getAccessor( const std::string &member )
     if( member == "index" )
     {
         return { "GPU INDEX",
-                 "NVIDIA device indices in UUID order; 4294967295 means unknown",
+                 "NVIDIA indices in measurement order; 4294967295 means unknown",
                  logMeta::Vector_UInt,
                  logMeta::State,
                  reinterpret_cast<void *>( &numbers<unsigned, &Gpu_sample_fb::index> ),

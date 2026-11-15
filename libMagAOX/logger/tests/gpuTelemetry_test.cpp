@@ -1,5 +1,5 @@
 /** \file gpuTelemetry_test.cpp
- * \brief GPU telemetry identity, clocks, validity, dispatch, and metadata tests.
+ * \brief GPU telemetry indices, omitted identity, legacy decoding, validity, and metadata tests.
  * \ingroup flatlogs_unit_test
  */
 
@@ -30,9 +30,9 @@ void appendGPU( MagAOX::logger::logMap<>                  &map /**< [in,out] dev
 }
 /// \endcond
 
-/// Round-trip multiple identified devices, all measurements, timestamps, and invalid retained values.
+/// Round-trip indexed measurements and retained invalid values while omitting static identity strings.
 /** \ingroup flatlogs_unit_test */
-TEST_CASE( "GPU telemetry retains identified measurements and validity", "[gpuTelemetry]" )
+TEST_CASE( "GPU telemetry retains indexed measurements and omits static identity", "[gpuTelemetry]" )
 {
     using MagAOX::logger::telem_gpu;
     std::vector<telem_gpu::gpuT> gpus{ { "GPU-01234567-89ab-cdef-0123-456789abcdef",
@@ -66,14 +66,34 @@ TEST_CASE( "GPU telemetry retains identified measurements and validity", "[gpuTe
     telem_gpu::messageT          message( "partial", gpus );
     auto                        *payload = message.builder.GetBufferPointer();
     REQUIRE( telem_gpu::status( payload ) == "partial" );
-    const auto decoded = telem_gpu::gpus( payload );
-    REQUIRE( decoded == gpus );
+    const auto decoded  = telem_gpu::gpus( payload );
+    auto       expected = gpus;
+
+    for( auto &gpu : expected )
+    {
+        gpu.m_uuid.clear();
+        gpu.m_pci.clear();
+    }
+
+    REQUIRE( decoded == expected );
     REQUIRE( decoded[0].m_sampleTime == gpus[0].m_sampleTime );
     REQUIRE( decoded[1].m_sampleTime == gpus[1].m_sampleTime );
     REQUIRE( decoded[0].m_index == 0 );
     REQUIRE( decoded[1].m_index == 7 );
-    const auto text = telem_gpu::msgString( payload, message.builder.GetSize() );
-    REQUIRE( text.find( gpus[0].m_uuid ) != std::string::npos );
+    const auto        text = telem_gpu::msgString( payload, message.builder.GetSize() );
+    const std::string bytes( reinterpret_cast<const char *>( payload ), message.builder.GetSize() );
+
+    for( size_t n = 0; n < gpus.size(); ++n )
+    {
+        const auto *sample = MagAOX::logger::GetTelem_gpu_fb( payload )->gpus()->Get( n );
+        REQUIRE( sample->uuid() == nullptr );
+        REQUIRE( sample->pci() == nullptr );
+        REQUIRE( bytes.find( gpus[n].m_uuid ) == std::string::npos );
+        REQUIRE( bytes.find( gpus[n].m_pci ) == std::string::npos );
+        REQUIRE( text.find( gpus[n].m_uuid ) == std::string::npos );
+        REQUIRE( text.find( gpus[n].m_pci ) == std::string::npos );
+    }
+
     REQUIRE( text.find( "clocks=1400/1410/7000 MHz" ) != std::string::npos );
     REQUIRE( text.find( "memory=256/8192 MiB" ) != std::string::npos );
     REQUIRE( text.find( "valid=0" ) != std::string::npos );
@@ -94,9 +114,9 @@ TEST_CASE( "GPU telemetry retains identified measurements and validity", "[gpuTe
     REQUIRE_FALSE( telem_gpu::verify( buffer, flatlogs::logHeader::msgLen( buffer ) ) );
 }
 
-/// Older records omit the appended index field and must never be misidentified as NVIDIA device zero.
+/// Legacy identity strings remain readable, and omitted indices must never be mistaken for device zero.
 /** \ingroup flatlogs_unit_test */
-TEST_CASE( "GPU telemetry reads absent device indices as unknown", "[gpuTelemetry]" )
+TEST_CASE( "GPU telemetry preserves legacy identities and reads absent indices as unknown", "[gpuTelemetry]" )
 {
     using namespace MagAOX::logger;
     REQUIRE( telem_gpu::gpuT{}.m_index == telem_gpu::UnknownIndex );
@@ -117,9 +137,23 @@ TEST_CASE( "GPU telemetry reads absent device indices as unknown", "[gpuTelemetr
     auto      *payload = builder.GetBufferPointer();
     const auto decoded = telem_gpu::gpus( payload );
     REQUIRE( decoded.size() == 1 );
+    REQUIRE( decoded[0].m_uuid == "GPU-01234567-89ab-cdef-0123-456789abcdef" );
+    REQUIRE( decoded[0].m_pci == "0000:01:00.0" );
     REQUIRE( decoded[0].m_index == telem_gpu::UnknownIndex );
     REQUIRE( decoded[0].m_sampleTime == 1234567890.25 );
-    REQUIRE( telem_gpu::msgString( payload, builder.GetSize() ).find( "index=unknown" ) != std::string::npos );
+    const auto text = telem_gpu::msgString( payload, builder.GetSize() );
+    REQUIRE( text.find( "index=unknown" ) != std::string::npos );
+    REQUIRE( text.find( "uuid=" + decoded[0].m_uuid ) != std::string::npos );
+    REQUIRE( text.find( "pci=" + decoded[0].m_pci ) != std::string::npos );
+
+    for( const auto &[member, expected] : std::vector<std::pair<std::string, std::string>>{
+             { "uuid", decoded[0].m_uuid }, { "pci", decoded[0].m_pci } } )
+    {
+        auto metadata = telem_gpu::getAccessor( member );
+        auto getter   = reinterpret_cast<std::vector<std::string> ( * )( void * )>( metadata.accessor );
+        REQUIRE( getter( payload ) == std::vector<std::string>{ expected } );
+    }
+
     auto metadata = telem_gpu::getAccessor( "index" );
     auto indices  = reinterpret_cast<std::vector<unsigned> ( * )( void * )>( metadata.accessor );
     REQUIRE( indices( payload ) == std::vector<unsigned>{ telem_gpu::UnknownIndex } );
@@ -148,7 +182,7 @@ TEST_CASE( "GPU telemetry records empty and unavailable inventories", "[gpuTelem
     }
 }
 
-/// Metadata vectors expose matching identities and validity for every numeric diagnostic, including clocks.
+/// Metadata vectors expose matching indices and validity, with empty placeholders for omitted identity fields.
 /** \ingroup flatlogs_unit_test */
 TEST_CASE( "GPU metadata dispatch exposes units and validity alongside every field", "[gpuTelemetry]" )
 {
@@ -201,7 +235,7 @@ TEST_CASE( "GPU metadata dispatch exposes units and validity alongside every fie
     REQUIRE( getIndices( payload ) == std::vector<unsigned>{ 3 } );
 
     for( const auto &[name, value] : std::vector<std::pair<std::string, std::string>>{
-             { "uuid", gpus[0].m_uuid }, { "pci", gpus[0].m_pci }, { "device_status", "partial" } } )
+             { "uuid", "" }, { "pci", "" }, { "device_status", "partial" } } )
     {
         auto metadata = telem_gpu::getAccessor( name );
         REQUIRE( metadata.valType == logMeta::Vector_String );
@@ -229,7 +263,9 @@ TEST_CASE( "GPU vector metadata produces verified FITS cards", "[gpuTelemetry][l
     appendGPU( map, message, 20 );
 
     for( const auto &[member, expected] :
-         std::vector<std::pair<std::string, std::string>>{ { "uuid", uuid + "," + uuidB },
+         std::vector<std::pair<std::string, std::string>>{ { "uuid", "," },
+                                                           { "pci", "," },
+                                                           { "device_status", "ok,missing" },
                                                            { "index", "0,7" },
                                                            { "valid", "255,0" },
                                                            { "load", "0.75,0.5" },

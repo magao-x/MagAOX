@@ -1,9 +1,13 @@
 /** \file telem_irq.hpp
- * \brief Identified IRQ placement telemetry with explicit verification status.
+ * \brief Compact IRQ policy flags and backward-compatible placement-record decoding.
  * \ingroup logger_types_files
  */
 #ifndef logger_types_telem_irq_hpp
 #define logger_types_telem_irq_hpp
+
+#include <algorithm>
+
+#include <mx/math/floatUtils.hpp>
 
 #include "generated/telem_irq_generated.h"
 #include "flatbuffer_log.hpp"
@@ -13,7 +17,7 @@ namespace MagAOX
 namespace logger
 {
 
-/// Placement snapshots for configured logical IRQ groups.
+/// Compact policy results in the group order recorded in startup logs.
 /** \ingroup logger_types */
 struct telem_irq : public flatbuffer_log
 {
@@ -51,37 +55,44 @@ struct telem_irq : public flatbuffer_log
         bool operator==( const groupT &other /**< [in] snapshot to compare */ ) const;
     };
 
-    /// Serialized snapshot input.
+    /// Serialized policy flags and actual collection time, without repeated placement metadata.
     struct messageT : public fbMessage
     {
-        /// Serialize all groups and their actual check times.
-        messageT( const std::vector<groupT> &groups /**< [in] identified placement snapshots */ );
+        /// Serialize zero for unchecked/unacceptable groups and one for completed acceptable checks.
+        messageT( const std::vector<uint8_t> &ok /**< [in] policy flags in startup-logged group order */,
+                  double checkTime /**< [in] Unix time of the actual check, or zero before any check */ );
     };
 
-    /// Verify the complete serialized payload.
+    /// Verify one compact or legacy representation, including compact flags and collection time.
     static bool verify( flatlogs::bufferPtrT &logBuff /**< [in] complete log buffer */,
                         flatlogs::msgLenT     len /**< [in] payload length */ );
 
-    /// Format group identity, verification status and observed CPU lists.
+    /// Format compact flags and check time, or original details from a legacy record.
     static std::string msgString( void             *msgBuffer /**< [in] serialized payload */,
                                   flatlogs::msgLenT len /**< [in] unused payload length */ );
 
-    /// Decode the complete identified snapshot, including acquisition timestamps.
+    /// Get zero/one policy flags, converting legacy group results when necessary.
+    static std::vector<unsigned> ok( void *msgBuffer /**< [in] serialized payload */ );
+
+    /// Get the actual check time, or the latest group check time in a legacy record.
+    static double checkTime( void *msgBuffer /**< [in] serialized payload */ );
+
+    /// Decode legacy identified snapshots, or return an empty vector for compact records.
     static std::vector<groupT> groups( void *msgBuffer /**< [in] serialized payload */ );
 
-    /// Get logical group names in the recorded order.
+    /// Get legacy logical group names, or an empty vector for compact records.
     static std::vector<std::string> names( void *msgBuffer /**< [in] serialized payload */ );
 
-    /// Get verification results in the same order as names().
+    /// Get legacy verification results in names() order, or an empty vector for compact records.
     static std::vector<std::string> statuses( void *msgBuffer /**< [in] serialized payload */ );
 
-    /// Get expected CPU lists in the same order as names().
+    /// Get legacy expected CPU lists in names() order, or an empty vector for compact records.
     static std::vector<std::string> expected( void *msgBuffer /**< [in] serialized payload */ );
 
-    /// Get actual check times in the same order as names().
+    /// Get each legacy group time, or repeat the compact check time once per policy flag.
     static std::vector<double> checkTimes( void *msgBuffer /**< [in] serialized payload */ );
 
-    /// Get whether any recorded group requires operator attention.
+    /// Get whether any compact flag is zero, or any legacy group reported a warning.
     static bool warning( void *msgBuffer /**< [in] serialized payload */ );
 
     /// Get metadata for a supported field, or an empty descriptor for an unknown field.
@@ -99,45 +110,79 @@ inline bool telem_irq::groupT::operator==( const groupT &other ) const
            m_warning == other.m_warning && m_irqs == other.m_irqs;
 }
 
-inline telem_irq::messageT::messageT( const std::vector<groupT> &groups )
+inline telem_irq::messageT::messageT( const std::vector<uint8_t> &ok, double checkTime )
 {
-    std::vector<flatbuffers::Offset<IrqGroup>> records;
-
-    for( const auto &group : groups )
-    {
-        std::vector<flatbuffers::Offset<IrqAffinity>> irqs;
-
-        for( const auto &irq : group.m_irqs )
-        {
-            auto requested = builder.CreateString( irq.m_requested );
-            auto effective = builder.CreateString( irq.m_effective );
-            irqs.push_back( CreateIrqAffinity( builder, irq.m_number, requested, effective ) );
-        }
-
-        auto name     = builder.CreateString( group.m_name );
-        auto expected = builder.CreateString( group.m_expected );
-        auto status   = builder.CreateString( group.m_status );
-        auto vectors  = builder.CreateVector( irqs );
-        records.push_back(
-            CreateIrqGroup( builder, name, expected, status, group.m_warning, group.m_checkTime, vectors ) );
-    }
-
-    auto vector = builder.CreateVector( records );
-    builder.Finish( CreateTelem_irq_fb( builder, vector ) );
+    auto flags = builder.CreateVector( ok );
+    builder.Finish( CreateTelem_irq_fb( builder, 0, flags, checkTime ) );
 }
 
 inline bool telem_irq::verify( flatlogs::bufferPtrT &logBuff, flatlogs::msgLenT len )
 {
     flatbuffers::Verifier verifier( static_cast<uint8_t *>( flatlogs::logHeader::messageBuffer( logBuff ) ), len );
-    return VerifyTelem_irq_fbBuffer( verifier );
+
+    if( !VerifyTelem_irq_fbBuffer( verifier ) )
+    {
+        return false;
+    }
+
+    const auto *record = GetTelem_irq_fb( flatlogs::logHeader::messageBuffer( logBuff ) );
+    const auto *flags  = record->ok();
+
+    if( ( flags != nullptr ) == ( record->groups() != nullptr ) )
+    {
+        return false;
+    }
+
+    if( flags )
+    {
+        if( !mx::math::isFinite( record->check_time() ) || record->check_time() < 0 )
+        {
+            return false;
+        }
+
+        for( auto value : *flags )
+        {
+            if( value > 1 )
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 inline std::string telem_irq::msgString( void *msgBuffer, flatlogs::msgLenT len )
 {
     static_cast<void>( len );
-    std::string text = "[irq]";
+    std::string text   = "[irq]";
+    const auto *record = GetTelem_irq_fb( msgBuffer );
 
-    for( const auto *group : *GetTelem_irq_fb( msgBuffer )->groups() )
+    if( record->ok() )
+    {
+        text += " ok=";
+        bool first = true;
+
+        for( auto value : *record->ok() )
+        {
+            if( !first )
+            {
+                text += ',';
+            }
+
+            text += std::to_string( value );
+            first = false;
+        }
+
+        return text + " checked=" + std::to_string( record->check_time() );
+    }
+
+    if( !record->groups() )
+    {
+        return text;
+    }
+
+    for( const auto *group : *record->groups() )
     {
         text += " " + group->name()->str() + " expected=" + group->expected()->str() +
                 " status=" + group->status()->str() + " warning=" + std::to_string( group->warning() ) +
@@ -153,11 +198,60 @@ inline std::string telem_irq::msgString( void *msgBuffer, flatlogs::msgLenT len 
     return text;
 }
 
+inline std::vector<unsigned> telem_irq::ok( void *msgBuffer )
+{
+    std::vector<unsigned> values;
+    const auto           *record = GetTelem_irq_fb( msgBuffer );
+
+    if( record->ok() )
+    {
+        return { record->ok()->begin(), record->ok()->end() };
+    }
+
+    if( record->groups() )
+    {
+        for( const auto *group : *record->groups() )
+        {
+            values.push_back( !group->warning() && group->status()->str() != "unchecked" );
+        }
+    }
+
+    return values;
+}
+
+inline double telem_irq::checkTime( void *msgBuffer )
+{
+    const auto *record = GetTelem_irq_fb( msgBuffer );
+
+    if( record->ok() )
+    {
+        return record->check_time();
+    }
+
+    double latest = 0;
+
+    if( record->groups() )
+    {
+        for( const auto *group : *record->groups() )
+        {
+            latest = std::max( latest, group->check_time() );
+        }
+    }
+
+    return latest;
+}
+
 inline std::vector<telem_irq::groupT> telem_irq::groups( void *msgBuffer )
 {
     std::vector<groupT> values;
+    const auto         *legacy = GetTelem_irq_fb( msgBuffer )->groups();
 
-    for( const auto *record : *GetTelem_irq_fb( msgBuffer )->groups() )
+    if( !legacy )
+    {
+        return values;
+    }
+
+    for( const auto *record : *legacy )
     {
         groupT group;
         group.m_name      = record->name()->str();
@@ -180,8 +274,14 @@ inline std::vector<telem_irq::groupT> telem_irq::groups( void *msgBuffer )
 inline std::vector<std::string> telem_irq::names( void *msgBuffer )
 {
     std::vector<std::string> values;
+    const auto              *legacy = GetTelem_irq_fb( msgBuffer )->groups();
 
-    for( const auto *group : *GetTelem_irq_fb( msgBuffer )->groups() )
+    if( !legacy )
+    {
+        return values;
+    }
+
+    for( const auto *group : *legacy )
     {
         values.push_back( group->name()->str() );
     }
@@ -192,8 +292,14 @@ inline std::vector<std::string> telem_irq::names( void *msgBuffer )
 inline std::vector<std::string> telem_irq::statuses( void *msgBuffer )
 {
     std::vector<std::string> values;
+    const auto              *legacy = GetTelem_irq_fb( msgBuffer )->groups();
 
-    for( const auto *group : *GetTelem_irq_fb( msgBuffer )->groups() )
+    if( !legacy )
+    {
+        return values;
+    }
+
+    for( const auto *group : *legacy )
     {
         values.push_back( group->status()->str() );
     }
@@ -204,8 +310,14 @@ inline std::vector<std::string> telem_irq::statuses( void *msgBuffer )
 inline std::vector<std::string> telem_irq::expected( void *msgBuffer )
 {
     std::vector<std::string> values;
+    const auto              *legacy = GetTelem_irq_fb( msgBuffer )->groups();
 
-    for( const auto *group : *GetTelem_irq_fb( msgBuffer )->groups() )
+    if( !legacy )
+    {
+        return values;
+    }
+
+    for( const auto *group : *legacy )
     {
         values.push_back( group->expected()->str() );
     }
@@ -216,8 +328,19 @@ inline std::vector<std::string> telem_irq::expected( void *msgBuffer )
 inline std::vector<double> telem_irq::checkTimes( void *msgBuffer )
 {
     std::vector<double> values;
+    const auto         *record = GetTelem_irq_fb( msgBuffer );
 
-    for( const auto *group : *GetTelem_irq_fb( msgBuffer )->groups() )
+    if( record->ok() )
+    {
+        return std::vector<double>( record->ok()->size(), record->check_time() );
+    }
+
+    if( !record->groups() )
+    {
+        return values;
+    }
+
+    for( const auto *group : *record->groups() )
     {
         values.push_back( group->check_time() );
     }
@@ -227,7 +350,27 @@ inline std::vector<double> telem_irq::checkTimes( void *msgBuffer )
 
 inline bool telem_irq::warning( void *msgBuffer )
 {
-    for( const auto *group : *GetTelem_irq_fb( msgBuffer )->groups() )
+    const auto *record = GetTelem_irq_fb( msgBuffer );
+
+    if( record->ok() )
+    {
+        for( auto value : *record->ok() )
+        {
+            if( !value )
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    if( !record->groups() )
+    {
+        return false;
+    }
+
+    for( const auto *group : *record->groups() )
     {
         if( group->warning() )
         {
@@ -240,6 +383,26 @@ inline bool telem_irq::warning( void *msgBuffer )
 
 inline logMetaDetail telem_irq::getAccessor( const std::string &member )
 {
+    if( member == "ok" )
+    {
+        return { "IRQ OK",
+                 "policy flags in startup-logged group order",
+                 logMeta::valTypes::Vector_UInt,
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &ok ),
+                 true };
+    }
+
+    if( member == "checkTime" )
+    {
+        return { "IRQ CHECK TIME",
+                 "actual IRQ check time [Unix seconds]",
+                 logMeta::valTypes::Double,
+                 logMeta::metaTypes::State,
+                 reinterpret_cast<void *>( &checkTime ),
+                 true };
+    }
+
     if( member == "names" )
     {
         return { "IRQ NAMES",

@@ -165,8 +165,8 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
     /// Current placement results for every configured logical IRQ group.
     std::vector<telem_irq::groupT> m_irqs;
 
-    /// Last recorded IRQ results for value-change suppression.
-    std::vector<telem_irq::groupT> m_lastIRQs;
+    /// Last recorded IRQ policy flags, in the startup-logged rule order.
+    std::vector<uint8_t> m_lastIRQOK;
 
     /// Whether any IRQ telemetry record has been made by this instance.
     bool m_irqRecorded{ false };
@@ -213,7 +213,7 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
     /// Record first, changed, or explicitly forced GPU state.
     int recordGPUs( bool force = false /**< [in] record even when values are unchanged */ );
 
-    /// Record first, changed, or explicitly forced IRQ state.
+    /// Record first, changed, or explicitly forced IRQ OK flags and the actual check time.
     int recordIRQs( bool force = false /**< [in] record even when values are unchanged */ );
 
     ///@}
@@ -2182,9 +2182,22 @@ inline int sysMonitor::startupDiagnostics()
 
     bool warning = false;
     m_irqs.clear();
+    std::sort( m_irqRules.begin(),
+               m_irqRules.end(),
+               []( const auto &a, const auto &b )
+               {
+                   return a.m_name < b.m_name;
+               } );
 
-    for( const auto &rule : m_irqRules )
+    for( size_t n = 0; n < m_irqRules.size(); ++n )
     {
+        const auto &rule = m_irqRules[n];
+        log<text_log>( "IRQ policy " + std::to_string( n ) + ": " + rule.m_name + " match=" + rule.m_match +
+                           ( rule.m_cpuset.empty() ? " cpus=" + rule.m_cpus : " cpuset=" + rule.m_cpuset ) +
+                           " required=" + std::to_string( rule.m_required ) +
+                           " requireEffective=" + std::to_string( rule.m_requireEffective ),
+                       logPrio::LOG_NOTICE );
+
         telem_irq::groupT group;
         group.m_name    = rule.m_name;
         group.m_status  = "unchecked";
@@ -2328,6 +2341,14 @@ inline void sysMonitor::acceptGPUResult( const sys::boundedCommand::result &resu
                                            return value.m_uuid == gpu.m_uuid;
                                        } );
 
+        if( gpu.m_index != telem_gpu::UnknownIndex &&
+            ( old == m_gpus.end() || old->m_index != gpu.m_index || old->m_pci != gpu.m_pci ) )
+        {
+            log<text_log>( "GPU mapping: index=" + std::to_string( gpu.m_index ) + " uuid=" + gpu.m_uuid +
+                               " pci=" + gpu.m_pci,
+                           logPrio::LOG_NOTICE );
+        }
+
         if( old == m_gpus.end() || old->m_status != gpu.m_status )
         {
             log<text_log>( "GPU " + gpu.m_uuid + ": " + gpu.m_status,
@@ -2373,6 +2394,13 @@ inline int sysMonitor::pollDiagnostics( std::chrono::steady_clock::time_point no
                                            {
                                                return value.m_name == group.m_name;
                                            } );
+
+            if( old == m_irqs.end() || old->m_status == "unchecked" || old->m_expected != group.m_expected )
+            {
+                log<text_log>( "IRQ expectation " + group.m_name +
+                                   ": expected=" + ( group.m_expected.empty() ? "unavailable" : group.m_expected ),
+                               logPrio::LOG_NOTICE );
+            }
 
             if( old == m_irqs.end() || old->m_status != group.m_status || old->m_warning != group.m_warning ||
                 ( group.m_warning && !( group == *old ) ) )
@@ -2535,7 +2563,17 @@ inline int sysMonitor::recordGPUs( bool force )
 {
     if( m_gpuEnabled && ( !m_gpuRecorded || force || m_gpuStatus != m_lastGPUStatus || m_gpus != m_lastGPUs ) )
     {
-        telem<telem_gpu>( { m_gpuStatus, m_gpus } );
+        std::vector<telem_gpu::gpuT> indexed;
+
+        for( const auto &gpu : m_gpus )
+        {
+            if( gpu.m_index != telem_gpu::UnknownIndex )
+            {
+                indexed.push_back( gpu );
+            }
+        }
+
+        telem<telem_gpu>( { m_gpuStatus, indexed } );
         m_lastGPUStatus = m_gpuStatus;
         m_lastGPUs      = m_gpus;
         m_gpuRecorded   = true;
@@ -2546,10 +2584,23 @@ inline int sysMonitor::recordGPUs( bool force )
 
 inline int sysMonitor::recordIRQs( bool force )
 {
-    if( !m_irqRules.empty() && ( !m_irqRecorded || force || m_irqs != m_lastIRQs ) )
+    std::vector<uint8_t> ok;
+
+    for( const auto &rule : m_irqRules )
     {
-        telem<telem_irq>( m_irqs );
-        m_lastIRQs    = m_irqs;
+        const auto group = std::find_if( m_irqs.begin(),
+                                         m_irqs.end(),
+                                         [&]( const auto &value )
+                                         {
+                                             return value.m_name == rule.m_name;
+                                         } );
+        ok.push_back( group != m_irqs.end() && group->m_status != "unchecked" && !group->m_warning );
+    }
+
+    if( !m_irqRules.empty() && ( !m_irqRecorded || force || ok != m_lastIRQOK ) )
+    {
+        telem<telem_irq>( { ok, m_irqs.empty() ? 0 : m_irqs.front().m_checkTime } );
+        m_lastIRQOK   = std::move( ok );
         m_irqRecorded = true;
     }
 

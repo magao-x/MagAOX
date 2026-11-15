@@ -45,15 +45,14 @@ gTestFixtures = {
         "activeMode": "2"
     },
     "telem_gpu": {
-        "gpus": '{{"GPU-01234567-89ab-cdef-0123-456789abcdef", "0000:01:00.0", "ok", '
+        "gpus": '{{"", "", "ok", '
                 '65, 0.75, 0.25, 256, 8192, 1400, 1410, 7000, 255, 1234567890.25, 0}, '
-                '{"GPU-11234567-89ab-cdef-0123-456789abcdef", "0000:02:00.0", "missing", '
+                '{"", "", "missing", '
                 '40, 0.1, 0.5, 512, 16384, 500, 510, 2000, 0, 1234567880.5, 7}}'
     },
     "telem_irq": {
-        "groups": '{{"gpu", "45", "ok", false, 1234567890.25, {{100, "45", "45"}, '
-                  '{101, "45", "45"}}}, {"camera", "49", "mismatch", true, 1234567891.5, '
-                  '{{200, "1", "1"}}}}'
+        "ok": "{1, 0, 1}",
+        "checkTime": "1234567890.25"
     }
 }
 
@@ -61,9 +60,7 @@ gTestFixtures = {
 # FlatBuffers struct constructors. Include timestamps omitted by state equality.
 gVectorAdapters = {
     "telem_gpu": {"gpus": {"vectorType": "MagAOX::logger::telem_gpu::gpuT",
-                           "decoder": "gpus", "extraVectorMembers": ["m_sampleTime"]}},
-    "telem_irq": {"groups": {"vectorType": "MagAOX::logger::telem_irq::groupT",
-                             "decoder": "groups", "extraVectorMembers": ["m_checkTime"]}}
+                           "decoder": "gpus", "extraVectorMembers": ["m_sampleTime"]}}
 }
 
 # Check Jinja2 is installed; retain the existing installation fallback.
@@ -386,17 +383,18 @@ def makeFieldAssertions(field : dict, actual : str, expected : str) -> list[str]
     return [f"REQUIRE({actual} == {expected});"]
 
 def findMatchingSchemaField(schemaFieldInfo, fieldName):
-    """Find an exact field name in the root or a nested schema table."""
-    for schemaField in schemaFieldInfo:
-        if isinstance(schemaField, tuple) and schemaField[0] == fieldName:
+    """Match the parameter name, then its snake_case form, in root or nested fields."""
+    for candidate in (fieldName, re.sub(r"(?<!^)(?=[A-Z])", "_", fieldName).lower()):
+        for schemaField in schemaFieldInfo:
+            if isinstance(schemaField, tuple) and schemaField[0] == candidate:
                 return schemaField, None
-        if isinstance(schemaField, dict):
-            subTableName = next(iter(schemaField))
-            for subField in schemaField[subTableName]:
-                if len(subField) != 2:
-                    continue
-                if subField[0] == fieldName:
-                    return subField, subTableName
+            if isinstance(schemaField, dict):
+                subTableName = next(iter(schemaField))
+                for subField in schemaField[subTableName]:
+                    if len(subField) != 2:
+                        continue
+                    if subField[0] == candidate:
+                        return subField, subTableName
     return None, None # no matching field in schema for given fieldName
 
 def setDefaultArgOfLastField(fieldsList, fieldParts):

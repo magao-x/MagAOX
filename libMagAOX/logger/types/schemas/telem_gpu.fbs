@@ -1,5 +1,5 @@
 /// \file telem_gpu.fbs
-/// \brief Identified GPU measurements with per-field validity and acquisition times.
+/// \brief Indexed GPU measurements with per-field validity and acquisition times.
 namespace MagAOX.logger;
 
 // valid bits, in field order: temperature, load, memory_load, memory_used,
@@ -7,8 +7,8 @@ namespace MagAOX.logger;
 // the associated numeric values, which may retain older measurements.
 table Gpu_sample_fb
 {
-    uuid:string (required);
-    pci:string (required);
+    uuid:string; // Legacy records only; new records identify the device by index.
+    pci:string;  // Legacy records only; initial discovery and mapping changes log static identity separately.
     status:string (required);
     temperature:double;    // Celsius
     load:double;           // kernel-active fraction, 0..1

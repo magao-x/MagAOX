@@ -104,7 +104,7 @@ class diagnosticHarness : public sysMonitor
     using sysMonitor::m_irqRules;
     using sysMonitor::m_irqs;
     using sysMonitor::m_lastGPUs;
-    using sysMonitor::m_lastIRQs;
+    using sysMonitor::m_lastIRQOK;
     using sysMonitor::pollDiagnostics;
     using sysMonitor::publishDiagnostics;
     using sysMonitor::recordGPUs;
@@ -131,6 +131,9 @@ class diagnosticHarness : public sysMonitor
 
     /// Flush private logs and return their text messages with priorities in record order.
     std::vector<std::pair<flatlogs::logPrioT, std::string>> textLogs();
+
+    /// Flush and read private records in file order.
+    std::vector<flatlogs::bufferPtrT> records( bool telemetry /**< [in] select telemetry instead of process logs */ );
 };
 
 diagnosticHarness::diagnosticHarness()
@@ -204,22 +207,31 @@ int diagnosticHarness::loadExample( const std::string &file )
     return loadDiagnosticsConfig( config );
 }
 
-std::vector<std::pair<flatlogs::logPrioT, std::string>> diagnosticHarness::textLogs()
+std::vector<flatlogs::bufferPtrT> diagnosticHarness::records( bool telemetry )
 {
-    m_log.logShutdown( true );
-    m_log.logThreadExec();
+    if( telemetry )
+    {
+        m_tel.logShutdown( true );
+        m_tel.logThreadExec();
+    }
+    else
+    {
+        m_log.logShutdown( true );
+        m_log.logThreadExec();
+    }
+
     std::vector<std::filesystem::path> files;
 
     for( const auto &entry : std::filesystem::recursive_directory_iterator( m_root ) )
     {
-        if( entry.path().extension() == ".binlog" )
+        if( entry.path().extension() == ( telemetry ? ".bintel" : ".binlog" ) )
         {
             files.push_back( entry.path() );
         }
     }
 
     std::sort( files.begin(), files.end() );
-    std::vector<std::pair<flatlogs::logPrioT, std::string>> result;
+    std::vector<flatlogs::bufferPtrT> result;
 
     for( const auto &path : files )
     {
@@ -235,13 +247,26 @@ std::vector<std::pair<flatlogs::logPrioT, std::string>> diagnosticHarness::textL
             REQUIRE( size >= flatlogs::logHeader::minHeadSize );
             REQUIRE( size <= bytes.size() - offset );
 
-            if( flatlogs::logHeader::eventCode( record ) == text_log::eventCode )
-            {
-                result.emplace_back( flatlogs::logHeader::logLevel( record ),
-                                     text_log::message( flatlogs::logHeader::messageBuffer( record ) ) );
-            }
-
+            flatlogs::bufferPtrT buffer( static_cast<char *>( ::operator new( size ) ) );
+            std::memcpy( buffer.get(), record, size );
+            result.push_back( buffer );
             offset += size;
+        }
+    }
+
+    return result;
+}
+
+std::vector<std::pair<flatlogs::logPrioT, std::string>> diagnosticHarness::textLogs()
+{
+    std::vector<std::pair<flatlogs::logPrioT, std::string>> result;
+
+    for( const auto &record : records( false ) )
+    {
+        if( flatlogs::logHeader::eventCode( record.get() ) == text_log::eventCode )
+        {
+            result.emplace_back( flatlogs::logHeader::logLevel( record.get() ),
+                                 text_log::message( flatlogs::logHeader::messageBuffer( record.get() ) ) );
         }
     }
 
@@ -384,6 +409,7 @@ TEST_CASE( "sysMonitor GPU properties follow NVIDIA indices", "[sysMonitor][diag
     REQUIRE( app.m_gpuProperties.at( "gpu_2" )["valid"].get<unsigned>() == 0 );
     REQUIRE( app.m_gpuProperties.at( "gpu_2" ).getState() == INDI_ALERT );
     REQUIRE( app.m_gpuStatus == "partial" );
+    REQUIRE( app.recordGPUs() == 0 );
 
     app.m_result.m_output = "1," + gpuCSV.substr( 2 ) + "0," + secondCSV;
     app.acceptGPUResult( app.m_result, 400 );
@@ -391,6 +417,34 @@ TEST_CASE( "sysMonitor GPU properties follow NVIDIA indices", "[sysMonitor][diag
     REQUIRE( app.m_gpuInfoProperties.at( "gpu_1" )["uuid"].get<std::string>() == gpuUUID );
     REQUIRE( app.m_gpuProperties.at( "gpu_1" )["valid"].get<unsigned>() == 255 );
     REQUIRE( app.m_gpuStatus == "ok" );
+    REQUIRE( app.recordGPUs() == 0 );
+    const auto records = app.records( true );
+    REQUIRE( records.size() == 2 );
+    const auto replaced = telem_gpu::gpus( flatlogs::logHeader::messageBuffer( records[0].get() ) );
+    REQUIRE( replaced.size() == 1 );
+    REQUIRE( replaced[0].m_index == 0 );
+    REQUIRE( replaced[0].m_temperature == 60 );
+    REQUIRE( replaced[0].m_uuid.empty() );
+    const auto recovered = telem_gpu::gpus( flatlogs::logHeader::messageBuffer( records[1].get() ) );
+    REQUIRE( recovered.size() == 2 );
+    REQUIRE( recovered[0].m_index == 1 );
+    REQUIRE( recovered[1].m_index == 0 );
+
+    std::vector<std::string> mappings;
+
+    for( const auto &[priority, message] : app.textLogs() )
+    {
+        if( message.find( "GPU mapping: " ) == 0 )
+        {
+            REQUIRE( priority == logPrio::LOG_NOTICE );
+            mappings.push_back( message );
+        }
+    }
+
+    REQUIRE( mappings == std::vector<std::string>{ "GPU mapping: index=0 uuid=" + gpuUUID + " pci=00000000:01:00.0",
+                                                   "GPU mapping: index=2 uuid=" + secondUUID + " pci=00000000:02:00.0",
+                                                   "GPU mapping: index=0 uuid=" + secondUUID + " pci=00000000:02:00.0",
+                                                   "GPU mapping: index=1 uuid=" + gpuUUID + " pci=00000000:01:00.0" } );
 }
 
 /// Verify IRQ detail is absent from INDI and logged only on changed fault snapshots.
@@ -419,18 +473,25 @@ TEST_CASE( "sysMonitor logs IRQ details only for changed problems", "[sysMonitor
     app.m_groups = { irqGroup( false ) };
     REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 24 ) ) == 0 );
     REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 30 ) ) == 0 );
+    app.m_groups[0].m_expected = "46";
+    app.m_groups[0].m_irqs     = { { 125, "46", "46" } };
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 36 ) ) == 0 );
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 42 ) ) == 0 );
     const auto logs = app.textLogs();
-    REQUIRE( logs.size() == 4 );
+    REQUIRE( logs.size() == 7 );
     REQUIRE( logs[0].first == logPrio::LOG_NOTICE );
-    REQUIRE( logs[0].second == "IRQ camera: ok" );
-    REQUIRE( logs[1].first == logPrio::LOG_WARNING );
-    REQUIRE( logs[1].second ==
+    REQUIRE( logs[0].second == "IRQ policy 0: camera match=edt cpuset=camera required=1 requireEffective=1" );
+    REQUIRE( logs[1].second == "IRQ expectation camera: expected=45" );
+    REQUIRE( logs[2].second == "IRQ camera: ok" );
+    REQUIRE( logs[3].first == logPrio::LOG_WARNING );
+    REQUIRE( logs[3].second ==
              "IRQ camera: requested affinity mismatch; expected=45; IRQ 123 requested=0-63 effective=45" );
-    REQUIRE( logs[2].first == logPrio::LOG_WARNING );
-    REQUIRE( logs[2].second ==
+    REQUIRE( logs[4].first == logPrio::LOG_WARNING );
+    REQUIRE( logs[4].second ==
              "IRQ camera: requested affinity mismatch; expected=45; IRQ 123 requested=0-31 effective=45" );
-    REQUIRE( logs[3].first == logPrio::LOG_NOTICE );
-    REQUIRE( logs[3].second == "IRQ camera: ok" );
+    REQUIRE( logs[5].first == logPrio::LOG_NOTICE );
+    REQUIRE( logs[5].second == "IRQ camera: ok" );
+    REQUIRE( logs[6].second == "IRQ expectation camera: expected=46" );
 }
 
 /// Verify IRQ warnings start unchecked, include failures, and clear without repeated property traffic.
@@ -490,7 +551,7 @@ TEST_CASE( "sysMonitor telemetry records first changes and forced snapshots", "[
     REQUIRE( app.recordGPUs() == 0 );
     REQUIRE( app.recordIRQs() == 0 );
     REQUIRE( app.m_lastGPUs.size() == 1 );
-    REQUIRE( app.m_lastIRQs.size() == 1 );
+    REQUIRE( app.m_lastIRQOK == std::vector<uint8_t>{ 1 } );
     REQUIRE( telem_gpu::lastRecord.tv_sec != 0 );
     REQUIRE( telem_irq::lastRecord.tv_sec != 0 );
 
@@ -507,7 +568,79 @@ TEST_CASE( "sysMonitor telemetry records first changes and forced snapshots", "[
     REQUIRE( telem_gpu::lastRecord.tv_sec != 0 );
     REQUIRE( telem_irq::lastRecord.tv_sec != 0 );
     REQUIRE( app.m_lastGPUs[0].m_sampleTime == 200 );
-    REQUIRE( app.m_lastIRQs[0].m_checkTime == 200 );
+    const auto records = app.records( true );
+    REQUIRE( records.size() == 4 );
+
+    for( size_t n = 0; n < records.size(); n += 2 )
+    {
+        const auto gpu = telem_gpu::gpus( flatlogs::logHeader::messageBuffer( records[n].get() ) );
+        REQUIRE( gpu.size() == 1 );
+        REQUIRE( gpu[0].m_index == 0 );
+        REQUIRE( gpu[0].m_uuid.empty() );
+        REQUIRE( gpu[0].m_pci.empty() );
+        REQUIRE( gpu[0].m_sampleTime == ( n == 0 ? 100 : 200 ) );
+        auto *irq = flatlogs::logHeader::messageBuffer( records[n + 1].get() );
+        REQUIRE( telem_irq::ok( irq ) == std::vector<unsigned>{ 1 } );
+        REQUIRE( telem_irq::groups( irq ).empty() );
+        REQUIRE( telem_irq::checkTime( irq ) == ( n == 0 ? 100 : 200 ) );
+    }
+}
+
+/// Verify compact flags use the logged group order and ignore placement-only changes.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor IRQ telemetry records only policy OK changes", "[sysMonitor][diagnostics]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::startupDiagnostics();
+    sysMonitor::recordIRQs(false);
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_irqRules = { { "network", "nic", "", "46", false, false }, { "camera", "edt", "camera", "", true, true } };
+    REQUIRE( app.startupDiagnostics() == 0 );
+    REQUIRE( app.recordIRQs() == 0 );
+    REQUIRE( app.m_lastIRQOK == std::vector<uint8_t>{ 0, 0 } );
+    auto camera        = irqGroup( false );
+    camera.m_checkTime = 100;
+    telem_irq::groupT network{ "network", "46", "optional device absent", false, 100, {} };
+    app.m_irqs = { network, camera };
+    REQUIRE( app.recordIRQs() == 0 );
+    REQUIRE( app.m_lastIRQOK == std::vector<uint8_t>{ 1, 1 } );
+    app.m_irqs[1].m_irqs[0].m_number = 456;
+    app.m_irqs[1].m_expected         = "47";
+    app.m_irqs[1].m_status           = "requested affinity verified; effective affinity unverified";
+    telem_irq::lastRecord            = {};
+    REQUIRE( app.recordIRQs() == 0 );
+    REQUIRE( telem_irq::lastRecord.tv_sec == 0 );
+    app.m_irqs[1].m_warning = true;
+    app.m_irqs[1].m_status  = "requested affinity mismatch";
+    REQUIRE( app.recordIRQs() == 0 );
+    REQUIRE( app.m_lastIRQOK == std::vector<uint8_t>{ 0, 1 } );
+    app.m_irqs[1].m_irqs[0].m_requested = "0-31";
+    app.m_irqs[0].m_checkTime           = 200;
+    app.m_irqs[1].m_checkTime           = 200;
+    telem_irq::lastRecord               = {};
+    REQUIRE( app.recordIRQs() == 0 );
+    REQUIRE( telem_irq::lastRecord.tv_sec == 0 );
+    REQUIRE( app.recordIRQs( true ) == 0 );
+    const auto records = app.records( true );
+    REQUIRE( records.size() == 4 );
+    const std::vector<std::vector<unsigned>> flags{ { 0, 0 }, { 1, 1 }, { 0, 1 }, { 0, 1 } };
+    const std::vector<double>                times{ 0, 100, 100, 200 };
+
+    for( size_t n = 0; n < records.size(); ++n )
+    {
+        auto *payload = flatlogs::logHeader::messageBuffer( records[n].get() );
+        REQUIRE( telem_irq::ok( payload ) == flags[n] );
+        REQUIRE( telem_irq::checkTime( payload ) == times[n] );
+        REQUIRE( telem_irq::groups( payload ).empty() );
+    }
+
+    const auto logs = app.textLogs();
+    REQUIRE( logs.size() == 2 );
+    REQUIRE( logs[0].second == "IRQ policy 0: camera match=edt cpuset=camera required=1 requireEffective=1" );
+    REQUIRE( logs[1].second == "IRQ policy 1: network match=nic cpus=46 required=0 requireEffective=0" );
 }
 
 /// Verify shipped host policies match the merged dedicated IRQ structure.

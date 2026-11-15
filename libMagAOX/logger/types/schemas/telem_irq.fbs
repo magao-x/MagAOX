@@ -1,5 +1,5 @@
 // \file telem_irq.fbs
-// \brief Identified IRQ placement checks, including incomplete and failed checks.
+// \brief Compact IRQ policy flags with legacy placement-record decoding.
 namespace MagAOX.logger;
 
 table IrqAffinity
@@ -21,7 +21,11 @@ table IrqGroup
 
 table Telem_irq_fb
 {
-    groups:[IrqGroup] (required);
+    // Retain the original field slot for reading existing identified records.
+    groups:[IrqGroup];
+    // Current records omit groups and store flags in the startup-logged group order.
+    ok:[ubyte];
+    check_time:double;
 }
 
 root_type Telem_irq_fb;
