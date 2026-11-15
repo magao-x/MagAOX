@@ -6,6 +6,7 @@
 #define PCSHADOW_HPP
 
 #include <memory>
+#include <atomic>
 #include <vector>
 
 #include "ar_controller.hpp"
@@ -18,6 +19,57 @@ enum class ShadowMode
 {
     Standard,
     AccelAssisted
+};
+
+/// One scalar of a scored frozen-origin forecast; future commands are confirmed later, never known at the origin.
+struct ShadowPrediction
+{
+    ShadowMode    m_mode{ ShadowMode::Standard }; ///< Independent predictor identity.
+    std::uint64_t m_origin{ 0 }, m_target{ 0 };   ///< Original external WFS counters, not circular buffer indices.
+    unsigned      m_horizon{ 0 }, m_channel{ 0 }; ///< Positive WFS-frame horizon and measured modal channel.
+    double        m_prediction{ 0 }, m_measurement{ 0 }; ///< Conditional forecast and identical observed target.
+    bool m_late{ false }; ///< Computed after an explicit diagnostic deadline, or without any deadline qualification.
+    std::uint64_t m_generation{ 0 }, m_epoch{ 0 }, m_layout{ 0 }; ///< Adapter source/synchronization/calibration tags.
+    double m_originPrediction{ 0 }; ///< Forecast using only origin state and a held-last-confirmed-input assumption.
+    bool   m_originValid{ false };  ///< False for older auto-origins whose future input was already known when frozen.
+};
+
+/// Optional diagnostics consumer, serialized with learning; it must not block, throw or change model/input state.
+class ShadowPredictionSink
+{
+  public:
+    /// Destroy only the interface, without owning the learner.
+    virtual ~ShadowPredictionSink() = default;
+
+    /// Enqueue a fixed scalar or count diagnostic loss; no I/O or learner calls are allowed here.
+    virtual void prediction( const ShadowPrediction &sample /**< [in] Scored conditional forecast. */ ) noexcept = 0;
+};
+
+/// Bounded SPSC scalar-score transport; diagnostic overflow never changes learner or input state.
+class ShadowPredictionQueue
+{
+    std::vector<ShadowPrediction> m_rows;                   ///< Fixed owned payload slots; empty means disabled.
+    std::atomic<std::size_t>      m_head{ 0 }, m_tail{ 0 }; ///< Sole numerical producer and ordinary consumer cursors.
+    std::atomic<std::uint64_t>    m_drops{ 0 };             ///< Rejected diagnostic records, never acquisition losses.
+
+  public:
+    /// Allocate at most 65536 records before starting either thread; zero disables tracing.
+    explicit ShadowPredictionQueue( std::size_t capacity /**< [in] Fixed scalar capacity. */ );
+
+    /// Copy a scalar or count overflow, with no allocation, blocking or I/O.
+    bool push( const ShadowPrediction &sample /**< [in] Original score. */ ) noexcept;
+
+    /// Copy one oldest scalar on the sole consumer thread.
+    bool pop( ShadowPrediction &sample /**< [out] Original score if present. */ ) noexcept;
+
+    /// Observe approximate active backlog, separate from historical model counters.
+    std::size_t queued() const noexcept;
+
+    /// Observe lifetime trace-only losses since reset.
+    std::uint64_t drops() const noexcept;
+
+    /// Reset only when producer and consumer are quiescent, including an explicit worker restart.
+    void reset() noexcept;
 };
 
 /// Describe why a shadow model cannot yet supply valid diagnostics.
@@ -156,7 +208,9 @@ struct ShadowStatus
     int m_rank{ 0 };
 
     /// Conditional future-residual RMSE; meaningful only with predictionValid.
-    double m_rmse{ 0 };
+    double        m_rmse{ 0 };
+    double        m_originRmse{ 0 };        ///< Origin-only RMSE, excluding any actual future input values.
+    std::uint64_t m_originPredictions{ 0 }; ///< Scored origin-only forecast vectors in this segment.
 
     /// Current readiness/fault description.
     ShadowReason m_reason{ ShadowReason::AwaitingRecord };
@@ -175,10 +229,18 @@ class ShadowController
     /// Parameters and state frozen at an origin, scored only after its target horizon matures.
     struct Forecast
     {
+        /// Original external counter at which coefficients and state were frozen.
+        std::uint64_t m_index{ 0 };
+        /// Diagnostic lateness is distinct from data causality and DM slot eligibility.
+        bool m_late{ false };
         /// Canonical [A B D C] prediction matrix at the origin.
         Matrix m_theta;
         /// Canonical [y_p;u_p;a_p] state available at the origin.
         Matrix m_state;
+        /// Actual origin-only WFS forecast under the explicit held-last-confirmed-input assumption.
+        Matrix m_availablePrediction;
+        /// Only explicit next-origin calls can establish this forecast without future inputs.
+        bool m_availableValid{ false };
         /// Origin was ready when this forecast was saved.
         bool m_valid{ false };
     };
@@ -198,6 +260,8 @@ class ShadowController
         Matrix m_proposal;
         /// Fixed forecast scoring and normalized rank workspaces.
         Matrix m_context, m_error, m_scaled;
+        /// Pre-subtraction prediction copied only for an enabled scalar trace, so reporting cannot depend on truth.
+        Matrix m_scoredPrediction;
         /// Empty standard-model sensor argument; both sides of the selection remain lvalues.
         Matrix m_emptyAcceleration;
         /// Reused factorization; the numerical rank rule and threshold are unchanged.
@@ -214,8 +278,12 @@ class ShadowController
         std::uint64_t m_segmentUpdates{ 0 };
         /// Sum of frozen-origin squared prediction errors in this segment.
         double m_squaredError{ 0 };
+        /// Separate origin-only diagnostics never feed learning, command history or control.
+        double m_originSquaredError{ 0 };
         /// Number of output values scored in this segment.
         std::uint64_t m_errorValues{ 0 };
+        /// Number of scalar targets scored without future inputs.
+        std::uint64_t m_originErrorValues{ 0 };
         /// Numerical fault latched until an explicit model reset.
         bool m_fault{ false };
     };
@@ -241,6 +309,9 @@ class ShadowController
     /// Only validity flags retained from the latest input, without sample matrices.
     ShadowRecord m_validity;
 
+    /// Borrowed optional diagnostics sink; caller serializes replacement and outlives all process calls.
+    ShadowPredictionSink *m_predictionSink{ nullptr };
+
     /// Construct an independent model without changing the other model.
     void initialize( Model &model /**< [out] Model to replace. */,
                      bool   assisted /**< [in] Include accelerometer columns. */ );
@@ -254,6 +325,10 @@ class ShadowController
                const ShadowRecord &record /**< [in] Validated common record. */,
                bool                assisted /**< [in] Use the supplied acceleration features. */ );
 
+    /// Freeze an origin-only forecast with the last confirmed input repeated, never a shadow-generated input.
+    void available_forecast( Model    &model /**< [in,out] Independent ready model. */,
+                             Forecast &origin /**< [in,out] Frozen state and coefficients. */ );
+
     /// Return the independent state selected by a validated enum value.
     Model &model( ShadowMode mode /**< [in] Standard or assisted. */ );
 
@@ -263,6 +338,9 @@ class ShadowController
   public:
     /// Allocate the pair and validate fixed configuration; training starts disabled for both models.
     explicit ShadowController( const ShadowConfig &config /**< [in] Fixed model and readiness parameters. */ );
+
+    /// Install optional nonblocking diagnostics without changing either numerical model or readiness.
+    void prediction_sink( ShadowPredictionSink *sink /**< [in] Borrowed sink or nullptr; no ownership transfer. */ );
 
     /// Accept a complete record; invalid common data stop both models, missing acceleration stops only the assisted
     /// one.
@@ -276,6 +354,9 @@ class ShadowController
 
     /// Cancel next-origin scoring when computation missed its externally established cutoff.
     void discard_next_forecasts();
+
+    /// Preserve a data-causal forecast for diagnostics while explicitly marking missed computation deadlines.
+    void mark_next_forecasts_late();
 
     /// Enable or pause one learner without changing selection or the other learner.
     void training( ShadowMode mode /**< [in] Learner to configure. */,
@@ -310,6 +391,13 @@ class ShadowController
                        Matrix       &plan /**< [out] Pre-sized F*m*commandSlots newest-first future plan. */,
                        const Matrix *fixedPrefix =
                            nullptr /**< [in] Independently established oldest command slots, newest first. */ );
+
+    /// Freeze only the DDSPC state/coefficients for conditional scoring, without requiring or solving a DM plan.
+    bool freeze_next( ShadowMode    mode /**< [in] Independent ready model. */,
+                      std::uint64_t index /**< [in] Next external WFS counter. */,
+                      const Matrix &measurement /**< [in] Actual current measurement. */,
+                      const Matrix &acceleration /**< [in] Available individual ADC lift. */,
+                      bool          late /**< [in] Honest diagnostic computation status, not an output permission. */ );
 
     /// Evaluate the latest ready validation snapshot without adaptation, rank work or allocation.
     /** Caller serializes access and supplies a causally synchronized canonical state. Readiness refers to the

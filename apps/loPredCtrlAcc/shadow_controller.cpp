@@ -13,6 +13,54 @@
 namespace DDSPC
 {
 
+ShadowPredictionQueue::ShadowPredictionQueue( std::size_t capacity )
+{
+    if( capacity > 65536 )
+        throw std::invalid_argument( "Prediction queue exceeds bound" );
+    if( capacity )
+        m_rows.resize( capacity + 1 );
+}
+bool ShadowPredictionQueue::push( const ShadowPrediction &sample ) noexcept
+{
+    if( m_rows.empty() )
+        return false;
+    const auto head = m_head.load( std::memory_order_relaxed );
+    const auto next = ( head + 1 ) % m_rows.size();
+    if( next == m_tail.load( std::memory_order_acquire ) )
+    {
+        ++m_drops;
+        return false;
+    }
+    m_rows[head] = sample;
+    m_head.store( next, std::memory_order_release );
+    return true;
+}
+bool ShadowPredictionQueue::pop( ShadowPrediction &sample ) noexcept
+{
+    if( m_rows.empty() )
+        return false;
+    const auto tail = m_tail.load( std::memory_order_relaxed );
+    if( tail == m_head.load( std::memory_order_acquire ) )
+        return false;
+    sample = m_rows[tail];
+    m_tail.store( ( tail + 1 ) % m_rows.size(), std::memory_order_release );
+    return true;
+}
+std::size_t ShadowPredictionQueue::queued() const noexcept
+{
+    return m_rows.empty() ? 0 : ( m_head.load() + m_rows.size() - m_tail.load() ) % m_rows.size();
+}
+std::uint64_t ShadowPredictionQueue::drops() const noexcept
+{
+    return m_drops.load();
+}
+void ShadowPredictionQueue::reset() noexcept
+{
+    m_head.store( 0 );
+    m_tail.store( 0 );
+    m_drops.store( 0 );
+}
+
 const char *shadow_reason( ShadowReason reason )
 {
     switch( reason )
@@ -66,19 +114,21 @@ void ShadowController::initialize( Model &item, bool assisted )
     fresh.m_workspace           = fresh.m_controller->make_workspace();
     fresh.m_status.m_features   = fresh.m_controller->prediction_matrix_view().cols();
     const int p = fresh.m_status.m_features, d = m_config.m_future * m_config.m_modes;
-    const int q      = d * ( assisted ? m_config.m_assistedCommandSlots : m_config.m_standardCommandSlots );
-    fresh.m_features = Matrix::Zero( fresh.m_status.m_features, fresh.m_status.m_features );
-    fresh.m_context  = Matrix::Zero( p, 1 );
-    fresh.m_error    = Matrix::Zero( d, 1 );
-    fresh.m_scaled   = Matrix::Zero( p, p );
-    fresh.m_rankQR   = std::make_unique<Eigen::ColPivHouseholderQR<Matrix>>( p, p );
-    fresh.m_proposal = Matrix::Zero(
+    const int q              = d * ( assisted ? m_config.m_assistedCommandSlots : m_config.m_standardCommandSlots );
+    fresh.m_features         = Matrix::Zero( fresh.m_status.m_features, fresh.m_status.m_features );
+    fresh.m_context          = Matrix::Zero( p, 1 );
+    fresh.m_error            = Matrix::Zero( d, 1 );
+    fresh.m_scoredPrediction = Matrix::Zero( d, 1 );
+    fresh.m_scaled           = Matrix::Zero( p, p );
+    fresh.m_rankQR           = std::make_unique<Eigen::ColPivHouseholderQR<Matrix>>( p, p );
+    fresh.m_proposal         = Matrix::Zero(
         m_config.m_modes * ( assisted ? m_config.m_assistedCommandSlots : m_config.m_standardCommandSlots ), 1 );
     fresh.m_forecasts.resize( m_config.m_future + 1 );
     for( auto &forecast : fresh.m_forecasts )
     {
-        forecast.m_theta = Matrix::Zero( d, p );
-        forecast.m_state = Matrix::Zero( p - q, 1 );
+        forecast.m_theta               = Matrix::Zero( d, p );
+        forecast.m_state               = Matrix::Zero( p - q, 1 );
+        forecast.m_availablePrediction = Matrix::Zero( d, 1 );
     }
     item = std::move( fresh );
 }
@@ -115,6 +165,8 @@ void ShadowController::break_history( Model &item, bool resetBuffers )
     item.m_status.m_reason          = item.m_fault ? ShadowReason::NumericalFault : ShadowReason::InvalidData;
     item.m_featureRows = item.m_segmentUpdates = item.m_errorValues = 0;
     item.m_squaredError                                             = 0;
+    item.m_originSquaredError                                       = 0;
+    item.m_originErrorValues                                        = 0;
     item.m_proposal.setZero();
     item.m_features.setZero();
     item.m_rankDirty   = true;
@@ -196,6 +248,12 @@ void ShadowController::discard_next_forecasts()
         item->m_forecasts[item->m_status.m_samples % item->m_forecasts.size()].m_valid = false;
 }
 
+void ShadowController::mark_next_forecasts_late()
+{
+    for( auto *item : { &m_standard, &m_assisted } )
+        item->m_forecasts[item->m_status.m_samples % item->m_forecasts.size()].m_late = true;
+}
+
 void ShadowController::step( Model &item, const ShadowRecord &record, bool assisted )
 {
     auto &state       = item.m_status;
@@ -227,9 +285,38 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
                     phi.topRows( m_config.m_future * m_config.m_modes *
                                  ( assisted ? m_config.m_assistedCommandSlots : m_config.m_standardCommandSlots ) );
                 item.m_error.noalias() = origin.m_theta * item.m_context;
+                if( m_predictionSink )
+                    item.m_scoredPrediction = item.m_error;
                 item.m_error -= target;
                 if( !item.m_error.allFinite() )
                     throw std::runtime_error( "Nonfinite shadow forecast" );
+                if( origin.m_availableValid )
+                {
+                    for( int row = 0; row < target.rows(); ++row )
+                    {
+                        const double error = double( origin.m_availablePrediction( row ) ) - target( row );
+                        item.m_originSquaredError += error * error;
+                    }
+                    item.m_originErrorValues += target.rows();
+                    state.m_originRmse = std::sqrt( item.m_originSquaredError / item.m_originErrorValues );
+                    ++state.m_originPredictions;
+                }
+                if( m_predictionSink )
+                    for( int row = 0; row < target.rows(); ++row )
+                    {
+                        ShadowPrediction score{ assisted ? ShadowMode::AccelAssisted : ShadowMode::Standard,
+                                                origin.m_index,
+                                                record.m_index - unsigned( row / m_config.m_modes ),
+                                                unsigned( m_config.m_future - row / m_config.m_modes ),
+                                                unsigned( row % m_config.m_modes ),
+                                                double( item.m_scoredPrediction( row ) ),
+                                                double( target( row ) ),
+                                                origin.m_late };
+                        score.m_originValid = origin.m_availableValid;
+                        if( score.m_originValid )
+                            score.m_originPrediction = origin.m_availablePrediction( row );
+                        m_predictionSink->prediction( score );
+                    }
                 item.m_squaredError += item.m_error.cast<double>().squaredNorm();
                 item.m_errorValues += item.m_error.size();
                 state.m_rmse = std::sqrt( item.m_squaredError / item.m_errorValues );
@@ -301,6 +388,9 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
         next.m_valid = state.m_ready;
         if( next.m_valid )
         {
+            next.m_index          = record.m_index;
+            next.m_availableValid = false;
+            next.m_late           = false;
             DDSPC_PROFILE_SCOPE( Diagnostics );
             next.m_theta = workspace.theta();
             next.m_state = workspace.state();
@@ -345,6 +435,10 @@ ShadowMode ShadowController::selected() const
 {
     return m_selected;
 }
+void ShadowController::prediction_sink( ShadowPredictionSink *sink )
+{
+    m_predictionSink = sink;
+}
 ShadowStatus ShadowController::status( ShadowMode mode ) const
 {
     return model( mode ).m_status;
@@ -360,6 +454,45 @@ Matrix ShadowController::prediction_matrix( ShadowMode mode )
 Matrix ShadowController::proposal( ShadowMode mode ) const
 {
     return model( mode ).m_status.m_ready ? model( mode ).m_proposal : Matrix();
+}
+
+void ShadowController::available_forecast( Model &item, Forecast &origin )
+{
+    const Matrix lastInput                 = item.m_controller->get_current_command_past( 1 );
+    const int    inputs                    = lastInput.rows();
+    origin.m_availablePrediction.noalias() = origin.m_theta.leftCols( origin.m_state.rows() ) * origin.m_state;
+    for( int h = 0; h < m_config.m_future; ++h )
+        origin.m_availablePrediction.noalias() +=
+            origin.m_theta.middleCols( origin.m_state.rows() + h * inputs, inputs ) * lastInput;
+    if( !origin.m_availablePrediction.allFinite() )
+        throw std::runtime_error( "Nonfinite origin-only DDSPC forecast" );
+    origin.m_availableValid = true;
+}
+
+bool ShadowController::freeze_next(
+    ShadowMode mode, std::uint64_t index, const Matrix &measurement, const Matrix &acceleration, bool late )
+{
+    auto &item = model( mode );
+    if( !m_config.m_externalOrigins || !m_haveIndex || index != m_lastIndex + 1 || !item.m_status.m_ready ||
+        !item.m_status.m_dataValid || item.m_fault )
+        return false;
+    try
+    {
+        auto &origin = item.m_forecasts[item.m_status.m_samples % item.m_forecasts.size()];
+        item.m_controller->next_prediction_state( measurement, acceleration, origin.m_state );
+        origin.m_theta = item.m_workspace->theta();
+        available_forecast( item, origin );
+        origin.m_index = index;
+        origin.m_late  = late;
+        origin.m_valid = true;
+        return true;
+    }
+    catch( const std::exception & )
+    {
+        item.m_fault = true;
+        break_history( item );
+        return false;
+    }
 }
 
 bool ShadowController::predict_next( ShadowMode    mode,
@@ -399,6 +532,9 @@ bool ShadowController::predict_next( ShadowMode    mode,
         if( !plan.allFinite() )
             throw std::runtime_error( "Nonfinite next-origin DDSPC plan" );
         origin.m_theta = item.m_workspace->theta();
+        available_forecast( item, origin );
+        origin.m_index = index;
+        origin.m_late  = false;
         origin.m_valid = true;
         return true;
     }

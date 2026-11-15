@@ -1,4 +1,23 @@
+Current native integration: [SYNCO_NATIVE.md](../SYNCO_NATIVE.md).
+`check-multirate` includes native packet-to-RLS/QR training, the actual ordinary
+numerical worker/CSV recorder, source interruptions, complete DM-image projection,
+four-slot Request ordering, prepared-payload overlap/fallback/deadlines, and
+read-only schedule loss/reconnection. `native_producer_test.py` also verifies the
+exact upstream helper hashes and absence of producer poll/publish calls.
+All of these tests use explicit private transport/framework doubles, not live streams.
+
 # Offline DDSPC validation
+
+The current native input convention is upstream semaphore synchronization, with
+four individual ADC samples per measured WFS frame. See
+[UPSTREAM_SHADOW.md](../UPSTREAM_SHADOW.md) and
+[ACCELSIM_SHADOW_EXPERIMENT.md](../ACCELSIM_SHADOW_EXPERIMENT.md).
+`check-multirate` now exercises the common synchronized record factories and
+origin-only forecasts with no physical exposure or cross-host clock requirement.
+`qualified-replay` builds the safe standalone **native DDSPC** report CLI; it is
+neither EOF nor a live application. Its report includes matched RMSE, gap-aware
+prediction-error PSDs, rank/readiness and numerical-job timing. Explicit synthetic
+qualification stays distinct from live source/command qualification.
 
 ## Qualified online multirate shadow tests
 
@@ -8,7 +27,9 @@ check-multirate` from the app directory for actual rectangular DDSPC/RLS/QR,
 causal ADC histories, independent model readiness/fallback, source/clock loss,
 deadline, resource-bound and installed-header safety tests. This does not launch
 a native app or use a live stream. The default configuration leaves the worker
-disabled; its opt-in example cannot qualify missing physical input evidence.
+disabled. The opt-in example still requires reviewed upstream counter anchors,
+modal calibration and complete observed-request history; it does not establish
+physical command application.
 The historical single-rate replay targets below remain regression tests, not a
 substitute for the new multirate path or native timestamp qualification.
 
@@ -27,9 +48,11 @@ make -C apps/loPredCtrlAcc -f tests/Makefile.offline -j2 \
 ```
 
 The numerical DDSPC implementations and historical Legacy test adapters are
-preserved. The installed native entrypoint cannot activate Legacy, training or
-physical output. Historical handoff/results descriptions below predate that
-entrypoint change; their test counts are not current native acceptance results.
+preserved. The installed native entrypoint cannot activate Legacy or physical
+output. Opt-in native shadow training is now connected as described in
+`SYNCO_NATIVE.md`, subject to input and model qualification. Historical
+handoff/results descriptions below predate that integration; their test counts
+are not current native acceptance results.
 
 The reusable components and opt-in actual-application replay integration are
 covered in [SHADOW_PIPELINE.md](../SHADOW_PIPELINE.md). The reusable base-class
@@ -70,10 +93,12 @@ tests use stream-free lifecycle doubles and real INDI property objects.
 
 For the **manual exao2 handoff**, read [EXAO2_TESTING.md](../EXAO2_TESTING.md)
 and the [attachment-only example](../examples/loPredCtrlAcc-shadow.conf.example).
-**Live accelerometer-assisted prediction is blocked**: native shadow still has no
-applied-command reader or exposure/clock adapter; Stage 1 adds ADC capture only. WFS
-callbacks invalidate models rather than invent those records. The guide is a
+That guide predates the current upstream-synchronized native adapter. It is a
 conditional native-build/WFS-attachment procedure, not a DM enable procedure.
+Current native training uses an explicitly declared observed-request domain;
+physical application, camera exposures and cross-host clock mappings are not
+inferred from stream publications. See `SYNCO_NATIVE.md` for current admission
+requirements rather than the older Stage 1 restrictions.
 
 `DDSPC_SHADOW_ONLY=yes` adds a compile-time guard refusing missing/false shadow
 configuration before helpers start and implies a strict shadow build. The Linux

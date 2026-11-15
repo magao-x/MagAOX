@@ -42,6 +42,8 @@ class NativeDeploymentTest(unittest.TestCase):
         self.assertGreaterEqual(config.getfloat("diagnostics", "period_ms"), 50)
         self.assertFalse(config.getboolean("diagnostics", "debug_indi"))
         self.assertFalse(config.getboolean("online_shadow", "enabled"))
+        self.assertTrue(config.getboolean("online_shadow", "upstream_sync"))
+        self.assertEqual(config.getint("online_shadow", "prediction_capacity"), 0)
         self.assertEqual(config.getint("online_shadow", "standard_slots"), 1)
         self.assertEqual(config.getint("online_shadow", "training_stride"), 4)
         for flag in ("own_shmim", "accel_enabled", "shadow_pipeline", "is_integrating"):

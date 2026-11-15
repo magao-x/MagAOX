@@ -5,6 +5,7 @@
 #define PCNATIVE_OBSERVATION_HPP
 #include "adc_reader.hpp"
 #include "../../libMagAOX/common/dmCompletion.hpp"
+#include "../../libMagAOX/app/dmSyncopationTiming.hpp"
 #include <array>
 #include <atomic>
 #include <span>
@@ -67,6 +68,8 @@ struct NativeObservationConfig
     std::size_t m_commandQueueCapacity{ 64 },
         m_commandMaxElements{ 4096 };      ///< Independently bounded payload retention; no allocation in source copies.
     std::size_t m_historyCapacity{ 4096 }; ///< Per-source chronological input retention, independent of disk recording.
+    std::string m_timingStream;            ///< Optional existing synco schedule; never an auxiliary source/sidecar.
+    bool m_sampleRequests{ false }; ///< Emit actual local observer ticks only for the opt-in native numerical adapter.
 
     /// Set existing source defaults without opening any input or file.
     NativeObservationConfig();
@@ -81,7 +84,8 @@ enum class ObservationEvent : unsigned
     Sample,
     Attached,
     Disconnected,
-    AdcBreak
+    AdcBreak,
+    Invalid ///< Internal qualification fault, never a fabricated source publication or journal sample.
 };
 
 /// Per-record diagnostics, never a measurement/application qualification.
