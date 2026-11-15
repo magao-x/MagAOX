@@ -70,6 +70,27 @@ class GeneratorTests(unittest.TestCase):
         fields = generator.getMessageFieldInfo([0], lines, (("frame", "uint"), ("valid", "bool")), {}, "example")
         self.assertEqual([field["name"] for field in fields[0]], ["frame", "valid"])
 
+    def test_diagnostic_table_vectors_use_decoders_and_preserve_times(self):
+        """GPU and IRQ table-vector fixtures compare state plus acquisition times."""
+        template = generator.jinja2.Environment().from_string(
+            (pathlib.Path(__file__).parent / "catch2TestTemplate.jinja2").read_text())
+        for log_name, field_name, aggregate, time_field in (
+                ("telem_gpu", "gpus", "gpuT", "m_sampleTime"),
+                ("telem_irq", "groups", "groupT", "m_checkTime")):
+            with self.subTest(log=log_name):
+                info = generator.makeTestInfoDict(
+                    str(pathlib.Path(__file__).parent / f"../types/{log_name}.hpp"), {})
+                self.assertEqual(len(info["messageTypes"]), 1)
+                field = next(f for f in info["messageTypes"][0] if f["name"] == field_name)
+                self.assertEqual(field["type"], f"std::vector<MagAOX::logger::{log_name}::{aggregate}>")
+                self.assertEqual(field["decoder"], field_name)
+                self.assertEqual(field["testVal"], generator.gTestFixtures[log_name][field_name])
+                checks = generator.makeFieldAssertions(field, "actual", "expected")
+                self.assertIn(f"    REQUIRE(actual[i].{time_field} == expected[i].{time_field});", checks)
+                rendered = template.render(**info, makeFieldAssertions=generator.makeFieldAssertions)
+                self.assertIn(f"m_{field_name} = MagAOX::logger::{log_name}::{field_name}(buffPtr);", rendered)
+                self.assertNotIn(f"m_{field_name}.push_back", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

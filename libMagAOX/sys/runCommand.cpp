@@ -7,6 +7,7 @@
 
 #include "runCommand.hpp"
 
+#include <cerrno>
 #include <cstring>
 #include <sstream>
 
@@ -70,7 +71,22 @@ int runCommand( std::vector<std::string> & commandOutput, // [out] the output, l
    {
       char commandOutput_c[4096];
 
-      wait(NULL);
+      pid_t waited;
+      do
+      {
+         waited = waitpid(pid, nullptr, 0);
+      }
+      while(waited < 0 && errno == EINTR);
+
+      if(waited < 0)
+      {
+         commandOutput.push_back(std::string("waitpid error: ") + strerror(errno));
+         close(link[0]);
+         close(link[1]);
+         close(errlink[0]);
+         close(errlink[1]);
+         return -1;
+      }
 
       close(link[1]);
       close(errlink[1]);
@@ -115,7 +131,6 @@ int runCommand( std::vector<std::string> & commandOutput, // [out] the output, l
          commandStderr.push_back(line);
       }
 
-      wait(NULL);
       return 0;
    }
 }

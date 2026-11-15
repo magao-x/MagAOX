@@ -1,0 +1,27 @@
+// \file telem_irq.fbs
+// \brief Identified IRQ placement checks, including incomplete and failed checks.
+namespace MagAOX.logger;
+
+table IrqAffinity
+{
+    number:uint;
+    requested:string (required);
+    effective:string (required);
+}
+
+table IrqGroup
+{
+    name:string (required);
+    expected:string (required);
+    status:string (required);
+    warning:bool;
+    check_time:double;
+    irqs:[IrqAffinity] (required);
+}
+
+table Telem_irq_fb
+{
+    groups:[IrqGroup] (required);
+}
+
+root_type Telem_irq_fb;

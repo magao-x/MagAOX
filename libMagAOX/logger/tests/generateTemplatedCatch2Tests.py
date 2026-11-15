@@ -43,7 +43,27 @@ gTestFixtures = {
         "setpoints": "{{3, 6, 4}, {6, 12, 8}, {9, 18, 12}}",
         "requestedMode": "2",
         "activeMode": "2"
+    },
+    "telem_gpu": {
+        "gpus": '{{"GPU-01234567-89ab-cdef-0123-456789abcdef", "0000:01:00.0", "ok", '
+                '65, 0.75, 0.25, 256, 8192, 1400, 1410, 7000, 255, 1234567890.25}, '
+                '{"GPU-11234567-89ab-cdef-0123-456789abcdef", "0000:02:00.0", "missing", '
+                '40, 0.1, 0.5, 512, 16384, 500, 510, 2000, 0, 1234567880.5}}'
+    },
+    "telem_irq": {
+        "groups": '{{"gpu", "45", "ok", false, 1234567890.25, {{100, "45", "45"}, '
+                  '{101, "45", "45"}}}, {"camera", "49", "mismatch", true, 1234567891.5, '
+                  '{{200, "1", "1"}}}}'
     }
+}
+
+# Domain aggregates stored as table vectors have production decoders rather than
+# FlatBuffers struct constructors. Include timestamps omitted by state equality.
+gVectorAdapters = {
+    "telem_gpu": {"gpus": {"vectorType": "MagAOX::logger::telem_gpu::gpuT",
+                           "decoder": "gpus", "extraVectorMembers": ["m_sampleTime"]}},
+    "telem_irq": {"groups": {"vectorType": "MagAOX::logger::telem_irq::groupT",
+                             "decoder": "groups", "extraVectorMembers": ["m_checkTime"]}}
 }
 
 # Check Jinja2 is installed; retain the existing installation fallback.
@@ -357,6 +377,12 @@ def makeFieldAssertions(field : dict, actual : str, expected : str) -> list[str]
         return [f"REQUIRE({actual}.{name} == {expected}.{name});" for name, _ in field["schemaMembers"]]
     if "char *" in field["type"]:
         return [f"REQUIRE(strcmp({actual}, {expected}) == 0);"]
+    if "extraVectorMembers" in field:
+        return [f"REQUIRE({actual} == {expected});",
+                f"for(size_t i = 0; i < {expected}.size(); ++i)", "{"] + [
+                    f"    REQUIRE({actual}[i].{member} == {expected}[i].{member});"
+                    for member in field["extraVectorMembers"]
+                ] + ["}"]
     return [f"REQUIRE({actual} == {expected});"]
 
 def findMatchingSchemaField(schemaFieldInfo, fieldName):
@@ -554,6 +580,9 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
 
                 if name in gTestFixtures.get(logName, {}):
                     fieldDict["fixture"] = gTestFixtures[logName][name]
+                if name in gVectorAdapters.get(logName, {}):
+                    fieldDict.update(gVectorAdapters[logName][name])
+                    fieldDict["type"] = f"std::vector<{fieldDict['vectorType']}>"
                 fieldDict["testVal"] = makeTestVal(fieldDict)
 
                 # add field dict to list of fields

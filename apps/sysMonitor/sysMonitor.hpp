@@ -19,6 +19,9 @@
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
+#include "../../libMagAOX/sys/boundedCommand.hpp"
+#include "gpuMonitor.hpp"
+#include "irqMonitor.hpp"
 
 #include <iostream>
 #include <string>
@@ -28,6 +31,11 @@
 #include <algorithm>
 #include <iterator>
 #include <sys/wait.h>
+#include <chrono>
+#include <map>
+#include <set>
+#include <cctype>
+#include <mx/math/floatUtils.hpp>
 
 
 namespace MagAOX
@@ -42,6 +50,9 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
 {
 
    friend class dev::telemeter<sysMonitor>;
+
+   /// Telemeter interface used by the framework lifecycle macros.
+   using telemeterT = dev::telemeter<sysMonitor>;
 
    enum class sysType
    {
@@ -83,6 +94,101 @@ protected:
      * \returns 0 on completion
      */
    int updateVals();
+
+   /** \name GPU and IRQ Diagnostics - Data
+     * @{ */
+
+   /// Whether the optional NVIDIA collector is enabled.
+   bool m_gpuEnabled{false};
+
+   /// Minimum time between GPU query starts, in seconds.
+   double m_gpuInterval{5};
+
+   /// Maximum userspace wait for a GPU query, in seconds.
+   double m_gpuTimeout{2};
+
+   /// GPU UUIDs required even before successful discovery.
+   std::vector<std::string> m_gpuExpected;
+
+   /// Owns the bounded GPU query process until it has been reaped.
+   sys::boundedCommand m_gpuCommand;
+
+   /// Current GPU samples, including unavailable previously known devices.
+   std::vector<telem_gpu::gpuT> m_gpus;
+
+   /// Last recorded samples for value-change suppression.
+   std::vector<telem_gpu::gpuT> m_lastGPUs;
+
+   /// Overall GPU collection status, also published when discovery returns no devices.
+   std::string m_gpuStatus{"disabled"};
+
+   /// Last recorded overall GPU status.
+   std::string m_lastGPUStatus;
+
+   /// Whether any GPU telemetry record has been made by this instance.
+   bool m_gpuRecorded{false};
+
+   /// Logical dedicated-device affinity rules, resolved anew each poll.
+   std::vector<sysMonitorDetail::ruleT> m_irqRules;
+
+   /// Minimum time between IRQ checks, in seconds.
+   double m_irqInterval{5};
+
+   /// Current placement results for every configured logical IRQ group.
+   std::vector<telem_irq::groupT> m_irqs;
+
+   /// Last recorded IRQ results for value-change suppression.
+   std::vector<telem_irq::groupT> m_lastIRQs;
+
+   /// Whether any IRQ telemetry record has been made by this instance.
+   bool m_irqRecorded{false};
+
+   /// Monotonic start times of the most recent GPU and IRQ polls.
+   std::chrono::steady_clock::time_point m_lastGPUPoll{}, m_lastIRQPoll{};
+
+   /// Track first polls independently of the monotonic clock's epoch.
+   bool m_gpuPolled{false}, m_irqPolled{false};
+
+   /// Stable property storage; map nodes keep registered addresses valid.
+   std::map<std::string, pcf::IndiProperty> m_gpuProperties, m_gpuInfoProperties;
+
+   /// Overall GPU state and per-rule IRQ state exposed to operators.
+   pcf::IndiProperty m_indiP_gpuStatus, m_indiP_irqStatus, m_indiP_irqDetails, m_indiP_irqWarning;
+
+   ///@}
+
+   /** \name GPU and IRQ Diagnostics
+     * @{ */
+
+   /// Load and validate optional diagnostic settings and named IRQ sections.
+   int loadDiagnosticsConfig(mx::app::appConfigurator &cfg /**< [in,out] configuration source */);
+
+   /// Initialize only diagnostic properties, without starting collectors or threads.
+   int startupDiagnostics();
+
+   /// Collect due diagnostics using the supplied monotonic scheduling time.
+   int pollDiagnostics(std::chrono::steady_clock::time_point now /**< [in] monotonic poll time */);
+
+   /// Query the NVIDIA utility; virtual so offline tests can inject command results.
+   virtual sys::boundedCommand::result queryGPUs();
+
+   /// Check current IRQ files; virtual so offline tests can supply fixtures.
+   virtual std::vector<telem_irq::groupT> queryIRQs(double sampleTime /**< [in] wall-clock check time */);
+
+   /// Merge a query result while preserving identity and invalidating missing devices.
+   void acceptGPUResult(const sys::boundedCommand::result &result /**< [in] command outcome */,
+                        double sampleTime /**< [in] wall-clock measurement time */);
+
+   /// Publish the current diagnostic state, registering new GPU identities as needed.
+   int publishDiagnostics();
+
+   /// Record first, changed, or explicitly forced GPU state.
+   int recordGPUs(bool force = false /**< [in] record even when values are unchanged */);
+
+   /// Record first, changed, or explicitly forced IRQ state.
+   int recordIRQs(bool force = false /**< [in] record even when values are unchanged */);
+
+   ///@}
 
 public:
 
@@ -344,6 +450,12 @@ public:
 
    int recordTelem(const telem_chrony_stats*);
 
+   /// Force a periodic GPU record without claiming another measurement.
+   int recordTelem(const telem_gpu* unused /**< [in] telemetry type selector */);
+
+   /// Force a periodic IRQ record without claiming another check.
+   int recordTelem(const telem_irq* unused /**< [in] telemetry type selector */);
+
    int recordCoreLoads(bool force = false);
 
    int recordCoreTemps(bool force = false);
@@ -375,7 +487,13 @@ void sysMonitor::setupConfig()
    config.add("warningDiskTemp", "", "warningDiskTemp", argType::Required, "", "warningDiskTemp", false, "int", "The warning temperature for the disk.");
    config.add("criticalDiskTemp", "", "criticalDiskTemp", argType::Required, "", "criticalDiskTemp", false, "int", "The critical temperature for disk.");
 
-   dev::telemeter<sysMonitor>::setupConfig(config);
+   config.add("gpu.enabled", "", "gpu.enabled", argType::Required, "gpu", "enabled", false, "bool", "Enable read-only NVIDIA GPU diagnostics (default false).");
+   config.add("gpu.interval", "", "gpu.interval", argType::Required, "gpu", "interval", false, "double", "GPU polling interval in seconds (default 5).");
+   config.add("gpu.timeout", "", "gpu.timeout", argType::Required, "gpu", "timeout", false, "double", "GPU command deadline in seconds (default 2).");
+   config.add("gpu.expectedUUIDs", "", "gpu.expectedUUIDs", argType::Required, "gpu", "expectedUUIDs", false, "vector<string>", "Optional GPU UUIDs required at startup.");
+   config.add("irq.interval", "", "irq.interval", argType::Required, "irq", "interval", false, "double", "Dedicated IRQ checking interval in seconds (default 5). Configure groups in [irq.NAME] sections.");
+
+   TELEMETER_SETUP_CONFIG(config);
 }
 
 void sysMonitor::loadConfig()
@@ -411,11 +529,21 @@ void sysMonitor::loadConfig()
    config(m_warningDiskTemp, "warningDiskTemp");
    config(m_criticalDiskTemp, "criticalDiskTemp");
 
+   if(loadDiagnosticsConfig(config) < 0)
+   {
+      m_shutdown = true;
+   }
+
    dev::telemeter<sysMonitor>::loadConfig(config);
 }
 
 int sysMonitor::appStartup()
 {
+
+   if(startupDiagnostics() < 0)
+   {
+      return -1;
+   }
 
    REG_INDI_NEWPROP_NOCB(m_indiP_core_temps, "core_temps", pcf::IndiProperty::Number);
    m_indiP_core_temps.add(pcf::IndiElement("max"));
@@ -460,10 +588,7 @@ int sysMonitor::appStartup()
    createStandardIndiToggleSw(m_indiP_setlat, "set_latency");
    registerIndiPropertyNew(m_indiP_setlat, INDI_NEWCALLBACK(m_indiP_setlat));
 
-   if (dev::telemeter<sysMonitor>::appStartup() < 0)
-   {
-      return log<software_error, -1>({ __FILE__,__LINE__ });
-   }
+   TELEMETER_APP_STARTUP;
 
    if (threadStart(m_setlatThread, m_setlatThreadInit, m_setlatThreadID, m_setlatThreadProp, m_setlatThreadPrio, "", "set_latency", this, setlatThreadStart) < 0)
    {
@@ -477,6 +602,11 @@ int sysMonitor::appStartup()
 
 int sysMonitor::appLogic()
 {
+
+   if(pollDiagnostics(std::chrono::steady_clock::now()) < 0)
+   {
+      log<software_error>({__FILE__, __LINE__, "Could not publish GPU/IRQ diagnostics."});
+   }
 
    m_coreTemps.clear();
    int rvCPUTemp = findCPUTemperatures(m_coreTemps);
@@ -578,6 +708,7 @@ int sysMonitor::appLogic()
 
 int sysMonitor::appShutdown()
 {
+   m_gpuCommand.shutdown();
    try
    {
       if (m_setlatThread.joinable())
@@ -587,7 +718,7 @@ int sysMonitor::appShutdown()
    }
    catch (...) {}
 
-   dev::telemeter<sysMonitor>::appShutdown();
+   TELEMETER_APP_SHUTDOWN;
 
    return 0;
 }
@@ -1425,7 +1556,9 @@ int sysMonitor::checkRecordTimes()
                                                    telem_drivetemps(),
                                                    telem_usage(),
                                                    telem_chrony_status(),
-                                                   telem_chrony_stats()
+                                                   telem_chrony_stats(),
+                                                   telem_gpu(),
+                                                   telem_irq()
                                                  );
 }
 
@@ -1623,6 +1756,371 @@ int sysMonitor::recordChronyStats(bool force)
    }
 
    return 0;
+}
+
+inline int sysMonitor::loadDiagnosticsConfig(mx::app::appConfigurator &cfg)
+{
+   auto parseBoolean = [](bool &value, const std::string &text)
+   {
+      if(text == "true" || text == "1")
+      {
+         value = true;
+         return true;
+      }
+
+      if(text == "false" || text == "0")
+      {
+         value = false;
+         return true;
+      }
+
+      return false;
+   };
+
+   std::string enabled = m_gpuEnabled ? "true" : "false";
+   cfg(enabled, "gpu.enabled");
+   if(!parseBoolean(m_gpuEnabled, enabled))
+   {
+      return log<software_critical, -1>({__FILE__, __LINE__, "gpu.enabled must be true, false, 1, or 0."});
+   }
+
+   cfg(m_gpuInterval, "gpu.interval");
+   cfg(m_gpuTimeout, "gpu.timeout");
+   cfg(m_gpuExpected, "gpu.expectedUUIDs");
+   cfg(m_irqInterval, "irq.interval");
+
+   if(!mx::math::isFinite(m_gpuInterval) || m_gpuInterval <= 0 || !mx::math::isFinite(m_gpuTimeout) ||
+      m_gpuTimeout <= 0 || !mx::math::isFinite(m_irqInterval) || m_irqInterval <= 0)
+   {
+      return log<software_critical, -1>({__FILE__, __LINE__, "Diagnostic intervals and timeout must be finite and positive."});
+   }
+
+   std::set<std::string> expected;
+   for(auto &uuid : m_gpuExpected)
+   {
+      const auto key = sysMonitorDetail::gpuKey(uuid);
+      if(key.empty() || !expected.insert(key).second)
+      {
+         return log<software_critical, -1>({__FILE__, __LINE__, "Invalid or duplicate expected GPU UUID: " + uuid});
+      }
+
+      std::transform(uuid.begin() + 4, uuid.end(), uuid.begin() + 4,
+                     [](unsigned char c) { return std::tolower(c); });
+   }
+
+   m_irqRules.clear();
+   std::vector<std::string> sections;
+   cfg.unusedSections(sections);
+   for(const auto &section : sections)
+   {
+      if(section.compare(0, 4, "irq.") != 0)
+      {
+         continue;
+      }
+
+      sysMonitorDetail::ruleT rule;
+      rule.m_name = section.substr(4);
+      if(rule.m_name == "summary")
+      {
+         return log<software_critical, -1>({__FILE__, __LINE__, "IRQ rule name summary is reserved."});
+      }
+      cfg.configUnused(rule.m_match, mx::app::iniFile::makeKey(section, "match"));
+      cfg.configUnused(rule.m_cpuset, mx::app::iniFile::makeKey(section, "cpuset"));
+      cfg.configUnused(rule.m_cpus, mx::app::iniFile::makeKey(section, "cpus"));
+      std::string required = "true", requireEffective = "true";
+      cfg.configUnused(required, mx::app::iniFile::makeKey(section, "required"));
+      cfg.configUnused(requireEffective, mx::app::iniFile::makeKey(section, "requireEffective"));
+      if(!parseBoolean(rule.m_required, required) || !parseBoolean(rule.m_requireEffective, requireEffective))
+      {
+         return log<software_critical, -1>({__FILE__, __LINE__, "IRQ policy booleans must be true, false, 1, or 0: " + rule.m_name});
+      }
+
+      m_irqRules.push_back(rule);
+   }
+
+   std::string error;
+   if(!sysMonitorDetail::validateIRQRules(m_irqRules, error))
+   {
+      return log<software_critical, -1>({__FILE__, __LINE__, error});
+   }
+
+   return 0;
+}
+
+inline int sysMonitor::startupDiagnostics()
+{
+   m_gpuStatus = m_gpuEnabled ? "unchecked" : "disabled";
+   REG_INDI_NEWPROP_NOCB(m_indiP_gpuStatus, "gpu_status", pcf::IndiProperty::Text);
+   m_indiP_gpuStatus.add(pcf::IndiElement("status", m_gpuStatus));
+   REG_INDI_NEWPROP_NOCB(m_indiP_irqStatus, "irq_status", pcf::IndiProperty::Text);
+   m_indiP_irqStatus.add(pcf::IndiElement("summary", m_irqRules.empty() ? "disabled" : "unchecked"));
+   REG_INDI_NEWPROP_NOCB(m_indiP_irqDetails, "irq_details", pcf::IndiProperty::Text);
+   if(registerIndiPropertyNew(m_indiP_irqWarning, "irq_warning", pcf::IndiProperty::Switch,
+                             pcf::IndiProperty::ReadOnly, INDI_IDLE, pcf::IndiProperty::AnyOfMany, nullptr) < 0)
+   {
+      return -1;
+   }
+
+   bool warning = false;
+   m_irqs.clear();
+   for(const auto &rule : m_irqRules)
+   {
+      telem_irq::groupT group;
+      group.m_name = rule.m_name;
+      group.m_status = "unchecked";
+      group.m_warning = rule.m_required;
+      warning = warning || group.m_warning;
+      m_irqs.push_back(group);
+      m_indiP_irqStatus.add(pcf::IndiElement(rule.m_name, group.m_status));
+      m_indiP_irqDetails.add(pcf::IndiElement(rule.m_name, "No check completed"));
+   }
+
+   m_indiP_irqWarning.add(pcf::IndiElement("active", warning ? pcf::IndiElement::On : pcf::IndiElement::Off));
+   m_indiP_irqWarning.setState(warning ? INDI_ALERT : INDI_IDLE);
+
+   for(const auto &uuid : m_gpuExpected)
+   {
+      telem_gpu::gpuT gpu;
+      gpu.m_uuid = uuid;
+      gpu.m_status = m_gpuStatus;
+      m_gpus.push_back(gpu);
+   }
+
+   return publishDiagnostics();
+}
+
+inline sys::boundedCommand::result sysMonitor::queryGPUs()
+{
+   return m_gpuCommand.run({"/usr/bin/nvidia-smi",
+                           "--query-gpu=uuid,pci.bus_id,temperature.gpu,utilization.gpu,utilization.memory,memory.used,memory.total,clocks.current.graphics,clocks.current.sm,clocks.current.memory",
+                           "--format=csv,noheader,nounits"}, m_gpuTimeout);
+}
+
+inline std::vector<telem_irq::groupT> sysMonitor::queryIRQs(double sampleTime)
+{
+   return sysMonitorDetail::checkIRQs(m_irqRules, "/proc", cpusetPath(), sampleTime);
+}
+
+inline void sysMonitor::acceptGPUResult(const sys::boundedCommand::result &result, double sampleTime)
+{
+   std::vector<telem_gpu::gpuT> samples;
+   const auto previousStatus = m_gpuStatus;
+   if(result.m_status != sys::boundedCommand::status::success)
+   {
+      using commandStatus = sys::boundedCommand::status;
+      switch(result.m_status)
+      {
+         case commandStatus::spawnError: m_gpuStatus = "could not start /usr/bin/nvidia-smi"; break;
+         case commandStatus::exitError: m_gpuStatus = "GPU query exit " + std::to_string(result.m_exitCode); break;
+         case commandStatus::signalError: m_gpuStatus = "GPU query signal " + std::to_string(result.m_exitCode); break;
+         case commandStatus::timeout: m_gpuStatus = "GPU query timed out"; break;
+         case commandStatus::outputLimit: m_gpuStatus = "GPU query output exceeded limit"; break;
+         case commandStatus::ioError: m_gpuStatus = "GPU query capture failed"; break;
+         case commandStatus::busy: m_gpuStatus = "previous GPU query is still pending cleanup"; break;
+         case commandStatus::success: break;
+      }
+   }
+   else if(sysMonitorDetail::parseGPUs(samples, result.m_output, sampleTime) < 0)
+   {
+      m_gpuStatus = "invalid GPU response";
+   }
+   else
+   {
+      m_gpuStatus = samples.empty() ? "no GPUs found" : "ok";
+   }
+
+   for(const auto &old : m_gpus)
+   {
+      auto found = std::find_if(samples.begin(), samples.end(),
+                               [&](const auto &gpu) { return gpu.m_uuid == old.m_uuid; });
+      if(found == samples.end())
+      {
+         auto missing = old;
+         missing.m_valid = 0;
+         missing.m_status = m_gpuStatus == "ok" ? "missing" : m_gpuStatus;
+         samples.push_back(missing);
+      }
+   }
+
+   std::sort(samples.begin(), samples.end(), [](const auto &a, const auto &b) { return a.m_uuid < b.m_uuid; });
+   if(m_gpuStatus == "ok" && std::any_of(samples.begin(), samples.end(),
+                                        [](const auto &gpu) { return gpu.m_status != "ok"; }))
+   {
+      m_gpuStatus = "partial";
+   }
+
+   if(previousStatus != m_gpuStatus)
+   {
+      log<text_log>("GPU monitoring: " + m_gpuStatus,
+                    m_gpuStatus == "ok" ? logPrio::LOG_NOTICE : logPrio::LOG_WARNING);
+   }
+
+   for(const auto &gpu : samples)
+   {
+      const auto old = std::find_if(m_gpus.begin(), m_gpus.end(),
+                                    [&](const auto &value) { return value.m_uuid == gpu.m_uuid; });
+      if(old == m_gpus.end() || old->m_status != gpu.m_status)
+      {
+         log<text_log>("GPU " + gpu.m_uuid + ": " + gpu.m_status,
+                       gpu.m_status == "ok" ? logPrio::LOG_NOTICE : logPrio::LOG_WARNING);
+      }
+   }
+
+   m_gpus = std::move(samples);
+}
+
+inline int sysMonitor::pollDiagnostics(std::chrono::steady_clock::time_point now)
+{
+   const auto entered = std::chrono::steady_clock::now();
+   if(m_gpuEnabled && (!m_gpuPolled || std::chrono::duration<double>(now - m_lastGPUPoll).count() >= m_gpuInterval))
+   {
+      m_gpuPolled = true;
+      m_lastGPUPoll = now;
+      auto result = queryGPUs();
+      const double sampleTime = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+      acceptGPUResult(result, sampleTime);
+      recordGPUs();
+   }
+
+   const auto irqNow = now + (std::chrono::steady_clock::now() - entered);
+   if(!m_irqRules.empty() && (!m_irqPolled || std::chrono::duration<double>(irqNow - m_lastIRQPoll).count() >= m_irqInterval))
+   {
+      m_irqPolled = true;
+      m_lastIRQPoll = irqNow;
+      const double sampleTime = std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+      auto groups = queryIRQs(sampleTime);
+      for(const auto &group : groups)
+      {
+         const auto old = std::find_if(m_irqs.begin(), m_irqs.end(),
+                                      [&](const auto &value) { return value.m_name == group.m_name; });
+         if(old == m_irqs.end() || old->m_status != group.m_status || old->m_warning != group.m_warning)
+         {
+            log<text_log>("IRQ " + group.m_name + ": " + group.m_status,
+                          group.m_warning ? logPrio::LOG_WARNING : logPrio::LOG_NOTICE);
+         }
+      }
+
+      m_irqs = std::move(groups);
+      recordIRQs();
+   }
+
+   return publishDiagnostics();
+}
+
+inline int sysMonitor::publishDiagnostics()
+{
+   for(const auto &gpu : m_gpus)
+   {
+      const auto key = sysMonitorDetail::gpuKey(gpu.m_uuid);
+      if(m_gpuProperties.count(key) == 0)
+      {
+         auto &number = m_gpuProperties[key];
+         number = pcf::IndiProperty(pcf::IndiProperty::Number);
+         number.setDevice(m_configName);
+         number.setName(key);
+         number.setPerm(pcf::IndiProperty::ReadOnly);
+         number.setState(INDI_IDLE);
+         for(const auto &name : {"temperature", "load", "memory_load", "memory_used", "memory_total",
+                                "clock_graphics", "clock_sm", "clock_memory", "valid", "sample_time"})
+         {
+            number.add(pcf::IndiElement(name, 0.0));
+         }
+
+         auto &info = m_gpuInfoProperties[key];
+         info = pcf::IndiProperty(pcf::IndiProperty::Text);
+         info.setDevice(m_configName);
+         info.setName(key + "_info");
+         info.setPerm(pcf::IndiProperty::ReadOnly);
+         info.setState(INDI_IDLE);
+         info.add(pcf::IndiElement("uuid", gpu.m_uuid));
+         info.add(pcf::IndiElement("pci", gpu.m_pci));
+         info.add(pcf::IndiElement("status", gpu.m_status));
+
+         if(registerIndiPropertyNew(number, nullptr) < 0 || registerIndiPropertyNew(info, nullptr) < 0)
+         {
+            return -1;
+         }
+
+         if(m_indiDriver)
+         {
+            m_indiDriver->sendDefProperty(number);
+            m_indiDriver->sendDefProperty(info);
+         }
+      }
+
+      const auto state = !m_gpuEnabled ? INDI_IDLE : (gpu.m_status == "ok" ? INDI_OK : INDI_ALERT);
+      updateIfChanged<double>(m_gpuProperties.at(key),
+                              {"temperature", "load", "memory_load", "memory_used", "memory_total", "clock_graphics",
+                               "clock_sm", "clock_memory", "valid", "sample_time"},
+                              {gpu.m_temperature, gpu.m_load, gpu.m_memoryLoad, gpu.m_memoryUsed, gpu.m_memoryTotal,
+                               gpu.m_clockGraphics, gpu.m_clockSM, gpu.m_clockMemory, double(gpu.m_valid), gpu.m_sampleTime}, state);
+      updateIfChanged<std::string>(m_gpuInfoProperties.at(key), {"uuid", "pci", "status"},
+                                   {gpu.m_uuid, gpu.m_pci, gpu.m_status}, state);
+   }
+
+   updateIfChanged(m_indiP_gpuStatus, "status", m_gpuStatus,
+                   !m_gpuEnabled ? INDI_IDLE : (m_gpuStatus == "ok" ? INDI_OK : INDI_ALERT));
+   const bool warning = std::any_of(m_irqs.begin(), m_irqs.end(), [](const auto &group) { return group.m_warning; });
+   const auto state = m_irqRules.empty() ? INDI_IDLE : (warning ? INDI_ALERT : (m_irqPolled ? INDI_OK : INDI_IDLE));
+   std::vector<std::string> names{"summary"}, statuses{m_irqRules.empty() ? "disabled" :
+                                                     (!m_irqPolled ? "unchecked" : (warning ? "warning" : "ok"))};
+   std::vector<std::string> detailNames, details;
+   for(const auto &group : m_irqs)
+   {
+      std::string detail = "expected=" + group.m_expected;
+      for(const auto &irq : group.m_irqs)
+      {
+         detail += "; IRQ " + std::to_string(irq.m_number) + " requested=" + irq.m_requested + " effective=" + irq.m_effective;
+      }
+
+      names.push_back(group.m_name);
+      statuses.push_back(group.m_status);
+      detailNames.push_back(group.m_name);
+      details.push_back(detail);
+   }
+
+   updateIfChanged(m_indiP_irqStatus, names, statuses, state);
+   if(!detailNames.empty())
+   {
+      updateIfChanged(m_indiP_irqDetails, detailNames, details, state);
+   }
+   updateSwitchIfChanged(m_indiP_irqWarning, "active", warning ? pcf::IndiElement::On : pcf::IndiElement::Off, state);
+   return 0;
+}
+
+inline int sysMonitor::recordGPUs(bool force)
+{
+   if(m_gpuEnabled && (!m_gpuRecorded || force || m_gpuStatus != m_lastGPUStatus || m_gpus != m_lastGPUs))
+   {
+      telem<telem_gpu>({m_gpuStatus, m_gpus});
+      m_lastGPUStatus = m_gpuStatus;
+      m_lastGPUs = m_gpus;
+      m_gpuRecorded = true;
+   }
+
+   return 0;
+}
+
+inline int sysMonitor::recordIRQs(bool force)
+{
+   if(!m_irqRules.empty() && (!m_irqRecorded || force || m_irqs != m_lastIRQs))
+   {
+      telem<telem_irq>(m_irqs);
+      m_lastIRQs = m_irqs;
+      m_irqRecorded = true;
+   }
+
+   return 0;
+}
+
+inline int sysMonitor::recordTelem(const telem_gpu *)
+{
+   return recordGPUs(true);
+}
+
+inline int sysMonitor::recordTelem(const telem_irq *)
+{
+   return recordIRQs(true);
 }
 
 } //namespace app
