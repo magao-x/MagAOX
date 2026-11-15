@@ -236,8 +236,6 @@ class dmRecon : public MagAOXApp<true>,
     bool    m_triggerClockValid{ false }; ///< Trigger offset is qualified against the monotonic clock.
     std::atomic<uint64_t> m_beforeNext{ 0 }, m_late{ 0 }, m_unknown{ 0 }; ///< Cumulative timing classifications.
     std::atomic<uint64_t> m_rejected{ 0 }, m_coalesced{ 0 }; ///< Invalid/torn inputs and superseded pending inputs.
-    uint64_t              m_reportedLate{ 0 }, m_reportedUnknown{ 0 }; ///< App-thread warning rate limiting.
-    uint64_t m_reportedDryLate{ 0 }, m_reportedDryUnknown{ 0 };        ///< App-thread dry-run warning rate limiting.
     std::atomic<SnapshotStatus> m_modesSnapshot{ SnapshotStatus::unavailable },
         m_maskSnapshot{ SnapshotStatus::unavailable }; ///< Calibration-monitor outcomes, readable by the app thread.
     std::atomic<const char *> m_setupStage{ "waiting_for_calibration" }; ///< Worker stage; values are static literals.
@@ -341,7 +339,7 @@ class dmRecon : public MagAOXApp<true>,
     void loadConfig() override;
     /// Initialize subscriptions, calibration file, semaphore and workers.
     int appStartup() override;
-    /// Report state and rate-limited timing warnings.
+    /// Report state and publish timing diagnostics through INDI.
     int appLogic() override;
     /// Stop all workers using their existing base interfaces.
     int appShutdown() override;
@@ -765,45 +763,6 @@ inline int dmRecon::appLogic()
         m_reportedSetupStage    = setupStage;
         m_reportedModesSnapshot = modesSnapshot;
         m_reportedMaskSnapshot  = maskSnapshot;
-    }
-
-    if( late != m_reportedLate )
-    {
-        log<text_log>( std::format( "dmRecon feedback missed the next trigger timestamp: {} new, {} total",
-                                    late - m_reportedLate,
-                                    late ),
-                       logPrio::LOG_WARNING );
-        m_reportedLate = late;
-    }
-
-    if( unknown != m_reportedUnknown )
-    {
-        log<text_log>(
-            std::format( "dmRecon feedback timing unverified: {} new, {} total (trigger gaps, identity or clock)",
-                         unknown - m_reportedUnknown,
-                         unknown ),
-            logPrio::LOG_WARNING );
-        m_reportedUnknown = unknown;
-    }
-
-    if( dryTiming.late != m_reportedDryLate )
-    {
-        log<text_log>(
-            std::format( "dmRecon dry-run reconstruction missed the next trigger timestamp: {} new, {} total",
-                         dryTiming.late - m_reportedDryLate,
-                         dryTiming.late ),
-            logPrio::LOG_WARNING );
-        m_reportedDryLate = dryTiming.late;
-    }
-
-    if( dryTiming.unknown != m_reportedDryUnknown )
-    {
-        log<text_log>(
-            std::format( "dmRecon dry-run timing unverified: {} new, {} total (trigger gaps, identity or clock)",
-                         dryTiming.unknown - m_reportedDryUnknown,
-                         dryTiming.unknown ),
-            logPrio::LOG_WARNING );
-        m_reportedDryUnknown = dryTiming.unknown;
     }
 
     { //mutex scope
