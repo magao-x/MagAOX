@@ -59,6 +59,7 @@
 ../apps/cacaoInterface/tests/cacaoInterface_test
 ../apps/cameraSim/tests/cameraSim_emgain_test
 ../apps/closedLoopIndi/tests/closedLoopIndi_test
+../apps/counterOffload/tests/counterOffload_test
 ../apps/dmMode/tests/dmMode_test
 ../apps/dmPokeCenter/tests/dmPokeCenter_test
 ../apps/dmPokeXCorr/tests/dmPokeXCorr_test

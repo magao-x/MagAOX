@@ -28,7 +28,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 <!-- This section will be filled out by the agent -->
 
-*Status (2026-11-15): plan complete; all questions (Q1–Q6) answered. No code written; implementation waits for an explicit "implement".*
+*Status (2026-11-15): implemented on `ktwitchell/counter-offload` (see Implementation Log). Not yet built or tested; the user builds, tests and `clang-format`s on the RTC.*
 
 ## Task Summary
 <!-- The agent should summarize the task as they understand it -->
@@ -203,6 +203,47 @@ Files (new unless noted):
   1. functional app, tests and Makefile entries, with this plan updated;
   2. documentation;
   3. `clang-format`, run by the user on the RTC.
+
+### Implementation Log
+
+**2026-11-15: first implementation (not yet compiled).**
+
+Files added or changed:
+- `apps/counterOffload/counterOffload.hpp`: the class and its out-of-class inline definitions.
+- `apps/counterOffload/counterOffload.cpp`: `main` only.
+- `apps/counterOffload/Makefile`.
+- `apps/counterOffload/dmtweeter_counteroffload.conf`: the example config.
+- `apps/counterOffload/tests/counterOffload_test.cpp`.
+- Top-level `Makefile`: added `counterOffload` to `apps_rtc` and `all_buildable_apps`.
+- `tests/tests.list`: added the test.
+
+Design details settled while writing the code:
+- **Ramp pool.** Ramps live in a preallocated pool of 8 entries (`m_maxRamps`), so the monitor thread does not allocate memory per offload.
+  - If the pool is full, the oldest ramp is folded into the accumulator straight away and counted in `overflows`.
+  - The input monitor thread adds a ramp under `m_stateMutex`. The producer thread folds completed ramps when it builds a command.
+- **When it publishes.** The app publishes only when something is changing:
+  - a ramp is active;
+  - the leak is above 0 and the accumulator is nonzero;
+  - a final zero is pending after the leak reached zero;
+  - a zero was requested.
+
+  Otherwise it skips the slot, and dmSyncopation keeps the last contribution.
+- **Idle.** When disabled with nothing to finish, the producer thread sleeps 1 ms between checks. Otherwise it polls the schedule every 10 µs, as dmSpeckle does.
+- **When it computes.** For each slot the producer thread sleeps until `cutoff − writeLeadUs − computeLeadUs`. It then builds the command under the lock, releases the lock, and calls `syncopationPublish`.
+- **Leak.** The leak is applied only after a successful publish. A leaking accumulator whose largest pixel falls below `m_zeroTol` (1e-7) is set to zero, and one explicit zero is then published.
+- **Zero request.** A zero request clears all ramps and the accumulator and publishes zero. The flag is cleared only after a successful publish, as in dmSpeckle.
+- **Startup state.** The app opens the auxiliary source in `appLogic` while `NOTCONNECTED`, then goes to `OPERATING`. The input monitor and the producer thread both run only in `OPERATING`.
+- **INDI.**
+  - `enable` toggle;
+  - `zero` request;
+  - numbers `gain`, `leak`, `rampStartUs`, `rampDurationUs`, `timeOffsetUs`, all set through one `setNumber()` helper;
+  - read-only `stats`: `events`, `published`, `failed`, `overflows`, `active`.
+- **Example config.** It uses `writeLeadUs=10`, `computeLeadUs=20`, `cpuset=spare26`, `threadPrio=20`.
+
+Checks for the first RTC build:
+- Constructing `pcf::IndiProperty` references inside the startup `numberT` table.
+- `createStandardIndiNumber<double>` with `"%g"` formatting.
+- `M_PI` from `<cmath>`.
 
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->
