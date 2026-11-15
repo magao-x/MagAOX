@@ -1,6 +1,5 @@
 /** \file sysMonitor.hpp
-  * \brief The MagAO-X sysMonitor app main program which provides functions to read and report system statistics
-  * \author Chris Bohlman (cbohlman@pm.me)
+  * \brief Publish and telemeter host diagnostics, GPU measurements, and IRQ placement.
   *
   * To view logdump files: logdump -f sysMonitor
   *
@@ -54,6 +53,7 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
    /// Telemeter interface used by the framework lifecycle macros.
    using telemeterT = dev::telemeter<sysMonitor>;
 
+   /// Select the host CPU-temperature output format.
    enum class sysType
    {
       Intel,
@@ -62,37 +62,67 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
 
 protected:
 
+   /** \name System Statistics - Data
+     * @{ */
+
+   /// CPU family selecting the supported sensors output parser.
    sysType m_sysType{ sysType::Intel };
 
-   int m_warningCoreTemp = 0;   ///< User defined warning temperature for CPU cores
-   int m_criticalCoreTemp = 0;   ///< User defined critical temperature for CPU cores
-   int m_warningDiskTemp = 0;   ///< User defined warning temperature for drives
-   int m_criticalDiskTemp = 0;   ///< User defined critical temperature for drives
+   /// CPU warning threshold in Celsius; zero requests discovery from Intel sensors output.
+   int m_warningCoreTemp = 0;
 
-   pcf::IndiProperty m_indiP_core_loads;   ///< Indi variable for reporting CPU core loads
-   pcf::IndiProperty m_indiP_core_temps;   ///< Indi variable for reporting CPU core temperature(s)
-   pcf::IndiProperty m_indiP_drive_temps;   ///< Indi variable for reporting drive temperature(s)
-   pcf::IndiProperty m_indiP_usage;   ///< Indi variable for reporting drive usage of all paths
+   /// CPU critical threshold in Celsius; zero requests discovery from Intel sensors output.
+   int m_criticalCoreTemp = 0;
 
-   std::vector<float> m_coreTemps;   ///< List of current core temperature(s)
-   std::vector<float> m_coreLoads;   ///< List of current core load(s)
+   /// Drive warning threshold in Celsius; zero derives it from the first measured temperature.
+   int m_warningDiskTemp = 0;
 
-   std::vector<std::string> m_diskNameList; ///< vector of names of the hard disks to monitor
-   std::vector<std::string> m_diskNames; ///< vector of names of the hard disks returned by hdd_temp
-   std::vector<float> m_diskTemps;        ///< vector of current disk temperature(s)
+   /// Drive critical threshold in Celsius; zero derives it from the first measured temperature.
+   int m_criticalDiskTemp = 0;
 
-   float m_rootUsage = 0;   ///< Disk usage in root path as a value out of 100
-   float m_dataUsage = 0;   ///< Disk usage in /data path as a value out of 100
-   float m_bootUsage = 0;   ///< Disk usage in /boot path as a value out of 100
-   float m_ramUsage = 0;   ///< RAM usage as a decimal value between 0 and 1
+   /// INDI summary of minimum, maximum, and mean CPU load fractions.
+   pcf::IndiProperty m_indiP_core_loads;
 
-   /// Updates Indi property values of all system statistics
-   /** This includes updating values for core loads, core temps, drive temps, / usage, /boot usage, /data usage, and RAM usage
-     * Unsure if this method can fail in any way, as of now always returns 0
-     *
-     * \TODO: Check to see if any method called in here can fail
-     * \returns 0 on completion
-     */
+   /// INDI summary of minimum, maximum, and mean CPU temperatures in Celsius.
+   pcf::IndiProperty m_indiP_core_temps;
+
+   /// INDI temperatures indexed by the drive names returned by hddtemp.
+   pcf::IndiProperty m_indiP_drive_temps;
+
+   /// INDI disk and RAM utilization fractions.
+   pcf::IndiProperty m_indiP_usage;
+
+   /// CPU temperatures from the current sensors sample, in Celsius.
+   std::vector<float> m_coreTemps;
+
+   /// CPU activity fractions from the current mpstat sample.
+   std::vector<float> m_coreLoads;
+
+   /// Configured drive names retained from the diskNames setting.
+   std::vector<std::string> m_diskNameList;
+
+   /// Drive identities associated with the current temperature sample.
+   std::vector<std::string> m_diskNames;
+
+   /// Current drive temperatures in Celsius, ordered like m_diskNames.
+   std::vector<float> m_diskTemps;
+
+   /// Most recently parsed utilization fraction for the root filesystem.
+   float m_rootUsage = 0;
+
+   /// Most recently parsed utilization fraction for the /data filesystem.
+   float m_dataUsage = 0;
+
+   /// Most recently parsed utilization fraction for the /boot filesystem.
+   float m_bootUsage = 0;
+
+   /// Most recently parsed RAM utilization fraction.
+   float m_ramUsage = 0;
+
+   ///@}
+
+   /// Publish the current CPU, drive, RAM, Chrony, and latency-control values through INDI.
+   /** \returns 0 on completion. */
    int updateVals();
 
    /** \name GPU and IRQ Diagnostics - Data
@@ -192,37 +222,40 @@ protected:
 
 public:
 
-   /// Default c'tor.
+   /// Construct the app with its build identity and default diagnostic settings.
    sysMonitor();
 
-   /// D'tor, declared and defined for noexcept.
+   /// Destroy app-owned diagnostic state without propagating exceptions.
    ~sysMonitor() noexcept
    {
    }
 
-   /// Setup the user-defined warning and critical values for core and drive temperatures
+   /// Register host thresholds, optional GPU/IRQ diagnostics, and telemeter configuration.
    virtual void setupConfig();
 
-   /// Load the warning and critical temperature values for core and drive temperatures
+   /// Load and validate host settings, diagnostic policy, and telemetry configuration.
    virtual void loadConfig();
 
-   /// Registers all new Indi properties for each of the reported values to publish
+   /// Register diagnostic INDI properties and start telemetry and the latency-control thread.
    virtual int appStartup();
 
-   /// Implementation of reading and logging each of the measured statistics
+   /// Collect due diagnostics, record telemetry, and publish current values.
    virtual int appLogic();
 
-   /// Do any needed shutdown tasks; currently nothing in this app
+   /// Stop command collection, join the latency-control thread, and shut down telemetry.
    virtual int appShutdown();
 
 
-   /// Finds all CPU core temperatures
+   /** \name System Statistics
+     * @{ */
+
+   /// Collect CPU temperatures from sensors output.
    /** Makes system call and then parses result to add temperatures to vector of values
      *
      * \returns -1 on error with system command or output reading
      * \returns 0 on successful completion otherwise
      */
-   int findCPUTemperatures(std::vector<float>&  /**< [out] the vector of measured CPU core temperatures*/);
+   int findCPUTemperatures(std::vector<float>& temps /**< [out] measured CPU temperatures in Celsius */);
 
 
    /// Parses string from system call to find CPU temperatures
@@ -232,8 +265,8 @@ public:
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseCPUTemperatures( float& temp,            /// [out] the return value from the string
-                             const std::string& line /// [in] the string to be parsed
+   int parseCPUTemperatures( float& temp, /**< [out] parsed temperature in Celsius */
+                             const std::string& line /**< [in] one sensors output line */
                            );
 
    /// Parses string from system call to find CPU temperatures on an Intel system
@@ -242,9 +275,9 @@ public:
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseCPUTemperaturesIntel( float& temp,            /// [out] the return value from the string
-                                  const std::string& line /// [in] the string to be parsed
-                                );
+   int parseCPUTemperaturesIntel( float& temp, /**< [out] parsed temperature in Celsius */
+                             const std::string& line /**< [in] one sensors output line */
+                           );
 
    /// Parses string from system call to find CPU temperatures on an AMD system
    /** When a valid string is read in, the value from that string is stored
@@ -252,19 +285,19 @@ public:
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseCPUTemperaturesAMD( float& temp,            /// [out] the return value from the string
-                                const std::string& line /// [in] the string to be parsed
-                              );
+   int parseCPUTemperaturesAMD( float& temp, /**< [out] parsed temperature in Celsius */
+                             const std::string& line /**< [in] one sensors output line */
+                           );
 
 
    /// Checks if any core temperatures are warning or critical levels
-   /** Warning and critical temperatures are either user-defined or generated based on initial core temperature values
+   /** Compare against configured thresholds or the limits discovered from Intel sensors output.
      *
      * \returns 1 if a temperature value is at the warning level
      * \returns 2 if a temperature value is at critical level
      * \returns 0 otherwise (all temperatures are considered normal)
      */
-   int criticalCoreTemperature( std::vector<float>&   /**< [in] the vector of temperature values to be checked*/);
+   int criticalCoreTemperature( std::vector<float>& v /**< [in] CPU temperatures to compare with configured thresholds */);
 
    /// Finds all CPU core usage loads
    /** Makes system call and then parses result to add usage loads to vector of values
@@ -272,33 +305,29 @@ public:
      * \returns -1 on error with system command or output file reading
      * \returns 0 on completion
      */
-   int findCPULoads( std::vector<float>&   /**< [out] the vector of measured CPU usages*/);
+   int findCPULoads( std::vector<float>& loads /**< [out] measured CPU activity fractions */);
 
 
    /// Parses string from system call to find CPU usage loads
-   /** When a valid string is read in, the value from that string is stored
+   /** Convert the final idle-percentage field to an activity fraction.
      *
-     * \returns -1 on invalid string being read in
-     * \returns 0 on completion and storing of value
+     * \returns -1 for empty input or a failed numeric conversion.
+     * \returns 1 when the line has too few fields to contain a CPU sample.
+     * \returns 0 when a value is stored.
      */
-   int parseCPULoads( float &,            ///< [out] the return value from the string
-                      const std::string & ///< [in] the string to be parsed
+   int parseCPULoads( float &loadVal, /**< [out] CPU activity fraction parsed from the idle percentage */
+                      const std::string &line /**< [in] one mpstat output line */
                     );
 
 
    /// Finds all drive temperatures
    /** Makes 'hddtemp' system call and then parses result to add temperatures to vector of values
-     * For hard drive temp utility:
-     * `wget http://dl.fedoraproject.org/pub/epel/7/x86_64/Packages/h/hddtemp-0.3-0.31.beta15.el7.x86_64.rpm`
-     * `su`
-     * `rpm -Uvh hddtemp-0.3-0.31.beta15.el7.x86_64.rpm`
-     * Check install with rpm -q -a | grep -i hddtemp
      *
      * \returns -1 on error with system command or output reading
      * \returns 0 on successful completion otherwise
      */
-   int findDiskTemperature( std::vector<std::string>& hdd_names, ///< [out] the names of the drives reported by hddtemp
-                            std::vector<float>& hdd_temps        ///< [out] the vector of measured drive temperatures
+   int findDiskTemperature( std::vector<std::string>& hdd_names, /**< [out] drive names reported by hddtemp */
+                            std::vector<float>& hdd_temps /**< [out] temperatures in Celsius, ordered like hdd_names */
                           );
 
 
@@ -308,9 +337,9 @@ public:
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseDiskTemperature( std::string& driveName, ///< [out] the name of the drive
-                             float& temp,            ///< [out] the return value from the string
-                             const std::string& line ///< [in] the string to be parsed
+   int parseDiskTemperature( std::string& driveName, /**< [out] parsed drive name without the /dev/ prefix */
+                             float& temp, /**< [out] parsed drive temperature in Celsius */
+                             const std::string& line /**< [in] one hddtemp output line */
                            );
 
 
@@ -321,20 +350,18 @@ public:
      * \returns 2 if a temperature value is at critical level
      * \returns 0 otherwise (all temperatures are considered normal)
      */
-   int criticalDiskTemperature(std::vector<float>&   /**< [in] the vector of temperature values to be checked*/);
+   int criticalDiskTemperature(std::vector<float>& v /**< [in] drive temperatures to compare with configured thresholds */);
 
 
    /// Finds usages of space for following directory paths: /; /data; /boot
-   /** These usage values are stored as integer values between 0 and 100 (e.g. value of 39 means directory is 39% full)
-     * If directory is not found, space usage value will remain 0
-     * \TODO: What about multiple drives? What does this do?
+   /** Usage values are fractions between zero and one. A path absent from df output retains its previous value.
      *
      * \returns -1 on error with system command or output reading
      * \returns 0 if at least one of the return values is found
      */
-   int findDiskUsage( float&,   /**< [out] the return value for usage in root path*/
-                      float&,   /**< [out] the return value for usage in /data path*/
-                      float&    /**< [out] the return value for usage in /boot path*/
+   int findDiskUsage( float& rootUsage, /**< [in,out] utilization fraction for the root filesystem */
+                      float& dataUsage, /**< [in,out] utilization fraction for the /data filesystem */
+                      float& bootUsage /**< [in,out] utilization fraction for the /boot filesystem */
                     );
 
 
@@ -344,10 +371,10 @@ public:
      * \returns -1 on invalid string being read in
      * \returns 0 on completion and storing of value
      */
-   int parseDiskUsage( std::string,   /**< [in] the string to be parsed*/
-                       float&,   /**< [out] the return value for usage in root path*/
-                       float&,   /**< [out] the return value for usage in /data path*/
-                       float&    /**< [out] the return value for usage in /boot path*/
+   int parseDiskUsage( std::string line, /**< [in] one df output line */
+                       float& rootUsage, /**< [in,out] root utilization, updated when this line identifies / */
+                       float& dataUsage, /**< [in,out] data utilization, updated when this line identifies /data */
+                       float& bootUsage /**< [in,out] boot utilization, updated when this line identifies /boot */
                      );
 
 
@@ -357,7 +384,7 @@ public:
      * \returns -1 on error with system command or output reading
      * \returns 0 on completion
      */
-   int findRamUsage(float&    /**< [out] the return value for current RAM usage*/);
+   int findRamUsage(float& ramUsage /**< [in,out] RAM utilization fraction, updated when a sample is parsed */);
 
 
    /// Parses string from system call to find RAM usage
@@ -366,33 +393,68 @@ public:
     * \returns -1 on invalid string being read in
     * \returns 0 on completion and storing of value
     */
-   int parseRamUsage( std::string,   /**< [in] the string to be parsed*/
-                      float&    /**< [out] the return value for current RAM usage*/
+   int parseRamUsage( std::string line, /**< [in] one free -m output line */
+                      float& ramUsage /**< [in,out] RAM utilization fraction, updated for a recognized memory row */
                     );
 
-   /** \name Chrony Status
-     * @{
-     */
+   ///@}
+
+   /** \name Chrony Status - Data
+     * @{ */
 protected:
+   /// Reference identifier reported by chronyc tracking.
    std::string m_chronySourceMac;
+
+   /// Address of the current Chrony synchronization source.
    std::string m_chronySourceIP;
+
+   /// Published YES/NO synchronization indication derived from the source.
    std::string m_chronySynch;
+
+   /// Current system-time correction in seconds.
    double m_chronySystemTime{ 0 };
+
+   /// Most recent estimated clock offset in seconds.
    double m_chronyLastOffset{ 0 };
+
+   /// Root-mean-square clock offset in seconds.
    double m_chronyRMSOffset{ 0 };
+
+   /// Estimated clock-frequency correction in parts per million.
    double m_chronyFreq{ 0 };
+
+   /// Residual frequency error in parts per million.
    double m_chronyResidFreq{ 0 };
+
+   /// Estimated frequency-error bound in parts per million.
    double m_chronySkew{ 0 };
+
+   /// Total delay to the reference clock in seconds.
    double m_chronyRootDelay{ 0 };
+
+   /// Accumulated dispersion to the reference clock in seconds.
    double m_chronyRootDispersion{ 0 };
+
+   /// Interval between clock updates in seconds.
    double m_chronyUpdateInt{ 0 };
+
+   /// Leap-second status reported by chronyc.
    std::string m_chronyLeap;
 
+
+   /// INDI synchronization state and source identity.
    pcf::IndiProperty m_indiP_chronyStatus;
+
+   /// INDI clock-correction and offset measurements.
    pcf::IndiProperty m_indiP_chronyStats;
 
+
+   ///@}
+
+   /** \name Chrony Status
+     * @{ */
 public:
-   /// Finds current chronyd status
+   /// Collect Chrony tracking status and record changed status/statistics.
    /** Uses the chrony tracking command
      *
      * \returns -1 on error
@@ -402,32 +464,44 @@ public:
 
    ///@}
 
-   /** \name Set Latency
-     * This thread spins up the cpus to minimize latency when requested
-     *
-     * @{
-     */
+   /** \name Set Latency - Data
+     * @{ */
+
+   /// Requested low-latency mode, applied by the existing latency-control thread.
    bool m_setLatency{ false };
 
-   int m_setlatThreadPrio{ 0 }; ///< Priority of the set latency thread, should normally be > 00.
+   /// Scheduling priority requested for the latency-control thread.
+   int m_setlatThreadPrio{ 0 };
 
-   std::thread m_setlatThread; ///< A separate thread for the actual setting of low latency
+   /// Owned worker that applies CPU governor and latency settings.
+   std::thread m_setlatThread;
 
-   bool m_setlatThreadInit{ true }; ///< Synchronizer to ensure set lat thread initializes before doing dangerous things.
+   /// Startup handshake preventing worker activity before thread configuration completes.
+   bool m_setlatThreadInit{ true };
 
-   pid_t m_setlatThreadID{ 0 }; ///< Set latency thread ID.
+   /// Kernel thread ID published for the latency-control worker.
+   pid_t m_setlatThreadID{ 0 };
 
-   pcf::IndiProperty m_setlatThreadProp; ///< The property to hold the setlat thread details.
+   /// INDI scheduling and identity details for the latency-control thread.
+   pcf::IndiProperty m_setlatThreadProp;
 
-   ///Thread starter, called by threadStart on thread construction.  Calls setlatThreadExec.
-   static void setlatThreadStart(sysMonitor* s /**< [in] a pointer to a sysMonitor instance (normally this) */);
-
-   /// Execute the frame grabber main loop.
-   void setlatThreadExec();
-
+   /// INDI toggle carrying the requested low-latency state.
    pcf::IndiProperty m_indiP_setlat;
 
+   ///@}
+
+   /** \name Set Latency
+     * @{ */
+
+   /// Forward the framework thread entrypoint to setlatThreadExec().
+   static void setlatThreadStart(sysMonitor* s /**< [in] a pointer to a sysMonitor instance (normally this) */);
+
+   /// Apply requested CPU governor/latency settings until app shutdown.
+   void setlatThreadExec();
+
 public:
+   /// Accept the INDI toggle requesting low-latency CPU operation.
+   /** The interface macro declares the received-property callback and its static dispatch wrapper. */
    INDI_NEWCALLBACK_DECL(sysMonitor, m_indiP_setlat);
 
    ///@}
@@ -436,19 +510,26 @@ public:
      *
      * @{
      */
+   /// Force records whose telemetry intervals have elapsed.
    int checkRecordTimes();
 
-   int recordTelem(const telem_coreloads*);
+   /// Force a periodic CPU load record from the current cached state.
+   int recordTelem(const telem_coreloads* unused /**< [in] unused telemetry type selector */);
 
-   int recordTelem(const telem_coretemps*);
+   /// Force a periodic CPU temperature record from the current cached state.
+   int recordTelem(const telem_coretemps* unused /**< [in] unused telemetry type selector */);
 
-   int recordTelem(const telem_drivetemps*);
+   /// Force a periodic drive temperature record from the current cached state.
+   int recordTelem(const telem_drivetemps* unused /**< [in] unused telemetry type selector */);
 
-   int recordTelem(const telem_usage*);
+   /// Force a periodic resource utilization record from the current cached state.
+   int recordTelem(const telem_usage* unused /**< [in] unused telemetry type selector */);
 
-   int recordTelem(const telem_chrony_status*);
+   /// Force a periodic Chrony synchronization record from the current cached state.
+   int recordTelem(const telem_chrony_status* unused /**< [in] unused telemetry type selector */);
 
-   int recordTelem(const telem_chrony_stats*);
+   /// Force a periodic Chrony clock-statistics record from the current cached state.
+   int recordTelem(const telem_chrony_stats* unused /**< [in] unused telemetry type selector */);
 
    /// Force a periodic GPU record without claiming another measurement.
    int recordTelem(const telem_gpu* unused /**< [in] telemetry type selector */);
@@ -456,17 +537,23 @@ public:
    /// Force a periodic IRQ record without claiming another check.
    int recordTelem(const telem_irq* unused /**< [in] telemetry type selector */);
 
-   int recordCoreLoads(bool force = false);
+   /// Record CPU load fractions according to the existing change/force policy.
+   int recordCoreLoads(bool force = false /**< [in] emit a record regardless of cached values */);
 
-   int recordCoreTemps(bool force = false);
+   /// Record CPU temperatures according to the existing change/force policy.
+   int recordCoreTemps(bool force = false /**< [in] emit a record regardless of cached values */);
 
-   int recordDriveTemps(bool force = false);
+   /// Record identified drive temperatures according to the existing change/force policy.
+   int recordDriveTemps(bool force = false /**< [in] emit a record regardless of cached values */);
 
-   int recordUsage(bool force = false);
+   /// Record disk and RAM utilization according to the existing change/force policy.
+   int recordUsage(bool force = false /**< [in] emit a record regardless of cached values */);
 
-   int recordChronyStatus(bool force = false);
+   /// Record Chrony synchronization state according to the existing change/force policy.
+   int recordChronyStatus(bool force = false /**< [in] emit a record regardless of cached values */);
 
-   int recordChronyStats(bool force = false);
+   /// Record Chrony clock statistics according to the existing change/force policy.
+   int recordChronyStats(bool force = false /**< [in] emit a record regardless of cached values */);
 
    ///@}
 
@@ -1524,7 +1611,7 @@ void sysMonitor::setlatThreadExec()
 
 }
 
-INDI_NEWCALLBACK_DEFN(sysMonitor, m_indiP_setlat)(const pcf::IndiProperty& ipRecv)
+INDI_NEWCALLBACK_DEFN(sysMonitor, m_indiP_setlat)(const pcf::IndiProperty& ipRecv /**< [in] received low-latency toggle property */)
 {
    INDI_VALIDATE_CALLBACK_PROPS(m_indiP_setlat, ipRecv);
 

@@ -44,7 +44,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 # Agent Findings and Plan
 
-Status: implementation authorized on 2026-11-15 after the answers below. Verified host `mx11` and checkout `/home/jrmales/Source/MagAOX-working`. Feature branch `jrmales/sysmon-diagnostics` starts from updated `dev` at `92c20495`, including the merged IRQ policy changes. No instrument commands have been run.
+Status: implementation completed and offline validation passed on 2026-11-15 after the answers below. Verified host `mx11` and checkout `/home/jrmales/Source/MagAOX-working`. Feature branch `jrmales/sysmon-diagnostics` starts from updated `dev` at `92c20495`, including the merged IRQ policy changes. No instrument commands have been run.
 
 ## Task Summary
 
@@ -224,5 +224,13 @@ Expected affected paths after approval:
 - The normal app compile reached linking, where pre-existing coverage-instrumented INDI archives required coverage runtime linkage. Validation uses `LDFLAGS=--coverage` with production optimization for final builds; initial integration builds also used `COVERAGE=1`. No instrument app is launched.
 - Review found legacy `runCommand` used `wait(NULL)` twice; a pending GPU child could therefore block an unrelated CPU/disk query. The scoped supporting fix waits for the legacy command's own PID and removes the second wait. Its API, output behavior, and callers remain unchanged. Two offline child-ownership regressions pass (20 assertions).
 - Logger integration also required static `lastRecord` definitions, runtime verification cases, and support for existing `Vector_String`, `Vector_UInt`, and `Vector_Double` metadata enum values. Focused tests verify actual FITS values, custom formatting, precision, and unavailable inventories.
-- Initial validated results: GPU parser 101 assertions/4 cases; CPU-list parser 42/2; IRQ collector 122/5; GPU telemetry/FITS 90/4; IRQ telemetry 29/2; bounded runner 78/8; existing metadata 22/4; generated logger suite 469/86; Python generator 6 tests. SysMonitor integration passed 223 assertions/9 cases including strict-policy-boolean regressions; existing sysMonitor tests passed 75/6. Final documentation/formatting checks are in progress.
+- Initial validated results: GPU parser 101 assertions/4 cases; CPU-list parser 42/2; IRQ collector 122/5; GPU telemetry/FITS 90/4; IRQ telemetry 29/2; bounded runner 78/8; existing metadata 22/4; generated logger suite 469/86; Python generator 6 tests. SysMonitor integration passed 223 assertions/9 cases including strict-policy-boolean regressions; existing sysMonitor tests passed 75/6. Final documentation/formatting checks passed.
 - Review corrected optional-only startup reporting, IRQ cadence after slow GPU queries, and policy booleans that mxlib would otherwise silently convert from malformed text to false. New diagnostics explicitly accept only `true`, `false`, `1`, or `0` for those booleans. Per-device GPU status changes are logged even when another device keeps the aggregate status partial.
+
+### Final validation
+
+- Both `libMagAOX` and `apps/sysMonitor` build successfully with production `-O3 -ffast-math`; existing coverage-instrumented dependency archives required `LDFLAGS=--coverage` at link time.
+- All 11 focused/regression C++ suites and the generated logger suite passed: **1294 assertions across 136 cases**, plus **6 Python generator tests**. This includes existing sysMonitor (75 assertions) and stateRuleEngine (23 assertions) regressions. Commands and output are retained locally in `/tmp/sysmon-final-validation/`, with the step results in `summary.tsv`.
+- Completed full-file documentation, Doxygen grouping/references, clang-format, explicit-brace checks, and required logical spacing across all 21 touched C++ files. The last whitespace-only pass was checked for identical code tokens and string literals; all code diff whitespace checks pass. Original user task/answer text remains unchanged, including its pre-existing whitespace.
+- Work is separated into functional, documentation, and formatting commits on `jrmales/sysmon-diagnostics`. Unrelated untracked files were preserved.
+- Remaining operator work: review/install the supplied configuration fragments and warning rules, then perform instrument readback/IRQ transition checks and timing A/B qualification. No hardware access, instrument startup, installed-configuration changes, or deployment was performed by the agent.

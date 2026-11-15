@@ -1,6 +1,5 @@
 /** \file runCommand.cpp
-  * \brief Run a command get the output.
-  * \author Jared R. Males (jaredmales@gmail.com)
+  * \brief Run a command and collect its standard output and error.
   *
   * \ingroup sys_files
   */
@@ -20,9 +19,10 @@ namespace MagAOX
 namespace sys
 {
 
-int runCommand( std::vector<std::string> & commandOutput, // [out] the output, line by line.  If an error, first entry contains the message.
-                std::vector<std::string> & commandStderr, // [out] the output of stderr.
-                std::vector<std::string> & commandList    // [in] command to be run, with one entry per command line word
+/// Run a command, waiting exclusively for its child before collecting the captured streams.
+int runCommand( std::vector<std::string> & commandOutput, /**< [out] standard output lines or an error message */
+                std::vector<std::string> & commandStderr, /**< [out] standard error lines */
+                std::vector<std::string> & commandList    /**< [in] executable followed by command arguments */
               )
 {
    int link[2];
@@ -72,6 +72,7 @@ int runCommand( std::vector<std::string> & commandOutput, // [out] the output, l
       char commandOutput_c[4096];
 
       pid_t waited;
+
       do
       {
          waited = waitpid(pid, nullptr, 0);
