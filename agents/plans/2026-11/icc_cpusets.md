@@ -145,7 +145,7 @@ IRQ entries describe the routing script's assignments, not observed IRQ activity
 
 | ICC CPU(s) | Current cpuset | Configured app threads / CACAO processes | Other consumers / planning status |
 |---|---|---|---|
-| `0-31,64-95` | `system` | Inherited/background placement; see exceptions below | Default IRQ pool; 32 cores with both hardware threads enabled |
+| `0-31,64-95` | `system` | Inherited/background placement; see exceptions below | Default IRQ pool, including NVIDIA IRQs since 2026-11-15; 32 cores with both hardware threads enabled |
 | 32 | `dm02comb` | CACAO `DMch2disp-02` | NCPC DM combiner |
 | 33 | `ncpc` | `dmncpc` DM | Command-monitor thread; no explicit SDK/post-worker cpusets |
 | 34 | `camflowfs` | `camflowfs` FG | `pvcamPCIE_1` IRQs |
@@ -159,7 +159,7 @@ IRQ entries describe the routing script's assignments, not observed IRQ activity
 | 42 | `camflowfs_fit` | `camflowfs-fit` SM + FG | Both threads share the set |
 | 43 | `camllowfs_fit` | `camllowfs-fit` SM + FG | Both threads share the set |
 | 44 | `spare44` | No consumer found in reviewed sources | Spare |
-| 45 | `acqu_mvm` | CACAO `acquWFS-2`, `wfs2cmodeval-2`, `mfilt-2`, `mvalC2dm-2` | NVIDIA IRQs also routed here |
+| 45 | `acqu_mvm` | CACAO `acquWFS-2`, `wfs2cmodeval-2`, `mfilt-2`, `mvalC2dm-2` | NVIDIA IRQs no longer routed here (2026-11-15, see `agents/plans/2026-10/rtc-cpuset-restructuring.md`) |
 | 46 | `spare46` | No consumer found in reviewed sources | Spare; released by moving `mfilt-2` to CPU45 |
 | 47 | `spare47` | No consumer found in reviewed sources | Spare |
 | 48 | `mlat` | CACAO `mlat-2` | Configured latency-measurement process; retain reservation pending decision |
@@ -217,9 +217,11 @@ establish runtime occupancy.
 - CACAO now sets `mfilt-2.procinfo.cset=acqu_mvm` and `taskset=45`, retaining
   `RTprio=48` and enabled `CACAO_FPSPROC_MODALFILTERING`. Both placement settings
   were updated together; the filtering process remains enabled.
-- IRQ policy comments reverse the `pvcamPCIE_0`/`pvcamPCIE_1` camera labels
-  relative to `move_irqs`. The table follows the executable routing statements;
-  actual device identities should be reconciled before changing that routing.
+- IRQ policy comments reversed the `pvcamPCIE_0`/`pvcamPCIE_1` camera labels
+  relative to `move_irqs`. The comments now follow `move_irqs` (2026-11-15).
+  Operator confirmed (2026-11-15): `pvcamPCIE_1` is camflowfs and
+  `pvcamPCIE_0` is camllowfs, consistently through several reboots and power
+  cycles, so the `move_irqs` routing is correct.
 
 | Missing exact instance config | Interpretation |
 |---|---|

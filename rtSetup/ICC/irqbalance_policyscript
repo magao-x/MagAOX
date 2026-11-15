@@ -1,20 +1,22 @@
 #!/bin/bash
+# \file
+# \brief Prevent irqbalance from moving the ICC's latency-sensitive device IRQs.
 #
-# Prevent rebalancing IRQs for latency-sensitive hardware interrupts
+# move_irqs routes each of these to its dedicated core.
 #
 # Install to /usr/local/bin ensuring *only* root can write to the file
 # (because it is invoked with root privileges).
 #
 # Driver names are actually patterns, i.e. enx matches enx2cfda1c6db1a.
 
-#nvidia: any NVIDIA GPU
 #enx503eaa0ceeff: ICC camsci1
 #enx503eaa0cf4cd: ICC camsci2
 #enx98b78501ae64: ICC icc-to-rtc
-#pvcamPCIE_0: camflowfs
-#pvcamPCIE_1: camllowfs
+#pvcamPCIE_0: camllowfs
+#pvcamPCIE_1: camflowfs
+#NVIDIA GPU IRQs are not banned: irqbalance keeps them on the system CPUs.
 
-for driverPattern in nvidia enx503eaa0ceeff enx503eaa0cf4cd enx98b78501ae64 pvcamPCIE_0 pvcamPCIE_1; do
+for driverPattern in enx503eaa0ceeff enx503eaa0cf4cd enx98b78501ae64 pvcamPCIE_0 pvcamPCIE_1; do
     if [[ $(grep -e "^\s*$2" /proc/interrupts) == *"$driverPattern"* ]]; then
         echo "ban=true"
         exit 0
