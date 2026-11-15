@@ -1,5 +1,5 @@
 /** \file dmRecon.hpp
- * \brief Reconstruct applied DM modes and diagnose publication timing relative to loop triggers.
+ * \brief Reconstruct applied DM modes and diagnose live or dry-run completion against loop triggers.
  * \ingroup dmRecon_files
  */
 #ifndef dmRecon_hpp
@@ -178,6 +178,14 @@ class dmRecon : public MagAOXApp<true>,
         std::string                   error;          ///< Empty on success; otherwise a failed-generation diagnostic.
     };
 
+    /// Cumulative disabled-feedback timing, with margins from verified completions only.
+    struct DryTimingStatistics
+    {
+        uint64_t beforeNext{ 0 }, late{ 0 }, unknown{ 0 }; ///< Counts since application startup.
+        int64_t  marginNs{ 0 }; ///< Latest verified next-trigger minus reconstruction-completion time.
+        int64_t  minMarginNs{ 0 }, maxMarginNs{ 0 }; ///< Verified extrema; zero until beforeNext or late is nonzero.
+    };
+
     std::mutex m_snapshotMutex; ///< Protects pending snapshots, their generations, and timing observations.
     std::condition_variable      m_calibrationCondition; ///< Wakes the builder on source changes or shutdown.
     std::unique_ptr<Calibration> m_calibrationResult;    ///< Pending immutable candidate, under m_snapshotMutex.
@@ -214,19 +222,22 @@ class dmRecon : public MagAOXApp<true>,
     mx::improc::milkImage<float> m_modevalMon, m_modeval, m_modevalDiff; ///< FG-owned diagnostic mappings.
     bool                         m_diagnosticsReady{ false },
         m_differenceReady{ false }; ///< Diagnostic stream availability is independent of feedback.
-    std::vector<float>    m_difference, m_diagnosticModes; ///< Private diagnostic input and difference product.
-    std::string           m_outputPath;       ///< Immutable feedback backing-file path for app-thread reconnect checks.
-    std::atomic<uint64_t> m_outputInode{ 0 }; ///< Worker-published output attachment identity.
-    std::atomic<bool>     m_outputChanged{ false };  ///< Inhibits publication after a detected output replacement.
-    clockid_t     m_triggerClock{ CLOCK_ISIO };      ///< Explicit clock used for publication-completion observations.
-    dmReconTiming m_timing;                          ///< Diagnostic-only event pairing under the snapshot lock.
-    dmReconTiming::Trigger m_latestTrigger;          ///< Latest coherent observed trigger, under the snapshot lock.
+    std::vector<float>     m_difference, m_diagnosticModes; ///< Private diagnostic input and difference product.
+    std::string            m_outputPath; ///< Immutable feedback backing-file path for app-thread reconnect checks.
+    std::atomic<uint64_t>  m_outputInode{ 0 };           ///< Worker-published output attachment identity.
+    std::atomic<bool>      m_outputChanged{ false };     ///< Inhibits publication after a detected output replacement.
+    clockid_t              m_triggerClock{ CLOCK_ISIO }; ///< Explicit clock used for completion observations.
+    dmReconTiming          m_timing;                     ///< Actual feedback event pairing under the snapshot lock.
+    dmReconTiming          m_dryTiming;      ///< Disabled-feedback reconstruction pairing under the snapshot lock.
+    DryTimingStatistics    m_dryTimingStats; ///< Disabled-feedback counts and margins under the snapshot lock.
+    dmReconTiming::Trigger m_latestTrigger;  ///< Latest coherent observed trigger, under the snapshot lock.
     uint64_t               m_triggerGeneration{ 0 }; ///< Trigger attachment/reset generation, under the snapshot lock.
     int64_t m_triggerClockLow{ 0 }, m_triggerClockHigh{ 0 }; ///< Last trigger observation's clock offset bracket.
     bool    m_triggerClockValid{ false }; ///< Trigger offset is qualified against the monotonic clock.
     std::atomic<uint64_t> m_beforeNext{ 0 }, m_late{ 0 }, m_unknown{ 0 }; ///< Cumulative timing classifications.
     std::atomic<uint64_t> m_rejected{ 0 }, m_coalesced{ 0 }; ///< Invalid/torn inputs and superseded pending inputs.
     uint64_t              m_reportedLate{ 0 }, m_reportedUnknown{ 0 }; ///< App-thread warning rate limiting.
+    uint64_t m_reportedDryLate{ 0 }, m_reportedDryUnknown{ 0 };        ///< App-thread dry-run warning rate limiting.
     std::atomic<SnapshotStatus> m_modesSnapshot{ SnapshotStatus::unavailable },
         m_maskSnapshot{ SnapshotStatus::unavailable }; ///< Calibration-monitor outcomes, readable by the app thread.
     std::atomic<const char *> m_setupStage{ "waiting_for_calibration" }; ///< Worker stage; values are static literals.
@@ -301,6 +312,13 @@ class dmRecon : public MagAOXApp<true>,
 
     /// Accumulate timing results without logging on the real-time path.
     void timingUpdate( const dmReconTiming::Update &update /**< [in] Newly resolved diagnostics. */ );
+
+    /// Accumulate dry-run counts and verified margins while holding the snapshot lock.
+    void dryTimingUpdate( const dmReconTiming::Update &update /**< [in] Newly resolved dry-run diagnostics. */ );
+
+    /// Sample completion before diagnostic copies and route it to the selected timing observer.
+    void
+    recordCompletion( bool dryRun /**< [in] True after disabled-feedback reconstruction, false after publication. */ );
 
     /// Publish optional diagnostics from private calculation storage.
     void publishDiagnostics();
@@ -384,6 +402,7 @@ class dmRecon : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_fps;            ///< Reported FPS.
     pcf::IndiProperty m_indiP_writeDMf;       ///< Feedback enable control.
     pcf::IndiProperty m_indiP_feedbackTiming; ///< Timing and input-quality counters.
+    pcf::IndiProperty m_indiP_dryTiming;      ///< Disabled-feedback timing counts and verified margins in microseconds.
     pcf::IndiProperty m_indiP_reconStatus;    ///< Setup stage and calibration snapshot outcomes.
     /// Accept an FPS update without expiring silent subscriptions.
     INDI_SETCALLBACK_DECL( dmRecon, m_indiP_fpsSource );
@@ -591,7 +610,16 @@ inline int dmRecon::appStartup()
         m_indiP_feedbackTiming.add( pcf::IndiElement( name ) );
     }
 
-    if( registerIndiPropertyReadOnly( m_indiP_feedbackTiming ) < 0 || sem_init( &m_smSemaphore, 0, 0 ) < 0 )
+    createROIndiNumber( m_indiP_dryTiming, "dry_run_timing" );
+
+    for( const char *name :
+         { "before_next", "late", "unverified", "margin_last_us", "margin_min_us", "margin_max_us" } )
+    {
+        m_indiP_dryTiming.add( pcf::IndiElement( name ) );
+    }
+
+    if( registerIndiPropertyReadOnly( m_indiP_feedbackTiming ) < 0 ||
+        registerIndiPropertyReadOnly( m_indiP_dryTiming ) < 0 || sem_init( &m_smSemaphore, 0, 0 ) < 0 )
     {
         return -1;
     }
@@ -716,10 +744,16 @@ inline int dmRecon::appLogic()
         }
     }
 
-    const auto  late          = m_late.load();
-    const auto  unknown       = m_unknown.load();
-    const char *setupStage    = m_setupStage.load();
-    const auto  modesSnapshot = m_modesSnapshot.load(), maskSnapshot = m_maskSnapshot.load();
+    const auto          late          = m_late.load();
+    const auto          unknown       = m_unknown.load();
+    const char         *setupStage    = m_setupStage.load();
+    const auto          modesSnapshot = m_modesSnapshot.load(), maskSnapshot = m_maskSnapshot.load();
+    DryTimingStatistics dryTiming;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_snapshotMutex );
+        dryTiming = m_dryTimingStats;
+    }
 
     if( setupStage != m_reportedSetupStage || modesSnapshot != m_reportedModesSnapshot ||
         maskSnapshot != m_reportedMaskSnapshot )
@@ -752,6 +786,26 @@ inline int dmRecon::appLogic()
         m_reportedUnknown = unknown;
     }
 
+    if( dryTiming.late != m_reportedDryLate )
+    {
+        log<text_log>(
+            std::format( "dmRecon dry-run reconstruction missed the next trigger timestamp: {} new, {} total",
+                         dryTiming.late - m_reportedDryLate,
+                         dryTiming.late ),
+            logPrio::LOG_WARNING );
+        m_reportedDryLate = dryTiming.late;
+    }
+
+    if( dryTiming.unknown != m_reportedDryUnknown )
+    {
+        log<text_log>(
+            std::format( "dmRecon dry-run timing unverified: {} new, {} total (trigger gaps, identity or clock)",
+                         dryTiming.unknown - m_reportedDryUnknown,
+                         dryTiming.unknown ),
+            logPrio::LOG_WARNING );
+        m_reportedDryUnknown = dryTiming.unknown;
+    }
+
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_indiMutex );
         updateSwitchIfChanged(
@@ -761,6 +815,12 @@ inline int dmRecon::appLogic()
         updateIfChanged( m_indiP_feedbackTiming, "unverified", double( unknown ) );
         updateIfChanged( m_indiP_feedbackTiming, "rejected", double( m_rejected.load() ) );
         updateIfChanged( m_indiP_feedbackTiming, "coalesced", double( m_coalesced.load() ) );
+        updateIfChanged( m_indiP_dryTiming, "before_next", double( dryTiming.beforeNext ) );
+        updateIfChanged( m_indiP_dryTiming, "late", double( dryTiming.late ) );
+        updateIfChanged( m_indiP_dryTiming, "unverified", double( dryTiming.unknown ) );
+        updateIfChanged( m_indiP_dryTiming, "margin_last_us", double( dryTiming.marginNs ) / 1000 );
+        updateIfChanged( m_indiP_dryTiming, "margin_min_us", double( dryTiming.minMarginNs ) / 1000 );
+        updateIfChanged( m_indiP_dryTiming, "margin_max_us", double( dryTiming.maxMarginNs ) / 1000 );
         updateIfChanged( m_indiP_reconStatus, "stage", std::string( setupStage ) );
         updateIfChanged( m_indiP_reconStatus, "modes", std::string( snapshotStatusName( modesSnapshot ) ) );
         updateIfChanged( m_indiP_reconStatus, "mask", std::string( snapshotStatusName( maskSnapshot ) ) );
@@ -1121,6 +1181,61 @@ inline void dmRecon::timingUpdate( const dmReconTiming::Update &update )
     m_unknown += update.unknown;
 }
 
+inline void dmRecon::dryTimingUpdate( const dmReconTiming::Update &update )
+{
+    if( update.beforeNextTrigger != 0 || update.late != 0 )
+    {
+        const bool first          = m_dryTimingStats.beforeNext == 0 && m_dryTimingStats.late == 0;
+        m_dryTimingStats.marginNs = update.marginNs;
+        m_dryTimingStats.minMarginNs =
+            first ? update.marginNs : std::min( m_dryTimingStats.minMarginNs, update.marginNs );
+        m_dryTimingStats.maxMarginNs =
+            first ? update.marginNs : std::max( m_dryTimingStats.maxMarginNs, update.marginNs );
+    }
+
+    m_dryTimingStats.beforeNext += update.beforeNextTrigger;
+    m_dryTimingStats.late += update.late;
+    m_dryTimingStats.unknown += update.unknown;
+}
+
+inline void dmRecon::recordCompletion( bool dryRun )
+{
+    timespec   completed{};
+    int64_t    low = 0, high = 0;
+    const bool clockValid = sampleClock( completed, low, high ) && m_currentCommand.clockValid &&
+                            low <= m_currentCommand.clockHigh + 1000 && high >= m_currentCommand.clockLow - 1000;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_snapshotMutex );
+
+        if( dryRun && ( !m_modesValid || !m_maskValid || !m_calibrationUsable || m_outputChanged.load() ||
+                        m_currentCommand.generation != m_calibrationGeneration ||
+                        m_currentCommand.inputGeneration != m_inputGeneration ) )
+        {
+            ++m_rejected;
+            return;
+        }
+
+        auto &timing = dryRun ? m_dryTiming : m_timing;
+        auto  update = clockValid ? timing.published( m_currentCommand.trigger, completed, m_currentCommand.stamp )
+                                  : timing.reset();
+
+        if( !clockValid )
+        {
+            ++update.unknown;
+        }
+
+        if( dryRun )
+        {
+            dryTimingUpdate( update );
+        }
+        else
+        {
+            timingUpdate( update );
+        }
+    }
+}
+
 inline void dmRecon::invalidateCalibration( bool modes )
 {
     { //mutex scope
@@ -1290,6 +1405,7 @@ inline int dmRecon::allocate( const dmLoopTriggerShmimT & )
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_snapshotMutex );
         timingUpdate( m_timing.reset() );
+        dryTimingUpdate( m_dryTiming.reset() );
         ++m_triggerGeneration;
         m_latestTrigger     = {};
         m_triggerClockValid = false;
@@ -1331,6 +1447,7 @@ inline int dmRecon::processImage( void *, const dmLoopTriggerShmimT & )
               ( trigger.inode != m_latestTrigger.inode || trigger.counter < m_latestTrigger.counter ) ) )
         {
             timingUpdate( m_timing.reset() );
+            dryTimingUpdate( m_dryTiming.reset() );
             ++m_triggerGeneration;
             m_latestTrigger = {};
         }
@@ -1346,6 +1463,7 @@ inline int dmRecon::processImage( void *, const dmLoopTriggerShmimT & )
 
         trigger.generation = m_triggerGeneration;
         timingUpdate( m_timing.observe( trigger ) );
+        dryTimingUpdate( m_dryTiming.observe( trigger ) );
         m_latestTrigger = trigger;
     }
 
@@ -1853,6 +1971,7 @@ inline int dmRecon::acquireAndCheckValid()
 
     if( !m_writeDMf.load() )
     {
+        recordCompletion( true );
         publishDiagnostics();
         return 1;
     }
@@ -1897,24 +2016,7 @@ inline int dmRecon::loadImageIntoStream( void *destination )
 
 inline int dmRecon::frameGrabberPostPublish( IMAGE * )
 {
-    timespec   completed{};
-    int64_t    low = 0, high = 0;
-    const bool clockValid = sampleClock( completed, low, high ) && m_currentCommand.clockValid &&
-                            low <= m_currentCommand.clockHigh + 1000 && high >= m_currentCommand.clockLow - 1000;
-
-    { //mutex scope
-        std::lock_guard<std::mutex> lock( m_snapshotMutex );
-
-        if( clockValid )
-        {
-            timingUpdate( m_timing.published( m_currentCommand.trigger, completed, m_currentCommand.stamp ) );
-        }
-        else
-        {
-            timingUpdate( m_timing.reset() );
-            ++m_unknown;
-        }
-    }
+    recordCompletion( false );
 
     if( m_publicationLock.owns_lock() )
     {

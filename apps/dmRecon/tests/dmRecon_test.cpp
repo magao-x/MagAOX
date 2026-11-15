@@ -1,5 +1,5 @@
 /** \file dmRecon_test.cpp
- * \brief Offline dmRecon calibration, snapshot, reconstruction and publication ownership regressions.
+ * \brief Offline dmRecon calibration, snapshot, reconstruction, publication and timing regressions.
  * \ingroup dmRecon_unit_test
  */
 
@@ -125,13 +125,16 @@ class dmRecon_test : public dmRecon
   public:
     using dmRecon::buildCalibration;
     using dmRecon::Frame;
+    using dmRecon::m_beforeNext;
     using dmRecon::m_calibrationExited;
     using dmRecon::m_calibrationGeneration;
     using dmRecon::m_calibrationUsable;
     using dmRecon::m_coalesced;
     using dmRecon::m_commandPending;
     using dmRecon::m_currentCommand;
+    using dmRecon::m_dryTimingStats;
     using dmRecon::m_inputGeneration;
+    using dmRecon::m_late;
     using dmRecon::m_latestTrigger;
     using dmRecon::m_maskIDX;
     using dmRecon::m_maskRetry;
@@ -154,10 +157,12 @@ class dmRecon_test : public dmRecon
     using dmRecon::m_triggerClockHigh;
     using dmRecon::m_triggerClockLow;
     using dmRecon::m_triggerClockValid;
+    using dmRecon::m_unknown;
     using dmRecon::m_workerGeneration;
     using dmRecon::m_writeDMf;
     using dmRecon::outputCompatible;
     using dmRecon::reconstruct;
+    using dmRecon::recordCompletion;
     using dmRecon::setCalibrationStage;
     using dmRecon::snapshot;
     using dmRecon::SnapshotStatus;
@@ -199,6 +204,12 @@ class dmRecon_test : public dmRecon
     /// Attach a local command to the real monitor callback.
     void commandSource( const IMAGE &source /**< [in] Borrowed fixture image. */ );
 
+    /// Attach local metadata to the real loop-trigger observer without opening a stream.
+    void triggerSource( const IMAGE &source /**< [in] Borrowed trigger fixture image. */ );
+
+    /// Accumulate deterministic dry timing updates under the production snapshot lock.
+    void applyDryUpdate( const dmReconTiming::Update &update /**< [in] Completed timing classifications. */ );
+
     /// Supply borrowed output metadata for the real final publication checks.
     void output( IMAGE *source /**< [in] Borrowed fixture image. */ );
 
@@ -228,10 +239,11 @@ dmRecon_test::~dmRecon_test() noexcept
 {
     stopCalibrationThread();
     reconfig();
-    dmModesSMT::m_imageStream    = {};
-    dmMaskSMT::m_imageStream     = {};
-    dmCommandSMT::m_imageStream  = {};
-    frameGrabberT::m_imageStream = nullptr;
+    dmModesSMT::m_imageStream     = {};
+    dmMaskSMT::m_imageStream      = {};
+    dmCommandSMT::m_imageStream   = {};
+    loopTriggerSMT::m_imageStream = {};
+    frameGrabberT::m_imageStream  = nullptr;
 }
 
 int dmRecon_test::prepareCalibration()
@@ -308,6 +320,17 @@ void dmRecon_test::commandSource( const IMAGE &source )
     dmCommandSMT::m_depth       = source.md->naxis == 3 ? source.md->size[2] : 1;
 }
 
+void dmRecon_test::triggerSource( const IMAGE &source )
+{
+    loopTriggerSMT::m_imageStream = source;
+}
+
+void dmRecon_test::applyDryUpdate( const dmReconTiming::Update &update )
+{
+    std::lock_guard<std::mutex> lock( m_snapshotMutex );
+    dryTimingUpdate( update );
+}
+
 void dmRecon_test::output( IMAGE *source )
 {
     frameGrabberT::m_imageStream = source;
@@ -351,9 +374,11 @@ int dmRecon_test::restartCalibrationMonitor( bool modes )
 namespace dmReconAppHarness
 {
 using MagAOX::app::dmCommandShmimT;
+using MagAOX::app::dmLoopTriggerShmimT;
 using MagAOX::app::dmMaskShmimT;
 using MagAOX::app::dmModesShmimT;
 using MagAOX::app::dmRecon_test;
+using MagAOX::app::dmReconTiming;
 
 /// Local metadata and vector storage only: never opened, created, posted or destroyed through ImageStreamIO.
 struct Image
@@ -392,6 +417,7 @@ struct Fixture
     Image        mask{ 2, 2 };        ///< Asymmetric active-pixel selection.
     Image        command{ 2, 2 };     ///< Applied shape with known mode amplitudes.
     Image        destination{ 2, 1 }; ///< Private feedback-vector destination.
+    Image        trigger{ 1, 1 };     ///< Borrowed loop-trigger metadata for timing tests.
     dmRecon_test app;                 ///< Unstarted app with no external resources.
 
     /// Stage real mode/mask callbacks, prepare the inverse, and enable local publication.
@@ -426,6 +452,44 @@ int Fixture::receive()
 {
     return app.processImage( command.pixels.data(), dmCommandShmimT{} );
 }
+
+/// Shift a valid clock sample for deterministic ordering of local fixture timestamps.
+timespec shiftedTime( const timespec &stamp /**< [in] Nonzero timestamp in the publication clock. */,
+                      int64_t         delta /**< [in] Signed nanosecond shift. */ )
+{
+    const int64_t total = int64_t( stamp.tv_sec ) * 1000000000 + stamp.tv_nsec + delta;
+    return { total / 1000000000, total % 1000000000 };
+}
+
+/// Observe a local baseline preceding the fixture command in the actual publication clock.
+void prepareTiming( Fixture &fixture /**< [in,out] Local app and borrowed trigger/command images. */ )
+{
+    timespec now{};
+    REQUIRE( clock_gettime( CLOCK_ISIO, &now ) == 0 );
+    fixture.trigger.metadata.cnt0      = 10;
+    fixture.trigger.metadata.writetime = shiftedTime( now, -2000000 );
+    fixture.command.metadata.writetime = shiftedTime( now, -1000000 );
+    fixture.app.triggerSource( fixture.trigger.image );
+    REQUIRE( fixture.app.allocate( dmLoopTriggerShmimT{} ) == 0 );
+    REQUIRE( fixture.app.processImage( nullptr, dmLoopTriggerShmimT{} ) == 0 );
+}
+
+/// Advance only local trigger metadata and invoke the production observer after command completion.
+void observeNextTrigger( Fixture &fixture /**< [in,out] Borrowed trigger source and receiving app. */,
+                         uint64_t step = 1 /**< [in] Counter increment, allowing an intentional observation gap. */ )
+{
+    REQUIRE( clock_gettime( CLOCK_ISIO, &fixture.trigger.metadata.writetime ) == 0 );
+    fixture.trigger.metadata.cnt0 += step;
+    REQUIRE( fixture.app.processImage( nullptr, dmLoopTriggerShmimT{} ) == 0 );
+}
+
+/// Give the next local command a distinct identity and a current source timestamp.
+void advanceTimedCommand( Fixture &fixture /**< [in,out] Local command metadata. */ )
+{
+    ++fixture.command.metadata.cnt0;
+    REQUIRE( clock_gettime( CLOCK_ISIO, &fixture.command.metadata.writetime ) == 0 );
+}
+
 } // namespace dmReconAppHarness
 /// \endcond
 
@@ -1161,6 +1225,311 @@ TEST_CASE( "dmRecon refuses unqualified trigger identities at command capture", 
     REQUIRE( app.takeCommand() );
     CHECK( app.m_currentCommand.trigger.generation == 0 );
     CHECK( app.reconstruct() == 0 );
+}
+
+/// Classify disabled reconstruction after its exact successor without changing feedback bytes or metadata.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon disabled acquisition records dry timing without publication", "[dmRecon][app][dryTiming]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::acquireAndCheckValid;
+    MagAOX::app::dmRecon::recordCompletion;
+    MagAOX::app::dmRecon::processImage;
+    #endif
+    // clang-format on
+
+    Fixture fixture;
+    auto   &app = fixture.app;
+    prepareTiming( fixture );
+    fixture.destination.pixels         = { -91, -92 };
+    fixture.destination.metadata.cnt0  = 77;
+    fixture.destination.metadata.cnt1  = 13;
+    fixture.destination.metadata.write = 1;
+    const auto stamp                   = fixture.destination.metadata.writetime;
+    REQUIRE( app.enable( false ) == 0 );
+    REQUIRE( fixture.receive() == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_currentCommand.trigger.generation != 0 );
+    CHECK( app.m_modevals( 0, 0 ) == Approx( 3 ) );
+    CHECK( app.m_modevals( 1, 0 ) == Approx( 5 ) );
+    CHECK( app.m_dryTimingStats.beforeNext == 0 );
+    CHECK( app.m_dryTimingStats.late == 0 );
+    CHECK( app.m_dryTimingStats.unknown == 0 );
+    observeNextTrigger( fixture );
+    CHECK( app.m_dryTimingStats.beforeNext == 1 );
+    CHECK( app.m_dryTimingStats.late == 0 );
+    CHECK( app.m_dryTimingStats.unknown == 0 );
+    CHECK( app.m_dryTimingStats.marginNs > 0 );
+    CHECK( app.m_dryTimingStats.minMarginNs == app.m_dryTimingStats.marginNs );
+    CHECK( app.m_dryTimingStats.maxMarginNs == app.m_dryTimingStats.marginNs );
+    CHECK( app.m_beforeNext.load() == 0 );
+    CHECK( app.m_late.load() == 0 );
+    CHECK( app.m_unknown.load() == 0 );
+    CHECK( fixture.destination.pixels == std::vector<float>{ -91, -92 } );
+    CHECK( fixture.destination.metadata.cnt0 == 77 );
+    CHECK( fixture.destination.metadata.cnt1 == 13 );
+    CHECK( fixture.destination.metadata.write == 1 );
+    CHECK( fixture.destination.metadata.writetime.tv_sec == stamp.tv_sec );
+    CHECK( fixture.destination.metadata.writetime.tv_nsec == stamp.tv_nsec );
+    CHECK_FALSE( app.m_publicationLock.owns_lock() );
+}
+
+/// Preserve each completion's dry or live origin when an enable toggle occurs before its successor is observed.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon toggles preserve pending dry and live timing origins", "[dmRecon][app][dryTiming]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::acquireAndCheckValid;
+    MagAOX::app::dmRecon::frameGrabberPostPublish;
+    MagAOX::app::dmRecon::recordCompletion;
+    MagAOX::app::dmRecon::processImage;
+    MagAOX::app::dmRecon::newCallBack_m_indiP_writeDMf;
+    #endif
+    // clang-format on
+
+    const bool firstDry = GENERATE( true, false );
+    Fixture    fixture;
+    auto      &app = fixture.app;
+    prepareTiming( fixture );
+
+    for( bool dry : { firstDry, !firstDry } )
+    {
+        REQUIRE( app.enable( !dry ) == 0 );
+        REQUIRE( fixture.receive() == 0 );
+        REQUIRE( app.acquireAndCheckValid() == ( dry ? 1 : 0 ) );
+        REQUIRE( app.m_currentCommand.trigger.generation != 0 );
+
+        if( !dry )
+        {
+            REQUIRE( app.loadImageIntoStream( fixture.destination.pixels.data() ) == 0 );
+            REQUIRE( app.frameGrabberPostPublish( &fixture.destination.image ) == 0 );
+        }
+
+        advanceTimedCommand( fixture );
+    }
+
+    CHECK( app.m_beforeNext.load() == 0 );
+    CHECK( app.m_dryTimingStats.beforeNext == 0 );
+    REQUIRE( app.enable( firstDry ) == 0 );
+    observeNextTrigger( fixture );
+    CHECK( app.m_beforeNext.load() == 1 );
+    CHECK( app.m_late.load() == 0 );
+    CHECK( app.m_unknown.load() == 0 );
+    CHECK( app.m_dryTimingStats.beforeNext == 1 );
+    CHECK( app.m_dryTimingStats.late == 0 );
+    CHECK( app.m_dryTimingStats.unknown == 0 );
+}
+
+/// Keep dry timing unknown when clocks, exact successors, or trigger attachment continuity are unavailable.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon dry timing does not infer missing clock or trigger evidence", "[dmRecon][app][dryTiming]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::acquireAndCheckValid;
+    MagAOX::app::dmRecon::recordCompletion;
+    MagAOX::app::dmRecon::allocate;
+    MagAOX::app::dmRecon::processImage;
+    #endif
+    // clang-format on
+
+    Fixture fixture;
+    auto   &app = fixture.app;
+    prepareTiming( fixture );
+    REQUIRE( app.enable( false ) == 0 );
+    REQUIRE( fixture.receive() == 0 );
+
+    SECTION( "command clock qualification failed" )
+    {
+        app.m_pendingCommand.clockValid = false;
+        REQUIRE( app.acquireAndCheckValid() == 1 );
+    }
+
+    SECTION( "command has no qualified baseline trigger" )
+    {
+        app.m_pendingCommand.trigger = {};
+        REQUIRE( app.acquireAndCheckValid() == 1 );
+    }
+
+    SECTION( "missing exact successor remains pending until reset" )
+    {
+        REQUIRE( app.acquireAndCheckValid() == 1 );
+        observeNextTrigger( fixture, 2 );
+        CHECK( app.m_dryTimingStats.beforeNext == 0 );
+        CHECK( app.m_dryTimingStats.late == 0 );
+        CHECK( app.m_dryTimingStats.unknown == 0 );
+        REQUIRE( app.allocate( dmLoopTriggerShmimT{} ) == 0 );
+    }
+
+    SECTION( "trigger attachment is replaced" )
+    {
+        REQUIRE( app.acquireAndCheckValid() == 1 );
+        REQUIRE( app.allocate( dmLoopTriggerShmimT{} ) == 0 );
+    }
+
+    SECTION( "trigger clock sample fails" )
+    {
+        REQUIRE( app.acquireAndCheckValid() == 1 );
+        app.m_triggerClock = static_cast<clockid_t>( -12345 );
+        REQUIRE( app.processImage( nullptr, dmLoopTriggerShmimT{} ) == 0 );
+    }
+
+    SECTION( "trigger counter resets" )
+    {
+        REQUIRE( app.acquireAndCheckValid() == 1 );
+        fixture.trigger.metadata.cnt0 = 0;
+        observeNextTrigger( fixture, 0 );
+    }
+
+    CHECK( app.m_dryTimingStats.beforeNext == 0 );
+    CHECK( app.m_dryTimingStats.late == 0 );
+    CHECK( app.m_dryTimingStats.unknown == 1 );
+    CHECK( app.m_dryTimingStats.marginNs == 0 );
+    CHECK( app.m_dryTimingStats.minMarginNs == 0 );
+    CHECK( app.m_dryTimingStats.maxMarginNs == 0 );
+    CHECK( app.m_beforeNext.load() == 0 );
+    CHECK( app.m_late.load() == 0 );
+    CHECK( app.m_unknown.load() == 0 );
+}
+
+/// A dry clock failure retires only dry observations, preserving a live publication awaiting its successor.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon dry clock failure preserves pending live timing", "[dmRecon][app][dryTiming]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::acquireAndCheckValid;
+    MagAOX::app::dmRecon::frameGrabberPostPublish;
+    MagAOX::app::dmRecon::recordCompletion;
+    MagAOX::app::dmRecon::processImage;
+    #endif
+    // clang-format on
+
+    Fixture fixture;
+    auto   &app = fixture.app;
+    prepareTiming( fixture );
+    REQUIRE( fixture.receive() == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( app.loadImageIntoStream( fixture.destination.pixels.data() ) == 0 );
+    REQUIRE( app.frameGrabberPostPublish( &fixture.destination.image ) == 0 );
+    advanceTimedCommand( fixture );
+    REQUIRE( app.enable( false ) == 0 );
+    REQUIRE( fixture.receive() == 0 );
+    app.m_pendingCommand.clockValid = false;
+    REQUIRE( app.acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_dryTimingStats.unknown == 1 );
+    observeNextTrigger( fixture );
+    CHECK( app.m_beforeNext.load() == 1 );
+    CHECK( app.m_late.load() == 0 );
+    CHECK( app.m_unknown.load() == 0 );
+    CHECK( app.m_dryTimingStats.beforeNext == 0 );
+    CHECK( app.m_dryTimingStats.late == 0 );
+    CHECK( app.m_dryTimingStats.unknown == 1 );
+}
+
+/// Reject state superseded between reconstruction and dry completion without counting a timing observation.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon dry completion rejects superseded reconstruction state", "[dmRecon][app][dryTiming]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::recordCompletion;
+    MagAOX::app::dmRecon::processImage;
+    MagAOX::app::dmRecon::allocate;
+    #endif
+    // clang-format on
+
+    Fixture fixture;
+    auto   &app = fixture.app;
+    prepareTiming( fixture );
+    REQUIRE( fixture.receive() == 0 );
+    REQUIRE( app.takeCommand() );
+    REQUIRE( app.reconstruct() == 0 );
+
+    SECTION( "calibration generation changed" )
+    {
+        ++app.m_calibrationGeneration;
+    }
+
+    SECTION( "command attachment changed" )
+    {
+        ++app.m_inputGeneration;
+    }
+
+    SECTION( "mode cube invalidated" )
+    {
+        app.m_modesValid = false;
+    }
+
+    SECTION( "mask invalidated" )
+    {
+        app.m_maskValid = false;
+    }
+
+    SECTION( "calibration unusable" )
+    {
+        app.m_calibrationUsable = false;
+    }
+
+    SECTION( "feedback output replaced" )
+    {
+        app.m_outputChanged = true;
+    }
+
+    app.recordCompletion( true );
+    CHECK( app.m_rejected.load() == 1 );
+    observeNextTrigger( fixture );
+    REQUIRE( app.allocate( dmLoopTriggerShmimT{} ) == 0 );
+    CHECK( app.m_dryTimingStats.beforeNext == 0 );
+    CHECK( app.m_dryTimingStats.late == 0 );
+    CHECK( app.m_dryTimingStats.unknown == 0 );
+    CHECK( app.m_beforeNext.load() == 0 );
+    CHECK( app.m_late.load() == 0 );
+    CHECK( app.m_unknown.load() == 0 );
+}
+
+/// Accumulate signed margins only from resolved classifications and preserve extrema across unknown updates.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon dry timing retains cumulative signed margin extrema", "[dmRecon][app][dryTiming]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::dryTimingUpdate;
+    #endif
+    // clang-format on
+
+    const int64_t first = GENERATE( int64_t( 30 ), int64_t( 0 ), int64_t( -30 ) );
+    dmRecon_test  app;
+    app.applyDryUpdate( { 0, 0, 3, 999 } );
+    CHECK( app.m_dryTimingStats.beforeNext == 0 );
+    CHECK( app.m_dryTimingStats.late == 0 );
+    CHECK( app.m_dryTimingStats.unknown == 3 );
+    CHECK( app.m_dryTimingStats.marginNs == 0 );
+    CHECK( app.m_dryTimingStats.minMarginNs == 0 );
+    CHECK( app.m_dryTimingStats.maxMarginNs == 0 );
+    app.applyDryUpdate( { unsigned( first > 0 ), unsigned( first <= 0 ), 0, first } );
+    CHECK( app.m_dryTimingStats.beforeNext + app.m_dryTimingStats.late == 1 );
+    CHECK( app.m_dryTimingStats.marginNs == first );
+    CHECK( app.m_dryTimingStats.minMarginNs == first );
+    CHECK( app.m_dryTimingStats.maxMarginNs == first );
+    app.applyDryUpdate( { 0, 0, 1, -999 } );
+    CHECK( app.m_dryTimingStats.marginNs == first );
+    CHECK( app.m_dryTimingStats.minMarginNs == first );
+    CHECK( app.m_dryTimingStats.maxMarginNs == first );
+    app.applyDryUpdate( { 0, 1, 0, -40 } );
+    app.applyDryUpdate( { 0, 1, 0, 0 } );
+    app.applyDryUpdate( { 1, 0, 0, 60 } );
+    CHECK( app.m_dryTimingStats.beforeNext == 1 + uint64_t( first > 0 ) );
+    CHECK( app.m_dryTimingStats.late == 2 + uint64_t( first <= 0 ) );
+    CHECK( app.m_dryTimingStats.unknown == 4 );
+    CHECK( app.m_dryTimingStats.marginNs == 60 );
+    CHECK( app.m_dryTimingStats.minMarginNs == -40 );
+    CHECK( app.m_dryTimingStats.maxMarginNs == 60 );
+    CHECK( app.m_beforeNext.load() == 0 );
+    CHECK( app.m_late.load() == 0 );
+    CHECK( app.m_unknown.load() == 0 );
 }
 
 /// Refuse mismatched, nonfinite and obsolete commands before publishing any reconstructed value.
