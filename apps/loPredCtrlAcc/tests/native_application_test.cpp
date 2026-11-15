@@ -25,6 +25,7 @@ class InstalledApplication : public MagAOX::app::loPredCtrlAcc_native
     using loPredCtrlAcc::m_indiP_nativeSafety;
     using loPredCtrlAcc::m_indiP_nativeSources;
     using loPredCtrlAcc::m_indiP_nativeTiming;
+    using loPredCtrlAcc::m_indiP_upstreamTiming;
     using loPredCtrlAcc::m_nativeNextDiagnosticNs;
     using loPredCtrlAcc::m_nativeObserver;
     using loPredCtrlAcc::m_onlineWorker;
@@ -84,6 +85,7 @@ TEST_CASE( "Installed native application defaults to continuous read-only acquis
         REQUIRE( app.load( {} ) );
         REQUIRE( app.appStartup() == 0 );
         REQUIRE( app.inhibited() );
+        REQUIRE( ddspc_test_output_calls() == 0 );
         REQUIRE( app.property( "app_health" )["shadow"].get<std::string>() == "true" );
         REQUIRE( app.property( "safety" )["dm_write_enabled"].get<std::string>() == "false" );
         REQUIRE( app.property( "timing" )["phase_offset_us"].get<std::string>() == "unqualified" );
@@ -270,9 +272,43 @@ TEST_CASE( "Installed online shadow worker preserves all timing and output guard
     REQUIRE( app.appLogic() == 0 );
     REQUIRE( app.property( "ddspc_control" )["training"].get<std::string>() == "inhibited" );
     REQUIRE( app.property( "safety" )["dm_write_enabled"].get<std::string>() == "false" );
-    REQUIRE( app.property( "safety" )["model_interlock"].get<std::string>() == "source_host_mapping_unqualified" );
+    REQUIRE( app.property( "safety" )["model_interlock"].get<std::string>() == "native_calibration_unavailable" );
     REQUIRE( app.inhibited() );
     REQUIRE( app.appShutdown() == 0 );
     REQUIRE_FALSE( app.m_onlineWorker->status().m_running );
+    REQUIRE( ddspc_test_output_calls() == 0 );
+}
+/** \brief Producer status is observed without granting training readiness or output permission. */
+TEST_CASE( "Native upstream INDI status cannot declare a model ready or publish a command",
+           "[native-observation][app][multirate]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::setCallBack_m_indiP_upstreamTiming;
+#endif
+    // clang-format on
+    InstalledApplication app;
+    REQUIRE( app.load( { { "online_shadow.enabled", "1" },
+                         { "native_inputs.sync_device", "synthetic-upstream" },
+                         { "parameters.accel_history", "5" } } ) );
+    REQUIRE( app.appStartup() == 0 );
+    pcf::IndiProperty status( pcf::IndiProperty::Number );
+    status.setDevice( "synthetic-upstream" );
+    status.setName( "timingDiag" );
+    for( const char *name :
+         { "mode_code", "delay_lock", "local_frame_seq", "sync_producer_frame_id", "sync_frame_id_gap_count" } )
+        status.add( pcf::IndiElement( name, 0. ) );
+    status["mode_code"]  = 1.;
+    status["delay_lock"] = 1.;
+    REQUIRE( app.setCallBack_m_indiP_upstreamTiming( status ) == 0 );
+    pcf::IndiProperty incomplete( pcf::IndiProperty::Number );
+    incomplete.setDevice( "synthetic-upstream" );
+    incomplete.setName( "timingDiag" );
+    REQUIRE( app.setCallBack_m_indiP_upstreamTiming( incomplete ) < 0 );
+    REQUIRE_FALSE( app.m_onlineWorker->status().m_standard.m_ready );
+    REQUIRE_FALSE( app.m_onlineWorker->status().m_assisted.m_ready );
+    REQUIRE( app.inhibited() );
+    REQUIRE( app.appShutdown() == 0 );
+    REQUIRE( ddspc_test_output_calls() == 0 );
 }
 } // namespace libXWCTest::loPredCtrlAccTest

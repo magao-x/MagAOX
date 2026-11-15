@@ -1,4 +1,16 @@
+> 2026-11-15: `SYNCO_NATIVE.md` documents the connected native input/recorder and
+> private syncopation payload path. The compact schema remains 60 elements;
+> additional preparation/callback/recording evidence shares `buffers.online_queue`.
+
 # Compact native input diagnostics
+
+The current synchronized-input convention is documented in
+[UPSTREAM_SHADOW.md](UPSTREAM_SHADOW.md). Its missing-input reason is
+`upstream_sync_and_command_contract_missing`, not a demand for reconstructed
+physical exposures or cross-host clocks. Native `standard_rmse`/`assisted_rmse`
+use origin-only forecasts; auxiliary conditional errors remain in detailed traces.
+`prediction` distinguishes queued/late diagnostics from eligible synco plans.
+`online_queue` also reports score backlog/drops and frozen/late forecast counts.
 
 The native application defaults to 11 application properties and 60 elements.
 Standard MagAO-X framework properties, including its FSM/log controls, remain.

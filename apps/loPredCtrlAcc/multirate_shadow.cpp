@@ -1,5 +1,5 @@
 /** \file multirate_shadow.cpp
- * \brief Timestamp-qualified individual-sample lifting and existing DDSPC model management, without I/O.
+ * \brief Upstream-counter or strict-timestamp individual-sample lifting and native DDSPC management, without I/O.
  */
 #include "multirate_shadow.hpp"
 #include <algorithm>
@@ -25,9 +25,10 @@ ShadowConfig native_model( const OnlineShadowConfig &c )
                                double( m.m_history ) * m.m_modes + 8.0 * m.m_accelHistory;
     if( m.m_modes < 1 || m.m_modes > 2 || m.m_history < 1 || m.m_history > 16 || m.m_future < 1 || m.m_future > 8 ||
         m.m_accelHistory < 1 || m.m_accelHistory > 16 || features > 128 || c.m_adcCapacity < 8 ||
-        c.m_adcCapacity > 8192 || c.m_queueCapacity < 16 || c.m_queueCapacity > 8192 || c.m_pendingCapacity < 2 ||
-        c.m_pendingCapacity > 128 || ( m.m_standardCommandSlots != 1 && m.m_standardCommandSlots != 4 ) ||
-        c.m_periodUs < 1000 || c.m_periodUs > 100000 || c.m_budgetUs < 50 || c.m_budgetUs > c.m_periodUs / 2 )
+        c.m_adcCapacity > 8192 || c.m_queueCapacity < 16 || c.m_queueCapacity > 8192 ||
+        c.m_predictionCapacity > 65536 || c.m_pendingCapacity < 2 || c.m_pendingCapacity > 128 ||
+        ( m.m_standardCommandSlots != 1 && m.m_standardCommandSlots != 4 ) || c.m_periodUs < 1000 ||
+        c.m_periodUs > 100000 || c.m_budgetUs < 50 || c.m_budgetUs > c.m_periodUs / 2 )
         throw std::invalid_argument( "Native DDSPC dimensions or worker budget exceed bounds" );
     return m;
 }
@@ -39,30 +40,40 @@ bool NativeBinding::matches( const NativeObservation &r ) const
            m_image == r.m_imageInode && m_generation == r.m_generation;
 }
 
-struct MultirateShadow::Impl
+bool native_shadow_evidence( const MultirateContract &c )
+{
+    if( c.m_upstream.m_combinedRequestModel )
+        return c.m_upstream.m_enabled && c.m_inputs.m_evidence == InputEvidence::Requested;
+    return c.m_inputs.m_evidence == InputEvidence::VerifiedApplied;
+}
+
+struct MultirateShadow::Impl : public ShadowPredictionSink
 {
     struct Origin
     {
-        OnlineOrigin m_source;            ///< Explicit immutable exposure/origin evidence.
+        OnlineOrigin m_source;            ///< Immutable upstream/origin evidence; exposures only in strict mode.
         Matrix       m_acceleration;      ///< Four distinct ADC pairs frozen at the origin, newest sample first.
-        bool         m_adcValid{ false }; ///< Complete, causally available timestamp-phase window.
+        bool         m_adcValid{ false }; ///< Complete, causally available four-sample group.
     };
-    OnlineShadowConfig m_config;      ///< Numerical and memory bounds.
-    ShadowConfig       m_modelConfig; ///< Explicit native lift; single-rate defaults elsewhere remain unchanged.
-    InputEvidence      m_allowed;     ///< Production physical evidence or an explicit offline-only synthetic instance.
-    MultirateContract  m_contract;    ///< Independently established source contract, never inferred from raw streams.
-    ShadowController   m_models;      ///< Actual RLS/QR DDSPC pair.
-    OnlineShadowStatus m_status;      ///< Bounded readback and inhibition reasons.
+    OnlineShadowConfig    m_config;      ///< Numerical and memory bounds.
+    ShadowConfig          m_modelConfig; ///< Explicit native lift; single-rate defaults elsewhere remain unchanged.
+    InputEvidence         m_allowed;  ///< Production physical evidence or an explicit offline-only synthetic instance.
+    MultirateContract     m_contract; ///< Independently established source contract, never inferred from raw streams.
+    ShadowController      m_models;   ///< Actual RLS/QR DDSPC pair.
+    ShadowPredictionSink *m_sink{ nullptr }; ///< Borrowed downstream diagnostics consumer; numerical-thread-only.
+    OnlineShadowStatus    m_status;          ///< Bounded readback and inhibition reasons.
     std::array<std::vector<NativeObservation>, 4> m_raw; ///< Per-source fixed retention, including every ADC sample.
     std::array<std::size_t, 4>                    m_next{}, m_count{}; ///< Ring cursors; histories are not work queues.
-    std::deque<Origin>            m_origins; ///< Bounded frozen origins awaiting actual command confirmation.
+    std::deque<Origin>            m_origins; ///< Bounded frozen origins awaiting independently observed inputs.
     std::deque<OnlineAppliedSlot> m_inputs;  ///< Bounded independently confirmed non-overlapping slot intervals.
     std::array<Matrix, 2> m_plans; ///< Separate newest-first future command plans; never returned as applied inputs.
-    std::array<bool, 2>   m_planValid{}; ///< Per-mode current causal/deadline eligibility.
+    std::array<bool, 2>   m_forecastValid{}; ///< Per-mode diagnostic forecasts, never output authority.
+    std::array<bool, 2>   m_planValid{};     ///< Per-mode current causal/deadline eligibility.
     std::int64_t          m_now{ -1 }, m_lastOriginNs{ -1 }, m_lastInputEnd{ -1 }; ///< Monotonic/session high waters.
     std::uint64_t         m_lastOrigin{ 0 }, m_lastCertificate{ 0 }; ///< Independent WFS/certificate sequences.
     std::int64_t  m_latestModelReceipt{ -1 }; ///< High-water availability of all evidence used by histories/fit.
-    std::uint64_t m_lastComplete{ 0 };        ///< Last input frame with all four physical certificates.
+    std::uint64_t m_lastComplete{ 0 };        ///< Last complete frame in the admitted request/physical input domain.
+    unsigned      m_goodSync{ 0 }; ///< Consecutive complete upstream-locked input groups, not a phase-lock algorithm.
 
     /// Allocate all fixed storage outside the acquisition worker.
     Impl( const OnlineShadowConfig &c /**< [in] Fixed resource bounds. */,
@@ -80,13 +91,27 @@ struct MultirateShadow::Impl
                 std::uint64_t     generation /**< [in] Expected source incarnation. */,
                 std::int64_t      now /**< [in] Actual processing time. */ ) const;
 
-    /// Form four timestamp-selected raw pairs, with no averaging or future receipt.
+    /// Form four counter- or strict-timestamp-selected raw pairs, without averaging or future receipt.
     bool acceleration( const OnlineOrigin &origin /**< [in] Frozen WFS origin. */,
                        Matrix             &features /**< [out] Four distinct newest-first ADC pairs. */ ) const;
 
     /// Consume exactly covered closed intervals and update both models with the same actual input lift.
     void complete();
+
+    /// Attach source/contract identity without changing a forecast or doing I/O.
+    void prediction( const ShadowPrediction &sample /**< [in] Original conditional score. */ ) noexcept override;
 };
+
+void MultirateShadow::Impl::prediction( const ShadowPrediction &sample ) noexcept
+{
+    if( !m_sink )
+        return;
+    auto tagged         = sample;
+    tagged.m_generation = m_contract.m_inputs.m_wfsGeneration;
+    tagged.m_epoch = m_contract.m_upstream.m_enabled ? m_contract.m_upstream.m_epoch : m_contract.m_inputs.m_clockEpoch;
+    tagged.m_layout = m_contract.m_inputs.m_layout;
+    m_sink->prediction( tagged );
+}
 
 MultirateShadow::Impl::Impl( const OnlineShadowConfig &c, InputEvidence evidence )
     : m_config( c ), m_modelConfig( native_model( c ) ), m_allowed( evidence ), m_models( m_modelConfig )
@@ -117,9 +142,13 @@ void MultirateShadow::Impl::invalidate( const char *reason )
     m_origins.clear();
     m_inputs.clear();
     m_planValid.fill( false );
-    m_lastComplete            = 0;
-    m_status.m_candidateValid = false;
-    m_status.m_reason         = reason;
+    m_forecastValid.fill( false );
+    m_status.m_predictionValid = false;
+    m_lastComplete             = 0;
+    m_status.m_candidateValid  = false;
+    m_status.m_reason          = reason;
+    m_goodSync                 = 0;
+    m_status.m_syncValid       = false;
 }
 
 bool MultirateShadow::Impl::stamp( const InputStamp &s, std::uint64_t generation, std::int64_t now ) const
@@ -134,6 +163,32 @@ bool MultirateShadow::Impl::stamp( const InputStamp &s, std::uint64_t generation
 bool MultirateShadow::Impl::acceleration( const OnlineOrigin &o, Matrix &features ) const
 {
     features.resize( 8, 1 );
+    if( m_contract.m_upstream.m_enabled )
+    {
+        const auto &u         = m_contract.m_upstream;
+        const auto  reference = u.m_referenceIsModal ? o.m_stamp.m_counter : o.m_cameraCounter;
+        const auto  anchor    = u.m_referenceIsModal ? u.m_modalAnchor : u.m_referenceAnchor;
+        if( !u.m_adcAnchor || !o.m_synchronized || !o.m_locked || o.m_syncEpoch != u.m_epoch ||
+            o.m_syncStatusReceivedNs < 0 || o.m_syncStatusReceivedNs > o.m_decisionNs ||
+            o.m_decisionNs - o.m_syncStatusReceivedNs > u.m_statusMaxAgeNs || reference < anchor ||
+            reference - anchor > ( std::numeric_limits<std::uint64_t>::max() - u.m_adcAnchor - 3 ) / 4 ||
+            o.m_firstAdcCounter != u.m_adcAnchor + 4 * ( reference - anchor ) )
+            return false;
+        std::uint64_t segment = 0;
+        for( unsigned s = 0; s < 4; ++s )
+        {
+            const auto *r = find( 0, o.m_firstAdcCounter + s );
+            if( !r || !m_contract.m_sources[0].matches( *r ) || r->m_receivedNs < 0 || r->m_availableNs < 0 ||
+                r->m_receivedNs > o.m_decisionNs || r->m_availableNs > o.m_decisionNs ||
+                o.m_decisionNs - r->m_receivedNs > u.m_featureMaxAgeNs || ( s && r->m_segment != segment ) ||
+                !std::isfinite( r->m_values[0] ) || !std::isfinite( r->m_values[1] ) )
+                return false;
+            segment                       = r->m_segment;
+            features( 2 * ( 3 - s ) )     = r->m_values[0];
+            features( 2 * ( 3 - s ) + 1 ) = r->m_values[1];
+        }
+        return true;
+    }
     const auto   &ring    = m_raw[0];
     const auto    count   = m_count[0];
     const auto    first   = ( m_next[0] + ring.size() - count ) % ring.size();
@@ -229,6 +284,12 @@ MultirateShadow::MultirateShadow( const OnlineShadowConfig &c, InputEvidence evi
 }
 MultirateShadow::~MultirateShadow() = default;
 
+void MultirateShadow::prediction_sink( ShadowPredictionSink *sink )
+{
+    m_impl->m_sink = sink;
+    m_impl->m_models.prediction_sink( sink ? m_impl.get() : nullptr );
+}
+
 bool MultirateShadow::qualify( const MultirateContract &c )
 {
     auto &p = *m_impl;
@@ -238,29 +299,58 @@ bool MultirateShadow::qualify( const MultirateContract &c )
     p.m_status.m_exposure    = c.m_exposureVerified;
     p.m_status.m_association = c.m_associationVerified;
     p.m_status.m_schedule    = c.m_scheduleVerified;
-    if( !c.m_clockVerified || c.m_provenance.size() > 4096 )
+    p.m_status.m_upstream    = c.m_upstream.m_enabled;
+    if( c.m_provenance.size() > 4096 )
         return false;
-    p.m_status.m_reason = "exposure_boundaries_unavailable";
-    if( !c.m_exposureVerified )
+    if( !c.m_upstream.m_enabled )
+    {
+        if( !c.m_clockVerified )
+            return false;
+        p.m_status.m_reason = "exposure_boundaries_unavailable";
+        if( !c.m_exposureVerified )
+            return false;
+        p.m_status.m_reason = "modal_camera_association_missing";
+        if( !c.m_associationVerified )
+            return false;
+    }
+    else
+    {
+        const auto &u       = c.m_upstream;
+        p.m_status.m_reason = "upstream_sync_counter_contract_unqualified";
+        if( !u.m_epoch || !u.m_modalAnchor || ( !u.m_referenceIsModal && !u.m_referenceAnchor ) ||
+            u.m_adcAnchor > std::numeric_limits<std::uint64_t>::max() - 3 || !u.m_recoveryFrames ||
+            u.m_recoveryFrames > 128 || u.m_statusMaxAgeNs <= 0 || u.m_statusMaxAgeNs > 2000000000 ||
+            u.m_featureMaxAgeNs < period || u.m_featureMaxAgeNs > 2 * period )
+            return false;
+    }
+    const auto &i        = c.m_inputs;
+    p.m_status.m_reason  = "applied_input_provenance_or_modal_projection_unqualified";
+    const bool requested = c.m_upstream.m_enabled && c.m_upstream.m_combinedRequestModel &&
+                           p.m_allowed == InputEvidence::VerifiedApplied && i.m_evidence == InputEvidence::Requested;
+    if( c.m_upstream.m_combinedRequestModel && !requested &&
+        !( p.m_allowed == InputEvidence::SyntheticApplied && i.m_evidence == InputEvidence::SyntheticApplied ) )
         return false;
-    p.m_status.m_reason = "modal_camera_association_missing";
-    if( !c.m_associationVerified )
+    if( ( i.m_evidence != p.m_allowed && !requested ) || !i.m_timingVerified || !i.m_mappingVerified ||
+        c.m_provenance.empty() )
         return false;
-    const auto &i       = c.m_inputs;
-    p.m_status.m_reason = "applied_input_provenance_or_modal_projection_unqualified";
-    if( i.m_evidence != p.m_allowed || !i.m_timingVerified || !i.m_mappingVerified || c.m_provenance.empty() )
-        return false;
-    if( i.m_modes != p.m_modelConfig.m_modes || i.m_periodNs != period || i.m_exposureNs <= 0 ||
-        i.m_exposureNs > period || i.m_jitterNs < 0 || i.m_jitterNs >= slot / 2 || i.m_maxAgeNs < period ||
-        i.m_maxAgeNs > 1000000000 || i.m_maxUncertaintyNs < 0 || i.m_maxUncertaintyNs > i.m_jitterNs ||
-        !i.m_clockEpoch || !i.m_layout || !i.m_wfsGeneration || !i.m_commandGeneration || i.m_responseLagNs != 0 ||
-        i.m_minCommandDelayNs != 0 || c.m_wfsEndOffsetNs < -2 * period || c.m_wfsEndOffsetNs > 2 * period ||
-        c.m_adcPhaseNs < 0 || c.m_adcPhaseNs >= slot )
+    if( i.m_modes != p.m_modelConfig.m_modes || i.m_periodNs != period ||
+        ( !c.m_upstream.m_enabled && ( i.m_exposureNs <= 0 || i.m_exposureNs > period ) ) || i.m_jitterNs < 0 ||
+        i.m_jitterNs >= slot / 2 || i.m_maxAgeNs < period || i.m_maxAgeNs > 1000000000 || i.m_maxUncertaintyNs < 0 ||
+        i.m_maxUncertaintyNs > i.m_jitterNs || !i.m_clockEpoch || !i.m_layout || !i.m_wfsGeneration ||
+        !i.m_commandGeneration || i.m_responseLagNs != 0 || i.m_minCommandDelayNs != 0 ||
+        c.m_wfsEndOffsetNs < -2 * period || c.m_wfsEndOffsetNs > 2 * period || c.m_adcPhaseNs < 0 ||
+        c.m_adcPhaseNs >= slot )
         throw std::invalid_argument( "Unsupported native multirate timing/model contract" );
     for( std::size_t n = 0; n < 4; ++n )
+    {
+        if( n == 0 && c.m_upstream.m_enabled && !c.m_upstream.m_adcAnchor )
+            continue; // Standard model needs no ADC binding.
+        if( n == 2 && c.m_upstream.m_enabled && c.m_upstream.m_referenceIsModal )
+            continue;
         if( !c.m_sources[n].m_device || !c.m_sources[n].m_inode || !c.m_sources[n].m_generation ||
             ( n && !c.m_sources[n].m_image ) )
             return false;
+    }
     if( c.m_sources[1].m_generation != i.m_wfsGeneration )
         return false;
     p.m_contract = c;
@@ -276,8 +366,10 @@ bool MultirateShadow::qualify( const MultirateContract &c )
     p.m_models.reset( ShadowMode::AccelAssisted );
     p.m_models.training( ShadowMode::Standard, true );
     p.m_models.training( ShadowMode::AccelAssisted, true );
-    p.m_status.m_qualified = true;
-    p.m_status.m_reason    = "awaiting_qualified_exposures_and_applied_slots";
+    p.m_status.m_qualified     = true;
+    p.m_status.m_inputEvidence = i.m_evidence;
+    p.m_status.m_reason        = c.m_upstream.m_enabled ? "awaiting_upstream_frames_and_command_history"
+                                                        : "awaiting_qualified_exposures_and_applied_slots";
     return true;
 }
 
@@ -288,6 +380,8 @@ void MultirateShadow::observe( const NativeObservation &r )
     const auto i = std::size_t( r.m_source );
     if( i >= 4 )
         return; // Software completion is diagnostic; it is never converted into an applied certificate.
+    if( i == 2 && p.m_contract.m_upstream.m_enabled && p.m_contract.m_upstream.m_referenceIsModal )
+        return; // Camera lineage is diagnostic-only for the synchronized modal-sample convention.
     const auto *last =
         p.m_count[i] ? &p.m_raw[i][( p.m_next[i] + p.m_raw[i].size() - 1 ) % p.m_raw[i].size()] : nullptr;
     const bool changed = last && ( r.m_generation != last->m_generation || r.m_fileInode != last->m_fileInode ||
@@ -305,9 +399,13 @@ void MultirateShadow::observe( const NativeObservation &r )
         if( i == 0 )
         {
             p.m_models.invalidate_acceleration();
-            p.m_planValid[1]            = false;
-            p.m_status.m_candidateValid = p.m_planValid[0];
-            p.m_status.m_effective      = ShadowMode::Standard;
+            p.m_goodSync                 = 0;
+            p.m_status.m_syncValid       = false;
+            p.m_planValid[1]             = false;
+            p.m_forecastValid[1]         = false;
+            p.m_status.m_predictionValid = p.m_forecastValid[0];
+            p.m_status.m_candidateValid  = p.m_planValid[0];
+            p.m_status.m_effective       = ShadowMode::Standard;
             if( p.m_status.m_qualified )
                 p.m_status.m_reason = "adc_discontinuity_standard_only_if_current_plan_valid";
         }
@@ -334,23 +432,46 @@ bool MultirateShadow::origin( const OnlineOrigin &o, std::int64_t now )
     advance( now );
     if( !p.m_status.m_qualified )
         return false;
-    const auto &c      = p.m_contract.m_inputs;
-    const auto *modal  = p.find( 1, o.m_stamp.m_counter );
-    const auto *camera = p.find( 2, o.m_cameraCounter );
-    if( o.m_gridNs < period || o.m_gridNs > std::numeric_limits<std::int64_t>::max() - 2 * period ||
-        !p.stamp( o.m_stamp, c.m_wfsGeneration, now ) || !modal || !camera ||
-        !p.m_contract.m_sources[1].matches( *modal ) || !p.m_contract.m_sources[2].matches( *camera ) ||
-        modal->m_availableNs < 0 || camera->m_availableNs < 0 || modal->m_receivedNs < 0 || camera->m_receivedNs < 0 ||
-        modal->m_availableNs > o.m_decisionNs || camera->m_availableNs > o.m_decisionNs ||
-        modal->m_receivedNs > o.m_decisionNs || camera->m_receivedNs > o.m_decisionNs || o.m_exposureStartNs < 0 ||
-        o.m_exposureEndNs <= o.m_exposureStartNs || o.m_exposureEndNs - o.m_exposureStartNs != c.m_exposureNs ||
-        o.m_exposureEndNs - o.m_gridNs != p.m_contract.m_wfsEndOffsetNs ||
-        o.m_exposureEndNs > o.m_stamp.m_availableNs || o.m_decisionNs < o.m_stamp.m_receivedNs ||
-        now < o.m_decisionNs || o.m_gridNs < period ||
-        ( p.m_lastOrigin && ( o.m_stamp.m_counter <= p.m_lastOrigin || o.m_gridNs <= p.m_lastOriginNs ) ) )
+    const auto &c              = p.m_contract.m_inputs;
+    const auto *modal          = p.find( 1, o.m_stamp.m_counter );
+    const auto *camera         = p.find( 2, o.m_cameraCounter );
+    const bool  upstream       = p.m_contract.m_upstream.m_enabled;
+    const auto &u              = p.m_contract.m_upstream;
+    const auto  originTime     = upstream ? o.m_decisionNs : o.m_gridNs;
+    const bool  modalReference = upstream && u.m_referenceIsModal;
+    const bool  association =
+        !upstream ||
+        ( o.m_stamp.m_counter >= u.m_modalAnchor &&
+          ( modalReference ? o.m_cameraCounter == 0
+                           : ( o.m_cameraCounter >= u.m_referenceAnchor &&
+                               o.m_stamp.m_counter - u.m_modalAnchor == o.m_cameraCounter - u.m_referenceAnchor ) ) );
+    const bool cameraValid =
+        modalReference || ( camera && p.m_contract.m_sources[2].matches( *camera ) && camera->m_availableNs >= 0 &&
+                            camera->m_receivedNs >= 0 && camera->m_availableNs <= o.m_decisionNs &&
+                            camera->m_receivedNs <= o.m_decisionNs );
+    const bool exposure =
+        upstream || ( o.m_gridNs >= period && o.m_gridNs <= std::numeric_limits<std::int64_t>::max() - 2 * period &&
+                      o.m_exposureStartNs >= 0 && o.m_exposureEndNs > o.m_exposureStartNs &&
+                      o.m_exposureEndNs - o.m_exposureStartNs == c.m_exposureNs &&
+                      o.m_exposureEndNs - o.m_gridNs == p.m_contract.m_wfsEndOffsetNs &&
+                      o.m_exposureEndNs <= o.m_stamp.m_availableNs );
+    if( !association || !exposure || !p.stamp( o.m_stamp, c.m_wfsGeneration, now ) || !modal || !cameraValid ||
+        !p.m_contract.m_sources[1].matches( *modal ) || modal->m_availableNs < 0 || modal->m_receivedNs < 0 ||
+        modal->m_availableNs > o.m_decisionNs || modal->m_receivedNs > o.m_decisionNs ||
+        o.m_decisionNs < o.m_stamp.m_receivedNs || now < o.m_decisionNs ||
+        o.m_decisionNs - o.m_stamp.m_receivedNs > c.m_maxAgeNs ||
+        ( p.m_lastOrigin && ( o.m_stamp.m_counter <= p.m_lastOrigin || originTime <= p.m_lastOriginNs ) ) )
     {
         ++p.m_status.m_rejections;
-        p.invalidate( "invalid_exposure_association_clock_or_counter" );
+        p.invalidate( upstream ? "invalid_upstream_reference_order_or_availability"
+                               : "invalid_exposure_association_clock_or_counter" );
+        return false;
+    }
+    if( upstream && !modalReference )
+        p.m_status.m_association = true;
+    if( upstream && ( o.m_stamp.m_availableNs < modal->m_availableNs || o.m_stamp.m_receivedNs < modal->m_receivedNs ) )
+    {
+        p.invalidate( "upstream_measurement_availability_backdated" );
         return false;
     }
     for( int m = 0; m < p.m_modelConfig.m_modes; ++m )
@@ -359,14 +480,22 @@ bool MultirateShadow::origin( const OnlineOrigin &o, std::int64_t now )
             p.invalidate( "modal_payload_not_bound_to_observed_frame" );
             return false;
         }
-    if( p.m_lastOrigin && ( o.m_stamp.m_counter != p.m_lastOrigin + 1 || o.m_gridNs - p.m_lastOriginNs != period ) )
+    if( p.m_lastOrigin &&
+        ( o.m_stamp.m_counter != p.m_lastOrigin + 1 || ( !upstream && o.m_gridNs - p.m_lastOriginNs != period ) ) )
         p.invalidate( "wfs_counter_gap_new_history_segment" );
     p.m_lastOrigin   = o.m_stamp.m_counter;
-    p.m_lastOriginNs = o.m_gridNs;
-    p.complete();
+    p.m_lastOriginNs = originTime;
+    if( !upstream )
+        p.complete();
     Impl::Origin frozen;
     frozen.m_source   = o;
     frozen.m_adcValid = p.acceleration( o, frozen.m_acceleration );
+    if( upstream )
+    {
+        p.m_goodSync           = frozen.m_adcValid ? std::min( p.m_goodSync + 1, u.m_recoveryFrames ) : 0;
+        frozen.m_adcValid      = frozen.m_adcValid && p.m_goodSync >= u.m_recoveryFrames;
+        p.m_status.m_syncValid = frozen.m_adcValid;
+    }
     if( !frozen.m_adcValid )
         p.m_models.invalidate_acceleration();
     p.m_planValid.fill( false );
@@ -374,7 +503,8 @@ bool MultirateShadow::origin( const OnlineOrigin &o, std::int64_t now )
     p.m_status.m_originNs       = o.m_decisionNs;
     p.m_status.m_reason =
         !frozen.m_adcValid ? "adc_phase_history_incomplete_or_unavailable_at_origin" : "models_warming_or_unexcited";
-    bool schedule = p.m_status.m_schedule && o.m_prefixSlots <= 4 &&
+    bool schedule = p.m_status.m_schedule && o.m_gridNs >= period &&
+                    o.m_gridNs <= std::numeric_limits<std::int64_t>::max() - 2 * period && o.m_prefixSlots <= 4 &&
                     o.m_prefixSlots < unsigned( 4 * p.m_modelConfig.m_future ) &&
                     ( !o.m_prefixSlots ||
                       ( o.m_prefixVerified && o.m_prefixAvailableNs <= o.m_decisionNs && o.m_prefixAvailableNs >= 0 ) );
@@ -386,6 +516,27 @@ bool MultirateShadow::origin( const OnlineOrigin &o, std::int64_t now )
                    ( !s || o.m_cutoffsNs[s] > o.m_cutoffsNs[s - 1] );
     p.m_status.m_deadlineNs  = schedule ? o.m_cutoffsNs[o.m_prefixSlots] : -1;
     const bool pastAvailable = p.m_lastComplete + 1 == o.m_stamp.m_counter && p.m_latestModelReceipt <= o.m_decisionNs;
+    bool       diagnostic    = false;
+    p.m_forecastValid.fill( false );
+    p.m_status.m_predictionValid = false;
+    if( upstream && pastAvailable )
+    {
+        Matrix y( p.m_modelConfig.m_modes, 1 ), empty;
+        for( int m = 0; m < y.rows(); ++m )
+            y( m ) = o.m_residual[m];
+        const bool late      = o.m_predictionDeadlineNs < 0 || now > o.m_predictionDeadlineNs;
+        p.m_forecastValid[0] = p.m_models.freeze_next( ShadowMode::Standard, o.m_stamp.m_counter, y, empty, late );
+        p.m_forecastValid[1] =
+            frozen.m_adcValid &&
+            p.m_models.freeze_next( ShadowMode::AccelAssisted, o.m_stamp.m_counter, y, frozen.m_acceleration, late );
+        const bool assisted          = p.m_status.m_requested == ShadowMode::AccelAssisted && p.m_forecastValid[1];
+        p.m_status.m_effective       = assisted ? ShadowMode::AccelAssisted : ShadowMode::Standard;
+        p.m_status.m_predictionValid = assisted || p.m_forecastValid[0];
+        p.m_status.m_predictionLate  = late;
+        diagnostic                   = p.m_forecastValid[0] || p.m_forecastValid[1];
+        p.m_status.m_forecasts += diagnostic;
+        p.m_status.m_lateForecasts += diagnostic && late;
+    }
     if( schedule && now <= p.m_status.m_deadlineNs && pastAvailable )
     {
         Matrix y( p.m_modelConfig.m_modes, 1 ), prefix( o.m_prefixSlots * p.m_modelConfig.m_modes, 1 ), empty;
@@ -433,6 +584,8 @@ bool MultirateShadow::origin( const OnlineOrigin &o, std::int64_t now )
         p.m_status.m_reason = !pastAvailable ? "past_applied_frame_not_confirmed_at_frozen_origin"
                               : schedule     ? "input_ready_cutoff_already_expired"
                                              : "synco_slot_or_committed_prefix_unqualified";
+    if( upstream && diagnostic && !p.m_status.m_candidateValid )
+        p.m_status.m_reason = "shadow_forecast_only_no_eligible_synco_plan";
     if( p.m_origins.size() == p.m_config.m_pendingCapacity )
     {
         p.invalidate( "qualified_origin_queue_overflow" );
@@ -442,12 +595,99 @@ bool MultirateShadow::origin( const OnlineOrigin &o, std::int64_t now )
     return true;
 }
 
+bool MultirateShadow::commands( const OnlineCommandFrame &u, std::int64_t now )
+{
+    auto &p = *m_impl;
+    advance( now );
+    if( !p.m_status.m_qualified || !p.m_contract.m_upstream.m_enabled ||
+        !p.m_contract.m_upstream.m_combinedRequestModel )
+        return false;
+    const auto &c = p.m_contract.m_inputs;
+    bool valid    = u.m_complete && p.stamp( u.m_stamp, c.m_commandGeneration, now ) && u.m_evidence == c.m_evidence &&
+                    !p.m_origins.empty() && p.m_origins.front().m_source.m_stamp.m_counter == u.m_wfsCounter &&
+                    ( !p.m_lastCertificate || u.m_stamp.m_counter > p.m_lastCertificate );
+    std::int64_t closingAvailable = -1;
+    if( valid )
+    {
+        const auto reference =
+            p.m_contract.m_upstream.m_referenceIsModal ? u.m_wfsCounter : p.m_origins.front().m_source.m_cameraCounter;
+        const auto  source = p.m_contract.m_upstream.m_referenceIsModal ? 1 : 2;
+        const auto *closed =
+            reference < std::numeric_limits<std::uint64_t>::max() ? p.find( source, reference + 1 ) : nullptr;
+        valid = closed && p.m_contract.m_sources[source].matches( *closed ) && closed->m_receivedNs >= 0 &&
+                closed->m_receivedNs <= u.m_stamp.m_receivedNs;
+        if( valid )
+            closingAvailable = closed->m_availableNs;
+    }
+    for( unsigned s = 0; s < 4; ++s )
+    {
+        const auto *request = p.find( 3, u.m_counters[s] );
+        valid = valid && request && p.m_contract.m_sources[3].matches( *request ) && u.m_hashes[s] &&
+                request->m_payloadHash == u.m_hashes[s] && request->m_receivedNs >= 0 && u.m_sampledNs[s] >= 0 &&
+                request->m_availableNs >= 0 && request->m_receivedNs <= u.m_sampledNs[s] &&
+                request->m_availableNs <= u.m_sampledNs[s] && u.m_sampledNs[s] <= closingAvailable &&
+                ( !s || ( u.m_counters[s] >= u.m_counters[s - 1] && u.m_sampledNs[s] > u.m_sampledNs[s - 1] ) );
+        for( std::size_t n = 0; valid && n < p.m_count[3]; ++n )
+        {
+            const auto &other = p.m_raw[3][( p.m_next[3] + p.m_raw[3].size() - n - 1 ) % p.m_raw[3].size()];
+            if( other.m_counter > u.m_counters[s] && other.m_availableNs <= u.m_sampledNs[s] )
+                valid = false;
+        }
+        for( int m = 0; m < p.m_modelConfig.m_modes; ++m )
+            valid = valid && std::isfinite( u.m_values[s * p.m_modelConfig.m_modes + m] );
+    }
+    if( !valid )
+    {
+        ++p.m_status.m_rejections;
+        p.invalidate( "combined_request_history_identity_coverage_or_sequence_invalid" );
+        return false;
+    }
+    const auto &frozen = p.m_origins.front();
+    if( p.m_lastCertificate && u.m_stamp.m_counter != p.m_lastCertificate + 1 )
+    {
+        p.m_models.invalidate( {} );
+        p.m_planValid.fill( false );
+        p.m_status.m_candidateValid = false;
+    }
+    const int    modes = p.m_modelConfig.m_modes;
+    ShadowRecord record;
+    record.m_index = u.m_wfsCounter;
+    record.m_residual.resize( modes, 1 );
+    record.m_assistedAppliedCommand.resize( 4 * modes, 1 );
+    for( int m = 0; m < modes; ++m )
+        record.m_residual( m ) = frozen.m_source.m_residual[m];
+    for( unsigned s = 0; s < 4; ++s )
+        for( int m = 0; m < modes; ++m )
+            record.m_assistedAppliedCommand( ( 3 - s ) * modes + m ) = u.m_values[s * modes + m];
+    record.m_appliedCommand = record.m_assistedAppliedCommand;
+    record.m_wfsValid = record.m_timingValid = record.m_appliedValid = record.m_assistedAppliedValid = true;
+    if( p.m_modelConfig.m_standardCommandSlots == 1 )
+    {
+        for( unsigned s = 1; s < 4; ++s )
+            for( int m = 0; m < modes; ++m )
+                record.m_appliedValid = record.m_appliedValid && u.m_values[s * modes + m] == u.m_values[m];
+        record.m_appliedCommand = record.m_assistedAppliedCommand.bottomRows( modes ).eval();
+    }
+    record.m_acceleration = frozen.m_acceleration;
+    record.m_accelValid   = frozen.m_adcValid;
+    p.m_models.process( record );
+    p.m_latestModelReceipt =
+        std::max( { p.m_latestModelReceipt, frozen.m_source.m_decisionNs, u.m_stamp.m_receivedNs } );
+    p.m_lastComplete    = record.m_index;
+    p.m_lastCertificate = u.m_stamp.m_counter;
+    ++p.m_status.m_records;
+    p.m_origins.pop_front();
+    return true;
+}
+
 bool MultirateShadow::applied( const OnlineAppliedSlot &u, std::int64_t now )
 {
     auto &p = *m_impl;
     advance( now );
     if( !p.m_status.m_qualified )
         return false;
+    if( p.m_contract.m_upstream.m_enabled && p.m_contract.m_upstream.m_combinedRequestModel )
+        return false; // Request-domain identification never consumes or manufactures physical-input certificates.
     const auto &c  = p.m_contract.m_inputs;
     const auto *dm = p.find( 3, u.m_dmCounter );
     bool        valid =
@@ -494,7 +734,9 @@ void MultirateShadow::advance( std::int64_t now )
     }
     if( p.m_lastOriginNs >= 0 && now - p.m_lastOriginNs > p.m_contract.m_inputs.m_maxAgeNs )
         p.invalidate( "common_input_silence" );
-    if( ( !p.m_origins.empty() && now - p.m_origins.front().m_source.m_gridNs > p.m_contract.m_inputs.m_maxAgeNs ) ||
+    if( ( !p.m_origins.empty() && now - ( p.m_contract.m_upstream.m_enabled ? p.m_origins.front().m_source.m_decisionNs
+                                                                            : p.m_origins.front().m_source.m_gridNs ) >
+                                      p.m_contract.m_inputs.m_maxAgeNs ) ||
         ( !p.m_inputs.empty() && now - p.m_inputs.front().m_startNs > p.m_contract.m_inputs.m_maxAgeNs ) )
         p.invalidate( "pending_input_evidence_stale" );
 }
@@ -502,7 +744,18 @@ void MultirateShadow::advance( std::int64_t now )
 void MultirateShadow::finish_origin( std::int64_t now )
 {
     auto &p = *m_impl;
-    if( now > p.m_status.m_deadlineNs && p.m_status.m_candidateValid )
+    if( p.m_contract.m_upstream.m_enabled )
+    {
+        if( p.m_origins.empty() || p.m_origins.back().m_source.m_predictionDeadlineNs < 0 ||
+            now > p.m_origins.back().m_source.m_predictionDeadlineNs )
+        {
+            p.m_models.mark_next_forecasts_late();
+            if( p.m_status.m_predictionValid && !p.m_status.m_predictionLate )
+                ++p.m_status.m_lateForecasts;
+            p.m_status.m_predictionLate = true;
+        }
+    }
+    else if( now > p.m_status.m_deadlineNs && p.m_status.m_candidateValid )
         p.m_models.discard_next_forecasts();
     advance( now );
 }
@@ -520,6 +773,12 @@ void MultirateShadow::request( ShadowMode mode )
     const bool assisted         = mode == ShadowMode::AccelAssisted && p.m_planValid[1];
     p.m_status.m_effective      = assisted ? ShadowMode::AccelAssisted : ShadowMode::Standard;
     p.m_status.m_candidateValid = assisted || p.m_planValid[0];
+    if( p.m_contract.m_upstream.m_enabled && !p.m_status.m_candidateValid )
+    {
+        const bool selectedAssisted  = mode == ShadowMode::AccelAssisted && p.m_forecastValid[1];
+        p.m_status.m_effective       = selectedAssisted ? ShadowMode::AccelAssisted : ShadowMode::Standard;
+        p.m_status.m_predictionValid = selectedAssisted || p.m_forecastValid[0];
+    }
 }
 OnlineShadowStatus MultirateShadow::status() const
 {
@@ -539,5 +798,23 @@ bool MultirateShadow::candidate( ShadowMode mode, Matrix &plan ) const
 Matrix MultirateShadow::coefficients( ShadowMode mode )
 {
     return m_impl->m_models.prediction_matrix( mode );
+}
+bool MultirateShadow::prepare_plan( ShadowMode mode, Matrix &plan )
+{
+    auto &p = *m_impl;
+    if( !p.m_contract.m_upstream.m_enabled || !p.m_status.m_qualified || p.m_origins.empty() )
+        return false;
+    const auto &o = p.m_origins.back();
+    if( p.m_lastComplete + 1 != o.m_source.m_stamp.m_counter || p.m_latestModelReceipt > o.m_source.m_decisionNs ||
+        ( mode == ShadowMode::AccelAssisted && !o.m_adcValid ) )
+        return false;
+    Matrix y( p.m_modelConfig.m_modes, 1 ), empty;
+    for( int m = 0; m < y.rows(); ++m )
+        y( m ) = o.m_source.m_residual[m];
+    plan.resize( p.m_modelConfig.m_future * p.m_modelConfig.m_modes *
+                     ( mode == ShadowMode::Standard ? p.m_modelConfig.m_standardCommandSlots : 4 ),
+                 1 );
+    return p.m_models.predict_next(
+        mode, o.m_source.m_stamp.m_counter, y, mode == ShadowMode::AccelAssisted ? o.m_acceleration : empty, plan );
 }
 } // namespace DDSPC

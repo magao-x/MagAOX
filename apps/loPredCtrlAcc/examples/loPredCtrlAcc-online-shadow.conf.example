@@ -1,8 +1,8 @@
 # DEVELOPMENT EXAMPLE ONLY: NOT A TELEMETRY QUALIFICATION OR DEPLOYMENT INSTRUCTION.
-# See ONLINE_SHADOW.md. Current native metadata still inhibits training.
+# See SYNCO_NATIVE.md. Supply reviewed calibration, producer identity and counter anchors before training.
 # Installed loPredCtrlAcc: continuous native inputs; compile-time DM output inhibition.
 # Named application/INDI identity is supplied by xctrl: loPredCtrlAcc.
-# Native training remains inhibited until exposure, input and clock contracts are qualified.
+# Native training requires the upstream counter contract and complete calibrated command history.
 loopPause = 100000000
 
 [parameters]
@@ -16,8 +16,8 @@ legacy_copy_gain_compat = false
 regularization = 100.0
 gamma = 1.0
 covariance = 1e-5
-history = 5
-future = 3
+history = 2
+future = 2
 num_modes = 2
 fpsSource = camwfs
 qrd = true
@@ -27,7 +27,7 @@ own_shmim = false
 # Keep the incompatible legacy FLOAT sensor reader disabled for the UINT16 ADC stream.
 accel_enabled = false
 accel_channels = 2
-accel_history = 5
+accel_history = 1
 accel_normalize = false
 
 [shmimMonitor]
@@ -37,7 +37,7 @@ threadPrio = 0
 cpuset =
 getExistingFirst = false
 
-# No framegrabber section or DM output stream. Do not add a DM channel or copy a production output name here.
+# No framegrabber output section. The future [dm] auxiliary identity below is never opened in shadow mode.
 
 # ADC health remains independent of model qualification. Calibration is unchanged.
 [adc]
@@ -91,20 +91,49 @@ completion_publication_clock = unknown
 sdk_acquisition_clock = unknown
 sdk_publication_clock = unknown
 
-# Opt-in numerical worker; enabling this cannot establish missing source/exposure/applied-input provenance.
+# Opt-in numerical worker; enabling it does not establish upstream lock, counter anchors or command provenance.
 [online_shadow]
+# Expect upstream semaphore/delay synchronization; this does not declare the producer synchronized.
+upstream_sync = true
 enabled = true
-period_us = 5000
-budget_us = 1000
+period_us = 1000
+budget_us = 500
 queue_capacity = 2048
 adc_capacity = 4096
 pending_capacity = 32
+# Optional bounded scores. A nonempty exclusive private prediction_file enables the ordinary recorder thread.
+prediction_capacity = 32768
+prediction_file =
+prediction_max_rows = 2000000
 # Every input/history record is retained; only RLS/rank/controller refresh is strided. Gamma is per update.
 training_stride = 4
 # One preserves the single-rate command history; four selects a matched WFS-only lifted baseline.
-standard_slots = 1
+standard_slots = 4
 
 [diagnostics]
 # Cap periodic INDI traffic independently of the 8 kHz input worker.
 period_ms = 250
 debug_indi = false
+
+# Future producer identity only: no attachment, ownership lock, sidecars, semaphore or DM write in this build.
+[dm]
+channelName = dm10disp10_aux
+
+[syncopation]
+# Empty disables schedule observation. The actual helper is inherited but never polled/published in shadow.
+timingStream = dmtweeter_synco_timing
+writeLeadUs = 50
+
+[native_inputs]
+# Empty calibration intentionally inhibits native training. See SYNCO_NATIVE.md for the complete text format.
+calibration =
+# Actual acquisition producer's timingDiag subscription; a configured name is not synchronization evidence.
+sync_device = accelSim
+sync_reference = camwfs_sync
+# Reviewed 4:1 source-incarnation anchors. Zero leaves assistance inhibited; standard can still train.
+sync_epoch = 0
+modal_anchor = 0
+adc_anchor = 0
+# Private plan-to-synco cycle association only; never an actuator eligibility or trust switch.
+synco_association = false
+synco_cycle_offset = 0

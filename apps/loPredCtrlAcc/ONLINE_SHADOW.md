@@ -1,5 +1,14 @@
 # Qualified online multirate DDSPC shadow path
 
+**Current architecture update:** [UPSTREAM_SHADOW.md](UPSTREAM_SHADOW.md) supersedes
+the native input/exposure/clock prerequisites below. ACC-WFS synchronization is
+provided upstream. The native receiver checks mode/lock, counter grouping and local
+availability; physical exposure reconstruction and cross-host mapping are not
+training prerequisites in that convention. The strict exposure/physical-input
+path documented here remains available for historical/offline regression.
+Origin-only prediction errors are now separate from conditional future-input
+diagnostics. See [the experiment procedure](ACCELSIM_SHADOW_EXPERIMENT.md).
+
 This change adds a bounded native-input fanout and a separate numerical worker using
 the existing `PredictiveController`, RLS, QR-RLS and regularized DDSPC solve. It does
 not add an EOF predictor, a command publisher, or a way to qualify telemetry through

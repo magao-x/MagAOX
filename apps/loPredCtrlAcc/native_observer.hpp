@@ -17,6 +17,17 @@ class NativeObservationSink
 
     /// Copy/enqueue an immutable record or count loss; no acquisition-thread numerical work is permitted.
     virtual void observe( const NativeObservation &record /**< [in] Original observation. */ ) noexcept = 0;
+
+    /// Offer a complete immutable DM copy; default consumers need metadata only.
+    virtual void command( const NativeObservation &record /**< [in] Original request. */,
+                          std::span<const float>   values /**< [in] Entire coherent payload. */ ) noexcept;
+
+    /// Offer an actual local request-sampling opportunity; no missed opportunities are synthesized.
+    virtual void tick( std::int64_t nowNs /**< [in] Actual observer MONOTONIC time. */ ) noexcept;
+
+    /// Offer an existing coherent version-2 schedule without registering a producer or consuming a semaphore.
+    virtual void schedule( const MagAOX::app::synco::Record &record /**< [in] Original scheduler record. */,
+                           std::int64_t receivedNs /**< [in] Actual observer receipt. */ ) noexcept;
 };
 
 /// Continuous or finite input worker, with optional bounded recording; ADC reader outlives stop()/destruction.

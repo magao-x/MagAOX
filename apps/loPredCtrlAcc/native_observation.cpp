@@ -50,6 +50,13 @@ NativeObservationConfig::NativeObservationConfig()
 }
 void validate_native_observation( const NativeObservationConfig &c )
 {
+    if( c.m_timingStream.size() > 127 ||
+        c.m_timingStream.find_first_not_of( "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" ) !=
+            std::string::npos )
+        throw std::invalid_argument( "Invalid existing synco timing name" );
+    for( const auto &source : c.m_streams )
+        if( !c.m_timingStream.empty() && c.m_timingStream == source.m_name )
+            throw std::invalid_argument( "Synco schedule must differ from measurement/command inputs" );
     if( !std::isfinite( c.m_durationSec ) || c.m_durationSec < 0 || ( c.m_durationSec > 0 && c.m_durationSec < .01 ) ||
         c.m_durationSec > 3600 || c.m_pollUs < 10 || c.m_pollUs > 10000 || c.m_queueCapacity < 2 ||
         c.m_queueCapacity > 262144 || c.m_staleNs <= 0 || c.m_staleNs > 1000000000 || c.m_modalIndices[0] >= 65536 ||

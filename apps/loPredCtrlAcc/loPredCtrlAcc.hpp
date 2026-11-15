@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <atomic>
 #include <mutex>
 #include <utility>
 
@@ -37,6 +38,7 @@ using namespace mx::improc;
 #include "adc_reader.hpp"
 #include "native_observer.hpp"
 #include "online_shadow.hpp"
+#include "../../libMagAOX/app/dev/dmSyncopationProducer.hpp"
 #include "shadow_pipeline.hpp"
 
 namespace MagAOX
@@ -59,7 +61,8 @@ class loPredCtrlAcc : public MagAOXApp<true>,
                       public dev::shmimMonitor<loPredCtrlAcc>,
                       public dev::shmimMonitor<loPredCtrlAcc, accelShmimT>,
                       public dev::frameGrabber<loPredCtrlAcc>,
-                      public dev::telemeter<loPredCtrlAcc>
+                      public dev::telemeter<loPredCtrlAcc>,
+                      protected dev::dmSyncopationProducer<loPredCtrlAcc>
 {
     // Give the test harness access.
     friend class loPredCtrlAcc_test;
@@ -78,6 +81,8 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     friend class dev::telemeter<loPredCtrlAcc>;
 
     typedef dev::telemeter<loPredCtrlAcc> telemeterT;
+    friend class dev::dmSyncopationProducer<loPredCtrlAcc>;
+    typedef dev::dmSyncopationProducer<loPredCtrlAcc> dmSyncopationProducerT;
 
     /// Floating point type in which to do all calculations.
     typedef float realT;
@@ -158,7 +163,7 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     std::size_t          m_shadowAdcCapacity{ 128 };
 
     /// Serialized admission gate, closed before input helpers are stopped or model storage is destroyed.
-    bool m_shadowStopping{ false };
+    std::atomic<bool> m_shadowStopping{ false };
 
     /// Startup-only native ADC observation, accepted only with shadow execution.
     bool m_adcEnabled{ false };
@@ -186,6 +191,10 @@ class loPredCtrlAcc : public MagAOXApp<true>,
         1 }; ///< Preserve the single-rate baseline; four enables a matched lifted comparison.
     std::unique_ptr<DDSPC::OnlineShadowWorker> m_onlineWorker; ///< Separate ordinary-priority numerical owner.
     std::unique_ptr<DDSPC::NativeObserver> m_nativeObserver;   ///< Stops before its borrowed online sink is destroyed.
+    DDSPC::NativePipelineConfig m_nativeInputs; ///< Startup-only calibrated native receiver; upstream owns phase lock.
+    std::string m_nativeCalibrationFile;        ///< Reviewed full-image projection; empty leaves training inhibited.
+    std::string m_auxChannel{ "dm10disp10_aux" }; ///< Future producer identity only; shadow never opens this image.
+    pcf::IndiProperty m_indiP_upstreamTiming;     ///< Read-only subscription to the actual acquisition producer status.
 
     /// Private read-only run state and per-source transport diagnostics.
     pcf::IndiProperty                                        m_indiP_nativeShadow;
@@ -493,6 +502,9 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     /// Receive the nominal WFS rate without asserting frame alignment.
     INDI_SETCALLBACK_DECL( loPredCtrlAcc, m_indiP_fpsSource );
 
+    /// Receive actual upstream synchronized-mode/lock/counter diagnostics without controlling the acquisition app.
+    INDI_SETCALLBACK_DECL( loPredCtrlAcc, m_indiP_upstreamTiming );
+
     /// Default c'tor.
     loPredCtrlAcc();
 
@@ -589,6 +601,13 @@ class loPredCtrlAcc : public MagAOXApp<true>,
 
     /// Forward an independently confirmed total applied-input interval, never a shadow proposal.
     bool processNativeApplied( const DDSPC::OnlineAppliedSlot &record /**< [in] Actual physical input certificate. */ );
+
+    /// Forward only a complete independently observed combined-request history in its declared input domain.
+    bool
+    processNativeCommands( const DDSPC::OnlineCommandFrame &record /**< [in] Counter-associated requested inputs. */ );
+
+    /// Drain optional scored diagnostics on one ordinary recorder thread; never change numerical or output state.
+    bool readNativePrediction( DDSPC::ShadowPrediction &sample /**< [out] Original origin-only/conditional scores. */ );
 
     /// Register the bounded operator schema; metadata is available only through explicit debug opt-in.
     int setupNativeOperatorINDI();
@@ -702,6 +721,33 @@ inline loPredCtrlAcc::loPredCtrlAcc() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_R
 
 inline void loPredCtrlAcc::setupConfig()
 {
+    DMSYNCOPATIONPRODUCER_SETUP_CONFIG( config );
+    for( const char *key : { "calibration",
+                             "sync_device",
+                             "sync_reference",
+                             "sync_epoch",
+                             "modal_anchor",
+                             "adc_anchor",
+                             "synco_association",
+                             "synco_cycle_offset" } )
+        config.add( std::string( "native_inputs." ) + key,
+                    "",
+                    std::string( "native_inputs." ) + key,
+                    argType::Optional,
+                    "native_inputs",
+                    key,
+                    false,
+                    "string",
+                    "Native receiver calibration/anchor contract." );
+    config.add( "dm.channelName",
+                "",
+                "dm.channelName",
+                argType::Optional,
+                "dm",
+                "channelName",
+                false,
+                "string",
+                "Future auxiliary producer identity; shadow never attaches or publishes." );
     shmimMonitorT::setupConfig( config );
     accelShmimMonitorT::setupConfig( config );
     FRAMEGRABBER_SETUP_CONFIG( config );
@@ -792,14 +838,25 @@ inline void loPredCtrlAcc::setupConfig()
                 "enabled",
                 false,
                 "bool",
-                "Start a bounded shadow worker; never bypass source/exposure/applied-input interlocks." );
+                "Start a bounded shadow worker; never bypass source, upstream or command-history interlocks." );
+    config.add( "online_shadow.upstream_sync",
+                "",
+                "online_shadow.upstream_sync",
+                argType::Optional,
+                "online_shadow",
+                "upstream_sync",
+                false,
+                "bool",
+                "Expect the upstream synchronized input convention; this does not declare a producer locked." );
     for( const char *key : { "period_us",
                              "budget_us",
                              "queue_capacity",
                              "pending_capacity",
                              "adc_capacity",
                              "training_stride",
-                             "standard_slots" } )
+                             "standard_slots",
+                             "prediction_capacity",
+                             "prediction_max_rows" } )
         config.add( std::string( "online_shadow." ) + key,
                     "",
                     std::string( "online_shadow." ) + key,
@@ -809,6 +866,15 @@ inline void loPredCtrlAcc::setupConfig()
                     false,
                     "unsigned",
                     "Startup-only worker resource bound." );
+    config.add( "online_shadow.prediction_file",
+                "",
+                "online_shadow.prediction_file",
+                argType::Optional,
+                "online_shadow",
+                "prediction_file",
+                false,
+                "string",
+                "Exclusive private prediction CSV; empty disables recording." );
     for( const char *role : { "modal", "camera", "dm", "completion", "sdk" } )
         for( const char *field : { "stream", "acquisition_clock", "publication_clock" } )
         {
@@ -1061,6 +1127,25 @@ inline void loPredCtrlAcc::setupConfig()
 
 inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
 {
+    if( m_nativeObserver )
+    {
+        m_nativeShadowConfigValid = false;
+        m_shutdown                = true;
+        return log<software_error, -1>( { __FILE__, __LINE__, "Native input/producer configuration is startup-only" } );
+    }
+    DMSYNCOPATIONPRODUCER_LOAD_CONFIG( _config );
+    _config( m_auxChannel, "dm.channelName" );
+    if( m_auxChannel.size() < 5 || m_auxChannel.substr( m_auxChannel.size() - 4 ) != "_aux" ||
+        m_auxChannel.find_first_of( "/\\ \t\n" ) != std::string::npos )
+        return -1;
+    _config( m_nativeCalibrationFile, "native_inputs.calibration" );
+    _config( m_nativeInputs.m_statusDevice, "native_inputs.sync_device" );
+    _config( m_nativeInputs.m_reference, "native_inputs.sync_reference" );
+    _config( m_nativeInputs.m_syncEpoch, "native_inputs.sync_epoch" );
+    _config( m_nativeInputs.m_modalAnchor, "native_inputs.modal_anchor" );
+    _config( m_nativeInputs.m_adcAnchor, "native_inputs.adc_anchor" );
+    _config( m_nativeInputs.m_syncoAssociation, "native_inputs.synco_association" );
+    _config( m_nativeInputs.m_syncoCycleOffset, "native_inputs.synco_cycle_offset" );
     if( m_onlineWorker )
     {
         m_shutdown = true;
@@ -1129,11 +1214,15 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
         return log<software_error, -1>(
             { __FILE__, __LINE__, "Online learning requires guarded native shadow acquisition" } );
     }
+    _config( m_onlineConfig.m_expectUpstream, "online_shadow.upstream_sync" );
     _config( m_onlineConfig.m_periodUs, "online_shadow.period_us" );
     _config( m_onlineConfig.m_budgetUs, "online_shadow.budget_us" );
     _config( m_onlineConfig.m_queueCapacity, "online_shadow.queue_capacity" );
     _config( m_onlineConfig.m_pendingCapacity, "online_shadow.pending_capacity" );
     _config( m_onlineConfig.m_adcCapacity, "online_shadow.adc_capacity" );
+    _config( m_onlineConfig.m_predictionCapacity, "online_shadow.prediction_capacity" );
+    _config( m_onlineConfig.m_predictionFile, "online_shadow.prediction_file" );
+    _config( m_onlineConfig.m_predictionMaxRows, "online_shadow.prediction_max_rows" );
     _config( m_onlineStride, "online_shadow.training_stride" );
     _config( m_onlineStandardSlots, "online_shadow.standard_slots" );
     m_nativeShadowConfigValid = false;
@@ -1290,6 +1379,18 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
                 _config( source.m_publicationClock, key + "_publication_clock" );
             }
             DDSPC::validate_native_observation( m_nativeShadowConfig );
+            m_nativeInputs.m_enabled = m_onlineShadowEnabled && m_onlineConfig.m_expectUpstream;
+            if( m_nativeInputs.m_enabled )
+            {
+                m_nativeInputs.m_calibration = DDSPC::load_native_calibration( m_nativeCalibrationFile );
+                const auto &cal              = m_nativeInputs.m_calibration;
+                if( cal.m_layout &&
+                    ( cal.m_projection.rows() != m_num_modes || cal.m_indices != m_nativeShadowConfig.m_modalIndices ) )
+                    throw std::invalid_argument(
+                        "Native calibration mode indices/dimensions do not match WFS selection" );
+                m_nativeShadowConfig.m_sampleRequests = true;
+                m_nativeShadowConfig.m_timingStream   = m_syncopationTiming;
+            }
             m_nativeShadowConfigValid = true;
         }
         catch( const std::exception &error )
@@ -1362,6 +1463,7 @@ inline int loPredCtrlAcc::configureShadow()
             m_onlineConfig.m_model.m_updateStride         = m_onlineStride;
             m_onlineConfig.m_model.m_standardCommandSlots = m_onlineStandardSlots;
             m_onlineWorker = std::make_unique<DDSPC::OnlineShadowWorker>( m_onlineConfig );
+            m_onlineWorker->native_inputs( m_nativeInputs );
         }
     }
     catch( const std::exception &e )
@@ -1768,7 +1870,7 @@ inline bool loPredCtrlAcc::compactNativeINDI() const
 inline bool loPredCtrlAcc::qualifyNativeShadow( const DDSPC::MultirateContract &c )
 {
     return m_shadowMode && m_nativeShadowEnabled && !m_shadowStopping && m_onlineWorker &&
-           c.m_inputs.m_evidence == DDSPC::InputEvidence::VerifiedApplied && m_onlineWorker->qualify( c );
+           DDSPC::native_shadow_evidence( c ) && m_onlineWorker->qualify( c );
 }
 inline bool loPredCtrlAcc::processNativeOrigin( const DDSPC::OnlineOrigin &r )
 {
@@ -1778,6 +1880,18 @@ inline bool loPredCtrlAcc::processNativeApplied( const DDSPC::OnlineAppliedSlot 
 {
     return m_shadowMode && m_nativeShadowEnabled && !m_shadowStopping && m_onlineWorker &&
            r.m_evidence == DDSPC::InputEvidence::VerifiedApplied && m_onlineWorker->applied( r );
+}
+
+inline bool loPredCtrlAcc::processNativeCommands( const DDSPC::OnlineCommandFrame &r )
+{
+    return m_shadowMode && m_nativeShadowEnabled && !m_shadowStopping && m_onlineWorker &&
+           r.m_evidence == DDSPC::InputEvidence::Requested && m_onlineWorker->commands( r );
+}
+
+inline bool loPredCtrlAcc::readNativePrediction( DDSPC::ShadowPrediction &sample )
+{
+    return m_shadowMode && m_nativeShadowEnabled && !m_shadowStopping && m_onlineWorker &&
+           m_onlineWorker->read_prediction( sample );
 }
 
 inline int loPredCtrlAcc::setupNativeOperatorINDI()
@@ -1996,23 +2110,39 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
                 ";commands=" + std::to_string( s.m_commandQueueOccupancy ),
             "metadata=" + std::to_string( s.m_queueDrops ) + ";commands=" + std::to_string( s.m_commandDrops ),
             "raw=" + std::to_string( online.m_rawQueued ) + ";qualified=" + std::to_string( online.m_qualifiedQueued ) +
-                ";drops=" + std::to_string( online.m_drops ) } );
+                ";drops=" + std::to_string( online.m_drops ) +
+                ";scores=" + std::to_string( online.m_predictionsQueued ) + ";score_drops=" +
+                std::to_string( online.m_predictionDrops ) + ";forecasts=" + std::to_string( online.m_forecasts ) +
+                ";late_forecasts=" + std::to_string( online.m_lateForecasts ) + ";native=" + online.m_adapterReason +
+                ";prepared=" + std::to_string( online.m_preparedPlans ) + ";private_slots=" +
+                std::to_string( online.m_shadowSlots ) + ";missed_slots=" + std::to_string( online.m_missedSlots ) +
+                ";callback_us=" + std::to_string( online.m_callbackUs ) + ";trace_rows=" +
+                std::to_string( online.m_traceRows ) + ";trace_error=" + std::to_string( online.m_traceIoError ) +
+                ";trace_limit=" + std::to_string( online.m_traceLimit ) } );
     text( NativeOperator::Timing,
           { "phase_offset_us", "phase_jitter_us", "clock", "exposure", "modal_association", "slots_per_wfs" },
           { "unqualified",
             "unqualified",
-            online.m_clock ? "independently_verified_contract" : "source_host_mapping_unqualified",
-            online.m_exposure ? "independently_verified_contract" : "exposure_boundaries_unavailable",
-            online.m_association ? "independently_verified_contract" : "camera_origin_and_exposure_contract_missing",
+            online.m_upstream ? "upstream_sync_local_receipt_checks"
+                              : ( online.m_clock ? "independently_verified_contract" : "upstream_contract_pending" ),
+            online.m_upstream
+                ? "not_required_for_upstream_synchronized_inputs"
+                : ( online.m_exposure ? "independently_verified_contract" : "not_used_until_input_contract_selected" ),
+            online.m_upstream
+                ? "modal_counter_contract_no_camera_parent_required"
+                : ( online.m_association ? "independently_verified_contract" : "upstream_contract_pending" ),
             "4_nominal_individual_adc_samples" } );
     text( NativeOperator::Control,
           { "requested_mode", "effective_mode", "training", "prediction", "standard_ready", "assisted_ready" },
           { m_shadowRequested,
-            online.m_candidateValid
+            ( online.m_candidateValid || online.m_predictionValid )
                 ? ( online.m_effective == DDSPC::ShadowMode::Standard ? "standard" : "accel_assisted" )
                 : "unavailable",
             online.m_running && online.m_qualified && !online.m_overrun ? "qualified_worker_enabled" : "inhibited",
-            online.m_candidateValid ? "shadow_candidate_valid" : "inhibited",
+            online.m_candidateValid ? "shadow_candidate_valid"
+                                    : ( online.m_predictionValid ? ( online.m_predictionLate ? "queued_forecast_late"
+                                                                                             : "diagnostic_forecast" )
+                                                                 : "inhibited" ),
             standard.m_ready ? "true" : "false",
             assisted.m_ready ? "true" : "false" } );
     number( NativeOperator::Performance,
@@ -2024,11 +2154,13 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
               "assisted_rmse",
               "compute_us" },
             { double( standard.m_updates ),
-              double( standard.m_predictions ),
-              standard.m_predictions ? standard.m_rmse : -1,
+              double( m_onlineWorker ? standard.m_originPredictions : standard.m_predictions ),
+              m_onlineWorker ? ( standard.m_originPredictions ? standard.m_originRmse : -1 )
+                             : ( standard.m_predictions ? standard.m_rmse : -1 ),
               double( assisted.m_updates ),
-              double( assisted.m_predictions ),
-              assisted.m_predictions ? assisted.m_rmse : -1,
+              double( m_onlineWorker ? assisted.m_originPredictions : assisted.m_predictions ),
+              m_onlineWorker ? ( assisted.m_originPredictions ? assisted.m_originRmse : -1 )
+                             : ( assisted.m_predictions ? assisted.m_rmse : -1 ),
               online.m_computeUs } );
     text( NativeOperator::Safety,
           { "dm_write_enabled", "output_reason", "timing_interlock", "model_interlock" },
@@ -2036,7 +2168,7 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
             "compile_time_shadow_only",
             online.m_qualified ? ( online.m_schedule ? "source_contract_verified_slot_deadlines_required"
                                                      : "synco_schedule_unqualified" )
-                               : "exposure_clock_and_applied_input_unqualified",
+                               : "upstream_contract_or_command_history_unqualified",
             m_onlineWorker ? online.m_reason : "native_training_inhibited_worker_disabled" } );
 }
 
@@ -2118,7 +2250,8 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
         { 1,
           double( !online.m_qualified || online.m_overrun ),
           double( online.m_exposure ),
-          double( online.m_qualified && ( online.m_standard.m_dataValid || online.m_assisted.m_dataValid ) ),
+          double( online.m_qualified && online.m_inputEvidence == DDSPC::InputEvidence::VerifiedApplied &&
+                  ( online.m_standard.m_dataValid || online.m_assisted.m_dataValid ) ),
           double( s.m_finished ),
           double( s.m_ioError ),
           double( s.m_written ),
@@ -2288,7 +2421,9 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
           m_onlineWorker ? online.m_reason : "exposure_and_applied_input_contract_unqualified",
           online.m_qualified ? "source_contract_verified_phase_statistics_unavailable"
                              : "source_clock_and_phase_reference_unqualified",
-          online.m_qualified ? "independent_verified_applied_certificates_required_per_slot"
+          online.m_qualified ? ( online.m_inputEvidence == DDSPC::InputEvidence::Requested
+                                     ? "observed_combined_requests_not_physical_application"
+                                     : "independent_verified_applied_certificates_required_per_slot" )
                              : "command_observation_not_physical_application",
           m_shadowRequested,
           online.m_candidateValid
@@ -2448,7 +2583,7 @@ inline void loPredCtrlAcc::updateShadowINDI()
         validity.m_wfsValid = validity.m_appliedValid = validity.m_timingValid =
             online.m_qualified && ( standard.m_dataValid || assisted.m_dataValid );
         validity.m_accelValid = assisted.m_dataValid;
-        inputEvidence = online.m_qualified ? DDSPC::InputEvidence::VerifiedApplied : DDSPC::InputEvidence::Unverified;
+        inputEvidence         = online.m_qualified ? online.m_inputEvidence : DDSPC::InputEvidence::Unverified;
     }
     if( m_shadowPipelineEnabled )
     {
@@ -2651,10 +2786,9 @@ inline int loPredCtrlAcc::appStartup()
     if( m_shadowMode && configureShadow() < 0 )
         return -1;
     if( m_shadowMode )
-        log<text_log>(
-            "Shadow output inhibited. Native WFS callbacks are observation-only; ADC capture does not establish "
-            "applied-command or exposure timing. Live training requires an independently qualified input contract.",
-            logPrio::LOG_WARNING );
+        log<text_log>( "Shadow output inhibited. Upstream synchronization is consumed, not reconstructed. "
+                       "Training requires an explicit counter contract and complete calibrated command history.",
+                       logPrio::LOG_WARNING );
     if( !m_nativeShadowEnabled && shmimMonitorT::appStartup() < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
@@ -2682,6 +2816,12 @@ inline int loPredCtrlAcc::appStartup()
     {
         return -1;
     }
+    if( m_onlineShadowEnabled && !m_nativeInputs.m_statusDevice.empty() &&
+        registerIndiPropertySet( m_indiP_upstreamTiming,
+                                 m_nativeInputs.m_statusDevice,
+                                 "timingDiag",
+                                 INDI_SETCALLBACK( m_indiP_upstreamTiming ) ) < 0 )
+        return -1;
 
     if( !compactNativeINDI() )
     {
@@ -2915,6 +3055,7 @@ inline int loPredCtrlAcc::appShutdown()
         m_nativeObserver->stop();
     if( m_onlineWorker )
         m_onlineWorker->stop();
+    DMSYNCOPATIONPRODUCER_APP_SHUTDOWN;
     if( m_adcReader )
     {
         m_adcReader->stop();
@@ -3895,6 +4036,54 @@ inline INDI_SETCALLBACK_DEFN( loPredCtrlAcc, m_indiP_fpsSource )( const pcf::Ind
     }
 
     return 0;
+}
+
+inline INDI_SETCALLBACK_DEFN( loPredCtrlAcc, m_indiP_upstreamTiming )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_upstreamTiming, ipRecv );
+    if( !m_shadowMode || !m_nativeShadowEnabled || !m_onlineWorker )
+        return -1;
+    DDSPC::NativeSyncStatus s;
+    timespec                now{};
+    if( clock_gettime( CLOCK_MONOTONIC, &now ) != 0 )
+        return -1;
+    s.m_status.m_receivedNs = std::int64_t( now.tv_sec ) * 1000000000 + now.tv_nsec;
+    s.m_status.m_epoch      = m_nativeInputs.m_syncEpoch;
+    const std::array<const char *, 5> names{
+        "mode_code", "delay_lock", "local_frame_seq", "sync_producer_frame_id", "sync_frame_id_gap_count" };
+    std::array<std::uint64_t, 5> values{};
+    bool                         valid = ipRecv.getType() == pcf::IndiProperty::Number;
+    for( unsigned n = 0; n < names.size(); ++n )
+    {
+        if( !ipRecv.find( names[n] ) )
+        {
+            valid = false;
+            break;
+        }
+        double value;
+        try
+        {
+            value = ipRecv[names[n]].get<double>();
+        }
+        catch( ... )
+        {
+            valid = false;
+            break;
+        }
+        if( !std::isfinite( value ) || value < 0 || value > 9007199254740991.0 || std::floor( value ) != value )
+        {
+            valid = false;
+            break;
+        }
+        values[n] = std::uint64_t( value );
+    }
+    s.m_status.m_synchronized = valid && values[0] == 1;
+    s.m_status.m_locked       = valid && values[1] == 1;
+    s.m_sequence              = values[2];
+    s.m_referenceCounter      = values[3];
+    s.m_gaps                  = values[4];
+    m_onlineWorker->sync_status( s ); // Missing fields revoke lock; no timestamp or counter anchor is fabricated.
+    return valid ? 0 : -1;
 }
 
 } // namespace app

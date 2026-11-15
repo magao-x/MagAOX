@@ -3,6 +3,7 @@
  */
 #include "adc_transport_fixture.hpp"
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <filesystem>
@@ -16,8 +17,9 @@
 /// \cond ADC_TRANSPORT_FIXTURE
 namespace
 {
-std::mutex                   s_mutex;  ///< Protect fixture registration against the real reader thread.
-std::map<std::string, IMAGE> s_images; ///< Registered immutable borrowed images, never actual streams.
+std::mutex                   s_mutex;            ///< Protect fixture registration against the real reader thread.
+std::map<std::string, IMAGE> s_images;           ///< Registered immutable borrowed images, never actual streams.
+std::atomic<std::uint64_t>   s_outputCalls{ 0 }; ///< Forbidden native output calls, counted rather than executed.
 
 /// Return a process-specific temporary directory used solely by the API double.
 std::filesystem::path fixture_directory()
@@ -63,6 +65,21 @@ int ddspc_adc_sem_trywait( sem_t * )
 {
     errno = EAGAIN;
     return -1;
+}
+
+int ImageStreamIO_UpdateIm( IMAGE * )
+{
+    ++s_outputCalls;
+    return -1;
+}
+int ImageStreamIO_createIm_gpu( IMAGE *, const char *, int, std::uint32_t *, int, int, int, int, int, int, int )
+{
+    ++s_outputCalls;
+    return -1;
+}
+std::uint64_t ddspc_test_output_calls()
+{
+    return s_outputCalls.load();
 }
 
 namespace libXWCTest::loPredCtrlAccTest

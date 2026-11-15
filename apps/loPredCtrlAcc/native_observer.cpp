@@ -2,6 +2,7 @@
  * \brief Read-only native snapshots, bounded ADC forwarding and exclusive private observation recording.
  */
 #include "native_observer.hpp"
+#include "../../libMagAOX/app/dev/dmSyncopationProducer.hpp"
 #include <ImageStreamIO/ImageStreamIO.h>
 #include <algorithm>
 #include <atomic>
@@ -21,8 +22,63 @@
 
 namespace DDSPC
 {
+void NativeObservationSink::command( const NativeObservation &, std::span<const float> ) noexcept
+{
+}
+void NativeObservationSink::tick( std::int64_t ) noexcept
+{
+}
+void NativeObservationSink::schedule( const MagAOX::app::synco::Record &, std::int64_t ) noexcept
+{
+}
 namespace
 {
+/// Existing-only schedule mapping; no source, sidecar, wait-index, semaphore or producer lock is opened.
+class ReadOnlySchedule
+{
+    IMAGE         m_image{};    ///< Owned read-only-use mapping; never passed to a producer poll/publish operation.
+    std::uint64_t m_inode{ 0 }; ///< Backing-file identity, checked on each poll.
+  public:
+    /// Close this observer mapping only.
+    ~ReadOnlySchedule();
+
+    /// Copy a coherent/explicitly invalid record; a busy copy supplies no new record and never fabricates a reset.
+    bool read( const std::string          &name /**< [in] Existing schedule identity. */,
+               MagAOX::app::synco::Record &record /**< [out] Original payload or explicit unavailable marker. */ );
+};
+ReadOnlySchedule::~ReadOnlySchedule()
+{
+    if( m_image.md )
+        ImageStreamIO_closeIm( &m_image );
+}
+bool ReadOnlySchedule::read( const std::string &name, MagAOX::app::synco::Record &result )
+{
+    result.fill( 0 );
+    char        path[4096];
+    struct stat file{};
+    if( name.empty() || ImageStreamIO_filename( path, sizeof( path ), name.c_str() ) != 0 || stat( path, &file ) != 0 ||
+        ( m_image.md && m_inode != std::uint64_t( file.st_ino ) ) )
+    {
+        if( m_image.md )
+            ImageStreamIO_closeIm( &m_image );
+        m_image = {};
+        return true;
+    }
+    if( !m_image.md )
+    {
+        if( ImageStreamIO_openIm( &m_image, name.c_str() ) != 0 )
+            return true;
+        m_inode = file.st_ino;
+    }
+    struct stat after{};
+    if( stat( path, &after ) != 0 || after.st_ino != file.st_ino || after.st_dev != file.st_dev )
+        return true;
+    if( m_image.md && m_image.md->write )
+        return false;
+    if( !MagAOX::app::synco::readRecord( m_image, result ) )
+        return false;
+    return true;
+}
 /// Capture actual local monotonic nanoseconds; an unavailable clock is never invented.
 std::int64_t mono_ns()
 {
@@ -468,6 +524,8 @@ void NativeObserver::Impl::run()
     try
     {
         std::array<NativeInput, observationSources - 1> inputs;
+        std::array<bool, observationSources>            incompatible{};
+        ReadOnlySchedule                                schedule;
         AdcStatus                                       latestAdc;
         AdcCursor                                       cursor;
         AdcBatch                                        lastBatch;
@@ -563,6 +621,7 @@ void NativeObserver::Impl::run()
                                                                       payload );
                 if( outcome == 1 )
                 {
+                    incompatible[index] = false;
                     if( r.m_source == ObservationSource::Dm && r.m_event != ObservationEvent::Sample )
                     { //mutex scope
                         std::lock_guard<std::mutex> guard( m_commandMutex );
@@ -575,9 +634,10 @@ void NativeObserver::Impl::run()
                         r.m_flags |= ObservationPayloadUnretained;
                     }
                     r = m_capture.accept( r );
-                    enqueue( r );
                     if( command && r.m_elements <= payload.size() )
                     {
+                        if( m_sink )
+                            m_sink->command( r, std::span<const float>( payload.data(), r.m_elements ) );
                         { //mutex scope
                             std::lock_guard<std::mutex> guard( m_commandMutex );
                             m_commandHistory.append( r, std::span<const float>( payload.data(), r.m_elements ) );
@@ -585,9 +645,30 @@ void NativeObserver::Impl::run()
                         if( m_commands )
                             m_commands->push( r, std::span<const float>( payload.data(), r.m_elements ) );
                     }
+                    enqueue( r );
                 }
                 else if( outcome != -4 )
+                {
                     m_capture.poll( ObservationSource( index ), outcome == -1, outcome == -2, outcome == -3 );
+                    if( outcome == -3 && !incompatible[index] && m_sink && ( index == 1 || index == 3 ) )
+                    {
+                        NativeObservation rejected;
+                        rejected.m_source     = ObservationSource( index );
+                        rejected.m_event      = ObservationEvent::Invalid;
+                        rejected.m_flags      = ObservationInvalidPayload;
+                        rejected.m_receivedNs = rejected.m_availableNs = mono_ns();
+                        m_sink->observe( rejected ); // Fault notification only; no invented frame or journal row.
+                    }
+                    incompatible[index] = outcome == -3;
+                }
+            }
+            if( m_sink && m_config.m_sampleRequests )
+                m_sink->tick( mono_ns() );
+            if( m_sink && !m_config.m_timingStream.empty() )
+            {
+                MagAOX::app::synco::Record record;
+                if( schedule.read( m_config.m_timingStream, record ) )
+                    m_sink->schedule( record, mono_ns() );
             }
             m_capture.tick( mono_ns() );
             { //mutex scope
