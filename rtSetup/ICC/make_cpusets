@@ -10,6 +10,8 @@
 ##
 ####################################################
 
+# cpuset-role: ICC
+
 source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
 cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
 
@@ -144,11 +146,11 @@ mkdir -p $cpusetMount/acqu_mvm
 /bin/echo 1 > $cpusetMount/acqu_mvm/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/acqu_mvm/cpuset.mems
 
-#mfilt
-mkdir -p $cpusetMount/mfilt
-/bin/echo 46 > $cpusetMount/mfilt/cpuset.cpus
-/bin/echo 1 > $cpusetMount/mfilt/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/mfilt/cpuset.mems
+#spare46: released by moving modal filtering to acqu_mvm
+mkdir -p $cpusetMount/spare46
+/bin/echo 46 > $cpusetMount/spare46/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare46/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare46/cpuset.mems
 
 #spare47
 mkdir -p $cpusetMount/spare47
@@ -198,23 +200,18 @@ mkdir -p $cpusetMount/camllowfs_avg_fit
 /bin/echo 1 > $cpusetMount/camllowfs_avg_fit/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/camllowfs_avg_fit/cpuset.mems
 
-#spare55
-mkdir -p $cpusetMount/spare55
-/bin/echo 55 > $cpusetMount/spare55/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare55/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare55/cpuset.mems
+#camscc_sw: recorder acquisition thread
+mkdir -p $cpusetMount/camscc_sw
+/bin/echo 55 > $cpusetMount/camscc_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camscc_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/camscc_sw/cpuset.mems
 
-#spare56
-mkdir -p $cpusetMount/spare56
-/bin/echo 56 > $cpusetMount/spare56/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare56/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare56/cpuset.mems
-
-#spare57
-mkdir -p $cpusetMount/spare57
-/bin/echo 57 > $cpusetMount/spare57/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare57/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare57/cpuset.mems
+#camscc: three camera cores sharing L3 56-59, separate from acqu_mvm's L3 44-47
+# Move the former CPU59 recorder to inactive acc001's CPU61; retain shmimTCP and NIC IRQs on CPU58.
+mkdir -p $cpusetMount/camscc
+/bin/echo 56-57,59 > $cpusetMount/camscc/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camscc/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/camscc/cpuset.mems
 
 #shmimTCP
 mkdir -p $cpusetMount/shmimTCP
@@ -222,23 +219,17 @@ mkdir -p $cpusetMount/shmimTCP
 /bin/echo 1 > $cpusetMount/shmimTCP/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/shmimTCP/cpuset.mems
 
-#dm02disp09_sw
-mkdir -p $cpusetMount/dm02disp09_sw
-/bin/echo 59 > $cpusetMount/dm02disp09_sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/dm02disp09_sw/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/dm02disp09_sw/cpuset.mems
-
 #dm02disp_sw
 mkdir -p $cpusetMount/dm02disp_sw
 /bin/echo 60 > $cpusetMount/dm02disp_sw/cpuset.cpus
 /bin/echo 1 > $cpusetMount/dm02disp_sw/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/dm02disp_sw/cpuset.mems
 
-#spare61
-mkdir -p $cpusetMount/spare61
-/bin/echo 61 > $cpusetMount/spare61/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare61/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare61/cpuset.mems
+#dm02disp09_sw: moved from CPU59 to keep camscc within one L3
+mkdir -p $cpusetMount/dm02disp09_sw
+/bin/echo 61 > $cpusetMount/dm02disp09_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/dm02disp09_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/dm02disp09_sw/cpuset.mems
 
 #spare62
 mkdir -p $cpusetMount/spare62
