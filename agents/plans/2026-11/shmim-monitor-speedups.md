@@ -554,3 +554,23 @@ the cacao `cset` setting and `agents/plans/2026-10/rtc-cpuset-restructuring.md`.
 Next: capture on the RTC during events (per-loop-CPU interrupts including
 TLB/CAL/RES IPIs, kernel memory activity such as reclaim and compaction, disk,
 network, NFS server and the busiest threads) to identify the source.
+
+### RTC event capture 2026-11-15 12:14-12:44 UTC: no events
+
+`rtc_event_capture.sh` (2 s samples of per-CPU interrupts, vmstat, disk,
+network and `top`), run after the cpuset/config deploy and app restarts.
+None of the 10-12 min events occurred: camwfs wma 35.00 us, sd of the 10 s
+means 0.07 us; holoop-time 139.2-139.8 us; dmtweeter 120.5-120.8 us. The camera
+write time is also ~2 us below the ~37 us seen before.
+
+- Loop-L3 CPUs (40-47) and 33, 56, 57: no TLB shootdowns except 48 on 42 (the
+  cbuff). CAL IPIs ~6/s on 40 (tweeter command thread), <1.5/s elsewhere.
+  Timer ticks 1000/s everywhere (no nohz_full), 3000/s on 47 (the modulators'
+  10 us polling) and 1020/s on 45.
+- No reclaim, compaction or migration. Over the run, khugepaged collapsed
+  ~500 huge pages (THP `always`) and `/data` had one burst of writes, up to 76 MB/s
+  (12:36-12:40). Neither moved wma or the loop.
+- Constant ~147 MB/s transmitted on one interface the whole time.
+
+Next: find when the events stopped from today's telemetry history, and
+compare with the deploy and restart times.
