@@ -55,13 +55,16 @@ struct Converter
 bool Converter::fails()
 {
     ++m_calls;
+
     if( m_failAt && m_calls == m_failAt )
     {
         errno = EIO;
         return true;
     }
+
     return false;
 }
+
 Converter hardware;
 
 /// Fake open cannot access a real endpoint.
@@ -69,11 +72,13 @@ int fakeOpen( const char *path /**< [in] requested endpoint */, int flags /**< [
 {
     REQUIRE( std::string( path ) == "/dev/spidev0.0" );
     REQUIRE( flags == ( O_RDWR | O_CLOEXEC ) );
+
     if( hardware.m_openFailure || hardware.fails() )
     {
         errno = ENOENT;
         return -1;
     }
+
     return 42;
 }
 
@@ -93,9 +98,14 @@ int fakeClock( clockid_t clock /**< [in] clock domain */, timespec *ts /**< [out
         errno = EIO;
         return -1;
     }
+
     hardware.m_time += 100;
+
     if( hardware.m_backwards )
+    {
         hardware.m_time -= 200;
+    }
+
     uint64_t value = hardware.m_time + ( clock == CLOCK_REALTIME ? 1700000000000000000ULL : 0 );
     ts->tv_sec     = value / 1000000000ULL;
     ts->tv_nsec    = value % 1000000000ULL;
@@ -115,22 +125,40 @@ int fakeIoctl( int           fd /**< [in] fake descriptor */,
                void         *data /**< [in/out] SPI setup or transfer */ )
 {
     REQUIRE( fd == 42 );
+
     if( hardware.fails() )
+    {
         return -1;
+    }
+
     if( operation == SPI_IOC_WR_MODE32 )
+    {
         hardware.m_mode = *static_cast<uint32_t *>( data );
+    }
     else if( operation == SPI_IOC_RD_MODE32 )
+    {
         *static_cast<uint32_t *>( data ) = hardware.m_badMode ? 0 : hardware.m_mode;
+    }
     else if( operation == SPI_IOC_WR_BITS_PER_WORD )
+    {
         hardware.m_bits = *static_cast<uint8_t *>( data );
+    }
     else if( operation == SPI_IOC_RD_BITS_PER_WORD )
+    {
         *static_cast<uint8_t *>( data ) = hardware.m_bits;
+    }
     else if( operation == SPI_IOC_WR_LSB_FIRST )
+    {
         hardware.m_order = *static_cast<uint8_t *>( data );
+    }
     else if( operation == SPI_IOC_RD_LSB_FIRST )
+    {
         *static_cast<uint8_t *>( data ) = hardware.m_order;
+    }
     else if( operation == SPI_IOC_WR_MAX_SPEED_HZ )
+    {
         hardware.m_baud = *static_cast<unsigned *>( data );
+    }
     else
     {
         REQUIRE( operation == SPI_IOC_MESSAGE( 1 ) );
@@ -138,41 +166,56 @@ int fakeIoctl( int           fd /**< [in] fake descriptor */,
         REQUIRE_FALSE( hardware.m_high );
         REQUIRE( hardware.m_time - hardware.m_falling >= hardware.m_setup );
         REQUIRE( hardware.m_requested );
-        REQUIRE( hardware.m_mode == ( SPI_MODE_0 | SPI_NO_CS ) );
+        REQUIRE( hardware.m_mode == SPI_MODE_0 ); // Retain the committed SPI-driver compatibility profile.
         REQUIRE( hardware.m_bits == 8 );
         REQUIRE( hardware.m_order == 0 );
         REQUIRE( xfer.bits_per_word == 8 );
         REQUIRE( xfer.cs_change == 0 );
         REQUIRE( ( xfer.len == 2 || xfer.len == 4 ) );
+
         if( !( hardware.m_capturedCfg & 1U ) )
+        {
             REQUIRE( xfer.len == 4 );
+        }
+
         const auto    *tx  = reinterpret_cast<const uint8_t *>( static_cast<uintptr_t>( xfer.tx_buf ) );
         auto          *rx  = reinterpret_cast<uint8_t *>( static_cast<uintptr_t>( xfer.rx_buf ) );
         const uint16_t cfg = static_cast<uint16_t>( ( ( tx[0] << 8 ) | tx[1] ) >> 2 );
         REQUIRE( ( tx[1] & 3 ) == 0 );
         hardware.m_written.push_back( cfg );
         hardware.m_lengths.push_back( xfer.len );
+
         if( cfg & ( 1U << 13 ) )
         {
             hardware.m_pending       = cfg;
             hardware.m_pendingUpdate = true;
         }
         else
+        {
             hardware.m_pendingUpdate = false;
+        }
+
         rx[0] = hardware.m_capturedCode >> 8;
         rx[1] = hardware.m_capturedCode & 0xff;
+
         if( xfer.len == 4 )
         {
             uint16_t rb = static_cast<uint16_t>( hardware.m_capturedCfg << 2 );
+
             if( hardware.m_corrupt )
+            {
                 rb ^= 0x0200;
+            }
+
             rx[2] = rb >> 8;
             rx[3] = rb & 0xff;
         }
+
         hardware.m_time += xfer.len * 8ULL * 1000000000ULL / hardware.m_baud;
         hardware.m_serialEnd = hardware.m_time;
         return hardware.m_shortRead ? static_cast<int>( xfer.len ) - 1 : xfer.len;
     }
+
     return 0;
 }
 } // namespace
@@ -180,80 +223,106 @@ int fakeIoctl( int           fd /**< [in] fake descriptor */,
 gpiod_chip *gpiod_chip_open( const char * )
 {
     if( hardware.fails() )
+    {
         return nullptr;
+    }
+
     ++hardware.m_chips;
     return new gpiod_chip;
 }
+
 void gpiod_chip_close( gpiod_chip *chip )
 {
     --hardware.m_chips;
     delete chip;
 }
+
 gpiod_line_settings *gpiod_line_settings_new()
 {
     if( hardware.fails() )
+    {
         return nullptr;
+    }
+
     ++hardware.m_allocations;
     return new gpiod_line_settings;
 }
+
 void gpiod_line_settings_free( gpiod_line_settings *value )
 {
     --hardware.m_allocations;
     delete value;
 }
+
 gpiod_line_config *gpiod_line_config_new()
 {
     if( hardware.fails() )
+    {
         return nullptr;
+    }
+
     ++hardware.m_allocations;
     return new gpiod_line_config;
 }
+
 void gpiod_line_config_free( gpiod_line_config *value )
 {
     --hardware.m_allocations;
     delete value;
 }
+
 gpiod_request_config *gpiod_request_config_new()
 {
     if( hardware.fails() )
+    {
         return nullptr;
+    }
+
     ++hardware.m_allocations;
     return new gpiod_request_config;
 }
+
 void gpiod_request_config_free( gpiod_request_config *value )
 {
     --hardware.m_allocations;
     delete value;
 }
+
 void gpiod_line_settings_set_active_low( gpiod_line_settings *, bool inverted )
 {
     REQUIRE_FALSE( inverted );
 }
+
 int gpiod_line_settings_set_direction( gpiod_line_settings *, gpiod_line_direction dir )
 {
     REQUIRE( dir == GPIOD_LINE_DIRECTION_OUTPUT );
     return hardware.fails() ? -1 : 0;
 }
+
 int gpiod_line_settings_set_drive( gpiod_line_settings *, gpiod_line_drive drive )
 {
     REQUIRE( drive == GPIOD_LINE_DRIVE_PUSH_PULL );
     return hardware.fails() ? -1 : 0;
 }
+
 int gpiod_line_settings_set_output_value( gpiod_line_settings *, gpiod_line_value value )
 {
     REQUIRE( value == GPIOD_LINE_VALUE_INACTIVE );
     return hardware.fails() ? -1 : 0;
 }
+
 int gpiod_line_config_add_line_settings( gpiod_line_config *, const unsigned *offsets, size_t n, gpiod_line_settings * )
 {
     REQUIRE( n == 1 );
     REQUIRE( offsets[0] == 8 );
     return hardware.fails() ? -1 : 0;
 }
+
 void gpiod_request_config_set_consumer( gpiod_request_config *, const char *value )
 {
     REQUIRE( std::string( value ) == "ad7689Ctrl-cnv" );
 }
+
 gpiod_line_request *gpiod_chip_request_lines( gpiod_chip *, gpiod_request_config *, gpiod_line_config * )
 {
     if( hardware.m_busy || hardware.fails() )
@@ -261,21 +330,28 @@ gpiod_line_request *gpiod_chip_request_lines( gpiod_chip *, gpiod_request_config
         errno = EBUSY;
         return nullptr;
     }
+
     REQUIRE_FALSE( hardware.m_requested );
     hardware.m_requested = true;
     return new gpiod_line_request;
 }
+
 void gpiod_line_request_release( gpiod_line_request *request )
 {
     hardware.m_requested = false;
     ++hardware.m_releases;
     delete request;
 }
+
 int gpiod_line_request_set_value( gpiod_line_request *, unsigned offset, gpiod_line_value value )
 {
     REQUIRE( offset == 8 );
+
     if( hardware.fails() )
+    {
         return -1;
+    }
+
     if( value == GPIOD_LINE_VALUE_ACTIVE )
     {
         if( hardware.m_highFailure )
@@ -283,15 +359,24 @@ int gpiod_line_request_set_value( gpiod_line_request *, unsigned offset, gpiod_l
             errno = EIO;
             return -1;
         }
+
         REQUIRE_FALSE( hardware.m_high );
+
         if( hardware.m_rising )
+        {
             REQUIRE( hardware.m_time - hardware.m_rising >= 5000 );
+        }
+
         REQUIRE( hardware.m_time - hardware.m_serialEnd >= hardware.m_quiet );
         hardware.m_rising = hardware.m_time;
         hardware.m_edges.push_back( hardware.m_time );
         hardware.m_high = true;
+
         if( hardware.m_clockAfterHigh )
+        {
             hardware.m_clockFailure = true;
+        }
+
         hardware.m_capturedCfg = hardware.m_active;
         const unsigned channel = ( hardware.m_active >> 7 ) & 7;
         hardware.m_channels.push_back( channel );
@@ -307,13 +392,19 @@ int gpiod_line_request_set_value( gpiod_line_request *, unsigned offset, gpiod_l
             errno = EIO;
             return -1;
         }
+
         REQUIRE( hardware.m_time - hardware.m_rising >= hardware.m_highHold );
         hardware.m_falling = hardware.m_time;
         hardware.m_high    = false;
+
         if( hardware.m_pendingUpdate )
+        {
             hardware.m_active = hardware.m_pending;
+        }
+
         hardware.m_pendingUpdate = false;
     }
+
     return 0;
 }
 
@@ -348,12 +439,15 @@ TEST_CASE( "AD7689 configuration and full-width data", "[ad7689Ctrl][driver]" )
         REQUIRE( AD7689::configuration( i ) == ( 0x3c71 | ( i << 7 ) ) );
         REQUIRE( AD7689::configuration( i, true ) == ( 0x3c70 | ( i << 7 ) ) );
     }
+
     REQUIRE_THROWS_AS( AD7689::configuration( 8 ), std::out_of_range );
+
     for( unsigned code : { 0U, 1U, 4095U, 4096U, 32767U, 32768U, 0xabcdU, 65535U } )
     {
         uint8_t bytes[]{ static_cast<uint8_t>( code >> 8 ), static_cast<uint8_t>( code ) };
         REQUIRE( AD7689::decode( bytes ) == code );
     }
+
     REQUIRE( AD7689::volts( 32768, 3.32 ) == Approx( 1.66 ) );
     REQUIRE( AD7689::volts( 65535, 3.32 ) < 3.32 );
     // clang-format off
@@ -379,9 +473,13 @@ TEST_CASE( "AD7689 settings and rate admission", "[ad7689Ctrl][driver]" )
     REQUIRE_FALSE( AD7689::validChannels( { 8 } ) );
     REQUIRE( AD7689::scanTime_ns( settings, 2 ) == Approx( 56000 ) );
     REQUIRE_FALSE( AD7689::validRate( settings, 8, 8000 ) );
+
     for( double rate :
          { 0.0, -1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN() } )
+    {
         REQUIRE_FALSE( AD7689::validRate( settings, 2, rate ) );
+    }
+
     for( double reference :
          { 0.0, -1.0, 5.6, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN() } )
     {
@@ -389,12 +487,14 @@ TEST_CASE( "AD7689 settings and rate admission", "[ad7689Ctrl][driver]" )
         invalid.m_vref = reference;
         REQUIRE_FALSE( AD7689::validSettings( invalid ) );
     }
+
     for( unsigned clock : { 0U, 99999U, 8000001U } )
     {
         Settings invalid;
         invalid.m_baud = clock;
         REQUIRE_FALSE( AD7689::validSettings( invalid ) );
     }
+
     Settings tooShort;
     tooShort.m_spiSetup_ns = 29;
     REQUIRE_FALSE( AD7689::validSettings( tooShort ) );
@@ -425,6 +525,7 @@ TEST_CASE( "AD7689 real driver preserves channel and frame association", "[ad768
         REQUIRE( adc.statistics().m_discarded == 12 );
         const unsigned warmup = hardware.m_pulses;
         REQUIRE( std::find( hardware.m_lengths.begin(), hardware.m_lengths.end(), 4 ) != hardware.m_lengths.end() );
+
         for( unsigned frame = 0; frame < 5; ++frame )
         {
             hardware.m_time += 100000;
@@ -436,12 +537,14 @@ TEST_CASE( "AD7689 real driver preserves channel and frame association", "[ad768
             const uint64_t scanStart = ( timestamp.tv_sec - 1700000000ULL ) * 1000000000ULL + timestamp.tv_nsec;
             REQUIRE( scanStart <= hardware.m_edges[firstPulse] );
             REQUIRE( hardware.m_pulses - firstPulse == channels.size() );
+
             for( size_t i = 0; i < channels.size(); ++i )
             {
                 REQUIRE( hardware.m_channels[firstPulse + i] == channels[i] );
                 REQUIRE( values[i] == channels[i] * 8192 + ( ( firstPulse + i + 1 ) & 0xfff ) );
             }
         }
+
         REQUIRE( hardware.m_pulses == warmup + 5 * channels.size() );
         REQUIRE( adc.disconnect() == 0 );
         REQUIRE_FALSE( adc.ready() );
@@ -450,6 +553,7 @@ TEST_CASE( "AD7689 real driver preserves channel and frame association", "[ad768
         REQUIRE( hardware.m_chips == 0 );
         REQUIRE( hardware.m_allocations == 0 );
     }
+
     // clang-format off
 #ifdef AD7689CTRL_TEST_DOXYGEN_REF
     AD7689Lib::AD7689::connect;
@@ -473,10 +577,12 @@ TEST_CASE( "AD7689 partial connection failures release resources", "[ad7689Ctrl]
             AD7689 adc;
             adc.connect( Settings{} );
         }
+
         REQUIRE_FALSE( hardware.m_requested );
         REQUIRE( hardware.m_chips == 0 );
         REQUIRE( hardware.m_allocations == 0 );
     }
+
     hardware        = {};
     hardware.m_busy = true;
     AD7689 adc;
@@ -498,22 +604,39 @@ TEST_CASE( "AD7689 readout failures never commit a partial frame", "[ad7689Ctrl]
         REQUIRE( adc.prepare( { 0, 7 } ) == 0 );
         std::array<uint16_t, 2> values{ 123, 456 };
         timespec                timestamp{};
+
         if( fault == 0 )
+        {
             hardware.m_shortRead = true;
+        }
+
         if( fault == 1 )
+        {
             hardware.m_highFailure = true;
+        }
+
         if( fault == 2 )
+        {
             hardware.m_lowFailure = true;
+        }
+
         if( fault == 3 )
+        {
             hardware.m_clockFailure = true;
+        }
+
         if( fault == 4 )
+        {
             hardware.m_failAt = hardware.m_calls + 3;
+        }
+
         REQUIRE( adc.readScan( values.data(), 2, timestamp ) == -1 );
         REQUIRE( values == std::array<uint16_t, 2>{ 123, 456 } );
         REQUIRE_FALSE( adc.ready() );
         hardware.m_shortRead = hardware.m_highFailure = hardware.m_lowFailure = hardware.m_clockFailure = false;
         REQUIRE( adc.prepare( { 7, 0 } ) == 0 );
     }
+
     hardware = {};
     AD7689 adc;
     REQUIRE( adc.connect( Settings{} ) == 0 );
@@ -535,9 +658,14 @@ TEST_CASE( "AD7689 rails and shortened timing remain explicit", "[ad7689Ctrl][dr
     AD7689 adc;
     REQUIRE( adc.connect( settings ) == 0 );
     REQUIRE( adc.prepare( { 0 } ) == 0 );
+
     for( size_t i = 1; i < hardware.m_edges.size(); ++i )
+    {
         REQUIRE( hardware.m_edges[i] - hardware.m_edges[i - 1] >= 20000 );
+    }
+
     hardware.m_constant = true;
+
     for( uint16_t code : { static_cast<uint16_t>( 0 ), static_cast<uint16_t>( 65535 ) } )
     {
         hardware.m_constantCode = code;
@@ -593,6 +721,7 @@ TEST_CASE( "AD7689 zero configuration write retains the selected input", "[ad768
     AD7689 adc;
     REQUIRE( adc.connect( Settings{} ) == 0 );
     REQUIRE( adc.prepare( { 7 } ) == 0 );
+
     for( unsigned i = 0; i < 4; ++i )
     {
         uint16_t sample = 0;
@@ -601,6 +730,7 @@ TEST_CASE( "AD7689 zero configuration write retains the selected input", "[ad768
         REQUIRE( hardware.m_channels.back() == 7 );
         REQUIRE( sample >= 7 * 8192 );
     }
+
     uint16_t sample = 0;
     timespec timestamp{};
     REQUIRE( adc.readScan( &sample, 1, timestamp ) == 0 );

@@ -1,6 +1,6 @@
 allall: check-platform all
 
-OTHER_HEADERS = dependencies/AD7689.h
+OTHER_HEADERS = dependencies/AD7689.h ad7689Sync.hpp
 OTHER_OBJS = dependencies/AD7689.o
 TARGET = ad7689Ctrl
 GPIOD_CFLAGS = $(shell pkg-config --cflags libgpiod)

@@ -10,6 +10,7 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 #include "dependencies/AD7689.h"
+#include "ad7689Sync.hpp"
 #include <array>
 #include <atomic>
 #include <mutex>
@@ -64,7 +65,7 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
 
     int m_numChannels{ 2 }; ///< The number of AD7689 channels read into each output frame.
 
-    std::string m_fpsDevice;               ///< Device name providing external fps metadata for framegrabber sizing.
+    std::string m_fpsDevice; ///< External WFS-rate hint in synchronized mode, or ADC-rate source in timer mode.
     std::string m_fpsProperty{ "fps" };    ///< Property name providing external fps metadata.
     std::string m_fpsElement{ "current" }; ///< Property element containing the fps value.
 
@@ -147,7 +148,7 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
     float m_nanoSecTarget{ 1e9f / m_fps }; ///< The timer-mode target interval in nanoseconds.
     float m_synchroDelay{ 0 };             ///< The commanded pre-read delay in synchronized mode, in nanoseconds.
     float m_synchroDelayTarget{
-        0 }; ///< The synchronized-mode effective delay target in nanoseconds after applying signed offset and wrap.
+        0 }; ///< Selected delay target [ns], with user offset; only the legacy model wraps within a WFS period.
 
     /// The timer-mode reference point for the next internal acquisition cycle.
     std::chrono::time_point<std::chrono::steady_clock> m_time_start;
@@ -205,14 +206,16 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
 
     bool m_firstReadLatency{ true }; ///< Tracks first-arrival initialization for semaphore-to-read latency estimation.
 
-    double m_wfs_fps{ 0.0 }; ///< WFS frame rate estimate used for timing prediction; initialized from configured fps
-                             ///< before callbacks.
+    double m_wfs_fps{
+        0.0 }; ///< Startup/source WFS rate hint; measured unique triggers supersede it in synchronized mode.
 
-    double m_delayModel_ns{ 0.0 }; ///< Current modulo-wrapped delay predicted by the synchronized phase model.
+    double m_delayModel_ns{
+        0.0 }; ///< Selected phase-model delay [ns]; legacy wrapped phase or full DDSPC acquisition delay.
 
     double m_delayApplied_ns{ 0.0 }; ///< Delay applied to the most recent synchronized ADC read.
 
-    double m_delayBudget_ns{ 0.0 }; ///< Maximum delay allowed this cycle after cadence budgeting.
+    double m_delayBudget_ns{
+        0.0 }; ///< Selected controller upper bound [ns]; legacy cadence budget or DDSPC causal limit.
 
     double m_nonDelayService_ns{
         0.0 }; ///< Measured wake-to-return service time minus applied delay for the latest cycle.
@@ -227,7 +230,7 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
 
     double m_delayCapped{ 0.0 }; ///< Delay-cap state exported as 1.0 when cadence budgeting limits the applied delay.
 
-    timespec m_triggerTime{}; ///< Computed trigger timestamp aligned to the estimated WFS integration midpoint.
+    timespec m_triggerTime{}; ///< Predicted synchronized scan deadline on the realtime diagnostic clock.
 
     double m_triggerInterval_ns{ 0.0 }; ///< Measured interval between consecutive trigger events in nanoseconds.
 
@@ -279,6 +282,44 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
     pcf::IndiProperty      m_indiP_channelMap; ///< Read-only output-slot to physical-channel mapping.
     ///@}
 
+    /** \name Synchronization Helpers - Data
+     * @{ */
+    ad7689CtrlDetail::syncSchedule m_syncSchedule; ///< Finite acquisition-owner schedule for the current WFS period.
+    double   m_referenceFps{ 0 };        ///< Optional startup WFS cadence hint; zero waits for two measured triggers.
+    double   m_syncTimeout{ 1 };         ///< Source silence/recreation timeout [s], independent of ADC sampling rate.
+    double   m_requestedWfsFps{ 0 };     ///< WFS cadence hint staged by the FPS source callback.
+    int64_t  m_lastSyncArrival_ns{ 0 };  ///< Last unique WFS arrival on the monotonic clock.
+    int64_t  m_nextSyncProbe_ns{ 0 };    ///< Next bounded stream identity check [monotonic ns].
+    bool     m_haveSyncArrival{ false }; ///< Whether an interval can be measured from the previous WFS event.
+    bool     m_haveMeasuredCadence{ false }; ///< Measured cadence supersedes the optional startup hint.
+    uint64_t m_syncDuplicates{ 0 };          ///< Duplicate source IDs rejected without creating additional scan slots.
+    uint64_t m_coalescedWakes{ 0 }; ///< Queued semaphore notifications collapsed into the latest source reference.
+    uint64_t m_cadenceResets{ 0 };  ///< Source restarts, silence timeouts, and significant cadence changes.
+    uint64_t m_lateScans{ 0 };      ///< Acquisitions starting after their absolute software deadlines.
+    double   m_maxLateness_ns{ 0 }; ///< Maximum observed monotonic deadline lateness [ns].
+    std::array<double, 11> m_syncSnapshot{};   ///< Synchronized scheduler diagnostics transferred to the main loop.
+    pcf::IndiProperty      m_indiP_syncTiming; ///< Read-only actual cadence, subscan spacing, and loss accounting.
+    ///@}
+
+    /** \name DDSPC Acquisition - Data
+     * @{ */
+    ad7689CtrlDetail::ddspcSettings m_ddspc; ///< Acquisition-owner phase model; disabled preserves legacy behavior.
+    ad7689CtrlDetail::ddspcSettings
+        m_requestedDdspc; ///< Complete validated runtime request, protected by m_controlMutex.
+    ad7689CtrlDetail::continuousSchedule m_ddspcSchedule; ///< One absolute clock with finite WFS slot authorization.
+    ad7689CtrlDetail::scanSlot           m_ddspcSlot;     ///< Last consumed slot and its original WFS reference.
+    double  m_ddspcTarget_ns{ 0 };                        ///< Unwrapped DDSPC formula, before user offset and feedback.
+    double  m_ddspcReadError_ns{ 0 };         ///< Smoothed first-slot actual delay error for the existing controller.
+    int64_t m_ddspcStart_ns{ 0 };             ///< Actual software scan invocation on the monotonic clock.
+    int64_t m_ddspcCompletion_ns{ 0 };        ///< Complete scan returned; data not yet published [monotonic ns].
+    int64_t m_ddspcPublished_ns{ 0 };         ///< Sample stream semaphores posted [monotonic ns].
+    std::array<double, 18> m_ddspcSnapshot{}; ///< Last timing and source association transferred to the main loop.
+    pcf::IndiProperty      m_indiP_ddspcSettings; ///< Runtime enabled/process/latency/margin/slew control.
+    pcf::IndiProperty      m_indiP_ddspcTiming;   ///< Calculated phase, actual timestamps, and WFS/ACC association.
+    /// Stage an atomic validated DDSPC settings update without touching acquisition hardware.
+    INDI_NEWCALLBACK_DECL( ad7689Ctrl, m_indiP_ddspcSettings );
+    ///@}
+
     /** \name ADC Configuration
      * @{
      */
@@ -312,6 +353,18 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
     /** \name Synchronization Helpers
      * @{
      */
+
+    /// Read monotonic nanoseconds for scan scheduling, independently of realtime stream timestamps.
+    virtual int monotonicNow( int64_t &now /**< [out] current monotonic time [ns] */ );
+
+    /// Wait for either a source notification or an absolute monotonic deadline.
+    virtual int waitForSync( int64_t deadline /**< [in] absolute monotonic wake deadline [ns] */ );
+
+    /// Track a coalesced WFS observation and update the selected acquisition clock.
+    int processSyncReference( int64_t arrival /**< [in] unique reference arrival [monotonic ns] */ );
+
+    /// Abandon pending slots and invalidate source cadence on stop, restart, or reconfiguration.
+    void resetSyncSchedule();
 
     /// Open the synchronization stream when semaphore-driven acquisition is enabled.
     /**
@@ -352,12 +405,15 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
      */
     int acquireSynchroAndCheckValid();
 
+    /// Consume one DDSPC clock slot, retaining its source association and distinct timing observations.
+    int acquireDdspcAndCheckValid( int64_t now /**< [in] actual scan start [monotonic ns] */ );
+
     /// Read the current realtime clock value.
     /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    int getRealtime( timespec &ts /**< [out] the current realtime clock value */ );
+    virtual int getRealtime( timespec &ts /**< [out] the current realtime clock value */ );
 
     /// Wait on the claimed synchronization semaphore until the supplied timeout.
     /**
@@ -379,6 +435,9 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
     /// Update the synchronized delay command with anti-windup and physical bounds.
     void
     updateSynchroDelayController( double desiredDelay_ns /**< [in] the unconstrained synchronized-delay command */ );
+
+    /// Recompute the WFS phase model using the current measured cadence.
+    void updatePhaseTarget( const timespec &atime /**< [in] latest source arrival [realtime] */ );
 
     /// Update synchronized trigger timing from the current semaphore arrival.
     void updateTriggerTiming( const timespec &atime /**< [in] the semaphore-arrival timestamp */ );
@@ -476,6 +535,9 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
      */
     int loadImageIntoStream( void *dest /**< [out] the destination image buffer */ );
 
+    /// Record actual data availability after the unchanged frameGrabber stream semaphore posts.
+    int frameGrabberPostPublish( IMAGE *stream /**< [in] just-published image stream */ );
+
     /// Reset synchronization resources before the next acquisition configuration.
     /**
      * \returns 0 on success
@@ -514,39 +576,56 @@ inline double ad7689Ctrl::controlValue( const pcf::IndiProperty &property, const
     {
         std::istringstream input( property[element].get() );
         double             value = 0;
+
         if( ( input >> value ) && ( input >> std::ws ).eof() && std::isfinite( value ) )
+        {
             return value;
+        }
     }
     catch( const std::exception & )
     {
     }
+
     return std::numeric_limits<double>::quiet_NaN();
 }
 
 inline int ad7689Ctrl::rejectControl( pcf::IndiProperty &property )
 {
     property.setState( INDI_ALERT );
+
     if( m_indiDriver )
+    {
         m_indiDriver->sendSetProperty( property );
+    }
+
     return -1;
 }
 
 inline int ad7689Ctrl::requestAcquisition( double rate, double count )
 {
     const double margin = m_synchroShmimName.empty() ? 0 : m_cadenceGuard_ns;
+
     if( !std::isfinite( rate ) || rate <= 0 || rate > 10000 )
+    {
         return log<software_error, -1>( { "Rejected nonfinite or out-of-range frame rate" } );
+    }
+
     const float storedRate = static_cast<float>( rate );
+
     if( !std::isfinite( count ) || count < 1 || count > 8 || std::floor( count ) != count ||
         ( m_explicitChannels && count != static_cast<double>( m_channels.size() ) ) ||
         !AD7689Lib::AD7689::validRate( m_adcSettings, static_cast<size_t>( count ), rate, margin ) ||
         !AD7689Lib::AD7689::validRate( m_adcSettings, static_cast<size_t>( count ), storedRate, margin ) )
+    {
         return log<software_error, -1>( { "Rejected invalid rate/count or ADC timing budget" } );
+    }
+
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
         m_requestedFps      = storedRate;
         m_requestedChannels = static_cast<int>( count );
     }
+
     return 0;
 }
 
@@ -556,35 +635,77 @@ inline bool ad7689Ctrl::applyControls( bool reconfigure )
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
         changed = m_requestedFps != m_fps || m_requestedChannels != m_numChannels;
+
         if( reconfigure )
         {
             m_fps         = static_cast<float>( m_requestedFps );
             m_numChannels = m_requestedChannels;
         }
+
+        m_wfs_fps       = m_synchroShmimName.empty() ? m_requestedFps : m_requestedWfsFps;
         m_alpha         = m_requestedAlpha;
         m_appliedAlpha  = m_alpha;
         m_appliedOffset = m_requestedOffset;
-        if( m_synchroPostDelay != m_requestedOffset )
+
+        if( m_ddspc != m_requestedDdspc )
+        {
+            const bool toggled = m_ddspc.m_enabled != m_requestedDdspc.m_enabled;
+
+            if( toggled || m_requestedDdspc.m_enabled )
+            {
+                m_firstReadLatency = true;
+            }
+
+            m_ddspc = m_requestedDdspc;
+
+            if( toggled )
+            {
+                m_syncSchedule.cancel();
+                m_ddspcSchedule.cancel();
+            }
+        }
+
+        if( m_ddspc.m_enabled && m_synchroPostDelay != m_requestedOffset )
         {
             m_synchroPostDelay = m_requestedOffset;
+            m_firstReadLatency = true;
+        }
+
+        if( !m_ddspc.m_enabled && m_synchroPostDelay != m_requestedOffset )
+        {
+            m_synchroPostDelay = m_requestedOffset;
+
             if( m_wfsPeriodMeasured_ns > 0 )
             {
                 double delay = std::fmod( m_delayModel_ns + 1000.0 * m_synchroPostDelay, m_wfsPeriodMeasured_ns );
+
                 if( delay < 0 )
+                {
                     delay += m_wfsPeriodMeasured_ns;
+                }
+
                 m_synchroDelayTarget = static_cast<float>( delay );
             }
             else
+            {
                 m_synchroDelayTarget = 1000.0f * m_synchroPostDelay;
+            }
+
             m_synchroDelay    = m_synchroDelayTarget;
             m_delayApplied_ns = m_synchroDelay;
         }
     }
+
     if( changed && reconfigure )
     {
         m_trigger = m_nanoSecTarget = 1e9f / m_fps;
-        m_wfs_fps                   = m_fps;
+
+        if( m_synchroShmimName.empty() )
+        {
+            m_wfs_fps = m_fps;
+        }
     }
+
     m_reportedFps      = m_fps;
     m_reportedChannels = m_numChannels;
     return changed;
@@ -598,18 +719,26 @@ inline int ad7689Ctrl::prepareAdc()
         state( stateCodes::ERROR );
         return log<software_error, -1>( { "ADC failed three consecutive acquisition/recovery attempts" } );
     }
+
     try
     {
         if( !m_adcConnected )
         {
             ++m_recoveries;
             elevatedPrivileges privilege( this );
+
             if( m_adc.connect( m_adcSettings ) < 0 )
+            {
                 throw std::runtime_error( m_adc.error() );
+            }
+
             m_adcConnected = true;
         }
+
         if( m_adc.prepare( m_activeChannels ) < 0 )
+        {
             throw std::runtime_error( m_adc.error() );
+        }
     }
     catch( const std::exception &error )
     {
@@ -619,6 +748,7 @@ inline int ad7689Ctrl::prepareAdc()
         captureTimingDiagnostics();
         return log<software_error, -1>( { std::string( "ADC initialization: " ) + error.what() } );
     }
+
     return 0;
 }
 
@@ -629,9 +759,14 @@ inline int ad7689Ctrl::readScan()
     try
     {
         if( m_staging.size() != m_values.size() )
+        {
             m_staging.resize( m_values.size() );
+        }
+
         if( m_adc.readScan( m_staging.data(), m_staging.size(), m_currImageTimestamp ) < 0 )
+        {
             throw std::runtime_error( m_adc.error() );
+        }
     }
     catch( const std::exception &error )
     {
@@ -642,22 +777,33 @@ inline int ad7689Ctrl::readScan()
         m_reconfig     = true;
         return log<software_error, 1>( { std::string( "ADC scan discarded: " ) + error.what() } );
     }
+
     m_channelReadoutTime_ns = static_cast<double>(
         std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::steady_clock::now() - started ).count() );
+
     if( m_channelReadoutTime_ns > 1e9 / m_fps )
+    {
         ++m_overruns;
+    }
+
     bool changed;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
         changed = m_requestedFps != m_fps || m_requestedChannels != m_numChannels;
     }
+
     if( m_shutdown || m_reconfig || changed )
     {
         ++m_invalidFrames;
+
         if( changed )
+        {
             m_reconfig = true;
+        }
+
         return 1;
     }
+
     m_values.swap( m_staging );
     m_failureAttempts = 0;
     m_frameValid      = true;
@@ -715,6 +861,11 @@ inline void ad7689Ctrl::updateTriggerTiming( const timespec &atime )
 
     m_lastAtime = atime;
 
+    updatePhaseTarget( atime );
+}
+
+inline void ad7689Ctrl::updatePhaseTarget( const timespec &atime )
+{
     const double deltaT_wfs_ns = m_avgSemaphorePeriod_ns;
     m_wfsPeriodMeasured_ns     = deltaT_wfs_ns;
 
@@ -722,6 +873,14 @@ inline void ad7689Ctrl::updateTriggerTiming( const timespec &atime )
     {
         m_triggerInterval_ns = 0.0;
         return;
+    }
+
+    if( m_ddspc.m_enabled )
+    {
+        m_ddspcTarget_ns     = m_ddspc.delay( deltaT_wfs_ns );
+        m_delayModel_ns      = m_ddspcTarget_ns;
+        m_synchroDelayTarget = static_cast<float>( m_ddspcTarget_ns + 1000.0 * m_synchroPostDelay );
+        return; // Full DDSPC delay is never wrapped or added to the legacy latency model.
     }
 
     const double raw_delay_ns = 0.5 * deltaT_wfs_ns - ( m_synchroDtTransfer_ns + m_synchroWfsProcess_ns +
@@ -736,6 +895,7 @@ inline void ad7689Ctrl::updateTriggerTiming( const timespec &atime )
 
     const double delayOffset_ns = 1e3 * static_cast<double>( m_synchroPostDelay );
     double       t_delay_ns     = std::fmod( t_delay_model_ns + delayOffset_ns, deltaT_wfs_ns );
+
     if( t_delay_ns < 0.0 )
     {
         t_delay_ns += deltaT_wfs_ns;
@@ -755,6 +915,7 @@ inline void ad7689Ctrl::updateTriggerTiming( const timespec &atime )
     else
     {
         m_triggerInterval_ns = timespecToNs( m_triggerTime ) - timespecToNs( m_lastTriggerTime );
+
         if( m_triggerInterval_ns < 0.0 )
         {
             m_triggerInterval_ns = 0.0;
@@ -921,6 +1082,71 @@ inline void ad7689Ctrl::setupConfig()
                 "string",
                 "The ImageStreamIO stream used to synchronize acquisition. Default is timer-driven operation." );
 
+    config.add( "synchro.referenceFps",
+                "",
+                "synchro.referenceFps",
+                argType::Required,
+                "synchro",
+                "referenceFps",
+                false,
+                "double",
+                "Optional initial WFS rate [Hz]; zero learns cadence from triggers. Does not set ADC fps." );
+    config.add( "synchro.timeout",
+                "",
+                "synchro.timeout",
+                argType::Required,
+                "synchro",
+                "timeout",
+                false,
+                "double",
+                "Maximum WFS silence before rechecking the source [s]." );
+
+    config.add( "synchro.ddspcDelayEnabled",
+                "",
+                "synchro.ddspcDelayEnabled",
+                argType::Required,
+                "synchro",
+                "ddspcDelayEnabled",
+                false,
+                "bool",
+                "Enable continuous DDSPC phase-aligned scheduling; default false." );
+    config.add( "synchro.wfsProcessTime_ns",
+                "",
+                "synchro.wfsProcessTime_ns",
+                argType::Required,
+                "synchro",
+                "wfsProcessTime_ns",
+                false,
+                "double",
+                "Processing after WFS exposure ends [ns]; DDSPC only, default 75000." );
+    config.add( "synchro.accLatency_ns",
+                "",
+                "synchro.accLatency_ns",
+                argType::Required,
+                "synchro",
+                "accLatency_ns",
+                false,
+                "double",
+                "Calibrated complete ACC-to-publication latency [ns]; DDSPC only, default 15000." );
+    config.add( "synchro.ddspcMargin_ns",
+                "",
+                "synchro.ddspcMargin_ns",
+                argType::Required,
+                "synchro",
+                "ddspcMargin_ns",
+                false,
+                "double",
+                "Desired availability lead before DDSPC [ns]; default 10000." );
+    config.add( "synchro.ddspcSlewFraction",
+                "",
+                "synchro.ddspcSlewFraction",
+                argType::Required,
+                "synchro",
+                "ddspcSlewFraction",
+                false,
+                "double",
+                "Maximum correction per future ACC interval, (0,0.25]; default 0.05." );
+
     config.add( "synchro.postDelay",
                 "",
                 "synchro.postDelay",
@@ -1074,6 +1300,13 @@ inline int ad7689Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fpsElement, "fps.element" );
     _config( m_fpsTol, "fps.tol" );
     _config( m_synchroShmimName, "synchro.shmimName" );
+    _config( m_referenceFps, "synchro.referenceFps" );
+    _config( m_syncTimeout, "synchro.timeout" );
+    _config( m_ddspc.m_enabled, "synchro.ddspcDelayEnabled" );
+    _config( m_ddspc.m_process, "synchro.wfsProcessTime_ns" );
+    _config( m_ddspc.m_latency, "synchro.accLatency_ns" );
+    _config( m_ddspc.m_margin, "synchro.ddspcMargin_ns" );
+    _config( m_ddspc.m_slew, "synchro.ddspcSlewFraction" );
     _config( m_synchroPostDelay, "synchro.postDelay" );
     _config( m_synchroDtTransfer_ns, "synchro.dtTransfer_ns" );
     _config( m_synchroWfsProcess_ns, "synchro.wfsProcess_ns" );
@@ -1096,32 +1329,73 @@ inline int ad7689Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_adcSettings.m_spiSetup_ns, "adc.spiSetup_ns" );
     _config( m_adcSettings.m_quietTime_ns, "adc.quietTime_ns" );
     _config( m_adcSettings.m_vref, "adc.vref" );
+
+    if( !std::isfinite( m_referenceFps ) || m_referenceFps < 0 || m_referenceFps > 1000000 ||
+        !std::isfinite( m_syncTimeout ) || m_syncTimeout <= 0 || m_syncTimeout > 60 )
+    {
+        return log<software_error, -1>( { "Invalid WFS reference rate or timeout" } );
+    }
+
+    if( !m_ddspc.valid() || ( m_ddspc.m_enabled && m_synchroShmimName.empty() ) )
+    {
+        return log<software_error, -1>( { "Invalid DDSPC settings or missing WFS stream" } );
+    }
+
+    if( m_ddspc.m_enabled && m_referenceFps > 0 )
+    {
+        const double delay = m_ddspc.delay( 1e9 / m_referenceFps, 1000.0 * m_synchroPostDelay );
+
+        if( !std::isfinite( delay ) || delay < 0 || delay > 1e9 )
+        {
+            return log<software_error, -1>( { "DDSPC acquisition delay must be within [0,1e9] ns" } );
+        }
+    }
+
+    m_requestedDdspc   = m_ddspc;
     m_explicitChannels = _config.isSet( "accel.channels" );
     m_channels.clear();
+
     if( m_explicitChannels )
     {
         std::string list;
         _config( list, "accel.channels" );
+
         if( list.size() >= 2 && list.front() == '[' && list.back() == ']' )
+        {
             list = list.substr( 1, list.size() - 2 );
+        }
+
         std::istringstream input( list );
         std::string        token;
+
         while( std::getline( input, token, ',' ) )
         {
             std::istringstream number( token );
             int                channel = -1;
+
             if( !( number >> channel ) || !( number >> std::ws ).eof() || channel < 0 || channel > 7 )
+            {
                 return log<software_error, -1>( { "Invalid accel.channels input" } );
+            }
+
             m_channels.push_back( static_cast<unsigned>( channel ) );
         }
+
         if( !AD7689Lib::AD7689::validChannels( m_channels ) || list.empty() || list.back() == ',' ||
             ( _config.isSet( "accel.numChannels" ) && channelCount != static_cast<double>( m_channels.size() ) ) )
+        {
             return log<software_error, -1>( { "Invalid or conflicting accel.channels/count" } );
+        }
+
         channelCount = m_channels.size();
     }
+
     if( !std::isfinite( channelCount ) || channelCount < 1 || channelCount > 8 ||
         std::floor( channelCount ) != channelCount )
+    {
         return log<software_error, -1>( { "accel.numChannels must be an integer in 1..8" } );
+    }
+
     m_numChannels = static_cast<int>( channelCount );
     _config( m_numChannelsDevice, "numChannels.device" );
     _config( m_numChannelsProperty, "numChannels.property" );
@@ -1138,11 +1412,40 @@ inline int ad7689Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
                            m_delayLockFracThreshold,
                            m_cadenceGuard_ns,
                            static_cast<double>( m_alpha ) } )
+    {
         if( !std::isfinite( timing ) )
+        {
             return log<software_error, -1>( { "Nonfinite timing configuration" } );
+        }
+    }
+
     const double margin = m_synchroShmimName.empty() ? 0 : std::max( 0.0, m_cadenceGuard_ns );
+
     if( !AD7689Lib::AD7689::validRate( m_adcSettings, m_numChannels, m_fps, margin ) )
+    {
         return log<software_error, -1>( { "Invalid ADC configuration or impossible rate/channel/SPI budget" } );
+    }
+
+    if( m_ddspc.m_enabled && m_referenceFps > 0 )
+    {
+        ad7689CtrlDetail::continuousSchedule admission;
+        const double                         period = 1e9 / m_referenceFps;
+        const double                         delay  = m_ddspc.delay( period, 1000.0 * m_synchroPostDelay );
+
+        if( !admission.reference( 0,
+                                  0,
+                                  period,
+                                  m_fps,
+                                  delay,
+                                  delay,
+                                  AD7689Lib::AD7689::scanTime_ns( m_adcSettings, m_numChannels ),
+                                  margin,
+                                  m_ddspc.m_slew ) )
+        {
+            return log<software_error, -1>( { "DDSPC effective cadence exceeds ADC/guard budget or rate limit" } );
+        }
+    }
+
     if( m_synchroDtTransfer_ns < 0.0 )
     {
         m_synchroDtTransfer_ns = 0.0;
@@ -1213,7 +1516,8 @@ inline int ad7689Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     m_syncProducerFrameDelta  = 0;
     m_lastSyncProducerFrameId = 0;
     m_syncProducerFrameValid  = false;
-    m_wfs_fps                 = m_fps;
+    m_wfs_fps                 = m_synchroShmimName.empty() ? m_fps : m_referenceFps;
+    m_requestedWfsFps         = m_wfs_fps;
     m_channelReadoutTime_ns   = 0.0;
 
     m_requestedFps      = m_fps;
@@ -1233,7 +1537,9 @@ inline void ad7689Ctrl::loadConfig()
     try
     {
         if( loadConfigImpl( config ) < 0 )
+        {
             m_shutdown = true;
+        }
     }
     catch( const std::exception &error )
     {
@@ -1307,11 +1613,15 @@ inline int ad7689Ctrl::appStartup()
         elevatedPrivileges elPriv( this );
 
         if( m_adc.connect( m_adcSettings ) < 0 )
+        {
             return log<software_error, -1>( { m_adc.error() } );
+        }
+
         m_adcConnected = true;
     }
 
     CREATE_REG_INDI_RO_NUMBER( m_indiP_adcHealth, "adcHealth", "ADC health", "Diagnostics" );
+
     for( const char *name : { "conversions",
                               "warmup_discarded",
                               "hardware_errors",
@@ -1321,14 +1631,77 @@ inline int ad7689Ctrl::appStartup()
                               "recoveries",
                               "scan_us",
                               "useful_conversions" } )
+    {
         m_indiP_adcHealth.add( pcf::IndiElement( name ) );
+    }
+
     m_indiP_channelMap = pcf::IndiProperty( pcf::IndiProperty::Text );
     m_indiP_channelMap.setDevice( configName() );
     m_indiP_channelMap.setName( "channelMap" );
     m_indiP_channelMap.setPerm( pcf::IndiProperty::ReadOnly );
     m_indiP_channelMap.add( pcf::IndiElement( "inputs" ) );
+
     if( registerIndiPropertyNew( m_indiP_channelMap, nullptr ) < 0 )
+    {
         return -1;
+    }
+
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_syncTiming, "syncTiming", "WFS scan scheduler", "Diagnostics" );
+
+    for( const char *name : { "scans_per_wfs",
+                              "scheduled_fps",
+                              "scan_period_us",
+                              "wfs_period_us",
+                              "phase_us",
+                              "skipped_scans",
+                              "late_scans",
+                              "max_lateness_us",
+                              "cadence_resets",
+                              "duplicate_triggers",
+                              "coalesced_wakes" } )
+    {
+        m_indiP_syncTiming.add( pcf::IndiElement( name ) );
+    }
+
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_ddspcTiming, "ddspcTiming", "DDSPC acquisition timing", "Diagnostics" );
+
+    for( const char *name : { "enabled",
+                              "valid",
+                              "target_delay_us",
+                              "applied_delay_us",
+                              "sync_correction_us",
+                              "phase_error_us",
+                              "scheduled_mono_us",
+                              "start_mono_us",
+                              "completion_mono_us",
+                              "published_mono_us",
+                              "reference_mono_us",
+                              "reference_id",
+                              "reference_slot",
+                              "nominal_slot",
+                              "frame_seq",
+                              "start_lateness_us",
+                              "availability_us",
+                              "phase_acquisitions" } )
+    {
+        m_indiP_ddspcTiming.add( pcf::IndiElement( name ) );
+    }
+
+    m_indiP_ddspcSettings = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_ddspcSettings.setDevice( configName() );
+    m_indiP_ddspcSettings.setName( "ddspcSettings" );
+    m_indiP_ddspcSettings.setPerm( pcf::IndiProperty::ReadWrite );
+
+    for( const char *name : { "enabled", "wfs_process_ns", "acc_latency_ns", "margin_ns", "slew_fraction" } )
+    {
+        m_indiP_ddspcSettings.add( pcf::IndiElement( name ) );
+    }
+
+    if( registerIndiPropertyNew( m_indiP_ddspcSettings, st_newCallBack_m_indiP_ddspcSettings ) < 0 )
+    {
+        return -1;
+    }
+
     captureTimingDiagnostics();
     updateTimingDiagnosticsIndi();
 
@@ -1353,9 +1726,11 @@ inline void ad7689Ctrl::captureTimingDiagnostics()
     const double wfsPeriodMeasured_ns  = synchroMode ? m_wfsPeriodMeasured_ns : 0.0;
 
     double triggerTime_ns = 0.0;
+
     if( ( m_atime.tv_sec != 0 || m_atime.tv_nsec != 0 ) && ( m_triggerTime.tv_sec != 0 || m_triggerTime.tv_nsec != 0 ) )
     {
         triggerTime_ns = timespecToNs( m_triggerTime ) - timespecToNs( m_atime );
+
         if( triggerTime_ns < 0.0 )
         {
             triggerTime_ns = 0.0;
@@ -1365,23 +1740,32 @@ inline void ad7689Ctrl::captureTimingDiagnostics()
     double delayPhaseError_ns = 0.0;
     double delayLock          = 0.0;
 
-    if( synchroMode && wfsPeriodMeasured_ns > 0.0 )
+    if( synchroMode && m_ddspc.m_enabled && m_ddspcSchedule.m_active )
     {
-        const double wfsPeriod_ns = wfsPeriodMeasured_ns;
+        delayPhaseError_ns = m_ddspcSchedule.m_applied - m_ddspcSchedule.m_target;
+        delayLock          = std::abs( delayPhaseError_ns ) <= m_delayLockAbsThreshold_ns &&
+                             std::abs( delayPhaseError_ns ) <= m_delayLockFracThreshold * m_ddspcSchedule.m_interval;
+    }
+    else if( synchroMode && !m_ddspc.m_enabled && wfsPeriodMeasured_ns > 0.0 )
+    {
+        const double wfsPeriod_ns = m_syncSchedule.m_count ? m_syncSchedule.m_interval : wfsPeriodMeasured_ns;
 
         double delayAppliedWrapped_ns = std::fmod( delayAppliedDiag_ns, wfsPeriod_ns );
+
         if( delayAppliedWrapped_ns < 0.0 )
         {
             delayAppliedWrapped_ns += wfsPeriod_ns;
         }
 
         double delayModelWrapped_ns = std::fmod( delayModelDiag_ns, wfsPeriod_ns );
+
         if( delayModelWrapped_ns < 0.0 )
         {
             delayModelWrapped_ns += wfsPeriod_ns;
         }
 
         delayPhaseError_ns = delayAppliedWrapped_ns - delayModelWrapped_ns;
+
         if( delayPhaseError_ns <= -0.5 * wfsPeriod_ns )
         {
             delayPhaseError_ns += wfsPeriod_ns;
@@ -1392,7 +1776,8 @@ inline void ad7689Ctrl::captureTimingDiagnostics()
         }
 
         const double absDelayPhaseError_ns = std::fabs( delayPhaseError_ns );
-        if( absDelayPhaseError_ns <= m_delayLockAbsThreshold_ns &&
+
+        if( m_syncSchedule.m_count > 0 && absDelayPhaseError_ns <= m_delayLockAbsThreshold_ns &&
             absDelayPhaseError_ns <= m_delayLockFracThreshold * wfsPeriod_ns )
         {
             delayLock = 1.0;
@@ -1451,27 +1836,66 @@ inline void ad7689Ctrl::captureTimingDiagnostics()
                               syncProducerFrameDeltaDiag,
                               modeCode };
         const auto &stats = m_adc.statistics();
-        m_healthSnapshot  = { static_cast<double>( stats.m_conversions ),
-                              static_cast<double>( stats.m_discarded ),
-                              static_cast<double>( stats.m_errors ),
-                              static_cast<double>( m_invalidFrames ),
-                              static_cast<double>( m_overruns ),
-                              static_cast<double>( m_missedPeriods ),
-                              static_cast<double>( m_recoveries ),
-                              m_channelReadoutTime_ns * 1e-3,
-                              static_cast<double>( m_usefulConversions ) };
+        m_healthSnapshot  = {
+            static_cast<double>( stats.m_conversions ),
+            static_cast<double>( stats.m_discarded ),
+            static_cast<double>( stats.m_errors ),
+            static_cast<double>( m_invalidFrames ),
+            static_cast<double>( m_overruns ),
+            static_cast<double>( m_missedPeriods + m_syncSchedule.m_skipped + m_ddspcSchedule.m_skipped ),
+            static_cast<double>( m_recoveries ),
+            m_channelReadoutTime_ns * 1e-3,
+            static_cast<double>( m_usefulConversions ) };
+        const bool ddspc = synchroMode && m_ddspc.m_enabled;
+        m_syncSnapshot   = { static_cast<double>( ddspc ? m_ddspcSchedule.m_count : m_syncSchedule.m_count ),
+                             ddspc ? m_ddspcSchedule.fps() : m_syncSchedule.fps(),
+                             ( ddspc ? m_ddspcSchedule.m_interval : m_syncSchedule.m_interval ) * 1e-3,
+                             m_wfsPeriodMeasured_ns * 1e-3,
+                             ( ddspc ? m_synchroDelay : m_syncSchedule.m_phase ) * 1e-3,
+                             static_cast<double>( m_syncSchedule.m_skipped + m_ddspcSchedule.m_skipped ),
+                             static_cast<double>( m_lateScans ),
+                             m_maxLateness_ns * 1e-3,
+                             static_cast<double>( m_cadenceResets ),
+                             static_cast<double>( m_syncDuplicates ),
+                             static_cast<double>( m_coalescedWakes ) };
+        const auto &slot = m_ddspcSlot;
+        m_ddspcSnapshot  = { ddspc ? 1.0 : 0.0,
+                             ddspc && m_ddspcSchedule.m_active ? 1.0 : 0.0,
+                             m_ddspcTarget_ns * 1e-3,
+                             m_delayApplied_ns * 1e-3,
+                             ( m_synchroDelay - m_synchroDelayTarget ) * 1e-3,
+                             ( m_ddspcSchedule.m_applied - m_ddspcSchedule.m_target ) * 1e-3,
+                             slot.m_deadline * 1e-3,
+                             m_ddspcStart_ns * 1e-3,
+                             m_ddspcCompletion_ns * 1e-3,
+                             m_ddspcPublished_ns * 1e-3,
+                             slot.m_reference.m_arrival * 1e-3,
+                             static_cast<double>( slot.m_reference.m_id ),
+                             static_cast<double>( slot.m_slot ),
+                             static_cast<double>( slot.m_index ),
+                             static_cast<double>( m_localFrameSeq ),
+                             m_ddspcStart_ns ? ( m_ddspcStart_ns - slot.m_deadline ) * 1e-3 : 0.0,
+                             m_ddspcPublished_ns ? ( m_ddspcPublished_ns - m_ddspcStart_ns ) * 1e-3 : 0.0,
+                             static_cast<double>( m_ddspcSchedule.m_epochs ) };
     }
 }
 
 inline void ad7689Ctrl::updateTimingDiagnosticsIndi()
 {
-    std::array<double, 23> values;
-    std::array<double, 9>  health;
+    std::array<double, 23>          values;
+    std::array<double, 9>           health;
+    std::array<double, 11>          sync;
+    std::array<double, 18>          ddspc;
+    ad7689CtrlDetail::ddspcSettings settings;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
-        values = m_timingSnapshot;
-        health = m_healthSnapshot;
+        values   = m_timingSnapshot;
+        health   = m_healthSnapshot;
+        sync     = m_syncSnapshot;
+        ddspc    = m_ddspcSnapshot;
+        settings = m_ddspc;
     }
+
     updatesIfChanged<double>( m_indiP_timingDiag,
                               { "avg_read_latency_us",
                                 "synchro_delay_us",
@@ -1500,7 +1924,9 @@ inline void ad7689Ctrl::updateTimingDiagnosticsIndi()
                                 values[6],  values[7],  values[8],  values[9],  values[10], values[11],
                                 values[12], values[13], values[14], values[15], values[16], values[17],
                                 values[18], values[19], values[20], values[21], values[22] } );
+
     if( m_indiP_adcHealth.find( "conversions" ) )
+    {
         updatesIfChanged<double>(
             m_indiP_adcHealth,
             { "conversions",
@@ -1513,6 +1939,77 @@ inline void ad7689Ctrl::updateTimingDiagnosticsIndi()
               "scan_us",
               "useful_conversions" },
             { health[0], health[1], health[2], health[3], health[4], health[5], health[6], health[7], health[8] } );
+    }
+
+    if( m_indiP_syncTiming.find( "scans_per_wfs" ) )
+    {
+        updatesIfChanged<double>(
+            m_indiP_syncTiming,
+            { "scans_per_wfs",
+              "scheduled_fps",
+              "scan_period_us",
+              "wfs_period_us",
+              "phase_us",
+              "skipped_scans",
+              "late_scans",
+              "max_lateness_us",
+              "cadence_resets",
+              "duplicate_triggers",
+              "coalesced_wakes" },
+            { sync[0], sync[1], sync[2], sync[3], sync[4], sync[5], sync[6], sync[7], sync[8], sync[9], sync[10] } );
+    }
+    if( m_indiP_ddspcTiming.find( "enabled" ) )
+    {
+        updatesIfChanged<double>( m_indiP_ddspcTiming,
+                                  { "enabled",
+                                    "valid",
+                                    "target_delay_us",
+                                    "applied_delay_us",
+                                    "sync_correction_us",
+                                    "phase_error_us",
+                                    "scheduled_mono_us",
+                                    "start_mono_us",
+                                    "completion_mono_us",
+                                    "published_mono_us",
+                                    "reference_mono_us",
+                                    "reference_id",
+                                    "reference_slot",
+                                    "nominal_slot",
+                                    "frame_seq",
+                                    "start_lateness_us",
+                                    "availability_us",
+                                    "phase_acquisitions" },
+                                  { ddspc[0],
+                                    ddspc[1],
+                                    ddspc[2],
+                                    ddspc[3],
+                                    ddspc[4],
+                                    ddspc[5],
+                                    ddspc[6],
+                                    ddspc[7],
+                                    ddspc[8],
+                                    ddspc[9],
+                                    ddspc[10],
+                                    ddspc[11],
+                                    ddspc[12],
+                                    ddspc[13],
+                                    ddspc[14],
+                                    ddspc[15],
+                                    ddspc[16],
+                                    ddspc[17] } );
+    }
+
+    if( m_indiP_ddspcSettings.find( "enabled" ) )
+    {
+        updatesIfChanged<double>( m_indiP_ddspcSettings,
+                                  { "enabled", "wfs_process_ns", "acc_latency_ns", "margin_ns", "slew_fraction" },
+                                  { settings.m_enabled ? 1.0 : 0.0,
+                                    settings.m_process,
+                                    settings.m_latency,
+                                    settings.m_margin,
+                                    settings.m_slew },
+                                  m_indiP_ddspcSettings.getState() == INDI_ALERT ? INDI_ALERT : INDI_OK );
+    }
 }
 
 inline int ad7689Ctrl::appLogic()
@@ -1532,6 +2029,7 @@ inline int ad7689Ctrl::appLogic()
         currentAlpha  = m_appliedAlpha;
         currentOffset = m_appliedOffset;
     }
+
     updatesIfChanged<double>( m_indiP_fps,
                               { "current", "target" },
                               { fps(), rate },
@@ -1557,12 +2055,17 @@ inline int ad7689Ctrl::appLogic()
                            : currentOffset == offset                     ? INDI_OK
                                                                          : INDI_BUSY );
     std::string mapping;
+
     for( int i = 0; i < numChannels(); ++i )
     {
         if( i )
+        {
             mapping += ',';
+        }
+
         mapping += std::to_string( m_explicitChannels ? m_channels[i] : static_cast<unsigned>( i ) );
     }
+
     updateIfChanged( m_indiP_channelMap, "inputs", mapping );
     updateTimingDiagnosticsIndi();
     return 0;
@@ -1574,8 +2077,12 @@ inline int ad7689Ctrl::appShutdown()
     TELEMETER_APP_SHUTDOWN;
 
     closeSynchroStream();
+
     if( m_adc.disconnect() < 0 )
+    {
         return log<software_error, -1>( { "ADC cleanup failed" } );
+    }
+
     m_adcConnected = false;
     return 0;
 }
@@ -1583,19 +2090,30 @@ inline int ad7689Ctrl::appShutdown()
 inline int ad7689Ctrl::configureAcquisition()
 {
     applyControls( true );
+
     if( m_shutdown )
+    {
         return 1;
+    }
+
     m_values.resize( m_numChannels );
     m_staging.resize( m_numChannels );
     m_activeChannels = m_channels;
+
     if( !m_explicitChannels )
     {
         m_activeChannels.resize( m_numChannels );
+
         for( int i = 0; i < m_numChannels; ++i )
+        {
             m_activeChannels[i] = i;
+        }
     }
+
     if( prepareAdc() < 0 )
+    {
         return 1;
+    }
 
     m_width    = m_numChannels;
     m_height   = 1;
@@ -1638,6 +2156,8 @@ inline float ad7689Ctrl::fps()
 
 inline int ad7689Ctrl::startAcquisition()
 {
+    resetSyncSchedule();
+
     if( !m_synchroShmimName.empty() )
     {
         if( !m_synchroStreamOpen )
@@ -1706,13 +2226,18 @@ inline int ad7689Ctrl::startAcquisition()
 inline int ad7689Ctrl::acquireAndCheckValid()
 {
     m_frameValid = false;
+
     if( m_shutdown || m_reconfig )
+    {
         return 1;
+    }
+
     if( applyControls() )
     {
         m_reconfig = true;
         return 1;
     }
+
     const int result = m_synchroShmimName.empty() ? acquireTimerAndCheckValid() : acquireSynchroAndCheckValid();
     captureTimingDiagnostics();
     return result;
@@ -1721,15 +2246,36 @@ inline int ad7689Ctrl::acquireAndCheckValid()
 inline int ad7689Ctrl::loadImageIntoStream( void *dest )
 {
     if( !dest || !m_frameValid || m_shutdown || m_reconfig )
+    {
         return -1;
+    }
+
     m_frameValid = false;
     memcpy( dest, m_values.data(), m_values.size() * sizeof( uint16_t ) );
     ++m_localFrameSeq;
     m_usefulConversions += m_values.size();
+
     if( !m_synchroShmimName.empty() )
     {
         ++m_syncFramesWritten;
     }
+
+    captureTimingDiagnostics();
+    return 0;
+}
+
+inline int ad7689Ctrl::frameGrabberPostPublish( IMAGE * )
+{
+    if( !m_ddspc.m_enabled )
+    {
+        return 0;
+    }
+
+    if( monotonicNow( m_ddspcPublished_ns ) < 0 )
+    {
+        return -1;
+    }
+
     captureTimingDiagnostics();
     return 0;
 }
@@ -1764,6 +2310,7 @@ inline int ad7689Ctrl::openSynchroStream()
     }
 
     ImageStreamIO_filename( shmimFilename, sizeof( shmimFilename ), m_synchroShmimName.c_str() );
+
     if( stat( shmimFilename, &buffer ) != 0 )
     {
         ImageStreamIO_closeIm( &m_synchroStream );
@@ -1789,6 +2336,7 @@ inline int ad7689Ctrl::claimSynchroSemaphore()
     }
 
     m_synchroSemaphoreNumber = ImageStreamIO_getsemwaitindex( &m_synchroStream, m_synchroSemaphoreNumber );
+
     if( m_synchroSemaphoreNumber < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "No valid semaphore found for " + m_synchroShmimName } );
@@ -1819,6 +2367,7 @@ inline bool ad7689Ctrl::synchroStreamStale()
     ImageStreamIO_filename( shmimFilename, sizeof( shmimFilename ), m_synchroShmimName.c_str() );
 
     shmimFd = open( shmimFilename, O_RDWR );
+
     if( shmimFd == -1 )
     {
         return true;
@@ -1836,6 +2385,8 @@ inline bool ad7689Ctrl::synchroStreamStale()
 
 inline void ad7689Ctrl::closeSynchroStream()
 {
+    resetSyncSchedule();
+
     if( m_synchroStreamOpen )
     {
         if( m_synchroSemaphore != nullptr && m_synchroSemaphoreNumber >= 0 )
@@ -1895,78 +2446,167 @@ inline int ad7689Ctrl::acquireTimerAndCheckValid()
     {
         const auto now     = std::chrono::steady_clock::now();
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>( now - m_time_start ).count();
+
         if( elapsed >= m_trigger )
         {
             m_triggerInterval_ns = m_firstTimerTrigger ? 0.0 : static_cast<double>( elapsed );
             m_firstTimerTrigger  = false;
             m_time_start         = now;
+
             if( elapsed >= 2 * m_nanoSecTarget )
+            {
                 m_missedPeriods += static_cast<uint64_t>( elapsed / m_nanoSecTarget ) - 1;
+            }
+
             m_trigger = std::clamp(
                 m_trigger - m_gain * ( elapsed - m_nanoSecTarget ), 0.5f * m_nanoSecTarget, m_nanoSecTarget );
             return readScan();
         }
+
         { //mutex scope
             std::lock_guard<std::mutex> lock( m_controlMutex );
+
             if( m_requestedFps != m_fps || m_requestedChannels != m_numChannels )
+            {
                 return 1;
+            }
         }
+
         mx::sys::nanoSleep( 1000 );
     }
+
     return 1;
 }
 
-inline int ad7689Ctrl::acquireSynchroAndCheckValid()
+inline int ad7689Ctrl::monotonicNow( int64_t &now )
 {
-    timespec ts;
+    timespec stamp{};
 
-    if( m_synchroSemaphore == nullptr )
+    if( clock_gettime( CLOCK_MONOTONIC, &stamp ) < 0 )
     {
-        m_reconfig = true;
-        return 1;
+        return log<software_critical, -1>( { __FILE__, __LINE__, errno, "monotonic scheduler clock" } );
     }
 
-    errno = 0;
-    if( getRealtime( ts ) < 0 )
-    {
-        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
-    }
+    now = stamp.tv_sec * 1000000000LL + stamp.tv_nsec;
+    return 0;
+}
 
-    ts.tv_sec += 1;
+inline int ad7689Ctrl::waitForSync( int64_t deadline )
+{
+#if defined( __linux__ ) && defined( __GLIBC__ )
+    #if __GLIBC_PREREQ( 2, 30 )
+    const timespec until{ deadline / 1000000000LL, deadline % 1000000000LL };
+    return sem_clockwait( m_synchroSemaphore, CLOCK_MONOTONIC, &until );
+    #endif
+#endif
+    // Match the portable monotonic-wait pattern already used by adcStream.
+    int64_t now = 0;
 
-    errno = 0;
-    if( waitOnSemaphore( m_synchroSemaphore, ts ) != 0 )
+    while( !m_shutdown && !m_reconfig )
     {
-        if( errno == EINTR )
+        if( sem_trywait( m_synchroSemaphore ) == 0 )
         {
-            return 1;
+            return 0;
         }
 
-        if( errno == ETIMEDOUT )
+        if( errno != EAGAIN || monotonicNow( now ) < 0 )
         {
-            if( synchroStreamStale() )
-            {
-                log<text_log>( "Synchronized trigger stream changed, reconfiguring.", logPrio::LOG_NOTICE );
-                m_reconfig = true;
-            }
-
-            return 1;
+            return -1;
         }
 
-        log<software_error>( { __FILE__, __LINE__, errno, "sem_timedwait" } );
-        m_reconfig = true;
-        return 1;
+        if( now >= deadline )
+        {
+            errno = ETIMEDOUT;
+            return -1;
+        }
+
+        const int64_t  remaining = std::min<int64_t>( deadline - now, 1000000 );
+        const timespec pause{ 0, static_cast<long>( remaining ) };
+        nanosleep( &pause, nullptr );
     }
 
-    ++m_syncFramesReceived;
+    errno = EINTR;
+    return -1;
+}
+
+inline void ad7689Ctrl::resetSyncSchedule()
+{
+    m_ddspcSchedule.cancel();
+    m_syncSchedule.cancel();
+    m_syncSchedule.m_haveSample = false;
+    m_haveSyncArrival = m_haveMeasuredCadence = false;
+    m_lastSyncArrival_ns = m_nextSyncProbe_ns = 0;
+    m_avgSemaphorePeriod_ns = m_wfsPeriodMeasured_ns = 0;
+    m_avgProducerPeriod_ns = m_producerPeriodInst_ns = 0;
+    m_firstSemaphore = m_firstProducerSample = m_firstReadLatency = true;
+    m_syncProducerFrameValid                                      = false;
+}
+
+inline int ad7689Ctrl::processSyncReference( int64_t arrival )
+{
+    uint64_t producerCnt0 = m_syncFramesReceived;
+    timespec producerAtime{};
 
     if( m_synchroStream.md != nullptr )
     {
-        const uint64_t producerCnt0       = m_synchroStream.md[0].cnt0;
-        const timespec producerAtime      = m_synchroStream.md[0].atime;
-        const bool     producerAtimeValid = ( producerAtime.tv_sec != 0 || producerAtime.tv_nsec != 0 );
+        const volatile auto *metadata = m_synchroStream.md;
+
+        if( metadata->write )
+        {
+            return 1;
+        }
+
+        producerCnt0  = metadata->cnt0;
+        producerAtime = timespec{ metadata->atime.tv_sec, metadata->atime.tv_nsec };
+        std::atomic_thread_fence( std::memory_order_seq_cst );
+
+        if( metadata->write || metadata->cnt0 != producerCnt0 )
+        {
+            return 1;
+        }
+
+        if( m_syncProducerFrameValid && producerCnt0 == m_lastSyncProducerFrameId )
+        {
+            ++m_syncDuplicates;
+            m_syncProducerFrameDelta = 0;
+            return 1;
+        }
+
+        if( m_syncProducerFrameValid && producerCnt0 < m_lastSyncProducerFrameId )
+        {
+            ++m_cadenceResets;
+            resetSyncSchedule();
+        }
+    }
+
+    const uint64_t delta = m_syncProducerFrameValid ? producerCnt0 - m_lastSyncProducerFrameId : 0;
+    const double   arrivalPeriod =
+        m_haveSyncArrival && delta ? static_cast<double>( arrival - m_lastSyncArrival_ns ) / delta : 0;
+    double observed = arrivalPeriod;
+
+    if( m_haveSyncArrival && delta && !m_firstProducerSample &&
+        ( producerAtime.tv_sec != 0 || producerAtime.tv_nsec != 0 ) )
+    {
+        const double seconds = static_cast<double>( producerAtime.tv_sec ) - m_lastProducerAtime.tv_sec;
+        const double timestampPeriod =
+            std::abs( seconds ) <= m_syncTimeout + 1
+                ? ( seconds * 1e9 + producerAtime.tv_nsec - m_lastProducerAtime.tv_nsec ) / delta
+                : 0;
+
+        // Arrival deadlines stay monotonic; a stepped producer realtime clock is not a cadence change.
+        if( timestampPeriod > 0 && arrivalPeriod > 0 && timestampPeriod >= 0.5 * arrivalPeriod &&
+            timestampPeriod <= 2.0 * arrivalPeriod )
+        {
+            observed = timestampPeriod;
+        }
+    }
+
+    if( m_synchroStream.md != nullptr )
+    {
+        const bool producerAtimeValid = ( producerAtime.tv_sec != 0 || producerAtime.tv_nsec != 0 );
 
         m_syncProducerFrameId = producerCnt0;
+
         if( !m_syncProducerFrameValid )
         {
             m_syncProducerFrameDelta = 0;
@@ -1987,6 +2627,7 @@ inline int ad7689Ctrl::acquireSynchroAndCheckValid()
         {
             m_syncProducerFrameDelta = 0;
         }
+
         m_lastSyncProducerFrameId = producerCnt0;
 
         if( producerAtimeValid )
@@ -2010,6 +2651,7 @@ inline int ad7689Ctrl::acquireSynchroAndCheckValid()
                     m_producerPeriodInst_ns        = producerPeriod_ns;
 
                     const double alphaProducer = static_cast<double>( m_alpha );
+
                     if( m_avgProducerPeriod_ns > 0.0 )
                     {
                         m_avgProducerPeriod_ns =
@@ -2034,87 +2676,362 @@ inline int ad7689Ctrl::acquireSynchroAndCheckValid()
         }
     }
 
+    else
+    {
+        m_syncProducerFrameId     = producerCnt0;
+        m_syncProducerFrameDelta  = delta;
+        m_lastSyncProducerFrameId = producerCnt0;
+        m_syncProducerFrameValid  = true;
+    }
+
     if( getRealtime( m_atime ) < 0 )
     {
-        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+        return log<software_critical, -1>( { __FILE__, __LINE__, errno, "WFS arrival timestamp" } );
     }
 
-    updateTriggerTiming( m_atime );
-
-    m_synchroDelay = m_synchroDelayTarget;
-
-    double desiredDelay_ns = static_cast<double>( m_synchroDelay );
-    if( desiredDelay_ns < 0.0 )
+    if( observed > 0 && std::isfinite( observed ) && observed <= 1e9 )
     {
-        desiredDelay_ns = 0.0;
-    }
+        const bool changed =
+            m_haveMeasuredCadence && std::abs( observed - m_avgSemaphorePeriod_ns ) > 0.1 * m_avgSemaphorePeriod_ns;
 
-    if( m_wfsPeriodMeasured_ns > 0.0 )
-    {
-        m_delayBudget_ns = m_wfsPeriodMeasured_ns - m_avgNonDelayService_ns - m_cadenceGuard_ns;
-        if( m_delayBudget_ns < 0.0 )
+        if( !m_haveMeasuredCadence || changed )
         {
-            m_delayBudget_ns = 0.0;
+            if( changed || m_avgSemaphorePeriod_ns <= 0 )
+            {
+                m_firstReadLatency = true;
+            }
+
+            m_avgSemaphorePeriod_ns = observed;
+
+            if( changed )
+            {
+                ++m_cadenceResets;
+                m_ddspcSchedule.cancel();
+            }
+        }
+        else
+        {
+            m_avgSemaphorePeriod_ns = m_alpha * observed + ( 1.0 - m_alpha ) * m_avgSemaphorePeriod_ns;
+        }
+
+        m_haveMeasuredCadence = true;
+    }
+    else if( !m_haveMeasuredCadence )
+    {
+        m_avgSemaphorePeriod_ns = m_wfs_fps > 0 ? 1e9 / m_wfs_fps : 0;
+    }
+
+    m_lastAtime             = m_atime;
+    m_lastSyncArrival_ns    = arrival;
+    m_haveSyncArrival       = true;
+    m_firstSemaphore        = false;
+    const double correction = m_firstReadLatency ? 0 : m_synchroDelay - m_synchroDelayTarget;
+    updatePhaseTarget( m_atime );
+    const double service =
+        std::max( AD7689Lib::AD7689::scanTime_ns( m_adcSettings, m_numChannels ), m_avgNonDelayService_ns );
+    m_delayBudget_ns = m_ddspc.m_enabled ? 1e9 : std::max( 0.0, m_wfsPeriodMeasured_ns - service - m_cadenceGuard_ns );
+    m_synchroDelay   = static_cast<float>( m_synchroDelayTarget + correction );
+
+    if( m_ddspc.m_enabled )
+    {
+        m_delayCapped = 0; // DDSPC phase is never capped at the end of one WFS period.
+
+        if( !m_ddspcSchedule.reference( producerCnt0,
+                                        arrival,
+                                        m_wfsPeriodMeasured_ns,
+                                        m_fps,
+                                        m_synchroDelayTarget,
+                                        m_synchroDelay,
+                                        service,
+                                        m_cadenceGuard_ns,
+                                        m_ddspc.m_slew ) )
+        {
+            if( m_wfsPeriodMeasured_ns > 0 )
+            {
+                ++m_overruns;
+            }
+
+            return 1;
+        }
+
+        return 0;
+    }
+
+    if( !m_syncSchedule.arm( arrival, m_wfsPeriodMeasured_ns, m_fps, m_synchroDelay, service, m_cadenceGuard_ns ) )
+    {
+        if( m_wfsPeriodMeasured_ns > 0 )
+        {
+            ++m_overruns;
+        }
+
+        return 1;
+    }
+
+    m_delayApplied_ns     = m_syncSchedule.m_phase;
+    double requestedPhase = std::fmod( m_synchroDelay, m_syncSchedule.m_interval );
+
+    if( requestedPhase < 0 )
+    {
+        requestedPhase += m_syncSchedule.m_interval;
+    }
+
+    m_delayCapped = requestedPhase > m_syncSchedule.m_phase ? 1 : 0;
+    return 0;
+}
+
+inline int ad7689Ctrl::acquireSynchroAndCheckValid()
+{
+    bool pendingWake = false;
+
+    if( m_synchroSemaphore == nullptr )
+    {
+        m_reconfig = true;
+        return 1;
+    }
+
+    while( !m_shutdown && !m_reconfig )
+    {
+        if( applyControls() )
+        {
+            m_reconfig = true;
+            return 1;
+        }
+
+        int64_t now = 0;
+
+        if( monotonicNow( now ) < 0 )
+        {
+            return -1;
+        }
+
+        if( now >= m_nextSyncProbe_ns )
+        {
+            m_nextSyncProbe_ns = now + static_cast<int64_t>( std::min( m_syncTimeout * 1e9, 1e8 ) );
+
+            if( synchroStreamStale() )
+            {
+                resetSyncSchedule();
+                m_reconfig = true;
+                return 1;
+            }
+        }
+
+        // References take precedence over a pending old-period scan, including after an overrun.
+        if( pendingWake || sem_trywait( m_synchroSemaphore ) == 0 )
+        {
+            pendingWake    = false;
+            unsigned wakes = 1;
+
+            while( wakes < 256 && sem_trywait( m_synchroSemaphore ) == 0 )
+            {
+                ++wakes;
+            }
+
+            m_syncFramesReceived += wakes;
+            m_coalescedWakes += wakes - 1;
+
+            if( monotonicNow( now ) < 0 || processSyncReference( now ) < 0 )
+            {
+                return -1;
+            }
+
+            captureTimingDiagnostics();
+            return 1; // A WFS observation is not itself an ADC frame; the next call serves its first slot.
+        }
+
+        if( errno != EAGAIN && errno != EINTR )
+        {
+            m_reconfig = true;
+            return log<software_error, 1>( { __FILE__, __LINE__, errno, "WFS semaphore poll" } );
+        }
+
+        if( m_haveSyncArrival && now - m_lastSyncArrival_ns >= m_syncTimeout * 1e9 )
+        {
+            ++m_cadenceResets;
+            resetSyncSchedule();
+            return 1;
+        }
+
+        if( m_ddspc.m_enabled )
+        {
+            m_ddspcSchedule.discardLate( now );
+
+            if( m_ddspcSchedule.pending() && now >= m_ddspcSchedule.deadline() )
+            {
+                return acquireDdspcAndCheckValid( now );
+            }
+
+            if( m_ddspcSchedule.m_active && !m_ddspcSchedule.pending() && now >= m_ddspcSchedule.end() )
+            {
+                m_ddspcSchedule.cancel();
+                m_firstReadLatency = true;
+                return 1;
+            }
+        }
+
+        m_syncSchedule.discardLate( now );
+
+        if( m_syncSchedule.m_slot < m_syncSchedule.m_count && now >= m_syncSchedule.deadline() )
+        {
+            const int64_t due      = m_syncSchedule.deadline();
+            const bool    previous = m_syncSchedule.m_haveSample;
+            const int64_t last     = m_syncSchedule.m_lastSample;
+
+            if( !m_syncSchedule.take( now ) )
+            {
+                continue;
+            }
+
+            if( now > due )
+            {
+                ++m_lateScans;
+                m_maxLateness_ns = std::max( m_maxLateness_ns, static_cast<double>( now - due ) );
+            }
+
+            const unsigned slot  = m_syncSchedule.m_slot - 1;
+            m_delayApplied_ns    = static_cast<double>( due - m_syncSchedule.m_anchor );
+            m_triggerTime        = nsToTimespec( timespecToNs( m_atime ) + m_delayApplied_ns );
+            m_triggerInterval_ns = previous ? static_cast<double>( now - last ) : 0;
+
+            if( readScan() != 0 )
+            {
+                m_syncSchedule.cancel();
+                return 1;
+            }
+
+            // Update the legacy read-latency controller once per WFS period at the nearest model phase.
+            const unsigned referenceSlot = static_cast<unsigned>( std::clamp(
+                std::floor( ( m_synchroDelayTarget - m_syncSchedule.m_phase ) / m_syncSchedule.m_interval + 0.5 ),
+                0.0,
+                static_cast<double>( m_syncSchedule.m_count - 1 ) ) );
+
+            if( slot == referenceSlot )
+            {
+                const double latency = static_cast<double>( now - m_syncSchedule.m_anchor );
+                m_avgReadLatency_ns =
+                    m_firstReadLatency ? latency : m_alpha * latency + ( 1 - m_alpha ) * m_avgReadLatency_ns;
+                m_firstReadLatency = false;
+                updateSynchroDelayController( m_synchroDelay );
+            }
+
+            int64_t finished = 0;
+
+            if( monotonicNow( finished ) < 0 )
+            {
+                m_frameValid = false;
+                return -1;
+            }
+
+            m_nonDelayService_ns    = static_cast<double>( finished - now );
+            m_avgNonDelayService_ns = m_firstNonDelayService
+                                          ? m_nonDelayService_ns
+                                          : m_alpha * m_nonDelayService_ns + ( 1 - m_alpha ) * m_avgNonDelayService_ns;
+            m_firstNonDelayService  = false;
+            return 0;
+        }
+
+        if( m_syncSchedule.m_count && now >= m_syncSchedule.end() )
+        {
+            m_syncSchedule.cancel();
+            m_delayLock = 0;
+            return 1;
+        }
+
+        int64_t until = now + ( m_ddspc.m_enabled ? 100000000 : 1000000 );
+
+        if( m_ddspc.m_enabled )
+        {
+            until = std::min( until, m_nextSyncProbe_ns );
+
+            if( m_haveSyncArrival )
+            {
+                until = std::min( until, m_lastSyncArrival_ns + static_cast<int64_t>( m_syncTimeout * 1e9 ) );
+            }
+        }
+
+        if( m_syncSchedule.m_count )
+        {
+            const int64_t next =
+                m_syncSchedule.m_slot < m_syncSchedule.m_count ? m_syncSchedule.deadline() : m_syncSchedule.end();
+            until = std::min( until, next );
+        }
+
+        if( m_ddspc.m_enabled && m_ddspcSchedule.m_active )
+        {
+            until = std::min( until, m_ddspcSchedule.pending() ? m_ddspcSchedule.deadline() : m_ddspcSchedule.end() );
+        }
+
+        if( waitForSync( until ) == 0 )
+        {
+            pendingWake = true;
+        }
+        else if( errno == EINTR )
+        {
+            return 1;
+        }
+        else if( errno != ETIMEDOUT )
+        {
+            m_reconfig = true;
+            return log<software_error, 1>( { __FILE__, __LINE__, errno, "WFS scheduler wait" } );
         }
     }
-    else
-    {
-        m_delayBudget_ns = 0.0;
-    }
 
-    if( desiredDelay_ns > m_delayBudget_ns )
-    {
-        m_delayApplied_ns = m_delayBudget_ns;
-        m_delayCapped     = 1.0;
-    }
-    else
-    {
-        m_delayApplied_ns = desiredDelay_ns;
-        m_delayCapped     = 0.0;
-    }
+    m_syncSchedule.cancel();
+    m_ddspcSchedule.cancel();
+    return 1;
+}
 
-    delayBeforeRead();
+inline int ad7689Ctrl::acquireDdspcAndCheckValid( int64_t now )
+{
+    const bool    previous = m_ddspcSchedule.m_haveSample;
+    const int64_t last     = m_ddspcSchedule.m_lastSample;
 
-    if( m_wfsPeriodMeasured_ns > 0 &&
-        AD7689Lib::AD7689::scanTime_ns( m_adcSettings, m_numChannels ) + m_cadenceGuard_ns > m_wfsPeriodMeasured_ns )
+    if( !m_ddspcSchedule.take( now, m_ddspcSlot ) )
     {
-        ++m_overruns;
         return 1;
     }
-    if( m_shutdown || m_reconfig || readScan() != 0 )
-        return 1;
-    const double readLatency_ns = timespecToNs( m_currImageTimestamp ) - timespecToNs( m_atime );
-    if( m_firstReadLatency )
+
+    const auto &slot     = m_ddspcSlot;
+    m_ddspcStart_ns      = now;
+    m_ddspcCompletion_ns = m_ddspcPublished_ns = 0;
+    m_delayApplied_ns = static_cast<double>( slot.m_deadline - slot.m_reference.m_arrival ) -
+                        slot.m_slot * slot.m_reference.m_period / ( slot.m_reference.m_end - slot.m_reference.m_first );
+    m_triggerInterval_ns = previous ? static_cast<double>( now - last ) : 0;
+    m_triggerTime        = nsToTimespec( timespecToNs( m_atime ) + slot.m_deadline - m_lastSyncArrival_ns );
+
+    if( now > slot.m_deadline )
     {
-        m_avgReadLatency_ns = readLatency_ns;
+        ++m_lateScans;
+        m_maxLateness_ns = std::max( m_maxLateness_ns, static_cast<double>( now - slot.m_deadline ) );
+    }
+
+    if( readScan() != 0 )
+    {
+        m_ddspcSchedule.cancel();
+        return 1;
+    }
+
+    if( monotonicNow( m_ddspcCompletion_ns ) < 0 )
+    {
+        m_frameValid = false;
+        return -1;
+    }
+
+    m_nonDelayService_ns    = static_cast<double>( m_ddspcCompletion_ns - now );
+    m_avgNonDelayService_ns = m_firstNonDelayService
+                                  ? m_nonDelayService_ns
+                                  : m_alpha * m_nonDelayService_ns + ( 1 - m_alpha ) * m_avgNonDelayService_ns;
+    m_firstNonDelayService  = false;
+
+    // Do not let the feedback integrator fight an intentional phase slew. Use the ORIGINAL
+    // reference's first slot even when a newer WFS observation has already arrived.
+    if( slot.m_slot == 0 && std::abs( m_ddspcSchedule.m_target - m_ddspcSchedule.m_applied ) < 1 )
+    {
+        const double error  = static_cast<double>( now - slot.m_reference.m_arrival ) - slot.m_reference.m_target;
+        m_ddspcReadError_ns = m_firstReadLatency ? error : m_alpha * error + ( 1 - m_alpha ) * m_ddspcReadError_ns;
         m_firstReadLatency  = false;
-    }
-    else
-        m_avgReadLatency_ns = m_alpha * readLatency_ns + ( 1.0 - m_alpha ) * m_avgReadLatency_ns;
-    updateSynchroDelayController( desiredDelay_ns );
-
-    timespec cycleEnd;
-    if( getRealtime( cycleEnd ) < 0 )
-    {
-        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
-    }
-
-    double nonDelayService_ns = timespecToNs( cycleEnd ) - timespecToNs( m_atime ) - m_delayApplied_ns;
-    if( nonDelayService_ns < 0.0 )
-    {
-        nonDelayService_ns = 0.0;
-    }
-
-    m_nonDelayService_ns      = nonDelayService_ns;
-    const double alphaService = static_cast<double>( m_alpha );
-    if( !m_firstNonDelayService )
-    {
-        m_avgNonDelayService_ns = alphaService * nonDelayService_ns + ( 1.0 - alphaService ) * m_avgNonDelayService_ns;
-    }
-    else
-    {
-        m_avgNonDelayService_ns = nonDelayService_ns;
-        m_firstNonDelayService  = false;
+        m_avgReadLatency_ns = m_synchroDelayTarget + m_ddspcReadError_ns;
+        updateSynchroDelayController( m_synchroDelay );
     }
 
     return 0;
@@ -2152,8 +3069,8 @@ inline void ad7689Ctrl::updateSynchroDelayController( double desiredDelay_ns )
         updatedDelay_ns = 0.0;
     }
 
-    const bool upperSaturated =
-        ( m_wfsPeriodMeasured_ns > 0.0 ) && ( m_delayApplied_ns + c_satEpsilon_ns < desiredDelay_ns );
+    const bool upperSaturated              = !m_ddspc.m_enabled && ( m_wfsPeriodMeasured_ns > 0.0 ) &&
+                                             ( m_delayApplied_ns + c_satEpsilon_ns < desiredDelay_ns );
     const bool pushesFurtherIntoSaturation = ( updatedDelay_ns > desiredDelay_ns );
 
     if( upperSaturated && pushesFurtherIntoSaturation )
@@ -2179,20 +3096,89 @@ inline int ad7689Ctrl::recordTelem( const telem_fgtimings * )
     return recordFGTimings( true );
 }
 
+inline INDI_NEWCALLBACK_DEFN( ad7689Ctrl, m_indiP_ddspcSettings )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.createUniqueKey() != m_indiP_ddspcSettings.createUniqueKey() )
+    {
+        return -1;
+    }
+
+    ad7689CtrlDetail::ddspcSettings requested;
+    double                          period;
+    int                             offset;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_controlMutex );
+        requested = m_requestedDdspc;
+        period =
+            m_syncSnapshot[3] > 0 ? m_syncSnapshot[3] * 1000 : ( m_requestedWfsFps > 0 ? 1e9 / m_requestedWfsFps : 0 );
+        offset = m_requestedOffset;
+    }
+
+    bool changed = false;
+
+    if( ipRecv.find( "enabled" ) )
+    {
+        const double enabled = controlValue( ipRecv, "enabled" );
+
+        if( enabled != 0 && enabled != 1 )
+        {
+            return rejectControl( m_indiP_ddspcSettings );
+        }
+
+        requested.m_enabled = enabled == 1;
+        changed             = true;
+    }
+
+    for( auto field : { std::pair<const char *, double *>( "wfs_process_ns", &requested.m_process ),
+                        { "acc_latency_ns", &requested.m_latency },
+                        { "margin_ns", &requested.m_margin },
+                        { "slew_fraction", &requested.m_slew } } )
+    {
+        if( ipRecv.find( field.first ) )
+        {
+            *field.second = controlValue( ipRecv, field.first );
+            changed       = true;
+        }
+    }
+
+    const double delay = requested.delay( period, 1000.0 * offset );
+
+    if( !changed || !requested.valid() ||
+        ( requested.m_enabled && ( m_synchroShmimName.empty() || ( period > 0 && ( delay < 0 || delay > 1e9 ) ) ) ) )
+    {
+        return rejectControl( m_indiP_ddspcSettings );
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_controlMutex );
+        m_requestedDdspc = requested;
+    }
+
+    m_indiP_ddspcSettings.setState( INDI_BUSY );
+    return 0;
+}
+
 // INDI callback handling for fps configuration.
 inline INDI_NEWCALLBACK_DEFN( ad7689Ctrl, m_indiP_fps )( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.createUniqueKey() != m_indiP_fps.createUniqueKey() ||
         !( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+    {
         return -1;
+    }
+
     double target = controlValue( ipRecv, ipRecv.find( "target" ) ? "target" : "current" );
     int    count;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
         count = m_requestedChannels;
     }
+
     if( requestAcquisition( target, count ) < 0 )
+    {
         return rejectControl( m_indiP_fps );
+    }
+
     updateIfChanged( m_indiP_fps, "target", target, INDI_BUSY );
     return 0;
 }
@@ -2202,15 +3188,23 @@ inline INDI_NEWCALLBACK_DEFN( ad7689Ctrl, m_indiP_alpha )( const pcf::IndiProper
 {
     if( ipRecv.createUniqueKey() != m_indiP_alpha.createUniqueKey() ||
         !( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+    {
         return -1;
+    }
+
     double target = controlValue( ipRecv, ipRecv.find( "target" ) ? "target" : "current" );
+
     if( !std::isfinite( target ) )
+    {
         return rejectControl( m_indiP_alpha );
+    }
+
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
         m_requestedAlpha = static_cast<float>( std::clamp( target, 0.0, 1.0 ) );
         target           = m_requestedAlpha;
     }
+
     updateIfChanged( m_indiP_alpha, "target", target, INDI_BUSY );
     return 0;
 }
@@ -2220,14 +3214,36 @@ inline INDI_NEWCALLBACK_DEFN( ad7689Ctrl, m_indiP_synchroDelay )( const pcf::Ind
 {
     if( ipRecv.createUniqueKey() != m_indiP_synchroDelay.createUniqueKey() ||
         !( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+    {
         return -1;
+    }
+
     double target = controlValue( ipRecv, ipRecv.find( "target" ) ? "target" : "current" );
+
     if( !std::isfinite( target ) || target < -1000000 || target > 1000000 || std::floor( target ) != target )
+    {
         return rejectControl( m_indiP_synchroDelay );
+    }
+
+    bool valid = true;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
-        m_requestedOffset = static_cast<int>( target );
+        const double                period =
+            m_syncSnapshot[3] > 0 ? m_syncSnapshot[3] * 1000 : ( m_requestedWfsFps > 0 ? 1e9 / m_requestedWfsFps : 0 );
+        const double delay = m_requestedDdspc.delay( period, 1000.0 * target );
+        valid              = !m_requestedDdspc.m_enabled || period <= 0 || ( delay >= 0 && delay <= 1e9 );
+
+        if( valid )
+        {
+            m_requestedOffset = static_cast<int>( target );
+        }
     }
+
+    if( !valid )
+    {
+        return rejectControl( m_indiP_synchroDelay );
+    }
+
     updateIfChanged( m_indiP_synchroDelay, "target", target, INDI_BUSY );
     return 0;
 }
@@ -2235,16 +3251,40 @@ inline INDI_NEWCALLBACK_DEFN( ad7689Ctrl, m_indiP_synchroDelay )( const pcf::Ind
 inline INDI_SETCALLBACK_DEFN( ad7689Ctrl, m_indiP_fpsSource )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fpsSource, ipRecv );
+
     if( !ipRecv.find( m_fpsElement ) )
+    {
         return -1;
+    }
+
     const double target = controlValue( ipRecv, m_fpsElement );
-    int          count;
+
+    if( !m_synchroShmimName.empty() )
+    {
+        if( !std::isfinite( target ) || target < 0 || target > 1000000 )
+        {
+            return log<software_error, -1>( { "Rejected invalid WFS rate metadata" } );
+        }
+
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_controlMutex );
+            m_requestedWfsFps = target;
+        }
+
+        return 0;
+    }
+
+    int count;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
         count = m_requestedChannels;
     }
+
     if( requestAcquisition( target, count ) < 0 )
+    {
         return rejectControl( m_indiP_fps );
+    }
+
     updateIfChanged( m_indiP_fps, "target", target, INDI_BUSY );
     return 0;
 } // INDI_SETCALLBACK_DEFN(ad7689Ctrl, m_indiP_fpsSource)
@@ -2253,15 +3293,22 @@ inline INDI_NEWCALLBACK_DEFN( ad7689Ctrl, m_indiP_numChannels )( const pcf::Indi
 {
     if( ipRecv.createUniqueKey() != m_indiP_numChannels.createUniqueKey() ||
         !( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+    {
         return -1;
+    }
+
     double target = controlValue( ipRecv, ipRecv.find( "target" ) ? "target" : "current" );
     double rate;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
         rate = m_requestedFps;
     }
+
     if( requestAcquisition( rate, target ) < 0 )
+    {
         return rejectControl( m_indiP_numChannels );
+    }
+
     updateIfChanged( m_indiP_numChannels, "target", target, INDI_BUSY );
     return 0;
 }
@@ -2269,16 +3316,24 @@ inline INDI_NEWCALLBACK_DEFN( ad7689Ctrl, m_indiP_numChannels )( const pcf::Indi
 inline INDI_SETCALLBACK_DEFN( ad7689Ctrl, m_indiP_numChannelsSource )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_numChannelsSource, ipRecv );
+
     if( !ipRecv.find( m_numChannelsElement ) )
+    {
         return -1;
+    }
+
     const double target = controlValue( ipRecv, m_numChannelsElement );
     double       rate;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
         rate = m_requestedFps;
     }
+
     if( requestAcquisition( rate, target ) < 0 )
+    {
         return rejectControl( m_indiP_numChannels );
+    }
+
     updateIfChanged( m_indiP_numChannels, "target", target, INDI_BUSY );
     return 0;
 }

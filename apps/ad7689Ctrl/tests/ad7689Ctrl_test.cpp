@@ -22,12 +22,13 @@ namespace
 /// Stub state for AD7689 hardware access during unit tests.
 struct adcStubState
 {
-    std::vector<unsigned short> m_channelValues;        ///< Values returned for each channel read.
-    std::vector<int>            m_readOrder;            ///< Order in which channels were sampled.
-    int                         m_connectCalls{ 0 };    ///< Number of stubbed connect calls.
-    bool                        m_failScan{ false };    ///< Fail after partially filling the caller staging area.
-    bool                        m_failPrepare{ false }; ///< Reject pipeline initialization.
-    std::function<void()>       m_duringRead;           ///< Optional frame-boundary control or shutdown injection.
+    std::vector<unsigned short>       m_channelValues;        ///< Values returned for each channel read.
+    std::vector<int>                  m_readOrder;            ///< Order in which channels were sampled.
+    int                               m_connectCalls{ 0 };    ///< Number of stubbed connect calls.
+    bool                              m_failScan{ false };    ///< Fail after partially filling the caller staging area.
+    bool                              m_failPrepare{ false }; ///< Reject pipeline initialization.
+    std::function<void( timespec & )> m_timestamp;            ///< Optional deterministic actual scan-start timestamp.
+    std::function<void()>             m_duringRead; ///< Optional frame-boundary control or shutdown injection.
 };
 
 /// Access the shared AD7689 stub state.
@@ -81,31 +82,49 @@ int AD7689::connect( const Settings &settings )
     ++stubState().m_connectCalls;
     return 0;
 }
+
 int AD7689::disconnect() noexcept
 {
     m_ready = false;
     return 0;
 }
+
 int AD7689::prepare( const std::vector<unsigned> &channels )
 {
     if( stubState().m_failPrepare )
+    {
         return -1;
+    }
+
     m_count = channels.size();
     std::copy( channels.begin(), channels.end(), m_channels.begin() );
     m_ready = true;
     return 0;
 }
+
 int AD7689::readScan( uint16_t *dest, size_t count, timespec &timestamp )
 {
-    clock_gettime( CLOCK_REALTIME, &timestamp );
+    if( stubState().m_timestamp )
+    {
+        stubState().m_timestamp( timestamp );
+    }
+    else
+    {
+        clock_gettime( CLOCK_REALTIME, &timestamp );
+    }
+
     for( size_t i = 0; i < count; ++i )
     {
         unsigned channel = m_count == count ? m_channels[i] : static_cast<unsigned>( i );
         stubState().m_readOrder.push_back( channel );
         dest[i] = channel < stubState().m_channelValues.size() ? stubState().m_channelValues[channel] : 0;
     }
+
     if( stubState().m_duringRead )
+    {
         stubState().m_duringRead();
+    }
+
     return stubState().m_failScan ? -1 : 0;
 }
 } // namespace AD7689Lib
@@ -156,21 +175,29 @@ captureDriver::captureDriver( MagAOX::app::MagAOXApp<true> *parent ) : indiDrive
     enableResponseMode( true );
     struct stat input{};
     REQUIRE( stat( parent->driverInName().c_str(), &input ) == 0 );
+
     for( const auto &entry : std::filesystem::directory_iterator( "/proc/self/fd" ) )
     {
         const int   descriptor = std::stoi( entry.path().filename() );
         struct stat candidate{};
+
         if( fstat( descriptor, &candidate ) == 0 && candidate.st_dev == input.st_dev &&
             candidate.st_ino == input.st_ino )
+        {
             m_inputFd = descriptor;
+        }
     }
+
     REQUIRE( m_inputFd >= 0 );
 }
 
 captureDriver::~captureDriver()
 {
     if( m_inputFd >= 0 )
+    {
         close( m_inputFd );
+    }
+
     setInputFd( -1 );
 }
 
@@ -183,6 +210,33 @@ void captureDriver::sendXml( const std::string &xml ) const
 class ad7689Ctrl_test : public ad7689Ctrl
 {
   public:
+    bool    m_fakeSync{ true };    ///< Deterministic scheduling clock for tests that use an in-process semaphore.
+    int64_t m_clockStep_ns{ 100 }; ///< Simulated clock-call cost; zero for exact nominal-deadline tests.
+    std::function<void( int64_t )> m_beforeWait; ///< Optional deterministic source event inserted before a wait.
+    int64_t m_fakeNow_ns{ 10000000000 }; ///< Simulated monotonic clock, advanced by waits instead of wall sleeps.
+
+    /// Return simulated time for deterministic scheduler tests, or the real clock for native integration.
+    int monotonicNow( int64_t &now /**< [out] monotonic nanoseconds */ ) override;
+
+    /// Advance to an absolute deadline or consume an already queued test notification.
+    int waitForSync( int64_t deadline /**< [in] absolute monotonic deadline */ ) override;
+
+    /// Keep source-arrival realtime timestamps coherent with the deterministic scheduling clock.
+    int getRealtime( timespec &stamp /**< [out] realtime timestamp */ ) override;
+
+    sem_t          m_testSemaphore{}; ///< Owned raw semaphore for deterministic multi-scan integration tests.
+    IMAGE_METADATA m_testMetadata{};  ///< Stable source metadata paired with the raw test semaphore.
+    bool           m_testSemaphoreOpen{ false }; ///< Whether the fixture must destroy its raw semaphore.
+
+    /// Configure independent ADC/WFS rates without opening hardware or a named shared-memory source.
+    void setupSync( double adcFps /**< [in] requested ADC scan rate */,
+                    double wfsFps /**< [in] optional source hint */ );
+
+    /// Post synthetic source progress at a precise monotonic reference time.
+    void postReference( uint64_t delta /**< [in] source counter advance */,
+                        int64_t  period /**< [in] source period [ns] */,
+                        unsigned wakes = 1 /**< [in] queued semaphore notifications */ );
+
     /// Construct the test harness with a stable config name.
     ad7689Ctrl_test();
 
@@ -228,15 +282,59 @@ class ad7689Ctrl_test : public ad7689Ctrl
 
 ad7689Ctrl_test::ad7689Ctrl_test()
 {
-    m_configName = "ad7689Ctrl_test";
+    m_configName      = "ad7689Ctrl_test";
+    m_requestedWfsFps = m_wfs_fps = 2000;
 }
 
 ad7689Ctrl_test::~ad7689Ctrl_test()
 {
+    if( m_testSemaphoreOpen )
+    {
+        sem_destroy( &m_testSemaphore );
+    }
+
     delete m_indiDriver;
     m_indiDriver = nullptr;
+
     if( !m_testInput.empty() )
+    {
         std::filesystem::remove( m_testInput );
+    }
+}
+
+void ad7689Ctrl_test::setupSync( double adcFps, double wfsFps )
+{
+    REQUIRE( sem_init( &m_testSemaphore, 0, 0 ) == 0 );
+    m_testSemaphoreOpen = true;
+    m_synchroShmimName  = "offline-wfs-subscans";
+    m_synchroSemaphore  = &m_testSemaphore;
+    m_synchroStream.md  = &m_testMetadata;
+    m_nextSyncProbe_ns  = std::numeric_limits<int64_t>::max();
+    m_requestedWfsFps = m_wfs_fps = wfsFps;
+    m_testMetadata.atime          = timespec{ 1700000000, 0 };
+    m_values.resize( 2 );
+    stubState().m_channelValues = { 65535, 4096 };
+    REQUIRE( requestAcquisition( adcFps, 2 ) == 0 );
+    applyControls( true );
+}
+
+void ad7689Ctrl_test::postReference( uint64_t delta, int64_t period, unsigned wakes )
+{
+    m_testMetadata.cnt0 += delta;
+    const int64_t elapsed = static_cast<int64_t>( delta ) * period;
+    const int64_t nanos   = m_testMetadata.atime.tv_nsec + elapsed;
+    m_testMetadata.atime.tv_sec += nanos / 1000000000;
+    m_testMetadata.atime.tv_nsec = nanos % 1000000000;
+
+    if( m_haveSyncArrival && elapsed )
+    {
+        m_fakeNow_ns = m_lastSyncArrival_ns + elapsed - 2 * m_clockStep_ns;
+    }
+
+    for( unsigned i = 0; i < wakes; ++i )
+    {
+        REQUIRE( sem_post( &m_testSemaphore ) == 0 );
+    }
 }
 
 void ad7689Ctrl_test::captureINDI()
@@ -250,13 +348,72 @@ void ad7689Ctrl_test::captureINDI()
     m_indiDriver                       = new captureDriver( this );
 }
 
+int ad7689Ctrl_test::monotonicNow( int64_t &now )
+{
+    if( !m_fakeSync || m_synchroShmimName.empty() )
+    {
+        return ad7689Ctrl::monotonicNow( now );
+    }
+
+    m_fakeNow_ns += m_clockStep_ns;
+    now = m_fakeNow_ns;
+    return 0;
+}
+
+int ad7689Ctrl_test::waitForSync( int64_t deadline )
+{
+    if( !m_fakeSync )
+    {
+        return ad7689Ctrl::waitForSync( deadline );
+    }
+
+    if( m_beforeWait )
+    {
+        m_beforeWait( deadline );
+    }
+
+    if( sem_trywait( m_synchroSemaphore ) == 0 )
+    {
+        return 0;
+    }
+
+    m_fakeNow_ns = std::max( m_fakeNow_ns, deadline );
+    errno        = ETIMEDOUT;
+    return -1;
+}
+
+int ad7689Ctrl_test::getRealtime( timespec &stamp )
+{
+    if( !m_fakeSync || m_synchroShmimName.empty() )
+    {
+        return ad7689Ctrl::getRealtime( stamp );
+    }
+
+    stamp = timespec{ 1700000000 + m_fakeNow_ns / 1000000000, m_fakeNow_ns % 1000000000 };
+    return 0;
+}
+
 int ad7689Ctrl_test::acquireAndCheckValid()
 {
     m_requestedFps      = m_fps;
     m_requestedChannels = m_numChannels;
     m_requestedAlpha    = m_alpha;
     m_requestedOffset   = m_synchroPostDelay;
-    return ad7689Ctrl::acquireAndCheckValid();
+    m_requestedWfsFps   = m_wfs_fps;
+
+    if( !m_synchroShmimName.empty() && m_fakeSync )
+    {
+        m_nextSyncProbe_ns = std::numeric_limits<int64_t>::max();
+    }
+
+    int result = ad7689Ctrl::acquireAndCheckValid();
+
+    while( result > 0 && !m_shutdown && !m_reconfig && m_syncSchedule.m_slot < m_syncSchedule.m_count )
+    {
+        result = ad7689Ctrl::acquireAndCheckValid();
+    }
+
+    return result;
 }
 
 void ad7689Ctrl_test::setupFpsProperty()
@@ -346,9 +503,13 @@ pcf::IndiProperty ad7689Ctrl_test::makeSynchroDelayUpdate( const double target_u
 void ad7689Ctrl_test::setupTimingDiagnosticsProperty()
 {
     if( !m_indiDriver )
+    {
         captureINDI();
+    }
+
     m_indiP_timingDiag = pcf::IndiProperty( pcf::IndiProperty::Number );
     m_indiP_timingDiag.setName( "timingDiag" );
+    m_indiP_timingDiag.setDevice( m_configName );
     m_indiP_timingDiag.add( pcf::IndiElement( "avg_read_latency_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_us" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "synchro_delay_target_us" ) );
@@ -473,8 +634,12 @@ TEST_CASE( "ad7689Ctrl configuration defaults load synchronized settings", "[ad7
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
     REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
     auto example = std::filesystem::path( "apps/ad7689Ctrl/config/example.conf" );
+
     if( !std::filesystem::exists( example ) )
+    {
         example = "../apps/ad7689Ctrl/config/example.conf";
+    }
+
     REQUIRE( std::filesystem::exists( example ) );
     app.config.readConfig( example.string() );
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
@@ -549,7 +714,7 @@ TEST_CASE( "ad7689Ctrl configuration overrides load synchronized settings", "[ad
     REQUIRE( app.m_numChannels == 3 );
     REQUIRE( app.m_synchroDelayTarget == Approx( 17000.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 17000.0f ) );
-    REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
+    REQUIRE( app.m_wfs_fps == 0 );
 }
 
 /// Verify the user fps callback still updates cadence metadata.
@@ -733,6 +898,8 @@ TEST_CASE( "ad7689Ctrl timing diagnostics publish synchronized loop metrics", "[
     app.m_syncProducerFrameDelta = 3;
     app.m_syncProducerFrameValid = true;
 
+    app.m_syncSchedule.m_count    = 1;
+    app.m_syncSchedule.m_interval = app.m_wfsPeriodMeasured_ns;
     app.captureTimingDiagnostics();
     app.updateTimingDiagnosticsIndi();
 
@@ -833,13 +1000,17 @@ TEST_CASE( "ad7689Ctrl timing diagnostics compute wrapped phase error and lock t
     app.m_delayLockAbsThreshold_ns = 200.0;
     app.m_delayLockFracThreshold   = 0.1;
 
+    app.m_syncSchedule.m_count    = 1;
+    app.m_syncSchedule.m_interval = app.m_wfsPeriodMeasured_ns;
     app.captureTimingDiagnostics();
     app.updateTimingDiagnosticsIndi();
 
     REQUIRE( app.m_indiP_timingDiag["delay_phase_error_us"].get<double>() == Approx( 0.15 ) );
     REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 0.0 ) );
 
-    app.m_delayLockFracThreshold = 0.2;
+    app.m_delayLockFracThreshold  = 0.2;
+    app.m_syncSchedule.m_count    = 1;
+    app.m_syncSchedule.m_interval = app.m_wfsPeriodMeasured_ns;
     app.captureTimingDiagnostics();
     app.updateTimingDiagnosticsIndi();
 
@@ -1328,11 +1499,11 @@ TEST_CASE( "ad7689Ctrl synchronized mode reads on semaphore wake", "[ad7689Ctrl]
     REQUIRE( stubState().m_readOrder == std::vector<int>( { 0, 1, 2 } ) );
     REQUIRE( app.m_firstSemaphore == false );
     REQUIRE( app.m_lastAtime.tv_sec > 0 );
-    REQUIRE( app.m_triggerTime.tv_sec == 0 ); // No measured cadence on the first wake.
+    REQUIRE( app.m_triggerTime.tv_sec > 0 ); // The fixture supplies an explicit startup WFS cadence.
     REQUIRE( app.m_currImageTimestamp.tv_sec > 0 );
     REQUIRE( app.m_firstReadLatency == false );
     REQUIRE( app.m_avgReadLatency_ns ==
-             Approx( ad7689Ctrl::timespecToNs( app.m_currImageTimestamp ) - ad7689Ctrl::timespecToNs( app.m_atime ) ) );
+             Approx( static_cast<double>( app.m_syncSchedule.m_lastSample - app.m_syncSchedule.m_anchor ) ) );
 
     REQUIRE( sem_destroy( &semaphore ) == 0 );
 }
@@ -1383,9 +1554,9 @@ TEST_CASE( "ad7689Ctrl synchronized mode tracks producer cadence from metadata",
     REQUIRE( app.m_syncProducerFrameDelta == 0 );
     REQUIRE( app.m_syncProducerFrameValid == true );
 
-    metadata.cnt0  = 102;
-    metadata.atime = timespec{ 10, 1000000L };
-    std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+    metadata.cnt0    = 102;
+    metadata.atime   = timespec{ 10, 1000000L };
+    app.m_fakeNow_ns = app.m_lastSyncArrival_ns + 1000000;
     REQUIRE( sem_post( &semaphore ) == 0 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
 
@@ -1398,9 +1569,9 @@ TEST_CASE( "ad7689Ctrl synchronized mode tracks producer cadence from metadata",
     REQUIRE( app.m_syncProducerFrameId == 102 );
     REQUIRE( app.m_syncProducerFrameDelta == 2 );
 
-    metadata.cnt0  = 104;
-    metadata.atime = timespec{ 10, 2100000L };
-    std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+    metadata.cnt0    = 104;
+    metadata.atime   = timespec{ 10, 2100000L };
+    app.m_fakeNow_ns = app.m_lastSyncArrival_ns + 1000000;
     REQUIRE( sem_post( &semaphore ) == 0 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
 
@@ -1418,11 +1589,12 @@ TEST_CASE( "ad7689Ctrl synchronized mode tracks producer cadence from metadata",
     const double periodBeforeNoAdvance_ns = app.m_producerPeriodInst_ns;
     const double avgBeforeNoAdvance_ns    = app.m_avgProducerPeriod_ns;
 
-    metadata.cnt0  = 104;
-    metadata.atime = timespec{ 10, 2200000L };
-    std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+    metadata.cnt0    = 104;
+    metadata.atime   = timespec{ 10, 2200000L };
+    app.m_fakeNow_ns = app.m_lastSyncArrival_ns + 1000000;
     REQUIRE( sem_post( &semaphore ) == 0 );
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( app.acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncDuplicates == 1 );
 
     REQUIRE( app.m_producerPeriodInst_ns == Approx( periodBeforeNoAdvance_ns ) );
     REQUIRE( app.m_avgProducerPeriod_ns == Approx( avgBeforeNoAdvance_ns ) );
@@ -1468,19 +1640,17 @@ TEST_CASE( "ad7689Ctrl synchronized read latency EMA initializes and smooths", "
     REQUIRE( sem_post( &semaphore ) == 0 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
 
-    const double readLatency0_ns =
-        ad7689Ctrl::timespecToNs( app.m_currImageTimestamp ) - ad7689Ctrl::timespecToNs( app.m_atime );
+    const double readLatency0_ns = static_cast<double>( app.m_syncSchedule.m_lastSample - app.m_syncSchedule.m_anchor );
 
     REQUIRE( app.m_firstReadLatency == false );
     REQUIRE( app.m_avgReadLatency_ns == Approx( readLatency0_ns ) );
 
-    std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+    app.m_fakeNow_ns = app.m_lastSyncArrival_ns + 500000;
     REQUIRE( sem_post( &semaphore ) == 0 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
 
-    const double readLatency1_ns =
-        ad7689Ctrl::timespecToNs( app.m_currImageTimestamp ) - ad7689Ctrl::timespecToNs( app.m_atime );
-    const double alpha                 = static_cast<double>( app.m_alpha );
+    const double readLatency1_ns = static_cast<double>( app.m_syncSchedule.m_lastSample - app.m_syncSchedule.m_anchor );
+    const double alpha           = static_cast<double>( app.m_alpha );
     const double expectedAvgLatency_ns = alpha * readLatency1_ns + ( 1.0 - alpha ) * readLatency0_ns;
 
     REQUIRE( app.m_avgReadLatency_ns == Approx( expectedAvgLatency_ns ) );
@@ -1525,7 +1695,7 @@ TEST_CASE( "ad7689Ctrl synchronized non-delay service EMA uses global alpha", "[
     REQUIRE( app.m_firstNonDelayService == false );
     REQUIRE( app.m_avgNonDelayService_ns == Approx( nonDelay0_ns ) );
 
-    std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+    app.m_fakeNow_ns = app.m_lastSyncArrival_ns + 500000;
     REQUIRE( sem_post( &semaphore ) == 0 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
 
@@ -1563,7 +1733,7 @@ TEST_CASE( "ad7689Ctrl synchronized delay controller uses read latency EMA", "[a
     app.m_values.assign( 1, 0 );
     app.m_synchroSemaphore   = &semaphore;
     app.m_synchroDelayTarget = 0.0f;
-    app.m_synchroDelay       = 2000000.0f;
+    app.m_synchroDelay       = 0.0f;
     app.m_gain               = 1.0f;
     app.m_alpha              = 0.2f;
     app.m_firstReadLatency   = false;
@@ -1573,11 +1743,20 @@ TEST_CASE( "ad7689Ctrl synchronized delay controller uses read latency EMA", "[a
     clock_gettime( CLOCK_REALTIME, &app.m_lastAtime );
     app.m_lastAtime             = ad7689Ctrl::nsToTimespec( ad7689Ctrl::timespecToNs( app.m_lastAtime ) - 10000000 );
     app.m_avgSemaphorePeriod_ns = 10000000;
+    app.m_requestedWfsFps = app.m_wfs_fps = 100;
     REQUIRE( app.acquireAndCheckValid() == 0 );
+    const unsigned referenceSlot = static_cast<unsigned>( std::clamp(
+        std::floor( ( app.m_synchroDelayTarget - app.m_syncSchedule.m_phase ) / app.m_syncSchedule.m_interval + 0.5 ),
+        0.0,
+        static_cast<double>( app.m_syncSchedule.m_count - 1 ) ) );
 
-    const double readLatency_ns =
-        ad7689Ctrl::timespecToNs( app.m_currImageTimestamp ) - ad7689Ctrl::timespecToNs( app.m_atime );
-    const double alpha                 = static_cast<double>( app.m_alpha );
+    while( app.m_syncSchedule.m_slot <= referenceSlot )
+    {
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+    }
+
+    const double readLatency_ns = static_cast<double>( app.m_syncSchedule.m_lastSample - app.m_syncSchedule.m_anchor );
+    const double alpha          = static_cast<double>( app.m_alpha );
     const double expectedAvgLatency_ns = alpha * readLatency_ns + ( 1.0 - alpha ) * 800000.0;
     const double expectedDelay_ns =
         std::clamp( 2.0 * app.m_synchroDelayTarget - expectedAvgLatency_ns, 0.0, app.m_delayBudget_ns );
@@ -1616,6 +1795,8 @@ TEST_CASE( "ad7689Ctrl synchronized delay controller clamps to zero", "[ad7689Ct
     app.m_synchroDelayTarget = 0.0f;
     app.m_synchroDelay       = 1000.0f;
     app.m_gain               = 1.0f;
+    app.m_firstReadLatency   = false;
+    app.m_avgReadLatency_ns  = 2000000;
 
     REQUIRE( app.acquireAndCheckValid() == 0 );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
@@ -1679,7 +1860,7 @@ TEST_CASE( "ad7689Ctrl synchronized timeout requests reconfig for a stale stream
     app.m_synchroSemaphore  = &semaphore;
     app.m_synchroStreamOpen = false;
 
-    REQUIRE( app.acquireAndCheckValid() == 1 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     REQUIRE( app.m_reconfig == true );
     REQUIRE( app.m_values == std::vector<uint16_t>( { 7, 8 } ) );
     REQUIRE( stubState().m_readOrder.empty() );
@@ -1830,6 +2011,7 @@ TEST_CASE( "ad7689Ctrl validates channel maps and ADC budgets", "[ad7689Ctrl]" )
         app.config.readConfig( "/tmp/ad7689Ctrl_invalid.conf" );
         REQUIRE( app.loadConfigImpl( app.config ) == -1 );
     }
+
     ad7689Ctrl_test app;
     app.setupConfig();
     mx::app::writeConfigFile( "/tmp/ad7689Ctrl_ordered.conf", { "accel" }, { "channels" }, { "[7,0,4]" } );
@@ -1863,6 +2045,7 @@ TEST_CASE( "ad7689Ctrl stages controls and rejects invalid rates", "[ad7689Ctrl]
     REQUIRE( app.applyControls( true ) );
     REQUIRE( app.m_fps == Approx( 1234.56789 ) );
     REQUIRE_FALSE( app.applyControls() );
+
     for( double rate : { 0.0,
                          -1.0,
                          10001.0,
@@ -1874,12 +2057,14 @@ TEST_CASE( "ad7689Ctrl stages controls and rejects invalid rates", "[ad7689Ctrl]
         REQUIRE( app.m_indiP_fps.getState() == INDI_ALERT );
         REQUIRE( app.m_fps == Approx( 1234.56789 ) );
     }
+
     for( const std::string value : { "garbage", "1000 trailing", "1,2", "nan", "inf" } )
     {
         auto update = app.makeFpsUpdate( 1000 );
         update["target"].setValue( value );
         REQUIRE( app.newCallBack_m_indiP_fps( update ) == -1 );
     }
+
     app.setupAlphaProperty();
     REQUIRE( app.newCallBack_m_indiP_alpha( app.makeAlphaUpdate( std::numeric_limits<double>::quiet_NaN() ) ) == -1 );
     REQUIRE( app.m_indiP_alpha.getState() == INDI_ALERT );
@@ -1948,19 +2133,28 @@ TEST_CASE( "ad7689Ctrl stops partial publication and bounds recovery", "[ad7689C
         stubState().m_duringRead = [&]()
         {
             if( stopping )
+            {
                 app.m_shutdown = true;
+            }
             else
+            {
                 REQUIRE( app.requestAcquisition( 1000, 1 ) == 0 );
+            }
         };
         REQUIRE( app.readScan() == 1 );
         REQUIRE_FALSE( app.m_frameValid );
         REQUIRE( app.m_invalidFrames == 1 );
     }
+
     resetStubState();
     ad7689Ctrl_test app;
     stubState().m_failPrepare = true;
+
     for( unsigned attempt = 0; attempt < 3; ++attempt )
+    {
         REQUIRE( app.prepareAdc() == -1 );
+    }
+
     REQUIRE( app.m_failureAttempts == 3 );
     REQUIRE( app.prepareAdc() == -1 );
     REQUIRE( app.m_shutdown );
@@ -1990,11 +2184,16 @@ TEST_CASE( "ad7689Ctrl accounts for missed deadlines and impossible trigger cade
     resetStubState();
     sem_t semaphore;
     REQUIRE( sem_init( &semaphore, 0, 1 ) == 0 );
-    app.m_synchroShmimName      = "offline-too-fast";
-    app.m_synchroSemaphore      = &semaphore;
-    app.m_alpha                 = 0;
-    app.m_firstSemaphore        = false;
-    app.m_avgSemaphorePeriod_ns = 20000;
+    app.m_synchroShmimName        = "offline-too-fast";
+    app.m_synchroSemaphore        = &semaphore;
+    app.m_alpha                   = 0;
+    app.m_firstSemaphore          = false;
+    app.m_avgSemaphorePeriod_ns   = 20000;
+    app.m_haveMeasuredCadence     = true;
+    app.m_haveSyncArrival         = true;
+    app.m_lastSyncArrival_ns      = app.m_fakeNow_ns - 20000;
+    app.m_syncProducerFrameValid  = true;
+    app.m_lastSyncProducerFrameId = 0;
     clock_gettime( CLOCK_REALTIME, &app.m_lastAtime );
     REQUIRE( app.acquireAndCheckValid() == 1 );
     REQUIRE( app.m_overruns == 1 );
@@ -2002,6 +2201,801 @@ TEST_CASE( "ad7689Ctrl accounts for missed deadlines and impossible trigger cade
     REQUIRE( stubState().m_readOrder.empty() );
     REQUIRE( sem_destroy( &semaphore ) == 0 );
     app.m_synchroSemaphore = nullptr;
+}
+
+/** Validate startup WFS hints and silence deadlines without conflating them with ADC rate controls.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl validates WFS scheduler configuration", "[ad7689Ctrl][wfs-subscan]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::loadConfigImpl;
+#endif
+    // clang-format on
+    { // Release the framework singleton before constructing the invalid-config fixtures.
+        ad7689Ctrl_test app;
+        app.setupConfig();
+        mx::app::writeConfigFile( "/tmp/ad7689-sync-config.conf",
+                                  { "synchro", "synchro", "synchro", "accel" },
+                                  { "shmimName", "referenceFps", "timeout", "fps" },
+                                  { "offline", "2000", "0.05", "8000" } );
+        app.config.readConfig( "/tmp/ad7689-sync-config.conf" );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        REQUIRE( app.m_requestedFps == 8000 );
+        REQUIRE( app.m_requestedWfsFps == 2000 );
+        REQUIRE( app.m_syncTimeout == 0.05 );
+    }
+
+    for( const std::string key : { "referenceFps", "timeout" } )
+    {
+        ad7689Ctrl_test invalid;
+        invalid.setupConfig();
+        mx::app::writeConfigFile( "/tmp/ad7689-sync-invalid.conf", { "synchro" }, { key }, { "-1" } );
+        invalid.config.readConfig( "/tmp/ad7689-sync-invalid.conf" );
+        REQUIRE( invalid.loadConfigImpl( invalid.config ) == -1 );
+    }
+}
+
+/** One WFS reference publishes four or three complete frames on an independent, evenly spaced scan grid.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl publishes multiple evenly spaced scans per WFS frame", "[ad7689Ctrl][wfs-subscan]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::acquireSynchroAndCheckValid;
+    MagAOX::app::ad7689Ctrl::processSyncReference;
+    MagAOX::app::ad7689Ctrl::loadImageIntoStream;
+#endif
+    // clang-format on
+    for( double rate : { 8000.0, 6000.0 } )
+    {
+        resetStubState();
+        ad7689Ctrl_test app;
+        app.setupSync( rate, 2000 );
+        app.postReference( 1, 500000 );
+        REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+        const unsigned count = rate == 8000 ? 4 : 3;
+        REQUIRE( app.m_syncSchedule.m_count == count );
+        REQUIRE( app.m_syncSchedule.fps() == Approx( rate ) );
+        REQUIRE( app.m_syncFramesReceived == 1 );
+        REQUIRE( app.m_syncFramesWritten == 0 );
+        int64_t first = 0;
+
+        for( unsigned slot = 0; slot < count; ++slot )
+        {
+            REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+
+            if( slot == 0 )
+            {
+                first = app.m_syncSchedule.m_lastSample;
+            }
+
+            const double elapsed = static_cast<double>( app.m_syncSchedule.m_lastSample - first );
+            REQUIRE( elapsed == Approx( slot * 1e9 / rate ).margin( 1 ) );
+            REQUIRE( app.m_currImageTimestamp.tv_sec > 0 );
+            std::array<uint16_t, 2> frame{};
+            REQUIRE( app.loadImageIntoStream( frame.data() ) == 0 );
+            REQUIRE( frame == std::array<uint16_t, 2>{ 65535, 4096 } );
+        }
+
+        REQUIRE( app.m_syncFramesReceived == 1 );
+        REQUIRE( app.m_syncFramesWritten == count );
+        REQUIRE( app.m_localFrameSeq == count );
+        REQUIRE( app.m_usefulConversions == 2 * count );
+        REQUIRE( app.m_syncSchedule.m_skipped == 0 );
+        REQUIRE( app.m_syncSchedule.m_slot == count );
+        resetStubState();
+    }
+}
+
+/** Separate a WFS FPS subscription from the independent ADC control, and wait for measured startup cadence.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl learns WFS cadence without changing requested ADC fps", "[ad7689Ctrl][wfs-subscan]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::processSyncReference;
+    MagAOX::app::ad7689Ctrl::setCallBack_m_indiP_fpsSource;
+#endif
+    // clang-format on
+    resetStubState();
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 0 );
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncSchedule.m_count == 0 );
+    REQUIRE( stubState().m_readOrder.empty() );
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_haveMeasuredCadence );
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 500000 ) );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+    app.setupFpsSourceProperty();
+    REQUIRE( app.setCallBack_m_indiP_fpsSource( app.makeFpsSourceUpdate( 1800 ) ) == 0 );
+    REQUIRE( app.m_requestedFps == 8000 );
+    REQUIRE_FALSE( app.applyControls() );
+    REQUIRE( app.fps() == 8000 );
+    REQUIRE( app.m_wfs_fps == 1800 );
+    REQUIRE( app.m_syncSchedule.m_count == 4 ); // Metadata alone neither adds nor re-anchors slots.
+    REQUIRE( app.setCallBack_m_indiP_fpsSource( app.makeFpsSourceUpdate( -1 ) ) == -1 );
+    REQUIRE( app.m_requestedFps == 8000 );
+    resetStubState();
+}
+
+/** A changed WFS cadence re-anchors the finite schedule, reports rate quantization, and preserves ADC admission.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl follows changed WFS cadence and reports actual scan rate", "[ad7689Ctrl][wfs-subscan]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::processSyncReference;
+    MagAOX::app::ad7689Ctrl::captureTimingDiagnostics;
+#endif
+    // clang-format on
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    app.postReference( 1, 1000000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncSchedule.m_count == 8 );
+    REQUIRE( app.m_syncSchedule.m_interval == Approx( 125000 ) );
+    app.postReference( 1, 555556 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+    REQUIRE( app.m_syncSchedule.fps() == Approx( 7200 ).epsilon( 1e-5 ) );
+    REQUIRE( app.fps() == 8000 );
+    app.captureTimingDiagnostics();
+    REQUIRE( app.m_syncSnapshot[0] == 4 );
+    REQUIRE( app.m_syncSnapshot[1] == Approx( 7200 ).epsilon( 1e-5 ) );
+    REQUIRE( app.m_syncSnapshot[2] == Approx( 138.889 ).margin( 0.001 ) );
+    app.postReference( 1, 20000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncSchedule.m_count == 0 );
+    REQUIRE( app.m_overruns == 1 );
+}
+
+/** Coalesce backlogs, ignore duplicate IDs, account for source gaps, and relearn after counter resets.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl rejects duplicate WFS triggers and accounts for source restarts", "[ad7689Ctrl][wfs-subscan]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::processSyncReference;
+    MagAOX::app::ad7689Ctrl::resetSyncSchedule;
+#endif
+    // clang-format on
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.postReference( 1, 500000, 10 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncFramesReceived == 10 );
+    REQUIRE( app.m_coalescedWakes == 9 );
+    const int64_t anchor = app.m_syncSchedule.m_anchor;
+    app.postReference( 0, 0 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncDuplicates == 1 );
+    REQUIRE( app.m_syncSchedule.m_anchor == anchor );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+    app.postReference( 4, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncFramesDropped == 3 );
+    REQUIRE( app.m_syncFrameIdGapCount == 1 );
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 500000 ) );
+    app.m_testMetadata.cnt0 = 0;
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_cadenceResets == 1 );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+    REQUIRE( app.m_syncSchedule.m_slot == 0 );
+}
+
+/** Source loss ends the finite schedule; delayed scans are counted and never replayed in a burst.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl stops subscans on source loss and skips expired slots", "[ad7689Ctrl][wfs-subscan]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::acquireSynchroAndCheckValid;
+    MagAOX::app::ad7689Ctrl::resetSyncSchedule;
+#endif
+    // clang-format on
+    resetStubState();
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    app.m_fakeNow_ns = app.m_syncSchedule.m_anchor + 250000;
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_syncSchedule.m_skipped >= 1 );
+    REQUIRE( stubState().m_readOrder.size() == 2 );
+    const int64_t           last = app.m_syncSchedule.m_lastSample;
+    std::array<uint16_t, 2> frame{};
+    REQUIRE( app.loadImageIntoStream( frame.data() ) == 0 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_syncSchedule.m_lastSample - last >= 100000 );
+    REQUIRE( app.loadImageIntoStream( frame.data() ) == 0 );
+    app.m_fakeNow_ns = app.m_syncSchedule.end() + 1;
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncSchedule.m_count == 0 );
+    REQUIRE_FALSE( app.m_frameValid );
+    REQUIRE( app.m_syncFramesWritten == 2 );
+    REQUIRE( stubState().m_readOrder.size() == 4 );
+    REQUIRE( app.m_cadenceResets == 0 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_cadenceResets == 1 );
+    app.captureTimingDiagnostics();
+    REQUIRE( app.m_delayLock == 0 );
+    resetStubState();
+}
+
+/** Reconfiguration cancels old slots before a new ADC rate can publish data.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl changes subscan rate only at a stopped acquisition boundary", "[ad7689Ctrl][wfs-subscan]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::requestAcquisition;
+    MagAOX::app::ad7689Ctrl::reconfig;
+    MagAOX::app::ad7689Ctrl::applyControls;
+#endif
+    // clang-format on
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.requestAcquisition( 6000, 2 ) == 0 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_reconfig );
+    REQUIRE_FALSE( app.m_frameValid );
+    REQUIRE( app.reconfig() == 0 );
+    REQUIRE( app.m_syncSchedule.m_count == 0 );
+    REQUIRE( app.m_syncSchedule.m_skipped == 4 );
+    REQUIRE( app.applyControls( true ) );
+    app.m_synchroSemaphore = &app.m_testSemaphore;
+    app.m_synchroStream.md = &app.m_testMetadata;
+    app.m_nextSyncProbe_ns = std::numeric_limits<int64_t>::max();
+    app.m_reconfig         = false;
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncSchedule.m_count == 3 );
+    REQUIRE( app.m_syncSchedule.fps() == Approx( 6000 ) );
+}
+
+/** A producer realtime step cannot steer the monotonic subscan cadence or read-latency controller.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl ignores producer realtime clock steps when scheduling", "[ad7689Ctrl][wfs-subscan]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::processSyncReference;
+    MagAOX::app::ad7689Ctrl::acquireSynchroAndCheckValid;
+#endif
+    // clang-format on
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    app.m_testMetadata.atime.tv_sec += 3600;
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 500000 ) );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+    REQUIRE( app.m_syncSchedule.m_interval == Approx( 125000 ) );
+
+    for( unsigned slot = 0; slot < 4; ++slot )
+    {
+        REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+    }
+
+    REQUIRE( app.m_avgReadLatency_ns < 500000 );
+    REQUIRE( app.m_avgReadLatency_ns > 0 );
+}
+
+/** The app consumes all cross-boundary slots, retaining each original reference and distinct scan timestamp.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl DDSPC continuous acquisition across WFS boundaries", "[ad7689Ctrl][ddspc]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::acquireDdspcAndCheckValid;
+    MagAOX::app::ad7689Ctrl::processSyncReference;
+    MagAOX::app::ad7689Ctrl::loadImageIntoStream;
+#endif
+    // clang-format on
+    resetStubState();
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.m_clockStep_ns             = 0;
+    app.m_requestedDdspc.m_enabled = true;
+    const int64_t epoch            = app.m_fakeNow_ns;
+    int64_t       nextReference    = epoch + 500000;
+    app.m_beforeWait               = [&]( int64_t until )
+    {
+        if( nextReference <= until )
+        {
+            app.m_fakeNow_ns = nextReference;
+            app.postReference( 1, 500000 );
+            nextReference += 500000;
+        }
+    };
+    stubState().m_timestamp  = [&]( timespec &stamp ) { app.getRealtime( stamp ); };
+    stubState().m_duringRead = [&]() { app.m_fakeNow_ns += 15000; };
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_ddspcTarget_ns == 300000 );
+
+    for( uint64_t i = 0; i < 32; ++i )
+    {
+        int result;
+
+        do
+        {
+            result = app.ad7689Ctrl::acquireAndCheckValid();
+        } while( result == 1 && !app.m_reconfig && !app.m_shutdown );
+
+        REQUIRE( result == 0 );
+        const int64_t expected = epoch + 300000 + i * 125000;
+        REQUIRE( app.m_ddspcSlot.m_deadline == expected );
+        REQUIRE( app.m_ddspcStart_ns == expected );
+        REQUIRE( app.m_ddspcCompletion_ns == expected + 15000 );
+        REQUIRE( app.m_delayApplied_ns == 300000 );
+        REQUIRE( app.m_ddspcSlot.m_reference.m_id == 1 + i / 4 );
+        REQUIRE( app.m_ddspcSlot.m_slot == i % 4 );
+        REQUIRE( app.m_currImageTimestamp.tv_nsec == expected % 1000000000 );
+        std::array<uint16_t, 2> frame{};
+        REQUIRE( app.loadImageIntoStream( frame.data() ) == 0 );
+        REQUIRE( frame == std::array<uint16_t, 2>{ 65535, 4096 } );
+        REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+        REQUIRE( app.m_ddspcSnapshot[16] == 15 );
+    }
+
+    REQUIRE( app.m_localFrameSeq == 32 );
+    REQUIRE( app.m_ddspcSchedule.m_epochs == 1 );
+    REQUIRE( app.m_ddspcSchedule.m_skipped == 0 );
+    REQUIRE( app.m_lateScans == 0 );
+    REQUIRE( app.m_syncFramesReceived < app.m_syncFramesWritten );
+    resetStubState();
+}
+
+/** Cadence changes explicitly reacquire phase while preserving the independent ACC target and scan admission.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl DDSPC cadence change and effective rate", "[ad7689Ctrl][ddspc]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::processSyncReference;
+    MagAOX::app::ad7689Ctrl::captureTimingDiagnostics;
+#endif
+    // clang-format on
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.m_clockStep_ns             = 0;
+    app.m_requestedDdspc.m_enabled = true;
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+    app.postReference( 1, 1000000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_ddspcTarget_ns == 550000 );
+    REQUIRE( app.m_ddspcSchedule.m_count == 8 );
+    REQUIRE( app.m_ddspcSchedule.m_interval == 125000 );
+    REQUIRE( app.m_ddspcSchedule.m_skipped == 3 );
+    REQUIRE( app.m_ddspcSchedule.m_epochs == 2 );
+    REQUIRE( app.fps() == 8000 );
+    app.postReference( 1, 555556 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncSnapshot[0] == 4 );
+    REQUIRE( app.m_syncSnapshot[1] == Approx( 7200 ).epsilon( 1e-5 ) );
+    app.postReference( 1, 20000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE_FALSE( app.m_ddspcSchedule.m_active );
+    REQUIRE( app.m_overruns == 1 );
+}
+
+/** Slots can finish after a missing next trigger, then acquisition suspends and reacquires without catch-up.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl DDSPC source loss duplicate and recovery", "[ad7689Ctrl][ddspc]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::acquireSynchroAndCheckValid;
+    MagAOX::app::ad7689Ctrl::resetSyncSchedule;
+#endif
+    // clang-format on
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.m_clockStep_ns             = 0;
+    app.m_requestedDdspc.m_enabled = true;
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    const int64_t frozen = app.m_ddspcSchedule.deadline();
+    app.postReference( 0, 0, 4 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncDuplicates == 1 );
+    REQUIRE( app.m_ddspcSchedule.deadline() == frozen );
+    app.m_fakeNow_ns = frozen + 260000;
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_ddspcSlot.m_slot == 2 );
+    REQUIRE( app.m_ddspcSchedule.m_skipped == 2 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_ddspcSlot.m_slot == 3 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE_FALSE( app.m_ddspcSchedule.m_active );
+    REQUIRE( app.m_ddspcSnapshot[1] == 0 );
+    app.postReference( 3, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_ddspcSchedule.m_epochs == 2 );
+    REQUIRE( app.m_syncFramesDropped == 2 );
+    REQUIRE( app.m_ddspcSchedule.m_next == 0 );
+    REQUIRE( app.m_ddspcSchedule.deadline() > app.m_fakeNow_ns );
+    app.m_syncTimeout = 0.001;
+    app.m_fakeNow_ns += 2000000;
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE_FALSE( app.m_ddspcSchedule.m_active );
+    REQUIRE( app.m_cadenceResets == 1 );
+}
+
+/** Runtime settings validate atomically, affect future phase only, and preserve disabled-mode behavior.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl DDSPC runtime controls and disabled compatibility", "[ad7689Ctrl][ddspc]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::newCallBack_m_indiP_ddspcSettings;
+    MagAOX::app::ad7689Ctrl::applyControls;
+    MagAOX::app::ad7689Ctrl::updateSynchroDelayController;
+#endif
+    // clang-format on
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.m_clockStep_ns             = 0;
+    app.m_requestedDdspc.m_enabled = true;
+    app.m_indiP_ddspcSettings      = pcf::IndiProperty( pcf::IndiProperty::Number );
+    app.m_indiP_ddspcSettings.setDevice( app.configName() );
+    app.m_indiP_ddspcSettings.setName( "ddspcSettings" );
+    app.m_indiP_ddspcSettings.add( pcf::IndiElement( "enabled" ) );
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+    const int64_t frozen = app.m_ddspcSchedule.deadline();
+    auto          update = app.m_indiP_ddspcSettings;
+    update["enabled"]    = 1;
+    update.add( pcf::IndiElement( "wfs_process_ns" ) );
+    update["wfs_process_ns"] = 125000;
+    REQUIRE( app.newCallBack_m_indiP_ddspcSettings( update ) == 0 );
+    REQUIRE_FALSE( app.applyControls() );
+    REQUIRE( app.m_ddspcSchedule.deadline() == frozen );
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_ddspcTarget_ns == 350000 );
+    REQUIRE( app.m_ddspcSchedule.deadline() == frozen );
+    update["wfs_process_ns"] = -1;
+    REQUIRE( app.newCallBack_m_indiP_ddspcSettings( update ) == -1 );
+    REQUIRE( app.m_requestedDdspc.m_process == 125000 );
+    update["wfs_process_ns"] = 125000;
+    update["enabled"]        = 0;
+    REQUIRE( app.newCallBack_m_indiP_ddspcSettings( update ) == 0 );
+    REQUIRE_FALSE( app.applyControls() );
+    REQUIRE_FALSE( app.m_ddspcSchedule.m_active );
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+    REQUIRE( app.m_syncSchedule.m_phase == Approx( 34400 ) );
+    REQUIRE( app.m_ddspcSnapshot[0] == 0 );
+    app.m_firstReadLatency   = false;
+    update["wfs_process_ns"] = 130000;
+    REQUIRE( app.newCallBack_m_indiP_ddspcSettings( update ) == 0 );
+    REQUIRE_FALSE( app.applyControls() );
+    REQUIRE_FALSE( app.m_firstReadLatency ); // Disabled DDSPC-only parameters cannot disturb legacy feedback.
+}
+
+/** The DDSPC formula has distinct configuration keys and rejects noncausal timing before acquisition.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl DDSPC configuration validation", "[ad7689Ctrl][ddspc]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::loadConfigImpl;
+#endif
+    // clang-format on
+    {
+        ad7689Ctrl_test app;
+        app.setupConfig();
+        mx::app::writeConfigFile( "/tmp/ad7689-ddspc.conf",
+                                  { "synchro", "synchro", "synchro", "synchro", "synchro", "synchro", "accel" },
+                                  { "shmimName",
+                                    "referenceFps",
+                                    "ddspcDelayEnabled",
+                                    "wfsProcessTime_ns",
+                                    "accLatency_ns",
+                                    "ddspcMargin_ns",
+                                    "fps" },
+                                  { "offline", "2000", "true", "75000", "15000", "10000", "8000" } );
+        app.config.readConfig( "/tmp/ad7689-ddspc.conf" );
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        REQUIRE( app.m_requestedDdspc.m_enabled );
+        REQUIRE( app.m_requestedDdspc.delay( 500000 ) == 300000 );
+        REQUIRE( app.m_requestedFps == 8000 );
+        REQUIRE( app.m_requestedWfsFps == 2000 );
+    }
+
+    for( const std::string bad : { "-1", "1000000", "1000000001", "nan" } )
+    {
+        ad7689Ctrl_test app;
+        app.setupConfig();
+        mx::app::writeConfigFile( "/tmp/ad7689-ddspc-invalid.conf",
+                                  { "synchro", "synchro", "synchro", "synchro" },
+                                  { "shmimName", "referenceFps", "ddspcDelayEnabled", "accLatency_ns" },
+                                  { "offline", "2000", "true", bad } );
+        app.config.readConfig( "/tmp/ad7689-ddspc-invalid.conf" );
+        REQUIRE( app.loadConfigImpl( app.config ) == -1 );
+    }
+}
+
+/** Existing feedback corrects the DDSPC target once, without adding the legacy latency formula or wrapping.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl DDSPC feedback and signed phase offset", "[ad7689Ctrl][ddspc]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::updateSynchroDelayController;
+    MagAOX::app::ad7689Ctrl::newCallBack_m_indiP_synchroDelay;
+#endif
+    // clang-format on
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.m_clockStep_ns             = 0;
+    app.m_requestedDdspc.m_enabled = true;
+    app.m_delayCapped              = 1;
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_delayCapped == 0 );
+    REQUIRE( app.m_synchroDelayTarget == 300000 );
+    app.m_avgReadLatency_ns = 301000;
+    app.m_firstReadLatency  = false;
+    app.updateSynchroDelayController( 300000 );
+    REQUIRE( app.m_synchroDelay == Approx( 299900 ) );
+    const int64_t frozen = app.m_ddspcSchedule.deadline();
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_synchroDelayTarget == 300000 );
+    REQUIRE( app.m_synchroDelay == Approx( 299900 ) );
+    REQUIRE( app.m_ddspcSchedule.deadline() == frozen );
+    REQUIRE( app.m_ddspcSchedule.m_target == Approx( -100 ) );
+    app.setupSynchroDelayProperty();
+    REQUIRE( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( -400 ) ) == -1 );
+    REQUIRE( app.m_requestedOffset == 0 );
+    REQUIRE( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( 50 ) ) == 0 );
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_synchroDelayTarget == 350000 );
+    REQUIRE( app.m_ddspcTarget_ns == 300000 );
+}
+
+/** Stale source identity and source-counter rollback suspend or explicitly reacquire the DDSPC clock.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl DDSPC source identity and restart", "[ad7689Ctrl][ddspc]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::processSyncReference;
+    MagAOX::app::ad7689Ctrl::synchroStreamStale;
+#endif
+    // clang-format on
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.m_clockStep_ns             = 0;
+    app.m_requestedDdspc.m_enabled = true;
+    app.postReference( 10, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    app.m_testMetadata.cnt0 = 0;
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_ddspcSchedule.m_epochs == 2 );
+    REQUIRE( app.m_ddspcSchedule.m_skipped == 4 );
+    REQUIRE( app.m_cadenceResets == 1 );
+    app.m_nextSyncProbe_ns = 0;
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.m_reconfig );
+    REQUIRE_FALSE( app.m_ddspcSchedule.m_active );
+    REQUIRE( app.m_ddspcSchedule.m_skipped == 8 );
+    REQUIRE_FALSE( app.m_frameValid );
+}
+
+/** INDI publishes distinct deadline/start/completion/availability and original-reference diagnostics.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl DDSPC timing INDI serialization", "[ad7689Ctrl][ddspc]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::updateTimingDiagnosticsIndi;
+    MagAOX::app::ad7689Ctrl::frameGrabberPostPublish;
+#endif
+    // clang-format on
+    resetStubState();
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.m_clockStep_ns             = 0;
+    app.m_requestedDdspc.m_enabled = true;
+    app.setupTimingDiagnosticsProperty();
+    app.m_indiP_ddspcTiming = pcf::IndiProperty( pcf::IndiProperty::Number );
+    app.m_indiP_ddspcTiming.setDevice( app.configName() );
+    app.m_indiP_ddspcTiming.setName( "ddspcTiming" );
+
+    for( const char *name : { "enabled",
+                              "valid",
+                              "target_delay_us",
+                              "applied_delay_us",
+                              "sync_correction_us",
+                              "phase_error_us",
+                              "scheduled_mono_us",
+                              "start_mono_us",
+                              "completion_mono_us",
+                              "published_mono_us",
+                              "reference_mono_us",
+                              "reference_id",
+                              "reference_slot",
+                              "nominal_slot",
+                              "frame_seq",
+                              "start_lateness_us",
+                              "availability_us",
+                              "phase_acquisitions" } )
+    {
+        app.m_indiP_ddspcTiming.add( pcf::IndiElement( name ) );
+    }
+
+    app.m_indiP_ddspcSettings = pcf::IndiProperty( pcf::IndiProperty::Number );
+    app.m_indiP_ddspcSettings.setDevice( app.configName() );
+    app.m_indiP_ddspcSettings.setName( "ddspcSettings" );
+
+    for( const char *name : { "enabled", "wfs_process_ns", "acc_latency_ns", "margin_ns", "slew_fraction" } )
+    {
+        app.m_indiP_ddspcSettings.add( pcf::IndiElement( name ) );
+    }
+
+    stubState().m_duringRead = [&]() { app.m_fakeNow_ns += 15000; };
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+    std::array<uint16_t, 2> frame{};
+    REQUIRE( app.loadImageIntoStream( frame.data() ) == 0 );
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    app.updateTimingDiagnosticsIndi();
+    REQUIRE( app.m_indiP_ddspcTiming["target_delay_us"].get<double>() == 300 );
+    REQUIRE( app.m_indiP_ddspcTiming["applied_delay_us"].get<double>() == 300 );
+    REQUIRE( app.m_indiP_ddspcTiming["availability_us"].get<double>() == 15 );
+    REQUIRE( app.m_indiP_ddspcTiming["reference_id"].get<double>() == 1 );
+    REQUIRE( app.m_indiP_ddspcTiming["reference_slot"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_ddspcTiming["frame_seq"].get<double>() == 1 );
+    REQUIRE( app.m_indiP_ddspcSettings["enabled"].get<double>() == 1 );
+    const auto &messages = static_cast<captureDriver *>( app.m_indiDriver )->m_messages;
+    REQUIRE( std::any_of( messages.begin(),
+                          messages.end(),
+                          []( const std::string &xml ) { return xml.find( "ddspcTiming" ) != std::string::npos; } ) );
+    resetStubState();
+}
+
+/** Actual frameGrabber publication follows the deterministic 300-us/8-kHz lattice through 2-kHz WFS wakes.
+ * Run alone in a fresh process with a private MILK_SHM_DIR; no ADC or INDI server is used.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl DDSPC native publication across WFS boundaries", "[.][ad7689Ctrl-ddspc-native]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::acquireAndCheckValid;
+    MagAOX::app::ad7689Ctrl::frameGrabberPostPublish;
+    MagAOX::app::ad7689Ctrl::loadImageIntoStream;
+#endif
+    // clang-format on
+    REQUIRE( std::getenv( "MILK_SHM_DIR" ) != nullptr );
+    resetStubState();
+    ad7689Ctrl_test app;
+    app.m_clockStep_ns             = 0;
+    app.m_requestedDdspc.m_enabled = true;
+    app.m_requestedFps             = 8000;
+    app.m_requestedWfsFps          = 2000;
+    app.m_shmimName                = "ad7689-offline-ddspc";
+    app.m_synchroShmimName         = "ad7689-offline-ddspc-source";
+    app.m_fgThreadInit             = false;
+    app.m_circBuffLength           = 4;
+    app.m_latencyCircBuffMaxLength = 0;
+    app.state( MagAOX::app::stateCodes::OPERATING );
+    IMAGE    trigger{}, reader{};
+    uint32_t size[2]{ 1, 1 };
+    REQUIRE(
+        ImageStreamIO_createIm_gpu(
+            &trigger, app.m_synchroShmimName.c_str(), 2, size, _DATATYPE_UINT16, -1, 1, IMAGE_NB_SEMAPHORE, 0, 0, 0 ) ==
+        0 );
+    const int64_t epoch         = app.m_fakeNow_ns;
+    int64_t       nextReference = epoch;
+    app.m_beforeWait            = [&]( int64_t until )
+    {
+        if( nextReference <= until )
+        {
+            app.m_fakeNow_ns  = nextReference;
+            trigger.md->write = 1;
+            app.getRealtime( trigger.md->atime );
+            ++trigger.md->cnt0;
+            trigger.md->write = 0;
+            ImageStreamIO_sempost( &trigger, -1 );
+            nextReference += 500000;
+        }
+    };
+    stubState().m_channelValues = { 65535, 4096 };
+    stubState().m_timestamp     = [&]( timespec &stamp ) { app.getRealtime( stamp ); };
+    unsigned reads              = 0;
+    bool     opened             = false;
+    stubState().m_duringRead    = [&]()
+    {
+        ++reads;
+        const int64_t expected = epoch + 300000 + ( reads - 1 ) * 125000;
+        CHECK( app.m_ddspcSlot.m_deadline == expected );
+        CHECK( app.m_ddspcStart_ns == expected );
+        CHECK( app.m_ddspcSlot.m_reference.m_id == 1 + ( reads - 1 ) / 4 );
+        CHECK( app.m_ddspcSlot.m_slot == ( reads - 1 ) % 4 );
+        CHECK( app.m_ddspcSchedule.m_skipped == 0 );
+
+        if( !opened )
+        {
+            opened = ImageStreamIO_openIm( &reader, app.m_shmimName.c_str() ) == 0;
+            CHECK( opened );
+        }
+
+        if( opened && reads > 1 )
+        {
+            CHECK( reader.md->write == 0 );
+            CHECK( reader.md->cnt0 == reads - 1 );
+            CHECK( reader.md->datatype == _DATATYPE_UINT16 );
+            const size_t slot = reader.md->cnt1;
+            CHECK( slot == ( reads - 2 ) % 4 );
+            CHECK( reader.array.UI16[slot * 2] == 65535 );
+            CHECK( reader.array.UI16[slot * 2 + 1] == 4096 );
+            CHECK( reader.md->atime.tv_nsec == ( expected - 125000 ) % 1000000000 );
+            CHECK( reader.atimearray[slot].tv_nsec == reader.md->atime.tv_nsec );
+            CHECK( reader.cntarray[slot] == reads - 1 );
+        }
+
+        app.m_fakeNow_ns += 15000;
+
+        if( reads == 33 )
+        {
+            app.m_shutdown = true;
+        }
+    };
+    app.fgThreadExec();
+    CHECK( reads == 33 );
+    CHECK( app.m_localFrameSeq == 32 );
+    CHECK( app.m_syncFramesWritten == 32 );
+    CHECK( app.m_ddspcSchedule.m_skipped == 3 ); // Authorized tail explicitly abandoned on shutdown.
+    CHECK( app.m_ddspcSchedule.m_epochs == 1 );
+    CHECK( app.m_invalidFrames == 1 );
+
+    if( opened )
+    {
+        ImageStreamIO_closeIm( &reader );
+    }
+
+    app.closeSynchroStream();
+    ImageStreamIO_destroyIm( &trigger );
+    resetStubState();
 }
 
 /** Exercise the actual frameGrabber publisher and an independent local shared-memory reader.
@@ -2022,15 +3016,19 @@ TEST_CASE( "ad7689Ctrl native frameGrabber publication", "[.][ad7689Ctrl-native]
 #endif
     // clang-format on
     REQUIRE( std::getenv( "MILK_SHM_DIR" ) != nullptr );
-    for( bool synchronized : { false, true } )
+
+    for( unsigned samplesPerWfs : { 0U, 4U, 3U } )
     {
+        const bool synchronized = samplesPerWfs != 0;
         resetStubState();
         ad7689Ctrl_test app;
+        app.m_fakeSync                 = false;
         app.m_shmimName                = synchronized ? "ad7689-offline-sync" : "ad7689-offline-timer";
         app.m_fgThreadInit             = false;
         app.m_circBuffLength           = 4;
         app.m_latencyCircBuffMaxLength = 0;
-        app.m_requestedFps             = 1000;
+        app.m_requestedFps             = synchronized ? 500 * samplesPerWfs : 1000;
+        app.m_requestedWfsFps = app.m_wfs_fps = 500;
         app.state( MagAOX::app::stateCodes::OPERATING );
         stubState().m_channelValues = { 65535, 4096 };
         IMAGE             reader{}, trigger{};
@@ -2038,6 +3036,7 @@ TEST_CASE( "ad7689Ctrl native frameGrabber publication", "[.][ad7689Ctrl-native]
         bool              opened = false;
         std::atomic<bool> running{ true };
         std::thread       producer;
+
         if( synchronized )
         {
             app.m_synchroShmimName = "ad7689-offline-source";
@@ -2067,14 +3066,17 @@ TEST_CASE( "ad7689Ctrl native frameGrabber publication", "[.][ad7689Ctrl-native]
                     }
                 } );
         }
+
         stubState().m_duringRead = [&]()
         {
             ++reads;
+
             if( !opened )
             {
                 opened = ImageStreamIO_openIm( &reader, app.m_shmimName.c_str() ) == 0;
                 CHECK( opened );
             }
+
             if( opened )
             {
                 CHECK( reader.md->datatype == _DATATYPE_UINT16 );
@@ -2083,6 +3085,7 @@ TEST_CASE( "ad7689Ctrl native frameGrabber publication", "[.][ad7689Ctrl-native]
                 CHECK( reader.md->size[2] == 4 );
                 CHECK( reader.md->write == 0 );
                 CHECK( reader.md->cnt0 == reads - 1 );
+
                 if( reads > 1 )
                 {
                     const size_t slot = reader.md->cnt1;
@@ -2095,23 +3098,42 @@ TEST_CASE( "ad7689Ctrl native frameGrabber publication", "[.][ad7689Ctrl-native]
                     CHECK( reader.cntarray[slot] == reader.md->cnt0 );
                 }
             }
+
             if( reads == 9 )
+            {
                 app.m_shutdown = true;
+            }
         };
         app.fgThreadExec();
         running = false;
+
         if( producer.joinable() )
+        {
             producer.join();
+        }
+
         CHECK( reads == 9 );
         CHECK( app.m_localFrameSeq == 8 );
         CHECK( app.m_invalidFrames == 1 );
+
         if( synchronized )
+        {
             CHECK( app.m_syncFramesWritten == 8 );
+            CHECK( app.m_syncFramesReceived < app.m_syncFramesWritten );
+        }
+
         if( opened )
+        {
             ImageStreamIO_closeIm( &reader );
+        }
+
         app.closeSynchroStream();
+
         if( synchronized )
+        {
             ImageStreamIO_destroyIm( &trigger );
+        }
+
         resetStubState();
     }
 }
