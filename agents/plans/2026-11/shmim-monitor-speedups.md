@@ -572,5 +572,17 @@ write time is also ~2 us below the ~37 us seen before.
   (12:36-12:40). Neither moved wma or the loop.
 - Constant ~147 MB/s transmitted on one interface the whole time.
 
-Next: find when the events stopped from today's telemetry history, and
-compare with the deploy and restart times.
+Likely cause (user): `rtSetup/RTC/move_irqs` was run this morning after the
+cpuset rebuild, but probably not after the rebuild a few days earlier. IRQ
+affinity lives in `/proc/irq` and is not changed by rebuilding cpusets, and
+the irqbalance policy bans the EDT IRQ, so nothing else moves it. Until this
+morning the camwfs EDT IRQ was probably on a CPU used by other work, and that
+work's ~10 min cycle delayed the camera's interrupt. Now it is on its own core,
+`camwfs_irq` (CPU 34), in the camera's L3 domain. The ~2 us drop in wma
+(37 -> 35 us) fits the IRQ moving onto a dedicated nearby core. To confirm:
+the events in today's camwfs telemetry history should stop when `move_irqs`
+ran, not when the apps restarted.
+
+Lesson: after every `make_cpusets` and every reboot, run `move_irqs` and check
+the EDT IRQ's `effective_affinity_list` is 34 (deploy step 4 in
+`agents/plans/2026-10/rtc-cpuset-restructuring.md`).
