@@ -34,8 +34,10 @@ Each discovered physical GPU has a numeric property named for its reported
 NVIDIA index, such as `gpu_0` or `gpu_1`. These indices come from `nvidia-smi`,
 not CSV row order or UUID sorting. The companion `gpu_0_info` or `gpu_1_info`
 contains `uuid`, `pci`, and `status` so the current device association is visible.
-UUID remains the stable identity for retained samples, logs, and telemetry;
-INDI property associations can change when NVIDIA indices change.
+UUID remains the stable internal identity, while telemetry identifies each GPU
+by its reported index. The app logs index-to-UUID/PCI mappings at first successful
+discovery and whenever a mapping changes. INDI property associations can change
+when NVIDIA indices change.
 
 | Numeric element | Units | Validity bit |
 | --- | --- | --- |
@@ -63,10 +65,12 @@ states are marked Alert. Failures and recovery are logged on status changes.
 A missing known GPU retains invalid values at its last reported index until that
 index belongs to another GPU. Reindexing invalidates an old property that no
 longer has an owner; an index reused by another GPU publishes the new UUID and
-measurements. The missing UUID remains in logs and telemetry even if its former
-index is reused. An expected UUID that has never been discovered has no known
-index, so it does not create a numbered INDI property. Its absence is represented
-in the overall status, logs, and UUID-identified telemetry.
+measurements. The missing UUID remains in internal state and status logs even
+if its former index is reused. An expected UUID that has never been discovered
+has no known index, so it does not create a numbered INDI property or a GPU
+telemetry sample. Devices whose former indices have been reclaimed are also
+omitted from GPU sample vectors while their index is unknown. The overall
+collection status and UUID-specific status logs still explain their absence.
 
 The CSV interface is a dependency on the installed NVIDIA driver release. Check
 the fields after driver upgrades. MIG instances, per-process GPU accounting,
@@ -90,6 +94,12 @@ Every group needs a unique name containing only letters, digits, or underscores;
 names. Supply exactly one of `cpuset` or `cpus`. The latter accepts a CPU list such
 as `45` or `45-47,109-111`; a named cpuset follows the framework's configured
 cpuset mountpoint and its current `cpuset.cpus` contents.
+
+At startup, the app logs each group's index in lexicographic name order for the
+configured group set, its action-name match, cpuset or explicit CPU list, and
+`required`/`requireEffective` policy. The first check logs the resolved expected
+CPUs, or their unavailability. Later resolution after an unavailable cpuset, or
+a change to the expected CPU set, is logged when it occurs.
 
 The checker resolves all matching numeric IRQs on every poll. It compares sets,
 so equivalent CPU-list spellings are accepted. Requested affinity must equal the
@@ -131,14 +141,32 @@ changes may require a configuration update; IRQ-number changes do not.
 
 ## Telemetry and qualification
 
-`telem_gpu` records UUID/PCI identity, the reported NVIDIA index, measurements,
-validity, and actual sample times. The appended index field preserves decoding
-of older GPU records, whose index is reported as unknown.
+`telem_gpu` records the reported NVIDIA index, measurements, per-field validity,
+collection/device status, and actual sample times. UUID and PCI strings are
+omitted from new records; use the first-discovery and mapping-change logs to
+identify the physical device. Samples without a known index are omitted.
 
-`telem_irq` records logical groups, current IRQ numbers, expected/requested/effective
-CPU lists, check status, and actual check times. Records are emitted first, when
-state changes, and at the existing telemeter maximum interval. A forced record
-of cached state retains the original measurement/check time.
+`telem_irq` records only a vector of per-group `ok` flags and the actual
+`check_time`. Vector positions follow the group indices logged at startup:
+
+- `0`: unchecked, or the completed check failed the configured policy.
+- `1`: a completed check is acceptable under the configured policy. This
+  includes an absent optional device and requested-affinity-only checking when
+  explicitly permitted.
+
+Group names, status strings, IRQ numbers, and CPU lists are not repeated in new
+IRQ telemetry. Startup and expectation-change logs describe the policy, and
+changed-fault logs carry placement details. A first record, a flag-vector change,
+or the existing telemeter maximum interval emits IRQ telemetry. Detail-only or
+check-time-only changes do not force an extra record. Forced records carry the
+latest actual check time; they do not claim a new check. GPU records retain
+first/change/forced behavior and their actual sample times.
+
+Updated readers can decode older GPU/IRQ records because legacy schema field
+positions remain available. Older binaries must be updated before reading the
+new compact records. Retain startup, GPU mapping, and IRQ expectation logs
+alongside telemetry, including when rotating files or extracting a time window;
+a telemetry segment alone may not identify a physical GPU or an IRQ group.
 
 Qualify the configuration on the instrument from the operator's workstation.
 Compare measurements with normal readbacks, check warning behavior before and
