@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 ## \file remove_cpusets_test.py
-## \brief Verify RTC cpuset cleanup with temporary files and mocked removals.
+## \brief Verify shared RTC/ICC cpuset cleanup with temporary files and mocked removals.
 
 import contextlib
 import importlib.machinery
@@ -13,6 +13,7 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "remove_cpusets"
+ICC_SCRIPT = SCRIPT.parents[1] / "ICC/remove_cpusets"
 LOADER = importlib.machinery.SourceFileLoader("remove_cpusets", str(SCRIPT))
 SPEC = importlib.util.spec_from_loader(LOADER.name, LOADER)
 cleanup = importlib.util.module_from_spec(SPEC)
@@ -41,14 +42,15 @@ class CleanupTest(unittest.TestCase):
 
         return directory
 
-    def run_main(self, arguments, remove=None):
-        """Run the CLI against fake mount metadata and intercept every removal."""
+    def run_main(self, arguments, remove=None, script=SCRIPT):
+        """Run the selected role's CLI against fake mounts and intercept every removal."""
         output = io.StringIO()
 
         with mock.patch.object(cleanup, "configured_mountpoint", return_value=self.mountpoint), \
              mock.patch.object(cleanup, "mount_records", return_value=self.mounts), \
              mock.patch.object(cleanup.os, "geteuid", return_value=0), \
-             mock.patch.object(cleanup.sys, "argv", [str(SCRIPT), *arguments]), \
+             mock.patch.object(cleanup.sys, "argv", [str(script), *arguments]), \
+             mock.patch.object(cleanup, "__file__", str(script)), \
              mock.patch.object(Path, "rmdir", autospec=True, side_effect=remove) as removals, \
              contextlib.redirect_stdout(output):
             cleanup.main()
@@ -182,16 +184,94 @@ class CleanupTest(unittest.TestCase):
     def test_allowlist_combines_legacy_and_sibling_setup_names(self):
         """Read quoted/unquoted declarations and fail closed on computed names."""
         setup = self.mountpoint / "make_cpusets"
-        setup.write_text('mkdir -p $cpusetMount/system\nmkdir -p "$cpusetMount/new-name"\n')
+        setup.write_text('# cpuset-role: RTC\nmkdir -p $cpusetMount/system\n'
+                         'mkdir -p "$cpusetMount/new-name"\n')
         names = cleanup.allowed_names(setup)
         self.assertIn("camacq", names)
         self.assertIn("spare56", names)
         self.assertIn("new-name", names)
         self.assertNotIn("system", names)
-        setup.write_text('mkdir -p $cpusetMount/system\nmkdir -p "$cpusetMount/$name"\n')
+        setup.write_text('# cpuset-role: RTC\nmkdir -p $cpusetMount/system\n'
+                         'mkdir -p "$cpusetMount/$name"\n')
 
         with self.assertRaisesRegex(RuntimeError, "Unrecognized"):
             cleanup.allowed_names(setup)
+
+    def test_role_marker_must_be_unique_and_known(self):
+        """Never infer ownership from filenames, prose, or an absent/ambiguous role."""
+        setup = self.mountpoint / "make_cpusets"
+
+        for marker in ("", "# cpuset-role: AOC\n", "# cpuset-role: RTC extra\n",
+                       "# cpuset-role: ICC\n# cpuset-role: RTC\n",
+                       "# cpuset-role: RTC\n# cpuset-role: ICC extra\n",
+                       "# cpuset-role: ICC\n# cpuset-role: ICC\n"):
+            with self.subTest(marker=marker):
+                setup.write_text(marker + 'mkdir -p $cpusetMount/system\n'
+                                 'mkdir -p $cpusetMount/camscc\n')
+
+                with self.assertRaisesRegex(RuntimeError, "exactly one known cpuset-role"):
+                    cleanup.allowed_names(setup)
+
+    def test_icc_cleanup_accepts_retired_and_new_camera_sets(self):
+        """Resolve the ICC sibling and accept retired names from both camera layouts."""
+        groups = [self.group(name) for name in ("spare44", "mfilt", "spare47", "spare55",
+                                                "spare56", "spare57", "spare61",
+                                                "camscc", "camscc_sw")]
+        output, removals = self.run_main(["--apply"], script=ICC_SCRIPT)
+        self.assertEqual(removals.call_args_list, [mock.call(group) for group in sorted(groups)])
+        self.assertIn("Removed 9 cpuset directories", output)
+        self.assertEqual((self.mountpoint / "tasks").read_text(), "1\n")
+        self.assertEqual((self.mountpoint / "system/tasks").read_text(), "2\n")
+
+    def test_icc_cleanup_rejects_rtc_only_names(self):
+        """Do not acquire RTC legacy ownership merely by sharing its implementation."""
+        self.group("camwfs")
+
+        with self.assertRaisesRegex(RuntimeError, "Unknown cpuset.*camwfs"):
+            self.run_main(["--apply"], script=ICC_SCRIPT)
+
+    def test_icc_busy_monitor_prevents_any_removal(self):
+        """Require the operator to stop milk-shmimmon before removing ICC sets."""
+        self.group("camscc")
+        self.group("RTmon", "999999999\n")
+
+        def unexpected_remove(directory):
+            """Reject any removal while the monitor owns its reserved cpuset."""
+            self.fail(f"Attempted removal during a failed preflight: {directory}")
+
+        with self.assertRaisesRegex(RuntimeError, "Occupied cpusets.*\n.*RTmon"):
+            self.run_main(["--apply"], unexpected_remove, script=ICC_SCRIPT)
+
+    def test_icc_default_remains_dry_run(self):
+        """Preview ICC cleanup without an apply flag and preserve the fake controls."""
+        group = self.group("camscc")
+        output, removals = self.run_main([], script=ICC_SCRIPT)
+        removals.assert_not_called()
+        self.assertIn(f"Would remove {group}", output)
+        self.assertTrue((group / "tasks").is_file())
+
+    def test_installed_icc_copy_and_public_links_select_icc_setup(self):
+        """Match install's dereferenced helper copy and /usr/local/bin sibling links."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        installed = root / "opt/MagAOX/bin"
+        public = root / "usr/local/bin"
+        installed.mkdir(parents=True)
+        public.mkdir(parents=True)
+        (installed / "remove_cpusets").write_text(ICC_SCRIPT.read_text())
+        (installed / "make_cpusets").write_text(ICC_SCRIPT.with_name("make_cpusets").read_text())
+
+        for name in ("remove_cpusets", "make_cpusets"):
+            (public / name).symlink_to(installed / name)
+
+        group = self.group("camscc")
+
+        for script in (installed / "remove_cpusets", public / "remove_cpusets"):
+            with self.subTest(script=script):
+                output, removals = self.run_main([], script=script)
+                removals.assert_not_called()
+                self.assertIn(f"Would remove {group}", output)
 
 
 if __name__ == "__main__":

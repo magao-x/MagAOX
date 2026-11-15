@@ -12,6 +12,8 @@
 ##
 ####################################################
 
+# cpuset-role: RTC
+
 source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
 cpusetMount="$CGROUPS1_CPUSET_MOUNTPOINT"
 
