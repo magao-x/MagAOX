@@ -103,14 +103,22 @@ capture helper sets and verifies it for every run. A shorter selection does not
 reduce the startup ceiling, so a subsequent 120-second run remains available
 when the configuration ceiling is 120.
 
+If migrating from the previous RTC layout, complete the
+[worker map migration](../../bmcCtrl/doc/sdk-worker.md#configuration) before
+this trial. Rebuild the map before setting `sdk.cpuset=dmtweeter-sdk`: the old
+map assigns that name to CPU42, while the updated map assigns CPU56 and retires
+`spare56`. Record the new placement separately from the historical baseline.
+
 Restart **dmSyncopation only** through the normal operator procedure. Keep the
 normal main writer, camera, reconstruction, DM controller and dmcomb running,
 with gains/workload/settings unchanged:
 
 - Camera/main cadence 2 kHz, camera synchronization On.
 - Synco monitor on `dmtweeter-synco` / CPU41.
-- Reader-release observer on FIFO30/spare57, reading `dmtweeter_read_done`.
-- BMC SDK worker FIFO55/spare56 and ordered post worker FIFO30/spare31.
+- Reader-release observer FIFO30 on `dmtweeter-synco-release` / CPU57
+  (historically `spare57`), reading `dmtweeter_read_done`.
+- BMC SDK worker FIFO55 on `dmtweeter-sdk` / CPU56 (historically `spare56`);
+  retain the tested ordered post worker FIFO30 on `spare31` / CPU31 for this comparison.
 - The working three-credit pipeline and matching delivery-clock diagnostics.
 - `sysMonRTC.set_latency.toggle=On`.
 - dmcomb mode 4 / DELAY / 5 us, using auxiliary-counter change detection. This

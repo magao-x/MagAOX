@@ -250,10 +250,14 @@ these two settings; changing them requires restarting synco.
 
 The additive profile
 [`dmtweeter_synco_reader_rt.conf`](../dmtweeter_synco_reader_rt.conf) provides
-priority 30 and the operator-confirmed **`spare57` / CPU57** assignment. The BMC
-SDK worker uses **`spare56` / CPU56**. Merge the section into the existing
-instance configuration; it does not replace the rest of that file. No cpuset
-creation or instrument configuration change is performed by this update.
+priority 30 on **`dmtweeter-synco-release` / CPU57**. The BMC SDK worker uses
+**`dmtweeter-sdk` / CPU56** in the updated RTC map. Historical captures used
+the names `spare57` and `spare56` for those CPUs. Follow the
+[worker map migration](../../bmcCtrl/doc/sdk-worker.md#configuration) before
+selecting `dmtweeter-sdk`; the old map assigns that name to CPU42. Merge the
+profile into the existing instance configuration; it does not replace the
+rest of that file. The operator performs any cpuset or instrument configuration
+changes.
 
 Use a different core from the main synco monitor, BMC command monitor and SDK
 worker, and retain RTC latency tuning On. Record the selected cpuset and its

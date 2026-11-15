@@ -75,6 +75,7 @@ apps_rtc = \
 	t2wOffloader \
 	dmSpeckle \
 	dmSyncopation \
+	loopTimingMonitor \
 	w2tcsOffloader \
 	pwfsSlopeCalc \
     kcubeCtrl \
@@ -135,6 +136,7 @@ all_buildable_apps = \
 	dmPokeXCorr \
 	dmSpeckle \
 	dmSyncopation \
+	loopTimingMonitor \
 	filterWheelCtrl \
 	flipperCtrl \
 	flowRPM \

@@ -185,10 +185,14 @@ pipelineCpuset=spare31
 ```
 
 These keys configure the ordered **post worker**, named `pipeline`; they do not
-change the SDK worker's `threadPrio=55` / `cpuset=spare56`. Keep the early-release
-observer on spare57, all shadow bounds and credit capacity unchanged, and camera
-at 2 kHz with synchronization On. The current binary already supports these
-settings; this comparison needs a controller restart, not another rebuild.
+change the SDK worker's `threadPrio=55` or CPU56 placement. The historical
+comparison used `spare56`; the updated RTC map names CPU56 `dmtweeter-sdk`.
+Follow the [worker map migration](../../bmcCtrl/doc/sdk-worker.md#configuration)
+before selecting the new name. Keep the early-release observer on CPU57
+(`dmtweeter-synco-release`, historically `spare57`), all shadow bounds and credit
+capacity unchanged, and camera at 2 kHz with synchronization On. The current
+binary already supports these settings; this comparison needs a controller
+restart, not another rebuild.
 
 Restart dmtweeter through the normal operator procedure and restore the recorded
 loop state. Check the actual post-worker readbacks:

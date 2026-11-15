@@ -7,10 +7,12 @@
 ## See https://linux.die.net/man/7/cpuset
 ##
 ## Run this as sudo at startup of the system
-## For a rename migration, stop instrument processes and run remove_cpusets first.
+## Before changing names or CPU assignments, stop instrument processes and run remove_cpusets.
 ## Applications and CACAO FPS settings place their threads in these sets.
 ##
 ####################################################
+
+# cpuset-role: RTC
 
 source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
 cpusetMount="$CGROUPS1_CPUSET_MOUNTPOINT"
@@ -77,11 +79,11 @@ mkdir -p "$cpusetMount/aol1_modevalDMf_mon-sw"
 /bin/echo 1 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/aol1_modevalDMf_mon-sw/cpuset.mems"
 
-#aol1_imWFS2_cbuff
-mkdir -p "$cpusetMount/aol1_imWFS2_cbuff"
-/bin/echo 26 > "$cpusetMount/aol1_imWFS2_cbuff/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/aol1_imWFS2_cbuff/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/aol1_imWFS2_cbuff/cpuset.mems"
+#spare26: dedicated development reserve
+mkdir -p "$cpusetMount/spare26"
+/bin/echo 26 > "$cpusetMount/spare26/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare26/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare26/cpuset.mems"
 
 #spare27: dedicated development reserve
 mkdir -p "$cpusetMount/spare27"
@@ -167,7 +169,7 @@ mkdir -p "$cpusetMount/tweeter"
 /bin/echo 1 > "$cpusetMount/tweeter/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/tweeter/cpuset.mems"
 
-# L3 domain 5 (CPUs 40-47): tweeter controller pipeline, synco and modulator, with the loop.
+# L3 domain 5 (CPUs 40-47): tweeter monitor/post, synco and modulator, with the loop and the imWFS2 circular buffer.
 
 #dmtweeter-synco: primary monitor and scheduler
 mkdir -p "$cpusetMount/dmtweeter-synco"
@@ -175,11 +177,11 @@ mkdir -p "$cpusetMount/dmtweeter-synco"
 /bin/echo 1 > "$cpusetMount/dmtweeter-synco/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/dmtweeter-synco/cpuset.mems"
 
-#dmtweeter-sdk: BMC SDK worker, sharing L3 with the tweeter monitor
-mkdir -p "$cpusetMount/dmtweeter-sdk"
-/bin/echo 42 > "$cpusetMount/dmtweeter-sdk/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/dmtweeter-sdk/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/dmtweeter-sdk/cpuset.mems"
+#aol1_imWFS2_cbuff: reads acquWFS's aol1_imWFS2pub copy, sharing L3 with acquWFS
+mkdir -p "$cpusetMount/aol1_imWFS2_cbuff"
+/bin/echo 42 > "$cpusetMount/aol1_imWFS2_cbuff/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/aol1_imWFS2_cbuff/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/aol1_imWFS2_cbuff/cpuset.mems"
 
 #po4ao
 mkdir -p "$cpusetMount/po4ao"
@@ -199,11 +201,11 @@ mkdir -p "$cpusetMount/acqu_mvm"
 /bin/echo 1 > "$cpusetMount/acqu_mvm/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/acqu_mvm/cpuset.mems"
 
-#mfilt
-mkdir -p "$cpusetMount/mfilt"
-/bin/echo 46 > "$cpusetMount/mfilt/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/mfilt/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/mfilt/cpuset.mems"
+#spare46: development reserve in the MVM's L3 domain; mfilt runs on acqu_mvm
+mkdir -p "$cpusetMount/spare46"
+/bin/echo 46 > "$cpusetMount/spare46/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/spare46/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/spare46/cpuset.mems"
 
 #tweeterSpeck
 mkdir -p "$cpusetMount/tweeterSpeck"
@@ -259,11 +261,11 @@ mkdir -p "$cpusetMount/camtip_sw"
 /bin/echo 1 > "$cpusetMount/camtip_sw/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/camtip_sw/cpuset.mems"
 
-#spare56: dedicated development reserve
-mkdir -p "$cpusetMount/spare56"
-/bin/echo 56 > "$cpusetMount/spare56/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/spare56/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/spare56/cpuset.mems"
+#dmtweeter-sdk: BMC SDK worker, outside the MVM's L3 domain
+mkdir -p "$cpusetMount/dmtweeter-sdk"
+/bin/echo 56 > "$cpusetMount/dmtweeter-sdk/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/dmtweeter-sdk/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/dmtweeter-sdk/cpuset.mems"
 
 #dmtweeter-synco-release: synco reader-release observer
 mkdir -p "$cpusetMount/dmtweeter-synco-release"
