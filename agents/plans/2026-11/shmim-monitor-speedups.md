@@ -596,6 +596,15 @@ Today's telemetry history (UTC) only partly supports this:
   mfilt on 45, the cbuffs reading the `pub` copies, or an app no longer
   running.
 - `set_latency` is worth ~5 us of camera write time and ~9 us of loop time.
+- Loop vs camera, Nov 13-15 history (5 s bins, excess over a 5 min rolling
+  median, bump > 0.8 us): 44 of 50 camera bumps come with a loop bump, but
+  only 42 of 140 loop bumps come with a camera bump. A typical episode has
+  three loop pulses ~45-60 s apart, and only the third also bumps the camera.
+  So the camera bump does not cause the loop bumps: a common source hits the
+  loop alone twice, then the loop and camera together.
+- After the restart, 11:53-12:13 had two loop bins over 0.8 us (max 2.0 us).
+  After `move_irqs`, 12:15-12:53 had none (max 0.35 us; sd of the 5 s means
+  0.14 us vs 0.57 us before).
 - To check: whether the events stay away, from a later history dump.
 
 Lesson: after every `make_cpusets` and every reboot, run `move_irqs` and check
