@@ -1,5 +1,5 @@
 # DEVELOPMENT EXAMPLE ONLY: NOT A TELEMETRY QUALIFICATION OR DEPLOYMENT INSTRUCTION.
-# See SYNCO_NATIVE.md. Supply reviewed calibration, producer identity and counter anchors before training.
+# See PHASE_DDSPC.md. Supply reviewed calibration, producer identity and counter anchors before training.
 # Installed loPredCtrlAcc: continuous native inputs; compile-time DM output inhibition.
 # Named application/INDI identity is supplied by xctrl: loPredCtrlAcc.
 # Native training requires the upstream counter contract and complete calibrated command history.
@@ -13,6 +13,7 @@ gain = 0.0
 copy_gain = 1.0
 # Explicitly honor copy_gain. Default true preserves the historical loading bug in existing Legacy configs.
 legacy_copy_gain_compat = false
+# Native standard and assisted use the same loPredCtrl-scaled command penalty and gain feedback.
 regularization = 100.0
 gamma = 1.0
 covariance = 1e-5
@@ -104,9 +105,9 @@ pending_capacity = 32
 # Optional bounded scores. A nonempty exclusive private prediction_file enables the ordinary recorder thread.
 prediction_capacity = 32768
 prediction_file =
-prediction_max_rows = 2000000
-# Every input/history record is retained; only RLS/rank/controller refresh is strided. Gamma is per update.
-training_stride = 4
+prediction_max_rows = 5000000
+# Every real WFS target adapts at stride=1; larger strides explicitly reduce learning load. Gamma is per update.
+training_stride = 1
 # One preserves the single-rate command history; four selects a matched WFS-only lifted baseline.
 standard_slots = 4
 
@@ -129,6 +130,8 @@ writeLeadUs = 50
 calibration =
 # Actual acquisition producer's timingDiag subscription; a configured name is not synchronization evidence.
 sync_device = accelSim
+# AD7689: use sync_device=ad7689Ctrl and sync_property=ddspcTiming; keep reviewed reference/anchors.
+sync_property = timingDiag
 sync_reference = camwfs_sync
 # Reviewed 4:1 source-incarnation anchors. Zero leaves assistance inhibited; standard can still train.
 sync_epoch = 0

@@ -151,3 +151,92 @@ later command-domain/response-phase qualification, committed prefixes, limits,
 ownership, actual helper transport timing and safe handover. Current build cannot
 activate it. Existing ADC-only defaults are preserved. No deploy/install/commit/
 push, service restart, telescope access or live test was performed.
+
+## 2026-11-15 ADC-driven prediction / WFS-driven learning
+
+Implemented the approved minimal multirate extension after checkpoint `70990414`.
+`apps/loPredCtrlAcc/PHASE_DDSPC.md` supersedes the preceding WFS-origin-only native
+receiver description and contains equations, configuration, results and the full
+changed-file inventory. Original applications and syncopation base/timing headers
+remain unchanged; nothing was installed, launched on an instrument or committed.
+
+- Added `PhaseShadow`, selected automatically by the native online worker. Existing
+  bounded ADC forwarding now evaluates cached native DDSPC gains at each genuinely
+  new valid ADC counter. It preserves individual acceleration pairs and the newest
+  actual WFS history, without inventing intermediate WFS measurements.
+- Removed consumer cadence inference from asynchronous INDI snapshots. Actual
+  upstream mode/lock, source/counter/segment continuity, reviewed counter anchors,
+  bounded local freshness and consecutive-valid recovery remain. Supported status
+  schemas are the existing accelSim `timingDiag` and AD7689 `ddspcTiming`; no ADC
+  producer or synchronization algorithm is changed. Cross-host/exposure mapping
+  is not required by this counter-contract path.
+- A bounded SPSC carries completed real WFS/request records to the ordinary
+  numerical owner. One standard learner and four phase-conditioned assisted views
+  reuse existing covariance RLS/Givens QR kernels. Only WFS records update weights,
+  excitation checks and immutable coefficient/prefix-gain snapshots. At stride
+  one each eligible real target updates once. Conservative complete-command closure
+  can delay adaptation by one WFS interval; newest measured WFS is used immediately
+  for inference. No adaptation or factorization runs on the ADC owner.
+- ADC phase p selects the fitted acceleration window. Actual observed request
+  prefix j independently selects a cached control gain. Delayed ADC arrivals can
+  therefore prepare a newly computed future slot without retagging an expired
+  candidate. Request cycle/step/epoch/generation/target/cutoff remain explicit.
+  Requests are sampled at existing advertised synco cutoffs with coherent original
+  command-poll coverage, not on a new local scheduling grid. Idle requests remain
+  healthy; publication never becomes physical-application evidence.
+- Both banks use the same operational scaled regularization policy and current
+  WFS feedback. The standard four-slot model is the matched lifted WFS-only
+  comparison; one-slot mode requires an actually held input. Causal history
+  offsets, F versus Legacy F-1 future input blocks, observed total request domain
+  and absence of command integration/exploration/publication prevent a claim of
+  exact operational closed-loop equivalence. Historical replay penalty defaults
+  and the original Legacy-compatible branch are preserved.
+- Reused the exact producer Request interface with a private single-slot cache;
+  no auxiliary/ready/ack images, ownership locks or semaphores are opened. Exact
+  deadlines and source-loss/fault barriers revoke old candidates. Actual nominal
+  quarter-frame times are accepted without requiring exactly 500,000 ns. A changed
+  WFS-to-slot phase invalidates that window; it is never independently re-estimated.
+- Preserved the compact 60-element operator INDI schema. Existing bounded text
+  diagnostics now show ADC opportunities/predictions, per-phase counts and fast
+  current/peak latency. Private prediction CSV adds phase/sample/model identities,
+  actual slot identity, causal forecast and completion timing; conditional-future
+  metrics are explicitly unavailable. Recorder limits remain separate from model
+  state and input loss.
+
+Deterministic tests exercise four distinct ADC phases, no duplicate WFS learning,
+immutable coefficients between updates, RLS and QR, equivalent control objectives,
+held versus lifted inputs, F=1/2/4/8 indexing, actual rotated synco targets, late
+inputs, fallback/recovery, source replacement, bounded concurrent handoff and
+shadow output guards. Paired held-out coherent prediction MSE is approximately
+57.74% lower for assistance with both native learners; unrelated ADC is 5.52%
+worse while standard coefficients are bitwise unchanged. This is synthetic
+prediction validation, not observed telescope performance or DM suppression.
+
+Remaining commissioning requirements are a private Linux GCC14/current dependency
+build, reviewed full-image/modal P (and optional R for private images), selected
+modes/units/signs, actual upstream reference/anchors, reviewed synco cycle/slot
+association, sufficiently independent command excitation, and whole-application
+Linux timing/resource measurements. The example keeps incomplete evidence
+inhibited; installed acquisition-only defaults and mandatory shadow protection
+remain. Requested-command response-phase/partition calibration, committed prefixes,
+limits, ownership, actual publication deadlines and handover are still required
+before any separately authorized physical output.
+
+Final completed-source validation: full offline 183 cases/8,969,496 assertions;
+focused native/multirate 59/6,706,351; native observation 59/14,316; confirmed
+replay 6/40,049; shadow-only 22/10,364. Focused ASan+UBSan passes59/6,706,351;
+full ASan+UBSan passes183/8,973,933, with no findings. Native timing Python49,
+report Python3, producer Python4 and observation-tools/timing-audit/deployment/Linux-build
+Python3/28/5/9 pass. Fifteen original loPredCtrl digests and both exact upstream
+producer/timing headers match. Format/whitespace checks pass; no files are staged.
+
+Optimized H=2/F=2/two-mode/2500-pixel whole ADC observe-call timing with stride-one
+learning: p50=11.834us, p99=14.542us, observed max=48.417us. Separate WFS learning
+jobs p50=137.250us/p99=156.042us/max234.666us. Stride-four prediction p50=11.875us/
+p99=14.416us/max46.500us; numerical p50=57.791us/p99=84.959us/max99.125us. An earlier
+optimized development run observed an832.125us host outlier; no WCET/deadline claim.
+ASan/UBSan is slower and excluded from optimized timing claims. The concurrent
+fixture processes1399 closed WFS records/5600 ADC opportunities with zero queue
+drops using nominal source timestamps and bounded producer pacing; this is not a
+wall-clock native stream qualification. Whole native acquisition, full-rate worker
+load and actual Linux scheduling remain for authorized shadow commissioning.

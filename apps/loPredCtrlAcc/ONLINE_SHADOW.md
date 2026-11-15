@@ -1,3 +1,5 @@
+Current native timing and learning path: [PHASE_DDSPC.md](PHASE_DDSPC.md). Native acquisition consumes the upstream contract; individual ADC events use immutable phase gains, while only real WFS records drive learning.
+
 # Qualified online multirate DDSPC shadow path
 
 **Current architecture update:** [UPSTREAM_SHADOW.md](UPSTREAM_SHADOW.md) supersedes

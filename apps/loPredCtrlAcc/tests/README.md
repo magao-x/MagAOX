@@ -1,3 +1,5 @@
+Current 8-kHz inference / 2-kHz learning path: [PHASE_DDSPC.md](../PHASE_DDSPC.md). `check-multirate` includes actual ADC conversion, phase RLS/QR, held-command baseline checks, 1/2/4/8-frame horizons, coherent/unrelated inputs, causal timestamps, exact synco targets, two-owner handoff and fast-path measurements. No live stream or native application is started.
+
 Current native integration: [SYNCO_NATIVE.md](../SYNCO_NATIVE.md).
 `check-multirate` includes native packet-to-RLS/QR training, the actual ordinary
 numerical worker/CSV recorder, source interruptions, complete DM-image projection,

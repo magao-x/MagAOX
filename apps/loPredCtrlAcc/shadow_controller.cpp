@@ -368,7 +368,15 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
                     if( !item.m_gainCurrent )
                     {
                         DDSPC_PROFILE_SCOPE( Reference );
-                        item.m_controller->get_reference_controller( workspace, m_config.m_lambda );
+                        realT penalty = m_config.m_lambda;
+                        if( m_config.m_scaledPenalty )
+                        {
+                            const auto  &weights = item.m_controller->prediction_matrix_view();
+                            const int    inputs  = m_config.m_future * item.m_proposal.rows();
+                            const Matrix c       = weights.leftCols( inputs );
+                            penalty *= ( c.transpose() * c ).maxCoeff();
+                        }
+                        item.m_controller->get_reference_controller( workspace, penalty );
                         item.m_gainCurrent = true;
                     }
                     else
@@ -451,6 +459,37 @@ Matrix ShadowController::prediction_matrix( ShadowMode mode )
 {
     return model( mode ).m_controller->get_reference_prediction_matrix();
 }
+
+bool ShadowController::snapshot( ShadowMode mode, ShadowSnapshot &out )
+{
+    auto &item   = model( mode );
+    out.m_status = item.m_status;
+    if( !item.m_status.m_ready || !item.m_gainCurrent || item.m_fault )
+        return false;
+    out.m_theta          = item.m_workspace->theta();
+    out.m_stateRows      = item.m_workspace->state().rows();
+    out.m_commands       = item.m_proposal.rows();
+    const int    inputs  = m_config.m_future * out.m_commands;
+    const Matrix c       = out.m_theta.rightCols( inputs );
+    realT        penalty = m_config.m_lambda;
+    if( m_config.m_scaledPenalty )
+        penalty *= ( c.transpose() * c ).maxCoeff();
+    out.m_gain[0] = item.m_workspace->gain();
+    for( unsigned p = 1; p < 5; ++p )
+    {
+        const int fixed = p * m_config.m_modes;
+        if( out.m_commands != 4 * m_config.m_modes || fixed >= inputs )
+        {
+            out.m_gain[p].resize( 0, 0 );
+            continue;
+        }
+        Matrix known( out.m_theta.rows(), out.m_stateRows + fixed );
+        known << out.m_theta.leftCols( out.m_stateRows ), c.rightCols( fixed );
+        Matrix empty( known.rows(), 0 );
+        out.m_gain[p] = reference_controller( known, empty, empty, c.leftCols( inputs - fixed ), penalty );
+    }
+    return true;
+}
 Matrix ShadowController::proposal( ShadowMode mode ) const
 {
     return model( mode ).m_status.m_ready ? model( mode ).m_proposal : Matrix();
@@ -523,8 +562,14 @@ bool ShadowController::predict_next( ShadowMode    mode,
             Matrix      known =
                 theta.leftCols( origin.m_state.rows() ) * origin.m_state + theta.rightCols( fixed ) * *fixedPrefix;
             Matrix empty( theta.rows(), 0 );
+            realT  penalty = m_config.m_lambda;
+            if( m_config.m_scaledPenalty )
+            {
+                const Matrix c = theta.rightCols( rows );
+                penalty *= ( c.transpose() * c ).maxCoeff();
+            }
             plan.topRows( rows - fixed ) = reference_controller(
-                known, empty, empty, theta.middleCols( theta.cols() - rows, rows - fixed ), m_config.m_lambda );
+                known, empty, empty, theta.middleCols( theta.cols() - rows, rows - fixed ), penalty );
             plan.bottomRows( fixed ) = *fixedPrefix;
         }
         else

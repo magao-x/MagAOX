@@ -118,6 +118,7 @@ NativeReplay::NativeReplay()
     m.m_standardCommandSlots = 4;
     auto &c                  = m_receiver;
     c.m_enabled              = true;
+    c.m_sampleDriven         = false; // Historical WFS-origin replay is retained as a reference.
     c.m_syncEpoch            = 77;
     c.m_modalAnchor = c.m_adcAnchor = 1;
     c.m_statusDevice                = "synthetic_adc";

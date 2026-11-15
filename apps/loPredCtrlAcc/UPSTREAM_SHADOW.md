@@ -1,3 +1,5 @@
+Current native implementation: [PHASE_DDSPC.md](PHASE_DDSPC.md). The numerical results below describe the preceding upstream-contract/WFS-origin milestone, not the new per-ADC phase predictor.
+
 # Upstream-synchronized native DDSPC shadow inputs
 
 2026-11-14. This supersedes the native-input qualification plan in

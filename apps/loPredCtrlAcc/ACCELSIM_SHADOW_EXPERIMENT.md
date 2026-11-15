@@ -1,3 +1,5 @@
+Use [PHASE_DDSPC.md](PHASE_DDSPC.md) for the current ADC-driven implementation, calibration/association requirements and score format. Compare identical origin/target/phase/channel/horizon rows, and distinguish ADC-tagged paired predictions from standard-only scheduler fallback records (`adc_counter=0`). The existing disturbance mechanism is unchanged.
+
 # Controlled accelSim DDSPC shadow comparison — not yet authorized to execute
 
 This procedure preserves the already validated accelSim disturbance injection.

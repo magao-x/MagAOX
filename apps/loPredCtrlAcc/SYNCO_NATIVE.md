@@ -1,3 +1,5 @@
+Current live path: [PHASE_DDSPC.md](PHASE_DDSPC.md) supersedes the WFS-origin-only preparation below with ADC-driven inference and WFS-driven phase identification. The existing producer API and output prohibitions remain unchanged.
+
 # Native DDSPC inputs and the existing syncopation producer
 
 2026-11-15. This completes the native binding described in `UPSTREAM_SHADOW.md`

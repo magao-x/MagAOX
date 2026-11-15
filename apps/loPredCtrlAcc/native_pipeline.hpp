@@ -24,9 +24,13 @@ NativeCalibration load_native_calibration( const std::string &path /**< [in] Rev
 /// Startup-only receiver contract; anchors must come from the upstream acquisition convention, not rate fitting.
 struct NativePipelineConfig
 {
-    bool              m_enabled{ false };      ///< Explicit opt-in independent of ADC-only/native observation.
+    bool  m_enabled{ false };      ///< Explicit opt-in independent of ADC-only/native observation.
+    bool  m_sampleDriven{ true };  ///< Native live path; false is retained only for historical replay comparisons.
+    bool  m_scaledPenalty{ true }; ///< Match loPredCtrl's model-scaled regularization in both phase model banks.
+    realT m_feedback{ 0 }; ///< Same configured additive current-WFS feedback for standard and assisted candidates.
     NativeCalibration m_calibration;           ///< Owned immutable full-image projection.
     std::string   m_statusDevice, m_reference; ///< Actual upstream INDI producer and configured RTC reference identity.
+    std::string   m_statusProperty{ "timingDiag" }; ///< Existing producer schema: timingDiag or AD7689 ddspcTiming.
     std::uint64_t m_syncEpoch{ 0 }, m_modalAnchor{ 0 }, m_adcAnchor{ 0 }; ///< Reviewed source-incarnation 4:1 anchors.
     std::int64_t  m_statusMaxAgeNs{ 1000000000 }, m_sampleToleranceNs{ 100000 }; ///< Local heartbeat/sampler limits.
     std::int64_t  m_predictionLeadNs{ 500000 }; ///< Diagnostic compute deadline after modal availability.
@@ -39,7 +43,9 @@ struct NativeSyncStatus
 {
     UpstreamStatus m_status; ///< Actual synchronized mode/lock and local receipt.
     std::uint64_t  m_sequence{ 0 }, m_referenceCounter{ 0 },
-        m_gaps{ 0 }; ///< Upstream diagnostics, not ADC cnt0 anchors.
+        m_gaps{ 0 };                       ///< Upstream diagnostics, not ADC cnt0 anchors.
+    bool         m_hasSlotOffset{ false }; ///< Producer exports a nominal-slot versus publication-counter witness.
+    std::int64_t m_slotOffset{ 0 }; ///< Explicit counter difference; changes identify producer-side skipped slots.
 };
 
 /// Single numerical-thread receiver; all inputs come from bounded queues, never operational output streams.

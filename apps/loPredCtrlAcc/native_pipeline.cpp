@@ -301,20 +301,6 @@ void NativeInputPipeline::sync( const NativeSyncStatus &s )
           s.m_gaps != m_sync.m_gaps ) )
         m_syncLost = true; // New counter anchors must be reviewed after producer restarts/gaps.
     m_sync = s;
-    if( !m_syncHistory.empty() )
-    {
-        const auto &previous = m_syncHistory.back();
-        if( s.m_referenceCounter > previous.m_referenceCounter && s.m_sequence >= previous.m_sequence )
-        {
-            const long double error =
-                ( s.m_sequence - previous.m_sequence ) - 4.L * ( s.m_referenceCounter - previous.m_referenceCounter );
-            if( std::abs( error ) > 8 )
-            {
-                m_sync.m_status.m_locked = false;
-                m_reason                 = "upstream_status_cadence_not_four_to_one";
-            }
-        }
-    }
     if( m_syncHistory.size() == 8 )
         m_syncHistory.pop_front();
     m_syncHistory.push_back( m_sync );

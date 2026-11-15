@@ -8,19 +8,23 @@
 
 namespace DDSPC
 {
-/// Optional observation consumer; called only by the observer worker and forbidden from blocking or doing model work.
+/// Optional observation consumer; permits bounded cached inference but forbids blocking, learning or factorization.
 class NativeObservationSink
 {
   public:
     /// Destroy the interface without owning any native producer.
     virtual ~NativeObservationSink() = default;
 
-    /// Copy/enqueue an immutable record or count loss; no acquisition-thread numerical work is permitted.
+    /// Consume an immutable record; bounded cached inference is allowed, RLS/QR/rank work is not.
     virtual void observe( const NativeObservation &record /**< [in] Original observation. */ ) noexcept = 0;
 
     /// Offer a complete immutable DM copy; default consumers need metadata only.
     virtual void command( const NativeObservation &record /**< [in] Original request. */,
                           std::span<const float>   values /**< [in] Entire coherent payload. */ ) noexcept;
+
+    /// Offer an actual coherent/idle command poll witness; busy/racing reads cannot qualify request coverage.
+    virtual void command_poll( bool         coherent /**< [in] Existing command metadata read was coherent. */,
+                               std::int64_t nowNs /**< [in] Actual post-read time. */ ) noexcept;
 
     /// Offer an actual local request-sampling opportunity; no missed opportunities are synthesized.
     virtual void tick( std::int64_t nowNs /**< [in] Actual observer MONOTONIC time. */ ) noexcept;

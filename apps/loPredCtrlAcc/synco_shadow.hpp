@@ -21,8 +21,9 @@ class SyncoShadowPlans
     std::size_t        m_elements{ 0 }; ///< Complete DM image extent.
     unsigned           m_frames{ 0 };   ///< Prepared WFS command frames, each with four distinct slots.
     std::int64_t       m_epoch{ 0 }, m_generation{ 0 }, m_grid{ -1 },
-        m_ready{ -1 };     ///< Exact scheduler and preparation epoch.
-    bool m_valid{ false }; ///< False on missing inputs, changed schedule or nonfinite plans.
+        m_ready{ -1 };         ///< Exact scheduler and preparation epoch.
+    bool     m_valid{ false }; ///< False on missing inputs, changed schedule or nonfinite plans.
+    unsigned m_slots{ 0 };     ///< Number of rendered consecutive targets; one for an ADC-driven payload.
 
   public:
     /// Allocate fixed payload storage outside the producer callback.
@@ -44,6 +45,13 @@ class SyncoShadowPlans
 
     /// Inhibit every old payload after input loss, mode changes or scheduler reset.
     void invalidate();
+
+    /// Render only one actual advertised opportunity, using caller-owned modal values without allocation.
+    bool prepare_slot( std::span<const float>             modal /**< [in] Next modal candidate. */,
+                       const Matrix                      &shapes /**< [in] Calibrated complete image shapes. */,
+                       const MagAOX::app::synco::Request &request /**< [in] Exact existing scheduler request. */,
+                       const MagAOX::app::synco::Record  &schedule /**< [in] Coherent scheduler record. */,
+                       std::int64_t                       nowNs /**< [in] Actual completion epoch. */ );
 };
 
 /// Private prepared-payload cache shared by numerical preparation and the observation-only callback.
@@ -81,6 +89,15 @@ class SyncoShadowProducer
                   std::int64_t                      gridNs /**< [in] Reviewed first command target. */,
                   std::int64_t                      nowNs /**< [in] Actual preparation time. */,
                   std::int64_t originNs = -1 /**< [in] Actual source decision time; default uses preparation time. */ );
+
+    /// Prepare one actual Request on the fast owner; mutually exclusive with numerical full-plan preparation.
+    bool prepare_slot( ShadowMode                         mode /**< [in] Independent model. */,
+                       std::span<const float>             modal /**< [in] Finite next modal values. */,
+                       const Matrix                      &shapes /**< [in] Complete image calibration. */,
+                       const MagAOX::app::synco::Request &request /**< [in] Exact scheduler opportunity. */,
+                       const MagAOX::app::synco::Record  &schedule /**< [in] Original schedule. */,
+                       std::int64_t                       nowNs /**< [in] Actual render start. */,
+                       std::int64_t                       originNs /**< [in] Actual input decision. */ );
 
     /// Set diagnostic selection and readiness without granting physical output permission.
     void models( ShadowMode requested /**< [in] Requested mode. */,
