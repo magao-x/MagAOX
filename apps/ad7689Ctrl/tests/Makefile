@@ -14,7 +14,7 @@ $(BUILD_DIR):
 $(BUILD_DIR)/AD7689_test: AD7689_test.cpp ../dependencies/AD7689.h ../dependencies/AD7689.cpp stubs/gpiod.h stubs/linux/spi/spidev.h ../../../tests/testMain.cpp | $(BUILD_DIR)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) AD7689_test.cpp ../../../tests/testMain.cpp $(LDFLAGS) -o $@
 
-$(BUILD_DIR)/ad7689Sync_test: ad7689Sync_test.cpp ../ad7689Sync.hpp ../../../tests/testMain.cpp | $(BUILD_DIR)
+$(BUILD_DIR)/ad7689Sync_test: ad7689Sync_test.cpp ../ad7689Sync.hpp ../ad7689WfsClock.hpp ../../../tests/testMain.cpp | $(BUILD_DIR)
 	$(CXX) $(CXXFLAGS) ad7689Sync_test.cpp ../../../tests/testMain.cpp $(LDFLAGS) -o $@
 
 test: all

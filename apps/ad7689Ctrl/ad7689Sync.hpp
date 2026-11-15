@@ -187,7 +187,7 @@ struct scanReference
 {
     uint64_t m_id{ 0 };                ///< Source cnt0, independent of the output frame sequence.
     uint64_t m_first{ 0 }, m_end{ 0 }; ///< Half-open range of nominal ACC slot indices authorized by this reference.
-    int64_t  m_arrival{ 0 };           ///< Local monotonic semaphore observation [ns].
+    int64_t  m_arrival{ 0 };           ///< Qualified monotonic WFS phase reference [ns]; fitted in DDSPC mode.
     double   m_period{ 0 };            ///< Estimated WFS period at this reference [ns].
     double   m_target{ 0 };            ///< DDSPC model plus user offset, without feedback [ns].
     double   m_command{ 0 };           ///< Requested delay including the existing controller correction [ns].
@@ -229,7 +229,7 @@ struct continuousSchedule
 
     /// Authorize N more slots and update the phase target without moving the pending deadline.
     bool reference( uint64_t id /**< [in] unique source counter */,
-                    int64_t  arrival /**< [in] monotonic WFS arrival [ns] */,
+                    int64_t  arrival /**< [in] qualified monotonic WFS phase reference [ns] */,
                     double   period /**< [in] estimated WFS period [ns] */,
                     double   fps /**< [in] independent requested ACC rate [Hz] */,
                     double   target /**< [in] DDSPC model plus user offset [ns] */,

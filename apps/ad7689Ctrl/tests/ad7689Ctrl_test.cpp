@@ -232,6 +232,9 @@ class ad7689Ctrl_test : public ad7689Ctrl
     void setupSync( double adcFps /**< [in] requested ADC scan rate */,
                     double wfsFps /**< [in] optional source hint */ );
 
+    /// Prequalify a deterministic two-point clock for existing DDSPC regression fixtures.
+    void enableDdspc( uint64_t firstId = 1 /**< [in] first externally supplied source counter */ );
+
     /// Post synthetic source progress at a precise monotonic reference time.
     void postReference( uint64_t delta /**< [in] source counter advance */,
                         int64_t  period /**< [in] source period [ns] */,
@@ -316,6 +319,15 @@ void ad7689Ctrl_test::setupSync( double adcFps, double wfsFps )
     stubState().m_channelValues = { 65535, 4096 };
     REQUIRE( requestAcquisition( adcFps, 2 ) == 0 );
     applyControls( true );
+}
+
+void ad7689Ctrl_test::enableDdspc( uint64_t firstId )
+{
+    m_requestedDdspc.m_enabled = true;
+    applyControls();
+    m_wfsClock.m_minEvents = 2;
+    const int64_t period   = static_cast<int64_t>( 1e9 / m_wfs_fps );
+    REQUIRE_FALSE( m_wfsClock.observe( firstId - 1, m_fakeNow_ns - period ) );
 }
 
 void ad7689Ctrl_test::postReference( uint64_t delta, int64_t period, unsigned wakes )
@@ -2515,11 +2527,11 @@ TEST_CASE( "ad7689Ctrl DDSPC continuous acquisition across WFS boundaries", "[ad
     resetStubState();
     ad7689Ctrl_test app;
     app.setupSync( 8000, 2000 );
-    app.m_clockStep_ns             = 0;
-    app.m_requestedDdspc.m_enabled = true;
-    const int64_t epoch            = app.m_fakeNow_ns;
-    int64_t       nextReference    = epoch + 500000;
-    app.m_beforeWait               = [&]( int64_t until )
+    app.m_clockStep_ns = 0;
+    app.enableDdspc();
+    const int64_t epoch         = app.m_fakeNow_ns;
+    int64_t       nextReference = epoch + 500000;
+    app.m_beforeWait            = [&]( int64_t until )
     {
         if( nextReference <= until )
         {
@@ -2580,11 +2592,13 @@ TEST_CASE( "ad7689Ctrl DDSPC cadence change and effective rate", "[ad7689Ctrl][d
     // clang-format on
     ad7689Ctrl_test app;
     app.setupSync( 8000, 2000 );
-    app.m_clockStep_ns             = 0;
-    app.m_requestedDdspc.m_enabled = true;
+    app.m_clockStep_ns = 0;
+    app.enableDdspc();
     app.postReference( 1, 500000 );
     REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+    app.postReference( 1, 1000000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     app.postReference( 1, 1000000 );
     REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     REQUIRE( app.m_ddspcTarget_ns == 550000 );
@@ -2595,8 +2609,12 @@ TEST_CASE( "ad7689Ctrl DDSPC cadence change and effective rate", "[ad7689Ctrl][d
     REQUIRE( app.fps() == 8000 );
     app.postReference( 1, 555556 );
     REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    app.postReference( 1, 555556 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     REQUIRE( app.m_syncSnapshot[0] == 4 );
     REQUIRE( app.m_syncSnapshot[1] == Approx( 7200 ).epsilon( 1e-5 ) );
+    app.postReference( 1, 20000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     app.postReference( 1, 20000 );
     REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     REQUIRE_FALSE( app.m_ddspcSchedule.m_active );
@@ -2616,8 +2634,8 @@ TEST_CASE( "ad7689Ctrl DDSPC source loss duplicate and recovery", "[ad7689Ctrl][
     // clang-format on
     ad7689Ctrl_test app;
     app.setupSync( 8000, 2000 );
-    app.m_clockStep_ns             = 0;
-    app.m_requestedDdspc.m_enabled = true;
+    app.m_clockStep_ns = 0;
+    app.enableDdspc();
     app.postReference( 1, 500000 );
     REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     const int64_t frozen = app.m_ddspcSchedule.deadline();
@@ -2661,9 +2679,9 @@ TEST_CASE( "ad7689Ctrl DDSPC runtime controls and disabled compatibility", "[ad7
     // clang-format on
     ad7689Ctrl_test app;
     app.setupSync( 8000, 2000 );
-    app.m_clockStep_ns             = 0;
-    app.m_requestedDdspc.m_enabled = true;
-    app.m_indiP_ddspcSettings      = pcf::IndiProperty( pcf::IndiProperty::Number );
+    app.m_clockStep_ns = 0;
+    app.enableDdspc();
+    app.m_indiP_ddspcSettings = pcf::IndiProperty( pcf::IndiProperty::Number );
     app.m_indiP_ddspcSettings.setDevice( app.configName() );
     app.m_indiP_ddspcSettings.setName( "ddspcSettings" );
     app.m_indiP_ddspcSettings.add( pcf::IndiElement( "enabled" ) );
@@ -2759,9 +2777,9 @@ TEST_CASE( "ad7689Ctrl DDSPC feedback and signed phase offset", "[ad7689Ctrl][dd
     // clang-format on
     ad7689Ctrl_test app;
     app.setupSync( 8000, 2000 );
-    app.m_clockStep_ns             = 0;
-    app.m_requestedDdspc.m_enabled = true;
-    app.m_delayCapped              = 1;
+    app.m_clockStep_ns = 0;
+    app.enableDdspc();
+    app.m_delayCapped = 1;
     app.postReference( 1, 500000 );
     REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     REQUIRE( app.m_delayCapped == 0 );
@@ -2800,11 +2818,14 @@ TEST_CASE( "ad7689Ctrl DDSPC source identity and restart", "[ad7689Ctrl][ddspc]"
     // clang-format on
     ad7689Ctrl_test app;
     app.setupSync( 8000, 2000 );
-    app.m_clockStep_ns             = 0;
-    app.m_requestedDdspc.m_enabled = true;
+    app.m_clockStep_ns = 0;
+    app.enableDdspc( 10 );
     app.postReference( 10, 500000 );
     REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     app.m_testMetadata.cnt0 = 0;
+    app.postReference( 1, 500000 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+    app.m_nextSyncProbe_ns = std::numeric_limits<int64_t>::max(); // Raw fixture has no filesystem source.
     app.postReference( 1, 500000 );
     REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
     REQUIRE( app.m_ddspcSchedule.m_epochs == 2 );
@@ -2832,8 +2853,8 @@ TEST_CASE( "ad7689Ctrl DDSPC timing INDI serialization", "[ad7689Ctrl][ddspc]" )
     resetStubState();
     ad7689Ctrl_test app;
     app.setupSync( 8000, 2000 );
-    app.m_clockStep_ns             = 0;
-    app.m_requestedDdspc.m_enabled = true;
+    app.m_clockStep_ns = 0;
+    app.enableDdspc();
     app.setupTimingDiagnosticsProperty();
     app.m_indiP_ddspcTiming = pcf::IndiProperty( pcf::IndiProperty::Number );
     app.m_indiP_ddspcTiming.setDevice( app.configName() );
@@ -2870,6 +2891,28 @@ TEST_CASE( "ad7689Ctrl DDSPC timing INDI serialization", "[ad7689Ctrl][ddspc]" )
         app.m_indiP_ddspcSettings.add( pcf::IndiElement( name ) );
     }
 
+    app.m_indiP_wfsClock = pcf::IndiProperty( pcf::IndiProperty::Number );
+    app.m_indiP_wfsClock.setDevice( app.configName() );
+    app.m_indiP_wfsClock.setName( "wfsClock" );
+
+    for( const char *name : { "valid",
+                              "samples",
+                              "history_s",
+                              "fps",
+                              "period_us",
+                              "phase_mono_us",
+                              "phase_frame_id",
+                              "jitter_rms_us",
+                              "arrival_error_us",
+                              "phase_drift_us",
+                              "cadence_events",
+                              "rejected_events",
+                              "fit_resets",
+                              "applied_phase_correction_us" } )
+    {
+        app.m_indiP_wfsClock.add( pcf::IndiElement( name ) );
+    }
+
     stubState().m_duringRead = [&]() { app.m_fakeNow_ns += 15000; };
     app.postReference( 1, 500000 );
     REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
@@ -2885,11 +2928,190 @@ TEST_CASE( "ad7689Ctrl DDSPC timing INDI serialization", "[ad7689Ctrl][ddspc]" )
     REQUIRE( app.m_indiP_ddspcTiming["reference_slot"].get<double>() == 0 );
     REQUIRE( app.m_indiP_ddspcTiming["frame_seq"].get<double>() == 1 );
     REQUIRE( app.m_indiP_ddspcSettings["enabled"].get<double>() == 1 );
+    REQUIRE( app.m_indiP_wfsClock["valid"].get<double>() == 1 );
+    REQUIRE( app.m_indiP_wfsClock["period_us"].get<double>() == 500 );
+    REQUIRE( app.m_indiP_wfsClock["fps"].get<double>() == 2000 );
+    REQUIRE( app.m_indiP_wfsClock["jitter_rms_us"].get<double>() == 0 );
+    REQUIRE( app.m_indiP_wfsClock["applied_phase_correction_us"].get<double>() == 0 );
     const auto &messages = static_cast<captureDriver *>( app.m_indiDriver )->m_messages;
     REQUIRE( std::any_of( messages.begin(),
                           messages.end(),
                           []( const std::string &xml ) { return xml.find( "ddspcTiming" ) != std::string::npos; } ) );
     resetStubState();
+}
+
+/** The actual app clock rejects raw semaphore jitter while the unchanged controller and ADC path remain active.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl averaged WFS phase isolates ADC cadence from semaphore jitter", "[ad7689Ctrl][wfs-clock]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::processSyncReference;
+    MagAOX::app::ad7689Ctrl::acquireDdspcAndCheckValid;
+    MagAOX::app::ad7689Ctrl::frameGrabberPostPublish;
+#endif
+    // clang-format on
+    resetStubState();
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.m_clockStep_ns             = 0;
+    app.m_fakeNow_ns               = 1000000000000LL;
+    app.m_requestedDdspc.m_enabled = true;
+    app.applyControls();
+    uint32_t   random = 42;
+    const auto jitter = [&]() -> int64_t
+    {
+        random = random * 1664525U + 1013904223U;
+        return static_cast<int64_t>( random % 20001 ) - 10000;
+    };
+    const int64_t origin = app.m_fakeNow_ns - 10000000000LL;
+
+    for( uint64_t id = 1; id <= 20001; ++id )
+    {
+        app.m_wfsClock.observe( id, origin + ( id - 1 ) * 500000 + jitter() );
+    }
+
+    REQUIRE( app.m_wfsClock.valid() );
+    uint64_t nextId      = 20002;
+    int64_t  nextArrival = origin + ( nextId - 1 ) * 500000 + jitter();
+    app.m_beforeWait     = [&]( int64_t until )
+    {
+        if( nextArrival <= until )
+        {
+            app.m_fakeNow_ns        = nextArrival;
+            app.m_testMetadata.cnt0 = nextId;
+            // Deliberately incorrect producer period: only local monotonic arrivals may steer DDSPC.
+            app.m_testMetadata.atime = timespec{ 1700000000 + static_cast<time_t>( nextId / 1000 ),
+                                                 static_cast<long>( ( nextId % 1000 ) * 1000000 ) };
+            REQUIRE( sem_post( &app.m_testSemaphore ) == 0 );
+            ++nextId;
+            nextArrival = origin + ( nextId - 1 ) * 500000 + jitter();
+        }
+    };
+    stubState().m_timestamp     = [&]( timespec &stamp ) { app.getRealtime( stamp ); };
+    stubState().m_duringRead    = [&]() { app.m_fakeNow_ns += 15000; };
+    int64_t previous            = 0;
+    double  maximumSpacingError = 0;
+    bool    valid               = true;
+
+    for( uint64_t i = 0; i < 20000; ++i )
+    {
+        int result;
+
+        do
+        {
+            result = app.ad7689Ctrl::acquireAndCheckValid();
+        } while( result == 1 && !app.m_reconfig && !app.m_shutdown );
+
+        REQUIRE( result == 0 );
+        const int64_t due = app.m_ddspcSlot.m_deadline;
+
+        if( previous )
+        {
+            maximumSpacingError =
+                std::max( maximumSpacingError, std::abs( static_cast<double>( due - previous ) - 125000 ) );
+        }
+
+        previous = due;
+        valid    = valid && app.m_ddspcSlot.m_reference.m_id == 20002 + i / 4 && app.m_ddspcSlot.m_slot == i % 4;
+        valid    = valid && app.m_ddspcStart_ns == due && app.m_ddspcCompletion_ns == due + 15000;
+        std::array<uint16_t, 2> frame{};
+        REQUIRE( app.loadImageIntoStream( frame.data() ) == 0 );
+        REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    }
+
+    REQUIRE( valid );
+    REQUIRE( maximumSpacingError <= 50 );
+    REQUIRE( app.m_wfsClock.m_period == Approx( 500000 ).margin( 0.1 ) );
+    REQUIRE( app.m_wfsClock.m_jitter > 5000 );
+    REQUIRE( app.m_wfsClock.m_jitter < 6500 );
+    REQUIRE( app.m_wfsClock.span() > 9.999 );
+    REQUIRE( app.m_ddspcSchedule.m_epochs == 1 );
+    REQUIRE( app.m_ddspcSchedule.m_skipped == 0 );
+    REQUIRE( app.m_localFrameSeq == 20000 );
+    REQUIRE( app.m_lateScans == 0 );
+    REQUIRE( app.m_cadenceResets == 0 );
+    resetStubState();
+}
+
+/** Startup and persistent frequency changes wait for the configured number of consistent monotonic observations.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl qualifies rolling clocks before starting and after cadence changes", "[ad7689Ctrl][wfs-clock]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::processSyncReference;
+    MagAOX::app::ad7689Ctrl::resetSyncSchedule;
+#endif
+    // clang-format on
+    ad7689Ctrl_test app;
+    app.setupSync( 8000, 2000 );
+    app.m_clockStep_ns             = 0;
+    app.m_requestedDdspc.m_enabled = true;
+    app.m_wfsClock.m_minEvents     = 8;
+
+    for( unsigned i = 0; i < 8; ++i )
+    {
+        app.postReference( 1, 500000 );
+        REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+        REQUIRE( app.m_ddspcSchedule.m_active == ( i == 7 ) );
+    }
+
+    REQUIRE( app.m_ddspcTarget_ns == 300000 );
+    REQUIRE( app.m_ddspcSchedule.m_count == 4 );
+    REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 0 );
+
+    for( unsigned i = 0; i < 8; ++i )
+    {
+        app.postReference( 1, 1000000 );
+        REQUIRE( app.ad7689Ctrl::acquireAndCheckValid() == 1 );
+
+        if( i >= 2 && i < 7 )
+        {
+            REQUIRE_FALSE( app.m_ddspcSchedule.m_active );
+        }
+    }
+
+    REQUIRE( app.m_wfsClock.valid() );
+    REQUIRE( app.m_wfsClock.m_period == 1000000 );
+    REQUIRE( app.m_ddspcTarget_ns == 550000 );
+    REQUIRE( app.m_ddspcSchedule.m_count == 8 );
+    REQUIRE( app.m_ddspcSchedule.m_interval == 125000 );
+    REQUIRE( app.m_wfsClock.m_history.size() == 8 );
+    REQUIRE( app.m_cadenceResets == 1 );
+    REQUIRE( app.m_requestedFps == 8000 );
+}
+
+/** Fit qualification and change gates reject impossible/nonfinite startup settings without touching hardware.
+ * \ingroup ad7689Ctrl_unit_test
+ */
+TEST_CASE( "ad7689Ctrl rolling WFS configuration validation", "[ad7689Ctrl][wfs-clock]" )
+{
+    // clang-format off
+#ifdef AD7689CTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ad7689Ctrl::loadConfigImpl;
+#endif
+    // clang-format on
+    for( const std::string bad : { "1", "1.5", "4097", "nan" } )
+    {
+        ad7689Ctrl_test app;
+        app.setupConfig();
+        mx::app::writeConfigFile( "/tmp/ad7689-rolling-invalid.conf", { "synchro" }, { "wfsFitMinEvents" }, { bad } );
+        app.config.readConfig( "/tmp/ad7689-rolling-invalid.conf" );
+        REQUIRE( app.loadConfigImpl( app.config ) == -1 );
+    }
+
+    for( const std::string bad : { "0", "0.6", "nan" } )
+    {
+        ad7689Ctrl_test app;
+        app.setupConfig();
+        mx::app::writeConfigFile(
+            "/tmp/ad7689-rolling-invalid.conf", { "synchro" }, { "wfsCadenceTolerance" }, { bad } );
+        app.config.readConfig( "/tmp/ad7689-rolling-invalid.conf" );
+        REQUIRE( app.loadConfigImpl( app.config ) == -1 );
+    }
 }
 
 /** Actual frameGrabber publication follows the deterministic 300-us/8-kHz lattice through 2-kHz WFS wakes.
@@ -2946,10 +3168,11 @@ TEST_CASE( "ad7689Ctrl DDSPC native publication across WFS boundaries", "[.][ad7
     stubState().m_duringRead    = [&]()
     {
         ++reads;
-        const int64_t expected = epoch + 300000 + ( reads - 1 ) * 125000;
+        const int64_t expected =
+            epoch + ( app.m_wfsClock.m_minEvents - 1 ) * 500000LL + 300000 + ( reads - 1 ) * 125000;
         CHECK( app.m_ddspcSlot.m_deadline == expected );
         CHECK( app.m_ddspcStart_ns == expected );
-        CHECK( app.m_ddspcSlot.m_reference.m_id == 1 + ( reads - 1 ) / 4 );
+        CHECK( app.m_ddspcSlot.m_reference.m_id == app.m_wfsClock.m_minEvents + ( reads - 1 ) / 4 );
         CHECK( app.m_ddspcSlot.m_slot == ( reads - 1 ) % 4 );
         CHECK( app.m_ddspcSchedule.m_skipped == 0 );
 

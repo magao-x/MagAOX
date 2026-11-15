@@ -11,6 +11,7 @@
 #include "../../magaox_git_version.h"
 #include "dependencies/AD7689.h"
 #include "ad7689Sync.hpp"
+#include "ad7689WfsClock.hpp"
 #include <array>
 #include <atomic>
 #include <mutex>
@@ -166,10 +167,9 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
 
     timespec m_lastAtime{}; ///< The previous semaphore-arrival timestamp used for period estimation.
 
-    double m_avgSemaphorePeriod_ns{ 0.0 }; ///< Exponential moving-average estimate of semaphore period in nanoseconds.
+    double m_avgSemaphorePeriod_ns{ 0.0 }; ///< Selected WFS period [ns]: rolling DDSPC fit or legacy semaphore EMA.
 
-    double m_wfsPeriodMeasured_ns{
-        0.0 }; ///< Measured semaphore period used as the synchronized delay-model WFS period.
+    double m_wfsPeriodMeasured_ns{ 0.0 }; ///< Selected measured WFS period used by the active phase model [ns].
 
     timespec m_lastProducerAtime{}; ///< Previous producer atime from the synchronization stream metadata.
 
@@ -224,7 +224,8 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
 
     bool m_firstNonDelayService{ true }; ///< Tracks first-sample initialization for non-delay service-time averaging.
 
-    double m_delayPhaseError_ns{ 0.0 }; ///< Wrapped phase error between applied and modeled synchronized delay.
+    double m_delayPhaseError_ns{
+        0.0 }; ///< Selected-mode phase residual: legacy wrapped delay or DDSPC clock slew [ns].
 
     double m_delayLock{ 0.0 }; ///< Delay-lock state exported to diagnostics as 1.0 (locked) or 0.0 (unlocked).
 
@@ -307,8 +308,11 @@ class ad7689Ctrl : public MagAOXApp<true>, public dev::frameGrabber<ad7689Ctrl>,
     ad7689CtrlDetail::ddspcSettings
         m_requestedDdspc; ///< Complete validated runtime request, protected by m_controlMutex.
     ad7689CtrlDetail::continuousSchedule m_ddspcSchedule; ///< One absolute clock with finite WFS slot authorization.
-    ad7689CtrlDetail::scanSlot           m_ddspcSlot;     ///< Last consumed slot and its original WFS reference.
-    double  m_ddspcTarget_ns{ 0 };                        ///< Unwrapped DDSPC formula, before user offset and feedback.
+    ad7689CtrlDetail::rollingWfsClock m_wfsClock; ///< Ten-second monotonic phase/cadence fit; acquisition-owner only.
+    std::array<double, 14>     m_wfsClockSnapshot{}; ///< Rolling-clock diagnostics transferred under m_controlMutex.
+    pcf::IndiProperty          m_indiP_wfsClock; ///< Fitted phase, cadence, jitter and change-acquisition diagnostics.
+    ad7689CtrlDetail::scanSlot m_ddspcSlot;      ///< Last consumed slot and its original WFS reference.
+    double                     m_ddspcTarget_ns{ 0 }; ///< Unwrapped DDSPC formula, before user offset and feedback.
     double  m_ddspcReadError_ns{ 0 };         ///< Smoothed first-slot actual delay error for the existing controller.
     int64_t m_ddspcStart_ns{ 0 };             ///< Actual software scan invocation on the monotonic clock.
     int64_t m_ddspcCompletion_ns{ 0 };        ///< Complete scan returned; data not yet published [monotonic ns].
@@ -662,6 +666,7 @@ inline bool ad7689Ctrl::applyControls( bool reconfigure )
             {
                 m_syncSchedule.cancel();
                 m_ddspcSchedule.cancel();
+                m_wfsClock.reset();
             }
         }
 
@@ -1101,6 +1106,25 @@ inline void ad7689Ctrl::setupConfig()
                 "double",
                 "Maximum WFS silence before rechecking the source [s]." );
 
+    config.add( "synchro.wfsFitMinEvents",
+                "",
+                "synchro.wfsFitMinEvents",
+                argType::Required,
+                "synchro",
+                "wfsFitMinEvents",
+                false,
+                "unsigned",
+                "Consistent WFS events required to qualify a rolling clock; default 16, range 2..4096." );
+    config.add( "synchro.wfsCadenceTolerance",
+                "",
+                "synchro.wfsCadenceTolerance",
+                argType::Required,
+                "synchro",
+                "wfsCadenceTolerance",
+                false,
+                "double",
+                "Relative persistent cadence-change gate, augmented by jitter; default 0.1, range 0.01..0.5." );
+
     config.add( "synchro.ddspcDelayEnabled",
                 "",
                 "synchro.ddspcDelayEnabled",
@@ -1302,6 +1326,17 @@ inline int ad7689Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_synchroShmimName, "synchro.shmimName" );
     _config( m_referenceFps, "synchro.referenceFps" );
     _config( m_syncTimeout, "synchro.timeout" );
+    double fitEvents = m_wfsClock.m_minEvents;
+    _config( fitEvents, "synchro.wfsFitMinEvents" );
+    _config( m_wfsClock.m_tolerance, "synchro.wfsCadenceTolerance" );
+
+    if( !std::isfinite( fitEvents ) || fitEvents < 2 || fitEvents > 4096 || std::floor( fitEvents ) != fitEvents ||
+        !std::isfinite( m_wfsClock.m_tolerance ) || m_wfsClock.m_tolerance < 0.01 || m_wfsClock.m_tolerance > 0.5 )
+    {
+        return log<software_error, -1>( { "Invalid rolling WFS clock qualification settings" } );
+    }
+
+    m_wfsClock.m_minEvents = static_cast<unsigned>( fitEvents );
     _config( m_ddspc.m_enabled, "synchro.ddspcDelayEnabled" );
     _config( m_ddspc.m_process, "synchro.wfsProcessTime_ns" );
     _config( m_ddspc.m_latency, "synchro.accLatency_ns" );
@@ -1343,6 +1378,11 @@ inline int ad7689Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
 
     if( m_ddspc.m_enabled && m_referenceFps > 0 )
     {
+        if( m_wfsClock.m_minEvents - 1 > 10 * m_referenceFps )
+        {
+            return log<software_error, -1>( { "Rolling WFS qualification count cannot fit the ten-second history" } );
+        }
+
         const double delay = m_ddspc.delay( 1e9 / m_referenceFps, 1000.0 * m_synchroPostDelay );
 
         if( !std::isfinite( delay ) || delay < 0 || delay > 1e9 )
@@ -1663,6 +1703,26 @@ inline int ad7689Ctrl::appStartup()
         m_indiP_syncTiming.add( pcf::IndiElement( name ) );
     }
 
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_wfsClock, "wfsClock", "Rolling WFS clock", "Diagnostics" );
+
+    for( const char *name : { "valid",
+                              "samples",
+                              "history_s",
+                              "fps",
+                              "period_us",
+                              "phase_mono_us",
+                              "phase_frame_id",
+                              "jitter_rms_us",
+                              "arrival_error_us",
+                              "phase_drift_us",
+                              "cadence_events",
+                              "rejected_events",
+                              "fit_resets",
+                              "applied_phase_correction_us" } )
+    {
+        m_indiP_wfsClock.add( pcf::IndiElement( name ) );
+    }
+
     CREATE_REG_INDI_RO_NUMBER( m_indiP_ddspcTiming, "ddspcTiming", "DDSPC acquisition timing", "Diagnostics" );
 
     for( const char *name : { "enabled",
@@ -1846,37 +1906,51 @@ inline void ad7689Ctrl::captureTimingDiagnostics()
             static_cast<double>( m_recoveries ),
             m_channelReadoutTime_ns * 1e-3,
             static_cast<double>( m_usefulConversions ) };
-        const bool ddspc = synchroMode && m_ddspc.m_enabled;
-        m_syncSnapshot   = { static_cast<double>( ddspc ? m_ddspcSchedule.m_count : m_syncSchedule.m_count ),
-                             ddspc ? m_ddspcSchedule.fps() : m_syncSchedule.fps(),
-                             ( ddspc ? m_ddspcSchedule.m_interval : m_syncSchedule.m_interval ) * 1e-3,
-                             m_wfsPeriodMeasured_ns * 1e-3,
-                             ( ddspc ? m_synchroDelay : m_syncSchedule.m_phase ) * 1e-3,
-                             static_cast<double>( m_syncSchedule.m_skipped + m_ddspcSchedule.m_skipped ),
-                             static_cast<double>( m_lateScans ),
-                             m_maxLateness_ns * 1e-3,
-                             static_cast<double>( m_cadenceResets ),
-                             static_cast<double>( m_syncDuplicates ),
-                             static_cast<double>( m_coalescedWakes ) };
-        const auto &slot = m_ddspcSlot;
-        m_ddspcSnapshot  = { ddspc ? 1.0 : 0.0,
-                             ddspc && m_ddspcSchedule.m_active ? 1.0 : 0.0,
-                             m_ddspcTarget_ns * 1e-3,
-                             m_delayApplied_ns * 1e-3,
-                             ( m_synchroDelay - m_synchroDelayTarget ) * 1e-3,
-                             ( m_ddspcSchedule.m_applied - m_ddspcSchedule.m_target ) * 1e-3,
-                             slot.m_deadline * 1e-3,
-                             m_ddspcStart_ns * 1e-3,
-                             m_ddspcCompletion_ns * 1e-3,
-                             m_ddspcPublished_ns * 1e-3,
-                             slot.m_reference.m_arrival * 1e-3,
-                             static_cast<double>( slot.m_reference.m_id ),
-                             static_cast<double>( slot.m_slot ),
-                             static_cast<double>( slot.m_index ),
-                             static_cast<double>( m_localFrameSeq ),
-                             m_ddspcStart_ns ? ( m_ddspcStart_ns - slot.m_deadline ) * 1e-3 : 0.0,
-                             m_ddspcPublished_ns ? ( m_ddspcPublished_ns - m_ddspcStart_ns ) * 1e-3 : 0.0,
-                             static_cast<double>( m_ddspcSchedule.m_epochs ) };
+        const bool ddspc   = synchroMode && m_ddspc.m_enabled;
+        m_syncSnapshot     = { static_cast<double>( ddspc ? m_ddspcSchedule.m_count : m_syncSchedule.m_count ),
+                               ddspc ? m_ddspcSchedule.fps() : m_syncSchedule.fps(),
+                               ( ddspc ? m_ddspcSchedule.m_interval : m_syncSchedule.m_interval ) * 1e-3,
+                               m_wfsPeriodMeasured_ns * 1e-3,
+                               ( ddspc ? m_synchroDelay : m_syncSchedule.m_phase ) * 1e-3,
+                               static_cast<double>( m_syncSchedule.m_skipped + m_ddspcSchedule.m_skipped ),
+                               static_cast<double>( m_lateScans ),
+                               m_maxLateness_ns * 1e-3,
+                               static_cast<double>( m_cadenceResets ),
+                               static_cast<double>( m_syncDuplicates ),
+                               static_cast<double>( m_coalescedWakes ) };
+        m_wfsClockSnapshot = { m_ddspc.m_enabled && m_wfsClock.valid() ? 1.0 : 0.0,
+                               static_cast<double>( m_wfsClock.m_count ),
+                               m_wfsClock.span(),
+                               m_wfsClock.m_period > 0 ? 1e9 / m_wfsClock.m_period : 0.0,
+                               m_wfsClock.m_period * 1e-3,
+                               m_wfsClock.m_ready ? m_wfsClock.reference( m_wfsClock.m_lastId ) * 1e-3 : 0.0,
+                               static_cast<double>( m_wfsClock.m_lastId ),
+                               m_wfsClock.m_jitter * 1e-3,
+                               m_wfsClock.m_arrivalError * 1e-3,
+                               m_wfsClock.m_drift * 1e-3,
+                               static_cast<double>( m_wfsClock.m_candidate.size() ),
+                               static_cast<double>( m_wfsClock.m_rejected ),
+                               static_cast<double>( m_wfsClock.m_resets ),
+                               m_ddspcSchedule.m_applied * 1e-3 };
+        const auto &slot   = m_ddspcSlot;
+        m_ddspcSnapshot    = { ddspc ? 1.0 : 0.0,
+                               ddspc && m_ddspcSchedule.m_active ? 1.0 : 0.0,
+                               m_ddspcTarget_ns * 1e-3,
+                               m_delayApplied_ns * 1e-3,
+                               ( m_synchroDelay - m_synchroDelayTarget ) * 1e-3,
+                               ( m_ddspcSchedule.m_applied - m_ddspcSchedule.m_target ) * 1e-3,
+                               slot.m_deadline * 1e-3,
+                               m_ddspcStart_ns * 1e-3,
+                               m_ddspcCompletion_ns * 1e-3,
+                               m_ddspcPublished_ns * 1e-3,
+                               slot.m_reference.m_arrival * 1e-3,
+                               static_cast<double>( slot.m_reference.m_id ),
+                               static_cast<double>( slot.m_slot ),
+                               static_cast<double>( slot.m_index ),
+                               static_cast<double>( m_localFrameSeq ),
+                               m_ddspcStart_ns ? ( m_ddspcStart_ns - slot.m_deadline ) * 1e-3 : 0.0,
+                               m_ddspcPublished_ns ? ( m_ddspcPublished_ns - m_ddspcStart_ns ) * 1e-3 : 0.0,
+                               static_cast<double>( m_ddspcSchedule.m_epochs ) };
     }
 }
 
@@ -1886,6 +1960,7 @@ inline void ad7689Ctrl::updateTimingDiagnosticsIndi()
     std::array<double, 9>           health;
     std::array<double, 11>          sync;
     std::array<double, 18>          ddspc;
+    std::array<double, 14>          wfs;
     ad7689CtrlDetail::ddspcSettings settings;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_controlMutex );
@@ -1893,6 +1968,7 @@ inline void ad7689Ctrl::updateTimingDiagnosticsIndi()
         health   = m_healthSnapshot;
         sync     = m_syncSnapshot;
         ddspc    = m_ddspcSnapshot;
+        wfs      = m_wfsClockSnapshot;
         settings = m_ddspc;
     }
 
@@ -1958,6 +2034,39 @@ inline void ad7689Ctrl::updateTimingDiagnosticsIndi()
               "coalesced_wakes" },
             { sync[0], sync[1], sync[2], sync[3], sync[4], sync[5], sync[6], sync[7], sync[8], sync[9], sync[10] } );
     }
+    if( m_indiP_wfsClock.find( "valid" ) )
+    {
+        updatesIfChanged<double>( m_indiP_wfsClock,
+                                  { "valid",
+                                    "samples",
+                                    "history_s",
+                                    "fps",
+                                    "period_us",
+                                    "phase_mono_us",
+                                    "phase_frame_id",
+                                    "jitter_rms_us",
+                                    "arrival_error_us",
+                                    "phase_drift_us",
+                                    "cadence_events",
+                                    "rejected_events",
+                                    "fit_resets",
+                                    "applied_phase_correction_us" },
+                                  { wfs[0],
+                                    wfs[1],
+                                    wfs[2],
+                                    wfs[3],
+                                    wfs[4],
+                                    wfs[5],
+                                    wfs[6],
+                                    wfs[7],
+                                    wfs[8],
+                                    wfs[9],
+                                    wfs[10],
+                                    wfs[11],
+                                    wfs[12],
+                                    wfs[13] } );
+    }
+
     if( m_indiP_ddspcTiming.find( "enabled" ) )
     {
         updatesIfChanged<double>( m_indiP_ddspcTiming,
@@ -2531,6 +2640,7 @@ inline int ad7689Ctrl::waitForSync( int64_t deadline )
 
 inline void ad7689Ctrl::resetSyncSchedule()
 {
+    m_wfsClock.reset();
     m_ddspcSchedule.cancel();
     m_syncSchedule.cancel();
     m_syncSchedule.m_haveSample = false;
@@ -2689,7 +2799,40 @@ inline int ad7689Ctrl::processSyncReference( int64_t arrival )
         return log<software_critical, -1>( { __FILE__, __LINE__, errno, "WFS arrival timestamp" } );
     }
 
-    if( observed > 0 && std::isfinite( observed ) && observed <= 1e9 )
+    int64_t fittedArrival = arrival;
+
+    if( m_ddspc.m_enabled )
+    {
+        const uint64_t resets   = m_wfsClock.m_resets;
+        const bool     accepted = m_wfsClock.observe( producerCnt0, arrival );
+        m_lastAtime             = m_atime;
+        m_lastSyncArrival_ns    = arrival; // Raw observation is used for source liveness only.
+        m_haveSyncArrival       = true;
+        m_firstSemaphore        = false;
+
+        if( !accepted )
+        {
+            if( !m_wfsClock.valid() )
+            {
+                m_ddspcSchedule.cancel();
+                m_firstReadLatency = true;
+            }
+
+            return 1;
+        }
+
+        if( m_haveMeasuredCadence && resets != m_wfsClock.m_resets )
+        {
+            ++m_cadenceResets;
+            m_ddspcSchedule.cancel();
+            m_firstReadLatency = true;
+        }
+
+        m_avgSemaphorePeriod_ns = m_wfsClock.m_period;
+        m_haveMeasuredCadence   = true;
+        fittedArrival           = m_wfsClock.reference( producerCnt0 );
+    }
+    else if( observed > 0 && std::isfinite( observed ) && observed <= 1e9 )
     {
         const bool changed =
             m_haveMeasuredCadence && std::abs( observed - m_avgSemaphorePeriod_ns ) > 0.1 * m_avgSemaphorePeriod_ns;
@@ -2716,7 +2859,7 @@ inline int ad7689Ctrl::processSyncReference( int64_t arrival )
 
         m_haveMeasuredCadence = true;
     }
-    else if( !m_haveMeasuredCadence )
+    else if( !m_ddspc.m_enabled && !m_haveMeasuredCadence )
     {
         m_avgSemaphorePeriod_ns = m_wfs_fps > 0 ? 1e9 / m_wfs_fps : 0;
     }
@@ -2737,7 +2880,7 @@ inline int ad7689Ctrl::processSyncReference( int64_t arrival )
         m_delayCapped = 0; // DDSPC phase is never capped at the end of one WFS period.
 
         if( !m_ddspcSchedule.reference( producerCnt0,
-                                        arrival,
+                                        fittedArrival,
                                         m_wfsPeriodMeasured_ns,
                                         m_fps,
                                         m_synchroDelayTarget,

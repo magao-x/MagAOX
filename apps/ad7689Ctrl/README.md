@@ -189,13 +189,17 @@ increments `adcHealth.overruns`. It does not silently reduce the scan count to f
 Requested ADC rates below WFS cadence likewise round up to one scan per WFS period.
 
 `synchro.referenceFps` is an optional initial WFS-rate hint. At its default zero,
-two unique triggers establish cadence before scans begin. In synchronized mode,
+two unique triggers establish cadence before legacy scans begin. DDSPC mode always
+qualifies its rolling clock using `wfsFitMinEvents` observations, even with a hint.
+In synchronized mode,
 the existing `fps.device/property/element` subscription supplies this WFS hint and
 **does not overwrite the ADC target**; in timer mode its previous ADC-rate behavior
-is retained. Measured triggers supersede the hint. Modest period changes use the
-existing `synchro.alpha` EMA; a change exceeding 10% resets the cadence estimate
-immediately. Producer timestamps estimate cadence when consistent with monotonic
-arrival intervals; counter gaps normalize missing WFS periods. Duplicate IDs do
+is retained. In legacy mode measured triggers supersede the hint, modest changes
+use the existing `synchro.alpha` EMA, and changes over 10% reset cadence immediately.
+Legacy producer timestamps estimate cadence when consistent with monotonic arrival
+intervals; counter gaps normalize missing WFS periods. DDSPC uses only the rolling
+monotonic fit below; producer realtime timestamps and the cadence hint do not steer
+its acquisition phase. Duplicate IDs do
 not re-anchor or create slots, and queued notifications are coalesced and counted.
 
 With `synchro.ddspcDelayEnabled=false` (default), each unique WFS reference arms
@@ -236,8 +240,10 @@ fps=8000
 [synchro]
 shmimName=<RTC exposure-center reference stream>
 referenceFps=2000
-# referenceFps=0 instead learns the period from two unique references.
+# DDSPC always waits for a qualified monotonic fit, regardless of this hint.
 ddspcDelayEnabled=true
+wfsFitMinEvents=16
+wfsCadenceTolerance=0.1
 wfsProcessTime_ns=75000
 accLatency_ns=15000
 ddspcMargin_ns=10000
@@ -258,7 +264,8 @@ still checks the complete configured scan independently; measure publication
 latency and choose a suitable margin before relying on DDSPC availability.
 
 The following **nominal start deadlines** use processing 75 us, ACC latency 15 us,
-and margin 10 us. Times are relative to the initial semaphore:
+and margin 10 us. Times are relative to the fitted reference of the first qualified
+WFS frame; startup qualification precedes acquisition:
 
 | WFS / ACC | Delay | Reference 0 slots | Reference 1 slots | Reference 1 arrives |
 | --- | --- | --- | --- | --- |
@@ -267,7 +274,7 @@ and margin 10 us. Times are relative to the initial semaphore:
 
 One acquisition owner tracks WFS references and serves a single continuous ACC
 clock. Each accepted reference authorizes N further slot indices; bounded metadata
-records retain each slot's original WFS ID, arrival and position, even after newer
+records retain each slot's original WFS ID, fitted phase reference and position, even after newer
 semaphores arrive. These records do not create independent group schedules.
 Normal references preserve the frozen pending deadline and extend authorization,
 so 550/675 us slots survive the 500 us semaphore. No modulo wrapping or end-of-WFS
@@ -285,11 +292,42 @@ uses the slot's original reference, not the most recent WFS wake. Phase adjustme
 can change transition intervals within those limits; steady nominal intervals
 remain uniform. This is software scheduling, not a hard realtime guarantee.
 
-Cadence tracking, metadata consistency checks, duplicate rejection, coalesced wakes,
-producer clock-step rejection, and independent requested ACC FPS remain shared
-with legacy mode. Modest cadence changes update future intervals and phase targets.
-Period steps over 10%, changes of the rounded integer ratio, source counter gaps or
-rollbacks explicitly discard/count pending work and acquire a new clock epoch.
+DDSPC cadence and phase come from a ten-second rolling linear regression of local
+monotonic arrival timestamps against **source frame IDs**. This retains approximately
+20,000 observations at 2 kHz, 10,000 at 1 kHz, or 5,000 at 500 Hz. Timestamp/frame
+origins move with the window; incremental centered residual moments support constant
+time insertion/removal and avoid large absolute timestamps in the regression.
+The fitted phase at the current source ID, never the raw individual arrival, feeds
+both the continuous schedule and its existing delay feedback. Raw arrivals serve
+liveness/outlier detection and diagnostics. No second PLL or competing integrator
+is introduced: the rolling fit supplies low-bandwidth targets to the existing
+bounded future-only correction. The interval remains `fitted_WFS_period/N`, with
+fractional-period accumulation preserved. Its estimate changes gradually as the
+clock drifts; it is not forced to follow +/-10 us source arrival errors.
+
+The window fills progressively. `wfsFitMinEvents` (default 16, range 2..4096)
+consistent unique observations qualify startup; this is about 7.5 ms from first to
+sixteenth observation at 2 kHz, not a ten-second startup wait. Early estimates have
+less noise rejection until the window matures. Choose a count that fits within ten
+seconds at the source rate; known incompatible startup hints are rejected.
+`wfsCadenceTolerance` (default 0.1, range 0.01..0.5) sets the relative phase/cadence
+change gate, augmented by a 20 us noise floor and six times current inlier jitter
+RMS; the candidate interarrival consistency gate has a 40 us floor to cover the
+full difference of successive +/-10 us errors. Ordinary fluctuations remain in the fit. Larger individual outliers
+are retained in history and excluded from regression; rejected observations do not
+authorize new slots. While a longer qualification is pending, three consistent outlying observations
+suspend the old ADC schedule. Qualification completes at the configured count. Once
+confirmed, the new model contains only that new consistent sequence: old-rate
+history cannot contaminate it. An isolated outlier followed by normal timing clears
+the candidate without replacing the fit. Excluded intervals and deliberately
+unstarted warmup periods are distinct from skipped already-authorized ADC deadlines.
+
+Metadata consistency checks, duplicate rejection, coalesced wakes and independent
+requested ACC FPS remain shared with legacy mode. Counter gaps use their actual
+indices in the regression, while the existing ADC-gap policy explicitly reacquires
+its sampling epoch. Counter rollback, stale identity, timeout and mode changes clear
+the fitted model. Persistent phase/cadence changes and changes of the rounded integer
+ratio explicitly discard/count pending work and acquire a new sampling epoch.
 A 2-to-1 kHz WFS step at an 8 kHz ACC request therefore changes N from 4 to 8 and
 target delay from 300 to 550 us; the new steady interval remains 125 us, with an
 explicitly reported reacquisition discontinuity. Source disappearance/recreation
@@ -312,7 +350,7 @@ exhaustion likewise invalidates the clock rather than growing without bound.
 `wfs_process_ns`, `acc_latency_ns`, `margin_ns`, and `slew_fraction`. Partial updates
 are validated and staged atomically. New phase settings are used at the next unique
 reference without an application restart or ADC re-prime. Toggling the mode
-explicitly cancels/counts pending slots and waits for the next unique reference.
+explicitly cancels/counts pending slots and qualifies a new rolling clock.
 Invalid updates leave accepted settings intact and set ALERT. Rate/channel changes
 retain the existing stopped reconfiguration boundary.
 
@@ -325,11 +363,31 @@ and `phase_acquisitions`. The snapshot also distinguishes `scheduled_mono_us`,
 after frameGrabber posts the output semaphores. `start_mono_us` is the software
 invocation, **not** a measured physical CNV edge. `reference_mono_us`, `reference_id`,
 `reference_slot`, `nominal_slot`, and `frame_seq` identify the associated source and
-last committed output count. A zero publication timestamp denotes an unpublished
+last committed output count. In DDSPC mode `reference_mono_us` is now the fitted
+reference for that source ID, with raw arrival error reported separately. A zero publication timestamp denotes an unpublished
 attempt. These INDI snapshots describe the latest attempt/publication; they are not
 retained per-frame association records. Existing UINT16 stream geometry, `cnt0/cnt1`,
 realtime driver scan-start `atime`, publication `writetime`, semaphore posts and
 circular-buffer timestamps remain unchanged for consumers.
+
+`wfsClock` adds `valid`, `samples`, `history_s`, `fps`, `period_us`,
+`phase_mono_us`, `phase_frame_id`, `jitter_rms_us`, `arrival_error_us`,
+`phase_drift_us`, `cadence_events`, `rejected_events`, `fit_resets`, and
+`applied_phase_correction_us` (the continuous clock's applied phase offset relative
+to its current epoch).
+`phase_mono_us` and its frame ID specify the rolling fitted clock. Jitter is the
+population RMS of inlier linear-fit residuals, including any unmodeled curvature;
+large rejected events have a separate count. Long-term drift is relative to the
+first full ten-second model and is zero while warming, so startup fit convergence
+is not presented as measured clock drift. `ddspcTiming.phase_error_us` and
+`sync_correction_us` show ADC phase residual and delay-controller correction;
+`syncTiming.phase_us` reports the commanded phase, and
+`ddspcTiming.start_lateness_us` distinguishes actual software acquisition error from
+`wfsClock.arrival_error_us`. `adcHealth.missed_periods`, `syncTiming.skipped_scans`,
+`syncTiming.cadence_resets`, and `ddspcTiming.phase_acquisitions` retain loss and
+synchronization-recovery accounting. History has a 200,001-observation safety bound,
+above the ten-second requirement at the supported 10 kHz ceiling; exhaustion clears
+the fit and requires qualification rather than growing indefinitely.
 
 ## Hardware and on-sky validation
 
@@ -384,3 +442,13 @@ steps, runtime delay changes, source loss and reacquisition. Start with downstre
 feed-forward disabled and a separate test stream; consumer qualification and any
 production handover require their own operator approval. No on-sky or hardware
 operations are performed by this implementation or its offline tests.
+
+For rolling-clock acceptance, log at least several complete ten-second windows and
+compare `wfsClock.arrival_error_us`/`jitter_rms_us` against the independently measured
+CNV/sample interval distribution and `ddspcTiming.start_lateness_us`. Verify that
+individual +/-10 us source errors do not appear as matching ADC phase jumps, while
+slow fitted drift is tracked with bounded corrections. Check the sample count/span
+at 500, 1000 and 2000 Hz, warmup, isolated delayed events, counter gaps/duplicates,
+persistent 2-to-1 kHz changes and requalification. Software tests establish nominal
+scheduling behavior; physical ADC jitter and worst-case regression/scan/publication
+service under real Pi load require independent hardware qualification.
