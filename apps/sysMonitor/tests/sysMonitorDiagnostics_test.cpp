@@ -21,7 +21,7 @@ using namespace MagAOX::app;
 using namespace MagAOX::logger;
 
 const std::string gpuUUID = "GPU-12345678-1234-1234-1234-123456789abc";
-const std::string gpuCSV  = gpuUUID + ",00000000:01:00.0,42,35,12,100,1000,1500,1500,5000\n";
+const std::string gpuCSV  = "0," + gpuUUID + ",00000000:01:00.0,42,35,12,100,1000,1500,1500,5000\n";
 
 /// Serialize INDI updates only into memory, without activating a connection.
 class diagnosticDriver : public indiDriver<MagAOXApp<true>>
@@ -97,6 +97,7 @@ class diagnosticHarness : public sysMonitor
     using sysMonitor::m_gpus;
     using sysMonitor::m_gpuStatus;
     using sysMonitor::m_gpuTimeout;
+    using sysMonitor::m_indiNewCallBacks;
     using sysMonitor::m_indiP_irqStatus;
     using sysMonitor::m_indiP_irqWarning;
     using sysMonitor::m_irqInterval;
@@ -127,6 +128,9 @@ class diagnosticHarness : public sysMonitor
 
     /// Load a tracked diagnostic configuration fragment.
     int loadExample( const std::string &file /**< [in] basename under the app's config directory */ );
+
+    /// Flush private logs and return their text messages with priorities in record order.
+    std::vector<std::pair<flatlogs::logPrioT, std::string>> textLogs();
 };
 
 diagnosticHarness::diagnosticHarness()
@@ -141,6 +145,8 @@ diagnosticHarness::diagnosticHarness()
     m_tel.logLevel( logPrio::LOG_TELEM );
     m_log.logPath( m_root );
     m_log.logName( "logs" );
+    m_log.logExt( "binlog" );
+    m_log.requestRotation(); // The process logger is shared across fixture instances.
     m_driverInName   = m_root + "/in";
     m_driverOutName  = m_root + "/out";
     m_driverCtrlName = m_root + "/ctrl";
@@ -198,6 +204,50 @@ int diagnosticHarness::loadExample( const std::string &file )
     return loadDiagnosticsConfig( config );
 }
 
+std::vector<std::pair<flatlogs::logPrioT, std::string>> diagnosticHarness::textLogs()
+{
+    m_log.logShutdown( true );
+    m_log.logThreadExec();
+    std::vector<std::filesystem::path> files;
+
+    for( const auto &entry : std::filesystem::recursive_directory_iterator( m_root ) )
+    {
+        if( entry.path().extension() == ".binlog" )
+        {
+            files.push_back( entry.path() );
+        }
+    }
+
+    std::sort( files.begin(), files.end() );
+    std::vector<std::pair<flatlogs::logPrioT, std::string>> result;
+
+    for( const auto &path : files )
+    {
+        std::ifstream     input( path, std::ios::binary );
+        std::vector<char> bytes( ( std::istreambuf_iterator<char>( input ) ), {} );
+        size_t            offset = 0;
+
+        while( offset < bytes.size() )
+        {
+            REQUIRE( bytes.size() - offset >= flatlogs::logHeader::minHeadSize );
+            auto      *record = bytes.data() + offset;
+            const auto size   = flatlogs::logHeader::totalSize( record );
+            REQUIRE( size >= flatlogs::logHeader::minHeadSize );
+            REQUIRE( size <= bytes.size() - offset );
+
+            if( flatlogs::logHeader::eventCode( record ) == text_log::eventCode )
+            {
+                result.emplace_back( flatlogs::logHeader::logLevel( record ),
+                                     text_log::message( flatlogs::logHeader::messageBuffer( record ) ) );
+            }
+
+            offset += size;
+        }
+    }
+
+    return result;
+}
+
 /// Construct a singleton fake IRQ result.
 telem_irq::groupT irqGroup( bool warning /**< [in] whether to inject a mismatch */ )
 {
@@ -252,9 +302,10 @@ TEST_CASE( "sysMonitor GPU failures and recovery publish validity", "[sysMonitor
     app.m_gpuEnabled  = true;
     app.m_gpuExpected = { gpuUUID };
     REQUIRE( app.startupDiagnostics() == 0 );
+    REQUIRE( app.m_gpuProperties.empty() );
     app.acceptGPUResult( app.m_result, 100 );
     REQUIRE( app.publishDiagnostics() == 0 );
-    const auto key = sysMonitorDetail::gpuKey( gpuUUID );
+    const std::string key = "gpu_0";
     REQUIRE( app.m_gpuProperties.at( key ).getPerm() == pcf::IndiProperty::ReadOnly );
     REQUIRE( app.m_gpuProperties.at( key )["clock_memory"].get<double>() == 5000 );
     REQUIRE( app.m_gpuProperties.at( key )["valid"].get<unsigned>() == 255 );
@@ -282,6 +333,104 @@ TEST_CASE( "sysMonitor GPU failures and recovery publish validity", "[sysMonitor
     REQUIRE( app.publishDiagnostics() == 0 );
     REQUIRE( app.m_gpuProperties.at( key ).getState() == INDI_OK );
     REQUIRE( app.m_gpus[0].m_sampleTime == 400 );
+}
+
+/// Verify NVIDIA indices control property names through reordering, disappearance, and replacement.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor GPU properties follow NVIDIA indices", "[sysMonitor][diagnostics]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::acceptGPUResult(*(MagAOX::sys::boundedCommand::result *)nullptr, 0);
+    sysMonitor::publishDiagnostics();
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_gpuEnabled = true;
+    REQUIRE( app.startupDiagnostics() == 0 );
+    const std::string secondUUID = "GPU-abcdefab-1234-1234-1234-123456789abc";
+    const std::string secondCSV  = secondUUID + ",00000000:02:00.0,60,70,15,200,2000,1600,1600,6000\n";
+    app.m_result.m_output        = "2," + secondCSV + gpuCSV;
+    app.acceptGPUResult( app.m_result, 100 );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_gpuProperties.size() == 2 );
+    REQUIRE( app.m_gpuInfoProperties.at( "gpu_0" )["uuid"].get<std::string>() == gpuUUID );
+    REQUIRE( app.m_gpuInfoProperties.at( "gpu_2" )["uuid"].get<std::string>() == secondUUID );
+    REQUIRE( app.m_gpuProperties.at( "gpu_2" )["temperature"].get<double>() == 60 );
+
+    app.m_result.m_output = gpuCSV + "2," + secondCSV;
+    app.acceptGPUResult( app.m_result, 100 );
+    app.driver().m_xml.clear();
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.driver().m_xml.empty() );
+
+    app.m_result.m_output = gpuCSV;
+    app.acceptGPUResult( app.m_result, 200 );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_gpuProperties.at( "gpu_2" )["valid"].get<unsigned>() == 0 );
+    REQUIRE( app.m_gpuInfoProperties.at( "gpu_2" )["status"].get<std::string>() == "missing" );
+
+    app.m_result.m_output = "0," + secondCSV;
+    app.acceptGPUResult( app.m_result, 300 );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_gpus.size() == 2 );
+    REQUIRE( app.m_gpus[0].m_uuid == gpuUUID );
+    REQUIRE( app.m_gpus[0].m_index == telem_gpu::UnknownIndex );
+    REQUIRE( app.m_gpus[0].m_valid == 0 );
+    REQUIRE( app.m_gpuInfoProperties.at( "gpu_0" )["uuid"].get<std::string>() == secondUUID );
+    REQUIRE( app.m_gpuProperties.at( "gpu_0" )["temperature"].get<double>() == 60 );
+    REQUIRE( app.m_gpuProperties.at( "gpu_0" )["valid"].get<unsigned>() == 255 );
+    REQUIRE( app.m_gpuInfoProperties.at( "gpu_2" )["status"].get<std::string>() == "unavailable" );
+    REQUIRE( app.m_gpuProperties.at( "gpu_2" )["valid"].get<unsigned>() == 0 );
+    REQUIRE( app.m_gpuProperties.at( "gpu_2" ).getState() == INDI_ALERT );
+    REQUIRE( app.m_gpuStatus == "partial" );
+
+    app.m_result.m_output = "1," + gpuCSV.substr( 2 ) + "0," + secondCSV;
+    app.acceptGPUResult( app.m_result, 400 );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_gpuInfoProperties.at( "gpu_1" )["uuid"].get<std::string>() == gpuUUID );
+    REQUIRE( app.m_gpuProperties.at( "gpu_1" )["valid"].get<unsigned>() == 255 );
+    REQUIRE( app.m_gpuStatus == "ok" );
+}
+
+/// Verify IRQ detail is absent from INDI and logged only on changed fault snapshots.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor logs IRQ details only for changed problems", "[sysMonitor][diagnostics]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::startupDiagnostics();
+    sysMonitor::pollDiagnostics(std::chrono::steady_clock::time_point{});
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_irqRules.push_back( { "camera", "edt", "camera", "", true, true } );
+    REQUIRE( app.startupDiagnostics() == 0 );
+    REQUIRE( app.m_indiNewCallBacks.count( "sysmon-test.irq_status" ) == 1 );
+    REQUIRE( app.m_indiNewCallBacks.count( "sysmon-test.irq_details" ) == 0 );
+    const auto epoch = std::chrono::steady_clock::time_point{};
+    app.m_groups     = { irqGroup( false ) };
+    REQUIRE( app.pollDiagnostics( epoch ) == 0 );
+    app.m_groups = { irqGroup( true ) };
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 6 ) ) == 0 );
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 12 ) ) == 0 );
+    app.m_groups[0].m_irqs[0].m_requested = "0-31";
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 18 ) ) == 0 );
+    app.m_groups = { irqGroup( false ) };
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 24 ) ) == 0 );
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 30 ) ) == 0 );
+    const auto logs = app.textLogs();
+    REQUIRE( logs.size() == 4 );
+    REQUIRE( logs[0].first == logPrio::LOG_NOTICE );
+    REQUIRE( logs[0].second == "IRQ camera: ok" );
+    REQUIRE( logs[1].first == logPrio::LOG_WARNING );
+    REQUIRE( logs[1].second ==
+             "IRQ camera: requested affinity mismatch; expected=45; IRQ 123 requested=0-63 effective=45" );
+    REQUIRE( logs[2].first == logPrio::LOG_WARNING );
+    REQUIRE( logs[2].second ==
+             "IRQ camera: requested affinity mismatch; expected=45; IRQ 123 requested=0-31 effective=45" );
+    REQUIRE( logs[3].first == logPrio::LOG_NOTICE );
+    REQUIRE( logs[3].second == "IRQ camera: ok" );
 }
 
 /// Verify IRQ warnings start unchecked, include failures, and clear without repeated property traffic.

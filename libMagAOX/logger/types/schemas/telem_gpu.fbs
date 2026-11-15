@@ -20,6 +20,7 @@ table Gpu_sample_fb
     clock_memory:double;   // MHz
     valid:uint;
     sample_time:double;    // Unix UTC seconds of the last successful query
+    index:uint = 4294967295; // NVIDIA device index; unknown in records written before this field existed
 }
 
 table Telem_gpu_fb

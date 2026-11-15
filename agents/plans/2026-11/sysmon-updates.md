@@ -44,7 +44,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 
 # Agent Findings and Plan
 
-Status: implementation completed and offline validation passed on 2026-11-15 after the answers below. Verified host `mx11` and checkout `/home/jrmales/Source/MagAOX-working`. Feature branch `jrmales/sysmon-diagnostics` starts from updated `dev` at `92c20495`, including the merged IRQ policy changes. No instrument commands have been run.
+Status: the initial implementation and offline validation completed on 2026-11-15 after the answers below. The subsequent user-requested INDI/logging refinement is also complete and validated in the follow-up section below. Verified host `mx11` and checkout `/home/jrmales/Source/MagAOX-working`. Feature branch `jrmales/sysmon-diagnostics` starts from updated `dev` at `92c20495`, including the merged IRQ policy changes. No instrument commands have been run.
 
 ## Task Summary
 
@@ -77,7 +77,7 @@ Extend `sysMonitor` with per-GPU temperature and load measurements, INDI publica
 
 ## Key Assumptions
 
-1. The first GPU backend targets NVIDIA physical GPUs. Monitor all discovered GPUs, keyed by UUID; retain PCI bus ID as context. Optional expected UUIDs can detect a card absent from the first sample. AMD GPUs, MIG instances, and per-process accounting are not initial targets.
+1. The first GPU backend targets NVIDIA physical GPUs. Track all discovered GPUs internally by UUID and retain PCI bus ID as context; publish INDI properties as `gpu_0`, `gpu_1`, etc. using each device's reported NVIDIA index. Optional expected UUIDs can detect a card absent from the first sample, without assigning an invented index. AMD GPUs, MIG instances, and per-process accounting are not initial targets.
 2. Proposed GPU metrics are temperature in degrees C, GPU activity and memory read/write activity as fractions in `[0,1]` to match existing CPU loads, VRAM used/total in MiB, and graphics/SM/memory clocks in MHz. Memory activity and allocated VRAM are distinct diagnostics. These fields are supported by NVIDIA's selective-query interface. [NVIDIA metric definitions](https://nvidia.custhelp.com/app/answers/detail/a_id/3751/~/useful-nvidia-smi-queries)
 3. Propose configurable five-second GPU and IRQ checks, with GPU polling explicitly enabled in deployment configuration. An empty IRQ rule list disables IRQ checking. Existing configurations retain their behavior until the new settings are added.
 4. Use RTC and ICC dedicated IRQ rules listed above, excluding NVIDIA. Required devices missing from a check produce a warning; an explicitly optional, absent device is reported as absent rather than passing a placement check. General IRQ isolation is a scope question below.
@@ -86,11 +86,11 @@ Extend `sysMonitor` with per-GPU temperature and load measurements, INDI publica
 ## Requirements
 
 1. Collect the GPU metrics periodically and associate every value with a stable device identity.
-2. Publish GPU values, availability, and identity on read-only INDI properties. Unsupported fields and failed queries must not appear as healthy zeroes.
+2. Publish GPU values, availability, and identity on read-only INDI properties named by the reported NVIDIA index. Keep UUID as the internal and telemetry identity. Unsupported fields and failed queries must not appear as healthy zeroes.
 3. Record GPU measurements and validity on first sample, change, and the existing telemeter maximum interval. Distinguish the last measurement time from a later forced record of cached state.
 4. Re-resolve every configured IRQ group on every check, including all matching vectors, so IRQ renumbering and driver reloads require no configuration edits.
 5. Compare dedicated IRQ requested affinity with the expected CPU set, and check that effective routing stays within that set. Expose missing devices, read failures, and unverified effective routing explicitly.
-6. Publish per-group IRQ results and an aggregate warning value, log state transitions, and provide `stateRuleEngine` rules for operator notifications. Include IRQ placement snapshots in telemetry so later drift can be reconstructed.
+6. Publish per-group IRQ results and an aggregate warning value, and provide `stateRuleEngine` rules for operator notifications. Keep detailed placement out of INDI; log IRQ numbers and expected/requested/effective CPUs when a fault snapshot changes. Suppress unchanged faults and keep healthy/recovery notices brief. Retain complete IRQ placement snapshots in telemetry so later drift can be reconstructed.
 7. A GPU/IRQ failure must not stop unrelated monitoring. Preserve existing diagnostic behavior and keep new collection work bounded where the operating system permits.
 8. Verify parsing, discovery, lifecycle, INDI, and telemetry with offline fixtures and fake commands; follow the full changed-file documentation and formatting requirements in `AGENTS.md`.
 
@@ -125,14 +125,14 @@ All automated tests use synthetic input and temporary files. Do not launch the r
 | Area | Cases and acceptance criteria |
 | --- | --- |
 | Bounded command execution | Fake executables: successful stdout/stderr, missing executable, nonzero exit, signal exit, timeout, output larger than pipe capacity, output-limit rejection, interrupted waits, and cleanup. Never return through app code in a failed child, wait for an unrelated child, deadlock on full pipes, or accumulate children after repeated failures. |
-| GPU parsing | One/multiple GPUs, whitespace, reordered rows, duplicate UUIDs, empty output, incorrect field counts, `N/A`/unsupported fields, malformed/trailing/nonfinite/overflowing numbers, utilization outside 0–100, and inconsistent memory sizes. Check unit conversions and preserve valid fields when another field is unsupported. |
-| GPU lifecycle | Disabled mode performs no query; interval scheduling uses injected time; first success, unchanged sample, query failure, disappearing/expected-missing GPU, and recovery produce the correct validity, identity, logging, and telemetry transitions. Enumeration order cannot swap devices. |
+| GPU parsing | One/multiple GPUs, whitespace, reordered rows, duplicate UUIDs or NVIDIA indices, invalid/overflowing indices, empty output, incorrect field counts, `N/A`/unsupported fields, malformed/trailing/nonfinite/overflowing numbers, utilization outside 0–100, and inconsistent memory sizes. Check unit conversions and preserve valid fields when another field is unsupported. |
+| GPU lifecycle | Disabled mode performs no query; interval scheduling uses injected time; first success, unchanged sample, query failure, disappearing/expected-missing GPU, and recovery produce the correct validity, identity, logging, and telemetry transitions. CSV row order cannot swap devices; reindexing and index reuse update the correct numbered properties while UUID histories remain separate. Expected UUIDs without a reported index must not create fabricated properties. |
 | CPU-list parser | Singletons/ranges, whitespace, duplicates, reordered equivalent lists, CPUs above 63, empty input, reversed ranges, negative/overflowing/trailing garbage, and bounded range expansion. Compare normalized sets rather than strings. |
 | IRQ discovery | Numeric interrupt rows with varying CPU columns, nonnumeric local interrupts, multiple action names/vectors, no matches, overlapping rules, and matching restricted to the action-name portion. Idle IRQs must still be checked. |
 | IRQ renumbering and races | A logical device moves from IRQ A to B; vectors appear/disappear; cpuset contents change; files vanish during a snapshot. Re-discovery must recover without config edits and an incomplete check must never publish OK. |
 | IRQ policy | Correct requested singleton/set; requested mask too broad even if current effective routing is correct; effective CPU outside the expected set; valid effective subset; missing/empty/malformed/unreadable cpuset or affinity; missing required/optional devices; unsupported effective-affinity interface. |
-| INDI and notifications | Read-only properties, stable GPU names, explicit invalid/unverified state, all IRQ vectors included, no repeated unchanged updates/log floods, and bad-to-good recovery. Load the example `stateRuleEngine` warning rule against synthetic properties and verify raise/clear behavior without a real server. |
-| Telemetry | GPU and IRQ FlatBuffer round trips, identity/value association, validity, timestamps, corrupt-buffer rejection, message formatting, generated dispatch/accessors, and first/change/forced record behavior. Never stamp old measurements as a new successful poll. |
+| INDI and notifications | Read-only properties named by reported GPU indices, UUID association, stale-slot invalidation/reuse, explicit invalid/unverified state, absence of `irq_details`, and bad-to-good recovery. Changed IRQ fault snapshots include all vectors and CPU lists in logs, unchanged faults do not repeat, and healthy/recovery notices omit affinity details. Load the example `stateRuleEngine` warning rule against synthetic properties and verify raise/clear behavior without a real server. |
+| Telemetry | GPU and IRQ FlatBuffer round trips, UUID/index/value association, older GPU records with unknown index, validity, timestamps, corrupt-buffer rejection, message formatting, generated dispatch/accessors, and first/change/forced record behavior. Never stamp old measurements as a new successful poll. |
 | Regression | Retain existing sysMonitor parser tests; injected collector failures must leave the other diagnostics operational. Exercise new app integration only with external commands and the latency thread isolated. |
 
 After implementation, build `libMagAOX` and `apps/sysMonitor`; run the focused sysMonitor, command-helper, CPU-list, telemetry, and applicable stateRuleEngine suites. Representative existing commands are:
@@ -165,12 +165,12 @@ Resolve the questions above and update this document. Before implementation/comm
 - Use one query per due interval for all physical GPUs:
 
   ```text
-  nvidia-smi --query-gpu=uuid,pci.bus_id,temperature.gpu,utilization.gpu,utilization.memory,memory.used,memory.total,clocks.current.graphics,clocks.current.sm,clocks.current.memory --format=csv,noheader,nounits
+  nvidia-smi --query-gpu=index,uuid,pci.bus_id,temperature.gpu,utilization.gpu,utilization.memory,memory.used,memory.total,clocks.current.graphics,clocks.current.sm,clocks.current.memory --format=csv,noheader,nounits
   ```
 
-- Parse into a temporary snapshot before updating live state. Key devices by UUID, preserve PCI context, normalize activity percentages to fractions, and keep per-field validity. A malformed whole response/failed command invalidates the current poll; a documented unsupported field invalidates just that field.
-- Keep known/expected missing devices visible as unavailable. Retry failed discovery on the configured cadence. Explicitly distinguish disabled, unavailable, partially supported, and valid states; repeated identical failures log only on transition, with recovery logged once.
-- Publish one read-only numeric property per UUID-derived INDI-safe key, with temperature, GPU load, memory load, used/total memory, and validity elements. Companion text properties carry UUID, PCI ID, and status. Never reuse a vanished GPU's key for a different GPU. Register new discoveries through framework helpers and publish state changes through existing update helpers.
+- Parse into a temporary snapshot before updating live state. Key devices by UUID, retain the reported NVIDIA index and PCI context, normalize activity percentages to fractions, and keep per-field validity. Reject duplicate UUIDs/indices and invalid index values. A malformed whole response/failed command invalidates the current poll; a documented unsupported field invalidates just that field.
+- Keep known/expected missing devices in UUID-identified state and telemetry as unavailable. A never-discovered expected UUID has an unknown index and no numbered INDI property. Retry failed discovery on the configured cadence. Explicitly distinguish disabled, unavailable, partially supported, and valid states; repeated identical failures log only on transition, with recovery logged once.
+- Publish read-only numeric properties named `gpu_<index>` using the reported NVIDIA index, with temperature, GPU load, memory load, used/total memory, current clocks, validity, and sample time. Companion `gpu_<index>_info` properties carry UUID, PCI ID, and status. Keep a missing device's old slot invalid until its index is reused; replace the slot's association when another GPU reports that index. Invalidate orphaned slots after reindexing. Preserve missing UUIDs in logs/telemetry when their former indices are reclaimed. Register discoveries through framework helpers and publish changes through existing update helpers.
 - Preserve last good numbers only alongside invalid status after a failed read. Store the last actual sample time separately so periodic telemetry cannot imply a new measurement. This is explicit local-poll failure handling, not receipt-age expiry of subscribed INDI values.
 
 ### 4. Add IRQ policy checking
@@ -179,15 +179,15 @@ Resolve the questions above and update this document. Before implementation/comm
 - At each due interval, read `/proc/interrupts`, resolve all matching numeric IRQs, read expected cpuset CPU lists through the existing framework path, and read requested/effective affinity for every match. Read files directly; no shell scripts or affinity writes.
 - For dedicated groups, require requested affinity set equality and a nonempty effective affinity set contained in the expected set. Linux distinguishes permitted affinity from effective delivery, so effective equality is not required for a multi-CPU expected set. [Permitted-affinity interface](https://docs.kernel.org/core-api/irq/irq-affinity.html), [effective-affinity examples](https://docs.kernel.org/core-api/irq/managed_irq.html)
 - Missing/malformed/unreadable data and mid-check device removal yield an unavailable result and retry next interval. Missing required devices and placement mismatches raise warnings. Optional missing devices remain visibly absent. Missing effective-affinity support remains unverified unless a reviewed host exception permits requested-only checking.
-- Publish `irq_status` text by logical group, `irq_details` with IRQ numbers and expected/requested/effective CPU lists, and a read-only `irq_warning` switch with an aggregate warning element. The aggregate is On for any required group that is unchecked, missing, unavailable, or unverified under its configured policy, and for any present group's mismatch/read failure. Optional absence alone does not warn. Only a complete successful check clears a required group's failure.
-- Provide `stateRuleEngine` examples comparing the explicit warning switch to `On` with warning priority. Reuse its subscription/retry/notification behavior, including clearing; do not add periodic get-property requests. Log detailed failure/recovery transitions in sysMonitor as well.
+- Publish `irq_status` text by logical group and a read-only `irq_warning` switch with an aggregate warning element. Do not publish an `irq_details` property. On a changed fault snapshot, log IRQ numbers and expected/requested/effective CPU lists; compare snapshots without check timestamps to suppress repeated unchanged faults. Healthy/recovery notices omit placement lists. The aggregate is On for any required group that is unchecked, missing, unavailable, or unverified under its configured policy, and for any present group's mismatch/read failure. Optional absence alone does not warn. Only a complete successful check clears a required group's failure.
+- Provide `stateRuleEngine` examples comparing the explicit warning switch to `On` with warning priority. Reuse its subscription/retry/notification behavior, including clearing; do not add periodic get-property requests. Direct operators to `irq_status` and sysMonitor fault logs; detailed CPU lists belong only to fault messages, while recovery remains a short notice.
 
 ### 5. Add identified telemetry records
 
 - Add `telem_gpu` and `telem_irq` schemas and wrapper headers. Use `telem_drivetemps` for identified collections and `telem_pdu`/its tests for validity patterns, while defining payloads specific to these diagnostics.
-- GPU records contain UUID/PCI identity, metrics, per-field validity, collection status, and last sample time. IRQ records contain logical group, match status, expected CPUs, current IRQ numbers, requested/effective CPU lists, warning/reason, and check time. Use deterministic ordering so enumeration changes do not generate spurious changes.
+- GPU records contain UUID/PCI identity, the reported NVIDIA index, metrics, per-field validity, collection status, and last sample time. Append the index field with an unknown default (`4294967295`) so existing GPU records remain decodable; UUID continues to define identity and deterministic ordering. IRQ records contain logical group, match status, expected CPUs, current IRQ numbers, requested/effective CPU lists, warning/reason, and check time. Use deterministic UUID/IRQ ordering so query-row changes do not generate spurious records; record actual NVIDIA index reassignment as a state change.
 - Add first/change/forced record methods and include the new types in the existing telemeter scheduling. Retain invalidity and failure transitions in the historical record. Keep per-instance previous-sample state for the new diagnostics; exclude acquisition timestamps from value-change comparison so unchanged polls can be suppressed while forced records carry the latest actual sample time.
-- Register event codes in `libMagAOX/logger/logCodes.dat` and dependencies in `libMagAOX/Makefile`. Allocate unused codes during implementation. Generate dispatch/accessor/schema outputs using the normal build; do not hand-edit generated files or change existing telemetry formats.
+- Register event codes in `libMagAOX/logger/logCodes.dat` and dependencies in `libMagAOX/Makefile`. Allocate unused codes during implementation. Generate dispatch/accessor/schema outputs using the normal build; do not hand-edit generated files. Preserve existing event codes and field meanings when appending the GPU index; the IRQ schema remains unchanged.
 
 ### 6. Supply configuration, documentation, and validation
 
@@ -209,7 +209,7 @@ Expected affected paths after approval:
 
 - **Instrument qualification:** The user should compare GPU readbacks with published/telemetered samples, verify warnings before/after their normal `move_irqs` procedure and reboot, and check recovery after their normal device reload/power workflow. The agent will not execute those steps. Measure loop impact with monitoring enabled/disabled, including the writer's own timing such as `fg_timing.delta_aw`, not only end-to-end latency.
 - **Polling impact:** Five seconds is a proposed starting point, not a measured optimum. GPU driver queries can add contention even though they do not access loop shared-memory streams. A kernel call stuck in uninterruptible sleep cannot be made promptly reapable by a userspace timeout; the runner must avoid repeated launches while an owned child remains outstanding and report this limitation explicitly.
-- **Driver/identity changes:** CSV output is not a stable cross-version API. Driver upgrades need fixture/qualification checks. MIG and unsupported metrics stay explicitly invalid. UUID identity prevents enumeration swaps; action-name changes, NIC renames, or PVCAM driver-instance renaming can still require a policy update even though numeric IRQ changes do not.
+- **Driver/identity changes:** CSV output is not a stable cross-version API. Driver upgrades need fixture/qualification checks. MIG and unsupported metrics stay explicitly invalid. UUID identity prevents historical samples from being reassigned; reported NVIDIA indices determine INDI property names and may change after enumeration changes. Never-discovered expected devices have no numbered property, and reused indices must not leave old values marked valid. Action-name changes, NIC renames, or PVCAM driver-instance renaming can still require a policy update even though numeric IRQ changes do not.
 - **Affinity limits:** Requested/effective CPU masks describe allowed/current routing, not proof of which CPU handled every interrupt. Cumulative interrupt counters include earlier placement and are not used as a health test. Managed IRQs, CPU hotplug, and broad housekeeping isolation require the agreed policy above.
 - **Startup/configuration:** Cpuset creation or device probing may lag sysMonitor startup. Keep an explicit unavailable warning until data is available, then recover automatically. No-rule/disabled monitoring must be distinguishable from successful checking. Invalid configured rules must not silently disappear.
 - **Operational integration:** The setup repository already supplies a `move_irqs.service`; why manual rerunning is necessary is a separate diagnosis. This task reports current placement and drift rather than attempting service-order or irqbalance remediation.
@@ -227,10 +227,63 @@ Expected affected paths after approval:
 - Initial validated results: GPU parser 101 assertions/4 cases; CPU-list parser 42/2; IRQ collector 122/5; GPU telemetry/FITS 90/4; IRQ telemetry 29/2; bounded runner 78/8; existing metadata 22/4; generated logger suite 469/86; Python generator 6 tests. SysMonitor integration passed 223 assertions/9 cases including strict-policy-boolean regressions; existing sysMonitor tests passed 75/6. Final documentation/formatting checks passed.
 - Review corrected optional-only startup reporting, IRQ cadence after slow GPU queries, and policy booleans that mxlib would otherwise silently convert from malformed text to false. New diagnostics explicitly accept only `true`, `false`, `1`, or `0` for those booleans. Per-device GPU status changes are logged even when another device keeps the aggregate status partial.
 
-### Final validation
+### Initial implementation validation
 
 - Both `libMagAOX` and `apps/sysMonitor` build successfully with production `-O3 -ffast-math`; existing coverage-instrumented dependency archives required `LDFLAGS=--coverage` at link time.
 - All 11 focused/regression C++ suites and the generated logger suite passed: **1294 assertions across 136 cases**, plus **6 Python generator tests**. This includes existing sysMonitor (75 assertions) and stateRuleEngine (23 assertions) regressions. Commands and output are retained locally in `/tmp/sysmon-final-validation/`, with the step results in `summary.tsv`.
 - Completed full-file documentation, Doxygen grouping/references, clang-format, explicit-brace checks, and required logical spacing across all 21 touched C++ files. The last whitespace-only pass was checked for identical code tokens and string literals; all code diff whitespace checks pass. Original user task/answer text remains unchanged, including its pre-existing whitespace.
 - Work is separated into functional, documentation, and formatting commits on `jrmales/sysmon-diagnostics`. Unrelated untracked files were preserved.
 - Remaining operator work: review/install the supplied configuration fragments and warning rules, then perform instrument readback/IRQ transition checks and timing A/B qualification. No hardware access, instrument startup, installed-configuration changes, or deployment was performed by the agent.
+
+## Follow-up: GPU indices and IRQ fault details
+
+The user requested shorter GPU INDI names based on the indices reported by
+`nvidia-smi`, and removal of the `irq_details` INDI property. The authoritative
+requirements and implementation descriptions above now include this refinement.
+The original task and review answers are unchanged.
+
+- Query the reported index as the first GPU CSV field. Publish `gpu_0`, `gpu_1`,
+  etc., with companion `_info` properties exposing UUID, PCI ID, and status.
+  UUID remains the stable internal/logged identity rather than property-slot
+  ownership. No property is invented for an expected UUID whose index is unknown.
+- On disappearance, keep the last indexed values invalid until the index is
+  reused. On reindexing, invalidate any abandoned property. A reused index adopts
+  the new device's UUID and values; the old missing UUID stays in logs/telemetry
+  with an unknown index when its slot is reclaimed.
+- Append the GPU telemetry index field with an unknown default for compatibility
+  with previously written records. Preserve existing GPU measurement units and
+  per-field validity. IRQ structured telemetry retains its complete placement
+  snapshots unchanged.
+- Remove `irq_details` registration and publication. Preserve `irq_status` and
+  `irq_warning.active`, and update warning-rule messages to point to sysMonitor
+  fault logs. Log expected/requested/effective CPU lists and IRQ numbers when a
+  fault snapshot changes; ignore check-time changes for repeat suppression.
+  Healthy transitions and recovery use brief notices without affinity lists.
+- Update operator documentation and the engineering record alongside the code.
+  Validation must cover reported-index parsing, UUID/index reassociation,
+  unknown expected indices, stale-slot invalidation, older telemetry decoding,
+  absence of `irq_details`, changed/unchanged fault logging, and brief recovery.
+
+Validation status: complete. Both `libMagAOX` and `apps/sysMonitor` built with
+production optimization; the existing coverage-instrumented archives still
+require `LDFLAGS=--coverage` for app/test linkage. Focused suites passed:
+
+- Existing sysMonitor: 75 assertions / 6 cases.
+- Diagnostic integration: 301 assertions / 11 cases, including real serialized
+  IRQ log content and suppression, removed property registration, sparse GPU
+  indices, row reordering, disappearance, slot reuse, and reappearance.
+- GPU parser: 150 assertions / 5 cases.
+- GPU telemetry, metadata, and legacy decoding: 107 assertions / 5 cases.
+- Generated logger suite: 469 assertions / 86 cases, plus 6 Python generator tests.
+
+Total: **1102 assertions across 113 C++ cases**, plus **6 Python tests**. The
+first integration run exposed a fixture issue: the shared process logger kept
+its previous fixture's open file. The fixture now requests rotation after
+setting its private path; the corrected suite passes. Build/test output and
+both integration runs are in `/tmp/sysmon-index-validation/`.
+
+Full-file documentation headers, clang-format, and diff whitespace checks pass.
+Original task/answer text and unrelated untracked files are preserved. No
+instrument commands, installed-configuration changes, or hardware actions were
+performed. Operator follow-up is to install/restart the updated app and update
+any clients referring to the old UUID-derived GPU property names.

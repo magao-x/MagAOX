@@ -23,14 +23,14 @@ const std::string gpuUUIDB = "GPU-11234567-89ab-cdef-0123-456789abcdef"; ///< Se
 /// Build a query row with one fixture identity and supplied measurement fields.
 std::string gpuRow( const std::string &metrics /**< [in] eight comma-separated measurements */ )
 {
-    return gpuUUIDA + ", 00000000:ab:01.0, " + metrics;
+    return "0, " + gpuUUIDA + ", 00000000:ab:01.0, " + metrics;
 }
 } // namespace
 /// \endcond
 
 /// Verify UUID normalization is stable and rejects malformed or colliding identities.
 /** \ingroup sysMonitor_unit_test */
-TEST_CASE( "GPU property keys preserve physical UUID identities", "[sysMonitor][gpuMonitor]" )
+TEST_CASE( "GPU internal keys preserve physical UUID identities", "[sysMonitor][gpuMonitor]" )
 {
     // clang-format off
     #ifdef SYSMONITOR_TEST_DOXYGEN_REF
@@ -68,11 +68,13 @@ TEST_CASE( "GPU query parser normalizes measurements and device order", "[sysMon
     using MagAOX::logger::telem_gpu;
     std::vector<telem_gpu::gpuT> gpus;
     const auto                   rowA = gpuRow( "65, 75.5, 12.5, 100.25, 8192, 1500, 1510, 7000" );
-    const auto                   rowB = gpuUUIDB + ",0000:02:00.0,0,0,100,0,16384,0,0,0";
+    const auto                   rowB = "7," + gpuUUIDB + ",0000:02:00.0,0,0,100,0,16384,0,0,0";
     REQUIRE( parseGPUs( gpus, " \t" + rowB + "\r\n\n" + rowA + "\n", 1234567890.25 ) == 0 );
     REQUIRE( gpus.size() == 2 );
     REQUIRE( gpus[0].m_uuid == gpuUUIDA );
     REQUIRE( gpus[1].m_uuid == gpuUUIDB );
+    REQUIRE( gpus[0].m_index == 0 );
+    REQUIRE( gpus[1].m_index == 7 );
     REQUIRE( gpus[0].m_pci == "00000000:ab:01.0" );
     REQUIRE( gpus[0].m_status == "ok" );
     REQUIRE( gpus[0].m_valid == telem_gpu::AllValid );
@@ -92,6 +94,9 @@ TEST_CASE( "GPU query parser normalizes measurements and device order", "[sysMon
     REQUIRE( parseGPUs( gpus, rowA + "\n" + rowB, 1234567899.25 ) == 0 );
     REQUIRE( gpus == first );
     REQUIRE( gpus[0].m_sampleTime != first[0].m_sampleTime );
+    gpus[0].m_index = 1;
+    REQUIRE_FALSE( gpus == first );
+    gpus            = first;
     gpus[0].m_valid = 0;
     REQUIRE_FALSE( gpus == first );
 }
@@ -162,10 +167,10 @@ TEST_CASE( "GPU query parser rejects corrupt samples without replacing prior sta
     }
 
     for( const auto &badRow :
-         { "bad uuid,0000:01:00.0,65,75,12,100,8192,1500,1510,7000",
-           "GPU-01234567-89ab-cdef-0123-456789abcdef,bad pci,65,75,12,100,8192,1500,1510,7000",
-           "GPU-01234567-89ab-cdef-0123-456789abcdef,0000:01:00.8,65,75,12,100,8192,1500,1510,7000",
-           "GPU-01234567-89ab-cdef-0123-456789abcdef,0000:01:20.0,65,75,12,100,8192,1500,1510,7000" } )
+         { "1,bad uuid,0000:01:00.0,65,75,12,100,8192,1500,1510,7000",
+           "1,GPU-11234567-89ab-cdef-0123-456789abcdef,bad pci,65,75,12,100,8192,1500,1510,7000",
+           "1,GPU-11234567-89ab-cdef-0123-456789abcdef,0000:01:00.8,65,75,12,100,8192,1500,1510,7000",
+           "1,GPU-11234567-89ab-cdef-0123-456789abcdef,0000:01:20.0,65,75,12,100,8192,1500,1510,7000" } )
     {
         REQUIRE( parseGPUs( gpus, validRow + "\n" + badRow, 11 ) == -1 );
         REQUIRE( gpus == prior );
@@ -173,13 +178,53 @@ TEST_CASE( "GPU query parser rejects corrupt samples without replacing prior sta
 
     REQUIRE( parseGPUs( gpus, validRow + "\n" + validRow, 11 ) == -1 );
     REQUIRE( parseGPUs( gpus,
-                        validRow + "\nGPU-01234567-89AB-CDEF-0123-456789ABCDEF,0000:02:00.0,"
+                        validRow + "\n1,GPU-01234567-89AB-CDEF-0123-456789ABCDEF,0000:02:00.0,"
                                    "65,75,12,100,8192,1500,1510,7000",
                         11 ) == -1 );
     REQUIRE( parseGPUs( gpus, validRow, -1 ) == -1 );
     REQUIRE( parseGPUs( gpus, validRow, std::numeric_limits<double>::infinity() ) == -1 );
     REQUIRE( parseGPUs( gpus, validRow, std::numeric_limits<double>::quiet_NaN() ) == -1 );
     REQUIRE( gpus == prior );
+}
+
+/// Reject ambiguous indices and distinguish reindexing from row-order changes while preserving UUID identity.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "GPU query indices are strict unique reported device numbers", "[sysMonitor][gpuMonitor]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::sysMonitorDetail::parseGPUs;
+    MagAOX::logger::telem_gpu::gpuT::operator==;
+    #endif
+    // clang-format on
+    using MagAOX::app::sysMonitorDetail::parseGPUs;
+    using MagAOX::logger::telem_gpu;
+    std::vector<telem_gpu::gpuT> gpus;
+    const auto                   suffixA = gpuUUIDA + ",0000:01:00.0,65,75,12,100,8192,1500,1510,7000";
+    const auto                   suffixB = gpuUUIDB + ",0000:02:00.0,40,25,10,200,8192,500,510,2000";
+    REQUIRE( parseGPUs( gpus, "2," + suffixA + "\n0," + suffixB, 10 ) == 0 );
+    REQUIRE( gpus[0].m_uuid == gpuUUIDA );
+    REQUIRE( gpus[0].m_index == 2 );
+    REQUIRE( gpus[1].m_index == 0 );
+    const auto prior = gpus;
+
+    for( const auto *index : { "", "-1", "+1", "1.0", "1e2", "N/A", "nan", "1x", "1 0", "4294967295", "4294967296" } )
+    {
+        INFO( index );
+        REQUIRE( parseGPUs( gpus, std::string( index ) + "," + suffixA, 11 ) == -1 );
+        REQUIRE( gpus == prior );
+        REQUIRE( gpus[0].m_sampleTime == 10 );
+    }
+
+    REQUIRE( parseGPUs( gpus, "0," + suffixA + "\n0," + suffixB, 11 ) == -1 );
+    REQUIRE( gpus == prior );
+    REQUIRE( parseGPUs( gpus, "0," + suffixA + "\n2," + suffixB, 12 ) == 0 );
+    REQUIRE( gpus[0].m_uuid == prior[0].m_uuid );
+    REQUIRE( gpus[0].m_index == 0 );
+    REQUIRE( gpus[1].m_index == 2 );
+    REQUIRE_FALSE( gpus == prior );
+    REQUIRE( parseGPUs( gpus, "4294967294," + suffixA, 13 ) == 0 );
+    REQUIRE( gpus[0].m_index == telem_gpu::UnknownIndex - 1 );
 }
 
 } // namespace sysMonitorTest

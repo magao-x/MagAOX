@@ -22,7 +22,7 @@ namespace app
 namespace sysMonitorDetail
 {
 
-/// Return a canonical INDI-safe UUID key, or an empty string for an invalid physical GPU UUID.
+/// Return a canonical internal UUID key, or an empty string for an invalid physical GPU UUID.
 /** Accepts GPU- followed by hexadecimal groups of lengths 8,4,4,4,12; hexadecimal case is normalized. */
 inline std::string gpuKey( const std::string &uuid /**< [in] physical NVIDIA GPU UUID */ )
 {
@@ -149,9 +149,10 @@ inline int number( double          &value /**< [out] parsed measurement, unchang
 /// \endcond
 
 /// Parse an entire GPU CSV response atomically, ordered by stable UUID.
-/** Columns are UUID, PCI address, Celsius, GPU %, memory activity %, used MiB, total MiB,
+/** Columns are NVIDIA index, UUID, PCI address, Celsius, GPU %, memory activity %, used MiB, total MiB,
  * graphics MHz, SM MHz, and memory MHz. Unsupported fields clear their validity bit.
- * Malformed rows or duplicate UUIDs return -1 and leave the previous output untouched.
+ * Indices must be decimal unsigned integers smaller than telem_gpu::UnknownIndex.
+ * Malformed rows or duplicate UUIDs/indices return -1 and leave the previous output untouched.
  * Empty output is a successful empty inventory. Sample times are Unix UTC seconds.
  */
 inline int parseGPUs( std::vector<logger::telem_gpu::gpuT> &out /**< [out] parsed device snapshot on success */,
@@ -166,6 +167,7 @@ inline int parseGPUs( std::vector<logger::telem_gpu::gpuT> &out /**< [out] parse
     using gpuT = logger::telem_gpu::gpuT;
     std::vector<gpuT>     parsed;
     std::set<std::string> keys;
+    std::set<uint32_t>    indices;
     size_t                start = 0;
 
     while( start < csv.size() )
@@ -185,7 +187,7 @@ inline int parseGPUs( std::vector<logger::telem_gpu::gpuT> &out /**< [out] parse
             continue;
         }
 
-        std::array<std::string_view, 10> fields;
+        std::array<std::string_view, 11> fields;
         size_t                           position = 0;
 
         for( size_t n = 0; n < fields.size(); ++n )
@@ -208,7 +210,15 @@ inline int parseGPUs( std::vector<logger::telem_gpu::gpuT> &out /**< [out] parse
         }
 
         gpuT       gpu;
-        const auto key = gpuKey( std::string( fields[0] ) );
+        const auto index = std::from_chars( fields[0].data(), fields[0].data() + fields[0].size(), gpu.m_index );
+
+        if( index.ec != std::errc{} || index.ptr != fields[0].data() + fields[0].size() ||
+            gpu.m_index == logger::telem_gpu::UnknownIndex || !indices.insert( gpu.m_index ).second )
+        {
+            return -1;
+        }
+
+        const auto key = gpuKey( std::string( fields[1] ) );
 
         if( key.empty() || !keys.insert( key ).second )
         {
@@ -217,7 +227,7 @@ inline int parseGPUs( std::vector<logger::telem_gpu::gpuT> &out /**< [out] parse
 
         gpu.m_uuid = "GPU-" + key.substr( 4 );
         std::replace( gpu.m_uuid.begin(), gpu.m_uuid.end(), '_', '-' );
-        gpu.m_pci = fields[1];
+        gpu.m_pci = fields[2];
 
         if( !gpuDetail::pciAddress( gpu.m_pci ) )
         {
@@ -235,7 +245,7 @@ inline int parseGPUs( std::vector<logger::telem_gpu::gpuT> &out /**< [out] parse
 
         for( size_t n = 0; n < members.size(); ++n )
         {
-            int result = gpuDetail::number( gpu.*members[n], fields[n + 2] );
+            int result = gpuDetail::number( gpu.*members[n], fields[n + 3] );
 
             if( result < 0 )
             {

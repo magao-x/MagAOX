@@ -5,7 +5,9 @@
 #ifndef logger_types_telem_gpu_hpp
 #define logger_types_telem_gpu_hpp
 
+#include <cstdint>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -31,6 +33,9 @@ struct telem_gpu : public flatbuffer_log
 
     /// Last emission time maintained by the telemetry scheduler.
     static timespec lastRecord;
+
+    /// No reported NVIDIA index, including records written before indices were recorded.
+    static constexpr uint32_t UnknownIndex = std::numeric_limits<uint32_t>::max();
 
     /// Stable validity bits for the eight measurement fields.
     enum validBits : uint32_t
@@ -64,6 +69,8 @@ struct telem_gpu : public flatbuffer_log
 
         uint32_t m_valid{ 0 };      ///< Bit mask identifying currently available measurement fields.
         double   m_sampleTime{ 0 }; ///< Unix UTC seconds of the last successful query for this device.
+
+        uint32_t m_index{ UnknownIndex }; ///< Associated NVIDIA index, or UnknownIndex; UUID is the stable identity.
 
         /// Compare measurement state while ignoring the acquisition time for change-triggered recording.
         bool operator==( const gpuT &other /**< [in] device state to compare */ ) const;
@@ -117,7 +124,8 @@ inline bool telem_gpu::gpuT::operator==( const gpuT &other ) const
                      m_clockGraphics,
                      m_clockSM,
                      m_clockMemory,
-                     m_valid ) == std::tie( other.m_uuid,
+                     m_valid,
+                     m_index ) == std::tie( other.m_uuid,
                                             other.m_pci,
                                             other.m_status,
                                             other.m_temperature,
@@ -128,7 +136,8 @@ inline bool telem_gpu::gpuT::operator==( const gpuT &other ) const
                                             other.m_clockGraphics,
                                             other.m_clockSM,
                                             other.m_clockMemory,
-                                            other.m_valid );
+                                            other.m_valid,
+                                            other.m_index );
 }
 
 inline telem_gpu::messageT::messageT( const std::string &status, const std::vector<gpuT> &gpus )
@@ -154,7 +163,8 @@ inline telem_gpu::messageT::messageT( const std::string &status, const std::vect
                                                 gpu.m_clockSM,
                                                 gpu.m_clockMemory,
                                                 gpu.m_valid,
-                                                gpu.m_sampleTime ) );
+                                                gpu.m_sampleTime,
+                                                gpu.m_index ) );
     }
 
     auto state   = builder.CreateString( status );
@@ -216,7 +226,8 @@ inline std::vector<telem_gpu::gpuT> telem_gpu::gpus( void *buffer )
                                 gpu->clock_sm(),
                                 gpu->clock_memory(),
                                 gpu->valid(),
-                                gpu->sample_time() } );
+                                gpu->sample_time(),
+                                gpu->index() } );
         }
     }
 
@@ -231,7 +242,9 @@ inline std::string telem_gpu::msgString( void *buffer, flatlogs::msgLenT len )
 
     for( const auto &gpu : gpus( buffer ) )
     {
-        output << " [" << gpu.m_uuid << " " << gpu.m_pci << " " << gpu.m_status << " valid=" << gpu.m_valid
+        output << " [" << gpu.m_uuid
+               << " index=" << ( gpu.m_index == UnknownIndex ? "unknown" : std::to_string( gpu.m_index ) ) << " "
+               << gpu.m_pci << " " << gpu.m_status << " valid=" << gpu.m_valid
                << " sample_time=" << std::setprecision( 17 ) << gpu.m_sampleTime << " temperature=" << gpu.m_temperature
                << " C load=" << gpu.m_load << " memory_load=" << gpu.m_memoryLoad << " memory=" << gpu.m_memoryUsed
                << "/" << gpu.m_memoryTotal << " MiB clocks=" << gpu.m_clockGraphics << "/" << gpu.m_clockSM << "/"
@@ -304,6 +317,16 @@ inline logMetaDetail telem_gpu::getAccessor( const std::string &member )
                  logMeta::Vector_String,
                  logMeta::State,
                  reinterpret_cast<void *>( &strings<&Gpu_sample_fb::pci> ),
+                 true };
+    }
+
+    if( member == "index" )
+    {
+        return { "GPU INDEX",
+                 "NVIDIA device indices in UUID order; 4294967295 means unknown",
+                 logMeta::Vector_UInt,
+                 logMeta::State,
+                 reinterpret_cast<void *>( &numbers<unsigned, &Gpu_sample_fb::index> ),
                  true };
     }
 

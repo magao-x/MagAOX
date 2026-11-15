@@ -177,11 +177,11 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
     /// Track first polls independently of the monotonic clock's epoch.
     bool m_gpuPolled{ false }, m_irqPolled{ false };
 
-    /// Stable property storage; map nodes keep registered addresses valid.
+    /// Properties keyed by NVIDIA index; map nodes keep registered addresses valid.
     std::map<std::string, pcf::IndiProperty> m_gpuProperties, m_gpuInfoProperties;
 
     /// Overall GPU state and per-rule IRQ state exposed to operators.
-    pcf::IndiProperty m_indiP_gpuStatus, m_indiP_irqStatus, m_indiP_irqDetails, m_indiP_irqWarning;
+    pcf::IndiProperty m_indiP_gpuStatus, m_indiP_irqStatus, m_indiP_irqWarning;
 
     ///@}
 
@@ -2168,7 +2168,6 @@ inline int sysMonitor::startupDiagnostics()
     m_indiP_gpuStatus.add( pcf::IndiElement( "status", m_gpuStatus ) );
     REG_INDI_NEWPROP_NOCB( m_indiP_irqStatus, "irq_status", pcf::IndiProperty::Text );
     m_indiP_irqStatus.add( pcf::IndiElement( "summary", m_irqRules.empty() ? "disabled" : "unchecked" ) );
-    REG_INDI_NEWPROP_NOCB( m_indiP_irqDetails, "irq_details", pcf::IndiProperty::Text );
 
     if( registerIndiPropertyNew( m_indiP_irqWarning,
                                  "irq_warning",
@@ -2193,7 +2192,6 @@ inline int sysMonitor::startupDiagnostics()
         warning         = warning || group.m_warning;
         m_irqs.push_back( group );
         m_indiP_irqStatus.add( pcf::IndiElement( rule.m_name, group.m_status ) );
-        m_indiP_irqDetails.add( pcf::IndiElement( rule.m_name, "No check completed" ) );
     }
 
     m_indiP_irqWarning.add( pcf::IndiElement( "active", warning ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
@@ -2212,11 +2210,12 @@ inline int sysMonitor::startupDiagnostics()
 
 inline sys::boundedCommand::result sysMonitor::queryGPUs()
 {
-    return m_gpuCommand.run( { "/usr/bin/nvidia-smi",
-                               "--query-gpu=uuid,pci.bus_id,temperature.gpu,utilization.gpu,utilization.memory,memory."
-                               "used,memory.total,clocks.current.graphics,clocks.current.sm,clocks.current.memory",
-                               "--format=csv,noheader,nounits" },
-                             m_gpuTimeout );
+    return m_gpuCommand.run(
+        { "/usr/bin/nvidia-smi",
+          "--query-gpu=index,uuid,pci.bus_id,temperature.gpu,utilization.gpu,utilization.memory,memory."
+          "used,memory.total,clocks.current.graphics,clocks.current.sm,clocks.current.memory",
+          "--format=csv,noheader,nounits" },
+        m_gpuTimeout );
 }
 
 inline std::vector<telem_irq::groupT> sysMonitor::queryIRQs( double sampleTime )
@@ -2282,6 +2281,17 @@ inline void sysMonitor::acceptGPUResult( const sys::boundedCommand::result &resu
             auto missing     = old;
             missing.m_valid  = 0;
             missing.m_status = m_gpuStatus == "ok" ? "missing" : m_gpuStatus;
+
+            if( std::any_of( samples.begin(),
+                             samples.end(),
+                             [&]( const auto &gpu )
+                             {
+                                 return gpu.m_index == old.m_index;
+                             } ) )
+            {
+                missing.m_index = telem_gpu::UnknownIndex;
+            }
+
             samples.push_back( missing );
         }
     }
@@ -2364,10 +2374,23 @@ inline int sysMonitor::pollDiagnostics( std::chrono::steady_clock::time_point no
                                                return value.m_name == group.m_name;
                                            } );
 
-            if( old == m_irqs.end() || old->m_status != group.m_status || old->m_warning != group.m_warning )
+            if( old == m_irqs.end() || old->m_status != group.m_status || old->m_warning != group.m_warning ||
+                ( group.m_warning && !( group == *old ) ) )
             {
-                log<text_log>( "IRQ " + group.m_name + ": " + group.m_status,
-                               group.m_warning ? logPrio::LOG_WARNING : logPrio::LOG_NOTICE );
+                std::string message = "IRQ " + group.m_name + ": " + group.m_status;
+
+                if( group.m_warning )
+                {
+                    message += "; expected=" + group.m_expected;
+
+                    for( const auto &irq : group.m_irqs )
+                    {
+                        message += "; IRQ " + std::to_string( irq.m_number ) + " requested=" + irq.m_requested +
+                                   " effective=" + irq.m_effective;
+                    }
+                }
+
+                log<text_log>( message, group.m_warning ? logPrio::LOG_WARNING : logPrio::LOG_NOTICE );
             }
         }
 
@@ -2380,9 +2403,31 @@ inline int sysMonitor::pollDiagnostics( std::chrono::steady_clock::time_point no
 
 inline int sysMonitor::publishDiagnostics()
 {
+    for( auto &[key, property] : m_gpuProperties )
+    {
+        const bool assigned = std::any_of( m_gpus.begin(),
+                                           m_gpus.end(),
+                                           [&]( const auto &gpu )
+                                           {
+                                               return gpu.m_index != telem_gpu::UnknownIndex &&
+                                                      key == "gpu_" + std::to_string( gpu.m_index );
+                                           } );
+
+        if( !assigned )
+        {
+            updateIfChanged( property, "valid", 0.0, INDI_ALERT );
+            updateIfChanged( m_gpuInfoProperties.at( key ), "status", std::string( "unavailable" ), INDI_ALERT );
+        }
+    }
+
     for( const auto &gpu : m_gpus )
     {
-        const auto key = sysMonitorDetail::gpuKey( gpu.m_uuid );
+        if( gpu.m_index == telem_gpu::UnknownIndex )
+        {
+            continue;
+        }
+
+        const auto key = "gpu_" + std::to_string( gpu.m_index );
 
         if( m_gpuProperties.count( key ) == 0 )
         {
@@ -2472,30 +2517,14 @@ inline int sysMonitor::publishDiagnostics()
         m_irqRules.empty() ? INDI_IDLE : ( warning ? INDI_ALERT : ( m_irqPolled ? INDI_OK : INDI_IDLE ) );
     std::vector<std::string> names{ "summary" },
         statuses{ m_irqRules.empty() ? "disabled" : ( !m_irqPolled ? "unchecked" : ( warning ? "warning" : "ok" ) ) };
-    std::vector<std::string> detailNames, details;
 
     for( const auto &group : m_irqs )
     {
-        std::string detail = "expected=" + group.m_expected;
-
-        for( const auto &irq : group.m_irqs )
-        {
-            detail += "; IRQ " + std::to_string( irq.m_number ) + " requested=" + irq.m_requested +
-                      " effective=" + irq.m_effective;
-        }
-
         names.push_back( group.m_name );
         statuses.push_back( group.m_status );
-        detailNames.push_back( group.m_name );
-        details.push_back( detail );
     }
 
     updateIfChanged( m_indiP_irqStatus, names, statuses, state );
-
-    if( !detailNames.empty() )
-    {
-        updateIfChanged( m_indiP_irqDetails, detailNames, details, state );
-    }
 
     updateSwitchIfChanged(
         m_indiP_irqWarning, "active", warning ? pcf::IndiElement::On : pcf::IndiElement::Off, state );
