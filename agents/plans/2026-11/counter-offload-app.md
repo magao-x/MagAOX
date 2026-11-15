@@ -240,6 +240,8 @@ Design details settled while writing the code:
   - read-only `stats`: `events`, `published`, `failed`, `overflows`, `active`.
 - **Example config.** It uses `writeLeadUs=10`, `computeLeadUs=20`, `cpuset=spare26`, `threadPrio=20`.
 
+**2026-11-15: documentation.** Added the operator guide `apps/counterOffload/doc/counterOffload.md`. It covers the purpose, the published command, running the app on the RTC, and the settings and `stats` reference.
+
 Checks for the first RTC build:
 - Constructing `pcf::IndiProperty` references inside the startup `numberT` table.
 - `createStandardIndiNumber<double>` with `"%g"` formatting.
