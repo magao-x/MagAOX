@@ -30,10 +30,12 @@ Boolean settings accept `true`, `false`, `1`, or `0`; other values are rejected.
 Polling follows the application loop, so existing collection work can delay a
 sample. No additional NVIDIA library is needed at build time.
 
-Each physical GPU has a numeric property named `gpu_<uuid>`, with UUID hyphens
-replaced by underscores and hexadecimal digits lowercased. Its companion
-`gpu_<uuid>_info` contains `uuid`, `pci`, and `status`. UUIDs keep the association
-stable when the driver's enumeration order changes.
+Each discovered physical GPU has a numeric property named for its reported
+NVIDIA index, such as `gpu_0` or `gpu_1`. These indices come from `nvidia-smi`,
+not CSV row order or UUID sorting. The companion `gpu_0_info` or `gpu_1_info`
+contains `uuid`, `pci`, and `status` so the current device association is visible.
+UUID remains the stable identity for retained samples, logs, and telemetry;
+INDI property associations can change when NVIDIA indices change.
 
 | Numeric element | Units | Validity bit |
 | --- | --- | --- |
@@ -53,11 +55,18 @@ values; this collector does not request clock changes. `N/A` and unsupported
 fields clear the corresponding validity bits while preserving other fields.
 
 `gpu_status.status` reports disabled, unchecked, successful, partial, or failed
-collection, including when no GPUs can be discovered. A previously known or
-explicitly expected GPU remains visible when missing. Failed reads clear validity
+collection, including when no GPUs can be discovered. Failed reads clear validity
 and retain the last device sample time; retained numbers must not be interpreted
 as fresh measurements. INDI properties are read-only and non-healthy enabled
 states are marked Alert. Failures and recovery are logged on status changes.
+
+A missing known GPU retains invalid values at its last reported index until that
+index belongs to another GPU. Reindexing invalidates an old property that no
+longer has an owner; an index reused by another GPU publishes the new UUID and
+measurements. The missing UUID remains in logs and telemetry even if its former
+index is reused. An expected UUID that has never been discovered has no known
+index, so it does not create a numbered INDI property. Its absence is represented
+in the overall status, logs, and UUID-identified telemetry.
 
 The CSV interface is a dependency on the installed NVIDIA driver release. Check
 the fields after driver upgrades. MIG instances, per-process GPU accounting,
@@ -98,14 +107,17 @@ disappearing IRQ, or an effective affinity outside the expected CPUs.
 Read-only INDI properties provide:
 
 - `irq_status`: overall `summary` and each group's verification result.
-- `irq_details`: expected CPUs and current IRQ numbers with requested/effective
-  CPU lists for each group.
 - `irq_warning.active`: On when a required group is unchecked, missing, or
   unverifiable under its policy, or any present group fails its check.
 
 An optional missing group is shown as absent. Monitoring with no configured
 groups is shown as disabled, and initial unchecked state is not reported as a
-successful check. Unchanged results do not repeatedly log warnings.
+successful check. Detailed placement is written to sysMonitor fault logs: each
+changed fault snapshot includes expected CPUs and the current IRQ numbers with
+requested/effective CPU lists. Repeated identical faults are suppressed even
+when their check times advance. Healthy transitions and recovery produce short
+notices without affinity lists. There is no `irq_details` INDI property; use
+`irq_status` for the current result and the app log for fault details.
 
 Install `config/sysmon-warning.conf` in the configured `stateRuleEngine` rules
 directory for RTC/ICC operator warnings and recovery notifications. It compares
@@ -119,7 +131,10 @@ changes may require a configuration update; IRQ-number changes do not.
 
 ## Telemetry and qualification
 
-`telem_gpu` records identity, measurements, validity, and actual sample times.
+`telem_gpu` records UUID/PCI identity, the reported NVIDIA index, measurements,
+validity, and actual sample times. The appended index field preserves decoding
+of older GPU records, whose index is reported as unknown.
+
 `telem_irq` records logical groups, current IRQ numbers, expected/requested/effective
 CPU lists, check status, and actual check times. Records are emitted first, when
 state changes, and at the existing telemeter maximum interval. A forced record
