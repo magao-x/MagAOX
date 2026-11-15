@@ -1,16 +1,117 @@
 /** \file dmRecon_test.cpp
- * \brief Offline dmRecon snapshot, reconstruction and publication ownership regressions.
+ * \brief Offline dmRecon calibration, snapshot, reconstruction and publication ownership regressions.
  * \ingroup dmRecon_unit_test
  */
 
 #include "../../../tests/testXWC.hpp"
-#include "../dmRecon.hpp"
+#include "../dmReconMath.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <future>
+#include <mutex>
 #include <thread>
+
+#include <sched.h>
+
+/// \cond DMRECON_APP_TEST_HARNESS
+namespace dmReconAppHarness
+{
+std::mutex              inverseMutex;           ///< Protects the test-only inverse gate and completion notifications.
+std::condition_variable inverseCondition;       ///< Wakes blocked test inversions and observers.
+std::atomic<uint64_t>   inverseCalls{ 0 };      ///< Number of actual inverse attempts, including rejected input.
+std::atomic<int>        inverseScheduler{ -1 }; ///< Scheduling policy observed by the latest inverse caller.
+bool                    inversePaused{ false }; ///< Test-only pause before the real math helper, under inverseMutex.
+
+/// Release an inverse even if a test assertion aborts while the worker is paused.
+class InversePause
+{
+  public:
+    /// Hold subsequent inverse attempts until explicitly released or destroyed.
+    InversePause();
+
+    /// Release any blocked worker before its owning app is destroyed.
+    ~InversePause();
+
+    /// Release the test gate and wake a blocked inverse.
+    void release();
+};
+
+InversePause::InversePause()
+{
+    std::lock_guard<std::mutex> lock( inverseMutex );
+    inversePaused = true;
+}
+
+InversePause::~InversePause()
+{
+    release();
+}
+
+void InversePause::release()
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( inverseMutex );
+        inversePaused = false;
+    }
+
+    inverseCondition.notify_all();
+}
+
+/// Wait at most two seconds for a specified number of inverse attempts.
+bool waitForInverse( uint64_t count /**< [in] Minimum total call count. */ )
+{
+    std::unique_lock<std::mutex> lock( inverseMutex );
+    return inverseCondition.wait_for( lock,
+                                      std::chrono::seconds( 2 ),
+                                      [&]
+                                      {
+                                          return inverseCalls.load() >= count;
+                                      } );
+}
+} // namespace dmReconAppHarness
+
+namespace MagAOX
+{
+namespace app
+{
+namespace dmReconMath
+{
+/// Observe and optionally pause the app's inverse call, then run the unmodified production math helper.
+inline int
+dmReconTestBuildInverse( mx::improc::eigenImage<float>       &inverse /**< [out] Validated inverse. */,
+                         float                               &condition /**< [out] Condition estimate. */,
+                         int                                 &rejected /**< [out] Rejected mode count. */,
+                         const mx::improc::eigenCube<float>  &modes /**< [in] Private mode cube. */,
+                         const std::vector<size_t>           &indices /**< [in] Active pixel indices. */,
+                         const mx::improc::eigenImage<float> &response /**< [in] Optional response matrix. */,
+                         int          inverseNumModes /**< [in] Singular modes retained, or zero for all. */,
+                         std::string &error /**< [out] Validation or decomposition failure. */ )
+{
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( dmReconAppHarness::inverseMutex );
+        dmReconAppHarness::inverseScheduler = sched_getscheduler( 0 );
+        ++dmReconAppHarness::inverseCalls;
+        dmReconAppHarness::inverseCondition.notify_all();
+        dmReconAppHarness::inverseCondition.wait( lock,
+                                                  []
+                                                  {
+                                                      return !dmReconAppHarness::inversePaused;
+                                                  } );
+    }
+
+    return buildInverse( inverse, condition, rejected, modes, indices, response, inverseNumModes, error );
+}
+} // namespace dmReconMath
+} // namespace app
+} // namespace MagAOX
+/// \endcond
+
+#define buildInverse dmReconTestBuildInverse
+#include "../dmRecon.hpp"
+#undef buildInverse
 
 /// \cond DMRECON_APP_TEST_HARNESS
 namespace MagAOX
@@ -18,11 +119,13 @@ namespace MagAOX
 namespace app
 {
 
-/// Expose real app callbacks using borrowed process-local images without starting any service or worker.
+/// Expose real callbacks and an optional local calibration worker without starting instrument services.
 class dmRecon_test : public dmRecon
 {
   public:
+    using dmRecon::buildCalibration;
     using dmRecon::Frame;
+    using dmRecon::m_calibrationExited;
     using dmRecon::m_calibrationGeneration;
     using dmRecon::m_calibrationUsable;
     using dmRecon::m_coalesced;
@@ -54,11 +157,32 @@ class dmRecon_test : public dmRecon
     using dmRecon::m_workerGeneration;
     using dmRecon::m_writeDMf;
     using dmRecon::outputCompatible;
-    using dmRecon::prepareCalibration;
     using dmRecon::reconstruct;
+    using dmRecon::setCalibrationStage;
     using dmRecon::snapshot;
     using dmRecon::SnapshotStatus;
     using dmRecon::takeCommand;
+
+    /// Build synchronously for existing fixtures, then consume through the production acquisition method.
+    int prepareCalibration();
+
+    /// Invoke acquisition preparation alone, which must never compute an inverse.
+    int prepareOnly();
+
+    /// Start the production calibration entry point using an ordinary process-local thread.
+    void startCalibrationWorker( bool release = true /**< [in] Release the normal startup gate immediately. */ );
+
+    /// Wait for the latest valid calibration result without consuming or computing it.
+    bool waitForCalibration();
+
+    /// Wake the worker without replacing its current calibration generation.
+    void wakeCalibrationWorker();
+
+    /// Inspect the calibration generation most recently attempted under snapshot ownership.
+    uint64_t attemptedCalibration();
+
+    /// Stop and join the production worker without touching any stream or app service.
+    using dmRecon::stopCalibrationThread;
 
     /// Initialize only the local wake semaphore and callback property.
     dmRecon_test();
@@ -102,11 +226,68 @@ dmRecon_test::dmRecon_test()
 
 dmRecon_test::~dmRecon_test() noexcept
 {
+    stopCalibrationThread();
     reconfig();
     dmModesSMT::m_imageStream    = {};
     dmMaskSMT::m_imageStream     = {};
     dmCommandSMT::m_imageStream  = {};
     frameGrabberT::m_imageStream = nullptr;
+}
+
+int dmRecon_test::prepareCalibration()
+{
+    buildCalibration();
+    return dmRecon::prepareCalibration();
+}
+
+int dmRecon_test::prepareOnly()
+{
+    return dmRecon::prepareCalibration();
+}
+
+void dmRecon_test::startCalibrationWorker( bool release )
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_snapshotMutex );
+        m_calibrationStart  = release;
+        m_calibrationStop   = false;
+        m_calibrationExited = false;
+    }
+
+    m_calibrationThread = std::thread( calibrationThreadStart, this );
+    m_calibrationCondition.notify_all();
+}
+
+bool dmRecon_test::waitForCalibration()
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 2 );
+
+    while( std::chrono::steady_clock::now() < deadline )
+    {
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_snapshotMutex );
+
+            if( m_calibrationResult && m_calibrationResult->generation == m_calibrationGeneration )
+            {
+                return true;
+            }
+        }
+
+        std::this_thread::yield();
+    }
+
+    return false;
+}
+
+void dmRecon_test::wakeCalibrationWorker()
+{
+    m_calibrationCondition.notify_all();
+}
+
+uint64_t dmRecon_test::attemptedCalibration()
+{
+    std::lock_guard<std::mutex> lock( m_snapshotMutex );
+    return m_calibrationAttempted;
 }
 
 void dmRecon_test::modesSource( const IMAGE &source )
@@ -435,6 +616,7 @@ TEST_CASE( "dmRecon prepares complete private calibration generations", "[dmReco
     // clang-format off
     #ifdef DMRECON_TEST_DOXYGEN_REF
     MagAOX::app::dmRecon::processImage;
+    MagAOX::app::dmRecon::buildCalibration;
     MagAOX::app::dmRecon::prepareCalibration;
     MagAOX::app::dmRecon::reconstruct;
     #endif
@@ -460,7 +642,185 @@ TEST_CASE( "dmRecon prepares complete private calibration generations", "[dmReco
     REQUIRE( app.processImage( fixture.mask.pixels.data(), dmMaskShmimT{} ) == 0 );
     REQUIRE( app.prepareCalibration() == 1 );
     CHECK_FALSE( app.m_calibrationUsable );
-    CHECK( app.m_workerGeneration > generation );
+    CHECK( app.attemptedCalibration() > generation );
+}
+
+/// Consume completed inverse results on acquisition without performing a new inverse there.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon acquisition only consumes completed calibration", "[dmRecon][app][calibration][worker]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::buildCalibration;
+    MagAOX::app::dmRecon::prepareCalibration;
+    #endif
+    // clang-format on
+
+    Fixture    fixture;
+    auto      &app          = fixture.app;
+    const auto calls        = inverseCalls.load();
+    fixture.modes.pixels[0] = 4;
+    ++fixture.modes.metadata.cnt0;
+    REQUIRE( app.processImage( fixture.modes.pixels.data(), dmModesShmimT{} ) == 0 );
+    CHECK( app.prepareOnly() == 1 );
+    CHECK( inverseCalls.load() == calls );
+    REQUIRE( app.buildCalibration() == 0 );
+    CHECK( inverseCalls.load() == calls + 1 );
+    REQUIRE( app.prepareOnly() == 0 );
+    CHECK( inverseCalls.load() == calls + 1 );
+    REQUIRE( fixture.receive() == 0 );
+    REQUIRE( app.takeCommand() );
+    REQUIRE( app.reconstruct() == 0 );
+    CHECK( app.m_modevals( 0, 0 ) == Approx( 1.5F ) );
+}
+
+/// Refuse a completed result after a newer source generation arrives before acquisition consumes it.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon rejects obsolete completed calibration results", "[dmRecon][app][calibration][worker]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::buildCalibration;
+    MagAOX::app::dmRecon::prepareCalibration;
+    MagAOX::app::dmRecon::processImage;
+    MagAOX::app::dmRecon::setCalibrationStage;
+    #endif
+    // clang-format on
+
+    Fixture fixture;
+    auto   &app             = fixture.app;
+    fixture.modes.pixels[0] = 4;
+    ++fixture.modes.metadata.cnt0;
+    REQUIRE( app.processImage( fixture.modes.pixels.data(), dmModesShmimT{} ) == 0 );
+    REQUIRE( app.buildCalibration() == 0 );
+    const auto obsolete     = app.attemptedCalibration();
+    fixture.modes.pixels[0] = 8;
+    ++fixture.modes.metadata.cnt0;
+    REQUIRE( app.processImage( fixture.modes.pixels.data(), dmModesShmimT{} ) == 0 );
+    REQUIRE( app.setCalibrationStage( app.m_calibrationGeneration, "building_inverse" ) );
+    CHECK_FALSE( app.setCalibrationStage( obsolete, "acquiring" ) );
+    CHECK( std::string( app.m_setupStage.load() ) == "building_inverse" );
+    CHECK( app.prepareOnly() == 1 );
+    CHECK( app.m_workerGeneration != obsolete );
+    REQUIRE( app.buildCalibration() == 0 );
+    REQUIRE( app.prepareOnly() == 0 );
+    REQUIRE( fixture.receive() == 0 );
+    REQUIRE( app.takeCommand() );
+    REQUIRE( app.reconstruct() == 0 );
+    CHECK( app.m_modevals( 0, 0 ) == Approx( 0.75F ) );
+}
+
+/// Discard an inverse superseded while it is running and build the latest complete calibration on the worker.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon worker replaces an obsolete in-flight inverse", "[dmRecon][app][calibration][worker]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::calibrationThreadStart;
+    MagAOX::app::dmRecon::calibrationThreadExec;
+    MagAOX::app::dmRecon::buildCalibration;
+    MagAOX::app::dmRecon::prepareCalibration;
+    MagAOX::app::dmRecon::stopCalibrationThread;
+    #endif
+    // clang-format on
+
+    Fixture    fixture;
+    auto      &app          = fixture.app;
+    const auto calls        = inverseCalls.load();
+    fixture.modes.pixels[0] = 4;
+    ++fixture.modes.metadata.cnt0;
+    REQUIRE( app.processImage( fixture.modes.pixels.data(), dmModesShmimT{} ) == 0 );
+    InversePause pause;
+    app.startCalibrationWorker();
+    REQUIRE( waitForInverse( calls + 1 ) );
+    CHECK( inverseScheduler.load() == SCHED_OTHER );
+    CHECK( app.prepareOnly() == 1 );
+    fixture.modes.pixels[0] = 8;
+    ++fixture.modes.metadata.cnt0;
+    REQUIRE( app.processImage( fixture.modes.pixels.data(), dmModesShmimT{} ) == 0 );
+    pause.release();
+    REQUIRE( app.waitForCalibration() );
+    CHECK( inverseCalls.load() == calls + 2 );
+    REQUIRE( app.prepareOnly() == 0 );
+    REQUIRE( fixture.receive() == 0 );
+    REQUIRE( app.takeCommand() );
+    REQUIRE( app.reconstruct() == 0 );
+    CHECK( app.m_modevals( 0, 0 ) == Approx( 0.75F ) );
+    app.stopCalibrationThread();
+}
+
+/// Attempt a numerically invalid generation once, then recover when a new valid snapshot arrives.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon worker waits for new data after inverse rejection", "[dmRecon][app][calibration][worker]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::calibrationThreadExec;
+    MagAOX::app::dmRecon::buildCalibration;
+    MagAOX::app::dmRecon::prepareCalibration;
+    MagAOX::app::dmRecon::stopCalibrationThread;
+    #endif
+    // clang-format on
+
+    Fixture    fixture;
+    auto      &app          = fixture.app;
+    const auto calls        = inverseCalls.load();
+    fixture.modes.pixels[0] = std::numeric_limits<float>::quiet_NaN();
+    ++fixture.modes.metadata.cnt0;
+    REQUIRE( app.processImage( fixture.modes.pixels.data(), dmModesShmimT{} ) == 0 );
+    const auto invalid = app.m_calibrationGeneration;
+    app.startCalibrationWorker();
+    REQUIRE( waitForInverse( calls + 1 ) );
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 2 );
+
+    while( std::string( app.m_setupStage.load() ) != "calibration_error" &&
+           std::chrono::steady_clock::now() < deadline )
+    {
+        std::this_thread::yield();
+    }
+
+    REQUIRE( std::string( app.m_setupStage.load() ) == "calibration_error" );
+    REQUIRE( app.attemptedCalibration() == invalid );
+
+    for( int attempt = 0; attempt < 10; ++attempt )
+    {
+        app.wakeCalibrationWorker();
+        CHECK( app.prepareOnly() == 1 );
+    }
+
+    app.stopCalibrationThread();
+    CHECK( inverseCalls.load() == calls + 1 );
+    fixture.modes.pixels[0] = 4;
+    ++fixture.modes.metadata.cnt0;
+    REQUIRE( app.processImage( fixture.modes.pixels.data(), dmModesShmimT{} ) == 0 );
+    app.startCalibrationWorker();
+    REQUIRE( app.waitForCalibration() );
+    CHECK( inverseCalls.load() == calls + 2 );
+    REQUIRE( app.prepareOnly() == 0 );
+    app.stopCalibrationThread();
+}
+
+/// Wake and join an idle worker both before its startup gate opens and after startup with no calibration.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon stops an idle calibration worker", "[dmRecon][app][calibration][worker]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::calibrationThreadStart;
+    MagAOX::app::dmRecon::calibrationThreadExec;
+    MagAOX::app::dmRecon::stopCalibrationThread;
+    #endif
+    // clang-format on
+
+    const bool   release = GENERATE( true, false );
+    dmRecon_test app;
+    const auto   calls = inverseCalls.load();
+    app.startCalibrationWorker( release );
+    app.stopCalibrationThread();
+    CHECK( inverseCalls.load() == calls );
+    CHECK( app.m_calibrationExited.load() );
+    CHECK( app.prepareOnly() == 1 );
+    app.stopCalibrationThread();
 }
 
 /// Recover the static calibration after its only notification precedes completion of the producer write.
@@ -472,6 +832,7 @@ TEST_CASE( "dmRecon retries calibration until an early-notified write completes"
     MagAOX::app::dmRecon::captureCalibration;
     MagAOX::app::dmRecon::processImage;
     MagAOX::app::dmRecon::allocate;
+    MagAOX::app::dmRecon::buildCalibration;
     MagAOX::app::dmRecon::prepareCalibration;
     #endif
     // clang-format on
@@ -538,6 +899,7 @@ TEST_CASE( "dmRecon invalid calibration requests a monitor-owned retry", "[dmRec
     MagAOX::app::dmRecon::captureCalibration;
     MagAOX::app::dmRecon::processImage;
     MagAOX::app::dmRecon::allocate;
+    MagAOX::app::dmRecon::buildCalibration;
     MagAOX::app::dmRecon::prepareCalibration;
     #endif
     // clang-format on
@@ -573,6 +935,7 @@ TEST_CASE( "dmRecon reports which calibration snapshot setup is waiting for", "[
 {
     // clang-format off
     #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::buildCalibration;
     MagAOX::app::dmRecon::prepareCalibration;
     MagAOX::app::dmRecon::allocate;
     #endif
@@ -612,6 +975,7 @@ TEST_CASE( "dmRecon calibration rejects malformed private frame lengths", "[dmRe
 {
     // clang-format off
     #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::buildCalibration;
     MagAOX::app::dmRecon::prepareCalibration;
     #endif
     // clang-format on

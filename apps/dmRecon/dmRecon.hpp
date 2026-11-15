@@ -6,9 +6,11 @@
 #define dmRecon_hpp
 
 #include <atomic>
+#include <condition_variable>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include <mx/improc/eigenCube.hpp>
@@ -98,7 +100,7 @@ struct dmLoopTriggerShmimT
     }
 };
 
-/// Reconstruct privately in one worker; observe, but never gate, the AO loop.
+/// Build calibration off the real-time worker, reconstruct privately, and observe the AO loop.
 /** \ingroup dmRecon */
 class dmRecon : public MagAOXApp<true>,
                 public dev::shmimMonitor<dmRecon, dmModesShmimT>,
@@ -164,8 +166,29 @@ class dmRecon : public MagAOXApp<true>,
         ready            ///< A complete private snapshot was accepted.
     };
 
-    std::mutex m_snapshotMutex;    ///< Protects pending snapshots, their generations, and timing observations.
-    std::mutex m_publicationMutex; ///< Serializes final publication with disable and calibration replacement.
+    /// Private CPU calibration transferred from the non-real-time builder to the frame-grabber.
+    struct Calibration
+    {
+        uint64_t            generation{ 0 };                     ///< Source generation captured before numerical work.
+        uint32_t            width{ 0 }, height{ 0 }, modes{ 0 }; ///< Command shape and number of reconstructed modes.
+        std::vector<size_t> indices;                             ///< Validated active-actuator indices.
+        mx::improc::eigenImage<float> inverse;        ///< Complete finite inverse, never used while being built.
+        float                         condition{ 1 }; ///< Validated condition estimate.
+        int                           rejected{ 0 };  ///< Number of singular modes rejected by the inverse.
+        std::string                   error;          ///< Empty on success; otherwise a failed-generation diagnostic.
+    };
+
+    std::mutex m_snapshotMutex; ///< Protects pending snapshots, their generations, and timing observations.
+    std::condition_variable      m_calibrationCondition; ///< Wakes the builder on source changes or shutdown.
+    std::unique_ptr<Calibration> m_calibrationResult;    ///< Pending immutable candidate, under m_snapshotMutex.
+    uint64_t    m_calibrationAttempted{ 0 }; ///< Last generation attempted by the builder, under m_snapshotMutex.
+    bool        m_calibrationStart{ false }, m_calibrationStop{ false }; ///< Builder gates, under m_snapshotMutex.
+    std::thread m_calibrationThread;                ///< CPU-only worker created from the application thread.
+    std::atomic<bool> m_calibrationExited{ false }; ///< Worker exit report; std::thread remains the sole join owner.
+    bool  m_calibrationThreadInit{ true }; ///< Framework initialization flag; worker uses the protected start gate.
+    pid_t m_calibrationThreadID{ 0 };      ///< Builder TID reported through the framework startup handshake.
+    pcf::IndiProperty m_calibrationThreadProperty; ///< Framework thread identity and scheduling report.
+    std::mutex        m_publicationMutex; ///< Serializes final publication with disable and calibration replacement.
     std::unique_lock<std::mutex> m_publicationLock; ///< FG-owned lock from final validation through post-publication.
     Frame m_pendingModes, m_pendingMask, m_pendingCommand; ///< Snapshots shared only under m_snapshotMutex.
     Frame m_modesStage, m_maskStage, m_commandStage;       ///< Each monitor's private reusable copy destination.
@@ -176,19 +199,19 @@ class dmRecon : public MagAOXApp<true>,
     uint64_t m_calibrationGeneration{ 0 }, m_inputGeneration{ 0 }; ///< Snapshot generations under the snapshot lock.
     uint64_t m_commandCounter{ 0 }, m_commandInode{ 0 }; ///< Last accepted input identity for duplicate suppression.
     bool     m_haveCommand{ false };                     ///< Input identity is valid for the current attachment.
-    uint64_t m_workerGeneration{ 0 };                    ///< Calibration attempted by the FG worker.
-    bool     m_calibrationUsable{ false };               ///< Worker buffers contain a complete validated calibration.
-    uint32_t m_commandWidth{ 0 }, m_commandHeight{ 0 };  ///< Worker-owned expected command shape.
+    uint64_t m_workerGeneration{ 0 };                    ///< Calibration installation attempted by the FG worker.
+    bool     m_calibrationUsable{ false };               ///< FG buffers contain a complete validated calibration.
+    uint32_t m_commandWidth{ 0 }, m_commandHeight{ 0 };  ///< FG-owned expected command shape.
     mx::improc::eigenImage<float> m_respM;   ///< Immutable optional response matrix loaded before threads start.
-    mx::improc::eigenImage<float> m_PInv;    ///< Worker-owned, finite pseudo-inverse.
-    std::vector<size_t>           m_maskIDX; ///< Worker-owned column-major active pixel indices.
-    mx::improc::eigenImage<float> m_command, m_modevals; ///< Worker-owned private calculation buffers.
+    mx::improc::eigenImage<float> m_PInv;    ///< FG-owned, finite installed pseudo-inverse.
+    std::vector<size_t>           m_maskIDX; ///< FG-owned column-major active pixel indices.
+    mx::improc::eigenImage<float> m_command, m_modevals; ///< FG-owned private reconstruction buffers.
     std::atomic<float>            m_fps{ 0 };            ///< Latest subscribed FPS, shared with the worker.
     std::atomic<bool> m_writeDMf{ false }; ///< Operator enable; final acceptance is serialized by the publication lock.
     sem_t             m_smSemaphore{}; ///< Coalesced wake hints for the single pending input, never a queue of results.
     bool              m_semaphoreInitialized{ false }; ///< Owns the local semaphore after successful startup.
     std::string       m_monShmimName;                  ///< Name of the diagnostic reconstructed-value stream.
-    mx::improc::milkImage<float> m_modevalMon, m_modeval, m_modevalDiff; ///< Worker-owned diagnostic mappings.
+    mx::improc::milkImage<float> m_modevalMon, m_modeval, m_modevalDiff; ///< FG-owned diagnostic mappings.
     bool                         m_diagnosticsReady{ false },
         m_differenceReady{ false }; ///< Diagnostic stream availability is independent of feedback.
     std::vector<float>    m_difference, m_diagnosticModes; ///< Private diagnostic input and difference product.
@@ -251,8 +274,24 @@ class dmRecon : public MagAOXApp<true>,
     /// Invalidate a calibration source under publication/snapshot ownership.
     void invalidateCalibration( bool modes /**< [in] True selects modes, false selects mask. */ );
 
-    /// Build private calibration and GPU buffers on the FG thread; return one while unavailable.
+    /// Build a private CPU candidate on the non-real-time worker; discard superseded generations.
+    int buildCalibration();
+
+    /// Install a current CPU candidate and prepare GPU buffers on the FG thread; return one while unavailable.
     int prepareCalibration();
+
+    /// Enter the calibration worker using the framework thread-start interface.
+    static void calibrationThreadStart( dmRecon *app /**< [in] Owning app whose lifetime encloses the worker. */ );
+
+    /// Wait for source generations and build CPU calibration on the SCHED_OTHER worker.
+    void calibrationThreadExec();
+
+    /// Update setup status only while this calibration generation is still current and valid.
+    bool setCalibrationStage( uint64_t    generation /**< [in] Generation which owns the reported operation. */,
+                              const char *stage /**< [in] Stage name with static storage duration. */ );
+
+    /// Wake and join the builder without holding snapshot/publication locks.
+    void stopCalibrationThread();
 
     /// Take the latest command exactly once, with no semaphore operations.
     bool takeCommand();
@@ -273,7 +312,7 @@ class dmRecon : public MagAOXApp<true>,
     /// Initialize passive feedback publication defaults.
     dmRecon();
 
-    /// Release the local semaphore after application workers have stopped.
+    /// Stop the calibration builder and release the local semaphore after other app workers have stopped.
     ~dmRecon() noexcept;
     /// Register app and base configuration.
     void setupConfig() override;
@@ -367,6 +406,8 @@ inline dmRecon::dmRecon() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED
 
 inline dmRecon::~dmRecon() noexcept
 {
+    stopCalibrationThread();
+
     if( m_semaphoreInitialized )
     {
         sem_destroy( &m_smSemaphore );
@@ -602,6 +643,44 @@ inline int dmRecon::appStartup()
 
 inline int dmRecon::startWorkers()
 {
+    XWCAPP_THREAD_START( m_calibrationThread,
+                         m_calibrationThreadInit,
+                         m_calibrationThreadID,
+                         m_calibrationThreadProperty,
+                         0,
+                         "",
+                         "calibration",
+                         calibrationThreadStart );
+
+    int         policy = 0;
+    sched_param parameters{};
+    const int   scheduleResult = pthread_getschedparam( m_calibrationThread.native_handle(), &policy, &parameters );
+
+    // threadStart logs scheduling failures but may still return success; do not begin SVD in that case.
+    if( scheduleResult != 0 || policy != SCHED_OTHER || parameters.sched_priority != 0 )
+    {
+        return log<software_error, -1>( { "calibration worker must run with SCHED_OTHER priority 0" } );
+    }
+
+    cpu_set_t affinity;
+    CPU_ZERO( &affinity );
+    const int affinityResult =
+        pthread_getaffinity_np( m_calibrationThread.native_handle(), sizeof( affinity ), &affinity );
+
+    if( affinityResult != 0 || CPU_COUNT( &affinity ) == 0 )
+    {
+        return log<software_error, -1>( { "could not verify calibration worker CPU affinity" } );
+    }
+
+    log<text_log>( std::format( "Calibration worker: SCHED_OTHER, {} allowed CPUs inherited from app startup",
+                                CPU_COUNT( &affinity ) ) );
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_snapshotMutex );
+        m_calibrationStart = true;
+    }
+
+    m_calibrationCondition.notify_one();
     SHMIMMONITORT_APP_STARTUP( loopTriggerSMT );
     SHMIMMONITORT_APP_STARTUP( dmModesSMT );
     SHMIMMONITORT_APP_STARTUP( dmMaskSMT );
@@ -613,6 +692,11 @@ inline int dmRecon::startWorkers()
 
 inline int dmRecon::appLogic()
 {
+    if( m_calibrationExited.load() )
+    {
+        return log<software_error, -1>( { "calibration worker exited unexpectedly" } );
+    }
+
     SHMIMMONITORT_APP_LOGIC( loopTriggerSMT );
     SHMIMMONITORT_APP_LOGIC( dmModesSMT );
     SHMIMMONITORT_APP_LOGIC( dmMaskSMT );
@@ -696,6 +780,7 @@ inline int dmRecon::appShutdown()
     SHMIMMONITORT_APP_SHUTDOWN( dmModesSMT );
     SHMIMMONITORT_APP_SHUTDOWN( dmMaskSMT );
     SHMIMMONITORT_APP_SHUTDOWN( dmCommandSMT );
+    stopCalibrationThread();
     FRAMEGRABBER_APP_SHUTDOWN;
     TELEMETER_APP_SHUTDOWN;
     return 0;
@@ -1044,6 +1129,8 @@ inline void dmRecon::invalidateCalibration( bool modes )
         ++m_calibrationGeneration;
         frameGrabberT::m_reconfig = true;
     }
+
+    m_calibrationCondition.notify_one();
 }
 
 inline int dmRecon::allocate( const dmModesShmimT & )
@@ -1089,6 +1176,7 @@ inline int dmRecon::processImage( void *, const dmModesShmimT & )
         frameGrabberT::m_reconfig = true;
     }
 
+    m_calibrationCondition.notify_one();
     return 0;
 }
 
@@ -1129,6 +1217,7 @@ inline int dmRecon::processImage( void *pixels, const dmMaskShmimT & )
         frameGrabberT::m_reconfig = true;
     }
 
+    m_calibrationCondition.notify_one();
     return 0;
 }
 
@@ -1263,10 +1352,206 @@ inline int dmRecon::processImage( void *, const dmLoopTriggerShmimT & )
     return 0;
 }
 
-inline int dmRecon::prepareCalibration()
+inline void dmRecon::calibrationThreadStart( dmRecon *app )
+{
+    try
+    {
+        app->calibrationThreadExec();
+    }
+    catch( const std::exception &error )
+    {
+        app->log<text_log>( std::string( "Calibration worker exited: " ) + error.what(), logPrio::LOG_ERROR );
+    }
+    catch( ... )
+    {
+        app->log<text_log>( "Calibration worker exited with an unknown exception", logPrio::LOG_ERROR );
+    }
+
+    app->m_calibrationExited = true;
+}
+
+inline bool dmRecon::setCalibrationStage( uint64_t generation, const char *stage )
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_snapshotMutex );
+
+        if( m_calibrationStop || generation != m_calibrationGeneration || !m_modesValid || !m_maskValid )
+        {
+            return false;
+        }
+
+        m_setupStage = stage;
+    }
+
+    return true;
+}
+
+inline void dmRecon::calibrationThreadExec()
+{
+    m_calibrationThreadID = syscall( SYS_gettid );
+
+    for( ;; )
+    {
+        { //mutex scope
+            std::unique_lock<std::mutex> lock( m_snapshotMutex );
+            m_calibrationCondition.wait( lock,
+                                         [this]
+                                         {
+                                             return m_calibrationStop ||
+                                                    ( m_calibrationStart &&
+                                                      m_calibrationGeneration != m_calibrationAttempted );
+                                         } );
+
+            if( m_calibrationStop )
+            {
+                return;
+            }
+        }
+
+        try
+        {
+            buildCalibration();
+        }
+        catch( const std::exception &error )
+        {
+            setCalibrationStage( m_calibrationAttempted, "calibration_error" );
+            log<text_log>( std::string( "Calibration worker: " ) + error.what(), logPrio::LOG_ERROR );
+        }
+        catch( ... )
+        {
+            setCalibrationStage( m_calibrationAttempted, "calibration_error" );
+            log<text_log>( "Unknown exception building calibration", logPrio::LOG_ERROR );
+        }
+    }
+}
+
+inline void dmRecon::stopCalibrationThread()
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_snapshotMutex );
+        m_calibrationStop = true;
+    }
+
+    m_calibrationCondition.notify_all();
+
+    if( m_calibrationThread.joinable() )
+    {
+        m_calibrationThread.join();
+    }
+}
+
+inline int dmRecon::buildCalibration()
 {
     Frame    modes, mask;
     uint64_t generation;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_snapshotMutex );
+        generation = m_calibrationGeneration;
+
+        if( m_calibrationStop || generation == m_calibrationAttempted )
+        {
+            return 1;
+        }
+
+        // Mark unavailable/failed generations too, so the worker cannot spin on unchanged input.
+        m_calibrationAttempted = generation;
+
+        if( !m_modesValid || !m_maskValid )
+        {
+            m_setupStage = !m_modesValid && !m_maskValid ? "waiting_for_modes_and_mask"
+                           : !m_modesValid               ? "waiting_for_modes"
+                                                         : "waiting_for_mask";
+            return 1;
+        }
+
+        m_setupStage = "copying_calibration";
+        modes        = m_pendingModes;
+        mask         = m_pendingMask;
+    }
+
+    auto candidate        = std::make_unique<Calibration>();
+    candidate->generation = generation;
+    candidate->width      = modes.width;
+    candidate->height     = modes.height;
+    candidate->modes      = modes.depth;
+
+    if( !setCalibrationStage( generation, "validating_calibration" ) )
+    {
+        return 1;
+    }
+
+    if( m_respM.size() != 0 )
+    {
+        if( !dmReconMath::squareSize( candidate->width, m_respM.rows() ) )
+        {
+            candidate->error = "response output is not square";
+        }
+
+        candidate->height = candidate->width;
+    }
+
+    if( candidate->error.empty() &&
+        ( modes.width == 0 || modes.height == 0 || modes.depth == 0 ||
+          size_t( modes.width ) > std::numeric_limits<size_t>::max() / modes.height / modes.depth ||
+          modes.pixels.size() != size_t( modes.width ) * modes.height * modes.depth || mask.width != candidate->width ||
+          mask.height != candidate->height || mask.depth != 1 ||
+          mask.pixels.size() != size_t( candidate->width ) * candidate->height ||
+          !dmReconMath::maskIndices( candidate->indices, mask.pixels.data(), mask.pixels.size() ) ) )
+    {
+        candidate->error = "invalid mask or calibration dimensions";
+    }
+
+    if( candidate->error.empty() )
+    {
+        mx::improc::eigenCube<float> cube( modes.width, modes.height, modes.depth );
+        memcpy( cube.data(), modes.pixels.data(), modes.pixels.size() * sizeof( float ) );
+
+        if( !setCalibrationStage( generation, "building_inverse" ) )
+        {
+            return 1;
+        }
+
+        log<text_log>( std::format( "Building CMmodesDM inverse generation {}: {} active pixels, {} modes",
+                                    generation,
+                                    candidate->indices.size(),
+                                    modes.depth ) );
+
+        if( dmReconMath::buildInverse( candidate->inverse,
+                                       candidate->condition,
+                                       candidate->rejected,
+                                       cube,
+                                       candidate->indices,
+                                       m_respM,
+                                       m_inverseNumModes,
+                                       candidate->error ) != 0 &&
+            candidate->error.empty() )
+        {
+            candidate->error = "inverse construction failed without a diagnostic";
+        }
+    }
+
+    const bool success = candidate->error.empty();
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_snapshotMutex );
+
+        if( m_calibrationStop || generation != m_calibrationGeneration || !m_modesValid || !m_maskValid )
+        {
+            return 1;
+        }
+
+        candidate.swap( m_calibrationResult );
+        m_setupStage = success ? "inverse_ready" : "calibration_error";
+    }
+
+    // Any displaced inverse is destroyed after releasing the snapshot lock.
+    return success ? 0 : 1;
+}
+
+inline int dmRecon::prepareCalibration()
+{
+    std::unique_ptr<Calibration> candidate;
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_snapshotMutex );
@@ -1279,64 +1564,33 @@ inline int dmRecon::prepareCalibration()
             return 1;
         }
 
-        generation = m_calibrationGeneration;
-
-        if( generation == m_workerGeneration )
+        if( m_calibrationGeneration == m_workerGeneration )
         {
             return m_calibrationUsable ? 0 : 1;
         }
 
-        m_setupStage = "copying_calibration";
-        modes        = m_pendingModes;
-        mask         = m_pendingMask;
+        if( !m_calibrationResult || m_calibrationResult->generation != m_calibrationGeneration )
+        {
+            // The builder owns the stage while computing; polling must not hide building_inverse.
+            return 1;
+        }
+
+        candidate = std::move( m_calibrationResult );
     }
 
-    m_workerGeneration  = generation;
+    m_workerGeneration  = candidate->generation;
     m_calibrationUsable = false;
-    m_setupStage        = "validating_calibration";
-    uint32_t width = modes.width, height = modes.height;
 
-    if( m_respM.size() != 0 && !dmReconMath::squareSize( width, m_respM.rows() ) )
+    if( !candidate->error.empty() )
     {
-        m_setupStage = "calibration_error";
-        return log<software_error, 1>( { "response output is not square" } );
+        setCalibrationStage( candidate->generation, "calibration_error" );
+        return log<software_error, 1>( { candidate->error } );
     }
 
-    if( m_respM.size() != 0 )
-    {
-        height = width;
-    }
-
-    if( modes.width == 0 || modes.height == 0 || modes.depth == 0 ||
-        size_t( modes.width ) > std::numeric_limits<size_t>::max() / modes.height / modes.depth ||
-        modes.pixels.size() != size_t( modes.width ) * modes.height * modes.depth || mask.width != width ||
-        mask.height != height || mask.depth != 1 || mask.pixels.size() != size_t( width ) * height ||
-        !dmReconMath::maskIndices( m_maskIDX, mask.pixels.data(), mask.pixels.size() ) )
-    {
-        m_setupStage = "calibration_error";
-        return log<software_error, 1>( { "invalid mask or calibration dimensions" } );
-    }
-
-    mx::improc::eigenCube<float> cube( modes.width, modes.height, modes.depth );
-    memcpy( cube.data(), modes.pixels.data(), modes.pixels.size() * sizeof( float ) );
-    float       condition = 1;
-    int         rejected  = 0;
-    std::string error;
-    m_setupStage = "building_inverse";
-    log<text_log>( std::format( "Building CMmodesDM inverse generation {}: {} active pixels, {} modes",
-                                generation,
-                                m_maskIDX.size(),
-                                modes.depth ) );
-
-    if( dmReconMath::buildInverse( m_PInv, condition, rejected, cube, m_maskIDX, m_respM, m_inverseNumModes, error ) !=
-        0 )
-    {
-        m_setupStage = "calibration_error";
-        return log<software_error, 1>( { error } );
-    }
-
-    m_commandWidth  = width;
-    m_commandHeight = height;
+    m_commandWidth  = candidate->width;
+    m_commandHeight = candidate->height;
+    m_maskIDX       = std::move( candidate->indices );
+    m_PInv.swap( candidate->inverse );
     m_command.resize( m_maskIDX.size(), 1 );
     m_modevals.resize( m_PInv.rows(), 1 );
     m_difference.resize( m_PInv.rows() );
@@ -1344,20 +1598,28 @@ inline int dmRecon::prepareCalibration()
 #ifdef MXLIB_CUDA
     if( m_useGPU && !m_gpuReady )
     {
-        m_setupStage = "initializing_gpu";
-        m_gpuReady   = setGPU() == 0;
+        if( !setCalibrationStage( candidate->generation, "initializing_gpu" ) )
+        {
+            return 1;
+        }
+
+        m_gpuReady = setGPU() == 0;
     }
 
     if( m_useGPU )
     {
-        m_setupStage = "allocating_gpu";
-        auto gpu     = std::make_unique<GPUData>();
+        if( !setCalibrationStage( candidate->generation, "allocating_gpu" ) )
+        {
+            return 1;
+        }
+
+        auto gpu = std::make_unique<GPUData>();
 
         if( gpu->inverse.upload( m_PInv.data(), m_PInv.rows(), m_PInv.cols() ) != mx::error_t::noerror ||
             gpu->command.resize( m_command.size() ) != mx::error_t::noerror ||
             gpu->modevals.resize( m_modevals.size() ) != mx::error_t::noerror )
         {
-            m_setupStage = "gpu_allocation_error";
+            setCalibrationStage( candidate->generation, "gpu_allocation_error" );
             return log<software_error, 1>( { "allocating reconstruction GPU buffers" } );
         }
 
@@ -1369,13 +1631,17 @@ inline int dmRecon::prepareCalibration()
         setGPU();
     }
 #endif
+    if( !setCalibrationStage( candidate->generation, "calibration_ready" ) )
+    {
+        return 1;
+    }
+
     m_calibrationUsable = true;
-    m_setupStage        = "calibration_ready";
     log<text_log>( std::format( "Inverted CMmodesDM generation {}: rejected {} of {} modes, condition {}",
-                                generation,
-                                rejected,
-                                modes.depth,
-                                condition ) );
+                                candidate->generation,
+                                candidate->rejected,
+                                candidate->modes,
+                                candidate->condition ) );
     return 0;
 }
 
@@ -1468,8 +1734,13 @@ inline int dmRecon::configureAcquisition()
     frameGrabberT::m_width    = m_modevals.rows();
     frameGrabberT::m_height   = 1;
     frameGrabberT::m_dataType = _DATATYPE_FLOAT;
-    m_setupStage              = "connecting_output";
-    const int rv              = frameGrabberT::openShmim();
+
+    if( !setCalibrationStage( m_workerGeneration, "connecting_output" ) )
+    {
+        return 1;
+    }
+
+    const int rv = frameGrabberT::openShmim();
 
     if( rv != 0 )
     {
@@ -1480,7 +1751,7 @@ inline int dmRecon::configureAcquisition()
 
     if( !outputCompatible( *metadata, m_modevals.size() ) )
     {
-        m_setupStage = "output_schema_mismatch";
+        setCalibrationStage( m_workerGeneration, "output_schema_mismatch" );
         return 1;
     }
 
@@ -1489,7 +1760,7 @@ inline int dmRecon::configureAcquisition()
     if( fstat( frameGrabberT::m_imageStream->shmfd, &mappedStatus ) != 0 ||
         stat( m_outputPath.c_str(), &pathStatus ) != 0 || mappedStatus.st_ino != pathStatus.st_ino )
     {
-        m_setupStage = "output_identity_mismatch";
+        setCalibrationStage( m_workerGeneration, "output_identity_mismatch" );
         return 1;
     }
 
@@ -1515,8 +1786,9 @@ inline int dmRecon::configureAcquisition()
         log<text_log>( std::string( "dmRecon diagnostic connection: " ) + error.what(), logPrio::LOG_WARNING );
     }
 
-    m_setupStage = m_diagnosticsReady ? "acquiring" : "acquiring_without_monitor";
-    return 0;
+    return setCalibrationStage( m_workerGeneration, m_diagnosticsReady ? "acquiring" : "acquiring_without_monitor" )
+               ? 0
+               : 1;
 }
 
 inline float dmRecon::fps()
@@ -1559,7 +1831,7 @@ inline void dmRecon::publishDiagnostics()
     catch( const std::exception & )
     {
         m_diagnosticsReady = false;
-        m_setupStage       = "acquiring_without_monitor";
+        setCalibrationStage( m_workerGeneration, "acquiring_without_monitor" );
     }
 }
 
