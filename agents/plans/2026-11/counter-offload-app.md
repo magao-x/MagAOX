@@ -28,7 +28,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 <!-- This section will be filled out by the agent -->
 
-*Status (2026-11-15): plan proposed for review. Q1–Q3 answered; Q4–Q6 open. No code written; implementation waits for an explicit "implement".*
+*Status (2026-11-15): plan proposed for review. Q1–Q3 answered (Q1 revised: optional leak coefficient); Q4–Q6 open. No code written; implementation waits for an explicit "implement".*
 
 ## Task Summary
 <!-- The agent should summarize the task as they understand it -->
@@ -38,7 +38,7 @@ Build a new RTC app, `counterOffload`, that is a same-host **dmSyncopation produ
 - **Input:** it watches `aol0_tweeterOffload`. Each update (≤1 kHz, published by t2wOffloader since Part 1) is one offload step Δ in tweeter command units, posted right after the woofer write.
 - **Output:** for every dmSyncopation slot (up to 8 kHz, at 0/125/250/375 µs per 2 kHz main cycle), it publishes to `dm01disp08_aux` a contribution that:
   1. **ramps** to −Δ following the woofer's smooth rise, with no overshoot or ringing, using one ramp shape for every offload shape; then
-  2. **decays** slowly back to zero, so the tweeter main loop takes over without a spike and tweeter stroke is freed.
+  2. optionally **leaks** back to zero, under a configurable leak coefficient, so the tweeter main loop takes over without a spike and tweeter stroke is freed.
 
 dmSyncopation copies the contribution into `dm01disp08` and triggers dmcomb. counterOffload never writes the main loop channels or triggers dmcomb itself.
 
@@ -65,35 +65,45 @@ dmSyncopation copies the contribution into `dm01disp08` and triggers dmcomb. cou
   - So the first slot lands 100–225 µs after the event, against a ramp that starts at 120 µs.
   - In the worst phase the first command already corresponds to about 24% of the rise; the rest of the ramp is tracked normally.
   - Offloads are clocked off the same loop, so their phase relative to the synco grid may be roughly fixed. Measure this on the bench.
-- **Why the decay matters.** `dmtweeter-avg` averages `dm01disp_delta`, the combined tweeter shape, which includes the counter channel.
+- **Why the leak matters.** `dmtweeter-avg` averages `dm01disp_delta`, the combined tweeter shape, which includes the counter channel.
   - If the counter held −Δ forever, the main channel would keep +Δ, so tweeter stroke is never freed.
-  - A slow decay lets the main loop remove Δ from its own channel. The loop holds the total tweeter shape constant during the decay, so t2wOffloader sees no change.
+  - A slow leak lets the main loop remove Δ from its own channel. The loop holds the total tweeter shape constant while the counter leaks away, so t2wOffloader sees no change.
 
 ## Key Assumptions
 <!-- The agent should list any assumptions they have made -->
 
 1. The Δ in `aol0_tweeterOffload` has the same geometry and command units as `dm01disp08_aux` (both 50×50 tweeter). This is checked at startup and on every stream reconnect.
-2. The default ramp is a raised cosine, start 120 µs, duration 330 µs after the woofer command, as fitted above. Start, duration and decay are configurable and can be set over INDI so they can be tuned on the bench.
-3. The decay is exponential, starting at the end of each ramp. The default time constant is **50 ms**, well slower than the tweeter loop's integration. It is a provisional value for bench tuning (see Q5).
+2. The default ramp is a raised cosine, start 120 µs, duration 330 µs after the woofer command, as fitted above. Start, duration and leak are configurable and can be set over INDI so they can be tuned on the bench.
+3. **The leak works like an integrator leak** (the same convention as t2wOffloader's `leak`).
+   - Completed ramps are summed into a counter accumulator `A`.
+   - At every published slot, `A ← (1 − leak)·A`, with `leak` in [0, 1].
+   - `leak = 0` holds the contribution indefinitely (no decay). `leak = 1` clears it at the first slot after the ramp ends.
+   - The equivalent time constant is about `−Δt / ln(1 − leak)`, where Δt is the slot period. For example, at 8 kHz a leak of 0.0025 gives about 50 ms.
+   - The default leak is **0** (off), pending Q5.
 4. At most about one ramp is active at a time (offloads ≤1 kHz, ramp 330 µs). The code still sums any overlapping ramps.
 5. The app starts disabled. A `gain` property (0–1) scales the output for operator qualification.
 6. Work continues on the existing branch `ktwitchell/counter-offload`. No new branch without asking.
-7. Building, testing and `clang-format` happen on the build machine. Instrument steps are run by the user.
+7. **Everything runs on the RTC.**
+   - counterOffload runs on the RTC, the same host as dmSyncopation and t2wOffloader. The producer protocol has no cross-host transport or clock mapping, and `aol0_tweeterOffload` is local to the RTC.
+   - The user builds, unit tests, `clang-format`s and bench-tests it on the RTC.
+   - The agent never runs anything on the RTC or instrument hardware (AGENTS.md rule 0).
 
 ## Requirements
 <!-- The agent should list the requirements to which they are planning -->
 
 - **R1.** A new header-only app `apps/counterOffload/` (AGENTS.md §21) that is a `dev::dmSyncopationProducer` writing `dm01disp08_aux`. It uses the `DMSYNCOPATIONPRODUCER_*` and `SHMIMMONITOR_*` macros (§18).
-- **R2.** On each `aol0_tweeterOffload` update while enabled, start a ramp of −Δ with the configured shape, then decay it to zero.
+- **R2.** On each `aol0_tweeterOffload` update while enabled, start a ramp of −Δ with the configured shape. When the ramp completes, add it to the accumulator, which is multiplied by (1 − leak) at every published slot.
 - **R3.** Publish a correctly time-evaluated contribution for every synco slot (up to 8 kHz). The publish path computes only a few-µs image sum. Count missed and failed slots.
 - **R4.** Never touch the main loop channels or trigger dmcomb. Fail closed on geometry mismatch or non-finite values.
 - **R5.** INDI controls:
   - `enable` toggle;
   - `zero` request (clear the state and publish zeros);
   - `gain`;
-  - ramp start, duration, decay and time offset;
+  - ramp start, ramp duration, `leak` (0–1) and time offset;
   - read-only counters: events received, slots published, missed and failed slots, active ramps.
-- **R6.** Disabling stops accepting new offloads but keeps publishing the decay until the contribution is zero. Then it publishes an explicit zero and goes idle.
+- **R6.** Disabling stops accepting new offloads.
+  - With `leak > 0`, the app keeps publishing the leaking contribution until it is negligible, then publishes an explicit zero and goes idle.
+  - With `leak = 0`, the contribution is held, as with dmSpeckle, until the operator sends `zero`.
 - **R7.** Follow the AGENTS.md documentation and test rules.
 
 ## Questions and Points of Clarification
@@ -101,6 +111,7 @@ dmSyncopation copies the contribution into `dm01disp08` and triggers dmcomb. cou
 
 - **Q1. What happens after the ramp?** Hold −Δ, or decay back to zero?
   - Answer: slow decay to zero.
+  - Revised (2026-11-15): make it an *option* through a leak coefficient (usually 0–1) that sets how fast, if at all, the signal leaks back to zero. This is effectively a leak on the counter integrator. See Assumption 3.
 - **Q2. Destination channel?**
   - Answer: `dm01disp08_aux`.
 - **Q3. Edits outside `apps/counterOffload/`?** Adding the app to `apps_rtc` and `all_buildable_apps` in the top-level `Makefile`, and its test to `tests/tests.list`.
@@ -113,29 +124,42 @@ dmSyncopation copies the contribution into `dm01disp08` and triggers dmcomb. cou
   - **(b) Shmim write timestamp.** Use the shmim's own write timestamp (`CLOCK_ISIO`) and convert it to monotonic time with dmSyncopation's existing publication-clock helper (`libMagAOX/common/publicationClock.hpp`, used by synco for the same purpose).
     - More exact; free of wake jitter.
     - More code, and a clock-qualification failure path to handle.
-- **Q5 (open).** Is a 50 ms default decay time constant a reasonable starting point?
-- **Q6 (open).** Which cpuset and priority should the producer thread use? For example a dedicated spare such as `spare26`, set in the instance conf only, with no `make_cpusets` change.
+
+  - Answer: We will do (a), the simpler version
+- **Q5 (open).** Two parts:
+  - **Default `leak`.** The plan assumes 0 (off) until it is tuned on the bench.
+    - Answer: the default should be 0
+  - **Apply the leak per published slot (integrator style)?** That is the recommendation. The effective time constant then depends on synco's step count, and no leak happens during missed slots. The alternative is per unit time, i.e. `(1 − leak)` per nominal 125 µs, applied by elapsed target time; that is independent of misses and step count, but less integrator-like.
+    - Answer: follow the recommendaation - only depend on synco's step count
+- **Q6 (open).** Which cpuset and priority should the producer thread use? The cpuset is set in the instance conf only, with no change to `rtSetup/RTC/make_cpusets`.
+  - **Recommendation:** a spare in the RTC's L3 domain 3 (`spare26`–`spare30`). That domain is set aside for recorders and reserves, away from the loop's caches.
+  - **Avoid CPUs 40–47** (L3 domain 5), which hold the tweeter monitor, synco, tweeterSpeck and the MVM. In November, moving the DM SDK worker onto CPU42 in that domain slowed the MVMs (`dm-syncopation-minimal-diagnostics.md`).
+  - **Load:** counterOffload's load is small, a 50×50 image sum at up to 8 kHz. But a producer thread that is constantly polling at 8 kHz is the kind of extra activity that caused that interference.
+  - **`spare31`** was used for post-worker tests; confirm it is free before using it.
+  - **Priority:** moderate real-time, like tweeterSpeck's 20, well below the SDK worker's 55.
+    - spare26 is fine.
 
 ## Tests
 <!-- The agent should list and describe the test it plans to implement.  It should be specific about the purpose and goal of the test. -->
 
 1. **Unit tests** (`apps/counterOffload/tests/counterOffload_test.cpp`; Catch2, AGENTS.md §19/§20 grouping and Doxygen):
    - **Ramp function:** 0 before the start; 0.5 at the midpoint; 1 at and after the end; monotonic; finite for edge parameters.
-   - **Single event:** at several target times relative to the event, the command equals −gain·Δ·ramp, and then −gain·Δ·exp(−t/τ) after the ramp ends.
-   - **Overlapping events:** the contributions add, and folding a finished ramp into the decaying accumulator is continuous at the hand-over.
-   - **Zero request / disable:** zero clears the state and produces an all-zero command. Disabled mode ignores new events but keeps decaying, then reaches exactly zero.
-   - **Validation:** rejects a channel without the `_aux` suffix, a geometry mismatch, and non-finite parameters.
+   - **Single event:** at several target times relative to the event, the command equals −gain·Δ·ramp, then −gain·Δ·(1 − leak)^n after n published slots past the end of the ramp.
+   - **Overlapping events:** the contributions add, and folding a finished ramp into the leaking accumulator is continuous at the hand-over.
+   - **Zero request / disable:** zero clears the state and produces an all-zero command. Disabled mode ignores new events. With leak > 0 it keeps leaking, then publishes exactly zero. With leak = 0 it holds.
+   - **Leak limits:** leak = 0 holds the value exactly; leak = 1 gives zero at the first slot after the ramp.
+   - **Validation:** rejects a leak outside [0, 1]; rejects a channel without the `_aux` suffix, a geometry mismatch, and non-finite parameters.
    - **(Optional)** One private-stream producer case, reusing dmSpeckle's test fixture pattern if it fits cleanly.
-2. **Build machine (user):**
+2. **On the RTC (user):**
    - `make -C apps/counterOffload`;
    - build and run the test with `Makefile.one`;
    - `clang-format`.
 3. **Bench, operator only:**
    - Start synco, then counterOffload with a small gain, then enable.
    - Confirm in synco's `production` property that mapping 1 (dm01disp08) is accepted every slot with no misses.
-   - Confirm `dm01disp08` follows the expected ramp and decay after an offload.
+   - Confirm `dm01disp08` follows the expected ramp, and then the expected leak, after an offload.
    - Then compare the low-order residual spike at offloads with counterOffload on and off.
-   - Tune the ramp start, duration, time offset and decay.
+   - Tune the ramp start, duration, time offset and leak.
 
 ## Implementation Plan
 <!-- Here the agent documents its plan for the implementation -->
@@ -146,7 +170,7 @@ Files (new unless noted):
   - `class counterOffload : public MagAOXApp<true>, public dev::shmimMonitor<counterOffload>, public dev::dmSyncopationProducer<counterOffload>`, with friend and alias declarations as in `dmSpeckle.hpp:55-63`.
   - **Config, under `[counterOffload]` unless noted:**
     - `channel` (default `dm01disp08_aux`);
-    - `rampStartUs` 120, `rampDurationUs` 330, `decayMs` 50, `timeOffsetUs` 0;
+    - `rampStartUs` 120, `rampDurationUs` 330, `leak` 0, `timeOffsetUs` 0;
     - `gain` 1, `computeLeadUs` 20;
     - `threadPrio`, `cpuset`;
     - `shmimMonitor.shmimName=aol0_tweeterOffload`;
@@ -156,7 +180,7 @@ Files (new unless noted):
     - while enabled, copy Δ and t0 (from Q4) into a pending queue under a mutex.
   - **Pure math, to be unit tested:**
     - `rampFraction(tauUs)`, the raised cosine.
-    - `buildCommand(targetNs)`: ingest pending events into the active-ramp list; fold finished ramps into a decaying accumulator image referenced to a time `t_ref`; then command = −gain·(accumulator·exp(−(T−t_ref)/τ) + Σ Δ_k·ramp(T − t0_k)).
+    - `buildCommand(targetNs)`: ingest pending events into the active-ramp list; fold finished ramps into accumulator `A`; apply `A ← (1 − leak)·A` once per published slot; then command = −gain·(A + Σ Δ_k·ramp(T − t0_k)), summed over the active ramps.
   - **Producer thread** (pattern of `dmSpeckle::syncopationThreadExec`, `dmSpeckle.hpp:591-643`):
     1. `syncopationPoll()`, with backoff on 0 and −1.
     2. On 1, sleep until `cutoffNs − writeLeadUs − computeLeadUs`.
@@ -179,12 +203,12 @@ Files (new unless noted):
 - **Commits** (§22/§23):
   1. functional app, tests and Makefile entries, with this plan updated;
   2. documentation;
-  3. `clang-format` on the build machine.
+  3. `clang-format`, run by the user on the RTC.
 
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->
 
-- **Missed slots:** if synco is disabled or the loop stops, no slots occur. The last contribution persists until synco resumes and the decay continues; it is evaluated by target time, so it catches up correctly.
+- **Missed slots:** if synco is disabled or the loop stops, no slots occur. The last contribution persists. With a per-slot leak, no leak is applied while no slots are being published; it resumes when synco does.
 - **Late events:** an event that arrives after the compute time misses that slot. The next slot evaluates the ramp at the correct τ, so it starts late without replaying the missed part.
 - **Ramp ripple:** the 125 µs zero-order hold produces small steps through the ramp. Bench tuning of `timeOffsetUs` (e.g. half a slot) can centre them.
 - **Model limits:** overshoot and ringing of the woofer (about 3–10%) are not modelled, by design.
