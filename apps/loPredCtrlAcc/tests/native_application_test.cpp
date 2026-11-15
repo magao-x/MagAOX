@@ -8,6 +8,7 @@
 #include "../loPredCtrlAcc_native.hpp"
 #include <chrono>
 #include <thread>
+#include <utility>
 
 namespace libXWCTest::loPredCtrlAccTest
 {
@@ -307,6 +308,43 @@ TEST_CASE( "Native upstream INDI status cannot declare a model ready or publish 
     REQUIRE( app.setCallBack_m_indiP_upstreamTiming( incomplete ) < 0 );
     REQUIRE_FALSE( app.m_onlineWorker->status().m_standard.m_ready );
     REQUIRE_FALSE( app.m_onlineWorker->status().m_assisted.m_ready );
+    REQUIRE( app.inhibited() );
+    REQUIRE( app.appShutdown() == 0 );
+    REQUIRE( ddspc_test_output_calls() == 0 );
+}
+/** \brief AD7689's own enabled/valid and nominal-slot metadata are consumed without estimating ACC/WFS cadence. */
+TEST_CASE( "Native phase app accepts existing AD7689 DDSPC status schema", "[native-observation][app][multirate]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::setCallBack_m_indiP_upstreamTiming;
+#endif
+    // clang-format on
+    AdcTransportFixture  adc( "ddspc-status-adc", 16 );
+    InstalledApplication app;
+    REQUIRE( app.load( { { "online_shadow.enabled", "1" },
+                         { "parameters.accel_history", "1" },
+                         { "adc.shmimName", "ddspc-status-adc" },
+                         { "native_inputs.sync_device", "synthetic_ad7689" },
+                         { "native_inputs.sync_property", "ddspcTiming" } } ) );
+    REQUIRE( app.appStartup() == 0 );
+    pcf::IndiProperty status( pcf::IndiProperty::Number );
+    status.setDevice( "synthetic_ad7689" );
+    status.setName( "ddspcTiming" );
+    for( const auto &[name, value] :
+         std::initializer_list<std::pair<const char *, double>>{ { "enabled", 1 },
+                                                                 { "valid", 1 },
+                                                                 { "frame_seq", 400 },
+                                                                 { "reference_id", 100 },
+                                                                 { "phase_acquisitions", 1 },
+                                                                 { "nominal_slot", 399 } } )
+        status.add( pcf::IndiElement( name, value ) );
+    REQUIRE( app.setCallBack_m_indiP_upstreamTiming( status ) == 0 );
+    pcf::IndiProperty incomplete( pcf::IndiProperty::Number );
+    incomplete.setDevice( "synthetic_ad7689" );
+    incomplete.setName( "ddspcTiming" );
+    incomplete.add( pcf::IndiElement( "enabled", 1.0 ) );
+    REQUIRE( app.setCallBack_m_indiP_upstreamTiming( incomplete ) < 0 );
     REQUIRE( app.inhibited() );
     REQUIRE( app.appShutdown() == 0 );
     REQUIRE( ddspc_test_output_calls() == 0 );

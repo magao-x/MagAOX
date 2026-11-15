@@ -2,6 +2,7 @@
  * \brief Nonblocking observation transport and bounded-duty native DDSPC processing, without a publisher.
  */
 #include "online_shadow.hpp"
+#include "phase_shadow.hpp"
 #include <algorithm>
 #include <chrono>
 #include <mutex>
@@ -14,6 +15,7 @@
 #include <unistd.h>
 #include <stdexcept>
 #include <thread>
+#include <limits>
 #include <pthread.h>
 
 namespace DDSPC
@@ -57,6 +59,7 @@ struct OnlineShadowWorker::Impl : public ShadowPredictionSink
     ShadowPredictionQueue                m_predictions; ///< Optional bounded SPSC scalar diagnostics, never commands.
     NativePipelineConfig                 m_nativeConfig; ///< Startup-only live receiver contract.
     std::unique_ptr<NativeInputPipeline> m_native;       ///< Numerical-thread packet assembly, never acquisition work.
+    std::unique_ptr<PhaseShadow> m_phase; ///< ADC owner evaluates immutable gains; numerical owner alone learns.
     std::shared_ptr<SyncoShadowProducer> m_shadowProducer; ///< Immutable lifetime while acquisition runs.
     std::array<NativeObservation, 4>     m_lastNative;     ///< Sole acquisition-producer continuity high waters.
     std::unique_ptr<NativeCommandQueue>  m_commandInputs;  ///< Separate complete-input SPSC; never model proposals.
@@ -115,20 +118,34 @@ void OnlineShadowWorker::Impl::record()
             if( m_traceIoError.load() )
                 continue;
             if( std::fprintf( m_trace,
-                              "%u,%llu,%llu,%u,%u,%.17g,%.17g,%.17g,%u,%u,%llu,%llu,%llu\n",
+                              "%u,%llu,%llu,%u,%u,%.17g,%.17g,%.17g,%u,%u,%llu,%llu,%llu,%u,%llu,%llu,%lld,%lld,%lld,%."
+                              "17g,%u,%lld,%lld,%lld,%lld,%lld\n",
                               unsigned( r.m_mode ),
                               (unsigned long long)r.m_origin,
                               (unsigned long long)r.m_target,
                               r.m_horizon,
                               r.m_channel,
                               r.m_originPrediction,
-                              r.m_prediction,
+                              r.m_conditionalValid ? r.m_prediction : std::numeric_limits<double>::quiet_NaN(),
                               r.m_measurement,
                               unsigned( r.m_originValid ),
                               unsigned( r.m_late ),
                               (unsigned long long)r.m_generation,
                               (unsigned long long)r.m_epoch,
-                              (unsigned long long)r.m_layout ) < 0 )
+                              (unsigned long long)r.m_layout,
+                              r.m_phase,
+                              (unsigned long long)r.m_adcCounter,
+                              (unsigned long long)r.m_version,
+                              (long long)r.m_decisionNs,
+                              (long long)r.m_completedNs,
+                              (long long)r.m_slotTargetNs,
+                              r.m_candidate,
+                              unsigned( r.m_conditionalValid ),
+                              (long long)r.m_slotCycle,
+                              (long long)r.m_slotStep,
+                              (long long)r.m_slotEpoch,
+                              (long long)r.m_slotGeneration,
+                              (long long)r.m_slotCutoffNs ) < 0 )
                 m_traceIoError.store( true );
             else
                 ++m_traceRows;
@@ -184,6 +201,8 @@ void OnlineShadowWorker::Impl::run()
             if( m_native && schedule )
                 m_native->schedule( schedule->first, schedule->second, now_ns() );
             m_engine.request( m_requested.load() ? ShadowMode::AccelAssisted : ShadowMode::Standard );
+            if( m_phase )
+                m_phase->request( m_requested.load() ? ShadowMode::AccelAssisted : ShadowMode::Standard );
             const auto drops = m_drops.load() + m_raw.drops() + ( m_commandInputs ? m_commandInputs->drops() : 0 );
             if( drops != observedDrops )
             {
@@ -299,8 +318,27 @@ void OnlineShadowWorker::Impl::run()
                     }
                 }
             }
+            while( m_phase && !fault && now_ns() - begin < std::int64_t( m_config.m_budgetUs ) * 1000 )
+            {
+                const auto start = now_ns();
+                if( !m_phase->learn() )
+                    break;
+                compute = double( now_ns() - start ) / 1000;
+                peak    = std::max( peak, compute );
+                if( compute > m_config.m_budgetUs )
+                {
+                    fault = true;
+                    m_phase->inhibit();
+                }
+            }
+            if( m_phase )
+            {
+                ShadowPrediction score;
+                for( unsigned n = 0; n < 4096 && m_phase->read_prediction( score ); ++n )
+                    prediction( score );
+            }
             m_engine.advance( now_ns() );
-            auto status = m_engine.status();
+            auto status = m_phase ? m_phase->status( now_ns() ) : m_engine.status();
             if( m_native )
                 m_native->status( status );
             if( fault )
@@ -309,12 +347,13 @@ void OnlineShadowWorker::Impl::run()
                 status.m_candidateValid  = false;
                 status.m_predictionValid = false;
             }
-            status.m_running   = true;
-            status.m_overrun   = fault;
-            status.m_drops     = observedDrops;
+            status.m_running = true;
+            status.m_overrun = fault;
+            status.m_drops += observedDrops;
             status.m_computeUs = compute;
             status.m_peakUs    = peak;
-            status.m_rawQueued = m_raw.queued();
+            if( !m_phase )
+                status.m_rawQueued = m_raw.queued();
             { //mutex scope
                 std::lock_guard<std::mutex> lock( m_mailbox );
                 status.m_qualifiedQueued = m_count;
@@ -334,6 +373,8 @@ void OnlineShadowWorker::Impl::run()
     }
     catch( ... )
     {
+        if( m_phase )
+            m_phase->inhibit();
         if( m_shadowProducer )
             m_shadowProducer->inhibit( false );
         std::lock_guard<std::mutex> lock( m_snapshot );
@@ -343,6 +384,12 @@ void OnlineShadowWorker::Impl::run()
         m_status.m_overrun         = true;
         m_status.m_qualified       = false;
         m_status.m_standard = m_status.m_assisted = ShadowStatus{};
+    }
+    if( m_phase )
+    {
+        ShadowPrediction score;
+        while( m_phase->read_prediction( score ) )
+            prediction( score );
     }
     std::lock_guard<std::mutex> lock( m_snapshot );
     if( m_shadowProducer )
@@ -379,12 +426,23 @@ void OnlineShadowWorker::start()
     m_impl->m_traceRows.store( 0 );
     m_impl->m_traceIoError.store( false );
     m_impl->m_traceLimit.store( false );
+    m_impl->m_native.reset();
+    m_impl->m_phase.reset();
+    m_impl->m_shadowProducer.reset();
     if( m_impl->m_nativeConfig.m_enabled )
     {
-        m_impl->m_native =
-            std::make_unique<NativeInputPipeline>( m_impl->m_engine, m_impl->m_nativeConfig, m_impl->m_config.m_model );
-        m_impl->m_shadowProducer = m_impl->m_native->producer();
-        m_impl->m_lastNative     = {};
+        if( m_impl->m_nativeConfig.m_sampleDriven )
+        {
+            m_impl->m_phase          = std::make_unique<PhaseShadow>( m_impl->m_nativeConfig, m_impl->m_config );
+            m_impl->m_shadowProducer = m_impl->m_phase->producer();
+        }
+        else
+        {
+            m_impl->m_native = std::make_unique<NativeInputPipeline>(
+                m_impl->m_engine, m_impl->m_nativeConfig, m_impl->m_config.m_model );
+            m_impl->m_shadowProducer = m_impl->m_native->producer();
+        }
+        m_impl->m_lastNative = {};
     }
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_impl->m_snapshot );
@@ -427,7 +485,9 @@ void OnlineShadowWorker::start()
             }
             if( std::fprintf( m_impl->m_trace,
                               "mode,origin,target,horizon,channel,origin_prediction,conditional_prediction,measurement,"
-                              "origin_valid,late,generation,epoch,layout\n" ) < 0 )
+                              "origin_valid,late,generation,epoch,layout,phase,adc_counter,model_version,"
+                              "decision_ns,completed_ns,slot_target_ns,candidate,conditional_valid,"
+                              "slot_cycle,slot_step,slot_epoch,slot_generation,slot_cutoff_ns\n" ) < 0 )
                 throw std::runtime_error( "Cannot write private prediction CSV header" );
         }
         m_impl->m_thread = std::thread( &Impl::run, m_impl.get() );
@@ -450,6 +510,8 @@ void OnlineShadowWorker::start()
 }
 void OnlineShadowWorker::stop()
 {
+    if( m_impl->m_phase )
+        m_impl->m_phase->inhibit();
     m_impl->m_running.store( false );
     if( m_impl->m_shadowProducer )
         m_impl->m_shadowProducer->inhibit( false );
@@ -466,6 +528,18 @@ void OnlineShadowWorker::stop()
 }
 void OnlineShadowWorker::observe( const NativeObservation &record ) noexcept
 {
+    if( m_impl->m_phase )
+    {
+        try
+        {
+            m_impl->m_phase->observe( record, now_ns() );
+        }
+        catch( ... )
+        {
+            m_impl->m_phase->inhibit();
+        }
+        return;
+    }
     const auto n = std::size_t( record.m_source );
     if( m_impl->m_shadowProducer && n < 4 && n != 2 )
     {
@@ -484,7 +558,7 @@ void OnlineShadowWorker::native_inputs( const NativePipelineConfig &c )
     if( m_impl->m_thread.joinable() || m_impl->m_running.load() )
         throw std::logic_error( "Native input convention is startup-only" );
     m_impl->m_nativeConfig = c;
-    if( c.m_enabled )
+    if( c.m_enabled && !c.m_sampleDriven )
     {
         m_impl->m_commandInputs = std::make_unique<NativeCommandQueue>( m_impl->m_config.m_pendingCapacity * 8, 4096 );
         m_impl->m_commandPayload.resize( 4096 );
@@ -492,11 +566,28 @@ void OnlineShadowWorker::native_inputs( const NativePipelineConfig &c )
 }
 void OnlineShadowWorker::command( const NativeObservation &r, std::span<const float> values ) noexcept
 {
+    if( m_impl->m_phase )
+    {
+        try
+        {
+            m_impl->m_phase->command( r, values );
+        }
+        catch( ... )
+        {
+            m_impl->m_phase->inhibit();
+        }
+        return;
+    }
     if( m_impl->m_commandInputs && !m_impl->m_commandInputs->push( r, values ) && m_impl->m_shadowProducer )
         m_impl->m_shadowProducer->inhibit( false, r.m_availableNs );
 }
 void OnlineShadowWorker::tick( std::int64_t now ) noexcept
 {
+    if( m_impl->m_phase )
+    {
+        m_impl->m_phase->tick( now );
+        return;
+    }
     if( !m_impl->m_nativeConfig.m_enabled )
         return;
     if( m_impl->m_shadowProducer )
@@ -512,10 +603,20 @@ void OnlineShadowWorker::tick( std::int64_t now ) noexcept
     if( !m_impl->m_raw.push( tick ) && m_impl->m_shadowProducer )
         m_impl->m_shadowProducer->inhibit( false, now );
 }
+void OnlineShadowWorker::command_poll( bool coherent, std::int64_t now ) noexcept
+{
+    if( m_impl->m_phase )
+        m_impl->m_phase->command_poll( coherent, now );
+}
 void OnlineShadowWorker::schedule( const MagAOX::app::synco::Record &s, std::int64_t received ) noexcept
 {
     if( !m_impl->m_running.load() )
         return;
+    if( m_impl->m_phase )
+    {
+        m_impl->m_phase->schedule( s, received );
+        return;
+    }
     if( m_impl->m_shadowProducer )
         m_impl->m_shadowProducer->callback( s, received );
     std::unique_lock<std::mutex> lock( m_impl->m_mailbox, std::try_to_lock );
@@ -526,6 +627,11 @@ bool OnlineShadowWorker::sync_status( const NativeSyncStatus &s )
 {
     if( !m_impl->m_running.load() || !m_impl->m_nativeConfig.m_enabled )
         return false;
+    if( m_impl->m_phase )
+    {
+        m_impl->m_phase->sync( s );
+        return true;
+    }
     if( m_impl->m_shadowProducer && ( !s.m_status.m_locked || !s.m_status.m_synchronized ) )
         m_impl->m_shadowProducer->inhibit( true, s.m_status.m_receivedNs );
     std::unique_lock<std::mutex> lock( m_impl->m_mailbox, std::try_to_lock );
@@ -536,6 +642,8 @@ bool OnlineShadowWorker::sync_status( const NativeSyncStatus &s )
 }
 bool OnlineShadowWorker::origin( const OnlineOrigin &r )
 {
+    if( m_impl->m_phase )
+        return false;
     if( !m_impl->m_running.load() )
         return false;
     Impl::Event event;
@@ -545,6 +653,8 @@ bool OnlineShadowWorker::origin( const OnlineOrigin &r )
 }
 bool OnlineShadowWorker::applied( const OnlineAppliedSlot &r )
 {
+    if( m_impl->m_phase )
+        return false;
     if( !m_impl->m_running.load() )
         return false;
     Impl::Event event;
@@ -553,6 +663,8 @@ bool OnlineShadowWorker::applied( const OnlineAppliedSlot &r )
 }
 bool OnlineShadowWorker::commands( const OnlineCommandFrame &r )
 {
+    if( m_impl->m_phase )
+        return false;
     if( !m_impl->m_running.load() || r.m_evidence != InputEvidence::Requested )
         return false;
     Impl::Event event;
@@ -563,6 +675,8 @@ bool OnlineShadowWorker::commands( const OnlineCommandFrame &r )
 
 bool OnlineShadowWorker::qualify( const MultirateContract &contract )
 {
+    if( m_impl->m_phase )
+        return false;
     if( !m_impl->m_running.load() || !native_shadow_evidence( contract ) ||
         contract.m_upstream.m_enabled != m_impl->m_config.m_expectUpstream || contract.m_provenance.size() > 4096 )
         return false;
@@ -580,14 +694,14 @@ OnlineShadowStatus OnlineShadowWorker::status() const
 {
     std::lock_guard<std::mutex> lock( m_impl->m_snapshot );
     auto                        s = m_impl->m_status;
-    s.m_rawQueued                 = m_impl->m_raw.queued();
-    s.m_drops                     = m_impl->m_drops.load() + m_impl->m_raw.drops() +
-                                    ( m_impl->m_commandInputs ? m_impl->m_commandInputs->drops() : 0 );
-    s.m_traceRows                 = m_impl->m_traceRows.load();
-    s.m_traceIoError              = m_impl->m_traceIoError.load();
-    s.m_traceLimit                = m_impl->m_traceLimit.load();
-    s.m_predictionsQueued         = m_impl->m_predictions.queued();
-    s.m_predictionDrops           = m_impl->m_predictions.drops();
+    s.m_rawQueued                 = m_impl->m_phase ? m_impl->m_phase->queued() : m_impl->m_raw.queued();
+    s.m_drops             = ( m_impl->m_phase ? s.m_drops : 0 ) + m_impl->m_drops.load() + m_impl->m_raw.drops() +
+                            ( m_impl->m_commandInputs ? m_impl->m_commandInputs->drops() : 0 );
+    s.m_traceRows         = m_impl->m_traceRows.load();
+    s.m_traceIoError      = m_impl->m_traceIoError.load();
+    s.m_traceLimit        = m_impl->m_traceLimit.load();
+    s.m_predictionsQueued = m_impl->m_predictions.queued();
+    s.m_predictionDrops   = ( m_impl->m_phase ? s.m_predictionDrops : 0 ) + m_impl->m_predictions.drops();
     if( m_impl->m_config.m_expectUpstream && !s.m_qualified )
     {
         s.m_upstream = true;

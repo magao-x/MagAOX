@@ -5,8 +5,8 @@ NEED_CUDA = no
 # ADC records and shared windows require C++20 even when no local/common.mk sets the standard.
 CXXSTD ?= -std=c++20
 export CXXSTD
-OTHER_HEADERS = native_pipeline.hpp synco_shadow.hpp ../../libMagAOX/app/dmSyncopationTiming.hpp ../../libMagAOX/app/dev/dmSyncopationProducer.hpp synchronized_inputs.hpp multirate_shadow.hpp online_shadow.hpp loPredCtrlAcc.hpp loPredCtrlAcc_native.hpp native_observer.hpp native_observation.hpp ../../libMagAOX/common/dmCompletion.hpp ../../libMagAOX/common/dmTiming.hpp ../../libMagAOX/common/timingStats.hpp adc_features.hpp shadow_policy.hpp shadow_pipeline.hpp adc_input.hpp adc_reader.hpp ar_controller.hpp shadow_controller.hpp causal_input.hpp
-OTHER_OBJS = native_pipeline.o synco_shadow.o synchronized_inputs.o multirate_shadow.o online_shadow.o native_observer.o native_observation.o adc_features.o shadow_policy.o shadow_pipeline.o adc_input.o adc_reader.o recursive_least_squares.o qrd_rls.o ar_controller.o utils.o shadow_controller.o causal_input.o
+OTHER_HEADERS = phase_shadow.hpp native_pipeline.hpp synco_shadow.hpp ../../libMagAOX/app/dmSyncopationTiming.hpp ../../libMagAOX/app/dev/dmSyncopationProducer.hpp synchronized_inputs.hpp multirate_shadow.hpp online_shadow.hpp loPredCtrlAcc.hpp loPredCtrlAcc_native.hpp native_observer.hpp native_observation.hpp ../../libMagAOX/common/dmCompletion.hpp ../../libMagAOX/common/dmTiming.hpp ../../libMagAOX/common/timingStats.hpp adc_features.hpp shadow_policy.hpp shadow_pipeline.hpp adc_input.hpp adc_reader.hpp ar_controller.hpp shadow_controller.hpp causal_input.hpp
+OTHER_OBJS = phase_shadow.o native_pipeline.o synco_shadow.o synchronized_inputs.o multirate_shadow.o online_shadow.o native_observer.o native_observation.o adc_features.o shadow_policy.o shadow_pipeline.o adc_input.o adc_reader.o recursive_least_squares.o qrd_rls.o ar_controller.o utils.o shadow_controller.o causal_input.o
 TARGET = loPredCtrlAcc
 
 # Every installed/default build is read-only. Runtime config and command-line make overrides cannot enable output.

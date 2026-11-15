@@ -28,6 +28,9 @@ void NativeObservationSink::command( const NativeObservation &, std::span<const 
 void NativeObservationSink::tick( std::int64_t ) noexcept
 {
 }
+void NativeObservationSink::command_poll( bool, std::int64_t ) noexcept
+{
+}
 void NativeObservationSink::schedule( const MagAOX::app::synco::Record &, std::int64_t ) noexcept
 {
 }
@@ -544,6 +547,70 @@ void NativeObserver::Impl::run()
         while( m_running.load( std::memory_order_acquire ) && !m_ioError.load() && mono_ns() < end )
         {
             const auto now = mono_ns();
+            // Observe command identities before matching any completion/SDK records from this poll.
+            for( const auto index : { 3u, 2u, 1u, 4u, 5u } )
+            {
+                if( m_config.m_streams[index].m_name.empty() )
+                    continue;
+                NativeObservation r;
+                const auto        outcome = inputs[index - 1].sample( m_config.m_streams[index],
+                                                                      ObservationSource( index ),
+                                                                      m_config.m_modalIndices,
+                                                                      mono_ns(),
+                                                                      r,
+                                                                      payload );
+                if( outcome == 1 )
+                {
+                    incompatible[index] = false;
+                    if( r.m_source == ObservationSource::Dm && r.m_event != ObservationEvent::Sample )
+                    { //mutex scope
+                        std::lock_guard<std::mutex> guard( m_commandMutex );
+                        m_commandHistory.clear();
+                    }
+                    const bool command = r.m_source == ObservationSource::Dm && r.m_event == ObservationEvent::Sample;
+                    if( command && r.m_elements > payload.size() )
+                    {
+                        ++m_commandOversize;
+                        r.m_flags |= ObservationPayloadUnretained;
+                    }
+                    r = m_capture.accept( r );
+                    if( command && r.m_elements <= payload.size() )
+                    {
+                        if( m_sink )
+                            m_sink->command( r, std::span<const float>( payload.data(), r.m_elements ) );
+                        { //mutex scope
+                            std::lock_guard<std::mutex> guard( m_commandMutex );
+                            m_commandHistory.append( r, std::span<const float>( payload.data(), r.m_elements ) );
+                        }
+                        if( m_commands )
+                            m_commands->push( r, std::span<const float>( payload.data(), r.m_elements ) );
+                    }
+                    enqueue( r );
+                }
+                else if( outcome != -4 )
+                {
+                    m_capture.poll( ObservationSource( index ), outcome == -1, outcome == -2, outcome == -3 );
+                    if( outcome == -3 && !incompatible[index] && m_sink && ( index == 1 || index == 3 ) )
+                    {
+                        NativeObservation rejected;
+                        rejected.m_source     = ObservationSource( index );
+                        rejected.m_event      = ObservationEvent::Invalid;
+                        rejected.m_flags      = ObservationInvalidPayload;
+                        rejected.m_receivedNs = rejected.m_availableNs = mono_ns();
+                        m_sink->observe( rejected ); // Fault notification only; no invented frame or journal row.
+                    }
+                    incompatible[index] = outcome == -3;
+                }
+                if( m_sink && index == 3 )
+                    m_sink->command_poll( outcome == 0 || ( outcome == 1 && r.m_event == ObservationEvent::Sample ),
+                                          mono_ns() );
+            }
+            if( m_sink && !m_config.m_timingStream.empty() )
+            {
+                MagAOX::app::synco::Record record;
+                if( schedule.read( m_config.m_timingStream, record ) )
+                    m_sink->schedule( record, mono_ns() );
+            }
             for( unsigned batch = 0; batch < 4; ++batch )
             {
                 // Observation has no frozen WFS decision origin. Measure availability after acquiring the reader lock.
@@ -607,69 +674,8 @@ void NativeObserver::Impl::run()
                 if( !copied.m_more )
                     break;
             }
-            // Observe command identities before matching any completion/SDK records from this poll.
-            for( const auto index : { 3u, 2u, 1u, 4u, 5u } )
-            {
-                if( m_config.m_streams[index].m_name.empty() )
-                    continue;
-                NativeObservation r;
-                const auto        outcome = inputs[index - 1].sample( m_config.m_streams[index],
-                                                                      ObservationSource( index ),
-                                                                      m_config.m_modalIndices,
-                                                                      mono_ns(),
-                                                                      r,
-                                                                      payload );
-                if( outcome == 1 )
-                {
-                    incompatible[index] = false;
-                    if( r.m_source == ObservationSource::Dm && r.m_event != ObservationEvent::Sample )
-                    { //mutex scope
-                        std::lock_guard<std::mutex> guard( m_commandMutex );
-                        m_commandHistory.clear();
-                    }
-                    const bool command = r.m_source == ObservationSource::Dm && r.m_event == ObservationEvent::Sample;
-                    if( command && r.m_elements > payload.size() )
-                    {
-                        ++m_commandOversize;
-                        r.m_flags |= ObservationPayloadUnretained;
-                    }
-                    r = m_capture.accept( r );
-                    if( command && r.m_elements <= payload.size() )
-                    {
-                        if( m_sink )
-                            m_sink->command( r, std::span<const float>( payload.data(), r.m_elements ) );
-                        { //mutex scope
-                            std::lock_guard<std::mutex> guard( m_commandMutex );
-                            m_commandHistory.append( r, std::span<const float>( payload.data(), r.m_elements ) );
-                        }
-                        if( m_commands )
-                            m_commands->push( r, std::span<const float>( payload.data(), r.m_elements ) );
-                    }
-                    enqueue( r );
-                }
-                else if( outcome != -4 )
-                {
-                    m_capture.poll( ObservationSource( index ), outcome == -1, outcome == -2, outcome == -3 );
-                    if( outcome == -3 && !incompatible[index] && m_sink && ( index == 1 || index == 3 ) )
-                    {
-                        NativeObservation rejected;
-                        rejected.m_source     = ObservationSource( index );
-                        rejected.m_event      = ObservationEvent::Invalid;
-                        rejected.m_flags      = ObservationInvalidPayload;
-                        rejected.m_receivedNs = rejected.m_availableNs = mono_ns();
-                        m_sink->observe( rejected ); // Fault notification only; no invented frame or journal row.
-                    }
-                    incompatible[index] = outcome == -3;
-                }
-            }
             if( m_sink && m_config.m_sampleRequests )
                 m_sink->tick( mono_ns() );
-            if( m_sink && !m_config.m_timingStream.empty() )
-            {
-                MagAOX::app::synco::Record record;
-                if( schedule.read( m_config.m_timingStream, record ) )
-                    m_sink->schedule( record, mono_ns() );
-            }
             m_capture.tick( mono_ns() );
             { //mutex scope
                 std::lock_guard<std::mutex> lock( m_mutex );

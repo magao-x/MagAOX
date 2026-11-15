@@ -724,6 +724,7 @@ inline void loPredCtrlAcc::setupConfig()
     DMSYNCOPATIONPRODUCER_SETUP_CONFIG( config );
     for( const char *key : { "calibration",
                              "sync_device",
+                             "sync_property",
                              "sync_reference",
                              "sync_epoch",
                              "modal_anchor",
@@ -1140,6 +1141,12 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
         return -1;
     _config( m_nativeCalibrationFile, "native_inputs.calibration" );
     _config( m_nativeInputs.m_statusDevice, "native_inputs.sync_device" );
+    _config( m_nativeInputs.m_statusProperty, "native_inputs.sync_property" );
+    if( m_nativeInputs.m_statusProperty != "timingDiag" && m_nativeInputs.m_statusProperty != "ddspcTiming" )
+    {
+        m_shutdown = true;
+        return log<software_error, -1>( { __FILE__, __LINE__, "Unsupported upstream status property" } );
+    }
     _config( m_nativeInputs.m_reference, "native_inputs.sync_reference" );
     _config( m_nativeInputs.m_syncEpoch, "native_inputs.sync_epoch" );
     _config( m_nativeInputs.m_modalAnchor, "native_inputs.modal_anchor" );
@@ -1379,7 +1386,8 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
                 _config( source.m_publicationClock, key + "_publication_clock" );
             }
             DDSPC::validate_native_observation( m_nativeShadowConfig );
-            m_nativeInputs.m_enabled = m_onlineShadowEnabled && m_onlineConfig.m_expectUpstream;
+            m_nativeInputs.m_enabled  = m_onlineShadowEnabled && m_onlineConfig.m_expectUpstream;
+            m_nativeInputs.m_feedback = m_gainCtrl;
             if( m_nativeInputs.m_enabled )
             {
                 m_nativeInputs.m_calibration = DDSPC::load_native_calibration( m_nativeCalibrationFile );
@@ -2116,8 +2124,14 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
                 ";late_forecasts=" + std::to_string( online.m_lateForecasts ) + ";native=" + online.m_adapterReason +
                 ";prepared=" + std::to_string( online.m_preparedPlans ) + ";private_slots=" +
                 std::to_string( online.m_shadowSlots ) + ";missed_slots=" + std::to_string( online.m_missedSlots ) +
-                ";callback_us=" + std::to_string( online.m_callbackUs ) + ";trace_rows=" +
-                std::to_string( online.m_traceRows ) + ";trace_error=" + std::to_string( online.m_traceIoError ) +
+                ";adc_opportunities=" + std::to_string( online.m_fastOpportunities ) +
+                ";adc_predictions=" + std::to_string( online.m_fastPredictions ) +
+                ";phase_counts=" + std::to_string( online.m_phasePredictions[0] ) + "," +
+                std::to_string( online.m_phasePredictions[1] ) + "," + std::to_string( online.m_phasePredictions[2] ) +
+                "," + std::to_string( online.m_phasePredictions[3] ) + ";fast_us=" + std::to_string( online.m_fastUs ) +
+                ";fast_peak_us=" + std::to_string( online.m_fastPeakUs ) + ";callback_us=" +
+                std::to_string( online.m_callbackUs ) + ";trace_rows=" + std::to_string( online.m_traceRows ) +
+                ";trace_error=" + std::to_string( online.m_traceIoError ) +
                 ";trace_limit=" + std::to_string( online.m_traceLimit ) } );
     text( NativeOperator::Timing,
           { "phase_offset_us", "phase_jitter_us", "clock", "exposure", "modal_association", "slots_per_wfs" },
@@ -2819,7 +2833,7 @@ inline int loPredCtrlAcc::appStartup()
     if( m_onlineShadowEnabled && !m_nativeInputs.m_statusDevice.empty() &&
         registerIndiPropertySet( m_indiP_upstreamTiming,
                                  m_nativeInputs.m_statusDevice,
-                                 "timingDiag",
+                                 m_nativeInputs.m_statusProperty,
                                  INDI_SETCALLBACK( m_indiP_upstreamTiming ) ) < 0 )
         return -1;
 
@@ -4047,13 +4061,24 @@ inline INDI_SETCALLBACK_DEFN( loPredCtrlAcc, m_indiP_upstreamTiming )( const pcf
     timespec                now{};
     if( clock_gettime( CLOCK_MONOTONIC, &now ) != 0 )
         return -1;
-    s.m_status.m_receivedNs = std::int64_t( now.tv_sec ) * 1000000000 + now.tv_nsec;
-    s.m_status.m_epoch      = m_nativeInputs.m_syncEpoch;
-    const std::array<const char *, 5> names{
-        "mode_code", "delay_lock", "local_frame_seq", "sync_producer_frame_id", "sync_frame_id_gap_count" };
-    std::array<std::uint64_t, 5> values{};
-    bool                         valid = ipRecv.getType() == pcf::IndiProperty::Number;
-    for( unsigned n = 0; n < names.size(); ++n )
+    s.m_status.m_receivedNs                 = std::int64_t( now.tv_sec ) * 1000000000 + now.tv_nsec;
+    s.m_status.m_epoch                      = m_nativeInputs.m_syncEpoch;
+    const bool                        ddspc = m_nativeInputs.m_statusProperty == "ddspcTiming";
+    const std::array<const char *, 6> names = ddspc ? std::array<const char *, 6>{ "enabled",
+                                                                                   "valid",
+                                                                                   "frame_seq",
+                                                                                   "reference_id",
+                                                                                   "phase_acquisitions",
+                                                                                   "nominal_slot" }
+                                                    : std::array<const char *, 6>{ "mode_code",
+                                                                                   "delay_lock",
+                                                                                   "local_frame_seq",
+                                                                                   "sync_producer_frame_id",
+                                                                                   "sync_frame_id_gap_count",
+                                                                                   "" };
+    std::array<std::uint64_t, 6>      values{};
+    bool                              valid = ipRecv.getType() == pcf::IndiProperty::Number;
+    for( unsigned n = 0; n < ( ddspc ? 6u : 5u ); ++n )
     {
         if( !ipRecv.find( names[n] ) )
         {
@@ -4082,6 +4107,8 @@ inline INDI_SETCALLBACK_DEFN( loPredCtrlAcc, m_indiP_upstreamTiming )( const pcf
     s.m_sequence              = values[2];
     s.m_referenceCounter      = values[3];
     s.m_gaps                  = values[4];
+    s.m_hasSlotOffset         = valid && ddspc;
+    s.m_slotOffset            = std::int64_t( values[5] ) - std::int64_t( values[2] );
     m_onlineWorker->sync_status( s ); // Missing fields revoke lock; no timestamp or counter anchor is fabricated.
     return valid ? 0 : -1;
 }

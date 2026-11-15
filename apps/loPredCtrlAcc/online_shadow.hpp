@@ -1,5 +1,5 @@
 /** \file online_shadow.hpp
- * \brief Budgeted native shadow learning worker; acquisition only enqueues immutable observations.
+ * \brief Budgeted native shadow learning worker with ADC-owner inference from immutable coefficient snapshots.
  */
 #ifndef PC_ONLINE_SHADOW_HPP
 #define PC_ONLINE_SHADOW_HPP
@@ -28,15 +28,19 @@ class OnlineShadowWorker : public NativeObservationSink
     /// Join before destroying the source/sink owner; no external process is signalled.
     void stop();
 
-    /// Sole native observation producer enqueues without allocation, blocking or learner access.
+    /// Sole native owner consumes/enqueues without allocation, blocking or learner access; phase mode predicts here.
     void observe( const NativeObservation &record /**< [in] Owned source record. */ ) noexcept override;
 
     /// Configure the real native receiver before starting either worker; empty calibration remains inhibited.
     void native_inputs( const NativePipelineConfig &config /**< [in] Immutable reviewed native receiver settings. */ );
 
-    /// Copy a whole original request to its separate bounded SPSC queue; never project on acquisition.
+    /// Consume a complete original request; phase mode performs only its bounded calibrated linear projection.
     void command( const NativeObservation &record /**< [in] Original request metadata. */,
                   std::span<const float>   values /**< [in] Entire coherent payload. */ ) noexcept override;
+
+    /// Forward read-only command coverage; an idle coherent poll is healthy, a busy/racing poll is not a witness.
+    void command_poll( bool         coherent /**< [in] Actual poll outcome. */,
+                       std::int64_t nowNs /**< [in] Actual post-read time. */ ) noexcept override;
 
     /// Enqueue an actual local observer sampling opportunity, separate from a measurement.
     void tick( std::int64_t nowNs /**< [in] Actual local observer time. */ ) noexcept override;

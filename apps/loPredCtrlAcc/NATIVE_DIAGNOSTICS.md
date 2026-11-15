@@ -1,3 +1,5 @@
+ADC-driven native predictions: [PHASE_DDSPC.md](PHASE_DDSPC.md). The same compact interface now includes ADC opportunity/prediction and phase counts plus fast-path latency in `input_buffers.online_queue`. Model updates count real WFS-driven adaptation, not ADC arrivals.
+
 > 2026-11-15: `SYNCO_NATIVE.md` documents the connected native input/recorder and
 > private syncopation payload path. The compact schema remains 60 elements;
 > additional preparation/callback/recording evidence shares `buffers.online_queue`.

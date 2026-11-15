@@ -8,6 +8,7 @@
 #include <memory>
 #include <atomic>
 #include <vector>
+#include <array>
 
 #include "ar_controller.hpp"
 
@@ -30,8 +31,15 @@ struct ShadowPrediction
     double        m_prediction{ 0 }, m_measurement{ 0 }; ///< Conditional forecast and identical observed target.
     bool m_late{ false }; ///< Computed after an explicit diagnostic deadline, or without any deadline qualification.
     std::uint64_t m_generation{ 0 }, m_epoch{ 0 }, m_layout{ 0 }; ///< Adapter source/synchronization/calibration tags.
-    double m_originPrediction{ 0 }; ///< Forecast using only origin state and a held-last-confirmed-input assumption.
-    bool   m_originValid{ false };  ///< False for older auto-origins whose future input was already known when frozen.
+    double   m_originPrediction{ 0 }; ///< Forecast using only origin state and a held-last-confirmed-input assumption.
+    bool     m_originValid{ false }; ///< False for older auto-origins whose future input was already known when frozen.
+    unsigned m_phase{ 0 };           ///< Upstream counter phase; repeated WFS targets remain real measurements.
+    std::uint64_t m_adcCounter{ 0 }, m_version{ 0 }; ///< Individual ADC and immutable coefficient version.
+    std::int64_t  m_decisionNs{ -1 }, m_completedNs{ -1 }, m_slotTargetNs{ -1 }; ///< Actual local prediction events.
+    double        m_candidate{ 0 };           ///< Private modal candidate; never an observed training command.
+    bool          m_conditionalValid{ true }; ///< False when only an origin-only forecast was computed.
+    std::int64_t  m_slotCycle{ -1 }, m_slotStep{ -1 }, m_slotEpoch{ 0 }, m_slotGeneration{ 0 },
+        m_slotCutoffNs{ -1 }; ///< Actual Request identity.
 };
 
 /// Optional diagnostics consumer, serialized with learning; it must not block, throw or change model/input state.
@@ -113,6 +121,9 @@ struct ShadowConfig
 
     /// Literal reference-law command penalty.
     realT m_lambda{ 100 };
+
+    /// Opt-in operational penalty scaling; historical causal replay defaults remain literal.
+    bool m_scaledPenalty{ false };
 
     /// Relative rank threshold after feature column normalization.
     realT m_rankTolerance{ 1e-5f };
@@ -214,6 +225,17 @@ struct ShadowStatus
 
     /// Current readiness/fault description.
     ShadowReason m_reason{ ShadowReason::AwaitingRecord };
+};
+
+/// Owned immutable numerical snapshot; only the learning thread constructs/factorizes it.
+struct ShadowSnapshot
+{
+    Matrix                m_theta;  ///< Canonical [A B D C] coefficients.
+    std::array<Matrix, 5> m_gain;   ///< Cached gains for zero through four fixed oldest quarter-frame slots.
+    ShadowStatus          m_status; ///< Excitation/finite/readiness evidence at publication.
+    int                   m_stateRows{ 0 }, m_commands{ 0 };     ///< Canonical state size and commands per WFS frame.
+    std::uint64_t         m_inputEpoch{ 0 }, m_sensorEpoch{ 0 }; ///< Receiver continuity at publication.
+    std::int64_t          m_dataAvailableNs{ -1 }; ///< High-water availability of all evidence used by the fit.
 };
 
 /// Two independently trained causal models with frozen-origin diagnostics and no output sink.
@@ -379,6 +401,10 @@ class ShadowController
 
     /// Return a copy of canonical [A B D C] coefficients for independent numerical diagnostics.
     Matrix prediction_matrix( ShadowMode mode /**< [in] Independent model to inspect. */ );
+
+    /// Export coefficients and all phase-prefix gains on the learning thread; no measurement history is advanced.
+    bool snapshot( ShadowMode      mode /**< [in] Independent model. */,
+                   ShadowSnapshot &snapshot /**< [out] Owned immutable copy for fast prediction. */ );
 
     /// Return a diagnostic next input only for a ready model; no history/output mutation is performed.
     Matrix proposal( ShadowMode mode /**< [in] Independent model to inspect. */ ) const;

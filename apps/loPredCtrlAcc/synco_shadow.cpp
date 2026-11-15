@@ -48,6 +48,7 @@ bool SyncoShadowPlans::prepare(
         ready +
         std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::steady_clock::now() - started ).count();
     m_valid = true;
+    m_slots = 4 * m_frames;
     return true;
 }
 bool SyncoShadowPlans::command( const synco::Request &r,
@@ -58,16 +59,16 @@ bool SyncoShadowPlans::command( const synco::Request &r,
     const auto started = std::chrono::steady_clock::now();
     if( !m_valid || !synco::validProductionRecord( s, now ) || s[synco::cycle] < 0 ||
         s[synco::cycle] == std::numeric_limits<std::int64_t>::max() || s[synco::steps] != 4 ||
-        s[synco::period] != 500000 || r.step < 0 || r.step >= 4 || r.epoch != m_epoch || r.generation != m_generation ||
-        now < m_ready || now >= r.cutoffNs || m_ready >= r.cutoffNs || r.targetNs < m_grid ||
-        pixels.size() != m_elements )
+        ( m_slots == 1 ? ( s[synco::period] < 450000 || s[synco::period] > 550000 ) : s[synco::period] != 500000 ) ||
+        r.step < 0 || r.step >= 4 || r.epoch != m_epoch || r.generation != m_generation || now < m_ready ||
+        now >= r.cutoffNs || m_ready >= r.cutoffNs || r.targetNs < m_grid || pixels.size() != m_elements )
         return false;
     const auto expected = synco::request( s, r.step );
     if( expected.epoch != r.epoch || expected.generation != r.generation || expected.cycle != r.cycle ||
         expected.targetNs != r.targetNs || expected.cutoffNs != r.cutoffNs )
         return false;
     const auto delta = r.targetNs - m_grid;
-    if( delta % 125000 || delta / 125000 >= 4 * m_frames )
+    if( m_slots == 1 ? delta != 0 : ( delta % 125000 || delta / 125000 >= m_slots ) )
         return false;
     std::copy_n( m_pixels.data() + ( delta / 125000 ) * m_elements, m_elements, pixels.data() );
     return now + std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::steady_clock::now() - started )
@@ -77,6 +78,41 @@ bool SyncoShadowPlans::command( const synco::Request &r,
 void SyncoShadowPlans::invalidate()
 {
     m_valid = false;
+}
+bool SyncoShadowPlans::prepare_slot( std::span<const float> modal,
+                                     const Matrix          &shapes,
+                                     const synco::Request  &r,
+                                     const synco::Record   &s,
+                                     std::int64_t           now )
+{
+    invalidate();
+    const auto start = std::chrono::steady_clock::now();
+    if( !synco::validProductionRecord( s, now ) || r.step < 0 || r.step >= 4 || s[synco::steps] != 4 ||
+        s[synco::period] < 450000 || s[synco::period] > 550000 || s[synco::cycle] < 0 ||
+        s[synco::cycle] == std::numeric_limits<std::int64_t>::max() || shapes.rows() != int( m_elements ) ||
+        shapes.cols() != int( modal.size() ) || modal.empty() || modal.size() > 2 || now >= r.cutoffNs )
+        return false;
+    const auto expected = synco::request( s, r.step );
+    if( expected.epoch != r.epoch || expected.generation != r.generation || expected.cycle != r.cycle ||
+        expected.targetNs != r.targetNs || expected.cutoffNs != r.cutoffNs )
+        return false;
+    for( std::size_t p = 0; p < m_elements; ++p )
+    {
+        double value = 0;
+        for( std::size_t m = 0; m < modal.size(); ++m )
+            value += double( shapes( p, m ) ) * modal[m];
+        if( !std::isfinite( float( value ) ) )
+            return false;
+        m_pixels[p] = float( value );
+    }
+    m_epoch      = r.epoch;
+    m_generation = r.generation;
+    m_grid       = r.targetNs;
+    m_ready =
+        now + std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::steady_clock::now() - start ).count();
+    m_slots = 1;
+    m_valid = m_ready < r.cutoffNs;
+    return m_valid;
 }
 SyncoShadowProducer::SyncoShadowProducer( std::size_t elements, unsigned frames ) : m_copy( elements )
 {
@@ -105,6 +141,33 @@ bool SyncoShadowProducer::prepare( ShadowMode           mode,
         m_planMask.fetch_and( ~( 1u << n ) );
         return false;
     }
+    std::unique_lock<std::mutex> lock( m_mutex, std::try_to_lock );
+    if( !lock.owns_lock() )
+        return false;
+    m_previous[n].swap( m_ready[n] );
+    m_work[n].swap( m_ready[n] );
+    m_previousOriginNs[n] = m_originNs[n];
+    m_originNs[n]         = origin;
+    m_planMask.fetch_or( 1u << n );
+    if( origin <= m_lossNs[n].load() )
+    {
+        m_planMask.fetch_and( ~( 1u << n ) );
+        return false;
+    }
+    ++m_prepared;
+    return true;
+}
+bool SyncoShadowProducer::prepare_slot( ShadowMode             mode,
+                                        std::span<const float> modal,
+                                        const Matrix          &shapes,
+                                        const synco::Request  &r,
+                                        const synco::Record   &s,
+                                        std::int64_t           now,
+                                        std::int64_t           origin )
+{
+    const unsigned n = mode == ShadowMode::AccelAssisted;
+    if( origin <= m_lossNs[n].load() || !m_work[n]->prepare_slot( modal, shapes, r, s, now ) )
+        return false;
     std::unique_lock<std::mutex> lock( m_mutex, std::try_to_lock );
     if( !lock.owns_lock() )
         return false;
