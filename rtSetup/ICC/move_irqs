@@ -1,4 +1,7 @@
 #!/bin/bash
+# \file
+# \brief Route ICC device IRQs to their configured dedicated CPUs.
+
 set -euo pipefail
 
 source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
@@ -51,12 +54,9 @@ for kitx in $kitxs; do
     echo $cpu > /proc/irq/$kitx/smp_affinity_list
 done
 
-nvidias=$(grep nvidia /proc/interrupts | awk '{print $1}' | sed 's/.$//')
-cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/acqu_mvm/cpuset.cpus)
-for nvidia in $nvidias; do
-    echo "nvidia: " $nvidia " to " $cpu
-    echo $cpu > /proc/irq/$nvidia/smp_affinity_list
-done
+# NVIDIA IRQs stay on the system CPUs with the ordinary IRQs: the loops' GPU
+# waits spin rather than wait for an interrupt, and management queries
+# (nvidia-smi, NVML monitoring) must not interrupt the loops' cores.
 
 echo "done moving IRQs"
 

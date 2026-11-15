@@ -751,8 +751,12 @@ resets every IRQ to the system CPUs before routing the device IRQs, so no
 reboot is needed. Check each NVIDIA IRQ's `effective_affinity_list` is in
 `0-23,64-87`.
 
-The ICC's `move_irqs` routes its NVIDIA IRQs to its own `acqu_mvm` the same
-way; not changed here.
+The ICC gets the same change in `rtSetup/ICC/move_irqs` and
+`rtSetup/ICC/irqbalance_policyscript`: its NVIDIA IRQs stay on its system CPUs
+(`0-31,64-95`; irqbalance excludes `32-63,96-127`). Deploy the same way with
+`MAGAOX_ROLE=ICC`. The ICC policy script's comments had the two pvcam IRQs
+swapped relative to `move_irqs` (`pvcamPCIE_0` -> `camllowfs`,
+`pvcamPCIE_1` -> `camflowfs`); the comments now match `move_irqs`.
 
 ## Implementation dependencies and sequence
 
