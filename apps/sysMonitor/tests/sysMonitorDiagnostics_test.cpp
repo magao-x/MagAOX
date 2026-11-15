@@ -47,10 +47,12 @@ diagnosticDriver::diagnosticDriver( MagAOXApp<true> *parent )
     enableResponseMode( true );
     struct stat input{};
     REQUIRE( stat( parent->driverInName().c_str(), &input ) == 0 );
+
     for( const auto &entry : std::filesystem::directory_iterator( "/proc/self/fd" ) )
     {
         const int   fd = std::stoi( entry.path().filename() );
         struct stat candidate{};
+
         if( fstat( fd, &candidate ) == 0 && candidate.st_dev == input.st_dev && candidate.st_ino == input.st_ino )
         {
             m_input = fd;
@@ -142,6 +144,7 @@ diagnosticHarness::diagnosticHarness()
     m_driverInName   = m_root + "/in";
     m_driverOutName  = m_root + "/out";
     m_driverCtrlName = m_root + "/ctrl";
+
     for( const auto &file : { m_driverInName, m_driverOutName, m_driverCtrlName } )
     {
         REQUIRE( mkfifo( file.c_str(), 0600 ) == 0 );
@@ -173,6 +176,7 @@ MagAOX::sys::boundedCommand::result diagnosticHarness::queryGPUs()
 std::vector<telem_irq::groupT> diagnosticHarness::queryIRQs( double time )
 {
     ++m_irqQueries;
+
     for( auto &group : m_groups )
     {
         group.m_checkTime = time;
@@ -373,15 +377,18 @@ TEST_CASE( "sysMonitor example configs omit NVIDIA pinning and retain PVCAM iden
     REQUIRE( app.m_gpuInterval == 5 );
     REQUIRE( app.m_gpuTimeout == 2 );
     REQUIRE( app.m_irqRules.size() == ( std::string( file ).find( "RTC" ) != std::string::npos ? 3 : 5 ) );
+
     for( const auto &rule : app.m_irqRules )
     {
         REQUIRE( rule.m_match != "nvidia" );
         REQUIRE( rule.m_required );
         REQUIRE( rule.m_requireEffective );
+
         if( rule.m_name == "camflowfs" )
         {
             REQUIRE( rule.m_match == "pvcamPCIE_1" );
         }
+
         if( rule.m_name == "camllowfs" )
         {
             REQUIRE( rule.m_match == "pvcamPCIE_0" );
@@ -419,6 +426,7 @@ TEST_CASE( "sysMonitor warning examples raise and clear via stateRuleEngine", "[
     std::map<std::string, ruleRuleKeys> keys;
     loadRuleConfig( rules, keys, cfg );
     REQUIRE( rules.rules.size() == 2 );
+
     for( const auto &device : { "sysMonRTC", "sysMonICC" } )
     {
         auto &property = *rules.props.at( std::string( device ) + ".irq_warning" );
