@@ -344,7 +344,7 @@ class AudibleAlerts(XDevice):
                     self.playback_text['voice'] = new_req.voice.name
                     self.telem("play", {"file": "", "speech": new_req.text, "voice": new_req.voice.name})
                     can_cache = new_req.text == req.text
-                    fp = get_or_create_speech_file(new_req, can_cache, cache_dir=self.config.playback_files_root)
+                    fp = get_or_create_speech_file(new_req, can_cache, output_dir=self.config.playback_files_root)
                 else:
                     raise RuntimeError(f"Unknown speech request type. What is a {req!r}?")
                 self.playback_text['file'] = f"{fp.relative_to(self.config.playback_files_root)}"
