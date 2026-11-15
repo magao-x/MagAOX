@@ -28,7 +28,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 <!-- This section will be filled out by the agent -->
 
-*Status (2026-11-15): plan proposed for review. Q1–Q3 answered (Q1 revised: optional leak coefficient); Q4–Q6 open. No code written; implementation waits for an explicit "implement".*
+*Status (2026-11-15): plan complete; all questions (Q1–Q6) answered. No code written; implementation waits for an explicit "implement".*
 
 ## Task Summary
 <!-- The agent should summarize the task as they understand it -->
@@ -79,7 +79,7 @@ dmSyncopation copies the contribution into `dm01disp08` and triggers dmcomb. cou
    - At every published slot, `A ← (1 − leak)·A`, with `leak` in [0, 1].
    - `leak = 0` holds the contribution indefinitely (no decay). `leak = 1` clears it at the first slot after the ramp ends.
    - The equivalent time constant is about `−Δt / ln(1 − leak)`, where Δt is the slot period. For example, at 8 kHz a leak of 0.0025 gives about 50 ms.
-   - The default leak is **0** (off), pending Q5.
+   - The default leak is **0** (off), per Q5. The leak is applied per published slot, so its effective time constant depends on synco's step count.
 4. At most about one ramp is active at a time (offloads ≤1 kHz, ramp 330 µs). The code still sums any overlapping ramps.
 5. The app starts disabled. A `gain` property (0–1) scales the output for operator qualification.
 6. Work continues on the existing branch `ktwitchell/counter-offload`. No new branch without asking.
@@ -116,7 +116,7 @@ dmSyncopation copies the contribution into `dm01disp08` and triggers dmcomb. cou
   - Answer: `dm01disp08_aux`.
 - **Q3. Edits outside `apps/counterOffload/`?** Adding the app to `apps_rtc` and `all_buildable_apps` in the top-level `Makefile`, and its test to `tests/tests.list`.
   - Answer: both allowed.
-- **Q4 (open, for the user to think about): time reference for the ramp.**
+- **Q4. Time reference for the ramp.**
   - t2wOffloader posts `aol0_tweeterOffload` a few µs after writing the woofer channel, and the ramp is defined relative to that woofer command. Two options:
   - **(a) Wake time + offset (recommended).** Take `CLOCK_MONOTONIC` when counterOffload's shmim monitor thread wakes on the update, plus a configurable `timeOffsetUs` (default 0) that can be tuned on the bench.
     - Simple.
@@ -126,18 +126,18 @@ dmSyncopation copies the contribution into `dm01disp08` and triggers dmcomb. cou
     - More code, and a clock-qualification failure path to handle.
 
   - Answer: We will do (a), the simpler version
-- **Q5 (open).** Two parts:
+- **Q5. Default leak, and how it is applied.** Two parts:
   - **Default `leak`.** The plan assumes 0 (off) until it is tuned on the bench.
     - Answer: the default should be 0
   - **Apply the leak per published slot (integrator style)?** That is the recommendation. The effective time constant then depends on synco's step count, and no leak happens during missed slots. The alternative is per unit time, i.e. `(1 − leak)` per nominal 125 µs, applied by elapsed target time; that is independent of misses and step count, but less integrator-like.
     - Answer: follow the recommendaation - only depend on synco's step count
-- **Q6 (open).** Which cpuset and priority should the producer thread use? The cpuset is set in the instance conf only, with no change to `rtSetup/RTC/make_cpusets`.
+- **Q6.** Which cpuset and priority should the producer thread use? The cpuset is set in the instance conf only, with no change to `rtSetup/RTC/make_cpusets`.
   - **Recommendation:** a spare in the RTC's L3 domain 3 (`spare26`–`spare30`). That domain is set aside for recorders and reserves, away from the loop's caches.
   - **Avoid CPUs 40–47** (L3 domain 5), which hold the tweeter monitor, synco, tweeterSpeck and the MVM. In November, moving the DM SDK worker onto CPU42 in that domain slowed the MVMs (`dm-syncopation-minimal-diagnostics.md`).
   - **Load:** counterOffload's load is small, a 50×50 image sum at up to 8 kHz. But a producer thread that is constantly polling at 8 kHz is the kind of extra activity that caused that interference.
   - **`spare31`** was used for post-worker tests; confirm it is free before using it.
   - **Priority:** moderate real-time, like tweeterSpeck's 20, well below the SDK worker's 55.
-    - spare26 is fine.
+    - spare26 is fine, and emulating the priority of tweeterSpeck is a good starting point.
 
 ## Tests
 <!-- The agent should list and describe the test it plans to implement.  It should be specific about the purpose and goal of the test. -->
@@ -172,12 +172,12 @@ Files (new unless noted):
     - `channel` (default `dm01disp08_aux`);
     - `rampStartUs` 120, `rampDurationUs` 330, `leak` 0, `timeOffsetUs` 0;
     - `gain` 1, `computeLeadUs` 20;
-    - `threadPrio`, `cpuset`;
+    - `threadPrio` 20 and `cpuset` `spare26` in the example conf (per Q6);
     - `shmimMonitor.shmimName=aol0_tweeterOffload`;
     - `[syncopation] timingStream`, `writeLeadUs` (example 10).
   - **`allocate()` / `processImage()`** (shmimMonitor):
     - check geometry;
-    - while enabled, copy Δ and t0 (from Q4) into a pending queue under a mutex.
+    - while enabled, copy Δ and t0 = monotonic receipt time + `timeOffsetUs` (Q4 option a) into a pending queue under a mutex.
   - **Pure math, to be unit tested:**
     - `rampFraction(tauUs)`, the raised cosine.
     - `buildCommand(targetNs)`: ingest pending events into the active-ramp list; fold finished ramps into accumulator `A`; apply `A ← (1 − leak)·A` once per published slot; then command = −gain·(A + Σ Δ_k·ramp(T − t0_k)), summed over the active ramps.
@@ -199,7 +199,6 @@ Files (new unless noted):
   - `dev::dmSyncopationProducer`, `dev::shmimMonitor`;
   - `synco::Request` and `synco::monotonicNs()`;
   - `mx::math::isFinite`;
-  - Q4(b), if chosen: `libMagAOX/common/publicationClock.hpp`.
 - **Commits** (§22/§23):
   1. functional app, tests and Makefile entries, with this plan updated;
   2. documentation;
