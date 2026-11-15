@@ -4,7 +4,113 @@ Review date: 2026-11-05. Recorded for commit: 2026-11-06. Author: Codex (GPT-6).
 
 Request: Analyze dmRecon after on-sky operation appeared to "blow up" after several minutes, concentrating first on concurrency and memory safety in its substitution of the current integrator state in cacao mfilt. Document the findings in a planning document.
 
-Status: Initial source audit complete. Defects and permitted failure interleavings identified; the cause of the observed on-sky event is **not yet established**. Implementation is not part of this review.
+Status: Source audit and initial dmRecon-only implementation complete on 2026-11-15; workstation validation recorded below. The cause of the observed on-sky event is **not yet established**. Historical source references below remain tied to the reviewed baseline.
+
+## Implementation decision — 2026-11-15
+
+The user's final choice is **dmRecon-only passive observation**: monitor the existing loop-trigger stream's semaphores, publish feedback, then verify from source timestamps that the exact next trigger occurred later. Warn when publication misses that timestamp or its ordering cannot be established. The user rejected a dmRecon-controlled trigger path. Do not gate mfilt, change its trigger configuration, or delay its execution. mfilt source remains unchanged.
+
+This supersedes both the earlier paired dmRecon/mfilt proposal and the subsequently considered producer-side exclusion requirement. Source changes in cacao, ImageStreamIO, mxlib, and common MagAOX base classes remain outside this implementation's scope; app-local tests and their required test registration are included. There is no pending gate approval or requirement to obtain an exclusion guarantee before completing this diagnostic implementation.
+
+The observer cannot exclude a concurrent mfilt read. Reconstruction completion, a posted semaphore, FPS estimates, and a final deadline/counter check do not prevent the writer from being descheduled. A post-publication warning cannot undo a mixed vector already consumed. **F1 remains unresolved:** successful timing classification is evidence about observed publication ordering, not proof that every mfilt read is protected or that the on-sky failure is fixed.
+
+The dmRecon work also addresses validated private snapshots, exclusive calibration/buffer ownership, coalesced input notifications and unique frame identities, serialized enable/disable publication behavior, corrected mask indices, nonfinite rejection, dimensions/type checks, inversion-error handling, and CPU/non-CUDA build coverage. Tests exercise actual app logic with synthetic/private data and never start instrument applications.
+
+Respect the current real-time stream rules in `AGENTS.md`: preserve frame-grabber publication ordering, perform computation in private storage, reuse the existing staged/non-temporal copy options, and treat metadata reads, copy methods, and thread placement as measurable costs. Instrument A/B timing remains user-run follow-up; workstation tests establish correctness, not RTC latency.
+
+### Implementation record and validation status
+
+Implementation is based on MagAOX `76fbd36ebaa1790ce746f38b41d1527ac5fdfaee` after merging `dev` into `jrmales/dmrecon-concurrency-review`. The historical audit below describes the earlier baseline; its line references apply to that baseline, not the updated header.
+
+The working implementation has these responsibilities:
+
+- `apps/dmRecon/dmRecon.hpp`: monitors capture private float snapshots with type, shape, capacity, counter and writer-state checks. A single frame-grabber worker owns reconstruction, calibration-derived buffers and GPU allocations. Calibration/input generations and a latest-command mailbox replace cross-thread mutation of calculation buffers. Duplicate input identities are ignored; wakeups are hints rather than queued output vectors. Publication is serialized with disable and calibration invalidation. The existing feedback and diagnostic stream names remain in use.
+- `apps/dmRecon/dmReconMath.hpp`: validates masks and response dimensions, selects active pixels in storage order, builds a private inverse, initializes diagnostics, rejects nonzero inversion status and nonfinite values, and retains the previous inverse object on candidate failure. Feedback remains inhibited when the current calibration generation is unusable. This does not introduce a new science-dependent condition-number or amplitude threshold.
+- `apps/dmRecon/dmReconTiming.hpp`: retains a bounded history of trigger identities/timestamps, matches an exact successor counter, and classifies completed publications as `before_next`, `late`, or `unverified`. It neither controls mfilt nor reconstructs missing trigger timestamps from callback arrival time. The source-command timestamp must lie between the candidate baseline trigger and its exact successor; a stale observer baseline is unverified.
+- `apps/dmRecon/tests/`: three isolated regression suites replace the unrelated template. The app harness invokes real snapshot, calibration, reconstruction, mailbox, enable/disable and publication callbacks using process-local buffers. It never starts the application, opens streams, posts an instrument semaphore, or invokes hardware APIs. Tests are registered in `tests/tests.list` and grouped in `tests/groups.dox`; the app Makefile lists both helper headers as dependencies.
+
+The existing `MagAOX::latestSnapshot` was considered; it requires fixed-size trivially copyable values, whereas these frames own variable-sized vectors and calibration/input generations. The app therefore uses vector swaps under its existing publication/snapshot ownership instead of adding a new common handoff utility.
+
+Runtime review corrected the clock wiring and output attachment checks. Output attachment identity comes from `fstat` on the mapped descriptor, cross-checked against the pathname; the app thread requests a reconnect on a later pathname change and inhibits further publication once detected. The check runs at app-loop cadence, not on every feedback frame. Partial worker-startup failure now joins started workers before semaphore/member destruction. The original float modal-vector schema is preserved: an existing `aolN_modevalDMf` must contain exactly the reconstructed mode count, with one column and one plane when represented as a three-axis stream. An oversized output is not compatible merely because it has sufficient byte capacity; publishing a prefix would leave stale tail coefficients.
+
+### Workstation validation — 2026-11-15
+
+Host verified as `mx11`, not an instrument computer. The app binaries were compiled and linked into `/tmp` and **never executed**. Only the isolated test executables were run. No instrument configuration or common dependency source was changed.
+
+| Check | Result |
+| --- | --- |
+| App compile/link, installed CUDA support, `-O3 -ffast-math -Wall -Wextra` | Passed with no compiler diagnostics. GPU execution not tested. |
+| App compile/link with `-UMXLIB_CUDA -UHAVE_CUDA` after installed flags | Passed with no compiler diagnostics; exercises compilation of the separate CPU branch. |
+| `dmRecon_test` production build | 372 assertions / 11 cases passed, including 2,000 concurrently submitted commands, exact output schemas, malformed private payloads, finite CPU reconstruction, trigger qualification, duplicate/coalesced inputs and disable/generation boundaries. |
+| `dmReconMath_test` production build | 158 assertions / 6 cases passed, including asymmetric masks, invalid response dimensions, nonfinite inputs, singular inverse and injected positive/negative SVD failures. |
+| `dmReconTiming_test` production build | 135 assertions / 11 cases passed, including delayed callbacks, exact/equal deadlines, source bracketing, gaps, identity resets and timestamp anomalies. |
+| Math and timing helpers, ASan + UBSan | Passed all respective assertions; LeakSanitizer disabled because this environment uses ptrace. |
+| App harness, ASan | Passed with `detect_leaks=0:new_delete_type_mismatch=0`. Unsuppressed ASan found an existing logger teardown mismatch: a variable-sized `flatlogs::logHeader::createLog` allocation is freed through scalar `shared_ptr<char>`. No logger change is included here. |
+| App harness, TSan | 372 assertions / 11 cases passed, no reports or suppressions, `halt_on_error=1`. GCC warns that TSan does not support `atomic_thread_fence`; this checks exercised in-process ownership, not interprocess stream coherence. |
+| App harness, UBSan | Build blocked by existing `libMagAOX/logger/types/telem_fgstage.hpp:485`: instrumented member-function-pointer comparison in `if constexpr` is rejected by GCC. No full-app UBSan result is claimed. |
+| Formatting / whitespace | Ran clang-format on all changed/new C++; restored mandated `{ //mutex scope` spelling. `git diff --check` passed. |
+
+There are **665 passing assertions in 28 production test cases**. Sanitizers instrumented the test/app header translation units; existing `tests/testMain.o`, `libMagAOX.a` and installed libraries were linked without rebuilding them under sanitizers. App-startup rollback and actual stream replacement were reviewed and compiled, but the harness deliberately does not launch the application or run shared-memory lifecycle integration. These results do not establish on-sky causality or RTC latency.
+
+The registered tests can be built individually with `make -C tests -f Makefile.one t=../apps/dmRecon/tests/dmRecon_test` (and similarly for `dmReconMath_test` and `dmReconTiming_test`). The standalone app-test build actually used here, from the repository root, was:
+
+```sh
+g++ $(pkg-config --cflags mxlib) \
+  -DMAGAOX_NOEDT -DMAGAOX_GITHEAD_NOWARNING \
+  -DMAGAOX_GITHEAD_NO_UNTRACKED_WARNING -Iflatlogs/include \
+  -Wall -Wextra -O3 -ffast-math \
+  apps/dmRecon/tests/dmRecon_test.cpp tests/testMain.o libMagAOX/libMagAOX.a \
+  -o /tmp/dmRecon_test $(pkg-config --libs mxlib) -ludev -lxrif \
+  libs/libtelnet/libtelnet.a INDI/libcommon/libcommon.a INDI/liblilxml/liblilxml.a
+/tmp/dmRecon_test '[dmRecon][app]'
+```
+
+For app TSan, replace `-O3 -ffast-math` with `-O1 -g -fno-fast-math -fsanitize=thread -fno-omit-frame-pointer` and run with `TSAN_OPTIONS=halt_on_error=1`. For app ASan use `-fsanitize=address` instead and the explicit options above. Helper tests use the same test main and installed mxlib flags/libraries (the timing-only helper needs only C++20 and pthread); they pass with `-fsanitize=address,undefined` and `ASAN_OPTIONS=detect_leaks=0`.
+
+Remaining validation and limitations:
+
+- F1 is monitored, not fixed. Producer metadata checks detect observed changes but are not a portable mutual-exclusion protocol with mfilt or with other stream writers. The upstream delta's relationship to hardware completion and static-offset generations remains outside this app's proof.
+- Clock-domain configuration, the exact mfilt trigger alias, and latency under the deployed cpusets need user verification. Reconstruction now runs on the **frame-grabber worker**, so its CPU affinity/priority must be evaluated alongside the command-monitor and new loop-trigger observer. The extra snapshot and observer have measurable cache/latency costs.
+- Test GPU execution and failure handling on an isolated workstation setup; perform realistic calibration/control replay and sustained latency testing. The app replaces CUDA allocation objects as a whole to avoid the inspected mxlib resize/free defects; mxlib itself is unchanged. A failed GPU initialization falls back to CPU, while a failed allocation/calibration inhibits that generation.
+- Output mapping replacement is detected at app-loop cadence. Optional diagnostic mappings reconnect during frame-grabber configuration; independent diagnostic-only replacement and missing-at-startup streams may require another reconfiguration. The `_diff` stream is an approximate asynchronous comparison copied into private storage, not proof of a matched mfilt/DM iteration.
+- Separate mode and mask streams have no shared transactional calibration identifier. Generation ownership prevents use-after-reallocation and rejects superseded frames; it cannot prove that independently published mode/mask data belong to one external calibration transaction.
+- Full process-level stream recreation, startup fault injection, GPU sanitizer coverage, realistic wind-up reproduction, and any further mfilt hardening remain follow-up work. On-instrument checks must be run by the user.
+
+### Passive timing interpretation and configuration
+
+The observer snapshots trigger `cnt0`, stream identity and source `writetime`. A command carries its captured baseline into the worker. Completion is sampled after the frame-grabber's main publication/semaphore post, independently of the output stream's earlier `writetime`. The exact next trigger may already be observed when completion is recorded, or its callback may arrive later; the diagnostic uses source timestamps in either case.
+
+The required classifications are:
+
+| Classification | Meaning |
+| --- | --- |
+| `before_next` | A qualified command/publication pair completed strictly before the observed exact successor's source timestamp. |
+| `late` | A qualified pair completed at or after that source timestamp; equality counts as a miss. |
+| `unverified` | The necessary successor, source association, identity or clock evidence is absent or inconsistent. A later counter across a gap cannot substitute for the missing successor. |
+| `rejected` | An input snapshot or reconstruction frame was rejected; inverse-build failures are logged separately. This is separate from timing classification. |
+| `coalesced` | A newer input superseded a still-pending command in the mailbox. |
+
+Repeated semaphore wakes with the same counter are not additional trigger events. Latest shared-memory metadata does not preserve a timestamp for every queued semaphore token. Counter gaps, counter resets, reconnects/inode changes, contradictory timestamps, bounded-history eviction and clock discontinuities must not produce an affirmative classification. An unresolved publication is retired as unverified when superseded or explicitly reset; absence of a successor is not evidence of success. Application-thread warnings report accumulated late/unverified results without per-frame logging in the publication path.
+
+In the inspected ImageStreamIO publisher, `writetime` is sampled before `cnt0` increments, `write` clears and semaphores are posted. Completing before that timestamp is conservative evidence of completing before its post. A `late` classification is a missed **source-timestamp deadline**, not proof of the exact semaphore-post order or of an overlapping mfilt read. Neither timestamp bracketing nor a DM delta counter proves which mfilt iteration caused that delta, particularly when auxiliary DM commands are present.
+
+Configuration belongs in the existing dmRecon instance configuration. The intended defaults follow the local cacao files: loop 1 monitors `aol1_mfiltINPUT`, normally a symlink to `aol1_modevalWFS`; other loops default to `aolN_modevalWFS`. `loopTrigger.shmimName` must match the actual configured mfilt trigger, including any changed alias target. This implementation does not modify that alias or mfilt configuration.
+
+```ini
+[recon]
+triggerClock=isio
+
+[loopTrigger]
+# Tweeter default; use the actual existing mfilt trigger stream.
+shmimName=aol1_mfiltINPUT
+spin=false
+```
+
+`recon.triggerClock` accepts `isio`, `tai` where available, or `realtime`. `isio` means the clock selected by dmRecon's installed ImageStreamIO headers; the local installation selects TAI, while the ordinary MagAOX frame-grabber output timestamp is realtime. Do not compare those raw timestamps directly. The command-delta source is assumed to publish with `CLOCK_ISIO`. If the selected trigger clock differs, source-command association is **unverified** unless an explicit validated conversion is implemented; choosing a clock name is not automatic discovery of the producer's clock.
+
+Clock qualification must cover the baseline/next-trigger observations as well as command capture and publication completion. Bounded samples against a monotonic clock can detect observed offset changes; they cannot prove that an unobserved change-and-restoration never happened. An unknown producer clock or an unqualified timestamp must stay unverified. The diagnostic does not infer stability from silence, and the subscribed FPS value remains valid until updated or explicitly invalidated under the existing INDI framework.
+
+Leave `loopTrigger.spin=false` for the requested semaphore observation. If polling is deliberately enabled later, follow `AGENTS.md`'s cpuset/SCHED_FIFO restrictions and measure its effect. Existing `framegrabber.staged` and staged-copy options remain available; the working app defaults to private staging. Added observers, copy choices and placement require user-run A/B measurements of writer timing, including `fg_timing.delta_aw`, as well as end-to-end loop timing. No instrument configuration or hardware action has been performed for this work.
 
 ## Reported operating conditions
 
@@ -97,9 +203,9 @@ Permitted interleaving:
 
 An alternative is that A's counter is still unconsumed when B is already being written; mfilt sees A's counter and reads B in progress. The local mutex around `loadImageIntoStream()` is invisible to the other process. Semaphore publication does not prevent the next write, and mfilt does not use that semaphore to claim ownership of the array.
 
-**Action:** Change the mfilt reader as well as the dmRecon handoff. Copy into a private candidate, validate a complete unchanged publication, and only then replace `mvalDMc` and advance the consumed counter. Reject an overlapping read without changing the integrator. Establish the synchronization/memory-order contract with the actual ImageStreamIO version; checking `write` once is insufficient. If a robust repeated-read protocol cannot be guaranteed, use explicit ownership/acknowledgment or protected slots. An uncoordinated two-buffer swap alone does not prevent reuse while a slow reader is copying.
+**Current action:** Retain F1 as an unresolved protocol gap and add the user-selected passive timing diagnostic. dmRecon publishes independently and then reports whether the exact next observed trigger timestamp followed completion. No mfilt changes or trigger gate are part of this implementation. The historical coordinated-reader proposal below remains a possible future repair, not a prerequisite or an approved next step: copy into a private candidate, validate a complete unchanged publication, and only then replace `mvalDMc` and advance the consumed counter. Such a repair must establish synchronization and memory ordering on both sides; checking `write` once is insufficient, and an uncoordinated two-buffer swap alone does not prevent reuse while a slow reader is copying.
 
-#### F1 implementation scope and runtime cost
+#### Historical mfilt repair proposal: outside the selected implementation
 
 The mfilt-side change can remain localized: allocate one `NBmode`-float scratch vector beside the existing work buffers, replace the acceptance block at `modalfilter.c:1431–1440`, and free the vector during existing cleanup (`2374–2396`). Expect a few dozen functional lines plus a focused test harness; this is a scope estimate, not an implemented patch.
 
@@ -167,7 +273,7 @@ This can inject a modal vector which represents neither complete input command. 
 
 If a NaN reaches mfilt, both ordinary `> limit` and `< -limit` comparisons are false (`modalfilter.c:1466–1474`). A NaN can thus survive limiting and integration until valid feedback or a reset replaces it. That is a plausible way for one rare bad input to persist across iterations, including without an application crash.
 
-**Action:** Treat every nonzero inversion status as failure; initialize diagnostics; reject empty/singular/invalid calibration before activation. Check input, inverse, and result finiteness and reject bad feedback before incrementing its publication counter. Add a defensive finite check at mfilt's acceptance boundary. Define any conditioning or amplitude thresholds with the actual calibration/control requirements, rather than silently changing the science behavior in a safety patch.
+**Action:** Treat every nonzero inversion status as failure; initialize diagnostics; reject empty/singular/invalid calibration before activation. Check input, inverse, and result finiteness and reject bad feedback before incrementing its publication counter. A defensive finite check at mfilt's acceptance boundary remains deferred under the selected dmRecon-only scope. Define any conditioning or amplitude thresholds with the actual calibration/control requirements, rather than silently changing the science behavior in a safety patch.
 
 ### F7 — Medium: ancillary state and stream lifecycle can obscure or interrupt feedback
 
@@ -182,13 +288,13 @@ If a NaN reaches mfilt, both ordinary `> limit` and `< -limit` comparisons are f
 
 - **Mask storage order:** `m_maskIDX` is built with row outermost, column innermost, and a sequential index (`898–908`), while `mx::improc::eigenImage` uses Eigen's default column-major storage. For a 3x3 mask with only `(0,1)` active, the stored index is 1 rather than 3. A symmetric mask hides this; an asymmetric square mask selects its transpose. Both modes and command use the same wrong selection, so this is not automatically an inconsistent matrix multiply, but it selects the wrong actuators and can change conditioning. Iterate raw mask storage or compute the actual storage index.
 - **Non-CUDA build:** The `#else` calculation at `1079` lacks a semicolon and does not use `m_modevalsMutex`. CPU execution inside a CUDA-enabled build does have the mutex (`1030–1031`). Repair and exercise the separate non-CUDA build; do not claim that all CPU operation is currently unlocked.
-- **Tests:** [dmRecon_tests.hpp](../../../apps/dmRecon/tests/dmRecon_tests.hpp) is an unrelated template which includes `../t2wOffloader.hpp`. It supplies no regression coverage of dmRecon's handoff, calibration, or bounds behavior.
+- **Tests:** The former `apps/dmRecon/tests/dmRecon_tests.hpp` (removed during implementation) was an unrelated template which includes `../t2wOffloader.hpp`. It supplied no regression coverage of dmRecon's handoff, calibration, or bounds behavior.
 - **GPU allocation leak on size changes:** The inspected `mxlib/include/math/cuda/cudaPtr.hpp:251–265` assigns a new `cudaMalloc` allocation to its stored pointer when the size changes without freeing the previous allocation. dmRecon reaches this through inverse upload and vector resizing (`973`, `981`, `988`). Repeated size-changing calibration reloads can exhaust device memory; unchanged steady-state processing does not allocate through this path. Fix and test this in mxlib. The ordinary upload/download path uses synchronous `cudaMemcpy`; no asynchronous host-buffer lifetime defect was identified there.
 - **mfilt startup initialization:** Local `modalfilter.c:880` has `for(uint32_t mi; mi < NBmode; mi++)`, with an uninitialized index when clearing `mvalDMc`. Correct this independently. Initial external-state substitution commonly overwrites the state, and this startup defect is a weaker explanation for a failure after minutes of stable operation.
 
-## Verification performed
+## Verification performed during the original audit
 
-The review traced the producer, both dmRecon worker stages, mfilt acceptance, and the dependency behavior above. No full application build, runtime reproduction, ASan, TSan, or GPU sanitizer run was performed. Such tests need a deliberately isolated harness; launching the configured application was unnecessary for this analysis.
+The original review traced the producer, both dmRecon worker stages, mfilt acceptance, and the dependency behavior above. At that stage no full application build, runtime reproduction, ASan, TSan, or GPU sanitizer run was performed. The 2026-11-15 implementation validation is recorded separately above; the configured application was never launched.
 
 A deterministic Python statement-interleaving model at `/tmp/dmrecon_mfilt_protocol_repro.py` ran successfully with assertions for these three cases:
 
@@ -203,7 +309,7 @@ These are executable demonstrations of the allowed algorithmic schedules. They a
 ## Proposed implementation and test order
 
 1. **Use the clarified failure baseline.** The reported symptom is apparent integrator wind-up on the tweeter, inferred from an all-red display after several minutes, with no loop changes and unknown revisions. Rail direction is unknown because the display does not distinguish it. Continue without requiring the user to recall revisions or infer rail direction. If existing deployment records become available, check for `70a2e1b4`; older code additionally lacks the current vector-copy mutex and atomic ready flags. Use available records to establish CPU/GPU choice and first growth/jump, and numeric actuator values if present. Examine existing logs for unexpected reconnects rather than presuming a calibration change.
-2. **Fix steady-state state transfer together.** Implement F1–F3 as a coordinated dmRecon/mfilt change, including private snapshots, result identity, generation, timestamps, publish-once semantics, bounded age policy, and a defined disable boundary. Make counter acceptance occur after successful validation. Add finite rejection from F6 at both ends.
+2. **Fix dmRecon state transfer and observe its timing.** Address F2–F3 through private snapshots, unique identities, generations, timestamps, publish-once semantics, and a defined disable boundary. Add finite rejection from F6 before publication. For F1, implement passive semaphore observation and post-publication exact-successor diagnostics with late/unverified warnings. Leave mfilt and its trigger path unchanged; the underlying reader/writer overlap remains possible.
 3. **Fix calibration ownership and schema validation.** Implement F4–F5, inversion failure handling, and mask storage-order correction. Keep failed candidate calibration from replacing the last valid generation; explicitly inhibit feedback whenever consistency with the live streams cannot be established.
 4. **Complete lifecycle/build work.** Address F7, compile the non-CUDA branch, and replace the placeholder tests with an isolated harness following repository application-unit-test and Doxygen conventions.
 5. **Validate timing and control behavior offline.** Replay representative commands/calibration through the corrected pipeline. Check modal-to-actuator-to-modal consistency, retained singular values, finite output, and reconstructed actuator shapes before and after clipping. Include fixed non-delta offsets and deliberately mismatched offset generations. Measure reconstruction-to-consumption age and variability, rejection counts, and integrator response under injected stalls. Model the reported all-actuator saturation with realistic WFS feedback, gains, leak, and limits; a queue-only model cannot establish wind-up. Finite coherent data may still be too old for stable substitution, so this step remains necessary after memory/race fixes.
@@ -214,7 +320,10 @@ Planned workstation-only validation:
 
 | Test | Required outcome |
 | --- | --- |
-| Pause mfilt halfway through copying; publish another vector | No mixed vector is accepted; skip the external replacement and continue normal integration from existing state |
+| Delay the trigger callback until after publication while its source timestamp precedes completion | Report `late` from source time; callback order must not produce a false success |
+| Observe an exact successor after completion, including a callback that precedes the completion record | Classify only after matching source/trigger identities and clock evidence |
+| Drop a successor observation, change inode/counter generation, or inject a clock anomaly | Report unverified; never infer success from a later counter or callback receipt time |
+| Pause mfilt halfway through copying; publish another vector | Preserve the original F1 reproducer as evidence of an unresolved gap; this passive implementation must not claim to prevent it |
 | Pause DM input gather across a producer update | Mixed input is rejected before reconstruction/publication |
 | Stall publication for many input frames, then resume | Latest-result policy publishes each selected identity at most once; no old-token replay |
 | Disable or reconfigure with queued/in-flight output | Defined disable boundary is honored; no retired-generation feedback is accepted |
@@ -240,4 +349,4 @@ Any interrogation of the real instrument must be performed by the user. This doc
 
 ## Changes from this investigation
 
-Only this planning document was added. Application, dependency, configuration, and test files were not modified. The findings are recorded as a documentation-only commit. The next engineering work is the isolated reproduction/repair sequence above; on-sky causality remains open pending the deployment and event evidence.
+The original audit added this planning document as a documentation-only change. On 2026-11-15 the user authorized implementation within dmRecon, selected passive timing diagnostics, and explicitly rejected gating mfilt. The application/helper/test changes and their validation are recorded above. Changed paths are `apps/dmRecon/dmRecon.hpp`, `apps/dmRecon/dmReconMath.hpp`, `apps/dmRecon/dmReconTiming.hpp`, `apps/dmRecon/Makefile`, the three `apps/dmRecon/tests/*_test.cpp` files, deletion of the unrelated `dmRecon_tests.hpp`, `tests/tests.list`, `tests/groups.dox`, and this plan. The implementation and this engineering record are committed together on the review branch. Cacao/mfilt and its trigger configuration remain unchanged. On-sky causality, F1 protection, control-law stability under late feedback, and instrument latency measurements remain open.
