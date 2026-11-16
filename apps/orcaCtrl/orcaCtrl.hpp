@@ -231,7 +231,7 @@ class orcaCtrl : public MagAOXApp<>,
      * `dcamcfgc` DCAM Configurator.  This flag only records the declared mode; the liquid-cooling
      * control in agents/plans/2026-09/orcaCtrl-liquidCooling.md is not yet implemented.
      */
-    bool m_liquidCooling{ false };
+    bool m_liquidCooling{ true };
 
     /// Maximum memory for the DCAM capture ring buffer [bytes] (`camera.circBuffMaxBytes`). Default 0.5 GB.
     uint32_t m_circBuffMaxBytes{ 536870912 };
