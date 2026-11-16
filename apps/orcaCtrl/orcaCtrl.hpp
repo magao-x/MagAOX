@@ -1,8 +1,6 @@
 /** \file orcaCtrl.hpp
  * \brief The MagAO-X Hamamatsu Orca-Quest2 camera controller.
  *
- * \author Joshua Liberman (jliberman54@gmail.com)
- *
  * \ingroup orcaCtrl_files
  */
 
@@ -119,7 +117,6 @@ namespace app
  *
  * \todo Define or remove setorcaParameterOnline( HDCAM, int32, int32 ) and
  *       setorcaParameterOnline( int32, int32 ), which are declared but not defined.
- * \todo Add unit tests under apps/orcaCtrl/tests (AGENTS.md rule 20).
  */
 class orcaCtrl : public MagAOXApp<>,
                  public dev::stdCamera<orcaCtrl>,
@@ -516,6 +513,8 @@ class orcaCtrl : public MagAOXApp<>,
     /// Find and open the camera whose DCAM_IDSTR_CAMERAID matches m_serialNumber.
     /** Closes any previous session, initializes the DCAM-API, opens the matching device and a wait
      * handle, and checks for cooling-fan control. Sets the state to CONNECTED, NODEVICE or ERROR.
+     * DCAMERR_NOCAMERA from dcamapi_init(), returned while the camera enumerates after power-on, is
+     * treated as no device (NODEVICE, with one notice) rather than an error.
      *
      * \returns 0 on success, including when no matching camera is found (state NODEVICE)
      * \returns -1 on error
@@ -530,7 +529,8 @@ class orcaCtrl : public MagAOXApp<>,
 
     /// Update the app state from the DCAM capture status.
     /** Sets OPERATING while capture is running, otherwise READY, and requests a reconfigure to
-     * restart acquisition if capture has stopped.
+     * restart acquisition if capture is not running. Capture stopping is logged as an error only if
+     * the state was OPERATING, so waiting for the first capture after connecting is not an error.
      *
      * \returns 0 on success
      * \returns -1 on error
