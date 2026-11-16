@@ -1,7 +1,7 @@
 
 allall: all
 
-OTHER_HEADERS=ocamUtils.hpp
+OTHER_HEADERS=ocamUtils.hpp ocamDescrambler.hpp
 OTHER_OBJS=fli/ocam2_sdk.o
 TARGET=ocam2KCtrl
 

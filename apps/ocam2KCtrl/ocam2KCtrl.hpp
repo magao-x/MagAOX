@@ -17,6 +17,7 @@
 typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; // This needs to be before pdvUtils.hpp for logging to work.
 
 #include "fli/ocam2_sdk.h"
+#include "ocamDescrambler.hpp"
 #include "ocamUtils.hpp"
 
 namespace MagAOX
@@ -132,7 +133,34 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     bool m_ocam2Initialized{ false }; ///< SDK initialization succeeded; numeric handle zero is valid.
 
-    long m_currImageNumber{ -1 }; ///< The current image number, retrieved from the raw image itself.
+    /// Requested or last completed frame's descramble implementation.
+    enum class DescrambleMethod
+    {
+        none,
+        sdk,
+        optimized
+    };
+
+    /// Preparation result for the current acquisition configuration.
+    enum class DescrambleAvailability
+    {
+        unconfigured,
+        unsupported,
+        unavailable,
+        ready
+    };
+
+    ocamDescrambler m_descrambler; ///< Frame-worker-owned map, rebuilt only while acquisition is being configured.
+
+    /// Latched once per frame; isolate ordinary-thread snapshots from the worker's changing frame counters.
+    alignas( 64 ) std::atomic<DescrambleMethod> m_descrambleRequested{ DescrambleMethod::sdk };
+
+    std::atomic<DescrambleMethod> m_descrambleApplied{ DescrambleMethod::none }; ///< Last completed load's method.
+
+    std::atomic<DescrambleAvailability> m_descrambleAvailability{
+        DescrambleAvailability::unconfigured }; ///< Preparation result published for ordinary-thread INDI updates.
+
+    alignas( 64 ) long m_currImageNumber{ -1 }; ///< The current image number, retrieved from the raw image itself.
 
     long m_lastImageNumber{ -1 }; ///< The last image number saved from the previous acquisition loop.
 
@@ -507,6 +535,15 @@ class ocam2KCtrl : public MagAOXApp<>,
     /// Release a successful SDK initialization while the frame worker is stopped or reconfiguring.
     void releaseOcamSdk();
 
+    /// Register the requested descramble method and read-only applied method and availability.
+    int initDescramble();
+
+    /// Prepare the optional bin2 implementation on the frame worker after SDK initialization.
+    void prepareDescramble();
+
+    /// Publish descramble selection and completion status; the caller holds m_indiMutex.
+    void updateDescramble();
+
     // INDI:
   protected:
     // declare our properties
@@ -522,7 +559,14 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     pcf::IndiProperty m_indiP_syncFreq; ///< INDI subscription to the external sync-frequency source.
 
+    pcf::IndiProperty m_indiP_descrambleMethod; ///< Requested SDK or optimized implementation, applied between frames.
+
+    pcf::IndiProperty m_indiP_descrambleStatus; ///< Last applied implementation and current fast-path availability.
+
   public:
+    /// Request a descramble implementation without changing camera acquisition or publication settings.
+    INDI_NEWCALLBACK_DECL( ocam2KCtrl, m_indiP_descrambleMethod );
+
     /// Start a 120-second quiet interval or explicitly resume routine serial polling.
     INDI_NEWCALLBACK_DECL( ocam2KCtrl, m_indiP_housekeepingPause );
 
@@ -583,6 +627,10 @@ inline ocam2KCtrl::~ocam2KCtrl() noexcept
 
 inline void ocam2KCtrl::releaseOcamSdk()
 {
+    m_descrambleAvailability.store( DescrambleAvailability::unconfigured, std::memory_order_relaxed );
+    m_descrambleApplied.store( DescrambleMethod::none, std::memory_order_relaxed );
+    m_descrambler.clear();
+
     if( m_ocam2Initialized )
     {
         ocam2_exit( m_ocam2_id );
@@ -607,6 +655,16 @@ inline void ocam2KCtrl::setupConfig()
                 false,
                 "string",
                 "The path of the OCAM descramble file, relative to MagAOX/config." );
+
+    config.add( "camera.descrambleMethod",
+                "",
+                "camera.descrambleMethod",
+                argType::Required,
+                "camera",
+                "descrambleMethod",
+                false,
+                "string",
+                "Descramble implementation: sdk (default) or optimized (validated bin2 only)." );
 
     dev::frameGrabber<ocam2KCtrl>::setupConfig( config );
 
@@ -659,6 +717,17 @@ inline int ocam2KCtrl::loadConfigImpl()
 
     config( m_ocamDescrambleFile, "camera.ocamDescrambleFile" );
 
+    std::string descrambleMethod = "sdk";
+    config( descrambleMethod, "camera.descrambleMethod" );
+
+    if( descrambleMethod != "sdk" && descrambleMethod != "optimized" )
+    {
+        return log<software_error, -1>( { "camera.descrambleMethod must be sdk or optimized" } );
+    }
+
+    m_descrambleRequested.store( descrambleMethod == "sdk" ? DescrambleMethod::sdk : DescrambleMethod::optimized,
+                                std::memory_order_relaxed );
+
     if( m_maxEMGain < 1 )
     {
         m_maxEMGain = 1;
@@ -700,6 +769,82 @@ inline int ocam2KCtrl::loadConfigImpl()
     dev::dssShutter<ocam2KCtrl>::loadConfig( config );
     dev::telemeter<ocam2KCtrl>::loadConfig( config );
     return 0;
+}
+
+inline int ocam2KCtrl::initDescramble()
+{
+    if( createStandardIndiSelectionSw( m_indiP_descrambleMethod, "descramble_method", { "sdk", "optimized" } ) < 0 ||
+        registerIndiPropertyNew( m_indiP_descrambleMethod, INDI_NEWCALLBACK( m_indiP_descrambleMethod ) ) < 0 )
+    {
+        return -1;
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_descrambleStatus, "descramble_status", pcf::IndiProperty::Text );
+
+    for( const auto &name : { "applied", "availability" } )
+    {
+        m_indiP_descrambleStatus.add( pcf::IndiElement( name ) );
+    }
+
+    m_indiP_descrambleStatus["applied"].set( "none" );
+    m_indiP_descrambleStatus["availability"].set( "unconfigured" );
+    const bool optimized = m_descrambleRequested.load( std::memory_order_relaxed ) == DescrambleMethod::optimized;
+    m_indiP_descrambleMethod[optimized ? "optimized" : "sdk"].setSwitchState( pcf::IndiElement::On );
+
+    return 0;
+}
+
+inline void ocam2KCtrl::prepareDescramble()
+{
+    m_descrambler.clear();
+    m_descrambleApplied.store( DescrambleMethod::none, std::memory_order_relaxed );
+
+    if( ocam2_getMode( m_ocam2_id ) != OCAM2_BINNING2x2 )
+    {
+        m_descrambleAvailability.store( DescrambleAvailability::unsupported, std::memory_order_relaxed );
+        return;
+    }
+
+    if( m_descrambler.prepare( m_ocam2_id ) < 0 || !m_descrambler.structured() )
+    {
+        m_descrambler.clear();
+        m_descrambleAvailability.store( DescrambleAvailability::unavailable, std::memory_order_relaxed );
+        log<software_warning>( { "Optimized descramble unavailable for the configured table; retaining SDK" } );
+        return;
+    }
+
+    m_descrambleAvailability.store( DescrambleAvailability::ready, std::memory_order_relaxed );
+}
+
+inline void ocam2KCtrl::updateDescramble()
+{
+    if( !m_indiP_descrambleStatus.find( "applied" ) )
+    {
+        return;
+    }
+
+    const auto requested = m_descrambleRequested.load( std::memory_order_relaxed );
+    const auto availability = m_descrambleAvailability.load( std::memory_order_relaxed );
+    const bool operating = !shutdown() && powerState() == 1 && powerStateTarget() == 1 && !m_reconfig &&
+                           state() == stateCodes::OPERATING;
+    const auto applied = operating ? m_descrambleApplied.load( std::memory_order_relaxed ) : DescrambleMethod::none;
+    const char *availabilityName = availability == DescrambleAvailability::ready ? "ready" :
+                                   availability == DescrambleAvailability::unsupported ? "unsupported mode" :
+                                   availability == DescrambleAvailability::unavailable ? "unavailable table" : "unconfigured";
+    const auto status = requested == DescrambleMethod::optimized && availability != DescrambleAvailability::ready
+                            ? INDI_ALERT
+                            : ( applied == requested ? INDI_OK : INDI_BUSY );
+
+    indi::updateSelectionSwitchIfChanged( m_indiP_descrambleMethod,
+                                         requested == DescrambleMethod::optimized ? "optimized" : "sdk",
+                                         m_indiDriver,
+                                         status );
+    updateIfChanged( m_indiP_descrambleStatus,
+                     "applied",
+                     std::string( applied == DescrambleMethod::optimized ? "optimized" :
+                                  applied == DescrambleMethod::sdk ? "sdk" : "none" ),
+                     status );
+    updateIfChanged( m_indiP_descrambleStatus, "availability", std::string( availabilityName ), status );
 }
 
 inline int ocam2KCtrl::ensureSyncStream()
@@ -1290,7 +1435,7 @@ inline int ocam2KCtrl::appStartup()
     createStandardIndiRequestSw( m_indiP_emProtReset, "emProtectionReset", "Reset", "EM Protection" );
     registerIndiPropertyNew( m_indiP_emProtReset, INDI_NEWCALLBACK( m_indiP_emProtReset ) );
 
-    if( initHousekeeping() < 0 )
+    if( initHousekeeping() < 0 || initDescramble() < 0 )
     {
         return -1;
     }
@@ -1331,9 +1476,14 @@ inline int ocam2KCtrl::appLogic()
     { //mutex scope
         std::unique_lock<std::mutex> lock( m_indiMutex, std::try_to_lock );
 
-        if( lock.owns_lock() && ( state() != stateCodes::READY && state() != stateCodes::OPERATING ) )
+        if( lock.owns_lock() )
         {
-            updateHousekeeping();
+            updateDescramble();
+
+            if( state() != stateCodes::READY && state() != stateCodes::OPERATING )
+            {
+                updateHousekeeping();
+            }
         }
     }
 
@@ -1508,6 +1658,8 @@ inline int ocam2KCtrl::onPowerOff()
 
     std::lock_guard<std::mutex> lock( m_indiMutex );
 
+    updateDescramble();
+
     { //mutex scope
         std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
         endHousekeepingPause( "camera powered off" );
@@ -1556,6 +1708,8 @@ inline int ocam2KCtrl::onPowerOff()
 inline int ocam2KCtrl::whilePowerOff()
 {
     std::lock_guard<std::mutex> lock( m_indiMutex );
+
+    updateDescramble();
 
     if( stdCamera<ocam2KCtrl>::whilePowerOff() < 0 )
     {
@@ -2333,6 +2487,8 @@ inline int ocam2KCtrl::configureAcquisition()
     m_ocam2_id         = nextOcam2Id;
     m_ocam2Initialized = true;
 
+    prepareDescramble();
+
     log<text_log>( "OCAM2K initialized. id: " + std::to_string( m_ocam2_id ) );
 
     log<text_log>( std::string( "OCAM2K mode is:" ) + ocam2_modeStr( ocam2_getMode( m_ocam2_id ) ) );
@@ -2451,19 +2607,21 @@ inline int ocam2KCtrl::acquireAndCheckValid()
 inline int ocam2KCtrl::loadImageIntoStream( void *dest )
 {
     unsigned currImageNumber = 0;
+    const bool optimized = m_descrambleRequested.load( std::memory_order_relaxed ) == DescrambleMethod::optimized &&
+                           m_descrambler.structured();
+    short *output = m_digitalBin ? m_digitalBinWork.data() : reinterpret_cast<int16_t *>( dest );
 
-    if( !m_digitalBin )
+    if( optimized )
     {
-        ocam2_descramble( m_ocam2_id,
-                          &currImageNumber,
-                          reinterpret_cast<int16_t *>( dest ),
-                          reinterpret_cast<int16_t *>( m_image_p ) );
-        // memcpy(dest, m_image_p, 120*120*2); //This is about 10 usec faster -- but we have to descramble.
+        m_descrambler.descramble( output, reinterpret_cast<int16_t *>( m_image_p ) );
     }
     else
     {
-        ocam2_descramble(
-            m_ocam2_id, &currImageNumber, m_digitalBinWork.data(), reinterpret_cast<int16_t *>( m_image_p ) );
+        ocam2_descramble( m_ocam2_id, &currImageNumber, output, reinterpret_cast<int16_t *>( m_image_p ) );
+    }
+
+    if( m_digitalBin )
+    {
 
         mx::improc::eigenMap<int16_t> destMap( reinterpret_cast<int16_t *>( dest ), m_width, m_height );
 
@@ -2482,6 +2640,13 @@ inline int ocam2KCtrl::loadImageIntoStream( void *dest )
                 }
             }
         }
+    }
+
+    const auto applied = optimized ? DescrambleMethod::optimized : DescrambleMethod::sdk;
+
+    if( m_descrambleApplied.load( std::memory_order_relaxed ) != applied )
+    {
+        m_descrambleApplied.store( applied, std::memory_order_relaxed );
     }
 
     return 0;
@@ -2560,6 +2725,41 @@ inline int ocam2KCtrl::frameGrabberPostPublish( IMAGE *imageStream )
 
     edtCamera<ocam2KCtrl>::pdvFinishAcquisition( !m_reconfig && !shutdown() && powerState() > 0 );
 
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_descrambleMethod )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_descrambleMethod, ipRecv );
+
+    DescrambleMethod requested = DescrambleMethod::none;
+
+    for( const auto &element : ipRecv.getElements() )
+    {
+        if( element.first != "sdk" && element.first != "optimized" )
+        {
+            return -1;
+        }
+
+        if( element.second.getSwitchState() == pcf::IndiElement::On )
+        {
+            if( requested != DescrambleMethod::none )
+            {
+                return -1;
+            }
+
+            requested = element.first == "sdk" ? DescrambleMethod::sdk : DescrambleMethod::optimized;
+        }
+    }
+
+    if( requested == DescrambleMethod::none )
+    {
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_descrambleRequested.store( requested, std::memory_order_relaxed );
+    updateDescramble();
     return 0;
 }
 

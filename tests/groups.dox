@@ -319,6 +319,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup ocam2KCtrl_descramble_unit_test OCAM Descramble Unit Tests
+ * \brief Real-SDK pixel equivalence and offline frame-boundary implementation selection.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup cameraSim_emgain_unit_test Camera Simulator EM Gain Unit Tests
  * \brief Offline simulated EM-gain disable behavior and generic shared interface compatibility.
  * \ingroup application_unit_test
