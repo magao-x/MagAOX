@@ -186,6 +186,16 @@ class dmRecon : public MagAOXApp<true>,
         int64_t  minMarginNs{ 0 }, maxMarginNs{ 0 }; ///< Verified extrema; zero until beforeNext or late is nonzero.
     };
 
+    /// Publication endpoint carried in each frame-timing event's mode tag.
+    enum class FGTimingSource : uint32_t
+    {
+        unavailable, ///< No publication endpoint is selected.
+        monitor,     ///< Local realtime completion of an actual monitor publication.
+        feedback     ///< Frame-grabber feedback-stream write timestamp.
+    };
+
+    FGTimingSource m_fgTimingSource{ FGTimingSource::unavailable }; ///< FG-owned timing epoch selection.
+
     std::mutex m_snapshotMutex; ///< Protects pending snapshots, their generations, and timing observations.
     std::condition_variable      m_calibrationCondition; ///< Wakes the builder on source changes or shutdown.
     std::unique_ptr<Calibration> m_calibrationResult;    ///< Pending immutable candidate, under m_snapshotMutex.
@@ -318,8 +328,15 @@ class dmRecon : public MagAOXApp<true>,
     void
     recordCompletion( bool dryRun /**< [in] True after disabled-feedback reconstruction, false after publication. */ );
 
+    /// Change the FG-owned timing endpoint, discarding the transition attempt to avoid mixed populations.
+    void selectFGTimingSource( FGTimingSource source /**< [in] Endpoint for subsequent frame-timing events. */ );
+
+    /// Finish a frame-timing event after a successful monitor publication, using realtime on both endpoints.
+    void recordMonitorTiming( const timespec &completed /**< [in] Local realtime sample after monitor post returns. */,
+                              uint64_t        counter /**< [in] Actual monitor publication counter. */ );
+
     /// Publish optional diagnostics from private calculation storage.
-    void publishDiagnostics();
+    void publishDiagnostics( bool timing = false /**< [in] Record monitor timing when feedback is disabled. */ );
 
     /// Start base workers with interface macros so appStartup can unwind any partial failure.
     int startWorkers();
@@ -401,6 +418,7 @@ class dmRecon : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_writeDMf;       ///< Feedback enable control.
     pcf::IndiProperty m_indiP_feedbackTiming; ///< Timing and input-quality counters.
     pcf::IndiProperty m_indiP_dryTiming;      ///< Disabled-feedback timing counts and verified margins in microseconds.
+    pcf::IndiProperty m_indiP_fgTimingSource; ///< Stream and endpoint belonging to the cached frame-timing population.
     pcf::IndiProperty m_indiP_reconStatus;    ///< Setup stage and calibration snapshot outcomes.
     /// Accept an FPS update without expiring silent subscriptions.
     INDI_SETCALLBACK_DECL( dmRecon, m_indiP_fpsSource );
@@ -632,6 +650,14 @@ inline int dmRecon::appStartup()
         return -1;
     }
 
+    createROIndiText( m_indiP_fgTimingSource, "fg_timing_source", "stream" );
+    m_indiP_fgTimingSource.add( pcf::IndiElement( "endpoint" ) );
+
+    if( registerIndiPropertyReadOnly( m_indiP_fgTimingSource ) < 0 )
+    {
+        return -1;
+    }
+
     char outputPath[1024];
     ImageStreamIO_filename( outputPath, sizeof( outputPath ), frameGrabberT::m_shmimName.c_str() );
     m_outputPath = outputPath;
@@ -746,6 +772,13 @@ inline int dmRecon::appLogic()
     const auto          unknown       = m_unknown.load();
     const char         *setupStage    = m_setupStage.load();
     const auto          modesSnapshot = m_modesSnapshot.load(), maskSnapshot = m_maskSnapshot.load();
+    const auto          timingSource   = static_cast<FGTimingSource>( frameGrabberT::m_fgTiming.summary().mode );
+    const std::string   timingStream   = timingSource == FGTimingSource::monitor    ? m_monShmimName
+                                         : timingSource == FGTimingSource::feedback ? frameGrabberT::m_shmimName
+                                                                                    : "none";
+    const std::string   timingEndpoint = timingSource == FGTimingSource::monitor    ? "monitor_post_complete"
+                                         : timingSource == FGTimingSource::feedback ? "feedback_write_stamp"
+                                                                                    : "unavailable";
     DryTimingStatistics dryTiming;
 
     { //mutex scope
@@ -780,6 +813,8 @@ inline int dmRecon::appLogic()
         updateIfChanged( m_indiP_dryTiming, "margin_last_us", double( dryTiming.marginNs ) / 1000 );
         updateIfChanged( m_indiP_dryTiming, "margin_min_us", double( dryTiming.minMarginNs ) / 1000 );
         updateIfChanged( m_indiP_dryTiming, "margin_max_us", double( dryTiming.maxMarginNs ) / 1000 );
+        updateIfChanged( m_indiP_fgTimingSource, "stream", timingStream );
+        updateIfChanged( m_indiP_fgTimingSource, "endpoint", timingEndpoint );
         updateIfChanged( m_indiP_reconStatus, "stage", std::string( setupStage ) );
         updateIfChanged( m_indiP_reconStatus, "modes", std::string( snapshotStatusName( modesSnapshot ) ) );
         updateIfChanged( m_indiP_reconStatus, "mask", std::string( snapshotStatusName( maskSnapshot ) ) );
@@ -1878,7 +1913,31 @@ inline int dmRecon::startAcquisition()
     return 0;
 }
 
-inline void dmRecon::publishDiagnostics()
+inline void dmRecon::selectFGTimingSource( FGTimingSource source )
+{
+    if( source != m_fgTimingSource )
+    {
+        // newSession retires this attempt; the base begins the next event with its real wait-enter endpoint.
+        frameGrabberT::m_fgTiming.newSession();
+        frameGrabberT::m_fgTiming.context( static_cast<uint32_t>( source ), 0, 0 );
+        m_fgTimingSource = source;
+    }
+}
+
+inline void dmRecon::recordMonitorTiming( const timespec &completed, uint64_t counter )
+{
+    if( completed.tv_sec <= 0 || completed.tv_nsec < 0 || completed.tv_nsec >= 1000000000 )
+    {
+        return;
+    }
+
+    selectFGTimingSource( FGTimingSource::monitor );
+    // milkImage does not expose its inode. Reconfiguration starts a new timing epoch for that attachment.
+    frameGrabberT::m_fgTiming.published( m_currentCommand.received, completed, counter );
+    frameGrabberT::m_fgTiming.finish();
+}
+
+inline void dmRecon::publishDiagnostics( bool timing )
 {
     if( !m_diagnosticsReady )
     {
@@ -1890,6 +1949,17 @@ inline void dmRecon::publishDiagnostics()
         m_modevalMon.setWrite();
         streamCopy( m_modevalMon.data(), m_modevals.data(), m_modevals.size() * sizeof( float ) );
         m_modevalMon.post();
+
+        if( timing )
+        {
+            timespec completed{};
+
+            // milkImage's writetime uses CLOCK_ISIO; the legacy acquisition endpoint is CLOCK_REALTIME.
+            if( clock_gettime( CLOCK_REALTIME, &completed ) == 0 )
+            {
+                recordMonitorTiming( completed, m_modevalMon.cnt0() );
+            }
+        }
 
         if( m_differenceReady )
         {
@@ -1931,7 +2001,7 @@ inline int dmRecon::acquireAndCheckValid()
     if( !m_writeDMf.load() )
     {
         recordCompletion( true );
-        publishDiagnostics();
+        publishDiagnostics( true );
         return 1;
     }
 
@@ -1960,6 +2030,8 @@ inline int dmRecon::loadImageIntoStream( void *destination )
         m_publicationLock.unlock();
         return -1;
     }
+
+    selectFGTimingSource( FGTimingSource::feedback );
 
     if( frameGrabberT::m_staged )
     {
@@ -1992,6 +2064,8 @@ inline int dmRecon::reconfig()
     {
         m_publicationLock.unlock();
     }
+
+    selectFGTimingSource( FGTimingSource::unavailable );
 
     return 0;
 }

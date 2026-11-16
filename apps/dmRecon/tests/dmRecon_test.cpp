@@ -124,6 +124,7 @@ class dmRecon_test : public dmRecon
 {
   public:
     using dmRecon::buildCalibration;
+    using dmRecon::FGTimingSource;
     using dmRecon::Frame;
     using dmRecon::m_beforeNext;
     using dmRecon::m_calibrationExited;
@@ -133,6 +134,7 @@ class dmRecon_test : public dmRecon
     using dmRecon::m_commandPending;
     using dmRecon::m_currentCommand;
     using dmRecon::m_dryTimingStats;
+    using dmRecon::m_fgTimingSource;
     using dmRecon::m_inputGeneration;
     using dmRecon::m_late;
     using dmRecon::m_latestTrigger;
@@ -161,12 +163,15 @@ class dmRecon_test : public dmRecon
     using dmRecon::m_workerGeneration;
     using dmRecon::m_writeDMf;
     using dmRecon::outputCompatible;
+    using dmRecon::publishDiagnostics;
     using dmRecon::reconstruct;
     using dmRecon::recordCompletion;
+    using dmRecon::recordMonitorTiming;
     using dmRecon::setCalibrationStage;
     using dmRecon::snapshot;
     using dmRecon::SnapshotStatus;
     using dmRecon::takeCommand;
+    using frameGrabberT::m_fgTiming;
 
     /// Build synchronously for existing fixtures, then consume through the production acquisition method.
     int prepareCalibration();
@@ -1530,6 +1535,186 @@ TEST_CASE( "dmRecon dry timing retains cumulative signed margin extrema", "[dmRe
     CHECK( app.m_beforeNext.load() == 0 );
     CHECK( app.m_late.load() == 0 );
     CHECK( app.m_unknown.load() == 0 );
+}
+
+/// Collect valid paired monitor samples once, excluding the endpoint transition and the base rejected finish.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon monitor timing supplies compatible paired statistics", "[dmRecon][app][fgTiming]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::recordMonitorTiming;
+    MagAOX::app::dmRecon::selectFGTimingSource;
+    MagAOX::app::dev::frameGrabberTiming::published;
+    MagAOX::app::dev::frameGrabberTiming::finish;
+    #endif
+    // clang-format on
+
+    using namespace MagAOX::fgTiming;
+    dmRecon_test app;
+    app.m_fgTiming.configure( 5, 32, false );
+
+    for( uint64_t counter = 1; counter <= 4; ++counter )
+    {
+        const auto acquired           = shiftedTime( { 100, 0 }, int64_t( counter ) * 1000000 );
+        app.m_currentCommand.received = acquired;
+        app.m_fgTiming.begin();
+        app.recordMonitorTiming( shiftedTime( acquired, 200000 ), counter );
+        CHECK_FALSE( app.m_fgTiming.active() );
+        // The normal frame-grabber tail still sees a disabled acquisition and must not append a second event.
+        app.m_fgTiming.mark( Marker::validated );
+        app.m_fgTiming.finish( Outcome::rejected );
+    }
+
+    app.m_fgTiming.update( 10000000000, 101000000000 );
+    const auto &summary   = app.m_fgTiming.summary();
+    const auto &acquired  = summary.metrics[metricIndex( Metric::acquisitionInterval )];
+    const auto &published = summary.metrics[metricIndex( Metric::publicationInterval )];
+    const auto &delay     = summary.metrics[metricIndex( Metric::acquisitionToWrite )];
+    CHECK( app.m_fgTimingSource == dmRecon_test::FGTimingSource::monitor );
+    CHECK( summary.mode == uint32_t( dmRecon_test::FGTimingSource::monitor ) );
+    CHECK( summary.total.events == 4 );
+    CHECK( summary.total.published == 3 );
+    CHECK( summary.total.rejected == 1 );
+    REQUIRE( acquired.valid );
+    REQUIRE( published.valid );
+    REQUIRE( delay.valid );
+    CHECK( acquired.count == 2 );
+    CHECK( acquired.mean == Approx( 0.001 ) );
+    CHECK( published.count == 2 );
+    CHECK( published.mean == Approx( 0.001 ) );
+    CHECK( delay.count == 3 );
+    CHECK( delay.mean == Approx( 0.0002 ) );
+    CHECK( delay.stddev == Approx( 0 ) );
+    CHECK( app.m_beforeNext.load() == 0 );
+    CHECK( app.m_late.load() == 0 );
+    CHECK( app.m_unknown.load() == 0 );
+    CHECK( app.m_dryTimingStats.beforeNext == 0 );
+    CHECK( app.m_dryTimingStats.late == 0 );
+    CHECK( app.m_dryTimingStats.unknown == 0 );
+}
+
+/// Preserve unavailable legacy timing when no monitor was posted or its completion timestamp is unusable.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon monitor timing excludes absent and invalid completions", "[dmRecon][app][fgTiming]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::publishDiagnostics;
+    MagAOX::app::dmRecon::recordMonitorTiming;
+    #endif
+    // clang-format on
+
+    using namespace MagAOX::fgTiming;
+    dmRecon_test app;
+    app.m_fgTiming.configure( 5, 32, false );
+    app.m_currentCommand.received = { 100, 0 };
+    app.m_fgTiming.begin();
+
+    SECTION( "monitor is unavailable" )
+    {
+        app.publishDiagnostics( true );
+    }
+
+    SECTION( "completion clock failed" )
+    {
+        app.recordMonitorTiming( {}, 1 );
+    }
+
+    SECTION( "completion nanoseconds are negative" )
+    {
+        app.recordMonitorTiming( { 100, -1 }, 1 );
+    }
+
+    SECTION( "completion nanoseconds are unnormalized" )
+    {
+        app.recordMonitorTiming( { 100, 1000000000 }, 1 );
+    }
+
+    CHECK( app.m_fgTiming.active() );
+    app.m_fgTiming.finish( Outcome::rejected );
+    app.m_fgTiming.update( 10000000000, 101000000000 );
+    const auto &summary = app.m_fgTiming.summary();
+    CHECK( app.m_fgTimingSource == dmRecon_test::FGTimingSource::unavailable );
+    CHECK( summary.mode == uint32_t( dmRecon_test::FGTimingSource::unavailable ) );
+    CHECK( summary.total.published == 0 );
+    CHECK( summary.total.rejected == 1 );
+    CHECK( summary.metrics[metricIndex( Metric::acquisitionToWrite )].count == 0 );
+    CHECK( summary.metrics[metricIndex( Metric::acquisitionInterval )].count == 0 );
+    CHECK( summary.metrics[metricIndex( Metric::publicationInterval )].count == 0 );
+}
+
+/// Keep each endpoint's window separate while preserving the normal live feedback publication path.
+/** \ingroup dmRecon_unit_test */
+TEST_CASE( "dmRecon timing sessions follow actual output endpoints", "[dmRecon][app][fgTiming]" )
+{
+    // clang-format off
+    #ifdef DMRECON_TEST_DOXYGEN_REF
+    MagAOX::app::dmRecon::recordMonitorTiming;
+    MagAOX::app::dmRecon::selectFGTimingSource;
+    MagAOX::app::dmRecon::loadImageIntoStream;
+    MagAOX::app::dmRecon::frameGrabberPostPublish;
+    MagAOX::app::dmRecon::reconfig;
+    #endif
+    // clang-format on
+
+    using namespace MagAOX::fgTiming;
+    const bool firstMonitor = GENERATE( true, false );
+    Fixture    fixture;
+    auto      &app = fixture.app;
+    REQUIRE( fixture.receive() == 0 );
+    REQUIRE( app.takeCommand() );
+    REQUIRE( app.reconstruct() == 0 );
+    app.m_fgTiming.configure( 5, 32, false );
+    uint64_t counter = 0;
+
+    for( bool monitor : { firstMonitor, !firstMonitor } )
+    {
+        const int64_t latency = monitor ? 800000 : 300000;
+        const auto    source = monitor ? dmRecon_test::FGTimingSource::monitor : dmRecon_test::FGTimingSource::feedback;
+
+        for( int sample = 0; sample < 4; ++sample )
+        {
+            ++counter;
+            const auto acquired           = shiftedTime( { 100, 0 }, int64_t( counter ) * 1000000 );
+            const auto completed          = shiftedTime( acquired, latency );
+            app.m_currentCommand.received = acquired;
+            app.m_fgTiming.begin();
+
+            if( monitor )
+            {
+                app.recordMonitorTiming( completed, counter );
+                app.m_fgTiming.finish( Outcome::rejected );
+            }
+            else
+            {
+                REQUIRE( app.loadImageIntoStream( fixture.destination.pixels.data() ) == 0 );
+                // Simulate the base's successful local feedback metadata/post sequence without stream operations.
+                app.m_fgTiming.published( acquired, completed, counter, fixture.destination.metadata.inode );
+                REQUIRE( app.frameGrabberPostPublish( &fixture.destination.image ) == 0 );
+                app.m_fgTiming.finish();
+                CHECK_FALSE( app.m_publicationLock.owns_lock() );
+                CHECK( fixture.destination.pixels == std::vector<float>{ 3, 5 } );
+            }
+        }
+
+        app.m_fgTiming.update( 10000000000, 101000000000 );
+        const auto &summary = app.m_fgTiming.summary();
+        const auto &delay   = summary.metrics[metricIndex( Metric::acquisitionToWrite )];
+        CHECK( app.m_fgTimingSource == source );
+        CHECK( summary.mode == uint32_t( source ) );
+        REQUIRE( delay.valid );
+        CHECK( delay.count == 3 );
+        CHECK( delay.mean == Approx( double( latency ) * 1e-9 ) );
+        CHECK( summary.metrics[metricIndex( Metric::acquisitionInterval )].count == 2 );
+        CHECK( summary.metrics[metricIndex( Metric::publicationInterval )].count == 2 );
+    }
+
+    REQUIRE( app.reconfig() == 0 );
+    app.m_fgTiming.update( 10000000000, 101000000000 );
+    CHECK( app.m_fgTimingSource == dmRecon_test::FGTimingSource::unavailable );
+    CHECK( app.m_fgTiming.summary().mode == uint32_t( dmRecon_test::FGTimingSource::unavailable ) );
+    CHECK( app.m_fgTiming.summary().metrics[metricIndex( Metric::acquisitionToWrite )].count == 0 );
 }
 
 /// Refuse mismatched, nonfinite and obsolete commands before publishing any reconstructed value.
