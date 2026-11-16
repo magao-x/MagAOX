@@ -866,6 +866,17 @@ inline int orcaCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
 
     STDCAMERA_LOAD_CONFIG( _config );
 
+     if( m_liquidCooling )
+    {
+        if( m_defaultFanSpeed != "off" )
+        {
+            log<text_log>( "camera.liquidCooling is true: forcing default fan speed to 'off'",
+                           logPrio::LOG_WARNING );
+        }
+
+        m_defaultFanSpeed = "off";
+    }
+
     FRAMEGRABBER_LOAD_CONFIG( _config );
 
     // dev::dssShutter<orcaCtrl>::loadConfig( _config );
@@ -1369,16 +1380,16 @@ inline int orcaCtrl::connect()
         state( stateCodes::CONNECTED );
         log<text_log>( "Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]" );
 
-        if( m_liquidCooling )
-        {
-            log<text_log>( "cooling mode: liquid (declared by camera.liquidCooling). orcaCtrl does not yet apply "
-                           "liquid-cooling settings; set Cooler Type = Water with dcamcfgc and run the chiller.",
-                           logPrio::LOG_WARNING );
-        }
-        else
-        {
-            log<text_log>( "cooling mode: air" );
-        }
+        // if( m_liquidCooling )
+        // {
+        //     log<text_log>( "cooling mode: liquid (declared by camera.liquidCooling). orcaCtrl does not yet apply "
+        //                    "liquid-cooling settings; set Cooler Type = Water with dcamcfgc and run the chiller.",
+        //                    logPrio::LOG_WARNING );
+        // }
+        // else
+        // {
+        //     log<text_log>( "cooling mode: air" );
+        // }
 
         m_readoutSpeedNameSet = m_defaultReadoutSpeed;
 
@@ -1860,19 +1871,16 @@ inline int orcaCtrl::configureAcquisition()
 
     if( m_fanSpeedControlEnabled && m_fanControlSupported )
     {
-        static constexpr int32 c_enableCoolingFan  = 0;
-        static constexpr int32 c_disableCoolingFan = 1;
-
         std::string priorFanSpeed     = m_fanSpeedName;
-        int32       disableCoolingFan = c_enableCoolingFan;
+        int32       fanMode = DCAMPROP_MODE__ON;
 
         if( m_fanSpeedNameSet == "on" )
         {
-            disableCoolingFan = c_enableCoolingFan;
+            fanMode = DCAMPROP_MODE__ON;
         }
         else if( m_fanSpeedNameSet == "off" )
         {
-            disableCoolingFan = c_disableCoolingFan;
+            fanMode = DCAMPROP_MODE__OFF;
         }
         else
         {
@@ -1883,7 +1891,7 @@ inline int orcaCtrl::configureAcquisition()
             return -1;
         }
 
-        if( setorcaParameter( m_cameraHandle, DCAM_IDPROP_SENSORCOOLERFAN, disableCoolingFan ) < 0 )
+        if( setorcaParameter( m_cameraHandle, DCAM_IDPROP_SENSORCOOLERFAN, fanMode ) < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
                 return -1;
