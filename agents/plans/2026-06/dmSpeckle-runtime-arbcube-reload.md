@@ -166,6 +166,17 @@ only; no new unit tests since the sanitizer helper was removed.
   2. Plan file under `agents/plans/2026-06/` (this file).
   3. Final `clang-format -i` pass over touched files if needed.
 
+### Integration with dm syncopation (rebase onto `dev`, 2026-11-16)
+- `dev` added a syncopation-managed provider path (`syncopationThreadExec`)
+  and a `TIPTILT` op mode that is only valid with `dm.syncopationTiming`.
+- The file-reload block moved into `handleFileReload()`, which is called from
+  both the legacy modulator loop and `syncopationThreadExec()`. Each call runs
+  on the thread that reads `m_shapes` in that mode, so `load_file` works in
+  either mode and the `file` property no longer stays Busy under syncopation.
+- The `mode` selection switch gains a `tiptilt` element only when syncopation
+  timing is configured; `opModeName()` maps op modes to the
+  `modulator.opMode` strings for both the switch and the log messages.
+
 ## Assumptions
 - The modulator thread is the only writer to `m_shapes` other than
   `loadArbcubeFile()`. Both call sites take `m_shapesMutex`; the hot inner

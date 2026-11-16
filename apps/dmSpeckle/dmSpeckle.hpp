@@ -180,6 +180,16 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
      */
     int loadArbcubeFile();
 
+    /// Service a pending load_file request from the modulator thread.
+    /** Clears m_reloadFile, calls loadArbcubeFile(), and publishes the result
+     *  as the state of the file property. Must only be called from the thread
+     *  that reads m_shapes so the reload does not race with modulation.
+     */
+    void handleFileReload();
+
+    /// Name of an operating mode as used in configuration and the mode INDI property.
+    static std::string opModeName( int opMode /**< [in] SPARKLE, ARBCUBE, or TIPTILT. */ );
+
     /// Prepare shape storage for the configured legacy or managed modulation.
     /** In SPARKLE mode, computes Fourier-mode speckle patterns from
      *  m_separation / m_angle / m_amp. In ARBCUBE mode, delegates to
@@ -263,7 +273,7 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
 
     pcf::IndiProperty m_indiP_zero; ///< INDI zero control/status.
 
-    pcf::IndiProperty m_indiP_mode; ///< Selection switch toggling SPARKLE / ARBCUBE.
+    pcf::IndiProperty m_indiP_mode; ///< Selection switch for SPARKLE / ARBCUBE, plus TIPTILT when syncopated.
 
     pcf::IndiProperty m_indiP_file; ///< Text property with current/target arbcube leaf filenames.
 
@@ -628,6 +638,12 @@ void dmSpeckle::syncopationThreadExec()
 
     while( !m_shutdown )
     {
+        // Reload here, on the only thread that reads m_shapes in syncopation mode.
+        if( m_reloadFile )
+        {
+            handleFileReload();
+        }
+
         if( !m_modulating && !m_syncopationZeroRequested )
         {
             mx::sys::milliSleep( 1 );
@@ -771,13 +787,21 @@ int dmSpeckle::appStartup()
         return -1;
     }
 
-    if( createStandardIndiSelectionSw( m_indiP_mode, "mode", { "sparkle", "arbcube" } ) < 0 )
+    // tiptilt is only valid with a syncopation timing source, see validateSyncopationConfig().
+    std::vector<std::string> modeNames = { opModeName( SPARKLE ), opModeName( ARBCUBE ) };
+    if( !m_syncopationTiming.empty() )
+    {
+        modeNames.push_back( opModeName( TIPTILT ) );
+    }
+    if( createStandardIndiSelectionSw( m_indiP_mode, "mode", modeNames ) < 0 )
     {
         log<software_error>( { __FILE__, __LINE__ } );
         return -1;
     }
-    m_indiP_mode["sparkle"] = ( m_opMode == SPARKLE ) ? pcf::IndiElement::On : pcf::IndiElement::Off;
-    m_indiP_mode["arbcube"] = ( m_opMode == ARBCUBE ) ? pcf::IndiElement::On : pcf::IndiElement::Off;
+    for( const auto &modeName : modeNames )
+    {
+        m_indiP_mode[modeName] = ( modeName == opModeName( m_opMode ) ) ? pcf::IndiElement::On : pcf::IndiElement::Off;
+    }
     if( registerIndiPropertyNew( m_indiP_mode, INDI_NEWCALLBACK( m_indiP_mode ) ) < 0 )
     {
         log<software_error>( { __FILE__, __LINE__ } );
@@ -971,6 +995,37 @@ int dmSpeckle::loadArbcubeFile()
     return 0;
 }
 
+void dmSpeckle::handleFileReload()
+{
+    m_reloadFile = false;
+
+    int                                  rv       = loadArbcubeFile();
+    pcf::IndiProperty::PropertyStateType newState = ( rv < 0 ) ? pcf::IndiProperty::Alert : pcf::IndiProperty::Ok;
+    if( m_indiDriver )
+    {
+        m_indiP_file.setState( newState );
+        m_indiP_file.setTimeStamp( pcf::TimeStamp() );
+        m_indiDriver->sendSetProperty( m_indiP_file );
+    }
+    if( rv == 0 )
+    {
+        updateIfChanged( m_indiP_nFrames, "current", (int)m_shapes.planes() );
+    }
+}
+
+std::string dmSpeckle::opModeName( int opMode )
+{
+    if( opMode == ARBCUBE )
+    {
+        return "arbcube";
+    }
+    if( opMode == TIPTILT )
+    {
+        return "tiptilt";
+    }
+    return "sparkle";
+}
+
 int dmSpeckle::generateSpeckles()
 {
     if( m_opMode == TIPTILT )
@@ -1073,20 +1128,7 @@ inline void dmSpeckle::modThreadExec()
         // is therefore safe to rewrite here.
         if( m_reloadFile && !m_shutdown )
         {
-            m_reloadFile = false;
-            int rv       = loadArbcubeFile();
-            pcf::IndiProperty::PropertyStateType newState =
-                ( rv < 0 ) ? pcf::IndiProperty::Alert : pcf::IndiProperty::Ok;
-            if( m_indiDriver )
-            {
-                m_indiP_file.setState( newState );
-                m_indiP_file.setTimeStamp( pcf::TimeStamp() );
-                m_indiDriver->sendSetProperty( m_indiP_file );
-            }
-            if( rv == 0 )
-            {
-                updateIfChanged( m_indiP_nFrames, "current", (int)m_shapes.planes() );
-            }
+            handleFileReload();
         }
 
         if( !m_modulating && !m_shutdown ) // If we aren't modulating we sleep for 1/2 a second
@@ -1693,10 +1735,12 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_mode )
             continue;
         if( m_indiP_mode.find( elit->first ) && m_indiP_mode[elit->first].getSwitchState() == pcf::IndiElement::On )
             continue;
-        if( elit->first == "sparkle" )
+        if( elit->first == opModeName( SPARKLE ) )
             newMode = SPARKLE;
-        else if( elit->first == "arbcube" )
+        else if( elit->first == opModeName( ARBCUBE ) )
             newMode = ARBCUBE;
+        else if( elit->first == opModeName( TIPTILT ) && !m_syncopationTiming.empty() )
+            newMode = TIPTILT;
     }
     if( newMode == -1 )
         return 0;
@@ -1706,12 +1750,12 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_mode )
     if( newMode != m_opMode )
     {
         m_opMode = newMode;
-        log<text_log>( newMode == ARBCUBE ? "mode set to arbcube" : "mode set to sparkle", logPrio::LOG_NOTICE );
+        log<text_log>( "mode set to " + opModeName( newMode ), logPrio::LOG_NOTICE );
         m_restartSp = true;
     }
 
     indi::updateSelectionSwitchIfChanged(
-        m_indiP_mode, newMode == SPARKLE ? "sparkle" : "arbcube", m_indiDriver, pcf::IndiProperty::Ok );
+        m_indiP_mode, opModeName( newMode ), m_indiDriver, pcf::IndiProperty::Ok );
 
     return 0;
 }
