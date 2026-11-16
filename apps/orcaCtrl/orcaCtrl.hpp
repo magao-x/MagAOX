@@ -832,7 +832,7 @@ inline void orcaCtrl::setupConfig()
                 argType::Required,
                 "camera",
                 "liquidCooling",
-                false,
+                true,
                 "bool",
                 "Set true if the camera's Cooler Type is set to Water with dcamcfgc and a chiller is connected. "
                 "Currently only logged; liquid-cooling control is not yet implemented. Default is false." );
@@ -1371,7 +1371,7 @@ inline int orcaCtrl::connect()
                 return -1;
             }
 
-            if( !m_fanControlSupported )
+            if( !m_fanControlSupported && m_fanSpeedControlEnabled )
             {
                 log<text_log>( "Cooling fan control is enabled in config but not supported. Disabling fan control..." );
             }
@@ -1548,7 +1548,7 @@ inline int orcaCtrl::getFanSpeed()
 
     int32 status;
 
-    if( getorcaParameter( status, DCAM_IDPROP_SENSORCOOLER ) < 0 )
+    if( getorcaParameter( status, DCAM_IDPROP_SENSORCOOLERFAN ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
             return -1;
@@ -1560,11 +1560,11 @@ inline int orcaCtrl::getFanSpeed()
 
     // bool fanForcedOn = false;
 
-    if( status == DCAMPROP_SENSORCOOLER__OFF )
+    if( status == DCAMPROP_SENSORCOOLERFAN__OFF )
     {
         m_fanSpeedName = "off";
     }
-    else if( status == DCAMPROP_SENSORCOOLER__ON )
+    else if( status == DCAMPROP_SENSORCOOLERFAN__ON )
     {
         m_fanSpeedName = "on";
     }
