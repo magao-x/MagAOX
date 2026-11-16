@@ -147,11 +147,17 @@ changes may require a configuration update; IRQ-number changes do not.
 # These are the defaults; omit this section to use them.
 enabled=true
 interval=5
+
+# Optional: require this array even when absent at startup.
+# Replace the placeholder with the UUID from /sys/block/<name>/md/uuid.
+# [raid.data]
+# uuid=<kernel MD UUID>
 ```
 
 The collector reads `/proc/mdstat` directly with the normal application user's
 permissions. It runs every five seconds by default; `interval` must be finite
-and positive. Polling follows the application loop, so other collection work can
+and positive. The first application poll checks immediately without waiting for
+the interval. Polling follows the application loop, so other collection work can
 delay a check. It discovers arrays on each complete snapshot without invoking
 `mdadm` or changing array state. This covers Linux MD arrays visible in mdstat,
 not storage-controller health or individual disks' SMART status.
@@ -172,36 +178,77 @@ metadata containers are normal bookkeeping; their inactivity does not warn, but
 a failed component still does. Inactive external member arrays are not containers
 and do warn.
 
-Each observed MD name receives a stable index for the current process, with a
-mapping log on discovery and when its level changes. Previously discovered
-arrays remain in the inventory as missing if they disappear. This also applies
-to metadata containers: their disappearance warns about inventory loss. A valid
-empty snapshot before discovery means no arrays. A missing `/proc/mdstat` is
-benign only before any array has been observed; other read failures remain
-unknown and warn. Failed reads or parsing never establish healthy state.
+Without any `[raid.NAME]` sections, monitoring uses mdstat alone and tracks each
+observed MD name by a stable index for the current process. This mode cannot
+recognize an array that is already absent at startup. An MD-name change cannot
+establish physical identity: the old name remains missing and the new name
+receives another index.
 
-There is no configured expected-array list. Autodiscovery cannot recognize an
-array that is already absent when sysMonitor starts. The retained inventory
-resets at restart, and an MD-name change cannot establish physical identity:
-the old name remains missing and the new name receives another index.
+To require an array from startup, add a section such as `[raid.data]` with its
+kernel MD `uuid`. The nonempty section suffix (`data` here) is the operator label
+and may contain letters, digits, underscores, and hyphens. Each configured UUID
+is required. Empty section headers with no keys are ignored by the configuration
+framework; include the `uuid=` line, whose empty or invalid value is rejected.
+The app accepts the standard hyphenated UUID
+or its 32 hexadecimal digits, normalizes case, and rejects zero, malformed, or
+duplicate UUIDs. Use the value from `/sys/block/<name>/md/uuid`. Colon-separated
+`mdadm` UUIDs are not accepted: older 0.90 metadata can have different byte
+ordering, so changing punctuation is not a reliable conversion.
+
+Any configured expectation enables UUID tracking for **all** discovered arrays.
+Health still comes from mdstat, and identity comes from each array's
+`/sys/block/<name>/md/uuid`. This requires readable, valid UUID attributes;
+the attribute was introduced upstream for Linux 5.9. Native MD 1.0/1.2 metadata
+is the primary supported case. Older kernels/modules or metadata that cannot
+provide a usable UUID cannot satisfy this mode. See the
+[Linux 5.9 MD source](https://github.com/torvalds/linux/blob/v5.9/drivers/md/md.c).
+
+Configured arrays receive indices and unchecked status at startup. The first
+check reports a configured UUID as missing if it is absent, including when
+mdstat is empty or absent. Autodiscovery continues: unconfigured UUIDs are added
+and monitored normally. A UUID retains its index through an MD-name change;
+a replacement UUID at the same name receives a new index while the old UUID
+remains missing. Expectation and discovery/mapping logs record the label, UUID,
+current name, and level when available.
+
+If identity cannot be established for any discovered array, the entire
+collection becomes unknown and warns. Its partial inventory is ignored, retained
+arrays become unavailable, and a later complete read can recover. This avoids
+matching an expectation using an unverified name. There is no fallback to
+name-based identity while expectations are configured.
+
+Previously discovered arrays remain in the inventory as missing if they
+disappear. This also applies to metadata containers: their disappearance warns
+about inventory loss. A valid empty snapshot means no arrays only when there are
+no configured or previously discovered arrays. A missing `/proc/mdstat` is benign
+only in that same case; other read failures remain unknown and warn. Failed reads
+or parsing never establish healthy state. The discovered inventory resets at
+restart; configured expectations are recreated from configuration.
 
 Read-only INDI properties provide:
 
 - `raid_status.summary`: overall inventory/collection result.
-- `raid_warning.active`: On when an observed array is missing, faulty, degraded,
-  inactive, or unverifiable, or collection fails. A recognized healthy metadata
-  container and an initial no-array host do not warn.
-- `raid_0`, `raid_1`, etc.: `valid`, `ok`, `degraded`, `expected`, `active`, `flags`,
-  and `check_time`. The first three are zero/one values; `flags` uses the bit values
-  below. Counts are zero unless `Redundant` is set. Time is Unix UTC seconds of
-  the actual check attempt, or zero before an attempt.
-- `raid_0_info`, `raid_1_info`, etc.: the corresponding `name`, `level`, and
-  human-readable `status`.
+- `raid_warning.active`: On when a configured or observed array is missing,
+  faulty, degraded, inactive, or unverifiable, or collection fails. A recognized
+  healthy metadata container and an initial no-array host without expectations
+  do not warn.
+- `raid_0`, `raid_1`, etc.: `valid`, `ok`, `degraded`, `configured`, `expected`,
+  `active`, `flags`, and `check_time`. The first four are zero/one values;
+  `configured` identifies an expected UUID, while `expected` remains the required
+  **member count**. `flags` uses the bit values below. Counts are zero unless
+  `Redundant` is set. Time is Unix UTC seconds of the actual check attempt, or
+  zero before an attempt.
+- `raid_0_info`, `raid_1_info`, etc.: the corresponding `name`, `level`, `label`,
+  `uuid`, and human-readable `status`. Labels identify configured expectations;
+  UUIDs are populated in UUID-tracking mode. An expected array that has not been
+  discovered has no current MD name or level. UUID-tracking mode also clears
+  these fields when an identity is missing or unavailable, avoiding a stale
+  association if another array reuses its old name.
 
 `ok` means the current assessment satisfies the monitoring policy; it is not
 proof of redundant storage. An active RAID0/linear array or recognized healthy
 metadata container can be OK. Use `valid` and `Redundant` when interpreting counts.
-Changed faults log array names, member descriptors, and the availability map
+Changed faults log array identity, member descriptors, and the availability map
 when present. Identical faults are suppressed, and recovery produces a short
 notice. Changing maintenance percentages, ETA, and throughput do not generate
 repeated diagnostic details or telemetry.
@@ -244,25 +291,27 @@ the read/parse outcome, independently of individual array health: `Unchecked=0`,
 | `Valid` | 1 | The current array health assessment is usable |
 | `OK` | 2 | The array satisfies the monitoring policy |
 | `Degraded` | 4 | A redundant array has fewer active members than expected |
-| `Missing` | 8 | A known array is absent, or mdstat has disappeared |
+| `Missing` | 8 | A configured or discovered array is absent, or mdstat has disappeared |
 | `Inactive` | 16 | An ordinary array is present but inactive |
 | `Redundant` | 32 | Expected/active counts describe redundant members |
 | `Container` | 64 | A recognized external metadata container |
 | `Faulty` | 128 | A failed component or broken array is reported |
 
-RAID telemetry omits names, levels, member lists, and maintenance progress. It
+RAID telemetry omits names, labels, UUIDs, levels, member lists, and maintenance
+progress. UUID expectations do not change its compact schema or add a configured
+flag; startup expectation and discovery/mapping logs provide that context. It
 records first, changed numeric state, and forced snapshots. Time-only or
 detail-only changes do not force another record; forced records preserve the
-latest actual check time. Retain RAID discovery/mapping and changed-fault logs
-with telemetry extracts. Array indices are local to the current process and may
-change after restart.
+latest actual check time. Retain RAID expectation, discovery/mapping, and
+changed-fault logs with telemetry extracts. Array indices are local to the
+current process and may change after restart.
 
 Updated readers can decode older GPU/IRQ records because legacy schema field
 positions remain available. Older binaries must be updated before reading the
 new compact records or the new RAID event type. Retain startup, GPU/RAID mapping,
-and IRQ expectation logs alongside telemetry, including when rotating files or
-extracting a time window; a telemetry segment alone may not identify a physical
-GPU, RAID array, or IRQ group.
+and IRQ/RAID expectation logs alongside telemetry, including when rotating files
+or extracting a time window; a telemetry segment alone may not identify a
+physical GPU, RAID array, or IRQ group.
 
 Qualify the configuration on the instrument from the operator's workstation.
 Compare measurements with normal readbacks, check warning behavior before and
@@ -272,6 +321,9 @@ disabled, including the writer's own timing such as `fg_timing.delta_aw`.
 For RAID, compare the reported array inventory and health with the operator's
 normal storage checks, including existing degraded/rebuilding arrays when
 available, and verify that installed warning rules receive the warning switch.
+Before enabling expected-array sections, have the operator obtain the real
+kernel MD UUIDs from the monitored host and confirm that sysMonitor's application
+user can read UUID attributes for every discovered array.
 
 A GPU query deadline bounds userspace collection. A child stuck in uninterruptible
 kernel sleep may remain pending after termination is requested; further GPU
