@@ -107,7 +107,8 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
 
     std::mutex m_shapesMutex; ///< Guards m_shapes during reload. Held only by callers that resize/repopulate the cube.
 
-    bool m_reloadFile{ false }; ///< Set by the load_file.request callback; consumed by the modulator thread.
+    std::atomic<bool> m_reloadFile{
+        false }; ///< Set by the load_file.request callback; consumed by the modulator thread.
 
     IMAGE    m_imageStream{}; ///< The only writable channel; an auxiliary source in managed mode.
     uint32_t m_width{ 0 };    ///< The width of the image
@@ -175,6 +176,9 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
      *  Any I/O or dimension errors are logged and returned; m_fileName is
      *  treated as an opaque filesystem path and not otherwise validated.
      *
+     *  The caller must hold m_indiMutex, which guards m_fileName and m_amp
+     *  against concurrent INDI callbacks.
+     *
      *  \returns 0 on success
      *  \returns -1 on error
      */
@@ -184,6 +188,7 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
     /** Clears m_reloadFile, calls loadArbcubeFile(), and publishes the result
      *  as the state of the file property. Must only be called from the thread
      *  that reads m_shapes so the reload does not race with modulation.
+     *  Takes m_indiMutex, so the caller must not already hold it.
      */
     void handleFileReload();
 
@@ -195,6 +200,9 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
      *  m_separation / m_angle / m_amp. In ARBCUBE mode, delegates to
      *  loadArbcubeFile(). In TIPTILT mode, only sizes m_shapes since the
      *  waveform is generated per command.
+     *
+     *  The caller must hold m_indiMutex, which guards the modulation
+     *  parameters against concurrent INDI callbacks.
      *
      *  \returns 0 on success
      *  \returns -1 on error
@@ -994,6 +1002,8 @@ int dmSpeckle::loadArbcubeFile()
 
 void dmSpeckle::handleFileReload()
 {
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+
     m_reloadFile = false;
 
     int                                  rv       = loadArbcubeFile();
@@ -1136,7 +1146,14 @@ inline void dmSpeckle::modThreadExec()
         if( m_modulating && !m_shutdown )
         {
             m_restartSp = false;
-            if( generateSpeckles() < 0 )
+
+            int rv;
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( m_indiMutex );
+                rv = generateSpeckles();
+            }
+
+            if( rv < 0 )
             {
                 m_modulating = false;
                 continue;
