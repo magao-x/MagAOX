@@ -197,16 +197,17 @@ duplicate UUIDs. Use the value from `/sys/block/<name>/md/uuid`. Colon-separated
 ordering, so changing punctuation is not a reliable conversion.
 
 The host fragments contain the UUIDs supplied on 2026-11-16, labeled from their
-local mount points (`root` for `/`, with underscores replacing other slashes):
+local mount points (`root` for `/`, with underscores replacing other slashes)
+and confirmed swap roles:
 
 | Host | Expected array labels |
 | --- | --- |
-| RTC / exao2 | `root`, `boot`, `boot_efi`, `data`, `unmounted` |
-| ICC / exao3 | `root`, `boot`, `boot_efi`, `data`, `unmounted` |
+| RTC / exao2 | `root`, `boot`, `boot_efi`, `data`, `swap` |
+| ICC / exao3 | `root`, `boot`, `boot_efi`, `data`, `swap` |
 | AOC / exao1 | `root`, `boot_efi`, `home`, `mnt_backup` |
 
-RTC md127 and ICC md126 were absent from the supplied `df` output; `unmounted`
-is a temporary label pending role confirmation. Both UUIDs remain required.
+The user confirmed that RTC md127 and ICC md126 are swap arrays. Both retain
+their supplied UUIDs and are required under the `swap` label.
 The AOC backup UUID is required even though its supplied mdstat snapshot reports
 a broken array. Network mounts are covered on the host owning the underlying
 array. Names in config comments record the supplied snapshot; UUIDs determine
