@@ -959,8 +959,7 @@ int dmSpeckle::loadArbcubeFile()
 {
     if( m_fileName.empty() )
     {
-        return log<software_error, -1>(
-            { __FILE__, __LINE__, "arbcube file name is empty; nothing to load" } );
+        return log<software_error, -1>( { __FILE__, __LINE__, "arbcube file name is empty; nothing to load" } );
     }
 
     std::lock_guard<std::mutex> shapesLock( m_shapesMutex ); //mutex scope
@@ -969,8 +968,7 @@ int dmSpeckle::loadArbcubeFile()
     mx::error_t               errc = ff.read( m_shapes, m_fileName );
     if( errc != mx::error_t::noerror )
     {
-        return log<software_error, -1>(
-            { __FILE__, __LINE__, "could not read arbcube FITS file: " + m_fileName } );
+        return log<software_error, -1>( { __FILE__, __LINE__, "could not read arbcube FITS file: " + m_fileName } );
     }
 
     if( m_shapes.rows() != m_width || m_shapes.cols() != m_height )
@@ -988,8 +986,7 @@ int dmSpeckle::loadArbcubeFile()
         m_shapes.image( p ) *= (float)m_amp;
     }
 
-    log<text_log>( "loaded arbcube FITS file: " + m_fileName + " (" + std::to_string( m_shapes.planes() ) +
-                       " planes)",
+    log<text_log>( "loaded arbcube FITS file: " + m_fileName + " (" + std::to_string( m_shapes.planes() ) + " planes)",
                    logPrio::LOG_NOTICE );
 
     return 0;
@@ -1732,18 +1729,30 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_mode )
     for( auto elit = ipRecv.getElements().begin(); elit != ipRecv.getElements().end(); ++elit )
     {
         if( elit->second.getSwitchState() != pcf::IndiElement::On )
+        {
             continue;
+        }
         if( m_indiP_mode.find( elit->first ) && m_indiP_mode[elit->first].getSwitchState() == pcf::IndiElement::On )
+        {
             continue;
+        }
         if( elit->first == opModeName( SPARKLE ) )
+        {
             newMode = SPARKLE;
+        }
         else if( elit->first == opModeName( ARBCUBE ) )
+        {
             newMode = ARBCUBE;
+        }
         else if( elit->first == opModeName( TIPTILT ) && !m_syncopationTiming.empty() )
+        {
             newMode = TIPTILT;
+        }
     }
     if( newMode == -1 )
+    {
         return 0;
+    }
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
@@ -1754,8 +1763,7 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_mode )
         m_restartSp = true;
     }
 
-    indi::updateSelectionSwitchIfChanged(
-        m_indiP_mode, opModeName( newMode ), m_indiDriver, pcf::IndiProperty::Ok );
+    indi::updateSelectionSwitchIfChanged( m_indiP_mode, opModeName( newMode ), m_indiDriver, pcf::IndiProperty::Ok );
 
     return 0;
 }
@@ -1766,7 +1774,9 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_file )
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_file, ipRecv );
 
     if( !ipRecv.find( "target" ) )
+    {
         return 0;
+    }
 
     std::string target = ipRecv["target"].get<std::string>();
 
@@ -1783,10 +1793,14 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_loadFile )
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loadFile, ipRecv );
 
     if( !ipRecv.find( "request" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+    {
         return 0;
+    }
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
