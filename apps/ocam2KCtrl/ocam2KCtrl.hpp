@@ -179,7 +179,8 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     unsigned m_digitalBinX{ 1 }; ///< Digital x-binning factor applied after descrambling.
 
-    unsigned m_digitalBinY{ 1 }; ///< Output-height divisor when digital binning is active; no Y aggregation is performed.
+    unsigned m_digitalBinY{
+        1 }; ///< Output-height divisor when digital binning is active; no Y aggregation is performed.
 
     bool m_digitalBin{ false }; ///< Indicates whether post-descramble digital binning is active for the current mode.
 
@@ -727,7 +728,7 @@ inline int ocam2KCtrl::loadConfigImpl()
     }
 
     m_descrambleRequested.store( descrambleMethod == "sdk" ? DescrambleMethod::sdk : DescrambleMethod::optimized,
-                                std::memory_order_relaxed );
+                                 std::memory_order_relaxed );
 
     if( m_maxEMGain < 1 )
     {
@@ -824,26 +825,28 @@ inline void ocam2KCtrl::updateDescramble()
         return;
     }
 
-    const auto requested = m_descrambleRequested.load( std::memory_order_relaxed );
+    const auto requested    = m_descrambleRequested.load( std::memory_order_relaxed );
     const auto availability = m_descrambleAvailability.load( std::memory_order_relaxed );
-    const bool operating = !shutdown() && powerState() == 1 && powerStateTarget() == 1 && !m_reconfig &&
-                           state() == stateCodes::OPERATING;
-    const auto applied = operating ? m_descrambleApplied.load( std::memory_order_relaxed ) : DescrambleMethod::none;
-    const char *availabilityName = availability == DescrambleAvailability::ready ? "ready" :
-                                   availability == DescrambleAvailability::unsupported ? "unsupported mode" :
-                                   availability == DescrambleAvailability::unavailable ? "unavailable table" : "unconfigured";
-    const auto status = requested == DescrambleMethod::optimized && availability != DescrambleAvailability::ready
-                            ? INDI_ALERT
-                            : ( applied == requested ? INDI_OK : INDI_BUSY );
+    const bool operating =
+        !shutdown() && powerState() == 1 && powerStateTarget() == 1 && !m_reconfig && state() == stateCodes::OPERATING;
+    const auto  applied = operating ? m_descrambleApplied.load( std::memory_order_relaxed ) : DescrambleMethod::none;
+    const char *availabilityName = availability == DescrambleAvailability::ready         ? "ready"
+                                   : availability == DescrambleAvailability::unsupported ? "unsupported mode"
+                                   : availability == DescrambleAvailability::unavailable ? "unavailable table"
+                                                                                         : "unconfigured";
+    const auto  status = requested == DescrambleMethod::optimized && availability != DescrambleAvailability::ready
+                             ? INDI_ALERT
+                             : ( applied == requested ? INDI_OK : INDI_BUSY );
 
     indi::updateSelectionSwitchIfChanged( m_indiP_descrambleMethod,
-                                         requested == DescrambleMethod::optimized ? "optimized" : "sdk",
-                                         m_indiDriver,
-                                         status );
+                                          requested == DescrambleMethod::optimized ? "optimized" : "sdk",
+                                          m_indiDriver,
+                                          status );
     updateIfChanged( m_indiP_descrambleStatus,
                      "applied",
-                     std::string( applied == DescrambleMethod::optimized ? "optimized" :
-                                  applied == DescrambleMethod::sdk ? "sdk" : "none" ),
+                     std::string( applied == DescrambleMethod::optimized ? "optimized"
+                                  : applied == DescrambleMethod::sdk     ? "sdk"
+                                                                         : "none" ),
                      status );
     updateIfChanged( m_indiP_descrambleStatus, "availability", std::string( availabilityName ), status );
 }
@@ -2607,7 +2610,7 @@ inline int ocam2KCtrl::acquireAndCheckValid()
 
 inline int ocam2KCtrl::loadImageIntoStream( void *dest )
 {
-    unsigned currImageNumber = 0;
+    unsigned   currImageNumber = 0;
     const bool optimized = m_descrambleRequested.load( std::memory_order_relaxed ) == DescrambleMethod::optimized &&
                            m_descrambler.structured();
     short *output = m_digitalBin ? m_digitalBinWork.data() : reinterpret_cast<int16_t *>( dest );
