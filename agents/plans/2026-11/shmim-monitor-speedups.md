@@ -554,3 +554,59 @@ the cacao `cset` setting and `agents/plans/2026-10/rtc-cpuset-restructuring.md`.
 Next: capture on the RTC during events (per-loop-CPU interrupts including
 TLB/CAL/RES IPIs, kernel memory activity such as reclaim and compaction, disk,
 network, NFS server and the busiest threads) to identify the source.
+
+### RTC event capture 2026-11-15 12:14-12:44 UTC: no events
+
+`rtc_event_capture.sh` (2 s samples of per-CPU interrupts, vmstat, disk,
+network and `top`), run after the cpuset/config deploy and app restarts.
+None of the 10-12 min events occurred: camwfs wma 35.00 us, sd of the 10 s
+means 0.07 us; holoop-time 139.2-139.8 us; dmtweeter 120.5-120.8 us. The camera
+write time is also ~2 us below the ~37 us seen before.
+
+- Loop-L3 CPUs (40-47) and 33, 56, 57: no TLB shootdowns except 48 on 42 (the
+  cbuff). CAL IPIs ~6/s on 40 (tweeter command thread), <1.5/s elsewhere.
+  Timer ticks 1000/s everywhere (no nohz_full), 3000/s on 47 (the modulators'
+  10 us polling) and 1020/s on 45.
+- No reclaim, compaction or migration. Over the run, khugepaged collapsed
+  ~500 huge pages (THP `always`) and `/data` had one burst of writes, up to 76 MB/s
+  (12:36-12:40). Neither moved wma or the loop.
+- Constant ~147 MB/s transmitted on one interface the whole time.
+
+Possible cause (user): `rtSetup/RTC/move_irqs` was run this morning after
+the cpuset rebuild, but probably not after the rebuild a few days earlier.
+Rebuilding cpusets does not change IRQ affinity (`/proc/irq`), and the
+irqbalance policy bans the EDT IRQ, so nothing else moves it.
+
+Today's telemetry history (UTC) only partly supports this:
+
+| time | camwfs wma | loop | periodic events |
+|---|---|---|---|
+| until 02:29 (camera then off until 11:30) | ~37.5 us | - | every ~10-13 min |
+| 11:39 apps restarted | ~42 us | ~152 us | none |
+| 11:52 `set_latency` on (RT mode) | 37.4 us | ~142.8 us | none |
+| ~12:13:45, presumably `move_irqs` | 35.0 us | 139.5 us | none through 12:53 |
+
+- Pinning the EDT IRQ to `camwfs_irq` (CPU 34, camera L3) lowered both the
+  camera write time and the loop time by ~2.4 us.
+- The ~10 min events stopped at the restart. Between 11:52 and 12:13, with
+  RT mode on and the IRQ not yet pinned, about two events would have been
+  expected and none occurred. (On Nov 14 the events occurred with RT mode on.)
+  21 min is short given gaps of up to 16 min, so this is suggestive. If it
+  holds, the cause is something else the restart changed: the cpuset rebuild,
+  mfilt on 45, the cbuffs reading the `pub` copies, or an app no longer
+  running.
+- `set_latency` is worth ~5 us of camera write time and ~9 us of loop time.
+- Loop vs camera, Nov 13-15 history (5 s bins, excess over a 5 min rolling
+  median, bump > 0.8 us): 44 of 50 camera bumps come with a loop bump, but
+  only 42 of 140 loop bumps come with a camera bump. A typical episode has
+  three loop pulses ~45-60 s apart, and only the third also bumps the camera.
+  So the camera bump does not cause the loop bumps: a common source hits the
+  loop alone twice, then the loop and camera together.
+- After the restart, 11:53-12:13 had two loop bins over 0.8 us (max 2.0 us).
+  After `move_irqs`, 12:15-12:53 had none (max 0.35 us; sd of the 5 s means
+  0.14 us vs 0.57 us before).
+- To check: whether the events stay away, from a later history dump.
+
+Lesson: after every `make_cpusets` and every reboot, run `move_irqs` and check
+the EDT IRQ's `effective_affinity_list` is 34 (deploy step 4 in
+`agents/plans/2026-10/rtc-cpuset-restructuring.md`).

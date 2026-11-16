@@ -24,12 +24,9 @@ cpu=$(cat "$CGROUPS1_CPUSET_MOUNTPOINT/camwfs_irq/cpuset.cpus")
 echo "edt: " $edt " to " $cpu
 echo $cpu > /proc/irq/$edt/smp_affinity_list
 
-nvidias=$(grep nvidia /proc/interrupts | awk '{print $1}' | sed 's/.$//')
-cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/acqu_mvm/cpuset.cpus)
-for nvidia in $nvidias; do
-    echo "nvidia: " $nvidia " to " $cpu
-    echo $cpu > /proc/irq/$nvidia/smp_affinity_list
-done
+# NVIDIA IRQs stay on the system CPUs with the ordinary IRQs: the loop's GPU
+# waits spin rather than wait for an interrupt, and management queries
+# (nvidia-smi, NVML monitoring) must not interrupt the loop's cores.
 
 dmws=$(grep cp2x72c /proc/interrupts | awk '{print $1}' | sed 's/.$//')
 cpu=$(cat $CGROUPS1_CPUSET_MOUNTPOINT/woofer/cpuset.cpus)
