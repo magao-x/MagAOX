@@ -1560,11 +1560,11 @@ inline int orcaCtrl::getFanSpeed()
 
     // bool fanForcedOn = false;
 
-    if( status == DCAMPROP_SENSORCOOLERFAN__OFF )
+    if( status == DCAMPROP_SENSORCOOLER__OFF )
     {
         m_fanSpeedName = "off";
     }
-    else if( status == DCAMPROP_SENSORCOOLERFAN__ON )
+    else if( status == DCAMPROP_SENSORCOOLER__ON )
     {
         m_fanSpeedName = "on";
     }
