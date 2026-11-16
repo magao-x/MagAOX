@@ -866,12 +866,11 @@ inline int orcaCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
 
     STDCAMERA_LOAD_CONFIG( _config );
 
-     if( m_liquidCooling )
+    if( m_liquidCooling )
     {
         if( m_defaultFanSpeed != "off" )
         {
-            log<text_log>( "camera.liquidCooling is true: forcing default fan speed to 'off'",
-                           logPrio::LOG_WARNING );
+            log<text_log>( "camera.liquidCooling is true: forcing default fan speed to 'off'", logPrio::LOG_WARNING );
         }
 
         m_defaultFanSpeed = "off";
@@ -977,18 +976,24 @@ inline int orcaCtrl::appLogic()
 
         // Might have gotten here because of a power off.
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return 0;
+        }
 
         std::unique_lock<std::mutex> lock( m_indiMutex );
         if( connect() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return 0;
+            }
             log<software_error>( { __FILE__, __LINE__ } );
         }
 
         if( state() != stateCodes::CONNECTED )
+        {
             return 0;
+        }
     }
 
     if( state() == stateCodes::CONNECTED )
@@ -999,21 +1004,27 @@ inline int orcaCtrl::appLogic()
         if( getAcquisitionState() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return 0;
+            }
             return log<software_error, 0>( { __FILE__, __LINE__ } );
         }
 
         if( setTempSetPt() < 0 ) // m_ccdTempSetpt already set on power on
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return 0;
+            }
             return log<software_error, 0>( { __FILE__, __LINE__ } );
         }
 
         if( m_fanSpeedControlEnabled && m_fanStatusSupported && getFanSpeed() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return 0;
+            }
             return log<software_error, 0>( { __FILE__, __LINE__ } );
         }
 
@@ -1027,12 +1038,16 @@ inline int orcaCtrl::appLogic()
 
         // but don't wait for it, just go back around.
         if( !lock.owns_lock() )
+        {
             return 0;
+        }
 
         if( getAcquisitionState() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return 0;
+            }
 
             state( stateCodes::ERROR );
             return 0;
@@ -1041,7 +1056,9 @@ inline int orcaCtrl::appLogic()
         if( getTemps() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return 0;
+            }
 
             state( stateCodes::ERROR );
             return 0;
@@ -1050,7 +1067,9 @@ inline int orcaCtrl::appLogic()
         if( m_fanSpeedControlEnabled && m_fanStatusSupported && getFanSpeed() < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return 0;
+            }
 
             state( stateCodes::ERROR );
             return 0;
@@ -1192,7 +1211,9 @@ inline int orcaCtrl::setorcaParameter( int32 parameter, double value, bool commi
     if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         return -1;
     }
@@ -1206,7 +1227,9 @@ inline int orcaCtrl::setorcaParameter( HDCAM handle, int32 parameter, double val
     if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         return -1;
     }
@@ -1230,7 +1253,9 @@ inline int orcaCtrl::setorcaParameterOnline( HDCAM handle, int32 parameter, doub
     if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         return -1;
     }
@@ -1460,21 +1485,29 @@ inline int orcaCtrl::getAcquisitionState()
     const bool wasOperating = state() == stateCodes::OPERATING;
 
     if( MagAOXAppT::m_powerState == 0 )
+    {
         return 0;
+    }
 
     if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
         return -1;
     }
 
     if( acquisitionRunning || captureStatus == DCAMCAP_STATUS_UNSTABLE )
+    {
         state( stateCodes::OPERATING );
+    }
     else
+    {
         state( stateCodes::READY );
+    }
 
     if( !acquisitionRunning && captureStatus != DCAMCAP_STATUS_UNSTABLE )
     {
@@ -1496,7 +1529,9 @@ inline int orcaCtrl::getTemps()
     if( getorcaParameter( currTemperature, DCAM_IDPROP_SENSORTEMPERATURE ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
 
         log<software_error>( { __FILE__, __LINE__ } );
         state( stateCodes::ERROR );
@@ -1511,7 +1546,9 @@ inline int orcaCtrl::getTemps()
     if( getorcaParameter( status, DCAM_IDPROP_SENSORCOOLERSTATUS ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
 
         log<software_error>( { __FILE__, __LINE__ } );
         state( stateCodes::ERROR );
@@ -1552,14 +1589,18 @@ inline int orcaCtrl::getTemps()
 inline int orcaCtrl::getFanSpeed()
 {
     if( !m_fanStatusSupported )
+    {
         return 0;
+    }
 
     int32 status;
 
     if( getorcaParameter( status, DCAM_IDPROP_SENSORCOOLERFAN ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
 
         log<software_error>( { __FILE__, __LINE__ } );
         state( stateCodes::ERROR );
@@ -1693,7 +1734,9 @@ inline int orcaCtrl::setExpTime()
     if( rv < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, "Error setting exposure time" } );
         return -1;
     }
@@ -1707,7 +1750,9 @@ inline int orcaCtrl::setExpTime()
     if( getorcaParameter( m_FrameRateCalculation, DCAM_IDPROP_INTERNALFRAMERATE ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, "could not get FrameRateCalculation" } );
     }
     m_fps = m_FrameRateCalculation;
@@ -1723,7 +1768,9 @@ inline int orcaCtrl::capExpTime( double &exptime )
     if( exptime < m_minExpTime )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<text_log>( "Got exposure time " + std::to_string( exptime * 1000 ) + " ms but min value is " +
                        std::to_string( m_minExpTime * 1000 ) + " ms" );
         exptime = m_minExpTime;
@@ -1866,7 +1913,9 @@ inline int orcaCtrl::configureAcquisition()
     if( getorcaParameter( cmode, DCAM_IDPROP_READOUTSPEED ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, "could not get Readout Control Mode" } );
         return -1;
     }
@@ -1879,8 +1928,8 @@ inline int orcaCtrl::configureAcquisition()
 
     if( m_fanSpeedControlEnabled && m_fanControlSupported )
     {
-        std::string priorFanSpeed     = m_fanSpeedName;
-        int32       fanMode = DCAMPROP_MODE__ON;
+        std::string priorFanSpeed = m_fanSpeedName;
+        int32       fanMode       = DCAMPROP_MODE__ON;
 
         if( m_fanSpeedNameSet == "on" )
         {
@@ -1893,7 +1942,9 @@ inline int orcaCtrl::configureAcquisition()
         else
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return -1;
+            }
             log<software_error>( { __FILE__, __LINE__, "Invalid fan speed: " + m_fanSpeedNameSet } );
             state( stateCodes::ERROR );
             return -1;
@@ -1902,7 +1953,9 @@ inline int orcaCtrl::configureAcquisition()
         if( setorcaParameter( m_cameraHandle, DCAM_IDPROP_SENSORCOOLERFAN, fanMode ) < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return -1;
+            }
             log<software_error>( { __FILE__, __LINE__, "Error setting cooling-fan state" } );
             state( stateCodes::ERROR );
             return -1;
@@ -1962,7 +2015,9 @@ inline int orcaCtrl::configureAcquisition()
     if( getorcaParameter( frameStride, DCAM_IDPROP_IMAGE_ROWBYTES ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, "Error getting frame stride" } );
         state( stateCodes::ERROR );
 
@@ -1972,7 +2027,9 @@ inline int orcaCtrl::configureAcquisition()
     if( getorcaParameter( framesPerReadout, DCAM_IDPROP_FRAMEBUNDLE_NUMBER ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, "Error getting frames per readout" } );
         state( stateCodes::ERROR );
         return -1;
@@ -1981,7 +2038,9 @@ inline int orcaCtrl::configureAcquisition()
     if( getorcaParameter( m_frameSize, DCAM_IDPROP_IMAGE_FRAMEBYTES ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, "Error getting frame size" } );
         state( stateCodes::ERROR );
         return -1;
@@ -1990,7 +2049,9 @@ inline int orcaCtrl::configureAcquisition()
     if( getorcaParameter( pixelBitDepth, DCAM_IDPROP_BITSPERCHANNEL ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<software_error>( { __FILE__, __LINE__, "Error getting pixel bit depth" } );
         state( stateCodes::ERROR );
         return -1;
@@ -2070,7 +2131,9 @@ inline int orcaCtrl::configureAcquisition()
     if( getorcaParameter( m_ReadOutTimeCalculation, DCAM_IDPROP_TIMING_READOUTTIME ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         return log<software_error, -1>( { __FILE__, __LINE__, "could not get ReadOutTimeCalculation" } );
     }
 
@@ -2087,7 +2150,9 @@ inline int orcaCtrl::configureAcquisition()
     if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         log<text_log>( "Constraint count is not 1: " + std::to_string( attr.cbSize ) + " constraints",
                        logPrio::LOG_ERROR );
     }
@@ -2116,7 +2181,9 @@ inline int orcaCtrl::configureAcquisition()
         if( rv < 0 )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return -1;
+            }
             return log<software_error, -1>( { __FILE__, __LINE__, "Error setting exposure time" } );
         }
     }
@@ -2125,7 +2192,9 @@ inline int orcaCtrl::configureAcquisition()
     if( getorcaParameter( exptime, DCAM_IDPROP_EXPOSURETIME ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         return log<software_error, -1>( { __FILE__, __LINE__, "Error getting exposure time" } );
     }
     else
@@ -2140,7 +2209,9 @@ inline int orcaCtrl::configureAcquisition()
     if( getorcaParameter( m_FrameRateCalculation, DCAM_IDPROP_INTERNALFRAMERATE ) < 0 )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
         return log<software_error, -1>( { __FILE__, __LINE__, "Error getting frame rate" } );
     }
     else
@@ -2228,7 +2299,9 @@ inline int orcaCtrl::updateTransferInfo()
     if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
+        {
             return -1;
+        }
 
         log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
         state( stateCodes::ERROR );
@@ -2323,7 +2396,9 @@ inline int orcaCtrl::acquireAndCheckValid()
         if( failed( error ) )
         {
             if( powerState() != 1 || powerStateTarget() != 1 )
+            {
                 return 1; // camera is being powered off; let the framegrabber exit
+            }
 
             log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
             state( stateCodes::ERROR );
@@ -2378,7 +2453,9 @@ inline int orcaCtrl::loadImageIntoStream( void *dest )
 {
     if( frameGrabber<orcaCtrl>::loadImageIntoStreamCopy( dest, m_currentFrame.buf, m_width, m_height, m_typeSize ) ==
         nullptr )
+    {
         return -1;
+    }
 
     return 0;
 }
@@ -2407,7 +2484,9 @@ inline int orcaCtrl::reconfig()
     while( !failed( error ) && captureStatus == DCAMCAP_STATUS_BUSY )
     {
         if( MagAOXAppT::m_powerState == 0 )
+        {
             return 0;
+        }
         sleep( 1 );
 
         error = dcamcap_stop( m_cameraHandle );
