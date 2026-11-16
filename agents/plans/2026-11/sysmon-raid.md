@@ -25,11 +25,25 @@ User request: "ok I see the limitation now. Let's have a config section where we
 - With no expectations, preserve the existing mdstat-only name-based discovery behavior. Strict mode requires a readable unique nonzero kernel UUID for every discovered array. If any lookup fails or any UUID is invalid/duplicated, reject the partial inventory and mark retained identities unavailable. Never infer a match from an unverified name. A later complete read recovers normally.
 - Strict UUID mode targets persistent native Linux MD arrays, including the supplied metadata 1.0/1.2 examples. Upstream provides the read-only UUID attribute from Linux 5.9 (vendor backports can differ). External metadata containers may expose zero kernel UUIDs, and metadata=none has no persistent identity; those are not suitable for configured UUID expectations.
 - Add `configured` to per-array numeric INDI properties and `label`/`uuid` to companion information. Keep `expected` as the redundancy member count. No telemetry schema change: startup expectation/discovery mappings associate numeric indices with UUIDs and labels; first/change/forced recording remains unchanged.
-- Save the user's exao1/exao2/exao3 mdstat samples as offline fixtures. They contain 4/5/5 arrays; exao1's md124 is broken with five failed components and `[5/0] [_____]`, and must warn. Actual instrument UUIDs have been requested from the user; shipped configuration examples remain commented placeholders.
+- Save the user's exao1/exao2/exao3 mdstat samples as offline fixtures. They contain 4/5/5 arrays; exao1's md124 is broken with five failed components and `[5/0] [_____]`, and must warn. The user subsequently supplied all 14 kernel UUIDs and mount points; host configuration fragments now require those identities as described below.
 
 Identity sources: [kernel MD UUID interface](https://docs.kernel.org/admin-guide/md.html#md-devices-in-sysfs), [kernel UUID byte formatting](https://docs.kernel.org/core-api/printk-formats.html#uuid-guid-addresses), upstream [v5.8 MD source](https://github.com/torvalds/linux/blob/v5.8/drivers/md/md.c) versus [v5.9 MD source](https://github.com/torvalds/linux/blob/v5.9/drivers/md/md.c), and mdadm [native 1.x](https://github.com/md-raid-utilities/mdadm/blob/main/super1.c) / [native 0.90](https://github.com/md-raid-utilities/mdadm/blob/main/super0.c) UUID formatting.
 
 Follow-up validation: library and application builds passed, as did all eight focused suites (62 cases): RAID parser/identity (11), application diagnostics/configuration/lifecycle (21), RAID telemetry (5), existing sysMonitor parsing (6), GPU parser/telemetry (5 each), IRQ parser (5), and IRQ telemetry (4). Final application rebuild and 21-case diagnostics rerun passed after review corrected stale name/level display for missing UUIDs. The UUID follow-up changes no telemetry schema or generator. Formatting and `git diff --check` pass. Local output is under `/tmp/sysmon-raid-uuid-validation` and `/tmp/sysmon-raid-uuid-final`. All checks used saved mdstat text, synthetic sysfs files, or injected snapshots; no real MD devices were interrogated.
+
+## Host UUID configuration — 2026-11-16
+
+The user supplied read-only `/sys/block/md*/md/uuid` and `df -h` results for RTC/exao2, ICC/exao3, and AOC/exao1. Populate the RTC/ICC fragments and add `config/sysMonAOC-diagnostics.conf` with these exact kernel UUIDs. Use mount-based labels (`/` becomes `root`; other path separators become underscores). Names in comments refer only to the supplied snapshot, not identity matching.
+
+| Host | Label → observed array / mount |
+| --- | --- |
+| RTC | `root` → md126 `/`; `boot` → md125 `/boot`; `boot_efi` → md123 `/boot/efi`; `data` → md124 `/data`; `unmounted` → md127, absent from `df` |
+| ICC | `root` → md127 `/`; `boot` → md125 `/boot`; `boot_efi` → md124 `/boot/efi`; `data` → md123 `/data`; `unmounted` → md126, absent from `df` |
+| AOC | `root` → md127 `/`; `boot_efi` → md126 `/boot/efi`; `home` → md125 `/home`; `mnt_backup` → md124 `/mnt/backup` |
+
+All 14 arrays are required from startup. RTC md127 and ICC md126 use the neutral label `unmounted` pending confirmation of their roles (the user has been asked whether they are swap). The backup array remains expected despite its earlier broken state. Remote network mounts do not create duplicate local RAID expectations. AOC's fragment adds RAID settings only, preserving existing GPU/IRQ configuration when merged.
+
+Validation: independent review and a structured config check matched all 14 UUIDs and labels to the user's supplied data, checked uniqueness and normalized syntax, and confirmed the enabled five-second cadence. The existing application diagnostics suite passed all 21 cases / 1048 assertions with the populated RTC/ICC fragments (`/tmp/sysmon-raid-host-config-tests.log`). `git diff --check` passed. No binaries, installed configs, services, or instrument state were changed for this configuration-only follow-up.
 
 ## Sources
 
@@ -55,8 +69,8 @@ Faulty=128. Counts are zero without Redundant. OK means policy acceptance and ca
 include active non-redundant arrays or healthy metadata containers. Mapping logs
 must accompany extracted telemetry; indices are not identities across restarts.
 
-RTC/ICC configuration fragments explicitly show the optional default
-`[raid] enabled=true, interval=5` settings. The warning-rule example adds
+RTC/ICC/AOC configuration fragments explicitly show the default
+`[raid] enabled=true, interval=5` settings and their expected host UUIDs. The warning-rule example adds
 `swVal` rules for `sysMonRTC`, `sysMonICC`, and `sysMonAOC`, targeting
 `raid_warning.active=On`; no stateRuleEngine code change is needed. These are
 repository examples only: no installed configuration or running service was
@@ -76,7 +90,7 @@ No instrument app startup or actual RAID management commands were run. Applicati
 
 - Application: `apps/sysMonitor/sysMonitor.hpp`, `raidMonitor.hpp`, and `Makefile`.
 - Application tests: `apps/sysMonitor/tests/raidMonitor_test.cpp`, `sysMonitorDiagnostics_test.cpp`, and captured `tests/fixtures/exao1.mdstat`, `exao2.mdstat`, and `exao3.mdstat` under the application directory.
-- Operator guide/configuration: `apps/sysMonitor/sysMonitor.md`, `config/sysMonRTC-diagnostics.conf`, `config/sysMonICC-diagnostics.conf`, and `config/sysmon-warning.conf`.
+- Operator guide/configuration: `apps/sysMonitor/sysMonitor.md`, `config/sysMonRTC-diagnostics.conf`, `config/sysMonICC-diagnostics.conf`, `config/sysMonAOC-diagnostics.conf`, and `config/sysmon-warning.conf`.
 - Telemetry: `libMagAOX/logger/types/telem_raid.hpp`, `types/schemas/telem_raid.fbs`, `types/telem.cpp`, `logCodes.dat`, and `logMeta.cpp`.
 - Logger tests: `libMagAOX/logger/tests/raidTelemetry_test.cpp`, `generateTemplatedCatch2Tests.py`, and `test_generateTemplatedCatch2Tests.py`.
 - Build/test registration: `libMagAOX/Makefile`, `tests/Makefile.one`, `tests/tests.list`, and `tests/groups.dox`.
@@ -84,4 +98,4 @@ No instrument app startup or actual RAID management commands were run. Applicati
 
 ## Operator follow-up
 
-Install updated sysMonitor/logger binaries and merge the example RAID rules into stateRuleEngine's configured rules directory. Supply the real kernel MD UUIDs in `[raid.NAME]` sections to require those arrays from startup, and confirm the application user can read UUID attributes for every discovered array. Compare a real host's inventory and health with the read-only INDI output. Keep expectation and discovery logs with extracted telemetry. Without configured expectations, auto-discovery still cannot identify an array already absent when sysMonitor starts.
+Install updated sysMonitor/logger binaries, merge each host's populated diagnostic fragment into its normal configuration, and merge the example RAID rules into stateRuleEngine's configured rules directory. Confirm the application user can read UUID attributes for every discovered array. Compare a real host's inventory and health with the read-only INDI output. Confirm the roles of the two provisionally labeled `unmounted` arrays. Keep expectation and discovery logs with extracted telemetry. Without configured expectations, auto-discovery still cannot identify an array already absent when sysMonitor starts.
