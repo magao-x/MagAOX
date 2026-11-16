@@ -1,12 +1,12 @@
 /** \file runCommand.cpp
-  * \brief Run a command get the output.
-  * \author Jared R. Males (jaredmales@gmail.com)
-  *
-  * \ingroup sys_files
-  */
+ * \brief Run a command and collect its standard output and error.
+ *
+ * \ingroup sys_files
+ */
 
 #include "runCommand.hpp"
 
+#include <cerrno>
 #include <cstring>
 #include <sstream>
 
@@ -19,112 +19,126 @@ namespace MagAOX
 namespace sys
 {
 
-int runCommand( std::vector<std::string> & commandOutput, // [out] the output, line by line.  If an error, first entry contains the message.
-                std::vector<std::string> & commandStderr, // [out] the output of stderr.
-                std::vector<std::string> & commandList    // [in] command to be run, with one entry per command line word
-              )
+/// Run a command, waiting exclusively for its child before collecting the captured streams.
+int runCommand( std::vector<std::string> &commandOutput, /**< [out] standard output lines or an error message */
+                std::vector<std::string> &commandStderr, /**< [out] standard error lines */
+                std::vector<std::string> &commandList    /**< [in] executable followed by command arguments */
+)
 {
-   int link[2];
-   int errlink[2];
+    int link[2];
+    int errlink[2];
 
-   pid_t pid;
+    pid_t pid;
 
-   if (pipe(link)==-1)
-   {
-      commandOutput.push_back(std::string("Pipe error stdout: ") + strerror(errno));
-      return -1;
-   }
+    if( pipe( link ) == -1 )
+    {
+        commandOutput.push_back( std::string( "Pipe error stdout: " ) + strerror( errno ) );
+        return -1;
+    }
 
-   if (pipe(errlink)==-1)
-   {
-      commandOutput.push_back(std::string("Pipe error stderr: ") + strerror(errno));
-      return -1;
-   }
+    if( pipe( errlink ) == -1 )
+    {
+        commandOutput.push_back( std::string( "Pipe error stderr: " ) + strerror( errno ) );
+        return -1;
+    }
 
-   if ((pid = fork()) == -1)
-   {
-      commandOutput.push_back(std::string("Fork error: ") + strerror(errno));
-      return -1;
-   }
+    if( ( pid = fork() ) == -1 )
+    {
+        commandOutput.push_back( std::string( "Fork error: " ) + strerror( errno ) );
+        return -1;
+    }
 
-   if(pid == 0)
-   {
-      dup2 (link[1], STDOUT_FILENO);
-      close(link[0]);
-      close(link[1]);
+    if( pid == 0 )
+    {
+        dup2( link[1], STDOUT_FILENO );
+        close( link[0] );
+        close( link[1] );
 
-      dup2 (errlink[1], STDERR_FILENO);
-      close(errlink[0]);
-      close(errlink[1]);
+        dup2( errlink[1], STDERR_FILENO );
+        close( errlink[0] );
+        close( errlink[1] );
 
-      std::vector<const char *>charCommandList( commandList.size()+1, NULL);
-      for(int index = 0; index < (int) commandList.size(); ++index)
-      {
-         charCommandList[index]=commandList[index].c_str();
-      }
-      execvp( charCommandList[0], const_cast<char**>(charCommandList.data()));
-      commandOutput.push_back(std::string("execvp returned: ") + strerror(errno));
-      return -1;
-   }
-   else
-   {
-      char commandOutput_c[4096];
+        std::vector<const char *> charCommandList( commandList.size() + 1, NULL );
 
-      wait(NULL);
+        for( int index = 0; index < (int)commandList.size(); ++index )
+        {
+            charCommandList[index] = commandList[index].c_str();
+        }
 
-      close(link[1]);
-      close(errlink[1]);
+        execvp( charCommandList[0], const_cast<char **>( charCommandList.data() ) );
+        commandOutput.push_back( std::string( "execvp returned: " ) + strerror( errno ) );
+        return -1;
+    }
+    else
+    {
+        char commandOutput_c[4096];
 
-      int rd;
-      if ( (rd = read(link[0], commandOutput_c, sizeof(commandOutput_c))) < 0)
-      {
-         commandOutput.push_back(std::string("Read error: ") + strerror(errno));
-         close(link[0]);
-         return -1;
-      }
-      close(link[0]);
+        pid_t waited;
 
-      std::string line;
+        do
+        {
+            waited = waitpid( pid, nullptr, 0 );
+        } while( waited < 0 && errno == EINTR );
 
-      commandOutput_c[rd] = '\0';
-      std::string commandOutputString(commandOutput_c);
+        if( waited < 0 )
+        {
+            commandOutput.push_back( std::string( "waitpid error: " ) + strerror( errno ) );
+            close( link[0] );
+            close( link[1] );
+            close( errlink[0] );
+            close( errlink[1] );
+            return -1;
+        }
 
-      std::istringstream iss(commandOutputString);
+        close( link[1] );
+        close( errlink[1] );
 
-      while (getline(iss, line))
-      {
-         commandOutput.push_back(line);
-      }
+        int rd;
 
-      //----stderr
-      if ( (rd = read(errlink[0], commandOutput_c, sizeof(commandOutput_c))) < 0)
-      {
-         commandStderr.push_back(std::string("Read error on stderr: ") + strerror(errno));
-         close(errlink[0]);
-         return -1;
-      }
-      close(errlink[0]);
+        if( ( rd = read( link[0], commandOutput_c, sizeof( commandOutput_c ) ) ) < 0 )
+        {
+            commandOutput.push_back( std::string( "Read error: " ) + strerror( errno ) );
+            close( link[0] );
+            return -1;
+        }
 
-      commandOutput_c[rd] = '\0';
-      commandOutputString = commandOutput_c;
+        close( link[0] );
 
-      std::istringstream iss2(commandOutputString);
+        std::string line;
 
-      while (getline(iss2, line))
-      {
-         commandStderr.push_back(line);
-      }
+        commandOutput_c[rd] = '\0';
+        std::string commandOutputString( commandOutput_c );
 
-      wait(NULL);
-      return 0;
-   }
+        std::istringstream iss( commandOutputString );
+
+        while( getline( iss, line ) )
+        {
+            commandOutput.push_back( line );
+        }
+
+        //----stderr
+        if( ( rd = read( errlink[0], commandOutput_c, sizeof( commandOutput_c ) ) ) < 0 )
+        {
+            commandStderr.push_back( std::string( "Read error on stderr: " ) + strerror( errno ) );
+            close( errlink[0] );
+            return -1;
+        }
+
+        close( errlink[0] );
+
+        commandOutput_c[rd] = '\0';
+        commandOutputString = commandOutput_c;
+
+        std::istringstream iss2( commandOutputString );
+
+        while( getline( iss2, line ) )
+        {
+            commandStderr.push_back( line );
+        }
+
+        return 0;
+    }
 }
-
-
-
-
 
 } //namespace sys
 } //namespace MagAOX
-
-

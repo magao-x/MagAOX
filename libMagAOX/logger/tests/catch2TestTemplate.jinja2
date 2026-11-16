@@ -94,7 +94,9 @@ public:
     {% else %}
     {% set fbName = UPPER_FIRST_CHAR(name) + "_fb" %}
     {% endif %}
-    {% if "std::vector" in field.type %}
+    {% if "decoder" in field %}
+    m_{{field.name}} = MagAOX::logger::{{name}}::{{field.decoder}}(buffPtr);
+    {% elif "std::vector" in field.type %}
     {% if "std::string" in field.vectorType %}
     {% set pushVal = "it->str()" %}
     {% elif "structMembers" in field %}
