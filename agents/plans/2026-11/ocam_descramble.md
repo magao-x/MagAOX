@@ -581,3 +581,103 @@ Only this plan is changed by the analysis. Parsed window values and arithmetic
 are retained locally in `/tmp/ocam-descramble-rtc-20261116-summaries.csv` and
 `/tmp/ocam-descramble-rtc-20261116-analysis.json`. No instrument command, source
 change, default change, or push accompanies this update.
+
+
+## Operator SDK/optimized/SDK stage comparison — 2026-11-16
+
+The operator supplied three `fg_stage_timing` snapshots labeled `sdk`,
+`descramble`, and `sdk`. Source attachment SHA-256:
+`a5c12f4516d09a12a37759f11ce3c1c5719c55919504aeb7029829812a98e187`.
+Snapshot wall-clock times and `fg_timing_quality` were not included. Each
+snapshot contains 348 numeric elements; the middle label is interpreted as
+optimized following the operator's comparison context.
+
+All three acquisition intervals are approximately 276.116 us, or **3,621.67 Hz**,
+with 7,244 / 7,243 / 7,243 per-frame observations. This is a different cadence
+from the earlier 2,000 Hz excerpt and is analyzed separately. The same-frame
+metrics below all report valid variance estimates.
+
+| Metric, us | SDK before | Optimized | SDK return |
+| --- | ---: | ---: | ---: |
+| Acquisition-to-write mean | 37.7670 | 34.9512 | 37.8438 |
+| Acquisition-to-write standard deviation | 1.1246 | 1.6975 | 1.1086 |
+| Conversion mean | 16.4755 | 13.5300 | 16.5534 |
+| Conversion standard deviation | 1.0966 | 1.6867 | 1.0782 |
+| Conversion maximum | 21.1100 | 21.5800 | 21.9410 |
+| SDK-return-to-write mean | 17.5570 | 14.7388 | 17.6426 |
+| SDK-return-to-write standard deviation | 1.1022 | 1.6937 | 1.0889 |
+| Acquisition-interval standard deviation | 0.3508 | 0.3574 | 0.3586 |
+| SDK-return-interval standard deviation | 0.3167 | 0.3326 | 0.3548 |
+| Publication-interval standard deviation | 1.4480 | 2.1819 | 1.4528 |
+| Write-clock bracket mean | 0.6240 | 0.7411 | 0.6233 |
+| Write-clock bracket standard deviation | 0.0894 | 0.1305 | 0.0974 |
+
+The SDK return restores both the conversion mean and its lower standard
+deviation. Relative to the arithmetic midpoint of the two SDK snapshots,
+optimized conversion saves **2.9845 us (18.07%)**, while its standard deviation
+increases **0.5993 us (55.11%)**. Acquisition-to-write saves **2.8542 us (7.55%)**
+and its standard deviation increases from approximately 1.1166 to 1.6975 us.
+These midpoint comparisons summarize the two reference observations; they are
+not pooled distributions or confidence intervals.
+
+This substantially strengthens the link between method selection and the
+conversion-region tradeoff. Acquisition and SDK-return interval spreads remain
+similar, while SDK-return-to-write spread tracks conversion. Validation,
+timeout query and rearm spreads remain small. The write-clock bracket mean
+rises by about 0.1175 us, accounting for most of the difference between the
+conversion and acquisition-to-write mean improvements. Its spread increase is
+small relative to conversion. Variances of separate stages are not subtracted
+because their covariance is unavailable.
+
+The measured conversion bracket still includes `md->write`, the kernel,
+optional digital sampling and the staging copy; this does not isolate the
+kernel alone. Conversion maxima (21.110 / 21.580 / 21.941 us) and
+acquisition-to-write maxima (42.429 / 43.094 / 43.554 us) are comparable across
+these snapshots. Greater standard deviation therefore does not establish worse
+absolute tail latency. No per-frame distribution or p99 is supplied.
+
+Each snapshot has zero observed serial-overlap duration and no completed
+serial-duration samples. All conditional early/late populations have zero
+samples and invalid estimates; these cannot be read as zero variability or
+as proof of no frame-quality problems. Without `fg_timing_quality`, frame drops,
+failed acquisitions and diagnostic losses are not independently qualified here.
+
+Next local experiment: retain the validated four-amplifier kernel but process
+output row `y` immediately followed by `119-y` before moving to the next pair.
+The observed map sends both rows to one raw row; this tests whether immediate
+reuse helps without adding threads, copies, or changing pixel mapping. Compare
+against the current row-order kernel in a hardware-free benchmark first. Any
+candidate remains opt-in and requires another operator comparison to establish
+its RTC jitter behavior.
+
+The attachment was parsed locally into
+`/tmp/ocam-descramble-rtc-stages-20261116.json`; no INDI or other hardware
+commands were executed by the agent.
+
+
+### Local paired-row screening outcome
+
+Tested the minimal paired-row traversal in isolated sources under
+`/tmp/ocam-row-order-652sre5s`, without modifying repository implementation
+files. Three alternating baseline/candidate pairs each collected 50,000
+samples per path on CPU 2 with the same production compiler flags. Every
+benchmark input was checked against the SDK before timing.
+
+For 64 rotating raw buffers, candidate means improve by 0.060–0.075 us for the
+kernel and 0.055–0.090 us with staged streamCopy; staged medians improve by
+0.065–0.084 us. Hot-kernel mean changes range from a 0.001 us improvement to a
+0.006 us regression. The small locality improvement is repeatable, but staged
+standard deviations are mixed: 1.281→1.294, 1.199→1.197, and 1.218→1.268 us.
+p99 is also mixed. This local experiment does not demonstrate a jitter fix
+and cannot predict AMD RTC behavior.
+
+The temporary candidate passes the complete helper suite with the installed
+table: 1,020 assertions / four cases. Its minimal patch, sources, binaries and
+six benchmark logs remain under the temporary directory above. No candidate
+kernel or selector change is adopted in this analysis.
+
+For causal isolation, the next useful controlled candidate is the compact
+16-bit map with the SDK's alternating-half pixel order, compared against SDK
+and the current structured kernel. That retains SDK source/destination order
+while removing the strided 32-bit table access. It requires new local
+validation/benchmarking and an operator RTC trial before any jitter claim.
