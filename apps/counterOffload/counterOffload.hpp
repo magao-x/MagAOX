@@ -450,13 +450,16 @@ inline int counterOffload::validateConfig()
 {
     constexpr size_t suffixLength = 4;
 
-    auto inRange = []( double v, double lo, double hi ) { return mx::math::isFinite( v ) && v >= lo && v <= hi; };
+    auto inRange = []( double v, double lo, double hi )
+    {
+        return mx::math::isFinite( v ) && v >= lo && v <= hi;
+    };
 
     if( m_syncopationTiming.empty() || m_channel.size() <= suffixLength ||
         m_channel.compare( m_channel.size() - suffixLength, suffixLength, "_aux" ) != 0 ||
-        m_syncopationTiming == m_channel || !inRange( m_rampStartUs, 0, 1e6 ) ||
-        !inRange( m_rampDurationUs, 1, 1e6 ) || !inRange( m_leak, 0, 1 ) || !inRange( m_timeOffsetUs, -1e6, 1e6 ) ||
-        !inRange( m_gain, 0, 1 ) || !inRange( m_computeLeadUs, 0, 1e6 ) )
+        m_syncopationTiming == m_channel || !inRange( m_rampStartUs, 0, 1e6 ) || !inRange( m_rampDurationUs, 1, 1e6 ) ||
+        !inRange( m_leak, 0, 1 ) || !inRange( m_timeOffsetUs, -1e6, 1e6 ) || !inRange( m_gain, 0, 1 ) ||
+        !inRange( m_computeLeadUs, 0, 1e6 ) )
     {
         return -1;
     }
@@ -942,10 +945,8 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_enable )( const pcf::IndiProperty
         log<text_log>( on ? "enabled" : "disabled", logPrio::LOG_NOTICE );
     }
 
-    updateSwitchIfChanged( m_indiP_enable,
-                           "toggle",
-                           on ? pcf::IndiElement::On : pcf::IndiElement::Off,
-                           on ? INDI_OK : INDI_IDLE );
+    updateSwitchIfChanged(
+        m_indiP_enable, "toggle", on ? pcf::IndiElement::On : pcf::IndiElement::Off, on ? INDI_OK : INDI_IDLE );
 
     return 0;
 }
