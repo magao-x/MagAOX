@@ -33,15 +33,15 @@ Follow-up validation: library and application builds passed, as did all eight fo
 
 ## Host UUID configuration — 2026-11-16
 
-The user supplied read-only `/sys/block/md*/md/uuid` and `df -h` results for RTC/exao2, ICC/exao3, and AOC/exao1. Populate the RTC/ICC fragments and add `config/sysMonAOC-diagnostics.conf` with these exact kernel UUIDs. Use mount-based labels (`/` becomes `root`; other path separators become underscores). Names in comments refer only to the supplied snapshot, not identity matching.
+The user supplied read-only `/sys/block/md*/md/uuid` and `df -h` results for RTC/exao2, ICC/exao3, and AOC/exao1. Populate the RTC/ICC fragments and add `config/sysMonAOC-diagnostics.conf` with these exact kernel UUIDs. Use mount-based labels (`/` becomes `root`; other path separators become underscores) and `swap` for the user-confirmed swap arrays. Names in comments refer only to the supplied snapshot, not identity matching.
 
 | Host | Label → observed array / mount |
 | --- | --- |
-| RTC | `root` → md126 `/`; `boot` → md125 `/boot`; `boot_efi` → md123 `/boot/efi`; `data` → md124 `/data`; `unmounted` → md127, absent from `df` |
-| ICC | `root` → md127 `/`; `boot` → md125 `/boot`; `boot_efi` → md124 `/boot/efi`; `data` → md123 `/data`; `unmounted` → md126, absent from `df` |
+| RTC | `root` → md126 `/`; `boot` → md125 `/boot`; `boot_efi` → md123 `/boot/efi`; `data` → md124 `/data`; `swap` → md127 |
+| ICC | `root` → md127 `/`; `boot` → md125 `/boot`; `boot_efi` → md124 `/boot/efi`; `data` → md123 `/data`; `swap` → md126 |
 | AOC | `root` → md127 `/`; `boot_efi` → md126 `/boot/efi`; `home` → md125 `/home`; `mnt_backup` → md124 `/mnt/backup` |
 
-All 14 arrays are required from startup. RTC md127 and ICC md126 use the neutral label `unmounted` pending confirmation of their roles (the user has been asked whether they are swap). The backup array remains expected despite its earlier broken state. Remote network mounts do not create duplicate local RAID expectations. AOC's fragment adds RAID settings only, preserving existing GPU/IRQ configuration when merged.
+All 14 arrays are required from startup. The user confirmed that RTC md127 and ICC md126 are swap arrays; their labels are now `swap`, with the supplied UUIDs unchanged. The backup array remains expected despite its earlier broken state. Remote network mounts do not create duplicate local RAID expectations. AOC's fragment adds RAID settings only, preserving existing GPU/IRQ configuration when merged.
 
 Validation: independent review and a structured config check matched all 14 UUIDs and labels to the user's supplied data, checked uniqueness and normalized syntax, and confirmed the enabled five-second cadence. The existing application diagnostics suite passed all 21 cases / 1048 assertions with the populated RTC/ICC fragments (`/tmp/sysmon-raid-host-config-tests.log`). `git diff --check` passed. No binaries, installed configs, services, or instrument state were changed for this configuration-only follow-up.
 
@@ -98,4 +98,4 @@ No instrument app startup or actual RAID management commands were run. Applicati
 
 ## Operator follow-up
 
-Install updated sysMonitor/logger binaries, merge each host's populated diagnostic fragment into its normal configuration, and merge the example RAID rules into stateRuleEngine's configured rules directory. Confirm the application user can read UUID attributes for every discovered array. Compare a real host's inventory and health with the read-only INDI output. Confirm the roles of the two provisionally labeled `unmounted` arrays. Keep expectation and discovery logs with extracted telemetry. Without configured expectations, auto-discovery still cannot identify an array already absent when sysMonitor starts.
+Install updated sysMonitor/logger binaries, merge each host's populated diagnostic fragment into its normal configuration, and merge the example RAID rules into stateRuleEngine's configured rules directory. Confirm the application user can read UUID attributes for every discovered array. Compare a real host's inventory and health with the read-only INDI output. Keep expectation and discovery logs with extracted telemetry. Without configured expectations, auto-discovery still cannot identify an array already absent when sysMonitor starts.
