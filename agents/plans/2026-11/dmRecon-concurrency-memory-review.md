@@ -4,7 +4,7 @@ Review date: 2026-11-05. Recorded for commit: 2026-11-06. Author: Codex (GPT-6).
 
 Request: Analyze dmRecon after on-sky operation appeared to "blow up" after several minutes, concentrating first on concurrency and memory safety in its substitution of the current integrator state in cacao mfilt. Document the findings in a planning document.
 
-Status: Source audit and initial dmRecon-only implementation complete on 2026-11-15; workstation validation recorded below. The cause of the observed on-sky event is **not yet established**. Historical source references below remain tied to the reviewed baseline.
+Status: Source audit and initial dmRecon-only implementation complete on 2026-11-15, with telemetry follow-up on 2026-11-16; workstation validation recorded below. Further sampling-policy and GPU-scheduling work is **deferred at the user's request on 2026-11-16**, with the discussion and resume points recorded below. The cause of the observed on-sky event is **not yet established**. Historical source references below remain tied to the reviewed baseline.
 
 ## Implementation decision — 2026-11-15
 
@@ -96,7 +96,7 @@ The user reported that recurring diagnostics were overwhelming the log stream an
 
 ### Frame-timing telemetry while feedback is disabled — 2026-11-16
 
-The user reported that `dmtweeter-recon` was not producing meaningful `[fgtimes]` telemetry. The last reported operating state had `writeDMf=Off`; an enabled-state example has not been supplied. Source inspection found that the disabled path reconstructed and published `_mon`, then returned `1` to the frame-grabber before its normal publication-timestamp hook. The collector therefore received attempts without paired output timestamps, leaving legacy rates and acquisition-to-write statistics unavailable despite a working monitor.
+The user reported that `dmtweeter-recon` was not producing meaningful `[fgtimes]` telemetry and subsequently confirmed `writeDMf=Off`; an enabled-state example has not been supplied. Source inspection found that the disabled path reconstructed and published `_mon`, then returned `1` to the frame-grabber before its normal publication-timestamp hook. The collector therefore received attempts without paired output timestamps, leaving legacy rates and acquisition-to-write statistics unavailable despite a working monitor.
 
 The dmRecon-only correction records an existing successful `_mon` publication in the frame-grabber's bounded timing collector while feedback is off. Its acquisition endpoint is the command snapshot's local `received` timestamp, and its output endpoint is a local `CLOCK_REALTIME` sample immediately after `_mon.post()` returns, before `_diff` work. The actual monitor counter is retained. Raw `_mon.writetime` is deliberately not used because milkImage publishes in `CLOCK_ISIO`, while the acquisition endpoint and legacy collector's age anchor are realtime. milkImage exposes no inode accessor, so the collector's documented unavailable-inode value is used; reconfiguration starts a new epoch for attachment continuity. No additional stream is read or written for timing.
 
@@ -104,9 +104,72 @@ On this path, `[fgtimes] acq`/`fg_timing.acq_fps` describe the captured commands
 
 Enabled feedback retains the base frame-grabber's existing realtime feedback-write timestamp. Read-only `fg_timing_source.stream` and `.endpoint` identify the population: `_mon` with `monitor_post_complete`, feedback with `feedback_write_stamp`, or `none`/`unavailable`. The labels use the cached timing summary's event context, so a concurrent enable change cannot relabel an older summary. Source changes retire the active timing attempt and advance its epoch; the first transition sample is deliberately omitted, while the actual reconstruction/publication still happens. The next real acquisition starts the new population. No timing locks or device synchronization are added. The disabled path adds one local realtime clock read and a bounded event handoff; instrument cost remains user-measured.
 
-The user's preceding scheduling question supplied a 500 us integration/2 kHz cadence, 143 us loop-reconstruction compute time, an estimated unmeasured additional 5 us camera transfer, and 125 us syncopation spacing. This telemetry correction does not isolate dmRecon's GPU-call duration or establish a GPU-free phase. Direct reconstruction and upload-through-download measurements remain separate follow-up work; the existing mfilt-trigger margin is relative to the WFS reconstruction output, not the start of GPU work. The once-per-main-loop publication policy is also not changed here. No recurring timing warning logs are restored.
+The user's preceding scheduling question supplied a 500 us integration/2 kHz cadence, a 143 us loop measurement, an estimated unmeasured additional 5 us camera transfer, and 125 us syncopation spacing. The user later clarified that the 143 us interval is **camwfs `atime` to DM SDK entry (start of the submission call)**, not isolated reconstruction or GPU compute time; see the scheduling discussion below. This telemetry correction does not isolate dmRecon's GPU-call duration or establish a GPU-free phase. Direct reconstruction and upload-through-download measurements remain separate follow-up work; the existing mfilt-trigger margin is relative to the WFS reconstruction output, not the start of GPU work. The once-per-main-loop publication policy is also not changed here. No recurring timing warning logs are restored.
 
 Validation passed: **1248 assertions in 29 app cases** under production `-O3 -ffast-math` and TSan (`halt_on_error=1`, no reports or suppressions). Three added cases use deterministic private timestamps to verify paired means/counts, omission of absent/invalid monitor samples, single event completion, both endpoint transition orders, and reconfiguration reset. They exercise the timing bookkeeping and simulated base event path; they do not execute an actual monitor post or measure hardware latency. CPU and CUDA-enabled app builds compiled and linked with no diagnostics; the binaries were not executed. Formatting and whitespace checks passed. The normal ignored git-version header was regenerated through the repository helper for these builds. Earlier sanitizer coverage limitations still apply. Only the dmRecon header, existing app tests and this plan are changed. No instrument commands or configured applications were run by the agent.
+
+### Once-per-loop feedback and GPU scheduling discussion — deferred 2026-11-16
+
+The user asked to table this work and commit the discussion. The latest implementation is `ea14eb73` (monitor frame timing while feedback is disabled). **No once-per-loop selector, synco-frame selection, direct GPU timer, or dmRecon GPU reassignment has been implemented.** The user has reported a working `_mon` with `writeDMf=Off`; enabled-feedback stability and the original wind-up cause remain unvalidated. The dmRecon-only scope and passive mfilt observation remain in force.
+
+#### Observed dry-run timing
+
+The user supplied these cumulative values while feedback was disabled:
+
+| Element | Value |
+| --- | ---: |
+| `before_next` | 17995 |
+| `late` | 0 |
+| `unverified` | 54018 |
+| `margin_last_us` | 40.166 |
+| `margin_min_us` | 27.542 |
+| `margin_max_us` | 67.607 |
+
+There were 17,995 verified completions before the next mfilt-input timestamp and no verified misses in this sample. The approximately 3:1 unverified/verified ratio is consistent with four DM updates per main iteration and the observer retaining only one pending completion: earlier completions can be superseded before the next trigger arrives. It is **not a 75% deadline-miss rate**, nor proof that every unverified result had this one cause. The verified margins tend to describe the retained/latest reconstruction in an interval, not necessarily the reconstruction associated with the main command. They measure reconstruction completion to the exact next mfilt-input source timestamp, not reconstruction duration or a GPU-free interval.
+
+#### Feedback frequency and command selection
+
+The user pointed out that mfilt needs one updated DMf vector before each main-loop iteration; the other N-1 synco updates need not each generate feedback. Inspection of the current local cacao source, `/home/jrmales/Source/milk-xwcl/plugins/cacao-src/AOloopControl/modalfilter.c`, confirms that mfilt checks the feedback counter once per active iteration and copies the current vector if the counter changed, before integrating and applying modal limits. Intermediate writes are not queued as individually consumed replacements.
+
+One appropriately selected, timely publication per main iteration is therefore sufficient for that consumption pattern. A future selector should leave both the feedback payload and counter unchanged on deliberately skipped updates; republishing an old vector with a new counter would present stale state as a new replacement. An illustrative main-associated sequence is `mfilt read(k) → main command(k) → associated applied delta(k) → feedback publication → next trigger(k+1)`. This is a candidate policy, not an implemented or agreed selection rule.
+
+The user explicitly sees arguments for both the last main-loop command and the latest DM command. The choice remains open because clipping can make them different anti-windup samples. In `libMagAOX/app/dev/dm.hpp`, the delta is the clipped combined shape minus non-delta channel contributions. With no clipping, auxiliary contributions subtract out; with clipping, later auxiliary commands can change the effective main-channel delta even without a new main command. Choosing the first main-associated delta preserves that iteration's sample; choosing a later delta reflects more recent applied saturation.
+
+Selection needs qualified source identity. Taking every fourth delta counter, or the first callback after an mfilt trigger, does not establish frame identity when updates coalesce, callbacks are delayed, or an older auxiliary command remains in flight. The delta stream has its own counter/timestamp, without an explicit originating main/combined-command identity. Synco's main timing records provide qualified main-command associations, but their diagnostic ring is published from ordinary `appLogic` and is retrospective, not a real-time selection signal. Identity propagation or a dedicated main-associated delta path would require a separate design decision if existing dmRecon inputs cannot establish the association. No such upstream change is included or authorized by this discussion. Reducing publication frequency also does not provide mutual exclusion with mfilt: F1 remains open.
+
+#### GPU placement and timing endpoints
+
+The user reports that modal-to-DM conversion has now moved to **GPU 0**, alongside the WFS-to-modes work. The desired next consolidation is to move dmRecon to GPU 0 and free GPU 1. This is a user-reported deployment change, superseding the earlier local modal-to-DM configuration; the agent has not changed GPU configuration or run instrument commands.
+
+The measured **143 us starts at camwfs `atime` and ends at DM SDK entry**, when the command is submitted, rather than after the SDK call completes. The user confirms that it is unchanged by which GPU performs modal-to-DM conversion. This agrees with the software-latency endpoint documented in `apps/loopTimingMonitor/README.md`; it includes camera publication, CPU work, scheduling, GPU work and downstream delivery. It is not GPU occupancy, nor a measurement ending at main-command publication. The additional approximately 5 us camera frame transfer remains an estimate; its relationship to `atime` must be established before adding it to a budget, to avoid double counting.
+
+At the stated 500 us main period, synco frames 0, 1, 2 and 3 nominally publish at 0, 125, 250 and 375 us relative to the main-command publication, with the next frame 0 at 500 us (`apps/dmSyncopation/doc/production-providers.md`). Frame 3 is therefore nominally 125 us before the next main publication, but the next loop's GPU work begins before that publication. Delta delivery, dmRecon wakeup and preparation consume part of the remaining interval.
+
+The initial conservative arithmetic reserved a full 143 us before the next main event: `500 - 143 = 357 us`, already 18 us before frame 3. Adding the estimated 5 us would move that assumed boundary to 352 us. This is only an illustration of reserving an entire software pipeline **assuming common endpoints**; the actual SDK and main-publication endpoints differ. It does not establish GPU overlap or rule out frame 3 for the narrower GPU-only objective.
+
+Earlier user measurements in [the shared-memory timing plan](shmim-monitor-speedups.md) put camera acquisition-to-publication near 37 us. Combining that historical value with 143 us gives a rough 106 us camera-publication-to-SDK interval and `125 - 106 ≈ 19 us` of nominal headroom from frame 3's SDK event to the next camera publication, **assuming comparable main/auxiliary delivery delays and unchanged camera timing**. These are not newly paired measurements. CPU preparation before the next loop GPU call can increase the available window; delta delivery, dmRecon preparation, GPU execution and jitter consume it. The 19 us estimate is not measured usable slack or evidence of safe coexistence.
+
+For an actual frame-3 publication `P3` and the next main-command publication `P0`, the relevant conditional budget is:
+
+```text
+B + L + D + guard < P0 - P3       (nominally 125 us)
+B = next main publication - start of that loop's first GPU operation
+L = frame-3 publication to dmRecon's first GPU operation
+D = dmRecon upload-through-completed-download interval
+```
+
+`B` is an envelope that can include CPU gaps; it is not pure GPU time. `L` includes DM/delta delivery, snapshot/mailbox delay and CPU preparation, and must end at the same marker that starts `D` (upload-call entry for host timing). If measuring the whole `reconstruct()` call instead of `D`, end `L` at function entry to avoid counting preparation twice. Actual phase, previous-loop GPU completion and other GPU users must also be checked. Frame 2 offers nominally another 125 us before the next main event, with an older DM-state sample; neither frame 2 nor frame 3 has been selected.
+
+The default `aol1_mfiltINPUT` alias refers to `aol1_modevalWFS`, published after the WFS GPU calculation and before mfilt/modal-to-DM work. A positive dry-run margin to that stream can therefore coexist with overlap with the next WFS GPU calculation. Existing dry-run timing and repaired `fgtimes` telemetry cannot establish the desired GPU separation.
+
+#### Measurements and decisions on resumption
+
+1. Measure dmRecon's whole reconstruction duration and upload-through-completed-download envelope, including latency tails, under the intended GPU placement. Local mxlib uses a synchronous device-to-host download here; host monotonic timestamps can conservatively include queueing/contention without adding a device-wide synchronization. Optional CUDA events can separate device execution, but alone do not prove cross-process non-overlap. Current `_mon` `fgtimes` spans snapshot receipt through monitor completion and cannot isolate these costs.
+2. Associate actual main/synco identities with camera publication, the next loop's first GPU operation, frame-3 DM/delta completion, and dmRecon GPU start/end. Establish clock comparability, actual phase and a jitter guard; the 143 us end-to-end value and 125 us nominal spacing are insufficient.
+3. Choose last-main versus later-DM sampling and the feasible slot from those measurements, then determine whether dmRecon alone has enough identity information to select it reliably. If not, revisit scope explicitly rather than inferring identity from counters or callback order.
+4. Implement and validate the selected policy in dry run before user-run enabled-feedback tests. Account separately for intentionally skipped auxiliary updates, unknown association and actual missed cycles. Keep measurements in INDI/structured telemetry; do not restore recurring timing warnings. Continue measuring effects on the loop's own latency, including writer timing.
+
+This section is a documentation-only checkpoint. Source endpoints and arithmetic were reviewed on workstation `mx11`; no application code/configuration changed, no tests were rerun, and no instrument commands were executed. The next action is measurement/design work when the user resumes, not an automatic GPU move or feedback enable.
 
 ### Workstation validation — 2026-11-15
 
@@ -425,3 +488,5 @@ Any interrogation of the real instrument must be performed by the user. This doc
 ## Changes from this investigation
 
 The original audit added this planning document as a documentation-only change. On 2026-11-15 the user authorized implementation within dmRecon, selected passive timing diagnostics, and explicitly rejected gating mfilt. The application/helper/test changes and their validation are recorded above. Changed paths are `apps/dmRecon/dmRecon.hpp`, `apps/dmRecon/dmReconMath.hpp`, `apps/dmRecon/dmReconTiming.hpp`, `apps/dmRecon/Makefile`, the three `apps/dmRecon/tests/*_test.cpp` files, deletion of the unrelated `dmRecon_tests.hpp`, `tests/tests.list`, `tests/groups.dox`, and this plan. The implementation and this engineering record are committed together on the review branch. Cacao/mfilt and its trigger configuration remain unchanged. On-sky causality, F1 protection, control-law stability under late feedback, and instrument latency measurements remain open.
+
+The 2026-11-16 pause checkpoint changes only this plan: it records the supplied dry-run results, once-per-loop feedback discussion, clarified timing endpoints, proposed GPU 0 consolidation, conditional frame-3 budget, and measurements/decisions needed on resumption. It does not select or implement a new sampling or GPU-scheduling policy.
