@@ -49,7 +49,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 Investigation date: 2026-11-16. Source baseline: `dev`, `cbc1d5cf`.
 Host verified as `mx11`. This pass inspects local source and configuration
 only; no instrument commands, benchmarks, or implementation were run.
-Status: **single-core implementation and local verification complete; RTC qualification pending**.
+Status: **single-core implementation complete; first RTC comparison shows lower mean and higher jitter, so qualification remains open**.
 The answers below and the subsequent user request authorize phases 1–3.
 The second-thread experiment remains deferred.
 
@@ -499,3 +499,85 @@ files, including correction of the existing Y-bin description without changing
 its behavior. Functional changes, operator documentation, and formatting are
 kept in separate commits. The plan's original protected template text has four
 pre-existing trailing-whitespace lines; these are deliberately preserved.
+
+
+## First operator RTC comparison — 2026-11-16 12:02 UTC
+
+The operator supplied 23 `fgtimes` summaries spanning
+12:02:15.350737034–12:02:47.984233007 UTC and identifies the downward step as
+the switch to `optimized`. The supplied acquisition/write means remain near
+500 us (approximately 2,000 Hz). The excerpt does not include applied-method
+readback, deployed build identity, stage metrics, reader/IRQ settings, frame
+quality counters, or an SDK return segment.
+
+Exclude the apparent mixed transition window at 12:02:33.727964234 UTC:
+its `wma` is 35.6045 us with 2.07548 us standard deviation. Average the 12
+reported SDK summaries ending at 12:02:32.191924593 UTC and the 10 optimized
+summaries starting at 12:02:35.263989137 UTC separately:
+
+| Reported metric, us | SDK | Optimized |
+| --- | ---: | ---: |
+| Mean acquisition-to-write (`wma`) | 37.0655 | 34.0654 |
+| Acquisition-to-write standard deviation | 1.11824 | 1.58492 |
+| Write-interval standard deviation | 1.61142 | 1.99391 |
+
+These are arithmetic averages of reported window statistics, not pooled
+independent frame populations. Rolling windows can overlap, and the excerpt
+has no sample counts or raw samples from which to infer percentiles.
+
+The mean improves by **3.0001 us (8.09%)**. Acquisition-to-write standard
+deviation increases by **0.46668 us (41.73%)**. The optimized standard deviations
+remain 1.53874–1.61977 us, above the SDK range 1.08419–1.14939 us, after the
+transition window has passed. This is a sustained mean/spread tradeoff in the
+supplied excerpt; the no-jitter-regression acceptance criterion is not met.
+It does not establish whether absolute high-percentile latency improved or
+worsened, or prove the algorithm caused all of the change without a matched
+return-to-SDK comparison.
+
+The last two reports have lower acquisition-interval jitter (approximately
+0.27 us) and arrive about one second apart, versus approximately 1.53 seconds
+previously. Their cause is unspecified. Excluding those two still gives
+optimized `wma` 34.0792 us and standard deviation 1.58674 us; acquisition-interval
+standard deviation before this cadence change averages 0.70146 us versus
+0.70316 us for SDK. Thus the observed `wma` spread increase is already present
+before that later change in the acquisition/reporting statistics.
+
+### Interpretation and next measurement
+
+`fgtimes` reports actual standard deviations from frameGrabber's trailing
+summary, including `acquisitionToWrite`. That interval starts at the SDK's
+acquisition timestamp and ends at the stream write timestamp. It cannot
+separate driver-to-thread delay, validation, descrambling or staging copy.
+
+The optimized algorithm removes table loads **and changes access order**.
+The SDK alternates the two output halves while its raw accesses advance inward
+from opposite ends; the new structured kernel traverses successive output rows
+and revisits the opposite tap lanes on a later reverse pass through the raw
+rows. Cache behavior is therefore a plausible lead, not an established cause
+of the measured standard-deviation increase. The selector's applied-status
+atomic is only written on method changes, not every frame.
+
+The next operator comparison should be SDK/optimized/SDK with identical
+instrumentation and a full timing-window settling interval. With
+`framegrabber.stageTiming=true` for all three runs, retain
+`fg_stage_timing.conversion_{mean,stddev,min,max,count,valid}` and the associated
+`waitToWrite`, `validation`, `timeoutQuery`, `writeBracket`, and quality
+statistics. Conversion includes the metadata write flag, kernel, optional
+digital sampling and staged copy. A variance change there localizes the issue
+to that bracket; marginal variances must not be subtracted as independent
+components without considering covariance. Include end-to-end loop timing and
+frame failures/gaps before judging the overall tradeoff.
+
+If conversion spread follows the selection, a controlled next candidate is a
+compact map preserving the SDK's alternating-half access order. The existing
+`mapped()` benchmark also traverses sequential output, so it does not isolate
+map compaction from order. A second, targeted structured experiment would
+process output row `y` immediately followed by `119-y`, retaining the current
+four-stream loop for each. For the observed table, both consume the same raw
+row, allowing immediate reuse. Neither experiment is implemented by this
+analysis, and neither is claimed to reduce RTC jitter before measurement.
+
+Only this plan is changed by the analysis. Parsed window values and arithmetic
+are retained locally in `/tmp/ocam-descramble-rtc-20261116-summaries.csv` and
+`/tmp/ocam-descramble-rtc-20261116-analysis.json`. No instrument command, source
+change, default change, or push accompanies this update.
