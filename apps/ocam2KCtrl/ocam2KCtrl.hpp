@@ -138,6 +138,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     {
         none,
         sdk,
+        compact,
         optimized
     };
 
@@ -540,7 +541,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     /// Register the requested descramble method and read-only applied method and availability.
     int initDescramble();
 
-    /// Prepare the optional bin2 implementation on the frame worker after SDK initialization.
+    /// Prepare the optional bin2 implementations on the frame worker after SDK initialization.
     void prepareDescramble();
 
     /// Publish descramble selection and completion status; the caller holds m_indiMutex.
@@ -561,7 +562,7 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     pcf::IndiProperty m_indiP_syncFreq; ///< INDI subscription to the external sync-frequency source.
 
-    pcf::IndiProperty m_indiP_descrambleMethod; ///< Requested SDK or optimized implementation, applied between frames.
+    pcf::IndiProperty m_indiP_descrambleMethod; ///< Requested method, applied between frames.
 
     pcf::IndiProperty m_indiP_descrambleStatus; ///< Last applied implementation and current fast-path availability.
 
@@ -666,7 +667,7 @@ inline void ocam2KCtrl::setupConfig()
                 "descrambleMethod",
                 false,
                 "string",
-                "Descramble implementation: sdk (default) or optimized (validated bin2 only)." );
+                "Descramble implementation: sdk (default), compact, or optimized (validated bin2 only)." );
 
     dev::frameGrabber<ocam2KCtrl>::setupConfig( config );
 
@@ -722,12 +723,14 @@ inline int ocam2KCtrl::loadConfigImpl()
     std::string descrambleMethod = "sdk";
     config( descrambleMethod, "camera.descrambleMethod" );
 
-    if( descrambleMethod != "sdk" && descrambleMethod != "optimized" )
+    if( descrambleMethod != "sdk" && descrambleMethod != "compact" && descrambleMethod != "optimized" )
     {
-        return log<software_error, -1>( { "camera.descrambleMethod must be sdk or optimized" } );
+        return log<software_error, -1>( { "camera.descrambleMethod must be sdk, compact, or optimized" } );
     }
 
-    m_descrambleRequested.store( descrambleMethod == "sdk" ? DescrambleMethod::sdk : DescrambleMethod::optimized,
+    m_descrambleRequested.store( descrambleMethod == "sdk"       ? DescrambleMethod::sdk
+                                 : descrambleMethod == "compact" ? DescrambleMethod::compact
+                                                                 : DescrambleMethod::optimized,
                                  std::memory_order_relaxed );
 
     if( m_maxEMGain < 1 )
@@ -775,7 +778,8 @@ inline int ocam2KCtrl::loadConfigImpl()
 
 inline int ocam2KCtrl::initDescramble()
 {
-    if( createStandardIndiSelectionSw( m_indiP_descrambleMethod, "descramble_method", { "sdk", "optimized" } ) < 0 ||
+    if( createStandardIndiSelectionSw(
+            m_indiP_descrambleMethod, "descramble_method", { "sdk", "compact", "optimized" } ) < 0 ||
         registerIndiPropertyNew( m_indiP_descrambleMethod, INDI_NEWCALLBACK( m_indiP_descrambleMethod ) ) < 0 )
     {
         return -1;
@@ -790,8 +794,11 @@ inline int ocam2KCtrl::initDescramble()
 
     m_indiP_descrambleStatus["applied"].set( "none" );
     m_indiP_descrambleStatus["availability"].set( "unconfigured" );
-    const bool optimized = m_descrambleRequested.load( std::memory_order_relaxed ) == DescrambleMethod::optimized;
-    m_indiP_descrambleMethod[optimized ? "optimized" : "sdk"].setSwitchState( pcf::IndiElement::On );
+    const auto requested = m_descrambleRequested.load( std::memory_order_relaxed );
+    m_indiP_descrambleMethod[requested == DescrambleMethod::optimized ? "optimized"
+                             : requested == DescrambleMethod::compact ? "compact"
+                                                                      : "sdk"]
+        .setSwitchState( pcf::IndiElement::On );
 
     return 0;
 }
@@ -811,7 +818,7 @@ inline void ocam2KCtrl::prepareDescramble()
     {
         m_descrambler.clear();
         m_descrambleAvailability.store( DescrambleAvailability::unavailable, std::memory_order_relaxed );
-        log<software_warning>( { "Optimized descramble unavailable for the configured table; retaining SDK" } );
+        log<software_warning>( { "Prepared descramble methods unavailable for the configured table; retaining SDK" } );
         return;
     }
 
@@ -834,17 +841,20 @@ inline void ocam2KCtrl::updateDescramble()
                                    : availability == DescrambleAvailability::unsupported ? "unsupported mode"
                                    : availability == DescrambleAvailability::unavailable ? "unavailable table"
                                                                                          : "unconfigured";
-    const auto  status = requested == DescrambleMethod::optimized && availability != DescrambleAvailability::ready
-                             ? INDI_ALERT
-                             : ( applied == requested ? INDI_OK : INDI_BUSY );
+    const auto  status           = requested != DescrambleMethod::sdk && availability != DescrambleAvailability::ready
+                                       ? INDI_ALERT
+                                       : ( applied == requested ? INDI_OK : INDI_BUSY );
 
     indi::updateSelectionSwitchIfChanged( m_indiP_descrambleMethod,
-                                          requested == DescrambleMethod::optimized ? "optimized" : "sdk",
+                                          requested == DescrambleMethod::optimized ? "optimized"
+                                          : requested == DescrambleMethod::compact ? "compact"
+                                                                                   : "sdk",
                                           m_indiDriver,
                                           status );
     updateIfChanged( m_indiP_descrambleStatus,
                      "applied",
                      std::string( applied == DescrambleMethod::optimized ? "optimized"
+                                  : applied == DescrambleMethod::compact ? "compact"
                                   : applied == DescrambleMethod::sdk     ? "sdk"
                                                                          : "none" ),
                      status );
@@ -2611,13 +2621,17 @@ inline int ocam2KCtrl::acquireAndCheckValid()
 inline int ocam2KCtrl::loadImageIntoStream( void *dest )
 {
     unsigned   currImageNumber = 0;
-    const bool optimized = m_descrambleRequested.load( std::memory_order_relaxed ) == DescrambleMethod::optimized &&
-                           m_descrambler.structured();
-    short *output = m_digitalBin ? m_digitalBinWork.data() : reinterpret_cast<int16_t *>( dest );
+    const auto requested       = m_descrambleRequested.load( std::memory_order_relaxed );
+    const auto applied         = m_descrambler.structured() ? requested : DescrambleMethod::sdk;
+    short     *output          = m_digitalBin ? m_digitalBinWork.data() : reinterpret_cast<int16_t *>( dest );
 
-    if( optimized )
+    if( applied == DescrambleMethod::optimized )
     {
         m_descrambler.descramble( output, reinterpret_cast<int16_t *>( m_image_p ) );
+    }
+    else if( applied == DescrambleMethod::compact )
+    {
+        m_descrambler.compact( output, reinterpret_cast<int16_t *>( m_image_p ) );
     }
     else
     {
@@ -2645,8 +2659,6 @@ inline int ocam2KCtrl::loadImageIntoStream( void *dest )
             }
         }
     }
-
-    const auto applied = optimized ? DescrambleMethod::optimized : DescrambleMethod::sdk;
 
     if( m_descrambleApplied.load( std::memory_order_relaxed ) != applied )
     {
@@ -2740,7 +2752,7 @@ INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_descrambleMethod )( const pcf::IndiPr
 
     for( const auto &element : ipRecv.getElements() )
     {
-        if( element.first != "sdk" && element.first != "optimized" )
+        if( element.first != "sdk" && element.first != "compact" && element.first != "optimized" )
         {
             return -1;
         }
@@ -2752,7 +2764,9 @@ INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_descrambleMethod )( const pcf::IndiPr
                 return -1;
             }
 
-            requested = element.first == "sdk" ? DescrambleMethod::sdk : DescrambleMethod::optimized;
+            requested = element.first == "sdk"       ? DescrambleMethod::sdk
+                        : element.first == "compact" ? DescrambleMethod::compact
+                                                     : DescrambleMethod::optimized;
         }
     }
 

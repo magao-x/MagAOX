@@ -75,6 +75,13 @@ class ocamDescrambler
     void mapped( short       *dest /**< [out] Buffer with at least imagePixels() samples. */,
                  const short *raw /**< [in] Buffer with at least rawPixels() samples. */ ) const;
 
+    /// Copy bin2 pixels through the compact map in the SDK's alternating-half source-level traversal.
+    /** Other prepared modes use mapped(). Requires a prepared map and suitably sized, nonoverlapping buffers.
+     * This does not extract a frame number or constrain compiler and hardware instruction ordering.
+     */
+    void compact( short       *dest /**< [out] Buffer with at least imagePixels() samples. */,
+                  const short *raw /**< [in] Buffer with at least rawPixels() samples. */ ) const;
+
     /// Convert a frame with the validated structured kernel, or the compact map when structure is unavailable.
     /** Requires a prepared map and suitably sized, nonoverlapping buffers. This does not extract a frame number.
      */
@@ -216,6 +223,24 @@ inline void ocamDescrambler::mapped( short *__restrict__ dest, const short *__re
     for( size_t i = 0; i < m_map.size(); ++i )
     {
         dest[i] = raw[m_map[i]];
+    }
+}
+
+inline void ocamDescrambler::compact( short *__restrict__ dest, const short *__restrict__ raw ) const
+{
+    // Supported modes have distinct raw extents; bin2 and bin1x4 have the same output extent.
+    if( m_rawPixels != OCAM2_PIXELS_RAW_BINNING2x2 )
+    {
+        mapped( dest, raw );
+        return;
+    }
+
+    constexpr size_t half = OCAM2_PIXELS_IMAGE_BINNING2x2 / 2;
+
+    for( size_t i = 0; i < half; ++i )
+    {
+        dest[i]        = raw[m_map[i]];
+        dest[half + i] = raw[m_map[half + i]];
     }
 }
 

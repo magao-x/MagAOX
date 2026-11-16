@@ -37,13 +37,19 @@ namespace
 enum class Kernel
 {
     sdk,
+    compact,
     mapped,
     optimized,
     copy
 };
 
-/// Names corresponding to the four comparison kernels.
-constexpr std::array<const char *, 4> kernelNames{ "sdk", "mapped", "optimized", "memcpy" };
+/// Names corresponding to each comparison kernel, in enumeration order.
+constexpr std::array kernelNames{ "sdk", "compact", "mapped", "optimized", "memcpy" };
+
+/// Number of algorithms measured independently and with the staged publication copy.
+constexpr size_t kernelCount = kernelNames.size();
+
+static_assert( kernelCount == static_cast<size_t>( Kernel::copy ) + 1 );
 
 /// Consume output outside measured intervals so each comparison remains observable.
 uint64_t outputChecksum{ 0 };
@@ -153,6 +159,9 @@ void execute( Kernel   kernel /**< [in] Algorithm to measure. */,
     case Kernel::sdk:
         ocam2_descramble( id, &frame, output, raw );
         break;
+    case Kernel::compact:
+        descrambler.compact( output, raw );
+        break;
     case Kernel::mapped:
         descrambler.mapped( output, raw );
         break;
@@ -172,7 +181,7 @@ void execute( Kernel   kernel /**< [in] Algorithm to measure. */,
     observe( staged ? published : output );
 }
 
-/// Verify all generated frames against the SDK before timing either replacement.
+/// Verify all generated frames against the SDK before timing each replacement.
 void validate( ocam2_id                            id /**< [in] Initialized SDK camera identifier. */,
                const MagAOX::app::ocamDescrambler &descrambler /**< [in] Prepared replacement. */,
                const std::vector<short>           &raw /**< [in] Contiguous synthetic raw frames. */,
@@ -188,7 +197,7 @@ void validate( ocam2_id                            id /**< [in] Initialized SDK 
         unsigned     frame = 0;
         ocam2_descramble( id, &frame, expected.data(), input );
 
-        for( Kernel kernel : { Kernel::mapped, Kernel::optimized } )
+        for( Kernel kernel : { Kernel::compact, Kernel::mapped, Kernel::optimized } )
         {
             for( size_t pixel = 0; pixel < expected.size(); ++pixel )
             {
@@ -200,8 +209,8 @@ void validate( ocam2_id                            id /**< [in] Initialized SDK 
 
             if( output != expected || published != expected )
             {
-                throw std::runtime_error( "replacement output differs from SDK for raw buffer " +
-                                          std::to_string( buffer ) );
+                throw std::runtime_error( std::string( kernelNames[static_cast<size_t>( kernel )] ) +
+                                          " output differs from SDK for raw buffer " + std::to_string( buffer ) );
             }
         }
     }
@@ -214,12 +223,12 @@ void benchmark( ocam2_id                            id /**< [in] Initialized SDK
                 size_t                              buffers /**< [in] Raw frames rotated during this comparison. */,
                 size_t                              rounds /**< [in] Repeated rounds with rotating method order. */ )
 {
-    std::mt19937                       random( 0x0ca2 );
-    std::uniform_int_distribution<int> values( -32768, 32767 );
-    std::vector<short>                 raw( buffers * descrambler.rawPixels() );
-    std::vector<short>                 output( descrambler.imagePixels() );
-    std::vector<short>                 published( output.size() );
-    std::array<std::vector<double>, 8> samples;
+    std::mt19937                                     random( 0x0ca2 );
+    std::uniform_int_distribution<int>               values( -32768, 32767 );
+    std::vector<short>                               raw( buffers * descrambler.rawPixels() );
+    std::vector<short>                               output( descrambler.imagePixels() );
+    std::vector<short>                               published( output.size() );
+    std::array<std::vector<double>, 2 * kernelCount> samples;
 
     std::cout << "# alignment_mod64,buffers=" << buffers << ",raw=" << reinterpret_cast<uintptr_t>( raw.data() ) % 64
               << ",raw_stride=" << ( descrambler.rawPixels() * sizeof( short ) ) % 64
@@ -242,8 +251,8 @@ void benchmark( ocam2_id                            id /**< [in] Initialized SDK
     {
         for( size_t warmup = 0; warmup < 1024; ++warmup )
         {
-            execute( static_cast<Kernel>( method % 4 ),
-                     method >= 4,
+            execute( static_cast<Kernel>( method % kernelCount ),
+                     method >= kernelCount,
                      id,
                      descrambler,
                      output.data(),
@@ -267,8 +276,8 @@ void benchmark( ocam2_id                            id /**< [in] Initialized SDK
                     const short *input = raw.data() + ( index % buffers ) * descrambler.rawPixels();
                     observe( input );
                     const int64_t begin = nowNs();
-                    execute( static_cast<Kernel>( method % 4 ),
-                             method >= 4,
+                    execute( static_cast<Kernel>( method % kernelCount ),
+                             method >= kernelCount,
                              id,
                              descrambler,
                              output.data(),
@@ -278,7 +287,7 @@ void benchmark( ocam2_id                            id /**< [in] Initialized SDK
                     samples[method].push_back( static_cast<double>( end - begin ) );
                 }
 
-                const auto &result = method >= 4 ? published : output;
+                const auto &result = method >= kernelCount ? published : output;
 
                 for( short pixel : result )
                 {
@@ -292,15 +301,15 @@ void benchmark( ocam2_id                            id /**< [in] Initialized SDK
             const auto   first = samples[method].begin() + round * iterations;
             const double mean  = std::accumulate( first, first + iterations, 0.0 ) / iterations;
             std::cout << "# round_mean_us,buffers=" << buffers << ",round=" << round + 1
-                      << ",kernel=" << kernelNames[method % 4] << ",staged=" << ( method >= 4 ) << ',' << mean * 1e-3
-                      << '\n';
+                      << ",kernel=" << kernelNames[method % kernelCount] << ",staged=" << ( method >= kernelCount )
+                      << ',' << mean * 1e-3 << '\n';
         }
     }
 
     for( size_t method = 0; method < samples.size(); ++method )
     {
-        statistics( std::to_string( buffers ) + ',' + kernelNames[method % 4] + ',' +
-                        ( method >= 4 ? "streamCopy" : "kernel" ),
+        statistics( std::to_string( buffers ) + ',' + kernelNames[method % kernelCount] + ',' +
+                        ( method >= kernelCount ? "streamCopy" : "kernel" ),
                     std::move( samples[method] ) );
     }
 }
@@ -404,6 +413,8 @@ int main( int    argc /**< [in] Number of command-line arguments. */,
                   << ",image_pixels=" << descrambler.imagePixels() << ",structured=" << descrambler.structured()
                   << ",iterations=" << iterations << ",rounds=" << rounds << '\n';
         std::cout << "# 128-frame blocks rotate method order; 1024 warmup calls per path.\n"
+                  << "# compact follows the SDK bin2 source-loop order, with mapped fallback in other modes.\n"
+                  << "# This source order does not prescribe compiler or hardware memory-operation order.\n"
                   << "# Timings include clock/barrier overhead; output checksums run outside measured intervals.\n"
                   << "# Local synthetic cache behavior does not reproduce DMA or cross-core stream readers.\n"
                   << "buffers,kernel,path,samples,mean_us,median_us,stddev_us,p95_us,p99_us,max_us\n";

@@ -35,6 +35,7 @@ struct descrambleMode
     size_t     imagePixels; ///< Number of output words to compare.
 };
 
+/// SDK modes whose complete input and output extents are covered by the equivalence checks.
 constexpr std::array<descrambleMode, 4> descrambleModes{
     { { OCAM2_NORMAL, OCAM2_PIXELS_RAW_NORMAL, OCAM2_PIXELS_IMAGE_NORMAL },
       { OCAM2_BINNING2x2, OCAM2_PIXELS_RAW_BINNING2x2, OCAM2_PIXELS_IMAGE_BINNING2x2 },
@@ -113,7 +114,7 @@ void fillDescrambleRaw( short       *raw,    /**< [out] Complete input allocatio
                         unsigned int pattern /**< [in] Index, inverse, sign, alternating, zero, or random selection. */
 );
 
-/// Compare both optimized kernels with the SDK while checking input immutability and output guards.
+/// Compare every candidate with the SDK while checking input immutability and output guards.
 void verifyDescrambleFrame( ocam2_id               id,          /**< [in] Initialized reference SDK handle. */
                             const ocamDescrambler &descrambler, /**< [in] Prepared candidate. */
                             unsigned int           pattern,     /**< [in] Raw input pattern. */
@@ -165,6 +166,7 @@ void verifyDescrambleFrame( ocam2_id id, const ocamDescrambler &descrambler, uns
 
     std::vector<short> expected( descrambler.imagePixels() + offset + 8, guard );
     auto               mapped    = expected;
+    auto               compact   = expected;
     auto               optimized = expected;
     unsigned int       number    = 0;
     ocam2_descramble( id, &number, expected.data() + offset, raw.data() + 8 );
@@ -172,20 +174,22 @@ void verifyDescrambleFrame( ocam2_id id, const ocamDescrambler &descrambler, uns
     REQUIRE( number == 0xfedc0000u + pattern );
 
     descrambler.mapped( mapped.data() + offset, raw.data() + 8 );
+    descrambler.compact( compact.data() + offset, raw.data() + 8 );
     descrambler.descramble( optimized.data() + offset, raw.data() + 8 );
 
     REQUIRE( mapped == expected );
+    REQUIRE( compact == expected );
     REQUIRE( optimized == expected );
     REQUIRE( raw == before );
     REQUIRE( std::all_of( expected.begin(),
                           expected.begin() + offset,
-                          [guard]( short value )
+                          [guard]( short value /**< [in] Destination prefix guard word. */ )
                           {
                               return value == guard;
                           } ) );
     REQUIRE( std::all_of( expected.end() - 8,
                           expected.end(),
-                          [guard]( short value )
+                          [guard]( short value /**< [in] Destination suffix guard word. */ )
                           {
                               return value == guard;
                           } ) );
@@ -201,7 +205,8 @@ TEST_CASE( "ocamDescrambler reproduces the real SDK in every app mode", "[ocamDe
     #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
     ocamDescrambler::prepare( 0 ); ocamDescrambler::ready(); ocamDescrambler::structured();
     ocamDescrambler::rawPixels(); ocamDescrambler::imagePixels();
-    ocamDescrambler::mapped( nullptr, nullptr ); ocamDescrambler::descramble( nullptr, nullptr );
+    ocamDescrambler::mapped( nullptr, nullptr ); ocamDescrambler::compact( nullptr, nullptr );
+    ocamDescrambler::descramble( nullptr, nullptr );
     #endif
     // clang-format on
 
@@ -255,6 +260,7 @@ TEST_CASE( "ocamDescrambler falls back when any structured run is different", "[
     // clang-format off
     #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
     ocamDescrambler::prepare( 0 ); ocamDescrambler::structured(); ocamDescrambler::descramble( nullptr, nullptr );
+    ocamDescrambler::compact( nullptr, nullptr );
     #endif
     // clang-format on
 
@@ -283,7 +289,7 @@ TEST_CASE( "ocamDescrambler owns prepared maps and clears failed preparations", 
     #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
     ocamDescrambler::prepare( 0 ); ocamDescrambler::clear(); ocamDescrambler::ready();
     ocamDescrambler::structured(); ocamDescrambler::rawPixels(); ocamDescrambler::imagePixels();
-    ocamDescrambler::descramble( nullptr, nullptr );
+    ocamDescrambler::descramble( nullptr, nullptr ); ocamDescrambler::compact( nullptr, nullptr );
     #endif
     // clang-format on
 
@@ -310,6 +316,14 @@ TEST_CASE( "ocamDescrambler owns prepared maps and clears failed preparations", 
         for( int repeat = 0; repeat < 4; ++repeat )
         {
             descrambler.descramble( actual.data(), raw.data() );
+            REQUIRE( actual == expected );
+
+            for( size_t pixel = 0; pixel < actual.size(); ++pixel )
+            {
+                actual[pixel] = ~expected[pixel];
+            }
+
+            descrambler.compact( actual.data(), raw.data() );
             REQUIRE( actual == expected );
         }
 
@@ -344,7 +358,7 @@ TEST_CASE( "ocamDescrambler agrees with an optional supplied calibration table",
     // clang-format off
     #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
     ocamDescrambler::prepare( 0 ); ocamDescrambler::mapped( nullptr, nullptr );
-    ocamDescrambler::descramble( nullptr, nullptr );
+    ocamDescrambler::compact( nullptr, nullptr ); ocamDescrambler::descramble( nullptr, nullptr );
     #endif
     // clang-format on
 

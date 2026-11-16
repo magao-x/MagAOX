@@ -681,3 +681,109 @@ For causal isolation, the next useful controlled candidate is the compact
 and the current structured kernel. That retains SDK source/destination order
 while removing the strided 32-bit table access. It requires new local
 validation/benchmarking and an operator RTC trial before any jitter claim.
+
+
+## Follow-up conversion snapshots and compact control — 2026-11-16
+
+The operator explicitly identifies the third of these new readings as SDK:
+
+| Conversion metric, us | SDK before | Optimized | SDK return |
+| --- | ---: | ---: | ---: |
+| Mean | 16.5146285 | 13.45059075 | 16.5710280 |
+| Standard deviation | 1.00254118 | 1.61073239 | 1.00720100 |
+| Maximum | 20.388 | 19.287 | 20.649 |
+
+Relative to the midpoint of the SDK summaries, optimized saves **3.09224 us
+(18.69%)** while standard deviation increases **0.60586 us (60.29%)**. The SDK
+return closely restores the first baseline. The optimized observed maximum
+is lower than both SDK maxima in these windows; increased standard deviation
+again does not imply a worse absolute upper tail. Counts, percentiles, validity,
+quality counters, applied-method readback and timestamps are not supplied.
+FPS is absent from this excerpt, so it is not assigned to the 2 kHz population;
+the operator clarified that the preceding full stage snapshots followed a
+restart at nominal 3,600 FPS.
+
+### Controlled implementation
+
+Added an opt-in `compact` method alongside `sdk` and the existing `optimized`.
+It reads the prepared 16-bit map while alternating output pixels `i` and
+`7200+i`, matching the bin2 SDK's source-level traversal. This provides a
+control for the sequential-row/four-amplifier traversal of `optimized`.
+Compiler scheduling and the removal of SDK dispatch/frame-number extraction
+remain differences; this is not a guarantee of identical machine access order
+or a complete one-variable cache experiment.
+
+The existing `mapped()` helper and benchmark retain their sequential-output
+traversal. `compact()` falls back to that traversal for non-bin2 helper modes.
+The app deliberately gates both candidates on the same validated structured
+bin2 map, retaining SDK fallback for unsupported modes or unrecognized tables.
+The request is latched once per frame; applied status changes only after the
+image load and optional digital sampling complete; the existing frameGrabber
+staging copy follows. SDK remains default.
+No allocation, new thread, camera command, staging change or timing
+instrumentation is added to the frame path.
+
+Extended the real-SDK equivalence tests, runtime selector/fallback tests and
+offline benchmark for this control. The operator procedure is now
+SDK/compact/SDK/optimized/SDK with fixed FPS verified after restart, identical
+stage timing, full-window settling, conversion and acquisition-to-write
+statistics, frame-quality counters and end-to-end loop timing. The candidate
+requires an operator RTC trial before any claim of lower jitter.
+
+### Validation
+
+- Real-SDK helper tests with the installed calibration table: **1,174 assertions
+  / four cases**. This includes every supported helper mode, arbitrary and
+  non-affine mappings, input immutability, destination guards and alignments,
+  and conversion after release of SDK global state.
+- ASan/UBSan helper build with the same table: **1,174 assertions / four cases**.
+  LeakSanitizer remains disabled for the previously documented sandbox
+  limitation; address and undefined-behavior checks are enabled.
+- Runtime configuration/selection/fallback/digital-sampling suite: **14,648
+  assertions / five cases**, including initial switch state, all directed
+  method transitions, concurrent requests, ambiguous selections and retained
+  SDK fallback for both candidates.
+- Force-rebuilt existing main, reconfiguration and lifecycle suites:
+  **902 / 36**, **379 / four**, and **seven / one** assertions / cases.
+- Real EDT application compiled and linked successfully with serial make; it
+  was not launched. No hardware, INDI or deployment commands were run.
+- All five changed C++ files pass clang-format checks; the complete diff
+  passes whitespace checks. Independent app/helper review found no correctness
+  or fallback blocker.
+
+The normal tests total **17,110 assertions / 50 cases**, excluding the repeated
+sanitizer run. Logs are under `/tmp/ocam-compact-*-{build,test}.log` and
+`/tmp/ocam-compact-sdk-build.log`; the instrumented helper executable is
+`/tmp/ocam-descramble-sanitize/test`.
+
+### Local benchmark
+
+Measured after all test/application builds completed: GCC 15.2.0, production
+`-O3 -march=native -ffast-math` flags, CPU 2 on mx11's Intel i9-12900HK,
+installed table FNV-1a64 `ebf98bbf036f9adb`, seven rounds of 10,000 samples per
+path with rotating method order. Every synthetic frame was checked against
+the SDK before timing; no hardware was involved.
+
+| 64 rotating raw buffers, us | Mean | Median | Standard deviation | p99 | Maximum |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SDK kernel | 5.1245 | 5.0570 | 0.4357 | 7.0170 | 39.0600 |
+| Compact SDK-order kernel | 4.7564 | 4.6950 | 0.3691 | 6.5490 | 29.7840 |
+| Sequential mapped kernel | 3.5251 | 3.4840 | 0.4150 | 4.8170 | 32.3110 |
+| Structured optimized kernel | 2.9628 | 2.9290 | 0.3225 | 3.3530 | 27.8050 |
+| SDK plus staged streamCopy | 5.9115 | 5.7740 | 1.4683 | 8.0660 | 37.3730 |
+| Compact plus staged streamCopy | 5.5001 | 5.3730 | 1.4718 | 7.5470 | 36.9290 |
+| Sequential mapped plus staged streamCopy | 4.3407 | 4.2320 | 1.3255 | 6.1790 | 35.2400 |
+| Structured optimized plus staged streamCopy | 3.7807 | 3.6760 | 1.2726 | 5.4670 | 34.1870 |
+
+Across hot/64-buffer and kernel/staged populations, all 28 paired round means
+favor compact over SDK by 0.342–0.434 us. In the 64-buffer case, its mean gain
+is 0.3681 us (7.18%) for the kernel and 0.4114 us (6.96%) with staged copy.
+Its staged standard deviation is close to the SDK's in this local run. The
+structured path remains faster here. These synthetic workstation results
+justify exposing compact as an opt-in comparison; they do not demonstrate an
+RTC jitter fix or reproduce DMA and cross-core shared-stream readers.
+
+The CSV includes hot-input statistics, all round means, timer overhead and
+buffer alignments: `/tmp/ocamDescramble-compact-bin2.csv`. The mean ordering is
+consistent within this run; no further repetitions were needed to establish
+its role as a control. RTC qualification remains the operator's next step.
