@@ -9,8 +9,9 @@ arrays, GPU clocks, IRQ affinity, cpusets, or services.
 RAID discovery is enabled by default. GPU monitoring defaults to disabled. IRQ
 checking is disabled when no IRQ groups are configured. Merge the appropriate
 `config/sysMonRTC-diagnostics.conf` or `config/sysMonICC-diagnostics.conf` fragment
-into the host's normal configuration to enable GPU/IRQ diagnostics and explicitly
-set the RAID defaults. These fragments follow the dedicated groups in the merged
+into the host's normal configuration to enable GPU/IRQ diagnostics and require
+the host's expected RAID UUIDs. `config/sysMonAOC-diagnostics.conf` supplies the
+AOC RAID expectations. The RTC/ICC fragments follow the dedicated groups in the merged
 `rtSetup/*/move_irqs` scripts. NVIDIA IRQs deliberately remain outside these
 groups because they now use system CPUs.
 
@@ -194,6 +195,22 @@ or its 32 hexadecimal digits, normalizes case, and rejects zero, malformed, or
 duplicate UUIDs. Use the value from `/sys/block/<name>/md/uuid`. Colon-separated
 `mdadm` UUIDs are not accepted: older 0.90 metadata can have different byte
 ordering, so changing punctuation is not a reliable conversion.
+
+The host fragments contain the UUIDs supplied on 2026-11-16, labeled from their
+local mount points (`root` for `/`, with underscores replacing other slashes):
+
+| Host | Expected array labels |
+| --- | --- |
+| RTC / exao2 | `root`, `boot`, `boot_efi`, `data`, `unmounted` |
+| ICC / exao3 | `root`, `boot`, `boot_efi`, `data`, `unmounted` |
+| AOC / exao1 | `root`, `boot_efi`, `home`, `mnt_backup` |
+
+RTC md127 and ICC md126 were absent from the supplied `df` output; `unmounted`
+is a temporary label pending role confirmation. Both UUIDs remain required.
+The AOC backup UUID is required even though its supplied mdstat snapshot reports
+a broken array. Network mounts are covered on the host owning the underlying
+array. Names in config comments record the supplied snapshot; UUIDs determine
+identity. Update a configured UUID deliberately when replacing/recreating an array.
 
 Any configured expectation enables UUID tracking for **all** discovered arrays.
 Health still comes from mdstat, and identity comes from each array's
