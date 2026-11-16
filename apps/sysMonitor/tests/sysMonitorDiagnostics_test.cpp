@@ -111,6 +111,7 @@ class diagnosticHarness : public sysMonitor
     using sysMonitor::m_lastGPUs;
     using sysMonitor::m_lastIRQOK;
     using sysMonitor::m_raidEnabled;
+    using sysMonitor::m_raidExpected;
     using sysMonitor::m_raidInfoProperties;
     using sysMonitor::m_raidInterval;
     using sysMonitor::m_raidProperties;
@@ -324,6 +325,39 @@ std::string raidBlock( const std::string &name /**< [in] kernel array name */,
     return name + " : active raid1 sda1[0] sdb1[1]" + ( degraded ? "(F)" : "" ) + "\n 1000 blocks super 1.2 " +
            ( degraded ? "[2/1] [U_]\n" : "[2/2] [UU]\n" );
 }
+
+/// Provide healthy arrays with verified synthetic identities, independent of kernel-name ordering.
+sysMonitorDetail::raidSnapshotT
+identifiedRAIDs( const std::vector<std::pair<std::string, std::string>> &identities /**< [in] kernel names and UUIDs */,
+                 double                                                  time /**< [in] actual collection time */ )
+{
+    std::string body;
+
+    for( const auto &identity : identities )
+    {
+        body += raidBlock( identity.first );
+    }
+
+    auto result = raidSnapshot( body, time );
+
+    for( auto &array : result.m_arrays )
+    {
+        const auto match = std::find_if( identities.begin(),
+                                         identities.end(),
+                                         [&]( const auto &value )
+                                         {
+                                             return value.first == array.m_name;
+                                         } );
+        array.m_uuid     = match->second;
+    }
+
+    return result;
+}
+
+/// Native MD UUID fixtures in the kernel's byte order, never obtained from real devices.
+const std::string raidUUIDA = "01234567-89ab-cdef-0123-456789abcdef";
+const std::string raidUUIDB = "fedcba98-7654-3210-fedc-ba9876543210";
+const std::string raidUUIDC = "11111111-2222-3333-4444-555555555555";
 /// \endcond
 
 /// Verify disabled collectors and independent monotonic interval scheduling.
@@ -1061,6 +1095,217 @@ TEST_CASE( "sysMonitor RAID maintenance progress does not repeat fault telemetry
     REQUIRE( faults.size() == 2 );
     REQUIRE( faults[0].find( "sdb1[1](F)" ) != std::string::npos );
     REQUIRE( faults[1].find( "sdc1[1](F)" ) != std::string::npos );
+}
+
+/// Load named expectations, normalizing kernel UUIDs and rejecting ambiguous or incomplete configuration.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor validates named expected RAID UUIDs", "[sysMonitor][diagnostics][raid]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::loadDiagnosticsConfig(*(mx::app::appConfigurator *)nullptr);
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.setupConfig();
+    const std::string body = GENERATE(
+        "[raid.data]\nuuid=0123456789ABCDEF0123456789ABCDEF\n[raid.root]\nuuid=fedcba98-7654-3210-fedc-ba9876543210\n",
+        "[raid.data]\nuuid=\n",
+        "[raid.data]\nlabel=data\n",
+        "[raid.data]\nuuid=00000000-0000-0000-0000-000000000000\n",
+        "[raid.data]\nuuid=01234567:89abcdef:01234567:89abcdef\n",
+        "[raid.]\nuuid=0123456789abcdef0123456789abcdef\n",
+        "[raid.bad.label]\nuuid=0123456789abcdef0123456789abcdef\n",
+        "[raid.data]\nuuid=0123456789abcdef0123456789abcdef\n[raid.root]\nuuid=01234567-89AB-CDEF-0123-"
+        "456789ABCDEF\n" );
+    std::ofstream file( app.m_root + "/raid.conf" );
+    file << "[raid]\nenabled=true\n" << body;
+    file.close();
+    REQUIRE( app.config.readConfig( app.m_root + "/raid.conf" ) == 0 );
+
+    if( body.find( raidUUIDB ) != std::string::npos )
+    {
+        REQUIRE( app.loadDiagnosticsConfig( app.config ) == 0 );
+        REQUIRE( app.m_raidExpected.size() == 2 );
+        REQUIRE( app.m_raidExpected.at( "data" ) == raidUUIDA );
+        REQUIRE( app.m_raidExpected.at( "root" ) == raidUUIDB );
+    }
+    else
+    {
+        REQUIRE( app.loadDiagnosticsConfig( app.config ) < 0 );
+    }
+}
+
+/// Required identities warn on the first empty or missing-interface result without waiting for the poll interval.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor reports expected RAID absence on the first poll", "[sysMonitor][diagnostics][raid]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::startupRAID();
+    sysMonitor::pollDiagnostics(std::chrono::steady_clock::time_point{});
+    sysMonitor::publishRAID();
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_raidEnabled = true;
+    app.m_raidExpected.emplace( "data", raidUUIDA );
+    app.m_raidResult           = raidSnapshot( "" );
+    const bool absentInterface = GENERATE( false, true );
+
+    if( absentInterface )
+    {
+        app.m_raidResult.m_result = telem_raid::NotPresent;
+        app.m_raidResult.m_status = "mdstat not present";
+    }
+
+    REQUIRE( app.startupDiagnostics() == 0 );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_raids.size() == 1 );
+    REQUIRE( app.m_raidProperties.at( "raid_0" ).getState() == INDI_IDLE );
+    REQUIRE( app.m_raidProperties.at( "raid_0" )["configured"].get<unsigned>() == 1 );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["name"].get().empty() );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["label"].get() == "data" );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["uuid"].get() == raidUUIDA );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::Off );
+    REQUIRE( app.pollDiagnostics( std::chrono::steady_clock::time_point{} ) == 0 );
+    REQUIRE( app.m_raidQueries == 1 );
+    REQUIRE( app.m_raidProperties.at( "raid_0" )["flags"].get<unsigned>() == telem_raid::Missing );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["status"].get() == "missing" );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::On );
+    const auto records = app.records( true );
+    REQUIRE( records.size() == 1 );
+    const auto arrays = telem_raid::arrays( flatlogs::logHeader::messageBuffer( records[0].get() ) );
+    REQUIRE( arrays.size() == 1 );
+    REQUIRE( arrays[0].m_index == 0 );
+    REQUIRE( arrays[0].m_flags == telem_raid::Missing );
+    bool expectationLogged = false;
+
+    for( const auto &[priority, message] : app.textLogs() )
+    {
+        if( message == "RAID expectation: index=0 label=data uuid=" + raidUUIDA )
+        {
+            REQUIRE( priority == logPrio::LOG_NOTICE );
+            expectationLogged = true;
+        }
+    }
+
+    REQUIRE( expectationLogged );
+}
+
+/// Disabling collection suppresses required-array warnings and leaves configured identities visibly disabled.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor can disable configured RAID expectations", "[sysMonitor][diagnostics][raid]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::startupRAID();
+    sysMonitor::pollDiagnostics(std::chrono::steady_clock::time_point{});
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_raidExpected.emplace( "data", raidUUIDA );
+    REQUIRE( app.startupDiagnostics() == 0 );
+    REQUIRE( app.pollDiagnostics( std::chrono::steady_clock::time_point{} ) == 0 );
+    REQUIRE( app.m_raidQueries == 0 );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["status"].get() == "disabled" );
+    REQUIRE( app.m_raidProperties.at( "raid_0" ).getState() == INDI_IDLE );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::Off );
+    REQUIRE( app.records( true ).empty() );
+}
+
+/// UUIDs retain indices through name swaps while replacement arrays cannot satisfy an absent expectation.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor tracks configured and discovered RAIDs by UUID", "[sysMonitor][diagnostics][raid]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::acceptRAIDResult(*(sysMonitorDetail::raidSnapshotT *)nullptr);
+    sysMonitor::publishRAID();
+    sysMonitor::recordRAID(false);
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_raidEnabled = true;
+    app.m_raidExpected.emplace( "data", raidUUIDA );
+    REQUIRE( app.startupDiagnostics() == 0 );
+    app.acceptRAIDResult( identifiedRAIDs( { { "md0", raidUUIDA }, { "md1", raidUUIDB } }, 100 ) );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.recordRAID() == 0 );
+    REQUIRE( app.m_raids.size() == 2 );
+    REQUIRE( app.m_raidProperties.at( "raid_1" )["configured"].get<unsigned>() == 0 );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_1" )["uuid"].get() == raidUUIDB );
+    app.acceptRAIDResult( identifiedRAIDs( { { "md0", raidUUIDB }, { "md1", raidUUIDA } }, 200 ) );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.recordRAID() == 0 );
+    REQUIRE( app.m_raids.size() == 2 );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["name"].get() == "md1" );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_1" )["name"].get() == "md0" );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::Off );
+    app.acceptRAIDResult( identifiedRAIDs( { { "md0", raidUUIDB }, { "md1", raidUUIDC } }, 300 ) );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.recordRAID() == 0 );
+    REQUIRE( app.m_raids.size() == 3 );
+    REQUIRE( app.m_raidProperties.at( "raid_0" )["flags"].get<unsigned>() == telem_raid::Missing );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["name"].get().empty() );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["level"].get().empty() );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_2" )["uuid"].get() == raidUUIDC );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::On );
+    app.acceptRAIDResult(
+        identifiedRAIDs( { { "md0", raidUUIDB }, { "md1", raidUUIDC }, { "md127", raidUUIDA } }, 400 ) );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.recordRAID() == 0 );
+    REQUIRE( app.m_raids.size() == 3 );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["name"].get() == "md127" );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::Off );
+    const auto records = app.records( true );
+    REQUIRE( records.size() == 3 );
+    size_t renamed = 0;
+
+    for( const auto &[priority, message] : app.textLogs() )
+    {
+        static_cast<void>( priority );
+
+        if( message == "RAID mapping: index=0 name=md1 level=raid1 uuid=" + raidUUIDA + " label=data" ||
+            message == "RAID mapping: index=0 name=md127 level=raid1 uuid=" + raidUUIDA + " label=data" )
+        {
+            ++renamed;
+        }
+    }
+
+    REQUIRE( renamed == 2 );
+}
+
+/// Incomplete identity collection invalidates known results and cannot match an expected array by kernel name.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor retains RAID expectations across identity errors", "[sysMonitor][diagnostics][raid]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::acceptRAIDResult(*(sysMonitorDetail::raidSnapshotT *)nullptr);
+    sysMonitor::publishRAID();
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_raidEnabled = true;
+    app.m_raidExpected.emplace( "data", raidUUIDA );
+    REQUIRE( app.startupDiagnostics() == 0 );
+    app.acceptRAIDResult( identifiedRAIDs( { { "md0", raidUUIDA } }, 100 ) );
+    auto failed     = identifiedRAIDs( { { "md0", raidUUIDC } }, 200 );
+    failed.m_result = GENERATE( telem_raid::ReadError, telem_raid::ParseError );
+    failed.m_status = "UUID unavailable or ambiguous";
+    app.acceptRAIDResult( failed );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_raids.size() == 1 );
+    REQUIRE( app.m_raidProperties.at( "raid_0" )["flags"].get<unsigned>() == 0 );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["uuid"].get() == raidUUIDA );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["status"].get() == "unavailable" );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["name"].get().empty() );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::On );
+    app.acceptRAIDResult( identifiedRAIDs( { { "md127", raidUUIDA } }, 300 ) );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_raids.size() == 1 );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::Off );
 }
 
 } // namespace sysMonitorTest

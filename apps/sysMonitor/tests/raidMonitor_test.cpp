@@ -1,10 +1,11 @@
 /** \file raidMonitor_test.cpp
- * \brief Offline MD discovery, degradation policy and bounded-read tests.
+ * \brief Offline MD discovery, UUID identity, saved instrument snapshots, and bounded-read tests.
  * \ingroup sysMonitor_unit_test
  */
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 
 #include "../../../tests/testXWC.hpp"
 #include "../raidMonitor.hpp"
@@ -24,7 +25,18 @@ std::string mdstat( const std::string &arrays /**< [in] array header and continu
            "unused devices: <none>\n";
 }
 
-/// Own a temporary mdstat file, ensuring tests never inspect the running host's arrays.
+/// Read a saved instrument snapshot beside this test executable, without inspecting instrument hardware.
+std::string savedMdstat( const std::string &name /**< [in] fixture filename within the local fixtures directory */ )
+{
+    const auto    directory = std::filesystem::read_symlink( "/proc/self/exe" ).parent_path() / "fixtures";
+    std::ifstream input( directory / name );
+    REQUIRE( input.is_open() );
+    const std::string text{ std::istreambuf_iterator<char>( input ), std::istreambuf_iterator<char>() };
+    REQUIRE_FALSE( input.bad() );
+    return text;
+}
+
+/// Own isolated mdstat and sysfs UUID fixtures, ensuring tests never inspect the running host's arrays.
 class raidFixture
 {
   public:
@@ -39,8 +51,13 @@ class raidFixture
     /// Replace the synthetic mdstat source.
     void put( const std::string &text /**< [in] complete synthetic source contents */ );
 
+    /// Write one synthetic sysfs UUID beneath the fixture's isolated root.
+    void putUUID( const std::string &name /**< [in] array name within the synthetic block tree */,
+                  const std::string &text /**< [in] complete UUID file contents */ );
+
     /// Collect only the synthetic source.
-    monitor::raidSnapshotT check( double time /**< [in] collection timestamp */ );
+    monitor::raidSnapshotT check( double time /**< [in] collection timestamp */,
+                                  bool   identities = false /**< [in] require UUIDs from the synthetic block tree */ );
 };
 
 raidFixture::raidFixture()
@@ -64,9 +81,19 @@ void raidFixture::put( const std::string &text )
     REQUIRE( file.good() );
 }
 
-monitor::raidSnapshotT raidFixture::check( double time )
+void raidFixture::putUUID( const std::string &name, const std::string &text )
 {
-    return monitor::checkRAID( ( m_root / "mdstat" ).string(), time );
+    const auto directory = m_root / "sysBlock" / name / "md";
+    std::filesystem::create_directories( directory );
+    std::ofstream file( directory / "uuid" );
+    file << text;
+    REQUIRE( file.good() );
+}
+
+monitor::raidSnapshotT raidFixture::check( double time, bool identities )
+{
+    return monitor::checkRAID(
+        ( m_root / "mdstat" ).string(), time, identities ? ( m_root / "sysBlock" ).string() : std::string{} );
 }
 /// \endcond
 
@@ -110,6 +137,49 @@ TEST_CASE( "RAID discovery identifies and sorts healthy redundant arrays", "[sys
     REQUIRE( sample.m_arrays[1].m_status == "ok (auto-read-only)" );
     REQUIRE( sample.m_arrays[2].m_status == "ok (read-only)" );
     REQUIRE( sample.m_arrays[1].m_members == "nvme0n1p2[0] nvme1n1p2[1](W) [UU]" );
+}
+
+/// Preserve the observed instrument inventories and identify the broken exao1 array from saved kernel text.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "RAID parsing handles captured instrument mdstat snapshots", "[sysMonitor][raidMonitor]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::sysMonitorDetail::parseMdstat("", 0);
+    #endif
+    // clang-format on
+    const std::vector<std::pair<std::string, size_t>> inventories{
+        { "exao1.mdstat", 4 }, { "exao2.mdstat", 5 }, { "exao3.mdstat", 5 } };
+
+    for( const auto &[name, count] : inventories )
+    {
+        INFO( name );
+        const auto sample = monitor::parseMdstat( savedMdstat( name ), 1234.5 );
+        REQUIRE( sample.m_result == raidLog::Ready );
+        REQUIRE( sample.m_checkTime == 1234.5 );
+        REQUIRE( sample.m_arrays.size() == count );
+        bool broken = false;
+
+        for( const auto &array : sample.m_arrays )
+        {
+            INFO( array.m_name );
+            REQUIRE( array.m_sample.m_flags & raidLog::Valid );
+
+            if( name == "exao1.mdstat" && array.m_name == "md124" )
+            {
+                broken = true;
+                REQUIRE( array.m_sample.m_flags & raidLog::Faulty );
+                REQUIRE_FALSE( array.m_sample.m_flags & raidLog::OK );
+            }
+            else
+            {
+                REQUIRE( array.m_sample.m_flags & raidLog::OK );
+                REQUIRE_FALSE( array.m_sample.m_flags & ( raidLog::Faulty | raidLog::Degraded ) );
+            }
+        }
+
+        REQUIRE( broken == ( name == "exao1.mdstat" ) );
+    }
 }
 
 /// A rebuilding array remains degraded, and a failed spare remains a fault even with full redundancy.
@@ -342,6 +412,158 @@ TEST_CASE( "RAID collector distinguishes no arrays read errors and repeated chan
     fixture.put( std::string( monitor::raidDetail::textLimit + 1, ' ' ) );
     REQUIRE( fixture.check( 7 ).m_result == raidLog::ReadError );
     REQUIRE( monitor::checkRAID( fixture.m_root.string(), 8 ).m_result == raidLog::ReadError );
+}
+
+/// Normalize only the documented raw sysfs UUID representations, preserving their byte order.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "RAID UUID normalization accepts sysfs forms and rejects ambiguous identities", "[sysMonitor][raidMonitor]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::sysMonitorDetail::raidUUID("");
+    #endif
+    // clang-format on
+    const std::string canonical = "01234567-89ab-cdef-0123-456789abcdef";
+    REQUIRE( monitor::raidUUID( canonical ) == canonical );
+    REQUIRE( monitor::raidUUID( "0123456789abcdef0123456789abcdef" ) == canonical );
+    REQUIRE( monitor::raidUUID( " \t01234567-89AB-CDEF-0123-456789ABCDEF\r\n" ) == canonical );
+    REQUIRE( monitor::raidUUID( "\n0123456789ABCDEF0123456789ABCDEF\t" ) == canonical );
+
+    for( const auto &invalid : { "",
+                                 " \t\r\n",
+                                 "00000000000000000000000000000000",
+                                 "00000000-0000-0000-0000-000000000000",
+                                 "01234567:89abcdef:01234567:89abcdef",
+                                 "UUID=01234567-89ab-cdef-0123-456789abcdef",
+                                 "01234567-89ab-cdef-0123-456789abcdeg",
+                                 "012345678-9ab-cdef-0123-456789abcdef",
+                                 "01234567_89ab-cdef-0123-456789abcdef",
+                                 "01234567-89ab-cdef-0123-456789abcde",
+                                 "01234567-89ab-cdef-0123-456789abcdef0",
+                                 "01234567-89ab-cdef-0123-456789abcdef trailing",
+                                 "01234567-89ab-cdef-0123-456789abc def" } )
+    {
+        INFO( invalid );
+        REQUIRE( monitor::raidUUID( invalid ).empty() );
+    }
+
+    auto embedded = canonical;
+    embedded.insert( 10, 1, '\0' );
+    REQUIRE( monitor::raidUUID( embedded ).empty() );
+}
+
+/// Strict collection requires a unique usable UUID for every discovered array and preserves the attempt time.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "RAID collector resolves complete UUID identities from isolated files", "[sysMonitor][raidMonitor]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::sysMonitorDetail::checkRAID("", 0, "");
+    #endif
+    // clang-format on
+    raidFixture fixture;
+    fixture.put( mdstat( "md1 : active raid1 sdc[0] sdd[1]\n      1000 blocks [2/2] [UU]\n"
+                         "md0 : active raid1 sda[0] sdb[1]\n      1000 blocks [2/2] [UU]\n" ) );
+    fixture.putUUID( "md0", "0123456789ABCDEF0123456789ABCDEF\n" );
+    fixture.putUUID( "md1", "11234567-89ab-cdef-0123-456789abcdef\n" );
+    auto sample = fixture.check( 1234.5, true );
+    REQUIRE( sample.m_result == raidLog::Ready );
+    REQUIRE( sample.m_checkTime == 1234.5 );
+    REQUIRE( sample.m_arrays.size() == 2 );
+    REQUIRE( sample.m_arrays[0].m_name == "md0" );
+    REQUIRE( sample.m_arrays[0].m_uuid == "01234567-89ab-cdef-0123-456789abcdef" );
+    REQUIRE( sample.m_arrays[1].m_name == "md1" );
+    REQUIRE( sample.m_arrays[1].m_uuid == "11234567-89ab-cdef-0123-456789abcdef" );
+    REQUIRE( sample.m_arrays[0].m_sample.m_index == raidLog::UnknownIndex );
+    REQUIRE( sample.m_arrays[1].m_sample.m_index == raidLog::UnknownIndex );
+    REQUIRE( sample.m_arrays[0].m_label.empty() );
+
+    fixture.putUUID( "md1", "21234567-89ab-cdef-0123-456789abcdef\n" );
+    sample = fixture.check( 1235, true );
+    REQUIRE( sample.m_result == raidLog::Ready );
+    REQUIRE( sample.m_arrays[1].m_uuid == "21234567-89ab-cdef-0123-456789abcdef" );
+    REQUIRE( sample.m_checkTime == 1235 );
+
+    sample = fixture.check( 1236 );
+    REQUIRE( sample.m_result == raidLog::Ready );
+    REQUIRE( sample.m_arrays[0].m_uuid.empty() );
+    REQUIRE( sample.m_arrays[1].m_uuid.empty() );
+
+    std::filesystem::remove_all( fixture.m_root / "sysBlock" );
+    fixture.put( mdstat( "" ) );
+    sample = fixture.check( 1237, true );
+    REQUIRE( sample.m_result == raidLog::Ready );
+    REQUIRE( sample.m_arrays.empty() );
+    REQUIRE( sample.m_checkTime == 1237 );
+}
+
+/// Identity failures cannot return partial inventories that would falsely satisfy configured UUID expectations.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "RAID collector rejects partial malformed and duplicate UUID inventories", "[sysMonitor][raidMonitor]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::sysMonitorDetail::checkRAID("", 0, "");
+    #endif
+    // clang-format on
+    raidFixture fixture;
+    fixture.put( mdstat( "md0 : active raid1 sda[0] sdb[1]\n      1000 blocks [2/2] [UU]\n"
+                         "md1 : active raid1 sdc[0] sdd[1]\n      1000 blocks [2/2] [UU]\n" ) );
+    fixture.putUUID( "md0", "01234567-89ab-cdef-0123-456789abcdef\n" );
+    auto sample = fixture.check( 100, true );
+    REQUIRE( sample.m_result == raidLog::ReadError );
+    REQUIRE( sample.m_arrays.empty() );
+    REQUIRE( sample.m_status.find( "md1" ) != std::string::npos );
+    REQUIRE( sample.m_checkTime == 100 );
+
+    for( const auto &invalid : { "",
+                                 "not-a-uuid",
+                                 "00000000-0000-0000-0000-000000000000",
+                                 "01234567:89abcdef:01234567:89abcdef",
+                                 "0123456789ABCDEF0123456789ABCDEF" } )
+    {
+        INFO( invalid );
+        fixture.putUUID( "md1", invalid );
+        sample = fixture.check( 101, true );
+        REQUIRE( sample.m_result == raidLog::ParseError );
+        REQUIRE( sample.m_arrays.empty() );
+        REQUIRE( sample.m_status.find( "md1" ) != std::string::npos );
+        REQUIRE( sample.m_checkTime == 101 );
+    }
+
+    fixture.putUUID( "md1", std::string( 257, 'a' ) );
+    sample = fixture.check( 102, true );
+    REQUIRE( sample.m_result == raidLog::ReadError );
+    REQUIRE( sample.m_arrays.empty() );
+    REQUIRE( sample.m_status.find( "md1" ) != std::string::npos );
+    REQUIRE( sample.m_checkTime == 102 );
+
+    const auto path = fixture.m_root / "sysBlock" / "md1" / "md" / "uuid";
+    REQUIRE( std::filesystem::remove( path ) );
+    REQUIRE( std::filesystem::create_directory( path ) );
+    sample = fixture.check( 103, true );
+    REQUIRE( sample.m_result == raidLog::ReadError );
+    REQUIRE( sample.m_arrays.empty() );
+    REQUIRE( sample.m_status.find( "md1" ) != std::string::npos );
+}
+
+/// MD array names may not traverse outside the supplied sysfs block directory.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "RAID collector bounds UUID paths to one array component", "[sysMonitor][raidMonitor]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    MagAOX::app::sysMonitorDetail::checkRAID("", 0, "");
+    #endif
+    // clang-format on
+    raidFixture fixture;
+    fixture.put( mdstat( "../escaped : active raid1 sda[0] sdb[1]\n      1000 blocks [2/2] [UU]\n" ) );
+    fixture.putUUID( "../escaped", "01234567-89ab-cdef-0123-456789abcdef\n" );
+    const auto sample = fixture.check( 200, true );
+    REQUIRE( sample.m_result == raidLog::ParseError );
+    REQUIRE( sample.m_arrays.empty() );
+    REQUIRE( sample.m_status.find( "../escaped" ) != std::string::npos );
+    REQUIRE( sample.m_checkTime == 200 );
 }
 
 } // namespace sysMonitorTest

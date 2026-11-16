@@ -2,9 +2,9 @@
 
 User request: "ok this was merged. To continue, I'd like to add monitoring of RAID status to sysMonitor. The main purpose is to provide operator warnings if a RAID is degraded. Telemetry will also be good. I think we can parse /proc/mdstat and auto-detect the arrays."
 
-Status: implemented and validated on `jrmales/sysmon-raid`, based on merged `dev` at `00ca7378` (PR #456). Checkout `/home/jrmales/Source/MagAOX-working`; workstation `mx11`. No instrument commands or hardware changes are authorized or needed for offline implementation.
+Status: RAID monitoring and expected-UUID follow-up implemented and validated on `jrmales/sysmon-raid`, based on merged `dev` at `00ca7378` (PR #456). Checkout `/home/jrmales/Source/MagAOX-working`; workstation `mx11`. No instrument commands or hardware changes are authorized or needed for offline implementation.
 
-## Design
+## Initial design
 
 - Read `/proc/mdstat` directly on a configurable five-second cadence. Discovery is enabled by default (`raid.enabled=true`); `raid.interval` must be finite and positive. Use bounded reads and strict complete-snapshot parsing, with no mdadm commands or configuration writes.
 - Auto-discover all named MD arrays. Preserve a stable per-process numeric index for each observed name, log its name/level mapping on discovery and changes, and retain disappeared arrays as missing until they return or sysMonitor restarts. Auto-discovery cannot recognize an array already absent at startup, or establish physical identity across an MD-name change.
@@ -14,6 +14,22 @@ Status: implemented and validated on `jrmales/sysmon-raid`, based on merged `dev
 - Publish overall `raid_status`, per-array read-only status/health/counts, and `raid_warning.active` for stateRuleEngine. Add warning examples for the system monitors. Log changed fault details and brief recovery; avoid repeated details and progress/ETA noise.
 - Add numeric-only `telem_raid` with collector status, actual check time, and per-array index/flags/configured/active counts. Flags distinguish valid, OK, degraded, missing, inactive, redundant, metadata container, and failed component states. Counts apply only to redundant arrays. Preserve startup/discovery mappings with telemetry extracts. Record first, changed numeric state, and forced snapshots, retaining the actual check time.
 - Keep existing GPU/IRQ telemetry formats and behavior unchanged.
+
+## Expected UUID follow-up — 2026-11-16
+
+User request: "ok I see the limitation now. Let's have a config section where we identify the expect RAIDs, maybe by UUID so we don't get confused by simple config changes. We should also continue auto discovery and track new ones or not-configured ones. But this way an expected but missing array gets reported ASAP."
+
+- Add named `[raid.NAME]` sections with a required `uuid`, using the kernel MD UUID from `/sys/block/<name>/md/uuid`. Validate labels and reject malformed, zero, or duplicate UUIDs. Accept case-insensitive dashed or compact hexadecimal text and normalize to lowercase dashed form. Reject mdadm colon syntax because metadata 0.90 can use different word byte order. The existing configuration framework drops completely empty section headers; document that an expectation requires the `uuid=` key, and reject empty values or populated expectation sections missing that key.
+- Seed configured identities and their numeric indices at startup, logging label/UUID/index even if an array never appears. Remain unchecked until the first immediate application poll; a complete empty inventory or missing mdstat then marks each expected identity Missing and raises the existing operator warning. Disabling RAID collection also disables expectation warnings.
+- Configured expectations enable strict UUID tracking for all discovered arrays, including unconfigured arrays. Match by UUID, retain indices through MD-name changes, and log changed mappings. A replacement UUID at the same MD name is a new identity and does not satisfy the original expectation. Retain absent expected and discovered identities.
+- With no expectations, preserve the existing mdstat-only name-based discovery behavior. Strict mode requires a readable unique nonzero kernel UUID for every discovered array. If any lookup fails or any UUID is invalid/duplicated, reject the partial inventory and mark retained identities unavailable. Never infer a match from an unverified name. A later complete read recovers normally.
+- Strict UUID mode targets persistent native Linux MD arrays, including the supplied metadata 1.0/1.2 examples. Upstream provides the read-only UUID attribute from Linux 5.9 (vendor backports can differ). External metadata containers may expose zero kernel UUIDs, and metadata=none has no persistent identity; those are not suitable for configured UUID expectations.
+- Add `configured` to per-array numeric INDI properties and `label`/`uuid` to companion information. Keep `expected` as the redundancy member count. No telemetry schema change: startup expectation/discovery mappings associate numeric indices with UUIDs and labels; first/change/forced recording remains unchanged.
+- Save the user's exao1/exao2/exao3 mdstat samples as offline fixtures. They contain 4/5/5 arrays; exao1's md124 is broken with five failed components and `[5/0] [_____]`, and must warn. Actual instrument UUIDs have been requested from the user; shipped configuration examples remain commented placeholders.
+
+Identity sources: [kernel MD UUID interface](https://docs.kernel.org/admin-guide/md.html#md-devices-in-sysfs), [kernel UUID byte formatting](https://docs.kernel.org/core-api/printk-formats.html#uuid-guid-addresses), upstream [v5.8 MD source](https://github.com/torvalds/linux/blob/v5.8/drivers/md/md.c) versus [v5.9 MD source](https://github.com/torvalds/linux/blob/v5.9/drivers/md/md.c), and mdadm [native 1.x](https://github.com/md-raid-utilities/mdadm/blob/main/super1.c) / [native 0.90](https://github.com/md-raid-utilities/mdadm/blob/main/super0.c) UUID formatting.
+
+Follow-up validation: library and application builds passed, as did all eight focused suites (62 cases): RAID parser/identity (11), application diagnostics/configuration/lifecycle (21), RAID telemetry (5), existing sysMonitor parsing (6), GPU parser/telemetry (5 each), IRQ parser (5), and IRQ telemetry (4). Final application rebuild and 21-case diagnostics rerun passed after review corrected stale name/level display for missing UUIDs. The UUID follow-up changes no telemetry schema or generator. Formatting and `git diff --check` pass. Local output is under `/tmp/sysmon-raid-uuid-validation` and `/tmp/sysmon-raid-uuid-final`. All checks used saved mdstat text, synthetic sysfs files, or injected snapshots; no real MD devices were interrogated.
 
 ## Sources
 
@@ -59,7 +75,7 @@ No instrument app startup or actual RAID management commands were run. Applicati
 ## Changed files
 
 - Application: `apps/sysMonitor/sysMonitor.hpp`, `raidMonitor.hpp`, and `Makefile`.
-- Application tests: `apps/sysMonitor/tests/raidMonitor_test.cpp` and `sysMonitorDiagnostics_test.cpp`.
+- Application tests: `apps/sysMonitor/tests/raidMonitor_test.cpp`, `sysMonitorDiagnostics_test.cpp`, and captured `tests/fixtures/exao1.mdstat`, `exao2.mdstat`, and `exao3.mdstat` under the application directory.
 - Operator guide/configuration: `apps/sysMonitor/sysMonitor.md`, `config/sysMonRTC-diagnostics.conf`, `config/sysMonICC-diagnostics.conf`, and `config/sysmon-warning.conf`.
 - Telemetry: `libMagAOX/logger/types/telem_raid.hpp`, `types/schemas/telem_raid.fbs`, `types/telem.cpp`, `logCodes.dat`, and `logMeta.cpp`.
 - Logger tests: `libMagAOX/logger/tests/raidTelemetry_test.cpp`, `generateTemplatedCatch2Tests.py`, and `test_generateTemplatedCatch2Tests.py`.
@@ -68,4 +84,4 @@ No instrument app startup or actual RAID management commands were run. Applicati
 
 ## Operator follow-up
 
-Install updated sysMonitor/logger binaries and merge the example RAID rules into stateRuleEngine's configured rules directory. Compare a real host's inventory and health with the read-only INDI output. Keep discovery logs with extracted telemetry. Auto-discovery still cannot identify an array already absent when sysMonitor starts; an expected-array policy can be added separately if required.
+Install updated sysMonitor/logger binaries and merge the example RAID rules into stateRuleEngine's configured rules directory. Supply the real kernel MD UUIDs in `[raid.NAME]` sections to require those arrays from startup, and confirm the application user can read UUID attributes for every discovered array. Compare a real host's inventory and health with the read-only INDI output. Keep expectation and discovery logs with extracted telemetry. Without configured expectations, auto-discovery still cannot identify an array already absent when sysMonitor starts.

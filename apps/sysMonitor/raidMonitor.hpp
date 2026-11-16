@@ -31,6 +31,8 @@ struct raidArrayT
     std::string m_level;   ///< MD personality, or empty for an inactive metadata container.
     std::string m_status;  ///< Concise assessment without changing maintenance percentages.
     std::string m_members; ///< Device descriptors and flags, followed by the redundancy bitmap when present.
+    std::string m_uuid;    ///< Canonical sysfs UUID when strict identity collection is enabled.
+    std::string m_label;   ///< Optional configured friendly label, assigned by the app rather than the collector.
 
     logger::telem_raid::arrayT m_sample; ///< Current numeric assessment; index is unassigned by the collector.
 };
@@ -48,9 +50,18 @@ struct raidSnapshotT
 inline raidSnapshotT parseMdstat( const std::string &text /**< [in] complete synthetic or collected mdstat text */,
                                   double             checkTime /**< [in] Unix time of this collection attempt */ );
 
-/// Read at most one MiB from the supplied mdstat path, without invoking a command or writing to MD.
-inline raidSnapshotT checkRAID( const std::string &path /**< [in] mdstat file path, normally /proc/mdstat */,
-                                double             checkTime /**< [in] Unix time of this collection attempt */ );
+/// Normalize a nonzero sysfs UUID from dashed or compact hex; return empty for invalid or mdadm-colon input.
+inline std::string
+raidUUID( const std::string &text /**< [in] UUID in kernel byte order, with optional outer whitespace */ );
+
+/// Read bounded mdstat text and optionally require a unique sysfs UUID for every discovered array.
+/** An empty sysBlockRoot preserves mdstat-only discovery. A supplied root enables strict identity collection:
+ * any unavailable or invalid UUID rejects the entire snapshot without returning a partial array inventory.
+ */
+inline raidSnapshotT
+checkRAID( const std::string &path /**< [in] mdstat file path, normally /proc/mdstat */,
+           double             checkTime /**< [in] Unix time of this collection attempt */,
+           const std::string &sysBlockRoot = "" /**< [in] optional sysfs block root, normally /sys/block */ );
 
 namespace raidDetail
 {
@@ -60,6 +71,11 @@ constexpr size_t textLimit = 1024 * 1024;
 
 /// Bound array cardinality and redundancy maps independently of the input-byte limit.
 constexpr unsigned countLimit = 65536;
+
+/// Read bounded text without opening a command or blocking on a synthetic FIFO; return zero or an errno value.
+inline int readText( std::string       &text /**< [out] collected text, possibly partial on error */,
+                     const std::string &path /**< [in] read-only diagnostic source */,
+                     size_t             limit /**< [in] maximum accepted bytes */ );
 
 /// Split one line on whitespace, keeping member flags and bracketed summaries intact.
 inline std::vector<std::string> words( const std::string &line /**< [in] source line */ );
@@ -83,6 +99,44 @@ inline std::string maintenance( const std::vector<std::string> &tokens /**< [in]
 /// Parse one framed array block, returning false for incomplete or inconsistent health evidence.
 inline bool array( raidArrayT                                  &result /**< [out] array assessment */,
                    const std::vector<std::vector<std::string>> &lines /**< [in] header and continuation tokens */ );
+
+inline int readText( std::string &text, const std::string &path, size_t limit )
+{
+    text.clear();
+    const int fd = open( path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK );
+
+    if( fd < 0 )
+    {
+        return errno;
+    }
+
+    char buffer[4096];
+
+    for( ;; )
+    {
+        const auto count = read( fd, buffer, sizeof( buffer ) );
+
+        if( count < 0 && errno == EINTR )
+        {
+            continue;
+        }
+
+        if( count < 0 || static_cast<size_t>( count ) > limit - text.size() )
+        {
+            const int error = count < 0 ? errno : EFBIG;
+            close( fd );
+            return error;
+        }
+
+        if( count == 0 )
+        {
+            close( fd );
+            return 0;
+        }
+
+        text.append( buffer, count );
+    }
+}
 
 inline std::vector<std::string> words( const std::string &line )
 {
@@ -567,17 +621,73 @@ inline raidSnapshotT parseMdstat( const std::string &text, double checkTime )
     return result;
 }
 
-inline raidSnapshotT checkRAID( const std::string &path, double checkTime )
+inline std::string raidUUID( const std::string &text )
+{
+    const auto first = text.find_first_not_of( " \t\r\n\f\v" );
+
+    if( first == std::string::npos )
+    {
+        return {};
+    }
+
+    const auto size = text.find_last_not_of( " \t\r\n\f\v" ) - first + 1;
+
+    if( size != 32 && size != 36 )
+    {
+        return {};
+    }
+
+    std::string hex;
+    hex.reserve( 32 );
+
+    for( size_t n = 0; n < size; ++n )
+    {
+        char value = text[first + n];
+
+        if( size == 36 && ( n == 8 || n == 13 || n == 18 || n == 23 ) )
+        {
+            if( value != '-' )
+            {
+                return {};
+            }
+
+            continue;
+        }
+
+        if( value >= 'A' && value <= 'F' )
+        {
+            value += 'a' - 'A';
+        }
+
+        if( !( ( value >= '0' && value <= '9' ) || ( value >= 'a' && value <= 'f' ) ) )
+        {
+            return {};
+        }
+
+        hex += value;
+    }
+
+    if( hex.find_first_not_of( '0' ) == std::string::npos )
+    {
+        return {};
+    }
+
+    return hex.substr( 0, 8 ) + '-' + hex.substr( 8, 4 ) + '-' + hex.substr( 12, 4 ) + '-' + hex.substr( 16, 4 ) + '-' +
+           hex.substr( 20 );
+}
+
+inline raidSnapshotT checkRAID( const std::string &path, double checkTime, const std::string &sysBlockRoot )
 {
     raidSnapshotT result;
     result.m_checkTime = checkTime;
     result.m_result    = logger::telem_raid::ReadError;
     result.m_status    = "cannot read mdstat";
-    const int fd       = open( path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK );
+    std::string text;
+    const int   error = raidDetail::readText( text, path, raidDetail::textLimit );
 
-    if( fd < 0 )
+    if( error )
     {
-        if( errno == ENOENT )
+        if( error == ENOENT )
         {
             result.m_result = logger::telem_raid::NotPresent;
             result.m_status = "mdstat not present";
@@ -586,32 +696,46 @@ inline raidSnapshotT checkRAID( const std::string &path, double checkTime )
         return result;
     }
 
-    std::string text;
-    char        buffer[4096];
+    result = parseMdstat( text, checkTime );
 
-    for( ;; )
+    if( result.m_result != logger::telem_raid::Ready || sysBlockRoot.empty() )
     {
-        const auto count = read( fd, buffer, sizeof( buffer ) );
+        return result;
+    }
 
-        if( count < 0 && errno == EINTR )
-        {
-            continue;
-        }
+    std::set<std::string> identities;
 
-        if( count < 0 || static_cast<size_t>( count ) > raidDetail::textLimit - text.size() )
+    for( auto &array : result.m_arrays )
+    {
+        if( array.m_name == "." || array.m_name == ".." || array.m_name.find( '/' ) != std::string::npos ||
+            !raidDetail::identifier( array.m_name ) )
         {
-            close( fd );
+            result.m_result = logger::telem_raid::ParseError;
+            result.m_status = "unsafe array name for UUID lookup: " + array.m_name;
+            result.m_arrays.clear();
             return result;
         }
 
-        if( count == 0 )
+        if( raidDetail::readText( text, sysBlockRoot + '/' + array.m_name + "/md/uuid", 256 ) )
         {
-            close( fd );
-            return parseMdstat( text, checkTime );
+            result.m_result = logger::telem_raid::ReadError;
+            result.m_status = "cannot read UUID for " + array.m_name;
+            result.m_arrays.clear();
+            return result;
         }
 
-        text.append( buffer, count );
+        array.m_uuid = raidUUID( text );
+
+        if( array.m_uuid.empty() || !identities.insert( array.m_uuid ).second )
+        {
+            result.m_result = logger::telem_raid::ParseError;
+            result.m_status = ( array.m_uuid.empty() ? "invalid UUID for " : "duplicate UUID for " ) + array.m_name;
+            result.m_arrays.clear();
+            return result;
+        }
     }
+
+    return result;
 }
 
 } // namespace sysMonitorDetail

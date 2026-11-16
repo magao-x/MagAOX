@@ -187,6 +187,9 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
     /// Enable automatic discovery of Linux MD arrays.
     bool m_raidEnabled{ true };
 
+    /// Required array UUIDs keyed by configured labels; nonempty enables UUID-based discovery.
+    std::map<std::string, std::string> m_raidExpected;
+
     /// Minimum time between MD status reads, in seconds.
     double m_raidInterval{ 5 };
 
@@ -195,7 +198,7 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
 
     bool m_raidPolled{ false }; ///< Whether the first RAID read has occurred.
 
-    /// Current arrays, including unavailable previously discovered names, in stable index order.
+    /// Configured and discovered arrays, including unavailable identities, in stable index order.
     std::vector<sysMonitorDetail::raidArrayT> m_raids;
 
     /// Last recorded compact array values for change suppression.
@@ -255,7 +258,7 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
     /// Read MD status; virtual so tests can inject snapshots without accessing hardware.
     virtual sysMonitorDetail::raidSnapshotT queryRAID( double checkTime /**< [in] actual read time */ );
 
-    /// Merge discovery results while retaining unavailable names and stable telemetry indices.
+    /// Merge discovery results by UUID when configured, retaining unavailable identities and stable indices.
     void acceptRAIDResult( const sysMonitorDetail::raidSnapshotT &result /**< [in] current read outcome */ );
 
     /// Report whether collection failed or any observed array needs operator attention.
@@ -724,7 +727,7 @@ void sysMonitor::setupConfig()
                 "interval",
                 false,
                 "double",
-                "RAID polling interval in seconds (default 5)." );
+                "RAID polling interval in seconds (default 5). Expected UUIDs use [raid.NAME] sections." );
 
     TELEMETER_SETUP_CONFIG( config );
 }
@@ -2200,11 +2203,33 @@ inline int sysMonitor::loadDiagnosticsConfig( mx::app::appConfigurator &cfg )
     }
 
     m_irqRules.clear();
+    m_raidExpected.clear();
+    std::set<std::string>    raidUUIDs;
     std::vector<std::string> sections;
     cfg.unusedSections( sections );
 
     for( const auto &section : sections )
     {
+        if( section.compare( 0, 5, "raid." ) == 0 )
+        {
+            const auto  label = section.substr( 5 );
+            std::string uuid;
+            cfg.configUnused( uuid, mx::app::iniFile::makeKey( section, "uuid" ) );
+            uuid = sysMonitorDetail::raidUUID( uuid );
+
+            if( label.empty() ||
+                label.find_first_not_of( "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" ) !=
+                    std::string::npos ||
+                uuid.empty() || !raidUUIDs.insert( uuid ).second )
+            {
+                return log<software_critical, -1>(
+                    { __FILE__, __LINE__, "Invalid RAID label or invalid/duplicate sysfs UUID in " + section } );
+            }
+
+            m_raidExpected.emplace( label, uuid );
+            continue;
+        }
+
         if( section.compare( 0, 4, "irq." ) != 0 )
         {
             continue;
@@ -2722,6 +2747,20 @@ inline int sysMonitor::startupRAID()
 {
     m_raidStatus  = m_raidEnabled ? telem_raid::Unchecked : telem_raid::Disabled;
     m_raidMessage = m_raidEnabled ? "unchecked" : "disabled";
+
+    for( const auto &[label, uuid] : m_raidExpected )
+    {
+        sysMonitorDetail::raidArrayT array;
+        array.m_label          = label;
+        array.m_uuid           = uuid;
+        array.m_status         = m_raidMessage;
+        array.m_sample.m_index = m_raids.size();
+        log<text_log>( "RAID expectation: index=" + std::to_string( array.m_sample.m_index ) + " label=" + label +
+                           " uuid=" + uuid,
+                       logPrio::LOG_NOTICE );
+        m_raids.push_back( std::move( array ) );
+    }
+
     REG_INDI_NEWPROP_NOCB( m_indiP_raidStatus, "raid_status", pcf::IndiProperty::Text );
     m_indiP_raidStatus.add( pcf::IndiElement( "summary", m_raidMessage ) );
 
@@ -2742,12 +2781,12 @@ inline int sysMonitor::startupRAID()
 
 inline sysMonitorDetail::raidSnapshotT sysMonitor::queryRAID( double checkTime )
 {
-    return sysMonitorDetail::checkRAID( "/proc/mdstat", checkTime );
+    return sysMonitorDetail::checkRAID( "/proc/mdstat", checkTime, m_raidExpected.empty() ? "" : "/sys/block" );
 }
 
 inline bool sysMonitor::raidWarning() const
 {
-    if( !m_raidEnabled )
+    if( !m_raidEnabled || m_raidStatus == telem_raid::Unchecked )
     {
         return false;
     }
@@ -2764,6 +2803,7 @@ inline bool sysMonitor::raidWarning() const
 inline void sysMonitor::acceptRAIDResult( const sysMonitorDetail::raidSnapshotT &result )
 {
     std::vector<sysMonitorDetail::raidArrayT> arrays;
+    const bool                                byUUID = !m_raidExpected.empty();
 
     if( result.m_result == telem_raid::Ready )
     {
@@ -2772,18 +2812,25 @@ inline void sysMonitor::acceptRAIDResult( const sysMonitorDetail::raidSnapshotT 
 
         for( auto &array : arrays )
         {
-            const auto old         = std::find_if( m_raids.begin(),
-                                           m_raids.end(),
-                                           [&]( const auto &value )
-                                           {
-                                               return value.m_name == array.m_name;
-                                           } );
+            const auto old =
+                std::find_if( m_raids.begin(),
+                              m_raids.end(),
+                              [&]( const auto &value )
+                              {
+                                  return byUUID ? value.m_uuid == array.m_uuid : value.m_name == array.m_name;
+                              } );
             array.m_sample.m_index = old == m_raids.end() ? nextIndex++ : old->m_sample.m_index;
 
-            if( old == m_raids.end() || old->m_level != array.m_level )
+            if( old != m_raids.end() )
+            {
+                array.m_label = old->m_label;
+            }
+
+            if( old == m_raids.end() || old->m_name != array.m_name || old->m_level != array.m_level )
             {
                 log<text_log>( "RAID mapping: index=" + std::to_string( array.m_sample.m_index ) +
-                                   " name=" + array.m_name + " level=" + array.m_level,
+                                   " name=" + array.m_name + " level=" + array.m_level +
+                                   ( byUUID ? " uuid=" + array.m_uuid + " label=" + array.m_label : "" ),
                                logPrio::LOG_NOTICE );
             }
         }
@@ -2795,13 +2842,20 @@ inline void sysMonitor::acceptRAIDResult( const sysMonitorDetail::raidSnapshotT 
                           arrays.end(),
                           [&]( const auto &value )
                           {
-                              return value.m_name == old.m_name;
+                              return value.m_sample.m_index == old.m_sample.m_index;
                           } ) )
         {
             auto       missing = old;
             const bool absent  = result.m_result == telem_raid::Ready || result.m_result == telem_raid::NotPresent;
             missing.m_status   = absent ? "missing" : "unavailable";
             missing.m_members.clear();
+
+            if( byUUID )
+            {
+                missing.m_name.clear();
+                missing.m_level.clear();
+            }
+
             missing.m_sample = { old.m_sample.m_index, absent ? telem_raid::Missing : 0U, 0, 0 };
             arrays.push_back( std::move( missing ) );
         }
@@ -2820,14 +2874,21 @@ inline void sysMonitor::acceptRAIDResult( const sysMonitorDetail::raidSnapshotT 
                                        m_raids.end(),
                                        [&]( const auto &value )
                                        {
-                                           return value.m_name == array.m_name;
+                                           return value.m_sample.m_index == array.m_sample.m_index;
                                        } );
         const bool warning = !( array.m_sample.m_flags & telem_raid::OK );
 
         if( old == m_raids.end() || old->m_status != array.m_status || !( old->m_sample == array.m_sample ) ||
             ( warning && old->m_members != array.m_members ) )
         {
-            std::string message = "RAID " + array.m_name + ": " + array.m_status;
+            const auto &identity =
+                !array.m_label.empty() ? array.m_label : ( !array.m_name.empty() ? array.m_name : array.m_uuid );
+            std::string message = "RAID " + identity + ": " + array.m_status;
+
+            if( byUUID )
+            {
+                message += "; uuid=" + array.m_uuid + " name=" + array.m_name;
+            }
 
             if( warning )
             {
@@ -2870,7 +2931,8 @@ inline int sysMonitor::publishRAID()
             number.setPerm( pcf::IndiProperty::ReadOnly );
             number.setState( INDI_IDLE );
 
-            for( const auto &name : { "valid", "ok", "degraded", "expected", "active", "flags", "check_time" } )
+            for( const auto &name :
+                 { "valid", "ok", "degraded", "expected", "active", "flags", "check_time", "configured" } )
             {
                 number.add( pcf::IndiElement( name, 0.0 ) );
             }
@@ -2884,6 +2946,8 @@ inline int sysMonitor::publishRAID()
             info.add( pcf::IndiElement( "name", array.m_name ) );
             info.add( pcf::IndiElement( "level", array.m_level ) );
             info.add( pcf::IndiElement( "status", array.m_status ) );
+            info.add( pcf::IndiElement( "uuid", array.m_uuid ) );
+            info.add( pcf::IndiElement( "label", array.m_label ) );
 
             if( registerIndiPropertyNew( number, nullptr ) < 0 || registerIndiPropertyNew( info, nullptr ) < 0 )
             {
@@ -2898,20 +2962,24 @@ inline int sysMonitor::publishRAID()
         }
 
         const auto flags = array.m_sample.m_flags;
-        const auto state = !m_raidEnabled ? INDI_IDLE : ( flags & telem_raid::OK ? INDI_OK : INDI_ALERT );
-        updateIfChanged<double>( m_raidProperties.at( key ),
-                                 { "valid", "ok", "degraded", "expected", "active", "flags", "check_time" },
-                                 { double( bool( flags & telem_raid::Valid ) ),
-                                   double( bool( flags & telem_raid::OK ) ),
-                                   double( bool( flags & telem_raid::Degraded ) ),
-                                   double( array.m_sample.m_expected ),
-                                   double( array.m_sample.m_active ),
-                                   double( flags ),
-                                   m_raidCheckTime },
-                                 state );
+        const auto state = !m_raidEnabled || m_raidStatus == telem_raid::Unchecked
+                               ? INDI_IDLE
+                               : ( flags & telem_raid::OK ? INDI_OK : INDI_ALERT );
+        updateIfChanged<double>(
+            m_raidProperties.at( key ),
+            { "valid", "ok", "degraded", "expected", "active", "flags", "check_time", "configured" },
+            { double( bool( flags & telem_raid::Valid ) ),
+              double( bool( flags & telem_raid::OK ) ),
+              double( bool( flags & telem_raid::Degraded ) ),
+              double( array.m_sample.m_expected ),
+              double( array.m_sample.m_active ),
+              double( flags ),
+              m_raidCheckTime,
+              double( !array.m_label.empty() ) },
+            state );
         updateIfChanged<std::string>( m_raidInfoProperties.at( key ),
-                                      { "name", "level", "status" },
-                                      { array.m_name, array.m_level, array.m_status },
+                                      { "name", "level", "status", "uuid", "label" },
+                                      { array.m_name, array.m_level, array.m_status, array.m_uuid, array.m_label },
                                       state );
     }
 
