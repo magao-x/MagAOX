@@ -473,3 +473,29 @@ The operator must still run SDK/optimized/SDK comparisons on the RTC using
 keeping staging, readers and IRQ placement fixed.
 No default change is proposed before that comparison. A helper-thread trial
 is a separate next phase only if further improvement is worthwhile.
+
+
+### Affected files
+
+- `apps/ocam2KCtrl/ocam2KCtrl.hpp`: configuration, INDI request/status,
+  preparation, frame-boundary dispatch and lifecycle invalidation.
+- `apps/ocam2KCtrl/ocamDescrambler.hpp`: compact mapping and validated
+  single-core bin2 kernel.
+- `apps/ocam2KCtrl/Makefile`: helper header dependency.
+- `apps/ocam2KCtrl/benchmarks/ocamDescramble_bench.cpp`, `Makefile`, and
+  `.gitignore`: standalone comparison and build-output handling.
+- `apps/ocam2KCtrl/tests/ocamDescrambleFixture.hpp`,
+  `ocamDescrambler_test.cpp`, and `ocam2KCtrl_descramble_test.cpp`: deterministic
+  mapping fixture, real-SDK equivalence and application regression coverage.
+- `tests/Makefile.one`, `tests/tests.list`, and `tests/groups.dox`: isolated
+  SDK linkage, test registration and application-unit-test documentation.
+- `apps/ocam2KCtrl/doc/descramble-comparison.md`: configuration, status,
+  operator RTC comparison and offline reproduction instructions.
+- `agents/plans/2026-11/ocam_descramble.md`: approved decisions and execution
+  evidence, preserving the original task text above the agent section.
+
+Full-file declaration/member documentation review covered the touched C/C++
+files, including correction of the existing Y-bin description without changing
+its behavior. Functional changes, operator documentation, and formatting are
+kept in separate commits. The plan's original protected template text has four
+pre-existing trailing-whitespace lines; these are deliberately preserved.

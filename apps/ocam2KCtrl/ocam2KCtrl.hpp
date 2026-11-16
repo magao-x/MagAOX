@@ -179,7 +179,7 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     unsigned m_digitalBinX{ 1 }; ///< Digital x-binning factor applied after descrambling.
 
-    unsigned m_digitalBinY{ 1 }; ///< Digital y-binning factor applied after descrambling.
+    unsigned m_digitalBinY{ 1 }; ///< Output-height divisor when digital binning is active; no Y aggregation is performed.
 
     bool m_digitalBin{ false }; ///< Indicates whether post-descramble digital binning is active for the current mode.
 
@@ -429,7 +429,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     int setEMGainOff();
 
     /// Implementation of the framegrabber configureAcquisition interface
-    /** Sends the mode command over serial, sets the FPS, and initializes the OCAM SDK.
+    /** Sends the mode command over serial, sets the FPS, initializes the SDK and prepares the optional bin2 map.
      *
      * \returns 0 on success
      * \returns -1 on error
@@ -460,10 +460,11 @@ class ocam2KCtrl : public MagAOXApp<>,
     int acquireAndCheckValid();
 
     /// Implementation of the framegrabber loadImageIntoStream interface
-    /** Conducts the OCAM descramble.
+    /** Latches one requested implementation for the whole frame, falls back to the SDK when unavailable, and
+     * preserves the existing digital X-sample selection. Publishes the applied-method snapshot after loading;
+     * frameGrabber performs any staging copy and stream publication afterward.
      *
-     * \returns 0 on success
-     * \returns -1 on error
+     * \returns 0 after conversion.
      */
     int loadImageIntoStream( void *dest /**< [out] Destination image buffer. */ );
 
