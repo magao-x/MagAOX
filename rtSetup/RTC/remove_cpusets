@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 ## \file remove_cpusets
-## \brief Remove empty RTC real-time cpusets before rebuilding names or CPU assignments.
+## \brief Remove empty RTC or ICC cpusets before rebuilding names or CPU assignments.
 #
 # Stop instrument workloads before running. The initial preflight changes nothing
 # if any owned cpuset is occupied. A concurrent restart can still interrupt an
@@ -14,25 +14,34 @@ import subprocess
 import sys
 
 
-# Include retired names so an installed replacement make_cpusets can remove them.
+# Keep retired names separate by role so cleanup never claims another host's sets.
 LEGACY_NAMES = {
-    "camwfs_sw", "camwfs", "camwfs2", "spare35", "spare36", "dm00comb",
-    "woofer", "dm01comb", "tweeter", "t2w", "spare42", "spare43", "spare44",
-    "acqu_mvm", "mfilt", "tweeterSpeck", "mlat", "RTmon", "spare50", "spare51",
-    "spare52", "spare53", "camtip", "camtip_sw", "camacq", "camacq_sw",
-    "shmimTCP", "spare59", "spare60", "spare61", "spare62", "spare63",
-    "spare56", "spare57",
+    "RTC": {
+        "camwfs_sw", "camwfs", "camwfs2", "spare35", "spare36", "dm00comb",
+        "woofer", "dm01comb", "tweeter", "t2w", "spare42", "spare43", "spare44",
+        "acqu_mvm", "mfilt", "tweeterSpeck", "mlat", "RTmon", "spare50", "spare51",
+        "spare52", "spare53", "camtip", "camtip_sw", "camacq", "camacq_sw",
+        "shmimTCP", "spare59", "spare60", "spare61", "spare62", "spare63",
+        "spare56", "spare57",
+    },
+    "ICC": {"spare44", "mfilt", "spare47", "spare55", "spare56", "spare57", "spare61"},
 }
 
 
 def allowed_names(setup_script):
-    """Read literal cpuset directory names from the sibling setup script."""
+    """Combine sibling setup declarations with retired names for its explicit role."""
     names = set()
+    setup = setup_script.read_text()
+    roles = [role.strip() for role in re.findall(r"^# cpuset-role:(.*)$", setup, re.MULTILINE)]
+
+    if len(roles) != 1 or roles[0] not in LEGACY_NAMES:
+        raise RuntimeError(f"Expected exactly one known cpuset-role marker in {setup_script}")
+
     directory = re.compile(
         r'^\s*mkdir\s+-p\s+(?:"\$cpusetMount/([\w.-]+)"|\$cpusetMount/([\w.-]+))\s*$'
     )
 
-    for line in setup_script.read_text().splitlines():
+    for line in setup.splitlines():
         if "mkdir" not in line or "$cpusetMount/" not in line:
             continue
 
@@ -44,9 +53,9 @@ def allowed_names(setup_script):
         names.add(match.group(1) or match.group(2))
 
     if "system" not in names or len(names) < 2:
-        raise RuntimeError(f"No complete RTC cpuset declarations found in {setup_script}")
+        raise RuntimeError(f"No complete {roles[0]} cpuset declarations found in {setup_script}")
 
-    return (names | LEGACY_NAMES) - {"system"}
+    return (names | LEGACY_NAMES[roles[0]]) - {"system"}
 
 
 def configured_mountpoint():
@@ -163,7 +172,7 @@ def require_empty(directories):
 def main():
     """Preview removals, or apply them only after a complete empty-tree preflight."""
     parser = argparse.ArgumentParser(
-        description="Remove empty RTC cpusets after stopping instrument processes. "
+        description="Remove empty RTC or ICC cpusets after stopping instrument processes. "
                     "Preserve the root and system cpuset. Default: dry run."
     )
     mode = parser.add_mutually_exclusive_group()
@@ -174,7 +183,9 @@ def main():
     if arguments.apply and os.geteuid() != 0:
         raise RuntimeError("--apply requires root")
 
-    names = allowed_names(Path(__file__).resolve().with_name("make_cpusets"))
+    # Select the invoked role's sibling before resolving a shared source symlink.
+    # Installed /usr/local/bin links likewise select their installed make_cpusets.
+    names = allowed_names(Path(__file__).absolute().with_name("make_cpusets").resolve(strict=True))
     mountpoint = configured_mountpoint()
     directories = removal_plan(mountpoint, names, mount_records())
     require_empty(directories)

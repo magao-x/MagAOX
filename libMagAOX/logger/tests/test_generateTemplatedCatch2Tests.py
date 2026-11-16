@@ -70,6 +70,36 @@ class GeneratorTests(unittest.TestCase):
         fields = generator.getMessageFieldInfo([0], lines, (("frame", "uint"), ("valid", "bool")), {}, "example")
         self.assertEqual([field["name"] for field in fields[0]], ["frame", "valid"])
 
+    def test_gpu_table_vectors_use_decoder_and_preserve_times(self):
+        """GPU table-vector fixtures compare compact state plus acquisition times."""
+        template = generator.jinja2.Environment().from_string(
+            (pathlib.Path(__file__).parent / "catch2TestTemplate.jinja2").read_text())
+        for log_name, field_name, aggregate, time_field in (
+                ("telem_gpu", "gpus", "gpuT", "m_sampleTime"),):
+            with self.subTest(log=log_name):
+                info = generator.makeTestInfoDict(
+                    str(pathlib.Path(__file__).parent / f"../types/{log_name}.hpp"), {})
+                self.assertEqual(len(info["messageTypes"]), 1)
+                field = next(f for f in info["messageTypes"][0] if f["name"] == field_name)
+                self.assertEqual(field["type"], f"std::vector<MagAOX::logger::{log_name}::{aggregate}>")
+                self.assertEqual(field["decoder"], field_name)
+                self.assertEqual(field["testVal"], generator.gTestFixtures[log_name][field_name])
+                checks = generator.makeFieldAssertions(field, "actual", "expected")
+                self.assertIn(f"    REQUIRE(actual[i].{time_field} == expected[i].{time_field});", checks)
+                rendered = template.render(**info, makeFieldAssertions=generator.makeFieldAssertions)
+                self.assertIn(f"m_{field_name} = MagAOX::logger::{log_name}::{field_name}(buffPtr);", rendered)
+                self.assertNotIn(f"m_{field_name}.push_back", rendered)
+
+    def test_compact_irq_fields_skip_legacy_groups(self):
+        """Compact constructor fields map by name after the legacy schema slot."""
+        info = generator.makeTestInfoDict(str(pathlib.Path(__file__).parent / "../types/telem_irq.hpp"), {})
+        self.assertEqual(len(info["messageTypes"]), 1)
+        fields = {field["name"]: field for field in info["messageTypes"][0]}
+        self.assertEqual(list(fields), ["ok", "checkTime"])
+        self.assertEqual(fields["ok"]["schemaName"], "ok")
+        self.assertEqual(fields["ok"]["testVal"], "{1, 0, 1}")
+        self.assertEqual(fields["checkTime"]["schemaName"], "check_time")
+
 
 if __name__ == "__main__":
     unittest.main()

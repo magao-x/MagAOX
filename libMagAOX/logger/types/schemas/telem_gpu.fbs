@@ -1,0 +1,32 @@
+/// \file telem_gpu.fbs
+/// \brief Indexed GPU measurements with per-field validity and acquisition times.
+namespace MagAOX.logger;
+
+// valid bits, in field order: temperature, load, memory_load, memory_used,
+// memory_total, clock_graphics, clock_sm, clock_memory. Unset bits invalidate
+// the associated numeric values, which may retain older measurements.
+table Gpu_sample_fb
+{
+    uuid:string; // Legacy records only; new records identify the device by index.
+    pci:string;  // Legacy records only; initial discovery and mapping changes log static identity separately.
+    status:string (required);
+    temperature:double;    // Celsius
+    load:double;           // kernel-active fraction, 0..1
+    memory_load:double;    // memory read/write-active fraction, 0..1
+    memory_used:double;    // MiB
+    memory_total:double;   // MiB
+    clock_graphics:double; // MHz
+    clock_sm:double;       // MHz
+    clock_memory:double;   // MHz
+    valid:uint;
+    sample_time:double;    // Unix UTC seconds of the last successful query
+    index:uint = 4294967295; // NVIDIA device index; unknown in records written before this field existed
+}
+
+table Telem_gpu_fb
+{
+    status:string (required);
+    gpus:[Gpu_sample_fb];
+}
+
+root_type Telem_gpu_fb;
