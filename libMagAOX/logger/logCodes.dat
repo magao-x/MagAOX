@@ -75,6 +75,7 @@ telem_drivetemps         20827    telem_drivetemps
 telem_usage              20828    telem_usage
 telem_gpu                20829    telem_gpu
 telem_irq                20830    telem_irq
+telem_raid               20831    telem_raid
 
 telem_cooler             20850    telem_cooler
 

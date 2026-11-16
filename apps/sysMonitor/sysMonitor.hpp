@@ -1,5 +1,5 @@
 /** \file sysMonitor.hpp
- * \brief Publish and telemeter host diagnostics, GPU measurements, and IRQ placement.
+ * \brief Publish and telemeter host diagnostics, GPU measurements, IRQ placement, and RAID health.
  *
  * To view logdump files: logdump -f sysMonitor
  *
@@ -21,6 +21,7 @@
 #include "../../libMagAOX/sys/boundedCommand.hpp"
 #include "gpuMonitor.hpp"
 #include "irqMonitor.hpp"
+#include "raidMonitor.hpp"
 
 #include <iostream>
 #include <string>
@@ -123,7 +124,7 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
     /** \returns 0 on completion. */
     int updateVals();
 
-    /** \name GPU and IRQ Diagnostics - Data
+    /** \name System Diagnostics - Data
      * @{ */
 
     /// Whether the optional NVIDIA collector is enabled.
@@ -183,9 +184,41 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
     /// Overall GPU state and per-rule IRQ state exposed to operators.
     pcf::IndiProperty m_indiP_gpuStatus, m_indiP_irqStatus, m_indiP_irqWarning;
 
+    /// Enable automatic discovery of Linux MD arrays.
+    bool m_raidEnabled{ true };
+
+    /// Minimum time between MD status reads, in seconds.
+    double m_raidInterval{ 5 };
+
+    /// Last read start and whether any RAID read has been attempted.
+    std::chrono::steady_clock::time_point m_lastRAIDPoll{};
+
+    bool m_raidPolled{ false }; ///< Whether the first RAID read has occurred.
+
+    /// Current arrays, including unavailable previously discovered names, in stable index order.
+    std::vector<sysMonitorDetail::raidArrayT> m_raids;
+
+    /// Last recorded compact array values for change suppression.
+    std::vector<telem_raid::arrayT> m_lastRAIDs;
+
+    /// Current and last recorded collector states.
+    uint8_t m_raidStatus{ telem_raid::Unchecked }, m_lastRAIDStatus{ telem_raid::Unchecked };
+
+    std::string m_raidMessage{ "unchecked" }; ///< Human-readable aggregate collection result.
+
+    double m_raidCheckTime{ 0 }; ///< Actual time of the latest read attempt, retained on forced records.
+
+    bool m_raidRecorded{ false }; ///< Whether this instance has emitted RAID telemetry.
+
+    /// Stable storage for dynamically discovered array measurements and identification.
+    std::map<std::string, pcf::IndiProperty> m_raidProperties, m_raidInfoProperties;
+
+    /// Overall collection status and operator-warning switch.
+    pcf::IndiProperty m_indiP_raidStatus, m_indiP_raidWarning;
+
     ///@}
 
-    /** \name GPU and IRQ Diagnostics
+    /** \name System Diagnostics
      * @{ */
 
     /// Load and validate optional diagnostic settings and named IRQ sections.
@@ -216,6 +249,24 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
     /// Record first, changed, or explicitly forced IRQ OK flags and the actual check time.
     int recordIRQs( bool force = false /**< [in] record even when values are unchanged */ );
 
+    /// Register aggregate RAID diagnostics before the first discovery read.
+    int startupRAID();
+
+    /// Read MD status; virtual so tests can inject snapshots without accessing hardware.
+    virtual sysMonitorDetail::raidSnapshotT queryRAID( double checkTime /**< [in] actual read time */ );
+
+    /// Merge discovery results while retaining unavailable names and stable telemetry indices.
+    void acceptRAIDResult( const sysMonitorDetail::raidSnapshotT &result /**< [in] current read outcome */ );
+
+    /// Report whether collection failed or any observed array needs operator attention.
+    bool raidWarning() const;
+
+    /// Publish current array measurements, identities, and aggregate status.
+    int publishRAID();
+
+    /// Record first, changed, or forced compact RAID state with its actual check time.
+    int recordRAID( bool force = false /**< [in] record even when values are unchanged */ );
+
     ///@}
 
   public:
@@ -227,7 +278,7 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
     {
     }
 
-    /// Register host thresholds, optional GPU/IRQ diagnostics, and telemeter configuration.
+    /// Register host thresholds, GPU/IRQ/RAID diagnostics, and telemeter configuration.
     virtual void setupConfig();
 
     /// Load and validate host settings, diagnostic policy, and telemetry configuration.
@@ -523,6 +574,9 @@ class sysMonitor : public MagAOXApp<>, public dev::telemeter<sysMonitor>
     /// Force a periodic IRQ record without claiming another check.
     int recordTelem( const telem_irq *unused /**< [in] telemetry type selector */ );
 
+    /// Force a periodic RAID record without claiming another check.
+    int recordTelem( const telem_raid *unused /**< [in] telemetry type selector */ );
+
     /// Record CPU load fractions according to the existing change/force policy.
     int recordCoreLoads( bool force = false /**< [in] emit a record regardless of cached values */ );
 
@@ -653,6 +707,25 @@ void sysMonitor::setupConfig()
                 "double",
                 "Dedicated IRQ checking interval in seconds (default 5). Configure groups in [irq.NAME] sections." );
 
+    config.add( "raid.enabled",
+                "",
+                "raid.enabled",
+                argType::Required,
+                "raid",
+                "enabled",
+                false,
+                "bool",
+                "Enable read-only Linux MD array discovery (default true)." );
+    config.add( "raid.interval",
+                "",
+                "raid.interval",
+                argType::Required,
+                "raid",
+                "interval",
+                false,
+                "double",
+                "RAID polling interval in seconds (default 5)." );
+
     TELEMETER_SETUP_CONFIG( config );
 }
 
@@ -774,7 +847,7 @@ int sysMonitor::appLogic()
 
     if( pollDiagnostics( std::chrono::steady_clock::now() ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "Could not publish GPU/IRQ diagnostics." } );
+        log<software_error>( { __FILE__, __LINE__, "Could not publish system diagnostics." } );
     }
 
     m_coreTemps.clear();
@@ -1839,7 +1912,8 @@ inline int sysMonitor::checkRecordTimes()
                                                     telem_chrony_status(),
                                                     telem_chrony_stats(),
                                                     telem_gpu(),
-                                                    telem_irq() );
+                                                    telem_irq(),
+                                                    telem_raid() );
 }
 
 int sysMonitor::recordTelem( const telem_coreloads * )
@@ -2087,9 +2161,18 @@ inline int sysMonitor::loadDiagnosticsConfig( mx::app::appConfigurator &cfg )
     cfg( m_gpuTimeout, "gpu.timeout" );
     cfg( m_gpuExpected, "gpu.expectedUUIDs" );
     cfg( m_irqInterval, "irq.interval" );
+    cfg( m_raidInterval, "raid.interval" );
+    enabled = m_raidEnabled ? "true" : "false";
+    cfg( enabled, "raid.enabled" );
+
+    if( !parseBoolean( m_raidEnabled, enabled ) )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__, "raid.enabled must be true, false, 1, or 0." } );
+    }
 
     if( !mx::math::isFinite( m_gpuInterval ) || m_gpuInterval <= 0 || !mx::math::isFinite( m_gpuTimeout ) ||
-        m_gpuTimeout <= 0 || !mx::math::isFinite( m_irqInterval ) || m_irqInterval <= 0 )
+        m_gpuTimeout <= 0 || !mx::math::isFinite( m_irqInterval ) || m_irqInterval <= 0 ||
+        !mx::math::isFinite( m_raidInterval ) || m_raidInterval <= 0 )
     {
         return log<software_critical, -1>(
             { __FILE__, __LINE__, "Diagnostic intervals and timeout must be finite and positive." } );
@@ -2163,6 +2246,11 @@ inline int sysMonitor::loadDiagnosticsConfig( mx::app::appConfigurator &cfg )
 
 inline int sysMonitor::startupDiagnostics()
 {
+    if( startupRAID() < 0 )
+    {
+        return -1;
+    }
+
     m_gpuStatus = m_gpuEnabled ? "unchecked" : "disabled";
     REG_INDI_NEWPROP_NOCB( m_indiP_gpuStatus, "gpu_status", pcf::IndiProperty::Text );
     m_indiP_gpuStatus.add( pcf::IndiElement( "status", m_gpuStatus ) );
@@ -2426,6 +2514,19 @@ inline int sysMonitor::pollDiagnostics( std::chrono::steady_clock::time_point no
         recordIRQs();
     }
 
+    const auto raidNow = now + ( std::chrono::steady_clock::now() - entered );
+
+    if( m_raidEnabled &&
+        ( !m_raidPolled || std::chrono::duration<double>( raidNow - m_lastRAIDPoll ).count() >= m_raidInterval ) )
+    {
+        m_raidPolled   = true;
+        m_lastRAIDPoll = raidNow;
+        const double checkTime =
+            std::chrono::duration<double>( std::chrono::system_clock::now().time_since_epoch() ).count();
+        acceptRAIDResult( queryRAID( checkTime ) );
+        recordRAID();
+    }
+
     return publishDiagnostics();
 }
 
@@ -2556,7 +2657,7 @@ inline int sysMonitor::publishDiagnostics()
 
     updateSwitchIfChanged(
         m_indiP_irqWarning, "active", warning ? pcf::IndiElement::On : pcf::IndiElement::Off, state );
-    return 0;
+    return publishRAID();
 }
 
 inline int sysMonitor::recordGPUs( bool force )
@@ -2615,6 +2716,238 @@ inline int sysMonitor::recordTelem( const telem_gpu * )
 inline int sysMonitor::recordTelem( const telem_irq * )
 {
     return recordIRQs( true );
+}
+
+inline int sysMonitor::startupRAID()
+{
+    m_raidStatus  = m_raidEnabled ? telem_raid::Unchecked : telem_raid::Disabled;
+    m_raidMessage = m_raidEnabled ? "unchecked" : "disabled";
+    REG_INDI_NEWPROP_NOCB( m_indiP_raidStatus, "raid_status", pcf::IndiProperty::Text );
+    m_indiP_raidStatus.add( pcf::IndiElement( "summary", m_raidMessage ) );
+
+    if( registerIndiPropertyNew( m_indiP_raidWarning,
+                                 "raid_warning",
+                                 pcf::IndiProperty::Switch,
+                                 pcf::IndiProperty::ReadOnly,
+                                 INDI_IDLE,
+                                 pcf::IndiProperty::AnyOfMany,
+                                 nullptr ) < 0 )
+    {
+        return -1;
+    }
+
+    m_indiP_raidWarning.add( pcf::IndiElement( "active", pcf::IndiElement::Off ) );
+    return 0;
+}
+
+inline sysMonitorDetail::raidSnapshotT sysMonitor::queryRAID( double checkTime )
+{
+    return sysMonitorDetail::checkRAID( "/proc/mdstat", checkTime );
+}
+
+inline bool sysMonitor::raidWarning() const
+{
+    if( !m_raidEnabled )
+    {
+        return false;
+    }
+
+    return m_raidStatus == telem_raid::ReadError || m_raidStatus == telem_raid::ParseError ||
+           std::any_of( m_raids.begin(),
+                        m_raids.end(),
+                        []( const auto &array )
+                        {
+                            return !( array.m_sample.m_flags & telem_raid::OK );
+                        } );
+}
+
+inline void sysMonitor::acceptRAIDResult( const sysMonitorDetail::raidSnapshotT &result )
+{
+    std::vector<sysMonitorDetail::raidArrayT> arrays;
+
+    if( result.m_result == telem_raid::Ready )
+    {
+        arrays             = result.m_arrays;
+        uint32_t nextIndex = m_raids.size();
+
+        for( auto &array : arrays )
+        {
+            const auto old         = std::find_if( m_raids.begin(),
+                                           m_raids.end(),
+                                           [&]( const auto &value )
+                                           {
+                                               return value.m_name == array.m_name;
+                                           } );
+            array.m_sample.m_index = old == m_raids.end() ? nextIndex++ : old->m_sample.m_index;
+
+            if( old == m_raids.end() || old->m_level != array.m_level )
+            {
+                log<text_log>( "RAID mapping: index=" + std::to_string( array.m_sample.m_index ) +
+                                   " name=" + array.m_name + " level=" + array.m_level,
+                               logPrio::LOG_NOTICE );
+            }
+        }
+    }
+
+    for( const auto &old : m_raids )
+    {
+        if( std::none_of( arrays.begin(),
+                          arrays.end(),
+                          [&]( const auto &value )
+                          {
+                              return value.m_name == old.m_name;
+                          } ) )
+        {
+            auto       missing = old;
+            const bool absent  = result.m_result == telem_raid::Ready || result.m_result == telem_raid::NotPresent;
+            missing.m_status   = absent ? "missing" : "unavailable";
+            missing.m_members.clear();
+            missing.m_sample = { old.m_sample.m_index, absent ? telem_raid::Missing : 0U, 0, 0 };
+            arrays.push_back( std::move( missing ) );
+        }
+    }
+
+    std::sort( arrays.begin(),
+               arrays.end(),
+               []( const auto &a, const auto &b )
+               {
+                   return a.m_sample.m_index < b.m_sample.m_index;
+               } );
+
+    for( const auto &array : arrays )
+    {
+        const auto old     = std::find_if( m_raids.begin(),
+                                       m_raids.end(),
+                                       [&]( const auto &value )
+                                       {
+                                           return value.m_name == array.m_name;
+                                       } );
+        const bool warning = !( array.m_sample.m_flags & telem_raid::OK );
+
+        if( old == m_raids.end() || old->m_status != array.m_status || !( old->m_sample == array.m_sample ) ||
+            ( warning && old->m_members != array.m_members ) )
+        {
+            std::string message = "RAID " + array.m_name + ": " + array.m_status;
+
+            if( warning )
+            {
+                message += "; level=" + array.m_level + " active=" + std::to_string( array.m_sample.m_active ) + "/" +
+                           std::to_string( array.m_sample.m_expected ) + " members=" + array.m_members;
+            }
+
+            log<text_log>( message, warning ? logPrio::LOG_WARNING : logPrio::LOG_NOTICE );
+        }
+    }
+
+    const auto oldStatus  = m_raidStatus;
+    const auto oldMessage = m_raidMessage;
+    m_raids               = std::move( arrays );
+    m_raidStatus          = result.m_result;
+    m_raidCheckTime       = result.m_checkTime;
+    m_raidMessage         = result.m_result == telem_raid::Ready
+                                ? ( m_raids.empty() ? "no arrays" : ( raidWarning() ? "warning" : "ok" ) )
+                                : result.m_status;
+
+    if( oldStatus != m_raidStatus || oldMessage != m_raidMessage )
+    {
+        log<text_log>( "RAID monitoring: " + m_raidMessage,
+                       raidWarning() ? logPrio::LOG_WARNING : logPrio::LOG_NOTICE );
+    }
+}
+
+inline int sysMonitor::publishRAID()
+{
+    for( const auto &array : m_raids )
+    {
+        const auto key = "raid_" + std::to_string( array.m_sample.m_index );
+
+        if( m_raidProperties.count( key ) == 0 )
+        {
+            auto &number = m_raidProperties[key];
+            number       = pcf::IndiProperty( pcf::IndiProperty::Number );
+            number.setDevice( m_configName );
+            number.setName( key );
+            number.setPerm( pcf::IndiProperty::ReadOnly );
+            number.setState( INDI_IDLE );
+
+            for( const auto &name : { "valid", "ok", "degraded", "expected", "active", "flags", "check_time" } )
+            {
+                number.add( pcf::IndiElement( name, 0.0 ) );
+            }
+
+            auto &info = m_raidInfoProperties[key];
+            info       = pcf::IndiProperty( pcf::IndiProperty::Text );
+            info.setDevice( m_configName );
+            info.setName( key + "_info" );
+            info.setPerm( pcf::IndiProperty::ReadOnly );
+            info.setState( INDI_IDLE );
+            info.add( pcf::IndiElement( "name", array.m_name ) );
+            info.add( pcf::IndiElement( "level", array.m_level ) );
+            info.add( pcf::IndiElement( "status", array.m_status ) );
+
+            if( registerIndiPropertyNew( number, nullptr ) < 0 || registerIndiPropertyNew( info, nullptr ) < 0 )
+            {
+                return -1;
+            }
+
+            if( m_indiDriver )
+            {
+                m_indiDriver->sendDefProperty( number );
+                m_indiDriver->sendDefProperty( info );
+            }
+        }
+
+        const auto flags = array.m_sample.m_flags;
+        const auto state = !m_raidEnabled ? INDI_IDLE : ( flags & telem_raid::OK ? INDI_OK : INDI_ALERT );
+        updateIfChanged<double>( m_raidProperties.at( key ),
+                                 { "valid", "ok", "degraded", "expected", "active", "flags", "check_time" },
+                                 { double( bool( flags & telem_raid::Valid ) ),
+                                   double( bool( flags & telem_raid::OK ) ),
+                                   double( bool( flags & telem_raid::Degraded ) ),
+                                   double( array.m_sample.m_expected ),
+                                   double( array.m_sample.m_active ),
+                                   double( flags ),
+                                   m_raidCheckTime },
+                                 state );
+        updateIfChanged<std::string>( m_raidInfoProperties.at( key ),
+                                      { "name", "level", "status" },
+                                      { array.m_name, array.m_level, array.m_status },
+                                      state );
+    }
+
+    const bool warning = raidWarning();
+    const auto state   = !m_raidEnabled || m_raidStatus == telem_raid::Unchecked
+                             ? INDI_IDLE
+                             : ( warning ? INDI_ALERT : ( m_raids.empty() ? INDI_IDLE : INDI_OK ) );
+    updateIfChanged( m_indiP_raidStatus, "summary", m_raidMessage, state );
+    updateSwitchIfChanged(
+        m_indiP_raidWarning, "active", warning ? pcf::IndiElement::On : pcf::IndiElement::Off, state );
+    return 0;
+}
+
+inline int sysMonitor::recordRAID( bool force )
+{
+    std::vector<telem_raid::arrayT> arrays;
+
+    for( const auto &array : m_raids )
+    {
+        arrays.push_back( array.m_sample );
+    }
+
+    if( m_raidEnabled && ( !m_raidRecorded || force || m_raidStatus != m_lastRAIDStatus || arrays != m_lastRAIDs ) )
+    {
+        telem<telem_raid>( { m_raidStatus, arrays, m_raidCheckTime } );
+        m_lastRAIDs      = std::move( arrays );
+        m_lastRAIDStatus = m_raidStatus;
+        m_raidRecorded   = true;
+    }
+
+    return 0;
+}
+
+inline int sysMonitor::recordTelem( const telem_raid * )
+{
+    return recordRAID( true );
 }
 
 } //namespace app

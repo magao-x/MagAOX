@@ -53,6 +53,11 @@ gTestFixtures = {
     "telem_irq": {
         "ok": "{1, 0, 1}",
         "checkTime": "1234567890.25"
+    },
+    "telem_raid": {
+        "status": "1",
+        "arrays": "{{0, 35, 2, 2}, {7, 37, 3, 2}}",
+        "checkTime": "1234567890.25"
     }
 }
 
@@ -60,7 +65,9 @@ gTestFixtures = {
 # FlatBuffers struct constructors. Include timestamps omitted by state equality.
 gVectorAdapters = {
     "telem_gpu": {"gpus": {"vectorType": "MagAOX::logger::telem_gpu::gpuT",
-                           "decoder": "gpus", "extraVectorMembers": ["m_sampleTime"]}}
+                           "decoder": "gpus", "extraVectorMembers": ["m_sampleTime"]}},
+    "telem_raid": {"arrays": {"vectorType": "MagAOX::logger::telem_raid::arrayT",
+                              "decoder": "arrays", "extraVectorMembers": []}}
 }
 
 # Check Jinja2 is installed; retain the existing installation fallback.

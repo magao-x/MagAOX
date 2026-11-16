@@ -1,0 +1,21 @@
+// \file telem_raid.fbs
+// \brief Compact indexed software RAID health and actual collection time.
+namespace MagAOX.logger;
+
+// Array names, personalities, and member details are recorded separately on discovery or change.
+struct Raid_array_fb
+{
+    index:uint;
+    flags:uint;    // Valid=1, OK=2, Degraded=4, Missing=8, Inactive=16, Redundant=32, Container=64, Faulty=128.
+    expected:uint; // Meaningful only when Redundant is set; otherwise zero.
+    active:uint;   // Meaningful only when Redundant is set; otherwise zero.
+}
+
+table Telem_raid_fb
+{
+    status:ubyte; // Unchecked=0, Ready=1, ReadError=2, ParseError=3, Disabled=4, NotPresent=5.
+    arrays:[Raid_array_fb] (required);
+    check_time:double; // Unix UTC seconds of the actual collection attempt; zero before any attempt.
+}
+
+root_type Telem_raid_fb;

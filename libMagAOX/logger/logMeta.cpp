@@ -227,6 +227,9 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
     case eventCodes::TELEM_IRQ:
         verified = telem_irq::verify( logBuff, len );
         break;
+    case eventCodes::TELEM_RAID:
+        verified = telem_raid::verify( logBuff, len );
+        break;
     case eventCodes::TELEM_COOLER:
         verified = telem_cooler::verify( logBuff, len );
         break;

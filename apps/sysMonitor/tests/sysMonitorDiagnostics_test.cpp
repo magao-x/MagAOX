@@ -83,10 +83,13 @@ class diagnosticHarness : public sysMonitor
   public:
     std::string                         m_root;                               ///< Owned temporary fixture directory.
     size_t                              m_gpuQueries{ 0 }, m_irqQueries{ 0 }; ///< Number of fake collector invocations.
+    size_t                              m_raidQueries{ 0 };                   ///< Number of fake MD reads.
     MagAOX::sys::boundedCommand::result m_result;                             ///< Next fake command result.
     std::vector<telem_irq::groupT>      m_groups;                             ///< Next fake IRQ snapshot.
+    sysMonitorDetail::raidSnapshotT     m_raidResult;                         ///< Next fake MD snapshot.
 
     using sysMonitor::acceptGPUResult;
+    using sysMonitor::acceptRAIDResult;
     using sysMonitor::config;
     using sysMonitor::loadDiagnosticsConfig;
     using sysMonitor::m_gpuEnabled;
@@ -100,15 +103,23 @@ class diagnosticHarness : public sysMonitor
     using sysMonitor::m_indiNewCallBacks;
     using sysMonitor::m_indiP_irqStatus;
     using sysMonitor::m_indiP_irqWarning;
+    using sysMonitor::m_indiP_raidStatus;
+    using sysMonitor::m_indiP_raidWarning;
     using sysMonitor::m_irqInterval;
     using sysMonitor::m_irqRules;
     using sysMonitor::m_irqs;
     using sysMonitor::m_lastGPUs;
     using sysMonitor::m_lastIRQOK;
+    using sysMonitor::m_raidEnabled;
+    using sysMonitor::m_raidInfoProperties;
+    using sysMonitor::m_raidInterval;
+    using sysMonitor::m_raidProperties;
+    using sysMonitor::m_raids;
     using sysMonitor::pollDiagnostics;
     using sysMonitor::publishDiagnostics;
     using sysMonitor::recordGPUs;
     using sysMonitor::recordIRQs;
+    using sysMonitor::recordRAID;
     using sysMonitor::startupDiagnostics;
 
     /// Prepare private logging and a serialization-only INDI driver.
@@ -122,6 +133,9 @@ class diagnosticHarness : public sysMonitor
 
     /// Supply fake IRQ results without reading proc/sys files.
     std::vector<telem_irq::groupT> queryIRQs( double time /**< [in] wall-clock check time */ ) override;
+
+    /// Supply a fake MD snapshot without reading the host's arrays.
+    sysMonitorDetail::raidSnapshotT queryRAID( double time /**< [in] wall-clock check time */ ) override;
 
     /// Return the local message capture driver.
     diagnosticDriver &driver();
@@ -140,8 +154,9 @@ diagnosticHarness::diagnosticHarness()
 {
     char directory[] = "/tmp/sysmon-diagnostics-XXXXXX";
     REQUIRE( mkdtemp( directory ) != nullptr );
-    m_root       = directory;
-    m_configName = "sysmon-test";
+    m_root        = directory;
+    m_configName  = "sysmon-test";
+    m_raidEnabled = false;
     m_tel.logPath( m_root );
     m_tel.logName( "telemetry" );
     m_tel.logExt( "bintel" );
@@ -192,6 +207,13 @@ std::vector<telem_irq::groupT> diagnosticHarness::queryIRQs( double time )
     }
 
     return m_groups;
+}
+
+sysMonitorDetail::raidSnapshotT diagnosticHarness::queryRAID( double time )
+{
+    ++m_raidQueries;
+    m_raidResult.m_checkTime = time;
+    return m_raidResult;
 }
 
 diagnosticDriver &diagnosticHarness::driver()
@@ -284,6 +306,24 @@ telem_irq::groupT irqGroup( bool warning /**< [in] whether to inject a mismatch 
     group.m_irqs.push_back( { 123, warning ? "0-63" : "45", "45" } );
     return group;
 }
+
+/// Parse a complete synthetic MD inventory for lifecycle tests.
+sysMonitorDetail::raidSnapshotT raidSnapshot( const std::string &body /**< [in] array blocks, or empty */,
+                                              double             time = 100 /**< [in] actual snapshot time */ )
+{
+    auto result =
+        sysMonitorDetail::parseMdstat( "Personalities : [raid1]\n" + body + "unused devices: <none>\n", time );
+    REQUIRE( result.m_result == telem_raid::Ready );
+    return result;
+}
+
+/// Return a two-member RAID1 block with either full or incomplete redundancy.
+std::string raidBlock( const std::string &name /**< [in] kernel array name */,
+                       bool               degraded = false /**< [in] whether the second member is unavailable */ )
+{
+    return name + " : active raid1 sda1[0] sdb1[1]" + ( degraded ? "(F)" : "" ) + "\n 1000 blocks super 1.2 " +
+           ( degraded ? "[2/1] [U_]\n" : "[2/2] [UU]\n" );
+}
 /// \endcond
 
 /// Verify disabled collectors and independent monotonic interval scheduling.
@@ -302,6 +342,7 @@ TEST_CASE( "sysMonitor diagnostics poll only when enabled and due", "[sysMonitor
     REQUIRE( app.pollDiagnostics( epoch ) == 0 );
     REQUIRE( app.m_gpuQueries == 0 );
     REQUIRE( app.m_irqQueries == 0 );
+    REQUIRE( app.m_raidQueries == 0 );
 
     app.m_gpuEnabled = true;
     REQUIRE( app.pollDiagnostics( epoch ) == 0 );
@@ -658,6 +699,8 @@ TEST_CASE( "sysMonitor example configs omit NVIDIA pinning and retain PVCAM iden
     REQUIRE( app.m_gpuEnabled );
     REQUIRE( app.m_gpuInterval == 5 );
     REQUIRE( app.m_gpuTimeout == 2 );
+    REQUIRE( app.m_raidEnabled );
+    REQUIRE( app.m_raidInterval == 5 );
     REQUIRE( app.m_irqRules.size() == ( std::string( file ).find( "RTC" ) != std::string::npos ? 3 : 5 ) );
 
     for( const auto &rule : app.m_irqRules )
@@ -689,8 +732,19 @@ TEST_CASE( "sysMonitor rejects invalid diagnostic intervals", "[sysMonitor][diag
     // clang-format on
     diagnosticHarness app;
     app.setupConfig();
-    app.m_gpuInterval =
+    const auto interval =
         GENERATE( 0.0, -1.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN() );
+    const bool raid = GENERATE( false, true );
+
+    if( raid )
+    {
+        app.m_raidInterval = interval;
+    }
+    else
+    {
+        app.m_gpuInterval = interval;
+    }
+
     REQUIRE( app.loadDiagnosticsConfig( app.config ) < 0 );
 }
 
@@ -707,7 +761,7 @@ TEST_CASE( "sysMonitor warning examples raise and clear via stateRuleEngine", "[
     indiRuleMaps                        rules;
     std::map<std::string, ruleRuleKeys> keys;
     loadRuleConfig( rules, keys, cfg );
-    REQUIRE( rules.rules.size() == 2 );
+    REQUIRE( rules.rules.size() == 5 );
 
     for( const auto &device : { "sysMonRTC", "sysMonICC" } )
     {
@@ -751,16 +805,262 @@ TEST_CASE( "sysMonitor rejects malformed policy booleans", "[sysMonitor][diagnos
     // clang-format on
     diagnosticHarness app;
     app.setupConfig();
-    const auto        setting = GENERATE( "gpu.enabled", "irq.camera.required", "irq.camera.requireEffective" );
-    const std::string key     = setting;
-    const auto        dot     = key.rfind( '.' );
-    const std::string path    = app.m_root + "/invalid.conf";
+    const auto setting =
+        GENERATE( "gpu.enabled", "raid.enabled", "irq.camera.required", "irq.camera.requireEffective" );
+    const std::string key  = setting;
+    const auto        dot  = key.rfind( '.' );
+    const std::string path = app.m_root + "/invalid.conf";
     std::ofstream     file( path );
     file << "[irq.camera]\nmatch=edt\ncpuset=camera\n";
     file << '[' << key.substr( 0, dot ) << "]\n" << key.substr( dot + 1 ) << "=garbage\n";
     file.close();
     REQUIRE( app.config.readConfig( path ) == 0 );
     REQUIRE( app.loadDiagnosticsConfig( app.config ) < 0 );
+}
+
+/// Verify RAID discovery, warning recovery, and independent cadence through the real INDI publisher.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor discovers RAID degradation and lost arrays", "[sysMonitor][diagnostics][raid]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::startupRAID();
+    sysMonitor::pollDiagnostics(std::chrono::steady_clock::time_point{});
+    sysMonitor::acceptRAIDResult(*(sysMonitorDetail::raidSnapshotT *)nullptr);
+    sysMonitor::publishRAID();
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_raidEnabled     = true;
+    app.m_gpuEnabled      = true;
+    app.m_result.m_status = MagAOX::sys::boundedCommand::status::timeout;
+    app.m_raidResult      = raidSnapshot( raidBlock( "md0" ) );
+    REQUIRE( app.startupDiagnostics() == 0 );
+    REQUIRE( app.m_indiP_raidStatus["summary"].get<std::string>() == "unchecked" );
+    const auto epoch = std::chrono::steady_clock::time_point{};
+    REQUIRE( app.pollDiagnostics( epoch ) == 0 );
+    REQUIRE( app.m_raidQueries == 1 );
+    REQUIRE( app.m_gpuQueries == 1 );
+    REQUIRE( app.m_raidProperties.at( "raid_0" ).getPerm() == pcf::IndiProperty::ReadOnly );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["name"].get<std::string>() == "md0" );
+    REQUIRE( app.m_raidProperties.at( "raid_0" )["active"].get<unsigned>() == 2 );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::Off );
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 4 ) ) == 0 );
+    REQUIRE( app.m_raidQueries == 1 );
+    app.driver().m_xml.clear();
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.driver().m_xml.empty() );
+
+    app.m_raidResult = raidSnapshot( raidBlock( "md0", true ) );
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 6 ) ) == 0 );
+    REQUIRE( app.m_raidQueries == 2 );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::On );
+    REQUIRE( app.m_raidProperties.at( "raid_0" )["degraded"].get<unsigned>() == 1 );
+    REQUIRE( app.m_raidProperties.at( "raid_0" )["valid"].get<unsigned>() == 1 );
+    REQUIRE( app.m_raidProperties.at( "raid_0" ).getState() == INDI_ALERT );
+    app.m_raidResult = raidSnapshot( raidBlock( "md0" ) );
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 12 ) ) == 0 );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::Off );
+
+    app.m_raidResult = raidSnapshot( raidBlock( "md1" ) + raidBlock( "md0" ) );
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 18 ) ) == 0 );
+    REQUIRE( app.m_raids.size() == 2 );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_1" )["name"].get<std::string>() == "md1" );
+    app.m_raidResult = raidSnapshot( raidBlock( "md1" ) );
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 24 ) ) == 0 );
+    REQUIRE( app.m_raidInfoProperties.at( "raid_0" )["status"].get<std::string>() == "missing" );
+    REQUIRE( app.m_raidProperties.at( "raid_0" )["valid"].get<unsigned>() == 0 );
+    REQUIRE( app.m_raidProperties.at( "raid_1" )["ok"].get<unsigned>() == 1 );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::On );
+
+    app.m_raidResult = sysMonitorDetail::parseMdstat( "Personalities : [raid1]\n" + raidBlock( "md1" ), 200 );
+    REQUIRE( app.m_raidResult.m_result == telem_raid::ParseError );
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 30 ) ) == 0 );
+    REQUIRE( app.m_raids.size() == 2 );
+    REQUIRE( app.m_raidProperties.at( "raid_1" )["valid"].get<unsigned>() == 0 );
+    app.m_raidResult = raidSnapshot( raidBlock( "md0" ) + raidBlock( "md1" ) );
+    REQUIRE( app.pollDiagnostics( epoch + std::chrono::seconds( 36 ) ) == 0 );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::Off );
+}
+
+/// Verify absence before discovery is benign while failed reads and loss of an observed array warn.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor RAID warnings distinguish no arrays from unknown health", "[sysMonitor][diagnostics][raid]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::acceptRAIDResult(*(sysMonitorDetail::raidSnapshotT *)nullptr);
+    sysMonitor::raidWarning();
+    sysMonitor::publishRAID();
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_raidEnabled = true;
+    REQUIRE( app.startupDiagnostics() == 0 );
+    app.acceptRAIDResult( raidSnapshot( "" ) );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_indiP_raidStatus["summary"].get() == "no arrays" );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::Off );
+    sysMonitorDetail::raidSnapshotT missing;
+    missing.m_result    = telem_raid::NotPresent;
+    missing.m_status    = "MD not present";
+    missing.m_checkTime = 101;
+    app.acceptRAIDResult( missing );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::Off );
+    auto error     = missing;
+    error.m_result = telem_raid::ReadError;
+    error.m_status = "read failed";
+    app.acceptRAIDResult( error );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::On );
+    app.acceptRAIDResult( raidSnapshot( raidBlock( "md0" ) ) );
+    app.acceptRAIDResult( missing );
+    REQUIRE( app.publishDiagnostics() == 0 );
+    REQUIRE( app.m_indiP_raidWarning["active"].getSwitchState() == pcf::IndiElement::On );
+
+    const auto               directory = std::filesystem::read_symlink( "/proc/self/exe" ).parent_path().parent_path();
+    mx::app::appConfigurator cfg;
+    cfg.readConfig( ( directory / "config/sysmon-warning.conf" ).string() );
+    indiRuleMaps                        rules;
+    std::map<std::string, ruleRuleKeys> keys;
+    loadRuleConfig( rules, keys, cfg );
+    REQUIRE( rules.rules.size() == 5 );
+
+    for( const auto &device : { "sysMonRTC", "sysMonICC", "sysMonAOC" } )
+    {
+        auto &property = *rules.props.at( std::string( device ) + ".raid_warning" );
+        property       = app.m_indiP_raidWarning;
+        property.setDevice( device );
+        auto *rule = rules.rules.at( std::string( device ) + "-raid-warning" );
+        REQUIRE( rule->priority() == rulePriority::warning );
+        REQUIRE( rule->value() );
+    }
+
+    app.acceptRAIDResult( raidSnapshot( raidBlock( "md0" ) ) );
+    REQUIRE( app.publishDiagnostics() == 0 );
+
+    for( const auto &device : { "sysMonRTC", "sysMonICC", "sysMonAOC" } )
+    {
+        auto &property = *rules.props.at( std::string( device ) + ".raid_warning" );
+        property       = app.m_indiP_raidWarning;
+        property.setDevice( device );
+        REQUIRE_FALSE( rules.rules.at( std::string( device ) + "-raid-warning" )->value() );
+    }
+}
+
+/// Verify compact RAID records, mapping logs, actual times, and suppression of unchanged fault details.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor records compact RAID state and changed fault logs", "[sysMonitor][diagnostics][raid]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::acceptRAIDResult(*(sysMonitorDetail::raidSnapshotT *)nullptr);
+    sysMonitor::recordRAID(false);
+    sysMonitor::recordTelem((telem_raid *)nullptr);
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_raidEnabled = true;
+    REQUIRE( app.startupDiagnostics() == 0 );
+    app.acceptRAIDResult( raidSnapshot( raidBlock( "md0" ), 100 ) );
+    REQUIRE( app.recordRAID() == 0 );
+    app.acceptRAIDResult( raidSnapshot( raidBlock( "md0" ), 200 ) );
+    telem_raid::lastRecord = {};
+    REQUIRE( app.recordRAID() == 0 );
+    REQUIRE( telem_raid::lastRecord.tv_sec == 0 );
+    REQUIRE( app.recordTelem( static_cast<const telem_raid *>( nullptr ) ) == 0 );
+    app.acceptRAIDResult( raidSnapshot( raidBlock( "md0", true ), 300 ) );
+    REQUIRE( app.recordRAID() == 0 );
+    app.acceptRAIDResult( raidSnapshot( raidBlock( "md0", true ), 400 ) );
+    telem_raid::lastRecord = {};
+    REQUIRE( app.recordRAID() == 0 );
+    REQUIRE( telem_raid::lastRecord.tv_sec == 0 );
+    app.acceptRAIDResult( raidSnapshot( raidBlock( "md0" ), 500 ) );
+    REQUIRE( app.recordRAID() == 0 );
+    const auto records = app.records( true );
+    REQUIRE( records.size() == 4 );
+    const std::vector<double> times{ 100, 200, 300, 500 };
+
+    for( size_t n = 0; n < records.size(); ++n )
+    {
+        auto      *payload = flatlogs::logHeader::messageBuffer( records[n].get() );
+        const auto arrays  = telem_raid::arrays( payload );
+        REQUIRE( arrays.size() == 1 );
+        REQUIRE( arrays[0].m_index == 0 );
+        REQUIRE( arrays[0].m_expected == 2 );
+        REQUIRE( arrays[0].m_active == ( n == 2 ? 1 : 2 ) );
+        REQUIRE( telem_raid::checkTime( payload ) == times[n] );
+        REQUIRE( telem_raid::status( payload ) == telem_raid::Ready );
+    }
+
+    size_t mappings = 0, faults = 0, healthy = 0;
+
+    for( const auto &[priority, message] : app.textLogs() )
+    {
+        if( message.find( "RAID mapping: " ) == 0 )
+        {
+            REQUIRE( message == "RAID mapping: index=0 name=md0 level=raid1" );
+            ++mappings;
+        }
+        else if( message.find( "RAID md0: " ) == 0 )
+        {
+            if( priority == logPrio::LOG_WARNING )
+            {
+                REQUIRE( message.find( "active=1/2" ) != std::string::npos );
+                REQUIRE( message.find( "sdb1[1](F)" ) != std::string::npos );
+                ++faults;
+            }
+            else
+            {
+                REQUIRE( message.find( "members=" ) == std::string::npos );
+                ++healthy;
+            }
+        }
+    }
+
+    REQUIRE( mappings == 1 );
+    REQUIRE( faults == 1 );
+    REQUIRE( healthy == 2 );
+}
+
+/// Record changing fault details only in logs while ignoring maintenance progress percentages.
+/** \ingroup sysMonitor_unit_test */
+TEST_CASE( "sysMonitor RAID maintenance progress does not repeat fault telemetry", "[sysMonitor][diagnostics][raid]" )
+{
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::acceptRAIDResult(*(sysMonitorDetail::raidSnapshotT *)nullptr);
+    sysMonitor::recordRAID(false);
+    #endif
+    // clang-format on
+    diagnosticHarness app;
+    app.m_raidEnabled = true;
+    REQUIRE( app.startupDiagnostics() == 0 );
+    const auto block = raidBlock( "md0", true );
+    app.acceptRAIDResult( raidSnapshot( block + "  [=>...................] recovery = 12.3%\n", 100 ) );
+    REQUIRE( app.recordRAID() == 0 );
+    app.acceptRAIDResult( raidSnapshot( block + "  [=========>...........] recovery = 45.6%\n", 200 ) );
+    REQUIRE( app.recordRAID() == 0 );
+    auto changed = block;
+    changed.replace( changed.find( "sdb1" ), 4, "sdc1" );
+    app.acceptRAIDResult( raidSnapshot( changed + "  [=========>...........] recovery = 45.6%\n", 300 ) );
+    REQUIRE( app.recordRAID() == 0 );
+    REQUIRE( app.records( true ).size() == 1 );
+    std::vector<std::string> faults;
+
+    for( const auto &[priority, message] : app.textLogs() )
+    {
+        if( priority == logPrio::LOG_WARNING && message.find( "RAID md0: " ) == 0 )
+        {
+            REQUIRE( message.find( '%' ) == std::string::npos );
+            faults.push_back( message );
+        }
+    }
+
+    REQUIRE( faults.size() == 2 );
+    REQUIRE( faults[0].find( "sdb1[1](F)" ) != std::string::npos );
+    REQUIRE( faults[1].find( "sdc1[1](F)" ) != std::string::npos );
 }
 
 } // namespace sysMonitorTest
