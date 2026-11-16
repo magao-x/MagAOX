@@ -979,7 +979,6 @@ inline int orcaCtrl::appLogic()
         if( powerState() != 1 || powerStateTarget() != 1 )
             return 0;
 
-        std::cerr << __LINE__ << '\n';
         std::unique_lock<std::mutex> lock( m_indiMutex );
         if( connect() < 0 )
         {
@@ -1254,7 +1253,14 @@ inline int orcaCtrl::connect()
     apiInit.size = sizeof( apiInit );
 
     DCAMERR error = dcamapi_init( &apiInit );
-    if( failed( error ) )
+
+    // dcamapi_init() fails with DCAMERR_NOCAMERA until the camera has enumerated after power-on, which is
+    // the same condition as finding no devices.
+    if( error == DCAMERR_NOCAMERA )
+    {
+        apiInit.iDeviceCount = 0;
+    }
+    else if( failed( error ) )
     {
         log<software_error>( { __FILE__, __LINE__, 0, error, "Failed to initialize DCAM API." } );
         state( stateCodes::ERROR );
@@ -1263,12 +1269,10 @@ inline int orcaCtrl::connect()
 
     const int32 deviceCount = apiInit.iDeviceCount;
 
-    std::cerr << __LINE__ << '\n';
-
     if( powerState() != 1 || powerStateTarget() != 1 )
+    {
         return 0;
-
-    std::cerr << __LINE__ << '\n';
+    }
 
     if( deviceCount == 0 )
     {
@@ -1304,9 +1308,6 @@ inline int orcaCtrl::connect()
         // Query camera id / model
 
         const std::string cameraID = dcamDeviceString( deviceOpen.hdcam, DCAM_IDSTR_CAMERAID );
-
-        // debugging
-        std::cerr << "DCAM cam ID " << cameraID << ", configured serial: '" << m_serialNumber << "'\n";
 
         if( cameraID != m_serialNumber )
         {
@@ -1455,6 +1456,9 @@ inline int orcaCtrl::getAcquisitionState()
 
     const bool acquisitionRunning = !failed( error ) && captureStatus == DCAMCAP_STATUS_BUSY;
 
+    // Capture is only "stopped" if it was running; after connecting it has not started yet.
+    const bool wasOperating = state() == stateCodes::OPERATING;
+
     if( MagAOXAppT::m_powerState == 0 )
         return 0;
 
@@ -1474,7 +1478,11 @@ inline int orcaCtrl::getAcquisitionState()
 
     if( !acquisitionRunning && captureStatus != DCAMCAP_STATUS_UNSTABLE )
     {
-        log<text_log>( "acquisition stopped. restarting", logPrio::LOG_ERROR );
+        if( wasOperating )
+        {
+            log<text_log>( "acquisition stopped. restarting", logPrio::LOG_ERROR );
+        }
+
         m_reconfig = true;
     }
 
