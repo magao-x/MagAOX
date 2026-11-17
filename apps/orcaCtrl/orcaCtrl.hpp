@@ -107,11 +107,16 @@ namespace app
  *
  * Configuration specific to this app (in addition to the stdCamera, frameGrabber and telemeter keys):
  * - `camera.serialNumber`: the camera ID reported by DCAM_IDSTR_CAMERAID (e.g. `PHX2`). Required.
- * - `camera.liquidCooling`: declares a liquid-cooled camera. Optional, default `false`, currently only
- *   logged (see agents/plans/2026-09/orcaCtrl-liquidCooling.md).
+ * - `camera.liquidCooling`: declares a liquid-cooled camera. Default `true`. When true, the fan is held off
+ *   and the INDI `fan_speed` control is hidden (overriding `camera.fanSpeedControl` and
+ *   `camera.defaultFanSpeed`), and the sensor cooler is set to MAX (ON if MAX is unavailable). Coolant
+ *   flow must be started before the camera is powered on; orcaCtrl does not monitor it.
  *
  * The camera's cooling method (Air or Water, "Cooler Type") is a persistent camera setting. It is
- * changed with the `dcamcfgc` DCAM Configurator, followed by a camera restart, not by this app.
+ * changed with the `dcamcfgc` DCAM Configurator, followed by a camera restart, not by this app. A writable
+ * DCAM_IDPROP_SENSORCOOLER is taken as the sign of Water mode (it is absent in Air mode), and a mismatch
+ * with `camera.liquidCooling` puts the app in ERROR. In liquid mode the `temp_controller` toggle turns the
+ * sensor cooler on and off. See agents/plans/2026-09/orcaCtrl-liquidCooling.md.
  *
  * \ingroup orcaCtrl
  *
@@ -225,8 +230,7 @@ class orcaCtrl : public MagAOXApp<>,
 
     /// True when the camera is declared liquid cooled (`camera.liquidCooling`).
     /** The cooling method itself is a persistent camera setting ("Cooler Type") changed with the
-     * `dcamcfgc` DCAM Configurator.  This flag only records the declared mode; the liquid-cooling
-     * control in agents/plans/2026-09/orcaCtrl-liquidCooling.md is not yet implemented.
+     * `dcamcfgc` DCAM Configurator. connect() checks that the camera matches.
      */
     bool m_liquidCooling{ true };
 
@@ -346,6 +350,21 @@ class orcaCtrl : public MagAOXApp<>,
 
     ///@}
 
+    /** \name Cooling State
+     *@{
+     */
+
+    /// True when the camera exposes a writable DCAM_IDPROP_SENSORCOOLER, which means Cooler Type is Water.
+    bool m_coolerControlSupported{ false };
+
+    /// True when DCAM_IDPROP_SENSORCOOLER accepts DCAMPROP_SENSORCOOLER__MAX.
+    bool m_coolerMaxSupported{ false };
+
+    /// Sensor cooler mode last read back from the camera (DCAMPROP_SENSORCOOLER__*), or 0 if not yet set.
+    int32 m_sensorCoolerMode{ 0 };
+
+    ///@}
+
   public:
     /** \name MagAOXApp Interface
      *@{
@@ -388,7 +407,8 @@ class orcaCtrl : public MagAOXApp<>,
 
     /// Implementation of the FSM for orcaCtrl.
     /** Connects to the camera when not connected, triggers the initial configuration, and while
-     * READY/OPERATING polls acquisition state, temperatures and fan state and updates INDI and telemetry.
+     * READY/OPERATING polls acquisition state, temperatures and fan state and updates INDI and
+     * telemetry.
      *
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
@@ -512,7 +532,9 @@ class orcaCtrl : public MagAOXApp<>,
 
     /// Find and open the camera whose DCAM_IDSTR_CAMERAID matches m_serialNumber.
     /** Closes any previous session, initializes the DCAM-API, opens the matching device and a wait
-     * handle, and checks for cooling-fan control. Sets the state to CONNECTED, NODEVICE or ERROR.
+     * handle, and checks for cooling-fan and sensor-cooler control. A sensor cooler that doesn't match
+     * `camera.liquidCooling` is a Cooler Type mismatch and sets ERROR. Sets the state to CONNECTED,
+     * NODEVICE or ERROR.
      * DCAMERR_NOCAMERA from dcamapi_init(), returned while the camera enumerates after power-on, is
      * treated as no device (NODEVICE, with one notice) rather than an error.
      *
@@ -571,19 +593,44 @@ class orcaCtrl : public MagAOXApp<>,
 
     ///@}
 
+    /** \name Cooling
+     *@{
+     */
+
+    /// Write a sensor cooler mode to the camera and read it back into m_sensorCoolerMode.
+    /** Does nothing if the camera has no writable sensor cooler. Logs a notice when the mode changes.
+     *
+     * \returns 0 on success, or if the sensor cooler isn't supported
+     * \returns -1 on a DCAM error
+     */
+    int setSensorCooler( int32 mode /**< [in] DCAMPROP_SENSORCOOLER__OFF, __ON or __MAX */ );
+
+    /// Get the sensor cooler mode that should be applied now.
+    /**
+     * \returns DCAMPROP_SENSORCOOLER__OFF if temperature control is off
+     * \returns DCAMPROP_SENSORCOOLER__MAX if supported, otherwise DCAMPROP_SENSORCOOLER__ON
+     */
+    int32 sensorCoolerTarget();
+
+    ///@}
+
     /** \name stdCamera Interface
      *@{
      */
 
     /// Set defaults for a power-on state. [stdCamera interface]
-    /** Sets m_ccdTempSetpt, the readout speed and the fan state to their power-on values.
+    /** Sets m_ccdTempSetpt, the readout speed, the fan state and the cooling state to their power-on
+     * values. Temperature control is requested on.
      *
      * \returns 0 always
      */
     int powerOnDefaults();
 
-    /// Turn temperature control on. Temperature control is always on for this camera. [stdCamera interface]
-    /**
+    /// Apply the temperature-control request in m_tempControlStatusSet. [stdCamera interface]
+    /** With a writable sensor cooler (liquid mode), writes sensorCoolerTarget() to the camera, falling back
+     * to a reconfigure if the camera refuses the change while capturing. Without one (air mode),
+     * temperature control is always on.
+     *
      * \returns 0 always
      */
     int setTempControl();
@@ -688,8 +735,8 @@ class orcaCtrl : public MagAOXApp<>,
      */
 
     /// Configure the camera for the pending settings and start continuous acquisition. [framegrabber interface]
-    /** Applies the fan state and the ROI and binning, reads back the frame geometry, readout time,
-     * exposure-time limits, exposure time and frame rate, then allocates the DCAM buffers and starts
+    /** Applies the cooling and fan state and the ROI and binning, reads back the frame geometry, readout
+     * time, exposure-time limits, exposure time and frame rate, then allocates the DCAM buffers and starts
      * capture.
      *
      * \returns 0 on success
@@ -835,7 +882,7 @@ inline void orcaCtrl::setupConfig()
                 true,
                 "bool",
                 "Set true if the camera's Cooler Type is set to Water with dcamcfgc and a chiller is connected. "
-                "Currently only logged; liquid-cooling control is not yet implemented. Default is false." );
+                "Holds the fan off and sets the sensor cooler to MAX. Default is true." );
 
     config.add( "camera.circBuffMaxBytes",
                 "",
@@ -866,14 +913,11 @@ inline int orcaCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
 
     STDCAMERA_LOAD_CONFIG( _config );
 
+    // In liquid mode the fan is always off, so fan control is hidden
     if( m_liquidCooling )
     {
-        if( m_defaultFanSpeed != "off" )
-        {
-            log<text_log>( "camera.liquidCooling is true: forcing default fan speed to 'off'", logPrio::LOG_WARNING );
-        }
-
-        m_defaultFanSpeed = "off";
+        m_fanSpeedControlEnabled = false;
+        m_defaultFanSpeed        = "off";
     }
 
     FRAMEGRABBER_LOAD_CONFIG( _config );
@@ -1401,21 +1445,53 @@ inline int orcaCtrl::connect()
             {
                 log<text_log>( "Cooling fan control is enabled in config but not supported. Disabling fan control..." );
             }
+
+            // A writable sensor cooler means Cooler Type is Water; it is absent in Air mode
+            DCAMPROP_ATTR coolerAttr{};
+            coolerAttr.cbSize = sizeof( coolerAttr );
+            coolerAttr.iProp  = DCAM_IDPROP_SENSORCOOLER;
+
+            error = dcamprop_getattr( m_cameraHandle, &coolerAttr );
+
+            m_coolerControlSupported = !failed( error ) && ( coolerAttr.attribute & DCAMPROP_ATTR_WRITABLE ) != 0;
+            m_coolerMaxSupported     = m_coolerControlSupported && coolerAttr.valuemax >= DCAMPROP_SENSORCOOLER__MAX;
+
+            if( m_coolerControlSupported != m_liquidCooling )
+            {
+                closeCamera( true );
+                state( stateCodes::ERROR );
+
+                if( !stateLogged() )
+                {
+                    log<text_log>( std::string( "Cooler Type mismatch: camera.liquidCooling is " ) +
+                                       ( m_liquidCooling ? "true" : "false" ) + " but the camera " +
+                                       ( m_coolerControlSupported ? "has" : "has no" ) +
+                                       " sensor cooler control. Set Cooler Type with dcamcfgc to match the "
+                                       "config, then restart the camera.",
+                                   logPrio::LOG_CRITICAL );
+                }
+
+                return 0;
+            }
         }
 
         state( stateCodes::CONNECTED );
         log<text_log>( "Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]" );
 
-        // if( m_liquidCooling )
-        // {
-        //     log<text_log>( "cooling mode: liquid (declared by camera.liquidCooling). orcaCtrl does not yet apply "
-        //                    "liquid-cooling settings; set Cooler Type = Water with dcamcfgc and run the chiller.",
-        //                    logPrio::LOG_WARNING );
-        // }
-        // else
-        // {
-        //     log<text_log>( "cooling mode: air" );
-        // }
+        if( m_liquidCooling )
+        {
+            log<text_log>( "cooling mode: liquid (fan off, sensor cooler " +
+                           std::string( m_coolerMaxSupported ? "MAX" : "ON" ) + ")" );
+
+            if( !m_coolerMaxSupported )
+            {
+                log<text_log>( "sensor cooler MAX is not available, using ON", logPrio::LOG_WARNING );
+            }
+        }
+        else
+        {
+            log<text_log>( "cooling mode: air" );
+        }
 
         m_readoutSpeedNameSet = m_defaultReadoutSpeed;
 
@@ -1574,6 +1650,12 @@ inline int orcaCtrl::getTemps()
         m_tempControlStatusStr = "FAULTED";
         log<text_log>( "temperature control faulted", logPrio::LOG_ALERT );
     }
+    else if( status == DCAMPROP_SENSORCOOLERSTATUS__OFF )
+    {
+        m_tempControlStatus    = false;
+        m_tempControlOnTarget  = false;
+        m_tempControlStatusStr = "OFF";
+    }
     else
     {
         m_tempControlStatus    = false;
@@ -1639,6 +1721,46 @@ inline int orcaCtrl::getFanSpeed()
     return 0;
 }
 
+inline int orcaCtrl::setSensorCooler( int32 mode )
+{
+    if( !m_coolerControlSupported )
+    {
+        return 0;
+    }
+
+    int32 actual = 0;
+
+    if( setorcaParameter( DCAM_IDPROP_SENSORCOOLER, mode ) < 0 ||
+        getorcaParameter( actual, DCAM_IDPROP_SENSORCOOLER ) < 0 )
+    {
+        return -1;
+    }
+
+    if( actual != m_sensorCoolerMode )
+    {
+        log<text_log>( "sensor cooler set to " + std::string( actual == DCAMPROP_SENSORCOOLER__OFF  ? "OFF"
+                                                              : actual == DCAMPROP_SENSORCOOLER__ON ? "ON"
+                                                              : actual == DCAMPROP_SENSORCOOLER__MAX
+                                                                  ? "MAX"
+                                                                  : std::to_string( actual ) ),
+                       logPrio::LOG_NOTICE );
+    }
+
+    m_sensorCoolerMode = actual;
+
+    return 0;
+}
+
+inline int32 orcaCtrl::sensorCoolerTarget()
+{
+    if( !m_tempControlStatusSet )
+    {
+        return DCAMPROP_SENSORCOOLER__OFF;
+    }
+
+    return m_coolerMaxSupported ? DCAMPROP_SENSORCOOLER__MAX : DCAMPROP_SENSORCOOLER__ON;
+}
+
 inline int orcaCtrl::setFPS()
 {
     return 0;
@@ -1675,12 +1797,30 @@ inline int orcaCtrl::powerOnDefaults()
     m_fanSpeedValid       = false;
     m_fanSpeedLogPending  = m_fanSpeedControlEnabled;
 
+    // Cooling starts on at power-on; connect() finds out whether the camera has a sensor cooler
+    m_tempControlStatusSet   = true;
+    m_coolerControlSupported = false;
+    m_coolerMaxSupported     = false;
+    m_sensorCoolerMode       = 0;
+
     return 0;
 }
 
 inline int orcaCtrl::setTempControl()
 {
-    // Always on
+    if( m_coolerControlSupported )
+    {
+        // The camera may refuse the change while capturing, in which case configureAcquisition() applies it
+        if( setSensorCooler( sensorCoolerTarget() ) < 0 )
+        {
+            m_reconfig = true;
+        }
+
+        recordCamera( true );
+        return 0;
+    }
+
+    // Always on in air mode
     m_tempControlStatus    = true;
     m_tempControlStatusSet = true;
     updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::On, INDI_IDLE );
@@ -1901,6 +2041,38 @@ inline int orcaCtrl::configureAcquisition()
     }
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+    // Liquid Cooling
+    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+    //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
+
+    if( m_liquidCooling )
+    {
+        // Coolant flow is started before the camera is powered on; it is not monitored here.
+        if( m_fanControlSupported && setorcaParameter( DCAM_IDPROP_SENSORCOOLERFAN, DCAMPROP_MODE__OFF ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+            {
+                return -1;
+            }
+            log<software_error>( { __FILE__, __LINE__, "Error turning the cooling fan off" } );
+            state( stateCodes::ERROR );
+            return -1;
+        }
+
+        if( setSensorCooler( sensorCoolerTarget() ) < 0 )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+            {
+                return -1;
+            }
+            log<software_error>( { __FILE__, __LINE__, "Error setting the sensor cooler" } );
+            state( stateCodes::ERROR );
+            return -1;
+        }
+    }
 
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
