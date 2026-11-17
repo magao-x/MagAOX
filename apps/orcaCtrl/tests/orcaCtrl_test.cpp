@@ -12,6 +12,7 @@
 
 #include <cstring>
 #include <map>
+#include <set>
 
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 namespace orcaHarness
@@ -34,6 +35,12 @@ struct Fake
 
     /// Property values by ID.
     std::map<int32, double> m_props;
+
+    /// Properties dcamprop_getattr reports as missing. The cooler properties are absent, as in Air mode.
+    std::set<int32> m_missing{ DCAM_IDPROP_SENSORCOOLER, DCAM_IDPROP_SENSORCOOLERFAN };
+
+    /// Largest valid DCAM_IDPROP_SENSORCOOLER value; DCAMPROP_SENSORCOOLER__MAX when MAX is available.
+    double m_coolerMax{ DCAMPROP_SENSORCOOLER__MAX };
 
     /// Call counts by function name.
     std::map<std::string, unsigned> m_calls;
@@ -125,9 +132,16 @@ extern "C"
 
     DCAMERR dcamprop_getattr( HDCAM, DCAMPROP_ATTR *param )
     {
+        auto &f = orcaHarness::g_fake;
+
+        if( f.m_missing.count( param->iProp ) > 0 )
+        {
+            return DCAMERR_INVALIDPROPERTYID;
+        }
+
         param->attribute = DCAMPROP_ATTR_WRITABLE;
         param->valuemin  = 1e-5;
-        param->valuemax  = 10;
+        param->valuemax  = param->iProp == DCAM_IDPROP_SENSORCOOLER ? f.m_coolerMax : 10;
         param->valuestep = 1e-6;
         return orcaHarness::call( "dcamprop_getattr" );
     }
@@ -271,13 +285,28 @@ struct Fixture : outletHarness::Controller<MagAOX::app::orcaCtrl>
     using MagAOX::app::dev::frameGrabber<MagAOX::app::orcaCtrl>::m_fgThread;
     using MagAOX::app::MagAOXApp<true>::m_powerOnWait;
 
-    /// Configure one camera and reset the fakes.
+    /// Configure one air-cooled camera and reset the fakes.
     Fixture()
     {
         g_fake                  = {};
         outletHarness::g_faults = {};
         m_serialNumber          = "PHX2";
         m_powerOnWait           = 0;
+        m_liquidCooling         = false;
+    }
+
+    /// Make the fake camera and the app liquid cooled (Cooler Type Water).
+    void liquid()
+    {
+        m_liquidCooling          = true;
+        m_fanSpeedControlEnabled = false; // as loadConfigImpl() does
+        g_fake.m_missing.clear();
+    }
+
+    /// Current DCAM_IDPROP_SENSORCOOLER value in the fake camera.
+    static int32 cooler()
+    {
+        return static_cast<int32>( g_fake.m_props[DCAM_IDPROP_SENSORCOOLER] );
     }
 
     /// Stop and join the placeholder framegrabber thread.
@@ -514,6 +543,169 @@ TEST_CASE( "orcaCtrl still reports real startup and acquisition errors", "[orcaC
         REQUIRE( f.state() == stateCodes::ERROR );
         REQUIRE( f.count( "Failed to initialize DCAM API." ) == 1 );
     }
+}
+
+/// `camera.liquidCooling` hides fan control; air cooling leaves it alone.
+/** \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl liquid-cooling configuration", "[orcaCtrl][cooling]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaCtrl::setupConfig();
+    orcaCtrl::loadConfigImpl();
+    #endif
+    // clang-format on
+
+    Fixture f;
+
+    SECTION( "liquid cooling hides fan control" )
+    {
+        f.configText( "[camera]\nliquidCooling=true\nfanSpeedControl=true\n" );
+        REQUIRE( f.loadConfigImpl( f.config ) == 0 );
+        REQUIRE( f.m_liquidCooling );
+        REQUIRE( !f.m_fanSpeedControlEnabled );
+        REQUIRE( f.m_defaultFanSpeed == "off" );
+    }
+
+    SECTION( "air cooling leaves fan control alone" )
+    {
+        f.configText( "[camera]\nliquidCooling=false\n" );
+        REQUIRE( f.loadConfigImpl( f.config ) == 0 );
+        REQUIRE( !f.m_liquidCooling );
+        REQUIRE( f.m_fanSpeedControlEnabled );
+    }
+}
+
+/// A camera whose Cooler Type doesn't match `camera.liquidCooling` puts the app in ERROR, logged once.
+/** \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl reports a Cooler Type mismatch", "[orcaCtrl][cooling]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaCtrl::connect();
+    #endif
+    // clang-format on
+
+    Fixture f;
+
+    SECTION( "liquid config with an Air-mode camera" )
+    {
+        f.m_liquidCooling = true;
+    }
+
+    SECTION( "air config with a Water-mode camera" )
+    {
+        g_fake.m_missing.clear();
+    }
+
+    f.start( 1 );
+
+    for( int n = 0; n < 3; ++n )
+    {
+        REQUIRE( f.loop() == 0 );
+        REQUIRE( f.state() == stateCodes::ERROR );
+    }
+
+    REQUIRE( f.count( "Cooler Type mismatch" ) == 1 );
+    REQUIRE( g_fake.m_calls["dcamcap_start"] == 0 );
+}
+
+/// In liquid mode, configureAcquisition() turns the fan off and the sensor cooler to MAX, or ON without MAX.
+/** \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl applies liquid cooling", "[orcaCtrl][cooling]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaCtrl::configureAcquisition();
+    orcaCtrl::setSensorCooler();
+    orcaCtrl::getTemps();
+    #endif
+    // clang-format on
+
+    Fixture f;
+    f.liquid();
+
+    SECTION( "MAX available" )
+    {
+    }
+
+    SECTION( "MAX not available" )
+    {
+        g_fake.m_coolerMax = DCAMPROP_SENSORCOOLER__ON;
+    }
+
+    f.start( 1 );
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.state() == stateCodes::READY );
+    REQUIRE( f.count( "cooling mode: liquid" ) == 1 );
+
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE( g_fake.m_props[DCAM_IDPROP_SENSORCOOLERFAN] == DCAMPROP_MODE__OFF );
+    REQUIRE( g_fake.m_calls["dcamcap_start"] == 1 );
+
+    if( g_fake.m_coolerMax == DCAMPROP_SENSORCOOLER__MAX )
+    {
+        REQUIRE( f.cooler() == DCAMPROP_SENSORCOOLER__MAX );
+        REQUIRE( f.count( "MAX is not available" ) == 0 );
+    }
+    else
+    {
+        REQUIRE( f.cooler() == DCAMPROP_SENSORCOOLER__ON );
+        REQUIRE( f.count( "MAX is not available" ) == 1 );
+    }
+
+    // A cooler reported OFF reads as OFF rather than UNKNOWN
+    g_fake.m_props[DCAM_IDPROP_SENSORCOOLERSTATUS] = DCAMPROP_SENSORCOOLERSTATUS__OFF;
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.m_tempControlStatusStr == "OFF" );
+}
+
+/// In liquid mode the `temp_controller` toggle turns the sensor cooler off and on; in air mode it stays on.
+/** \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl temperature-control toggle", "[orcaCtrl][cooling]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaCtrl::setTempControl();
+    orcaCtrl::sensorCoolerTarget();
+    #endif
+    // clang-format on
+
+    Fixture f;
+
+    SECTION( "liquid" )
+    {
+        f.liquid();
+        f.start( 1 );
+        REQUIRE( f.loop() == 0 );
+        REQUIRE( f.m_tempControlStatusSet );
+
+        f.m_tempControlStatusSet = false;
+        REQUIRE( f.setTempControl() == 0 );
+        REQUIRE( f.cooler() == DCAMPROP_SENSORCOOLER__OFF );
+
+        f.m_tempControlStatusSet = true;
+        REQUIRE( f.setTempControl() == 0 );
+        REQUIRE( f.cooler() == DCAMPROP_SENSORCOOLER__MAX );
+    }
+
+    SECTION( "air" )
+    {
+        f.start( 1 );
+        REQUIRE( f.loop() == 0 );
+
+        f.m_tempControlStatusSet = false;
+        REQUIRE( f.setTempControl() == 0 );
+        REQUIRE( f.m_tempControlStatus );
+        REQUIRE( f.m_tempControlStatusSet );
+        REQUIRE( g_fake.m_props.count( DCAM_IDPROP_SENSORCOOLER ) == 0 );
+    }
+
+    REQUIRE( f.errors() == 0 );
 }
 
 } // namespace orcaCtrlTest
