@@ -1771,12 +1771,12 @@ inline int orcaCtrl::powerOnDefaults()
 {
     m_ccdTempSetpt = -35; // This is the power on setpoint
 
-    /*m_currentROI.x = 511.5;
+    m_currentROI.x = 511.5;
     m_currentROI.y = 511.5;
     m_currentROI.w = 1024;
     m_currentROI.h = 1024;
     m_currentROI.bin_x = 1;
-    m_currentROI.bin_y = 1;*/
+    m_currentROI.bin_y = 1;
 
     m_readoutSpeedName = "Standard";
     // m_vShiftSpeedName  = "1_2us";
