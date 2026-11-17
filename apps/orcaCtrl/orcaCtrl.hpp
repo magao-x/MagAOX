@@ -1454,7 +1454,8 @@ inline int orcaCtrl::connect()
             error = dcamprop_getattr( m_cameraHandle, &coolerAttr );
 
             m_coolerControlSupported = !failed( error ) && ( coolerAttr.attribute & DCAMPROP_ATTR_WRITABLE ) != 0;
-            m_coolerMaxSupported     = m_coolerControlSupported && coolerAttr.valuemax >= DCAMPROP_SENSORCOOLER__MAX;
+            m_coolerMaxSupported =
+                m_coolerControlSupported && coolerAttr.valuemax >= static_cast<double>( DCAMPROP_SENSORCOOLER__MAX );
 
             if( m_coolerControlSupported != m_liquidCooling )
             {
