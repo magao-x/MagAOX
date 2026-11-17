@@ -13,6 +13,18 @@ Follow-up prompt:
 
 Yes, orcaCtrl should stop acquisition when the chiller flow is lost. A koolanceCtrl-style INDI app will publish the chiller status for the camera. Commit and push the updated plan along with the Q and A
 
+Follow-up prompt:
+
+I am having an issue where I power on the orcaQuest 2 camera powered by the orcaCtrl app and, despite the camera being set in liquid cooling mode, the temp_ccd INDI property is not decreasing but rather is increasing and reaching 29 C. The target temp is -35C  and I cannot toggle camscc.temp_controller. I would expect the camera temperature to decrease, as I am running glycol through the camera. Please investigate the source of this reported temperature issue in the orcaCtrl app and add your findings to orcaCtrl-liquidCooling.md
+
+Follow-up prompt:
+
+Implement step 4 of the plan. Cooling flow is started before the camera turns on
+
+Follow-up prompt:
+
+Don't poll the chiller flow rate as I do not have a way of monitoring it
+
 # Plan
 
 ## Analysis
@@ -323,11 +335,18 @@ go in a new `chiller` config section, following the MagAO-X habit of one section
 - **Q:** Which app publishes the chiller status?
   **A:** A koolanceCtrl-style INDI app (third follow-up). The defaults `chiller.property = status` and
   `chiller.flowElement = flow_rate` match koolanceCtrl, and `chiller.device` names the instance.
+- **Q:** Why does `temp_ccd` rise to 29 °C in liquid mode with glycol flowing, and why can't
+  `temp_controller` be toggled?
+  **A:** orcaCtrl never turns on the sensor cooler (`DCAM_IDPROP_SENSORCOOLER`). In Water mode the camera
+  doesn't start cooling by itself, so the Peltier stays off. `setTempControl()` doesn't send anything to
+  the camera, so `getTemps()` reads the cooler as OFF and turns the toggle back off. See "Investigation:
+  `temp_ccd` rises to 29 °C in liquid mode" below.
 
 ## Execution Notes
 
-- Steps 2-7 are not implemented yet. Step 1 has been run in **air mode only** (results below). The
-  water-mode re-probe is still to do.
+- Step 4 was implemented on 2026-11-17 (see "Step 4 implementation" below). Steps 2, 3 and 5-7 are
+  not done. Step 1 has been run in **air mode only** (results below). The water-mode re-probe is still
+  to do.
 - **Deferred (2026-09-30):** the user won't be testing liquid cooling for now. orcaCtrl only gets the
   optional `camera.liquidCooling` flag: a bool, default `false`, with a documented `m_liquidCooling`
   member and config help text, read in `loadConfigImpl()`. It is logged in `connect()`: "cooling mode:
@@ -417,3 +436,153 @@ The only supported properties with COOL, TEMP, FAN or WATER in their names are t
 `dcamcfgc`, restart the camera, re-run the probe, and record which properties appear and their values
 (especially whether `SENSORCOOLER` offers `MAX`). Then either leave the camera in Water mode or set it
 back to Air.
+
+### Investigation: `temp_ccd` rises to 29 °C in liquid mode (2026-11-17)
+
+**Reported:** the camera is set to liquid cooling and glycol is flowing, but after power-on `camscc.temp_ccd`
+rises to about 29 °C instead of falling toward the -35 °C target, and `camscc.temp_controller` can't be
+turned on. This was a code-only investigation done on a workstation, without the camera. Nothing was run
+against the hardware.
+
+**Root cause: orcaCtrl never turns on the sensor cooler.**
+
+- In Water mode the camera doesn't start cooling at power-on. The manual (section 9-2-2) says the
+  application has to "turn on the cooling switch of the camera", which is `DCAM_IDPROP_SENSORCOOLER`
+  (0x00200320, `OFF = 1`, `ON = 2`, `MAX = 4`).
+- `grep` finds no write of `DCAM_IDPROP_SENSORCOOLER` anywhere in `apps/orcaCtrl/`. It only appears as the
+  `DCAMPROP_SENSORCOOLER__OFF/__ON` constants in `getFanSpeed()`, and `getFanSpeed()` never runs because
+  `m_fanStatusSupported` is never set to `true`.
+- So in Water mode the Peltier stays off. The internal fan is also off (Water mode never runs it), so the
+  only heat path is the cold plate to the glycol. With no thermoelectric cooling, the sensor settles a few
+  degrees above the coolant because the camera electronics keep heating it. Rising to 29 °C fits this.
+  Step 4 of this plan, which would write `SENSORCOOLER = MAX`, has not been implemented. The
+  `camera.liquidCooling` flag only forces the default fan setting to `off` (`loadConfigImpl()`), and in
+  Water mode the fan is already off.
+- In Air mode the camera cools to -20 °C by itself (Step 1 results), so this problem only appears after
+  Cooler Type is switched to Water.
+
+**Why `temp_controller` can't be toggled:**
+
+1. stdCamera's `newCallBack_temp_controller()` sets `m_tempControlStatusSet` and calls
+   `orcaCtrl::setTempControl()`.
+2. `setTempControl()` (`orcaCtrl.hpp` ~line 1681) sends nothing to the camera. It sets
+   `m_tempControlStatus = true` and pushes the switch On. It also ignores the requested state, so an Off
+   request is treated as On.
+3. On the next `appLogic()` pass, `getTemps()` (~line 1525) reads `SENSORCOOLERSTATUS`. With the cooler
+   off, the camera reports `OFF` (1). There is no `OFF` branch, so it falls into the default `else`:
+   `m_tempControlStatus = false` and the status string becomes `"UNKNOWN"`.
+4. stdCamera's `updateINDI()` sees `m_tempControlStatus == false` and turns the `temp_controller` toggle
+   back Off.
+
+The toggle therefore can't stay on until orcaCtrl actually writes `SENSORCOOLER`.
+
+**Why the -35 °C target has no effect:**
+
+- The `SENSORTEMPERATURETARGET` write in `configureAcquisition()` (~line 1987) is still commented out.
+  Every reconfigure logs "Set temperature set point: -35.000000 C", but nothing is written to the camera.
+  The -35 °C target is only the value hard-coded in `powerOnDefaults()`.
+- Even with the cooler on, the manual gives -35 °C only for Water mode with `SENSORCOOLER = MAX` and 20 °C
+  water. With `ON` the typical value is -20 °C.
+
+**Other things found along the way:**
+
+- `m_liquidCooling` now defaults to `true` in the member initializer (`orcaCtrl.hpp:231`, commit
+  `d90709a5`). The `config.add()` help text still says "Default is false" and "Currently only logged". The
+  default should either go back to `false`, with `liquidCooling=true` set in `camscc.conf`, or the help
+  text should be fixed.
+- The untracked `camscc_20261115123443932659433.binlog` (2026-11-15 12:34) is from a build older than
+  `d90709a5`. It logs `camera.liquidCooling` as `default` (false), "cooling mode: air", and "Cooling fan
+  control is enabled in config but not supported". Temperatures are recorded in the `.bintel` telemetry,
+  not in this binlog, so it doesn't show the 29 °C rise. It does show that `SENSORCOOLERFAN` was missing
+  from that run.
+- `dcamprop.h` also defines `DCAM_IDPROP_SENSORTEMPERATURE_STATUS` (0x00200390, `NORMAL`, `WARNING`,
+  `PROTECTION`) and `DCAM_IDPROP_SENSORTEMPERATURE_PROTECT` (0x00200400). They weren't in the air-mode
+  probe's list of COOL, TEMP and FAN properties. Add them to the water-mode re-probe, since a sensor that
+  is warming may trip protection.
+
+**What the user should check on the instrument** (agents don't touch the hardware):
+
+1. With orcaCtrl stopped, run `dcamcfgc` and confirm Cooler Type reads **Water**. (Pressing `0` exits
+   without changing anything.)
+2. With the chiller circulating and the camera power-cycled after the Cooler Type change, run the
+   scratchpad `dcamCoolProbe` again. This is the outstanding Step 1 water-mode re-probe. Record whether
+   `SENSORCOOLER` exists, whether it is writable, its valid values (looking for `MAX`), and its current
+   value (expected `OFF`). Also record `SENSORCOOLERSTATUS` (expected `OFF`), `SENSORCOOLERFAN`,
+   `SENSORTEMPERATURETARGET` (attributes and range), and the two `SENSORTEMPERATURE_*` properties above.
+3. While orcaCtrl is running, `camscc.temp_control.status` should read
+   `UNKNOWN`. That confirms `SENSORCOOLERSTATUS` is outside BUSY, READY and WARNING, which is consistent
+   with OFF.
+4. Optional, with orcaCtrl stopped and flow confirmed: have the probe write `SENSORCOOLER = ON` (then
+   `MAX`) and watch `SENSORTEMPERATURE` fall. This confirms the fix before any orcaCtrl code changes.
+
+**Minimum code fix, a subset of steps 3 and 4, to do after the re-probe confirms `SENSORCOOLER` is
+writable in Water mode:**
+
+- In `connect()`, run `dcamprop_getattr( DCAM_IDPROP_SENSORCOOLER )` and set a documented
+  `m_coolerControlSupported` from the writable attribute.
+- `setTempControl()`: when supported, write `SENSORCOOLER` from `m_tempControlStatusSet`. On means `MAX`
+  when `m_liquidCooling` is true (falling back to `ON` if `MAX` isn't a valid value), or `ON` in air mode.
+  Off means `OFF`. Then read it back. Don't force the status to `true`.
+- In `configureAcquisition()` (or right after `connect()`), when `m_liquidCooling` is true, apply the
+  cooler state so cooling starts at power-on without an INDI toggle. Until the chiller gate from step 4
+  exists, this relies on the operator starting flow before powering the camera, as the manual requires.
+  Write the chiller gate before leaving this unattended.
+- `getTemps()`: add a `DCAMPROP_SENSORCOOLERSTATUS__OFF` branch that sets `m_tempControlStatusStr = "OFF"`
+  (instead of "UNKNOWN") and keeps `m_tempControlStatus` false.
+- Step 3: uncomment the `SENSORTEMPERATURETARGET` write, guarded by `getattr`, and remove the misleading
+  log line.
+
+### Step 4 implementation (2026-11-17)
+
+**Scope change from the user:** coolant flow is started before the camera is powered on, and there is no
+way to monitor the chiller. So the chiller part of step 4 was **dropped**: no `chiller.*` config, no INDI
+subscription, no flow gate at startup, and no stop when flow is lost. This replaces the earlier Q and A
+answers about checking the chiller and stopping on flow loss. Running the chiller before power-on and
+keeping it running is the operator's job, as the manual requires.
+
+What was built, in `apps/orcaCtrl/orcaCtrl.hpp`:
+
+- **Config.** In liquid mode, `loadConfigImpl()` sets `m_fanSpeedControlEnabled = false` and
+  `m_defaultFanSpeed = "off"`, which hides the INDI `fan_speed` switch. This replaces the old warning,
+  which fired every time because the constructor's default fan speed is `on`.
+  `camera.liquidCooling` still defaults to `true` (commit `d90709a5`), and its help text now says so.
+- **Water-mode check, in `connect()`.** `dcamprop_getattr( SENSORCOOLER )` sets `m_coolerControlSupported`
+  (writable) and `m_coolerMaxSupported` (`valuemax >= MAX`). If `m_coolerControlSupported` doesn't match
+  `m_liquidCooling`, in either direction, it logs `LOG_CRITICAL` "Cooler Type mismatch" (once, through
+  `stateLogged()`), closes the camera and sets `ERROR`. On success it logs "cooling mode: liquid (fan off,
+  sensor cooler MAX)" or "cooling mode: air", plus a warning if MAX isn't available.
+- **`configureAcquisition()`.** In liquid mode it writes `SENSORCOOLERFAN = OFF` (if supported), then
+  `SENSORCOOLER = sensorCoolerTarget()`: MAX, or ON when MAX isn't available, or OFF when temperature
+  control is off. `setSensorCooler()` reads the mode back into `m_sensorCoolerMode` and logs a notice when
+  it changes. This is the fix for the 29 °C problem found in the investigation.
+- **`temp_controller`.** `powerOnDefaults()` sets `m_tempControlStatusSet = true`, so cooling starts at
+  power-on. With a writable cooler, `setTempControl()` writes `sensorCoolerTarget()` right away, falling
+  back to `m_reconfig` if the camera refuses during capture. Air mode keeps the old always-on behavior.
+  `getTemps()` now maps `SENSORCOOLERSTATUS__OFF` to `"OFF"` instead of `"UNKNOWN"`.
+
+Where this differs from the plan text above:
+
+- **No chiller monitoring**, as described above.
+- **Air mode doesn't write `SENSORCOOLER = ON`.** The property doesn't exist in Air mode (step 1), and a
+  camera that has it while `liquidCooling=false` is now a mismatch error.
+- **Water-mode detection** depends on `SENSORCOOLER` being writable in Water mode. That is consistent with
+  the manual's "turn on the cooling switch from application software", but it is unconfirmed until the
+  water-mode re-probe.
+- **Step 3 isn't done.** `SENSORTEMPERATURETARGET` still isn't written, so the camera cools to its own
+  MAX/ON target, and the "Set temperature set point" log line is still misleading.
+
+Tests, in `apps/orcaCtrl/tests/orcaCtrl_test.cpp`:
+
+- The fake `dcamprop_getattr` now reports `SENSORCOOLER` and `SENSORCOOLERFAN` as missing, as in Air mode,
+  unless a test clears `m_missing`, and `m_coolerMax` sets the cooler's `valuemax`. `tests/dcam/dcamprop.h`
+  gained `DCAMPROP_SENSORCOOLER__MAX` and `DCAMPROP_SENSORCOOLERSTATUS__OFF`.
+- The existing tests run in air mode (`m_liquidCooling = false` in the fixture).
+- New cases cover:
+  - config loading;
+  - mismatch in both directions;
+  - liquid apply, with and without MAX;
+  - the `OFF` status string;
+  - the `temp_controller` toggle in liquid and air mode.
+- These tests were **not built or run**, because the workstation used has no mxlib (`gengithead.sh` is
+  missing, too). Build and run them with `make -f Makefile.one t=../apps/orcaCtrl/tests/orcaCtrl_test` in
+  `tests/`.
