@@ -40,7 +40,7 @@ struct Fake
     std::set<int32> m_missing{ DCAM_IDPROP_SENSORCOOLER, DCAM_IDPROP_SENSORCOOLERFAN };
 
     /// Largest valid DCAM_IDPROP_SENSORCOOLER value; DCAMPROP_SENSORCOOLER__MAX when MAX is available.
-    double m_coolerMax{ DCAMPROP_SENSORCOOLER__MAX };
+    double m_coolerMax{ static_cast<double>( DCAMPROP_SENSORCOOLER__MAX ) };
 
     /// Call counts by function name.
     std::map<std::string, unsigned> m_calls;
@@ -284,6 +284,13 @@ struct Fixture : outletHarness::Controller<MagAOX::app::orcaCtrl>
     using MagAOX::app::dev::frameGrabber<MagAOX::app::orcaCtrl>::m_reconfig;
     using MagAOX::app::dev::frameGrabber<MagAOX::app::orcaCtrl>::m_fgThread;
     using MagAOX::app::MagAOXApp<true>::m_powerOnWait;
+
+    /// Expose the stdCamera fan and temperature-control state used by the tests.
+    using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_fanSpeedControlEnabled;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_defaultFanSpeed;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_tempControlStatus;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_tempControlStatusSet;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_tempControlStatusStr;
 
     /// Configure one air-cooled camera and reset the fakes.
     Fixture()
@@ -634,7 +641,7 @@ TEST_CASE( "orcaCtrl applies liquid cooling", "[orcaCtrl][cooling]" )
 
     SECTION( "MAX not available" )
     {
-        g_fake.m_coolerMax = DCAMPROP_SENSORCOOLER__ON;
+        g_fake.m_coolerMax = static_cast<double>( DCAMPROP_SENSORCOOLER__ON );
     }
 
     f.start( 1 );
@@ -643,10 +650,10 @@ TEST_CASE( "orcaCtrl applies liquid cooling", "[orcaCtrl][cooling]" )
     REQUIRE( f.count( "cooling mode: liquid" ) == 1 );
 
     REQUIRE( f.configureAcquisition() == 0 );
-    REQUIRE( g_fake.m_props[DCAM_IDPROP_SENSORCOOLERFAN] == DCAMPROP_MODE__OFF );
+    REQUIRE( g_fake.m_props[DCAM_IDPROP_SENSORCOOLERFAN] == static_cast<double>( DCAMPROP_MODE__OFF ) );
     REQUIRE( g_fake.m_calls["dcamcap_start"] == 1 );
 
-    if( g_fake.m_coolerMax == DCAMPROP_SENSORCOOLER__MAX )
+    if( g_fake.m_coolerMax == static_cast<double>( DCAMPROP_SENSORCOOLER__MAX ) )
     {
         REQUIRE( f.cooler() == DCAMPROP_SENSORCOOLER__MAX );
         REQUIRE( f.count( "MAX is not available" ) == 0 );
