@@ -24,6 +24,7 @@ timespec telem_coreloads::lastRecord      = { 0, 0 };
 timespec telem_coretemps::lastRecord      = { 0, 0 };
 timespec telem_gpu::lastRecord            = { 0, 0 };
 timespec telem_irq::lastRecord            = { 0, 0 };
+timespec telem_raid::lastRecord           = { 0, 0 };
 timespec telem_dmmodes::lastRecord        = { 0, 0 };
 timespec telem_dmspeck::lastRecord        = { 0, 0 };
 timespec telem_drivetemps::lastRecord     = { 0, 0 };

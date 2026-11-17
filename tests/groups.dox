@@ -102,6 +102,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup raidTelemetry_unit_test RAID Telemetry Unit Tests
+ * \brief Compact MD array health, counts, and metadata tests.
+ * \ingroup unit_test
+ */
+
 /** \defgroup logdump_unit_test Logdump Unit Tests
  * \brief Complete-record decoding, live partial appends, filtering, and log rotation tests.
  * \ingroup application_unit_test
