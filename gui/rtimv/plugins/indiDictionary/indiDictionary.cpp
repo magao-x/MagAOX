@@ -338,6 +338,31 @@ void indiDictionary::receiveProperty( const pcf::IndiProperty &property,
     rtimvPropertySnapshot snapshot = definition ? rtimvPropertySnapshot{} : m_properties.value( key );
     if( definition )
     {
+        if( m_dict )
+        {
+            // A definition replaces the element list; partial value updates do not.
+            const std::string prefix = property.createUniqueKey() + ".";
+            for( auto entry = m_dict->lower_bound( prefix );
+                 entry != m_dict->end() && entry->first.starts_with( prefix );
+                 ++entry )
+            {
+                if( !property.find( entry->first.substr( prefix.size() ) ) )
+                {
+                    entry->second.setBlob( nullptr, 0 );
+                }
+            }
+
+            if( key == "tcsi.teldata" && !property.find( "pa" ) )
+            {
+                auto angle = m_dict->find( "rtimv.north.angle" );
+
+                if( angle != m_dict->end() )
+                {
+                    angle->second.setBlob( nullptr, 0 );
+                }
+            }
+        }
+
         snapshot.m_valid = true;
         snapshot.m_writable =
             property.getPerm() == pcf::IndiProperty::ReadWrite || property.getPerm() == pcf::IndiProperty::WriteOnly;
