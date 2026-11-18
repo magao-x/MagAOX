@@ -302,6 +302,23 @@ Build and run the hwpTracker test locally; no instrument commands.
   are 10 s apart and `hwpSequencer` waits for arrival before its next
   request, so this window is rarely hit.
 
+### Tests
+
+`apps/hwpTracker/tests/hwpTracker_test.cpp` (registered in
+`tests/tests.list`) has 7 `TEST_CASE`s: callback validation, configuration
+(defaults, overrides incl. `tracking.sign`, each invalid value, shutdown via
+`loadConfig()`), angle helpers (offset, wrapped stage target, nearest angle,
+names modulo 90), move queueing, tracking (teldata gating, invalid teldata,
+start/stop, periodic skip while not READY, `pa` unwrapping and reset),
+stage readback in the user's frame, app state, and telemetry. Non-finite and
+empty-string config values are tested by setting the member before
+`loadConfigImpl()`, since the config parser may not round-trip them.
+
+**Not compiled or run**: this Mac has no mxlib/MagAO-X build environment.
+The user builds and runs on a Linux workstation:
+`make -f Makefile.one t=../apps/hwpTracker/tests/hwpTracker_test` from
+`tests/`, and builds the app (`make` in `apps/hwpTracker`).
+
 ## Follow-up and Edge Cases
 
 - User to verify on the instrument that tracking commands reach
