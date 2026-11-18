@@ -3,6 +3,10 @@
 #define polarimetry_hpp
 
 #include <iostream>
+
+#include <QStringList>
+#include <QStyle>
+
 #include "ui_polarimetry.h"
 
 #include "../xWidgets/xWidget.hpp"
@@ -24,9 +28,13 @@ protected:
    std::string m_hwpAngleName{""};
 
    bool m_sequencing{false};
+   bool m_aborting{false};
    int m_hwpPosIndex{0};
    int m_curCycle{0};
-   int m_numCycles{-1};
+   int m_numCycles{0};
+   int m_framesPerPos{0};
+   int m_framesLast{0};
+   int m_numPositions{0};
    bool m_hwpTracking{false};
    
    bool m_hwptrackFsmOk{ false };
@@ -37,8 +45,11 @@ protected:
 
    void setBold(QLabel*, bool);
 
+   void setWarning(QLabel*, bool);
 
 public:
+   static int countPositions(const std::string & positions);
+
    explicit polarimetry( QWidget * Parent = 0,
                     Qt::WindowFlags f = Qt::WindowFlags()
                   );
@@ -61,6 +72,7 @@ public slots:
    void on_buttonStartSequence_pressed();
    void on_buttonLastCycle_clicked(bool);
    void on_buttonStopSequence_pressed();
+   void on_buttonAbortSequence_pressed();
 
 signals:
 
@@ -102,11 +114,16 @@ polarimetry::polarimetry(
    setXwFont(ui.hwpPosIndex);
    setXwFont(ui.labelCycleNum);
    setXwFont(ui.cycleNumStatus);
+   setXwFont(ui.labelFramesStatus);
+   setXwFont(ui.framesStatus);
 
    setXwFont(ui.buttonStartSequence);
    setXwFont(ui.buttonLastCycle);
    setXwFont(ui.buttonStopSequence);
-   setXwFont(ui.negOneLabel);
+   setXwFont(ui.buttonAbortSequence);
+   setXwFont(ui.labelNumCyclesHint);
+   setXwFont(ui.labelFramesHint);
+   setXwFont(ui.labelTimeHint);
 
    ui.hwptrackFsm->highlightChanges(false);
    ui.hwpseqFsm->highlightChanges(false);
@@ -141,6 +158,10 @@ polarimetry::polarimetry(
 
    ui.buttonLastCycle->setCheckable(true);
    ui.buttonLastCycle->setProperty("isHighlightButton", true);
+   ui.buttonAbortSequence->setProperty("isAbortButton", true);
+
+   ui.labelFramesStatus->setVisible(false);
+   ui.framesStatus->setVisible(false);
 
    ui.entryHwpAngle->setup("hwptrack", "hwp_position", statusEntry::FLOAT, "HWP target", "°");
    ui.entryHwpAngle->format("%.01f");
@@ -149,20 +170,23 @@ polarimetry::polarimetry(
    ui.sliderHwpTracking->setup("hwptrack", "tracking", "toggle", "HWP Tracking");
    ui.sliderHwpTracking->setStretch(0, 1, 3, true, false);
 
-   ui.comboHwpLin->setup("stagepollin", "", "", "HWP lin. stage", "");
+   ui.comboHwpLin->setup("stagepollin", "presetName", "", "HWP lin. stage", "");
    ui.comboHwpLin->ctrlWidget(nullptr);
 
 
    ui.sliderQwpTracking->setup("qwptrack", "tracking", "toggle", "QWP Tracking");
    ui.sliderQwpTracking->setStretch(0, 1, 3, true, false);
 
-   ui.comboQwpLin->setup("stageqwplin", "", "", "QWP lin. stage", "");
+   ui.comboQwpLin->setup("stageqwplin", "presetName", "", "QWP lin. stage", "");
    ui.comboQwpLin->ctrlWidget(nullptr);
 
-   ui.entryNumCycles->setup("hwpsequence", "numCycles", statusEntry::INT, "Num. cycles", "");
+   ui.entryNumCycles->setup("hwpsequence", "num_cycles", statusEntry::INT, "Num. cycles", "");
    ui.entryNumCycles->setStretch(0, 2, 1);
 
-   ui.entryTimePerPos->setup("hwpsequence", "timePerPos", statusEntry::FLOAT, "Time per pos.", "s");
+   ui.entryFramesPerPos->setup("hwpsequence", "frames_per_pos", statusEntry::INT, "Frames per pos.", "");
+   ui.entryFramesPerPos->setStretch(0, 2, 1);
+
+   ui.entryTimePerPos->setup("hwpsequence", "time_per_pos", statusEntry::FLOAT, "Time per pos.", "s");
    ui.entryTimePerPos->format("%.01f");
    ui.entryTimePerPos->setStretch(0, 2, 1);
 
@@ -190,10 +214,12 @@ void polarimetry::subscribe()
 
    m_parent->addSubscriberProperty(this, "hwpsequence", "fsm");
    m_parent->addSubscriberProperty(this, "hwpsequence", "sequence");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "hwpPosIndex");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "curCycle");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "lastCycle");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "numCycles");
+   m_parent->addSubscriberProperty(this, "hwpsequence", "last_cycle");
+   m_parent->addSubscriberProperty(this, "hwpsequence", "abort");
+   m_parent->addSubscriberProperty(this, "hwpsequence", "num_cycles");
+   m_parent->addSubscriberProperty(this, "hwpsequence", "frames_per_pos");
+   m_parent->addSubscriberProperty(this, "hwpsequence", "status");
+   m_parent->addSubscriberProperty(this, "hwpsequence", "positions");
 
    // m_parent->addSubscriberProperty(this, "qwptrack", "tracking");
 
@@ -209,6 +235,7 @@ void polarimetry::subscribe()
    m_parent->addSubscriber(ui.sliderQwpTracking);
    m_parent->addSubscriber(ui.comboQwpLin);
    m_parent->addSubscriber(ui.entryNumCycles);
+   m_parent->addSubscriber(ui.entryFramesPerPos);
    m_parent->addSubscriber(ui.entryTimePerPos);
 
    return;
@@ -238,6 +265,7 @@ void polarimetry::onConnect()
    ui.sliderQwpTracking->onConnect();
    ui.comboQwpLin->onConnect();
    ui.entryNumCycles->onConnect();
+   ui.entryFramesPerPos->onConnect();
    ui.entryTimePerPos->onConnect();
 
    ui.entryHwpAngle->setEnabled(true);
@@ -246,12 +274,16 @@ void polarimetry::onConnect()
    ui.sliderQwpTracking->setEnabled(false);
    ui.comboQwpLin->setEnabled(true);
    ui.entryNumCycles->setEnabled(true);
-   ui.negOneLabel->setEnabled(true);
+   ui.labelNumCyclesHint->setEnabled(true);
+   ui.entryFramesPerPos->setEnabled(true);
+   ui.labelFramesHint->setEnabled(true);
    ui.entryTimePerPos->setEnabled(true);
+   ui.labelTimeHint->setEnabled(true);
 
    ui.buttonStartSequence->setEnabled(true);
    ui.buttonLastCycle->setEnabled(true);
    ui.buttonStopSequence->setEnabled(true);
+   ui.buttonAbortSequence->setEnabled(true);
 }
 
 
@@ -280,12 +312,16 @@ void polarimetry::onDisconnect()
    setBold(ui.hwpPosIndex, false);
    setBold(ui.cycleNumStatus, false);
 
+   ui.framesStatus->setText(QString("---"));
+   setWarning(ui.framesStatus, false);
+
    ui.entryHwpAngle->onDisconnect();
    ui.sliderHwpTracking->onDisconnect();
    ui.comboHwpLin->onDisconnect();
    ui.sliderQwpTracking->onDisconnect();
    ui.comboQwpLin->onDisconnect();
    ui.entryNumCycles->onDisconnect();
+   ui.entryFramesPerPos->onDisconnect();
    ui.entryTimePerPos->onDisconnect();
 
    ui.entryHwpAngle->setEnabled(false);
@@ -294,12 +330,16 @@ void polarimetry::onDisconnect()
    ui.sliderQwpTracking->setEnabled(false);
    ui.comboQwpLin->setEnabled(false);
    ui.entryNumCycles->setEnabled(false);
-   ui.negOneLabel->setEnabled(false);
+   ui.labelNumCyclesHint->setEnabled(false);
+   ui.entryFramesPerPos->setEnabled(false);
+   ui.labelFramesHint->setEnabled(false);
    ui.entryTimePerPos->setEnabled(false);
+   ui.labelTimeHint->setEnabled(false);
 
    ui.buttonStartSequence->setEnabled(false);
    ui.buttonLastCycle->setEnabled(false);
    ui.buttonStopSequence->setEnabled(false);
+   ui.buttonAbortSequence->setEnabled(false);
 
    multiIndiSubscriber::onDisconnect();
 }
@@ -374,32 +414,57 @@ void polarimetry::handleSetProperty( const pcf::IndiProperty & ipRecv)
             m_sequencing = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
          }
       }
-      else if (ipRecv.getName() == "curCycle")
+      else if (ipRecv.getName() == "status")
+      {
+         // status elements are published as doubles
+         if (ipRecv.find("pos_index"))
+         {
+            m_hwpPosIndex = static_cast<int>(ipRecv["pos_index"].get<double>());
+         }
+
+         if (ipRecv.find("cycle"))
+         {
+            m_curCycle = static_cast<int>(ipRecv["cycle"].get<double>());
+         }
+
+         if (ipRecv.find("frames"))
+         {
+            m_framesLast = static_cast<int>(ipRecv["frames"].get<double>());
+         }
+      }
+      else if (ipRecv.getName() == "positions")
       {
          if (ipRecv.find("value"))
          {
-            m_curCycle = ipRecv["value"].get<int>();
+            m_numPositions = countPositions(ipRecv["value"].get<std::string>());
          }
       }
-      else if (ipRecv.getName() == "hwpPosIndex")
-      {
-         if (ipRecv.find("value"))
-         {
-            m_hwpPosIndex = ipRecv["value"].get<int>();
-         }
-      }
-      else if (ipRecv.getName() == "lastCycle")
+      else if (ipRecv.getName() == "last_cycle")
       {
          if (ipRecv.find("toggle"))
          {
             ui.buttonLastCycle->setChecked(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On);
          }
       }
-      else if (ipRecv.getName() == "numCycles")
+      else if (ipRecv.getName() == "abort")
+      {
+         if (ipRecv.find("toggle"))
+         {
+            m_aborting = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+         }
+      }
+      else if (ipRecv.getName() == "num_cycles")
       {
          if (ipRecv.find("current"))
          {
             m_numCycles = ipRecv["current"].get<int>();
+         }
+      }
+      else if (ipRecv.getName() == "frames_per_pos")
+      {
+         if (ipRecv.find("current"))
+         {
+            m_framesPerPos = ipRecv["current"].get<int>();
          }
       }
    }
@@ -484,9 +549,18 @@ void polarimetry::updateGUI()
 
    ui.comboQwpLin->setEnabled(!m_sequencing);
    
-   ui.entryNumCycles->setEnabled(!m_sequencing && m_hwpseqFsmOk);
-   ui.negOneLabel->setEnabled(!m_sequencing && m_hwpseqFsmOk);
-   ui.entryTimePerPos->setEnabled(!m_sequencing && m_hwpseqFsmOk);
+   // num_cycles may be changed during a sequence, it is checked at the end of each cycle
+   ui.entryNumCycles->setEnabled(m_hwpseqFsmOk);
+   ui.labelNumCyclesHint->setEnabled(m_hwpseqFsmOk);
+
+   ui.entryFramesPerPos->setEnabled(!m_sequencing && m_hwpseqFsmOk);
+   ui.labelFramesHint->setEnabled(!m_sequencing && m_hwpseqFsmOk);
+
+   // time_per_pos is ignored in frames mode
+   bool timeMode = m_framesPerPos == 0;
+
+   ui.entryTimePerPos->setEnabled(!m_sequencing && m_hwpseqFsmOk && timeMode);
+   ui.labelTimeHint->setEnabled(!m_sequencing && m_hwpseqFsmOk && timeMode);
 
    ui.buttonStartSequence->setVisible(!m_sequencing);
    ui.buttonStartSequence->setEnabled(!m_sequencing && m_hwpseqFsmOk && m_hwptrackFsmOk);
@@ -497,9 +571,37 @@ void polarimetry::updateGUI()
    ui.buttonLastCycle->setVisible(m_sequencing);
    ui.buttonLastCycle->setEnabled(m_sequencing && m_hwpseqFsmOk);
 
+   ui.buttonAbortSequence->setVisible(m_sequencing);
+   ui.buttonAbortSequence->setEnabled(m_sequencing && m_hwpseqFsmOk && !m_aborting);
+
+   // the frames count is only checked in frames mode
+   bool showFrames = m_sequencing && !timeMode;
+
+   ui.labelFramesStatus->setVisible(showFrames);
+   ui.framesStatus->setVisible(showFrames);
+
+   // status.frames is not reset at sequence start, so it is stale until the first position completes
+   if (showFrames && !(m_curCycle <= 1 && m_hwpPosIndex == 0))
+   {
+      ui.framesStatus->setText(QString("%1 / %2").arg(m_framesLast).arg(m_framesPerPos));
+      setWarning(ui.framesStatus, m_framesLast != m_framesPerPos);
+   }
+   else
+   {
+      ui.framesStatus->setText(QString("---"));
+      setWarning(ui.framesStatus, false);
+   }
+
    if (m_sequencing)
    {
-      ui.hwpPosIndex->setText(QString("%1 / 4").arg(m_hwpPosIndex + 1));
+      if (m_numPositions > 0)
+      {
+         ui.hwpPosIndex->setText(QString("%1 / %2").arg(m_hwpPosIndex + 1).arg(m_numPositions));
+      }
+      else
+      {
+         ui.hwpPosIndex->setText(QString("%1").arg(m_hwpPosIndex + 1));
+      }
 
       if (m_numCycles > 0)
       {
@@ -519,6 +621,7 @@ void polarimetry::updateGUI()
 
    setBold(ui.hwpPosIndex, m_sequencing);
    setBold(ui.cycleNumStatus, m_sequencing);
+   setBold(ui.framesStatus, showFrames);
 
 
 } //updateGUI()
@@ -549,11 +652,24 @@ void polarimetry::on_buttonStopSequence_pressed()
    return;
 }
 
+void polarimetry::on_buttonAbortSequence_pressed()
+{
+   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
+   ip.setDevice("hwpsequence");
+   ip.setName("abort");
+   ip.add(pcf::IndiElement("toggle"));
+   ip["toggle"] = pcf::IndiElement::On;
+   sendNewProperty(ip);
+
+   emit doUpdateGUI();
+   return;
+}
+
 void polarimetry::on_buttonLastCycle_clicked(bool checked)
 {
    pcf::IndiProperty ip(pcf::IndiProperty::Switch);
    ip.setDevice("hwpsequence");
-   ip.setName("lastCycle");
+   ip.setName("last_cycle");
    ip.add(pcf::IndiElement("toggle"));
    ip["toggle"] = checked ? pcf::IndiElement::On : pcf::IndiElement::Off;
    sendNewProperty(ip);
@@ -568,6 +684,41 @@ void polarimetry::setBold(QLabel *label, bool onoff)
    QFont font = label->font();
    font.setBold(onoff);
    label->setFont(font);
+}
+
+void polarimetry::setWarning(QLabel *label, bool onoff)
+{
+   if (label->property("isWarning").toBool() == onoff)
+   {
+      return;
+   }
+
+   label->setProperty("isWarning", onoff);
+   label->style()->unpolish(label);
+   label->style()->polish(label);
+}
+
+int polarimetry::countPositions(const std::string & positions)
+{
+   QStringList list = QString(positions.c_str()).split(',');
+
+   int n = 0;
+
+   for (const QString & pos : list)
+   {
+      bool ok = false;
+
+      pos.trimmed().toDouble(&ok);
+
+      if (!ok)
+      {
+         return 0;
+      }
+
+      ++n;
+   }
+
+   return n;
 }
 
 } //namespace xqt
