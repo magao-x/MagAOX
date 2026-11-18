@@ -1,6 +1,5 @@
 /** \file indiDictionary.cpp
  * \brief Implements the rtimv INDI-backed dictionary plugin.
- *
  */
 
 #include <cmath>
@@ -18,12 +17,14 @@ bool dictionaryElementKeyToPropertyKey( const std::string &elKey,  /**< [in] Dev
                                         std::string       &property /**< [out] Property name. */ )
 {
     size_t np = elKey.find( '.', 0 );
+
     if( np == std::string::npos )
     {
         return false;
     }
 
     size_t ap = elKey.find( '.', np + 1 );
+
     if( ap == std::string::npos )
     {
         return false;
@@ -40,11 +41,18 @@ bool dictionaryElementKeyToPropertyKey( const std::string &elKey,  /**< [in] Dev
 class rtimvIndiClient : public pcf::IndiClient
 {
   public:
-    std::set<std::string> m_subscribed;      ///< Requested property keys.
-    std::mutex            m_subscribedMutex; ///< Guards subscriptions shared with the GUI.
+    /// Requested property keys.
+    std::set<std::string> m_subscribed;
+
+    /// Guards subscriptions shared with the GUI.
+    std::mutex m_subscribedMutex;
+
   protected:
-    indiDictionary *m_owner;      ///< Plugin owns this client and outlives its receive thread.
-    quint64         m_generation; ///< Generation captured when this client connected.
+    /// Plugin owns this client and outlives its receive thread.
+    indiDictionary *m_owner;
+
+    /// Generation captured when this client connected.
+    quint64 m_generation;
 
     /// Queue a complete property without changing shared dictionary structures.
     void receive( const pcf::IndiProperty &property,   /**< [in] Incoming vector. */
@@ -57,16 +65,22 @@ class rtimvIndiClient : public pcf::IndiClient
                      int                port,    /**< [in] Configured INDI port. */
                      indiDictionary    *owner,   /**< [in] Owning GUI plugin. */
                      quint64            generation /**< [in] Connection generation. */ );
+
     /// Stop the receive thread before releasing the client.
     ~rtimvIndiClient();
+
     /// Queue an incoming definition.
     void handleDefProperty( const pcf::IndiProperty &property /**< [in] Definition. */ ) override;
+
     /// Queue a property or device deletion.
     void handleDelProperty( const pcf::IndiProperty &property /**< [in] Deleted property/device. */ ) override;
+
     /// Ignore unsolicited log messages.
     void handleMessage( const pcf::IndiProperty &property /**< [in] Server message. */ ) override;
+
     /// Queue an incoming value update.
     void handleSetProperty( const pcf::IndiProperty &property /**< [in] Values. */ ) override;
+
     /// Execute the INDI receive loop.
     void execute() override;
 };
@@ -75,41 +89,54 @@ rtimvIndiClient::rtimvIndiClient( const std::string &address, int port, indiDict
     : pcf::IndiClient( "rtimvIndiClient", "1.7", "1.7", address, port ), m_owner( owner ), m_generation( generation )
 {
 }
+
 rtimvIndiClient::~rtimvIndiClient()
 {
     quitProcess();
     deactivate();
 }
+
 void rtimvIndiClient::receive( const pcf::IndiProperty &property, bool definition, bool removed )
 {
     if( !removed )
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_subscribedMutex );
+
         if( !m_subscribed.count( property.createUniqueKey() ) )
+        {
             return;
+        }
     }
+
     QMetaObject::invokeMethod(
         m_owner,
         [owner = m_owner, generation = m_generation, property, definition, removed]()
-        { owner->receiveProperty( property, generation, definition, removed ); },
+        {
+            owner->receiveProperty( property, generation, definition, removed );
+        },
         Qt::QueuedConnection );
 }
+
 void rtimvIndiClient::handleDefProperty( const pcf::IndiProperty &property )
 {
     receive( property, true );
 }
+
 void rtimvIndiClient::handleDelProperty( const pcf::IndiProperty &property )
 {
     receive( property, false, true );
 }
+
 void rtimvIndiClient::handleMessage( const pcf::IndiProperty &property )
 {
     static_cast<void>( property );
 }
+
 void rtimvIndiClient::handleSetProperty( const pcf::IndiProperty &property )
 {
     receive( property, false );
 }
+
 void rtimvIndiClient::execute()
 {
     processIndiRequests( false );
@@ -125,8 +152,12 @@ indiDictionary::~indiDictionary()
     QObject::disconnect( &m_connTimer, SIGNAL( timeout() ), this, SLOT( checkConnection() ) );
 
     std::lock_guard<std::mutex> lock( m_clientMutex );
+
     if( m_client )
+    {
         delete m_client;
+    }
+
     m_client = nullptr;
 }
 
@@ -170,7 +201,9 @@ int indiDictionary::attachDictionary( dictionaryT *dict, mx::app::appConfigurato
 void indiDictionary::checkConnection()
 {
     if( !m_enabled )
+    {
         return;
+    }
 
     std::lock_guard<std::mutex> lock( m_clientMutex );
 
@@ -200,11 +233,13 @@ void indiDictionary::checkConnection()
     }
 
     if( !m_client )
+    {
         return;
+    }
 
     std::set<std::pair<std::string, std::string>> propertyKeys;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_dictMutex );
 
         if( m_dict == nullptr )
@@ -230,7 +265,8 @@ void indiDictionary::checkConnection()
     for( const auto &propertyKey : propertyKeys )
     {
         bool shouldSnoop = false;
-        { // mutex scope
+
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_client->m_subscribedMutex );
             auto res    = m_client->m_subscribed.insert( propertyKey.first + "." + propertyKey.second );
             shouldSnoop = res.second;
@@ -250,10 +286,15 @@ std::vector<std::string> indiDictionary::info()
 {
     std::vector<std::string> vinfo;
     vinfo.push_back( "INDI dictionary: " + m_ipAddress + ":" + std::to_string( m_port ) );
+
     if( m_client )
+    {
         vinfo[0] += " [connected]";
+    }
     else
+    {
         vinfo[0] += " [not connected]";
+    }
 
     return vinfo;
 }
@@ -276,26 +317,37 @@ void indiDictionary::writeCommand( const pcf::IndiProperty &property )
 rtimvPropertySnapshot indiDictionary::propertySnapshot( const QString &device, const QString &property ) const
 {
     if( !commandConnected() )
+    {
         return {};
+    }
+
     return m_properties.value( device + "." + property );
 }
 
 void indiDictionary::invalidateConnection()
 {
     ++m_generation;
+
     if( m_dict )
     {
         for( auto it = m_properties.begin(); it != m_properties.end(); ++it )
         {
             const std::string prefix = it.key().toStdString() + ".";
+
             for( auto entry = m_dict->lower_bound( prefix );
                  entry != m_dict->end() && entry->first.starts_with( prefix );
                  ++entry )
+            {
                 entry->second.setBlob( nullptr, 0 );
+            }
+
             if( it.key() == "tcsi.teldata" )
+            {
                 ( *m_dict )["rtimv.north.angle"].setBlob( nullptr, 0 );
+            }
         }
     }
+
     m_properties.clear();
 }
 
@@ -305,61 +357,132 @@ void indiDictionary::receiveProperty( const pcf::IndiProperty &property,
                                       bool                     removed )
 {
     if( generation != m_generation || !commandConnected() )
+    {
         return;
+    }
+
     QString device = QString::fromStdString( property.getDevice() );
     QString key    = QString::fromStdString( property.createUniqueKey() );
+
     if( removed )
     {
         QString prefix = property.getName().empty() ? device + "." : key + ".";
+
         for( auto it = m_properties.begin(); it != m_properties.end(); )
         {
             if( it.key() == key || it.key().startsWith( prefix ) )
+            {
                 it = m_properties.erase( it );
+            }
             else
+            {
                 ++it;
+            }
         }
+
         if( m_dict )
+        {
             for( auto &entry : *m_dict )
+            {
                 if( QString::fromStdString( entry.first ).startsWith( prefix ) )
+                {
                     entry.second.setBlob( nullptr, 0 );
+                }
+            }
+        }
+
         if( m_client )
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_client->m_subscribedMutex );
+
             for( auto it = m_client->m_subscribed.begin(); it != m_client->m_subscribed.end(); )
             {
                 if( *it == key.toStdString() || QString::fromStdString( *it ).startsWith( prefix ) )
+                {
                     it = m_client->m_subscribed.erase( it );
+                }
                 else
+                {
                     ++it;
+                }
             }
         }
+
         return;
     }
+
     rtimvPropertySnapshot snapshot = definition ? rtimvPropertySnapshot{} : m_properties.value( key );
+
     if( definition )
     {
+        if( m_dict )
+        {
+            // A definition replaces the element list; partial value updates do not.
+            const std::string prefix = property.createUniqueKey() + ".";
+
+            for( auto entry = m_dict->lower_bound( prefix );
+                 entry != m_dict->end() && entry->first.starts_with( prefix );
+                 ++entry )
+            {
+                if( !property.find( entry->first.substr( prefix.size() ) ) )
+                {
+                    entry->second.setBlob( nullptr, 0 );
+                }
+            }
+
+            if( key == "tcsi.teldata" && !property.find( "pa" ) )
+            {
+                auto angle = m_dict->find( "rtimv.north.angle" );
+
+                if( angle != m_dict->end() )
+                {
+                    angle->second.setBlob( nullptr, 0 );
+                }
+            }
+        }
+
         snapshot.m_valid = true;
         snapshot.m_writable =
             property.getPerm() == pcf::IndiProperty::ReadWrite || property.getPerm() == pcf::IndiProperty::WriteOnly;
+
         if( property.getType() == pcf::IndiProperty::Number )
+        {
             snapshot.m_type = rtimvPropertyType::number;
+        }
         else if( property.getType() == pcf::IndiProperty::Switch )
+        {
             snapshot.m_type = rtimvPropertyType::toggle;
+        }
         else if( property.getType() == pcf::IndiProperty::Text )
+        {
             snapshot.m_type = rtimvPropertyType::text;
+        }
         else
+        {
             snapshot.m_valid = false;
+        }
     }
+
     snapshot.m_generation = generation;
     snapshot.m_complete   = snapshot.m_valid;
+
     for( auto it = snapshot.m_elements.begin(); it != snapshot.m_elements.end(); ++it )
+    {
         if( !property.find( it.key().toStdString() ) )
+        {
             snapshot.m_complete = false;
+        }
+    }
+
     if( ( snapshot.m_type == rtimvPropertyType::number && property.getType() != pcf::IndiProperty::Number ) ||
         ( snapshot.m_type == rtimvPropertyType::toggle && property.getType() != pcf::IndiProperty::Switch ) ||
         ( snapshot.m_type == rtimvPropertyType::text && property.getType() != pcf::IndiProperty::Text ) )
+    {
         snapshot.m_valid = snapshot.m_complete = false;
+    }
+
     snapshot.m_revision = ++m_revision;
+
     switch( property.getState() )
     {
     case pcf::IndiProperty::Ok:
@@ -374,10 +497,12 @@ void indiDictionary::receiveProperty( const pcf::IndiProperty &property,
     default:
         snapshot.m_state = "idle";
     }
+
     for( const auto &entry : property.getElements() )
     {
         QString     name  = QString::fromStdString( entry.first );
         std::string value = entry.second.get();
+
         if( property.getType() == pcf::IndiProperty::Switch )
         {
             auto state = entry.second.getSwitchState();
@@ -392,10 +517,14 @@ void indiDictionary::receiveProperty( const pcf::IndiProperty &property,
             snapshot.m_elements[name] = ok && std::isfinite( number ) ? QVariant( number ) : QVariant();
         }
         else
+        {
             snapshot.m_elements[name] = QString::fromStdString( value );
+        }
+
         if( m_dict )
         {
             ( *m_dict )[property.createUniqueKey() + "." + entry.first].setBlob( value.c_str(), value.size() + 1 );
+
             if( key == "tcsi.teldata" && name == "pa" )
             {
                 float angle = snapshot.m_elements[name].toFloat();
@@ -403,31 +532,38 @@ void indiDictionary::receiveProperty( const pcf::IndiProperty &property,
             }
         }
     }
+
     m_properties[key] = snapshot;
 }
 
 bool indiDictionary::sendCommands( const QVector<rtimvCommand> &commands, QString &error )
 {
     std::lock_guard<std::mutex> guard( m_clientMutex );
+
     if( !commandConnected() )
     {
         error = "INDI disconnected";
         return false;
     }
+
     std::vector<pcf::IndiProperty> outgoing;
+
     for( const auto &command : commands )
     {
         auto snapshot = propertySnapshot( command.m_device, command.m_property );
+
         if( !snapshot.m_valid || !snapshot.m_writable || snapshot.m_type != command.m_type ||
             command.m_elements.empty() || command.m_type == rtimvPropertyType::text )
         {
             error = "INDI property unavailable, read-only, or wrong type";
             return false;
         }
+
         pcf::IndiProperty property( command.m_type == rtimvPropertyType::number ? pcf::IndiProperty::Number
                                                                                 : pcf::IndiProperty::Switch,
                                     command.m_device.toStdString(),
                                     command.m_property.toStdString() );
+
         for( auto it = command.m_elements.begin(); it != command.m_elements.end(); ++it )
         {
             if( !snapshot.m_elements.contains( it.key() ) )
@@ -435,13 +571,16 @@ bool indiDictionary::sendCommands( const QVector<rtimvCommand> &commands, QStrin
                 error = "Unknown INDI element";
                 return false;
             }
+
             std::string name = it.key().toStdString();
             property.add( pcf::IndiElement( name ) );
+
             if( command.m_type == rtimvPropertyType::number )
             {
                 bool      ok;
                 double    number = it.value().toDouble( &ok );
                 const int type   = it.value().userType();
+
                 if( !ok || !std::isfinite( number ) ||
                     ( type != QMetaType::Double && type != QMetaType::Float && type != QMetaType::Int &&
                       type != QMetaType::UInt && type != QMetaType::LongLong && type != QMetaType::ULongLong ) )
@@ -449,6 +588,7 @@ bool indiDictionary::sendCommands( const QVector<rtimvCommand> &commands, QStrin
                     error = "Invalid INDI number";
                     return false;
                 }
+
                 property[name] = number;
             }
             else
@@ -458,15 +598,21 @@ bool indiDictionary::sendCommands( const QVector<rtimvCommand> &commands, QStrin
                     error = "Invalid INDI switch";
                     return false;
                 }
+
                 property[name].setSwitchState( it.value().toBool() ? pcf::IndiElement::On : pcf::IndiElement::Off );
             }
         }
+
         outgoing.push_back( property );
     }
+
     try
     {
         for( const auto &property : outgoing )
+        {
             writeCommand( property );
+        }
+
         return true;
     }
     catch( const std::exception &e )
@@ -477,8 +623,13 @@ bool indiDictionary::sendCommands( const QVector<rtimvCommand> &commands, QStrin
     {
         error = "INDI send failed";
     }
+
     invalidateConnection();
+
     if( m_client )
+    {
         m_client->quitProcess();
+    }
+
     return false;
 }
