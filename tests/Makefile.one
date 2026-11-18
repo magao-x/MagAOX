@@ -103,7 +103,11 @@ else ifneq ($(filter $(notdir $(TESTNAME)),$(EDT_TESTS)),)
 endif
 
 ifeq ($(notdir $(TESTNAME)),ocam2KCtrl_descramble_test)
-    $(OBJNAME): $(PATHNAME)../ocam2KCtrl.hpp $(PATHNAME)../ocamDescrambler.hpp $(PATHNAME)ocam2KCtrl_test.cpp $(PATHNAME)ocamDescrambleFixture.hpp
+    $(OBJNAME): $(PATHNAME)../ocam2KCtrl.hpp $(PATHNAME)../ocamDescrambler.hpp $(PATHNAME)../ocamDescrambleParallel.hpp $(PATHNAME)../ocamDescramblePlacement.hpp $(PATHNAME)ocam2KCtrl_test.cpp $(PATHNAME)ocamDescrambleFixture.hpp
+endif
+
+ifeq ($(notdir $(TESTNAME)),ocamDescramblePlacement_test)
+    $(OBJNAME): $(PATHNAME)../ocamDescramblePlacement.hpp
 endif
 
 LDLIBS+=$(TESTLIBS)

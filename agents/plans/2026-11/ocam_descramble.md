@@ -52,10 +52,11 @@ only; no instrument commands, benchmarks, or implementation were run.
 Status as of 2026-11-18: **single-core implementation complete; current RTC
 captures show about 3.9 us lower mean with a small positive jitter difference.
 The local second-thread experiment is complete: its kernel improves, but its
-staged result depends strongly on cadence; RTC qualification remains open**.
-The answers below and subsequent user requests authorize phases 1–3 and an
-offline worker experiment. A runtime worker and instrument CPU reassignment
-remain separate from this local test.
+staged result depends strongly on cadence. The operator has now authorized an
+instrument test and a configurable runtime worker; RTC qualification remains
+open**. CPU reservation, deployment and hardware execution remain operator
+steps. The implementation and test record below distinguish local validation
+from actual instrument measurements.
 
 ## Task Summary
 
@@ -1235,3 +1236,157 @@ comparison including staging, actual placement and frequency conditions,
 then qualify frame delivery and end-to-end loop latency with the operator.
 A production implementation would additionally need framework thread startup,
 verified scheduling, fault/recovery handling and configuration lifecycle tests.
+
+
+## Runtime worker for operator RTC qualification — 2026-11-18
+
+The operator requested an instrument comparison and offered to free a cpuset
+on the framegrabber's CCD. Candidate placement is `spare31` (logical CPU 31)
+if actual topology confirms shared L3 with `camwfs` (CPU 33); `camwfs_sw`
+(CPU 32) is another proposed candidate. CPU numbers alone are insufficient.
+The operator was asked for the RTC's SMT and L3-sharing lists. This change
+adds configuration and verification, not a cpuset reassignment. The local
+host remains `mx11`; no agent-side instrument commands or camera execution
+are authorized or performed.
+
+### Runtime integration
+
+- Add `parallel` to `camera.descrambleMethod` and the live `descramble_method`
+  selector, retaining SDK as default. New `descramble.cpuset` defaults empty
+  and disables the worker. `descramble.threadPrio=-1` inherits the configured
+  framegrabber priority; an enabled worker requires priorities 1–99.
+  `descramble.partition` selects `paired30` (default), `paired28`, or `halves`.
+- Start one persistent worker with `MagAOXApp::threadStart`, including the
+  standard `th-descramble` property. The legacy startup boolean is not an
+  admission barrier: the worker remains parked until actual policy, priority,
+  exact configured single-CPU masks, distinct physical cores and shared L3
+  have been verified. This follows the existing BMC scheduling-verification
+  precedent because `threadStart` can return success after a scheduler error.
+- Require `framegrabber.staged=true`, a prepared structured bin2 map and
+  verified worker placement. Recheck placement during acquisition
+  configuration. Failures retain SDK fallback and report an Alert for an
+  unmet parallel request. Existing prepared single-thread choices remain
+  usable. `descramble_status` adds parallel state and verified CPU readbacks.
+- The frame thread latches one method for an entire load, completes both
+  private output portions before existing digital sampling, and returns only
+  when the worker has released the raw and output buffers. The original
+  primary-thread copy, metadata/write-flag ordering, publications and EDT
+  buffer-replenishment ordering remain unchanged.
+- Switching to a single-thread method parks the helper. Power-off/control
+  paths request parking without waiting for frame work under app locks;
+  frame-owned recovery/configuration paths drain and park it. Shutdown joins
+  the framegrabber, stops/joins the helper, then releases prepared maps and SDK
+  state. Worker mode/map lifetime is separate from numeric SDK-handle reuse.
+
+### Shared worker and placement support
+
+`ocamDescrambleParallel.hpp` holds the prepared row kernel and mandatory-job
+protocol without owning a thread, SDK handle or CPU configuration. Preparation
+copies validated mapping data via the existing helper's public interface;
+the production `optimized` implementation remains unchanged. The benchmark
+thread/affinity wrapper now uses this same engine, so future local measurements
+exercise the runtime handoff protocol rather than a separate prototype.
+
+An atomic control word closes admission when park/stop is requested. A job
+admitted concurrently with a control request must drain before the caller
+returns or storage is reused. Release/acquire generation counters separate
+job payload publication from completion. Atomic wait/notify handles cold
+park/resume; the active job/completion path spins. The admission protocol adds
+atomic operations compared with the original offline prototype, so earlier
+microbenchmarks are historical results, not exact timings of this revision.
+Unexpected or requested worker exit cannot authorize fallback while worker
+writes remain outstanding. One owner invokes prepare/clear/resume/run; control
+threads may request park/stop. Destruction still requires stop and join.
+
+`ocamDescramblePlacement.hpp` reads scheduling, affinity, cpuset files and
+kernel topology without changing them. Verification establishes observed
+placement, not exclusive ownership or protection against later reassignment.
+The operator must reserve the physical core, avoid conflicting FIFO tasks
+there and on its SMT sibling, and retain that reservation through all test
+intervals. The existing framework startup and staging utilities are reused.
+BMC and OCAM now both need post-start scheduling/affinity verification; a
+follow-up common utility could consolidate that check while retaining OCAM's
+app-specific distinct-core/shared-L3 requirement. This scoped experiment does
+not change BMC or the framework thread-start contract.
+
+### Operator comparison
+
+The comparison guide contains configuration and exact readbacks for
+SDK → optimized → parallel → optimized → SDK, settling at least one full
+rolling timing window after each acknowledgment. Keep the freed-core workload,
+FPS, synchronization, gain, staging, readers and stage instrumentation fixed
+through the crossover. Use applied-method, worker-running/parked and CPU
+readbacks to confirm each condition. Measure conversion where enabled,
+acquisition-to-write, frame quality and end-to-end loop timing. The operator
+runs installation, restart, cpuset and INDI commands. No RTC performance
+result is claimed by local code validation.
+
+
+### Completed local validation
+
+The production app compiled and linked successfully with the locally installed
+real EDT SDK using:
+
+```bash
+make -C apps/ocam2KCtrl EDT=true \
+  EDT_INCLUDES=-I/home/jrmales/Source/opt/EDTpdv \
+  'EDT_LIBS=-L/home/jrmales/Source/opt/EDTpdv -lpdv -lpthread -lm -ldl' -j1
+```
+
+The default build path `/opt/EDTpdv` is absent on this workstation; the explicit
+local SDK path above resolves that dependency. The built camera executable
+was not launched or installed. Final build log:
+`/tmp/ocam-runtime-app-build-edt-final.log`.
+
+Forced-rebuilt offline app suites passed **31,965 assertions in 81 cases**:
+
+| Suite | Assertions | Cases |
+| --- | ---: | ---: |
+| Descramble selection/lifecycle | 29,499 | 8 |
+| Main OCAM controller | 902 | 36 |
+| Reconfiguration | 379 | 4 |
+| Application lifecycle | 7 | 1 |
+| EM gain | 34 | 1 |
+| Temperature | 504 | 5 |
+| Housekeeping | 640 | 26 |
+
+The shared worker's standalone real-SDK suite passed **1,493 checks** in each
+of the optimized, ASan/UBSan and TSan builds. Each run observed 48 admitted-job
+park/stop races; no sanitizer diagnostic occurred. Admission observation
+exercises real concurrent interleavings without adding a production delay
+hook; it does not exhaust all possible schedules. The original pinned
+benchmark wrapper retained its **1,162 passing checks**, and worker-diagnostic
+and legacy benchmark smoke invocations validated output and guards.
+
+The placement suite passed **150 assertions in three cases**, both normally
+and with ASan/UBSan. It covers exact/wide/wrong affinity, invalid or absent
+cpusets, policy/priority mismatch, SMT siblings, different L3/package,
+malformed/missing topology, and reset output IDs after failure. Its only
+placement mutations pin its own ordinary local test threads. ASan leak
+checking was disabled because LeakSanitizer cannot operate under the tool's
+ptrace environment; address, undefined-behavior and thread checks did run.
+Logs and smoke outputs are in `/tmp/ocam-runtime-checks/`.
+
+Independent review found and corrected a premature `parked` readback: a park
+request now reports `parking` until acknowledged quiescence. SDK fallback
+also invalidates worker availability after definitive worker exit, reporting
+Alert rather than leaving an indefinitely Busy parallel request. C++ files
+match clang-format with restored mutex-scope comments; the protected original
+plan prefix is unchanged and `git diff --check` passes.
+
+### Affected files and remaining operator steps
+
+- `apps/ocam2KCtrl/ocam2KCtrl.hpp` and `apps/ocam2KCtrl/Makefile`.
+- New `apps/ocam2KCtrl/ocamDescrambleParallel.hpp` and
+  `apps/ocam2KCtrl/ocamDescramblePlacement.hpp`.
+- `apps/ocam2KCtrl/benchmarks/ocamDescrambleWorker.hpp`, `Makefile`, `.gitignore`,
+  and new `ocamDescrambleParallel_test.cpp` in that directory.
+- `apps/ocam2KCtrl/tests/ocam2KCtrl_descramble_test.cpp` and new
+  `apps/ocam2KCtrl/tests/ocamDescramblePlacement_test.cpp`.
+- `tests/Makefile.one`, `tests/tests.list`, this plan, and
+  `apps/ocam2KCtrl/doc/descramble-comparison.md`.
+
+Local implementation and checks are complete. Instrument topology confirmation,
+core reservation, deployment/restart and the matched measurement crossover
+remain operator steps. No cpuset was chosen or altered on the instrument,
+and no instrument performance result has yet been obtained for `parallel`.

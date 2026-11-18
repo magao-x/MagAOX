@@ -1,2 +1,3 @@
 /ocamDescramble_bench
 /ocamDescrambleWorker_test
+/ocamDescrambleParallel_test

@@ -18,6 +18,8 @@ typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; // This needs to be before pdvU
 
 #include "fli/ocam2_sdk.h"
 #include "ocamDescrambler.hpp"
+#include "ocamDescrambleParallel.hpp"
+#include "ocamDescramblePlacement.hpp"
 #include "ocamUtils.hpp"
 
 namespace MagAOX
@@ -140,7 +142,8 @@ class ocam2KCtrl : public MagAOXApp<>,
         sdk,
         compact,
         mapped,
-        optimized
+        optimized,
+        parallel
     };
 
     /// Preparation result for the current acquisition configuration.
@@ -153,6 +156,33 @@ class ocam2KCtrl : public MagAOXApp<>,
     };
 
     ocamDescrambler m_descrambler; ///< Frame-worker-owned map, rebuilt only while acquisition is being configured.
+
+    ocamDescrambleParallel
+        m_descrambleParallel; ///< Mandatory half-frame jobs; map lifetime belongs to the frame worker.
+
+    std::string m_descrambleCpuset; ///< Operator-reserved worker cpuset; empty disables the parallel experiment.
+
+    int m_descrambleThreadPrio{ -1 }; ///< Requested worker priority; -1 inherits the framegrabber priority at load.
+
+    /// Startup-configured split of disjoint output regions between the frame thread and worker.
+    ocamDescrambleParallel::Partition m_descramblePartition{ ocamDescrambleParallel::Partition::paired30 };
+
+    std::thread m_descrambleThread; ///< Persistent worker, joined before map or SDK cleanup.
+
+    bool m_descrambleThreadInit{ true }; ///< threadStart compatibility flag; workerMain uses its own parked barrier.
+
+    pid_t m_descrambleThreadID{ 0 }; ///< Worker TID exposed through the framework thread property.
+
+    pcf::IndiProperty m_descrambleThreadProp; ///< Standard worker TID and requested scheduling-priority readback.
+
+    std::atomic<bool> m_descrambleWorkerVerified{ false }; ///< Actual affinity and scheduling passed qualification.
+
+    std::atomic<bool> m_descrambleParallelAvailable{
+        false }; ///< Prepared map, staging, and worker placement are valid.
+
+    std::atomic<int> m_descrambleCallerCpu{ -1 }; ///< Verified framegrabber logical CPU, or -1 before verification.
+
+    std::atomic<int> m_descrambleWorkerCpu{ -1 }; ///< Verified descramble logical CPU, or -1 before verification.
 
     /// Latched once per frame; isolate ordinary-thread snapshots from the worker's changing frame counters.
     alignas( 64 ) std::atomic<DescrambleMethod> m_descrambleRequested{ DescrambleMethod::sdk };
@@ -548,6 +578,18 @@ class ocam2KCtrl : public MagAOXApp<>,
     /// Publish descramble selection and completion status; the caller holds m_indiMutex.
     void updateDescramble();
 
+    /// Start the optional parked worker using the application thread and cpuset framework.
+    int startDescrambleWorker();
+
+    /// Verify exact worker/caller placement, shared L3, and requested scheduling before enabling parallel jobs.
+    int verifyDescrambleWorker();
+
+    /// Stop and join the worker after the framegrabber has finished all buffer access.
+    void stopDescrambleWorker() noexcept;
+
+    /// Publish the worker TID, then enter the initially parked mandatory-job loop.
+    static void descrambleThreadStart( ocam2KCtrl *app /**< [in,out] Controller owning this worker. */ );
+
     // INDI:
   protected:
     // declare our properties
@@ -626,11 +668,14 @@ inline ocam2KCtrl::~ocam2KCtrl() noexcept
 {
     m_shutdown = true;
     dev::frameGrabber<ocam2KCtrl>::appShutdown();
+    stopDescrambleWorker();
     releaseOcamSdk();
 }
 
 inline void ocam2KCtrl::releaseOcamSdk()
 {
+    m_descrambleParallelAvailable.store( false, std::memory_order_relaxed );
+    m_descrambleParallel.clear();
     m_descrambleAvailability.store( DescrambleAvailability::unconfigured, std::memory_order_relaxed );
     m_descrambleApplied.store( DescrambleMethod::none, std::memory_order_relaxed );
     m_descrambler.clear();
@@ -660,15 +705,44 @@ inline void ocam2KCtrl::setupConfig()
                 "string",
                 "The path of the OCAM descramble file, relative to MagAOX/config." );
 
-    config.add( "camera.descrambleMethod",
+    config.add(
+        "camera.descrambleMethod",
+        "",
+        "camera.descrambleMethod",
+        argType::Required,
+        "camera",
+        "descrambleMethod",
+        false,
+        "string",
+        "Descramble implementation: sdk (default), compact, mapped, optimized, or parallel (validated bin2 only)." );
+
+    config.add( "descramble.cpuset",
                 "",
-                "camera.descrambleMethod",
+                "descramble.cpuset",
                 argType::Required,
-                "camera",
-                "descrambleMethod",
+                "descramble",
+                "cpuset",
                 false,
                 "string",
-                "Descramble implementation: sdk (default), compact, mapped, or optimized (validated bin2 only)." );
+                "Dedicated single-CPU worker cpuset on the framegrabber L3; empty disables parallel." );
+    config.add( "descramble.threadPrio",
+                "",
+                "descramble.threadPrio",
+                argType::Required,
+                "descramble",
+                "threadPrio",
+                false,
+                "int",
+                "Descramble worker RT priority (1-99); -1 inherits framegrabber.threadPrio." );
+    config.add( "descramble.partition",
+                "",
+                "descramble.partition",
+                argType::Required,
+                "descramble",
+                "partition",
+                false,
+                "string",
+                "Parallel split: halves, paired28, or paired30 (default)." );
 
     dev::frameGrabber<ocam2KCtrl>::setupConfig( config );
 
@@ -725,15 +799,17 @@ inline int ocam2KCtrl::loadConfigImpl()
     config( descrambleMethod, "camera.descrambleMethod" );
 
     if( descrambleMethod != "sdk" && descrambleMethod != "compact" && descrambleMethod != "mapped" &&
-        descrambleMethod != "optimized" )
+        descrambleMethod != "optimized" && descrambleMethod != "parallel" )
     {
-        return log<software_error, -1>( { "camera.descrambleMethod must be sdk, compact, mapped, or optimized" } );
+        return log<software_error, -1>(
+            { "camera.descrambleMethod must be sdk, compact, mapped, optimized, or parallel" } );
     }
 
-    m_descrambleRequested.store( descrambleMethod == "sdk"       ? DescrambleMethod::sdk
-                                 : descrambleMethod == "compact" ? DescrambleMethod::compact
-                                 : descrambleMethod == "mapped"  ? DescrambleMethod::mapped
-                                                                 : DescrambleMethod::optimized,
+    m_descrambleRequested.store( descrambleMethod == "sdk"        ? DescrambleMethod::sdk
+                                 : descrambleMethod == "compact"  ? DescrambleMethod::compact
+                                 : descrambleMethod == "mapped"   ? DescrambleMethod::mapped
+                                 : descrambleMethod == "parallel" ? DescrambleMethod::parallel
+                                                                  : DescrambleMethod::optimized,
                                  std::memory_order_relaxed );
 
     if( m_maxEMGain < 1 )
@@ -749,6 +825,30 @@ inline int ocam2KCtrl::loadConfigImpl()
     }
 
     dev::frameGrabber<ocam2KCtrl>::loadConfig( config );
+    config( m_descrambleCpuset, "descramble.cpuset" );
+    config( m_descrambleThreadPrio, "descramble.threadPrio" );
+    std::string partition = "paired30";
+    config( partition, "descramble.partition" );
+
+    if( m_descrambleThreadPrio == -1 )
+    {
+        m_descrambleThreadPrio = m_fgThreadPrio;
+    }
+
+    if( !m_descrambleCpuset.empty() && ( m_descrambleThreadPrio < 1 || m_descrambleThreadPrio > 99 ) )
+    {
+        return log<software_error, -1>( { "descramble.threadPrio must resolve to 1-99 when a worker cpuset is set" } );
+    }
+
+    if( partition != "halves" && partition != "paired28" && partition != "paired30" )
+    {
+        return log<software_error, -1>( { "descramble.partition must be halves, paired28, or paired30" } );
+    }
+
+    m_descramblePartition = partition == "halves"     ? ocamDescrambleParallel::Partition::halves
+                            : partition == "paired28" ? ocamDescrambleParallel::Partition::paired28
+                                                      : ocamDescrambleParallel::Partition::paired30;
+
     config( m_syncShmimName, "framegrabber.syncShmimName" );
     if( m_syncShmimName == "" )
     {
@@ -781,8 +881,9 @@ inline int ocam2KCtrl::loadConfigImpl()
 
 inline int ocam2KCtrl::initDescramble()
 {
-    if( createStandardIndiSelectionSw(
-            m_indiP_descrambleMethod, "descramble_method", { "sdk", "compact", "mapped", "optimized" } ) < 0 ||
+    if( createStandardIndiSelectionSw( m_indiP_descrambleMethod,
+                                       "descramble_method",
+                                       { "sdk", "compact", "mapped", "optimized", "parallel" } ) < 0 ||
         registerIndiPropertyNew( m_indiP_descrambleMethod, INDI_NEWCALLBACK( m_indiP_descrambleMethod ) ) < 0 )
     {
         return -1;
@@ -790,18 +891,22 @@ inline int ocam2KCtrl::initDescramble()
 
     REG_INDI_NEWPROP_NOCB( m_indiP_descrambleStatus, "descramble_status", pcf::IndiProperty::Text );
 
-    for( const auto &name : { "applied", "availability" } )
+    for( const auto &name : { "applied", "availability", "parallel", "caller_cpu", "worker_cpu" } )
     {
         m_indiP_descrambleStatus.add( pcf::IndiElement( name ) );
     }
 
     m_indiP_descrambleStatus["applied"].set( "none" );
     m_indiP_descrambleStatus["availability"].set( "unconfigured" );
+    m_indiP_descrambleStatus["parallel"].set( "unavailable" );
+    m_indiP_descrambleStatus["caller_cpu"].set( "-1" );
+    m_indiP_descrambleStatus["worker_cpu"].set( "-1" );
     const auto requested = m_descrambleRequested.load( std::memory_order_relaxed );
-    m_indiP_descrambleMethod[requested == DescrambleMethod::optimized ? "optimized"
-                             : requested == DescrambleMethod::mapped  ? "mapped"
-                             : requested == DescrambleMethod::compact ? "compact"
-                                                                      : "sdk"]
+    m_indiP_descrambleMethod[requested == DescrambleMethod::parallel    ? "parallel"
+                             : requested == DescrambleMethod::optimized ? "optimized"
+                             : requested == DescrambleMethod::mapped    ? "mapped"
+                             : requested == DescrambleMethod::compact   ? "compact"
+                                                                        : "sdk"]
         .setSwitchState( pcf::IndiElement::On );
 
     return 0;
@@ -809,6 +914,8 @@ inline int ocam2KCtrl::initDescramble()
 
 inline void ocam2KCtrl::prepareDescramble()
 {
+    m_descrambleParallelAvailable.store( false, std::memory_order_relaxed );
+    m_descrambleParallel.clear();
     m_descrambler.clear();
     m_descrambleApplied.store( DescrambleMethod::none, std::memory_order_relaxed );
 
@@ -827,6 +934,12 @@ inline void ocam2KCtrl::prepareDescramble()
     }
 
     m_descrambleAvailability.store( DescrambleAvailability::ready, std::memory_order_relaxed );
+
+    if( m_staged && m_descrambleWorkerVerified.load( std::memory_order_relaxed ) && verifyDescrambleWorker() == 0 &&
+        m_descrambleParallel.prepare( m_descrambler ) == 0 )
+    {
+        m_descrambleParallelAvailable.store( true, std::memory_order_relaxed );
+    }
 }
 
 inline void ocam2KCtrl::updateDescramble()
@@ -841,30 +954,133 @@ inline void ocam2KCtrl::updateDescramble()
     const bool operating =
         !shutdown() && powerState() == 1 && powerStateTarget() == 1 && !m_reconfig && state() == stateCodes::OPERATING;
     const auto  applied = operating ? m_descrambleApplied.load( std::memory_order_relaxed ) : DescrambleMethod::none;
-    const char *availabilityName = availability == DescrambleAvailability::ready         ? "ready"
-                                   : availability == DescrambleAvailability::unsupported ? "unsupported mode"
-                                   : availability == DescrambleAvailability::unavailable ? "unavailable table"
-                                                                                         : "unconfigured";
-    const auto  status           = requested != DescrambleMethod::sdk && availability != DescrambleAvailability::ready
-                                       ? INDI_ALERT
-                                       : ( applied == requested ? INDI_OK : INDI_BUSY );
+    const char *availabilityName  = availability == DescrambleAvailability::ready         ? "ready"
+                                    : availability == DescrambleAvailability::unsupported ? "unsupported mode"
+                                    : availability == DescrambleAvailability::unavailable ? "unavailable table"
+                                                                                          : "unconfigured";
+    const bool  parallelAvailable = m_descrambleParallelAvailable.load( std::memory_order_relaxed );
+    const auto  status = ( requested != DescrambleMethod::sdk && availability != DescrambleAvailability::ready ) ||
+                                ( requested == DescrambleMethod::parallel && !parallelAvailable )
+                             ? INDI_ALERT
+                             : ( applied == requested ? INDI_OK : INDI_BUSY );
 
     indi::updateSelectionSwitchIfChanged( m_indiP_descrambleMethod,
-                                          requested == DescrambleMethod::optimized ? "optimized"
-                                          : requested == DescrambleMethod::mapped  ? "mapped"
-                                          : requested == DescrambleMethod::compact ? "compact"
-                                                                                   : "sdk",
+                                          requested == DescrambleMethod::parallel    ? "parallel"
+                                          : requested == DescrambleMethod::optimized ? "optimized"
+                                          : requested == DescrambleMethod::mapped    ? "mapped"
+                                          : requested == DescrambleMethod::compact   ? "compact"
+                                                                                     : "sdk",
                                           m_indiDriver,
                                           status );
     updateIfChanged( m_indiP_descrambleStatus,
                      "applied",
-                     std::string( applied == DescrambleMethod::optimized ? "optimized"
-                                  : applied == DescrambleMethod::mapped  ? "mapped"
-                                  : applied == DescrambleMethod::compact ? "compact"
-                                  : applied == DescrambleMethod::sdk     ? "sdk"
-                                                                         : "none" ),
+                     std::string( applied == DescrambleMethod::parallel    ? "parallel"
+                                  : applied == DescrambleMethod::optimized ? "optimized"
+                                  : applied == DescrambleMethod::mapped    ? "mapped"
+                                  : applied == DescrambleMethod::compact   ? "compact"
+                                  : applied == DescrambleMethod::sdk       ? "sdk"
+                                                                           : "none" ),
                      status );
     updateIfChanged( m_indiP_descrambleStatus, "availability", std::string( availabilityName ), status );
+    const char *parallelName = m_descrambleCpuset.empty()                                      ? "disabled"
+                               : !m_staged                                                     ? "requires staging"
+                               : !m_descrambleWorkerVerified.load( std::memory_order_relaxed ) ? "unverified worker"
+                               : !parallelAvailable                                            ? "unavailable table"
+                               : m_descrambleParallel.running()                                ? "running"
+                               : m_descrambleParallel.isParked()                               ? "parked"
+                                                                                               : "parking";
+    updateIfChanged( m_indiP_descrambleStatus, "parallel", std::string( parallelName ), status );
+    updateIfChanged( m_indiP_descrambleStatus,
+                     "caller_cpu",
+                     std::to_string( m_descrambleCallerCpu.load( std::memory_order_relaxed ) ),
+                     status );
+    updateIfChanged( m_indiP_descrambleStatus,
+                     "worker_cpu",
+                     std::to_string( m_descrambleWorkerCpu.load( std::memory_order_relaxed ) ),
+                     status );
+}
+
+inline int ocam2KCtrl::startDescrambleWorker()
+{
+    if( m_descrambleCpuset.empty() || m_descrambleThread.joinable() )
+    {
+        return 0;
+    }
+
+    if( m_descrambleThreadPrio < 1 || m_descrambleThreadPrio > 99 || m_fgThreadPrio < 1 || m_fgThreadPrio > 99 )
+    {
+        return log<software_error, -1>( { "Parallel descramble requires RT priorities from 1 to 99 on both threads" } );
+    }
+
+    if( threadStart( m_descrambleThread,
+                     m_descrambleThreadInit,
+                     m_descrambleThreadID,
+                     m_descrambleThreadProp,
+                     m_descrambleThreadPrio,
+                     m_descrambleCpuset,
+                     "descramble",
+                     this,
+                     descrambleThreadStart ) < 0 ||
+        !m_descrambleParallel.waitUntilStarted() || verifyDescrambleWorker() < 0 )
+    {
+        stopDescrambleWorker();
+        return -1;
+    }
+
+    log<text_log>( "Descramble worker verified on CPU " + std::to_string( m_descrambleWorkerCpu.load() ) +
+                   ", sharing L3 with framegrabber CPU " + std::to_string( m_descrambleCallerCpu.load() ) );
+    return 0;
+}
+
+inline int ocam2KCtrl::verifyDescrambleWorker()
+{
+    std::string reason;
+    int         callerCpu = -1;
+    int         workerCpu = -1;
+
+    if( !ocamDescramblePlacement::verifyScheduling( m_fgThread, m_fgThreadPrio, MAGAOX_RT_SCHED_POLICY, reason ) ||
+        !ocamDescramblePlacement::verifyScheduling(
+            m_descrambleThread, m_descrambleThreadPrio, MAGAOX_RT_SCHED_POLICY, reason ) ||
+        !ocamDescramblePlacement::verifyPlacement( m_fgThread,
+                                                   m_descrambleThread,
+                                                   m_cpusetPath,
+                                                   m_fgCpuset,
+                                                   m_descrambleCpuset,
+                                                   callerCpu,
+                                                   workerCpu,
+                                                   reason ) ||
+        m_descrambleParallel.stopped() )
+    {
+        m_descrambleWorkerVerified.store( false, std::memory_order_relaxed );
+        m_descrambleParallelAvailable.store( false, std::memory_order_relaxed );
+        m_descrambleCallerCpu.store( -1, std::memory_order_relaxed );
+        m_descrambleWorkerCpu.store( -1, std::memory_order_relaxed );
+        m_descrambleParallel.requestPark();
+        return log<software_warning, -1>( { "Parallel descramble placement unavailable: " + reason } );
+    }
+
+    m_descrambleCallerCpu.store( callerCpu, std::memory_order_relaxed );
+    m_descrambleWorkerCpu.store( workerCpu, std::memory_order_relaxed );
+    m_descrambleWorkerVerified.store( true, std::memory_order_relaxed );
+    return 0;
+}
+
+inline void ocam2KCtrl::stopDescrambleWorker() noexcept
+{
+    m_descrambleParallelAvailable.store( false, std::memory_order_relaxed );
+    m_descrambleWorkerVerified.store( false, std::memory_order_relaxed );
+    m_descrambleParallel.requestStop();
+
+    if( m_descrambleThread.joinable() )
+    {
+        m_descrambleThread.join();
+    }
+}
+
+inline void ocam2KCtrl::descrambleThreadStart( ocam2KCtrl *app )
+{
+    app->m_descrambleThreadID = syscall( SYS_gettid );
+    app->m_descrambleParallel.workerMain();
 }
 
 inline int ocam2KCtrl::ensureSyncStream()
@@ -1477,6 +1693,11 @@ inline int ocam2KCtrl::appStartup()
         return log<software_critical, -1>( { "" } );
     }
 
+    if( startDescrambleWorker() < 0 )
+    {
+        log<software_warning>( { "Parallel descramble worker unavailable; retaining single-thread methods" } );
+    }
+
     if( dev::dssShutter<ocam2KCtrl>::appStartup() < 0 )
     {
         return log<software_critical, -1>( { "" } );
@@ -1674,6 +1895,7 @@ inline int ocam2KCtrl::appLogic()
 
 inline int ocam2KCtrl::onPowerOff()
 {
+    m_descrambleParallel.requestPark();
     m_powerOnCounter = 0;
 
     std::lock_guard<std::mutex> lock( m_indiMutex );
@@ -1756,6 +1978,7 @@ inline int ocam2KCtrl::whilePowerOff()
 
 inline int ocam2KCtrl::appShutdown()
 {
+    m_descrambleParallel.requestPark();
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_indiMutex );
         endHousekeepingPause( "application shutdown" );
@@ -1770,6 +1993,7 @@ inline int ocam2KCtrl::appShutdown()
 
     dev::frameGrabber<ocam2KCtrl>::appShutdown();
 
+    stopDescrambleWorker();
     releaseOcamSdk();
 
     destroySyncStream();
@@ -2384,6 +2608,7 @@ inline int ocam2KCtrl::setEMGainOff()
 
 inline int ocam2KCtrl::configureAcquisition()
 {
+    m_descrambleParallel.park();
     // lock mutex
     std::unique_lock<std::mutex>          lock( m_indiMutex );
     std::lock_guard<std::recursive_mutex> cameraGuard( m_cameraMutex );
@@ -2628,8 +2853,30 @@ inline int ocam2KCtrl::loadImageIntoStream( void *dest )
 {
     unsigned   currImageNumber = 0;
     const auto requested       = m_descrambleRequested.load( std::memory_order_relaxed );
-    const auto applied         = m_descrambler.structured() ? requested : DescrambleMethod::sdk;
+    auto       applied         = m_descrambler.structured() ? requested : DescrambleMethod::sdk;
     short     *output          = m_digitalBin ? m_digitalBinWork.data() : reinterpret_cast<int16_t *>( dest );
+
+    if( applied == DescrambleMethod::parallel )
+    {
+        if( !m_staged || !m_descrambleParallelAvailable.load( std::memory_order_relaxed ) || shutdown() ||
+            powerState() <= 0 || powerStateTarget() <= 0 || m_reconfig || m_descrambleParallel.resume() < 0 ||
+            m_descrambleParallel.run( output, reinterpret_cast<int16_t *>( m_image_p ), m_descramblePartition ) < 0 )
+        {
+            // A rejected/cancelled job has relinquished both buffers before SDK fallback can overwrite output.
+            applied = DescrambleMethod::sdk;
+
+            if( m_descrambleParallel.stopped() )
+            {
+                m_descrambleParallelAvailable.store( false, std::memory_order_relaxed );
+                m_descrambleWorkerVerified.store( false, std::memory_order_relaxed );
+            }
+        }
+    }
+
+    if( applied != DescrambleMethod::parallel )
+    {
+        m_descrambleParallel.park();
+    }
 
     if( applied == DescrambleMethod::optimized )
     {
@@ -2643,7 +2890,7 @@ inline int ocam2KCtrl::loadImageIntoStream( void *dest )
     {
         m_descrambler.mapped( output, reinterpret_cast<int16_t *>( m_image_p ) );
     }
-    else
+    else if( applied == DescrambleMethod::sdk )
     {
         ocam2_descramble( m_ocam2_id, &currImageNumber, output, reinterpret_cast<int16_t *>( m_image_p ) );
     }
@@ -2680,6 +2927,7 @@ inline int ocam2KCtrl::loadImageIntoStream( void *dest )
 
 inline int ocam2KCtrl::reconfig()
 {
+    m_descrambleParallel.park();
     std::lock_guard<std::mutex>           lock( m_indiMutex );
     std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
     endHousekeepingPause( "camera reconfiguration" );
@@ -2706,6 +2954,7 @@ inline int ocam2KCtrl::reconfig()
 
 inline void ocam2KCtrl::requestAcquisitionRecovery()
 {
+    m_descrambleParallel.park();
     edtCamera<ocam2KCtrl>::pdvFinishAcquisition( false );
 
     std::lock_guard<std::mutex> lock( m_indiMutex );
@@ -2726,6 +2975,7 @@ inline int ocam2KCtrl::frameGrabberPostPublish( IMAGE *imageStream )
 {
     if( imageStream == nullptr )
     {
+        m_descrambleParallel.park();
         edtCamera<ocam2KCtrl>::pdvFinishAcquisition( false );
         return 0;
     }
@@ -2749,6 +2999,11 @@ inline int ocam2KCtrl::frameGrabberPostPublish( IMAGE *imageStream )
 
     ImageStreamIO_sempost( m_syncImageStream, -1 );
 
+    if( m_reconfig || shutdown() || powerState() <= 0 || powerStateTarget() <= 0 )
+    {
+        m_descrambleParallel.requestPark();
+    }
+
     edtCamera<ocam2KCtrl>::pdvFinishAcquisition( !m_reconfig && !shutdown() && powerState() > 0 );
 
     return 0;
@@ -2763,7 +3018,7 @@ INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_descrambleMethod )( const pcf::IndiPr
     for( const auto &element : ipRecv.getElements() )
     {
         if( element.first != "sdk" && element.first != "compact" && element.first != "mapped" &&
-            element.first != "optimized" )
+            element.first != "optimized" && element.first != "parallel" )
         {
             return -1;
         }
@@ -2775,10 +3030,11 @@ INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_descrambleMethod )( const pcf::IndiPr
                 return -1;
             }
 
-            requested = element.first == "sdk"       ? DescrambleMethod::sdk
-                        : element.first == "compact" ? DescrambleMethod::compact
-                        : element.first == "mapped"  ? DescrambleMethod::mapped
-                                                     : DescrambleMethod::optimized;
+            requested = element.first == "sdk"        ? DescrambleMethod::sdk
+                        : element.first == "compact"  ? DescrambleMethod::compact
+                        : element.first == "mapped"   ? DescrambleMethod::mapped
+                        : element.first == "parallel" ? DescrambleMethod::parallel
+                                                      : DescrambleMethod::optimized;
         }
     }
 
@@ -2789,6 +3045,12 @@ INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_descrambleMethod )( const pcf::IndiPr
 
     std::lock_guard<std::mutex> lock( m_indiMutex );
     m_descrambleRequested.store( requested, std::memory_order_relaxed );
+
+    if( requested != DescrambleMethod::parallel )
+    {
+        m_descrambleParallel.requestPark();
+    }
+
     updateDescramble();
     return 0;
 }
