@@ -1,8 +1,9 @@
+/** \file polarimetry.hpp
+ * \brief Polarimetry control widget: HWP/QWP tracking, linear stages, and the hwpSequencer.
+ */
 
 #ifndef polarimetry_hpp
 #define polarimetry_hpp
-
-#include <iostream>
 
 #include <QStringList>
 #include <QStyle>
@@ -14,72 +15,153 @@
 namespace xqt
 {
 
+/// Polarimetry panel for `hwptrack`, `qwptrack`, the polarimetry stages, and `hwpsequence`.
+/**
+ * Shows the HWP angles and the hwpSequencer status, and sends start, stop, last-cycle and
+ * abort requests to `hwpsequence`. Sequence parameters other than `num_cycles` are locked
+ * while sequencing, and `time_per_pos` is disabled in frames mode (`frames_per_pos` > 0).
+ */
 class polarimetry : public xWidget
 {
    Q_OBJECT
 
 protected:
 
-   std::string m_appState;
+   /** \name hwptrack State
+    * @{
+    */
 
+   /// Last `hwptrack.hwp_position.current` [deg].
    float m_hwpSetAngle{0};
+
+   /// Last `hwptrack.hwp_tracking_offset.value` [deg].
    float m_hwpTrackingOffset{0};
+
+   /// Last `hwptrack.hwp_position_actual.value` [deg].
    float m_hwpActualAngle{0};
+
+   /// Last `hwptrack.hwp_position_name.value`.
    std::string m_hwpAngleName{""};
 
-   bool m_sequencing{false};
-   bool m_aborting{false};
-   int m_hwpPosIndex{0};
-   int m_curCycle{0};
-   int m_numCycles{0};
-   int m_framesPerPos{0};
-   int m_framesLast{0};
-   int m_numPositions{0};
+   /// Whether `hwptrack.tracking` is On.
    bool m_hwpTracking{false};
-   
+
+   /// Whether `hwptrack` is READY or OPERATING.
    bool m_hwptrackFsmOk{ false };
+
+   ///@}
+
+   /** \name hwpsequence State
+    * @{
+    */
+
+   /// Whether `hwpsequence.sequence` is On.
+   bool m_sequencing{false};
+
+   /// Whether `hwpsequence.abort` is On, i.e. an abort is in progress.
+   bool m_aborting{false};
+
+   /// Last `hwpsequence.status.pos_index` (0-based).
+   int m_hwpPosIndex{0};
+
+   /// Last `hwpsequence.status.cycle`.
+   int m_curCycle{0};
+
+   /// Last `hwpsequence.num_cycles.current` (0 = until stopped).
+   int m_numCycles{0};
+
+   /// Last `hwpsequence.frames_per_pos.current` (0 = time mode).
+   int m_framesPerPos{0};
+
+   /// Last `hwpsequence.status.frames`: frames that landed at the previous position.
+   int m_framesLast{0};
+
+   /// Number of positions in `hwpsequence.positions`, 0 if unknown.
+   int m_numPositions{0};
+
+   /// Whether `hwpsequence` is READY or OPERATING.
    bool m_hwpseqFsmOk{ false };
-   bool m_qwptrackFsmOk{ false };
-   
+
+   ///@}
+
+   /** \name qwptrack State
+    * @{
+    */
+
+   /// Whether `qwptrack.tracking` is On.
    bool m_qwpTracking{false};
 
-   void setBold(QLabel*, bool);
+   /// Whether `qwptrack` is READY or OPERATING.
+   bool m_qwptrackFsmOk{ false };
 
-   void setWarning(QLabel*, bool);
+   ///@}
 
-public:
-   static int countPositions(const std::string & positions);
+   /// Set or clear the bold font on a label.
+   void setBold( QLabel * label, /**< [in] the label to change */
+                 bool onoff      /**< [in] true for bold */
+               );
 
-   explicit polarimetry( QWidget * Parent = 0,
-                    Qt::WindowFlags f = Qt::WindowFlags()
+   /// Set or clear the `isWarning` style property on a label and re-polish it.
+   void setWarning( QLabel * label, /**< [in] the label to change */
+                    bool onoff      /**< [in] true to show the warning style */
                   );
 
+public:
+
+   /// Count the entries in a comma-separated positions list.
+   /**
+    * \returns the number of positions, or 0 if the list is empty or any entry is not a number.
+    */
+   static int countPositions( const std::string & positions /**< [in] the `hwpsequence.positions` text */ );
+
+   /// Construct the panel and configure its child widgets.
+   explicit polarimetry( QWidget * Parent = 0,                   /**< [in] the parent widget */
+                         Qt::WindowFlags f = Qt::WindowFlags()   /**< [in] Qt window flags */
+                       );
+
+   /// Unsubscribe from the parent publisher.
    ~polarimetry();
 
+   /// Subscribe the panel and its child widgets to their INDI properties.
    void subscribe();
 
+   /// Enable the panel and its children when the INDI connection is made.
    virtual void onConnect();
+
+   /// Reset displays and disable controls when the INDI connection is lost.
    virtual void onDisconnect();
 
+   /// Handle a property definition by treating it as a set.
    void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+   /// Update the cached device state from a property and request a GUI update.
    void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
-
 public slots:
+
+   /// Update displays and control availability from the cached device state.
    void updateGUI();
 
+   /// Request a sequence start (`hwpsequence.sequence` On).
    void on_buttonStartSequence_pressed();
-   void on_buttonLastCycle_clicked(bool);
+
+   /// Request or cancel ending after the current cycle (`hwpsequence.last_cycle`).
+   void on_buttonLastCycle_clicked( bool checked /**< [in] true to end after the current cycle */ );
+
+   /// Request a graceful stop (`hwpsequence.sequence` Off).
    void on_buttonStopSequence_pressed();
+
+   /// Request an immediate abort (`hwpsequence.abort` On); the in-flight frame is discarded.
    void on_buttonAbortSequence_pressed();
 
 signals:
 
+   /// Request a GUI update on the GUI thread.
    void doUpdateGUI();
 
 private:
 
+   /// Generated UI.
    Ui::polarimetry ui;
 };
 
