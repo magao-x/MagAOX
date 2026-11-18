@@ -139,6 +139,7 @@ class ocam2KCtrl : public MagAOXApp<>,
         none,
         sdk,
         compact,
+        mapped,
         optimized
     };
 
@@ -667,7 +668,7 @@ inline void ocam2KCtrl::setupConfig()
                 "descrambleMethod",
                 false,
                 "string",
-                "Descramble implementation: sdk (default), compact, or optimized (validated bin2 only)." );
+                "Descramble implementation: sdk (default), compact, mapped, or optimized (validated bin2 only)." );
 
     dev::frameGrabber<ocam2KCtrl>::setupConfig( config );
 
@@ -723,13 +724,15 @@ inline int ocam2KCtrl::loadConfigImpl()
     std::string descrambleMethod = "sdk";
     config( descrambleMethod, "camera.descrambleMethod" );
 
-    if( descrambleMethod != "sdk" && descrambleMethod != "compact" && descrambleMethod != "optimized" )
+    if( descrambleMethod != "sdk" && descrambleMethod != "compact" && descrambleMethod != "mapped" &&
+        descrambleMethod != "optimized" )
     {
-        return log<software_error, -1>( { "camera.descrambleMethod must be sdk, compact, or optimized" } );
+        return log<software_error, -1>( { "camera.descrambleMethod must be sdk, compact, mapped, or optimized" } );
     }
 
     m_descrambleRequested.store( descrambleMethod == "sdk"       ? DescrambleMethod::sdk
                                  : descrambleMethod == "compact" ? DescrambleMethod::compact
+                                 : descrambleMethod == "mapped"  ? DescrambleMethod::mapped
                                                                  : DescrambleMethod::optimized,
                                  std::memory_order_relaxed );
 
@@ -779,7 +782,7 @@ inline int ocam2KCtrl::loadConfigImpl()
 inline int ocam2KCtrl::initDescramble()
 {
     if( createStandardIndiSelectionSw(
-            m_indiP_descrambleMethod, "descramble_method", { "sdk", "compact", "optimized" } ) < 0 ||
+            m_indiP_descrambleMethod, "descramble_method", { "sdk", "compact", "mapped", "optimized" } ) < 0 ||
         registerIndiPropertyNew( m_indiP_descrambleMethod, INDI_NEWCALLBACK( m_indiP_descrambleMethod ) ) < 0 )
     {
         return -1;
@@ -796,6 +799,7 @@ inline int ocam2KCtrl::initDescramble()
     m_indiP_descrambleStatus["availability"].set( "unconfigured" );
     const auto requested = m_descrambleRequested.load( std::memory_order_relaxed );
     m_indiP_descrambleMethod[requested == DescrambleMethod::optimized ? "optimized"
+                             : requested == DescrambleMethod::mapped  ? "mapped"
                              : requested == DescrambleMethod::compact ? "compact"
                                                                       : "sdk"]
         .setSwitchState( pcf::IndiElement::On );
@@ -847,6 +851,7 @@ inline void ocam2KCtrl::updateDescramble()
 
     indi::updateSelectionSwitchIfChanged( m_indiP_descrambleMethod,
                                           requested == DescrambleMethod::optimized ? "optimized"
+                                          : requested == DescrambleMethod::mapped  ? "mapped"
                                           : requested == DescrambleMethod::compact ? "compact"
                                                                                    : "sdk",
                                           m_indiDriver,
@@ -854,6 +859,7 @@ inline void ocam2KCtrl::updateDescramble()
     updateIfChanged( m_indiP_descrambleStatus,
                      "applied",
                      std::string( applied == DescrambleMethod::optimized ? "optimized"
+                                  : applied == DescrambleMethod::mapped  ? "mapped"
                                   : applied == DescrambleMethod::compact ? "compact"
                                   : applied == DescrambleMethod::sdk     ? "sdk"
                                                                          : "none" ),
@@ -2633,6 +2639,10 @@ inline int ocam2KCtrl::loadImageIntoStream( void *dest )
     {
         m_descrambler.compact( output, reinterpret_cast<int16_t *>( m_image_p ) );
     }
+    else if( applied == DescrambleMethod::mapped )
+    {
+        m_descrambler.mapped( output, reinterpret_cast<int16_t *>( m_image_p ) );
+    }
     else
     {
         ocam2_descramble( m_ocam2_id, &currImageNumber, output, reinterpret_cast<int16_t *>( m_image_p ) );
@@ -2752,7 +2762,8 @@ INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_descrambleMethod )( const pcf::IndiPr
 
     for( const auto &element : ipRecv.getElements() )
     {
-        if( element.first != "sdk" && element.first != "compact" && element.first != "optimized" )
+        if( element.first != "sdk" && element.first != "compact" && element.first != "mapped" &&
+            element.first != "optimized" )
         {
             return -1;
         }
@@ -2766,6 +2777,7 @@ INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_descrambleMethod )( const pcf::IndiPr
 
             requested = element.first == "sdk"       ? DescrambleMethod::sdk
                         : element.first == "compact" ? DescrambleMethod::compact
+                        : element.first == "mapped"  ? DescrambleMethod::mapped
                                                      : DescrambleMethod::optimized;
         }
     }

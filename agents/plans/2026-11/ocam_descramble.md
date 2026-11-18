@@ -831,3 +831,51 @@ an operator RTC comparison before a performance or jitter claim.
 
 This update records the result and its interpretation only. Runtime code,
 defaults and instrument state are unchanged.
+
+
+## Expose mapped traversal for RTC comparison — 2026-11-18
+
+Following the operator's approval, `mapped` is now a fourth accepted
+`camera.descrambleMethod` value and `descramble_method` switch, alongside
+`sdk`, `compact` and `optimized`. The frame path calls the existing
+`ocamDescrambler::mapped()` implementation, using the same prepared 16-bit map
+as compact but writing sequential output pixels. The helper and offline
+benchmark algorithms are unchanged.
+
+Mapped uses the same validated structured-bin2 eligibility as the other
+candidates in the app. Unsupported modes and unrecognized tables retain SDK
+fallback and Alert status. SDK remains the default. The request is latched
+once per frame, applied status reports the completed load, and existing
+digital sampling and subsequent staged copy retain their behavior.
+
+The operator guide now describes compact/mapped/compact with method
+acknowledgment and a full timing-window settling interval for each capture.
+Use identical FPS, instrumentation, staging and reader workload; retain SDK as
+the operational reference. The previous local mapped benchmarks remain useful
+context but do not establish mapped's RTC speed or jitter.
+
+Extended the selector tests to four methods, including initial readback,
+transitions, concurrent requests, all 11 ambiguous switch combinations,
+candidate fallback/lifecycle and digital sampling.
+
+Validation:
+
+- Four-choice selector suite: **21,989 assertions / five cases**.
+- Force-rebuilt existing main, reconfiguration and lifecycle suites:
+  **902 / 36**, **379 / four**, and **seven / one** assertions / cases.
+- These integration/regression tests total **23,277 assertions / 46 cases**.
+  The mapped helper's existing real-SDK equivalence tests and algorithm are
+  unchanged; this update exercises its runtime integration.
+- Both changed C++ files pass clang-format checks, and the diff passes
+  whitespace checks. Independent review found no omitted configuration,
+  selection, fallback, dispatch or applied-status handling.
+
+The real-EDT application also compiled and linked successfully with serial
+make. Normal logger prerequisites were regenerated; existing FlatBuffers
+field-naming warnings were emitted. No unrelated tracked files changed.
+The application was not launched and no instrument commands were executed.
+Logs are under `/tmp/ocam-mapped-*-{build,test}.log` and
+`/tmp/ocam-mapped-sdk-build.log`.
+
+Mapped is ready for the operator's RTC comparison; no new RTC performance or
+jitter result is claimed by this integration.

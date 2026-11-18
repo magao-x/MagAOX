@@ -22,6 +22,9 @@ namespace ocam2KCtrlTest
 namespace
 {
 
+/// Every selectable runtime method, shared by selection and ambiguity checks.
+constexpr std::array<const char *, 4> descrambleChoices{ "sdk", "compact", "mapped", "optimized" };
+
 /// Supply the SDK stub's response to identity-input map preparation for bin2.
 void prepareBin2Map( ocam2KCtrl_test &app /**< [in,out] Controller receiving the structured bin2 map. */ )
 {
@@ -61,7 +64,7 @@ TEST_CASE( "ocam2KCtrl validates descramble method configuration", "[ocam2KCtrl]
     MagAOX::app::ocam2KCtrl::initDescramble;
     #endif
     // clang-format on
-    for( const std::string method : { "", "sdk", "compact", "optimized", "parallel", "typo" } )
+    for( const std::string method : { "", "sdk", "compact", "mapped", "optimized", "parallel", "typo" } )
     {
         CAPTURE( method );
         resetStubState();
@@ -90,12 +93,13 @@ TEST_CASE( "ocam2KCtrl validates descramble method configuration", "[ocam2KCtrl]
         {
             REQUIRE( result == 0 );
             const auto expected = method == "compact"     ? ocam2KCtrl::DescrambleMethod::compact
+                                  : method == "mapped"    ? ocam2KCtrl::DescrambleMethod::mapped
                                   : method == "optimized" ? ocam2KCtrl::DescrambleMethod::optimized
                                                           : ocam2KCtrl::DescrambleMethod::sdk;
             REQUIRE( app.m_descrambleRequested.load() == expected );
             REQUIRE( app.initDescramble() == 0 );
 
-            for( const std::string choice : { "sdk", "compact", "optimized" } )
+            for( const std::string choice : descrambleChoices )
             {
                 REQUIRE(
                     app.m_indiP_descrambleMethod[choice].getSwitchState() ==
@@ -150,7 +154,17 @@ TEST_CASE( "ocam2KCtrl switches descramblers between complete frames", "[ocam2KC
     app.updateDescramble();
     REQUIRE( app.m_indiP_descrambleStatus["applied"].get<std::string>() == "sdk" );
 
-    for( const std::string method : { "compact", "optimized", "compact", "sdk", "optimized", "sdk" } )
+    for( const std::string method : { "compact",
+                                      "mapped",
+                                      "compact",
+                                      "optimized",
+                                      "mapped",
+                                      "optimized",
+                                      "sdk",
+                                      "mapped",
+                                      "sdk",
+                                      "optimized",
+                                      "sdk" } )
     {
         const auto prior = app.m_descrambleApplied.load();
         REQUIRE( app.newCallBack_m_indiP_descrambleMethod( methodRequest( app, method ) ) == 0 );
@@ -162,7 +176,7 @@ TEST_CASE( "ocam2KCtrl switches descramblers between complete frames", "[ocam2KC
         REQUIRE( app.m_indiP_descrambleStatus["applied"].get<std::string>() == method );
         REQUIRE( app.m_indiP_descrambleMethod.getState() == INDI_OK );
 
-        for( const std::string choice : { "sdk", "compact", "optimized" } )
+        for( const std::string choice : descrambleChoices )
         {
             REQUIRE( app.m_indiP_descrambleMethod[choice].getSwitchState() ==
                      ( choice == method ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
@@ -178,8 +192,6 @@ TEST_CASE( "ocam2KCtrl switches descramblers between complete frames", "[ocam2KC
     std::thread       requester(
         [&app, &begin, &requestsAccepted]()
         {
-            const std::array<std::string, 3> choices{ "sdk", "compact", "optimized" };
-
             while( !begin.load( std::memory_order_acquire ) )
             {
                 std::this_thread::yield();
@@ -187,7 +199,8 @@ TEST_CASE( "ocam2KCtrl switches descramblers between complete frames", "[ocam2KC
 
             for( size_t i = 0; i < 300; ++i )
             {
-                if( app.newCallBack_m_indiP_descrambleMethod( methodRequest( app, choices[i % choices.size()] ) ) != 0 )
+                if( app.newCallBack_m_indiP_descrambleMethod(
+                        methodRequest( app, descrambleChoices[i % descrambleChoices.size()] ) ) != 0 )
                 {
                     requestsAccepted.store( false );
                 }
@@ -203,6 +216,7 @@ TEST_CASE( "ocam2KCtrl switches descramblers between complete frames", "[ocam2KC
         completeFrames     = completeFrames && ( applied == ocam2KCtrl::DescrambleMethod::sdk
                                                      ? output == sdkOutput
                                                      : ( applied == ocam2KCtrl::DescrambleMethod::compact ||
+                                                     applied == ocam2KCtrl::DescrambleMethod::mapped ||
                                                      applied == ocam2KCtrl::DescrambleMethod::optimized ) &&
                                                        output == expected );
     }
@@ -227,7 +241,7 @@ TEST_CASE( "ocam2KCtrl rejects malformed descramble requests", "[ocam2KCtrl][des
     outletHarness::Controller<ocam2KCtrl_test> app;
     app.driver();
     REQUIRE( app.initDescramble() == 0 );
-    REQUIRE( app.newCallBack_m_indiP_descrambleMethod( methodRequest( app, "compact" ) ) == 0 );
+    REQUIRE( app.newCallBack_m_indiP_descrambleMethod( methodRequest( app, "mapped" ) ) == 0 );
 
     for( const std::string kind : { "unknown", "off", "wrong property", "wrong device", "empty" } )
     {
@@ -252,23 +266,28 @@ TEST_CASE( "ocam2KCtrl rejects malformed descramble requests", "[ocam2KCtrl][des
         }
 
         REQUIRE( app.newCallBack_m_indiP_descrambleMethod( request ) == -1 );
-        REQUIRE( app.m_descrambleRequested.load() == ocam2KCtrl::DescrambleMethod::compact );
+        REQUIRE( app.m_descrambleRequested.load() == ocam2KCtrl::DescrambleMethod::mapped );
     }
 
-    for( unsigned int mask : { 3u, 5u, 6u, 7u } )
+    for( unsigned int mask = 1; mask < ( 1u << descrambleChoices.size() ); ++mask )
     {
-        CAPTURE( mask );
-        pcf::IndiProperty                request( pcf::IndiProperty::Switch, app.configName(), "descramble_method" );
-        const std::array<std::string, 3> choices{ "sdk", "compact", "optimized" };
-
-        for( size_t index = 0; index < choices.size(); ++index )
+        // A single selected element is valid; test every combination with multiple selected elements.
+        if( ( mask & ( mask - 1 ) ) == 0 )
         {
-            request.add( pcf::IndiElement( choices[index],
+            continue;
+        }
+
+        CAPTURE( mask );
+        pcf::IndiProperty request( pcf::IndiProperty::Switch, app.configName(), "descramble_method" );
+
+        for( size_t index = 0; index < descrambleChoices.size(); ++index )
+        {
+            request.add( pcf::IndiElement( descrambleChoices[index],
                                            mask & ( 1u << index ) ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
         }
 
         REQUIRE( app.newCallBack_m_indiP_descrambleMethod( request ) == -1 );
-        REQUIRE( app.m_descrambleRequested.load() == ocam2KCtrl::DescrambleMethod::compact );
+        REQUIRE( app.m_descrambleRequested.load() == ocam2KCtrl::DescrambleMethod::mapped );
     }
 }
 
@@ -284,7 +303,7 @@ TEST_CASE( "ocam2KCtrl invalidates candidate descramblers across configuration e
     MagAOX::app::ocam2KCtrl::loadImageIntoStream;
     #endif
     // clang-format on
-    for( const std::string method : { "compact", "optimized" } )
+    for( const std::string method : { "compact", "mapped", "optimized" } )
     {
         CAPTURE( method );
         resetStubState();
@@ -330,8 +349,9 @@ TEST_CASE( "ocam2KCtrl invalidates candidate descramblers across configuration e
         REQUIRE( app.m_descrambleApplied.load() == ocam2KCtrl::DescrambleMethod::none );
         prepareBin2Map( app );
         REQUIRE( app.m_descrambler.structured() );
-        app.m_descrambleApplied.store( method == "compact" ? ocam2KCtrl::DescrambleMethod::compact
-                                                           : ocam2KCtrl::DescrambleMethod::optimized );
+        app.m_descrambleApplied.store( method == "compact"  ? ocam2KCtrl::DescrambleMethod::compact
+                                       : method == "mapped" ? ocam2KCtrl::DescrambleMethod::mapped
+                                                            : ocam2KCtrl::DescrambleMethod::optimized );
         static_cast<MagAOXAppT &>( app ).m_powerState = 0;
         app.updateDescramble();
         REQUIRE( app.m_indiP_descrambleStatus["applied"].get<std::string>() == "none" );
@@ -362,6 +382,7 @@ TEST_CASE( "ocam2KCtrl descramble selection preserves digital binning", "[ocam2K
 
     for( const auto requested : { ocam2KCtrl::DescrambleMethod::sdk,
                                   ocam2KCtrl::DescrambleMethod::compact,
+                                  ocam2KCtrl::DescrambleMethod::mapped,
                                   ocam2KCtrl::DescrambleMethod::optimized } )
     {
         app.m_descrambleRequested.store( requested );
@@ -388,7 +409,9 @@ TEST_CASE( "ocam2KCtrl descramble selection preserves digital binning", "[ocam2K
     app.m_digitalBinWork.resize( 120, 120 );
     g_ocam2StubState.outputImage.assign( map.size(), -777 );
 
-    for( const auto requested : { ocam2KCtrl::DescrambleMethod::compact, ocam2KCtrl::DescrambleMethod::optimized } )
+    for( const auto requested : { ocam2KCtrl::DescrambleMethod::compact,
+                                  ocam2KCtrl::DescrambleMethod::mapped,
+                                  ocam2KCtrl::DescrambleMethod::optimized } )
     {
         app.m_descrambleRequested.store( requested );
         g_ocam2StubState.lastRaw = nullptr;
