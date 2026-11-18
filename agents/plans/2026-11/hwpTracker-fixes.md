@@ -319,6 +319,21 @@ The user builds and runs on a Linux workstation:
 `make -f Makefile.one t=../apps/hwpTracker/tests/hwpTracker_test` from
 `tests/`, and builds the app (`make` in `apps/hwpTracker`).
 
+### First test run (user, 2026-11-18)
+
+8 test cases, 29022 assertions: 5 cases passed, 3 failed (4 assertions).
+
+- `config_zero` (NaN `hwp.zero` accepted): `Make/common.mk` builds with
+  `OPTIMIZE ?= -ffast-math`, under which GCC may fold `std::isfinite()` to
+  true, so every non-finite check was a no-op. Fixed with a static
+  `hwpTracker::isFinite()` that tests the float exponent bits, plus a test.
+  The same issue affects `adcTracker`'s `std::isfinite` checks (follow-up);
+  a shared fast-math-safe helper in libMagAOX or mxlib would be the general
+  fix.
+- `logic()` returned -1 in three sections: `TELEMETER_APP_LOGIC` requires a
+  running telemetry thread. The harness `logic()` now starts it, as in
+  `ocam2KCtrl_test.cpp`.
+
 ## Follow-up and Edge Cases
 
 - User to verify on the instrument that tracking commands reach

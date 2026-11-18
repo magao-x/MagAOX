@@ -11,6 +11,8 @@
 #include "../../magaox_git_version.h"
 
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 
 #include <mx/math/geo.hpp>
 
@@ -191,6 +193,14 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
      */
     static float nearestAngle( float angle, /**< [in] the angle to shift [deg] */
                                float ref /**< [in] the reference angle [deg] */ );
+
+    /// Check that a value is finite, independent of -ffast-math.
+    /** The build uses -ffast-math, under which std::isfinite may be optimized to always return true, so this
+     * checks the exponent bits directly.
+     *
+     * \returns true if the value is neither NaN nor infinite
+     */
+    static bool isFinite( float val /**< [in] the value to check */ );
 
     /// Get the name of a HWP angle, matching the named positions modulo 90 degrees.
     /**
@@ -379,12 +389,12 @@ int hwpTracker::loadConfigImpl( mx::app::appConfigurator &_config )
         return log<text_log, -1>( "tracking.sign must be +1 or -1", logPrio::LOG_CRITICAL );
     }
 
-    if( !std::isfinite( m_updateInterval ) || m_updateInterval <= 0 )
+    if( !isFinite( m_updateInterval ) || m_updateInterval <= 0 )
     {
         return log<text_log, -1>( "tracking.updateInterval must be finite and positive", logPrio::LOG_CRITICAL );
     }
 
-    if( !std::isfinite( m_zero ) || !std::isfinite( m_pupilOffset ) )
+    if( !isFinite( m_zero ) || !isFinite( m_pupilOffset ) )
     {
         return log<text_log, -1>( "hwp.zero and tracking.pupilOffset must be finite", logPrio::LOG_CRITICAL );
     }
@@ -516,6 +526,14 @@ float hwpTracker::nearestAngle( float angle, float ref )
     return ref + diff - 360 * std::round( diff / 360 );
 }
 
+bool hwpTracker::isFinite( float val )
+{
+    uint32_t bits;
+    std::memcpy( &bits, &val, sizeof( bits ) );
+
+    return ( bits & 0x7f800000 ) != 0x7f800000;
+}
+
 std::string hwpTracker::positionName( float hwpPos )
 {
     static const std::vector<std::pair<std::string, float>> positions = {
@@ -623,7 +641,7 @@ INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_hwpSetPos )( const pcf::IndiProperty 
 
     float target = ipRecv["target"].get<float>();
 
-    if( !std::isfinite( target ) )
+    if( !isFinite( target ) )
     {
         return log<software_error, 0>( { __FILE__, __LINE__, "ignoring non-finite HWP position request" } );
     }
@@ -709,7 +727,7 @@ INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_teldata )( const pcf::IndiProperty &i
     float zd = ipRecv["zd"].get<float>();
     float pa = ipRecv["pa"].get<float>();
 
-    bool valid = std::isfinite( zd ) && std::isfinite( pa ) && zd >= 0 && zd <= 90;
+    bool valid = isFinite( zd ) && isFinite( pa ) && zd >= 0 && zd <= 90;
 
     bool changed = false;
 
@@ -761,7 +779,7 @@ INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stagePos )( const pcf::IndiProperty &
 
     float stagePos = ipRecv["current"].get<float>();
 
-    if( !std::isfinite( stagePos ) )
+    if( !isFinite( stagePos ) )
     {
         return 0;
     }
