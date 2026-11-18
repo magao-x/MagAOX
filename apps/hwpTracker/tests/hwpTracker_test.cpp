@@ -601,7 +601,7 @@ TEST_CASE( "hwpTracker tracking", "[hwpTracker]" )
         REQUIRE_FALSE( app.m_tracking );
         REQUIRE( app.m_hwpTrackingOffset == Approx( 0 ) );
         REQUIRE( app.m_sent.size() == 2 );
-        REQUIRE( app.m_sent[1] == Approx( 0 ) );
+        REQUIRE( app.m_sent[1] == Approx( 360 ) );
     }
 
     SECTION( "periodic updates are skipped while the stage is not READY" )
