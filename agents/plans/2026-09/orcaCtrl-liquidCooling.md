@@ -583,6 +583,13 @@ Tests, in `apps/orcaCtrl/tests/orcaCtrl_test.cpp`:
   - liquid apply, with and without MAX;
   - the `OFF` status string;
   - the `temp_controller` toggle in liquid and air mode.
-- These tests were **not built or run**, because the workstation used has no mxlib (`gengithead.sh` is
-  missing, too). Build and run them with `make -f Makefile.one t=../apps/orcaCtrl/tests/orcaCtrl_test` in
-  `tests/`.
+- The tests were written on a workstation without mxlib and first built on another machine. The first
+  build failed because the tests used protected stdCamera members; the fixture now exposes them with
+  `using` declarations. After that fix the full `orcaCtrl_test` suite passed (2026-11-17), including the
+  existing power tests in air mode.
+- **Hardware verification passed (2026-11-17), run by the user.** With Cooler Type = Water and coolant
+  flowing before power-on, orcaCtrl connected without a Cooler Type mismatch, which confirms that
+  `SENSORCOOLER` is writable in Water mode. It set the sensor cooler to MAX, the `temp_controller` toggle
+  worked, and the sensor reached -35 °C, the manual's water-cooled MAX figure. This resolves the 29 °C
+  problem from the 2026-11-17 investigation. The camera got there at its own MAX target, without
+  `SENSORTEMPERATURETARGET` being written (step 3).
