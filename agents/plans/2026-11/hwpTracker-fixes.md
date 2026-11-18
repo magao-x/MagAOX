@@ -334,6 +334,21 @@ The user builds and runs on a Linux workstation:
   running telemetry thread. The harness `logic()` now starts it, as in
   `ocam2KCtrl_test.cpp`.
 
+- Further harness fixes: `logManager::m_writePause` is protected, so the
+  harness does not set it; the non-finite config section created several
+  apps in one scope, which `MagAOXApp` forbids ("Attempt to instantiate 2nd
+  MagAOXApp"), so each now has its own block.
+
+### Final test run (user, 2026-11-18)
+
+`hwpTracker_test`: all tests passed (29045 assertions in 8 test cases),
+built with the standard `-ffast-math -O3` flags via `tests/Makefile.one`.
+Logged errors/criticals in the output come from the tests' deliberate
+wrong-property and invalid-config cases.
+
+Still to do by the user: build the app itself (`make` in `apps/hwpTracker`)
+and the on-instrument checks listed below.
+
 ## Follow-up and Edge Cases
 
 - User to verify on the instrument that tracking commands reach
