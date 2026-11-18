@@ -6,7 +6,7 @@ echo "setting transport mode"
 
 # do power checks first and fail fast. if no errors, then move stages.
 
-# stagepickoff
+# stagepickoff + stagek
 STAGESMC_POWER=$(getINDI "pdu1.stagesmc.state")
 if [[ "${STAGESMC_POWER#*=}" != "On" ]]; then
     echo "stagesmc is not on! cannot move stagek or stagepickoff"
