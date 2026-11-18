@@ -12,24 +12,26 @@ They do not establish performance on the RTC.
 ## Configuration and status
 
 Existing configurations need no change. To persist a selection after it has
-been qualified, the new optional setting is:
+been qualified, the optional setting is:
 
 ```ini
 [camera]
-descrambleMethod=optimized
+descrambleMethod=mapped
 ```
 
-The accepted values are `sdk`, `compact`, and `optimized`; the default is `sdk`.
-An unknown value fails configuration. Both candidates require the same
-validated structured bin2 mapping in the app. The offline helper can compare
-other modes.
+The accepted values are `sdk`, `compact`, `mapped`, and `optimized`; the default
+is `sdk`. An unknown value fails configuration. All three candidates require
+the same validated structured bin2 mapping in the app. The offline helper can
+compare other modes.
 
-`compact` uses a 16-bit index table and the SDK's alternating-half pixel
-traversal. It is a control for investigating the increased conversion standard
-deviation observed with `optimized`, which uses four fixed-stride amplifier
-runs and changes traversal order. The compiler can schedule memory operations
-differently; this controls source-level traversal, not exact machine accesses.
-Neither candidate has established jitter qualification on the RTC.
+`compact` and `mapped` use the same prepared 16-bit index table. `compact`
+follows the SDK's alternating-half pixel traversal; `mapped` writes output
+pixels sequentially. Their comparison investigates traversal and generated
+code without changing the index table. `optimized` uses four fixed-stride
+amplifier runs and avoids per-pixel map loads. The compiler can schedule memory
+operations differently; these distinctions describe source-level traversal,
+not exact machine accesses. The candidates have not established full RTC
+performance and jitter qualification.
 
 On 2026-11-18 the operator reported `compact` a few hundred nanoseconds slower
 than SDK with the same observed jitter. It remains a diagnostic control; the
@@ -38,8 +40,8 @@ separate `optimized` mean/spread tradeoff are recorded in the engineering plan.
 
 | INDI property / element | Meaning |
 | --- | --- |
-| `descramble_method.sdk` / `.compact` / `.optimized` | Requested method; exactly one switch is On. |
-| `descramble_status.applied` | `sdk`, `compact`, `optimized`, or `none` when no active completed load is reported. |
+| `descramble_method.sdk` / `.compact` / `.mapped` / `.optimized` | Requested method; exactly one switch is On. |
+| `descramble_status.applied` | `sdk`, `compact`, `mapped`, `optimized`, or `none` when no active completed load is reported. |
 | `descramble_status.availability` | `ready`, `unsupported mode`, `unavailable table`, or `unconfigured`. |
 
 The request is latched once for an entire frame. `applied` changes after the
@@ -61,9 +63,10 @@ Agents must not execute these commands or control the instrument.
 1. Build/install the app, configure `framegrabber.stageTiming=true`, and restart
    it using the usual deployment procedure.
    Verify bin2/FPS after restart, then keep FPS, gain, synchronization,
-   IRQ/cpuset placement and reader workload fixed. Retain
+   IRQ/cpuset placement, stage-timing settings and reader workload fixed. Retain
    `framegrabber.staged=true` and the existing `stagedCopyNT` setting. This change
    needs no additional core.
+
 2. Inspect preparation and establish the reference selection:
 
    ```bash
@@ -73,10 +76,11 @@ Agents must not execute these commands or control the instrument.
    getINDI camwfs.descramble_status
    ```
 
-   Require `availability=ready` before testing optimization, and wait for
-   `applied=sdk`. Exclude at least one full configured rolling latency window
-   plus warm-up; the current local configuration uses a two-second window.
+   Require `availability=ready` before testing a candidate, and wait for
+   `applied=sdk` with an Ok selection state. Exclude at least one full
+   configured rolling latency window plus warm-up.
    Collect a 60-second reference interval under the usual reader workload.
+
 3. Select the compact control, confirm acknowledgment, exclude the same settling
    interval, and collect another matched 60-second interval:
 
@@ -87,16 +91,41 @@ Agents must not execute these commands or control the instrument.
    ```
 
    Require `applied=compact`, `availability=ready`, and an Ok selection state.
-4. Return to the SDK, settle, and repeat the reference capture:
+
+4. Select mapped, require `applied=mapped`, `availability=ready`, and an Ok
+   selection state, then settle and collect another matched 60-second interval:
 
    ```bash
-   setINDI -s camwfs.descramble_method.sdk=On
+   setINDI -s camwfs.descramble_method.mapped=On
+   getINDI camwfs.descramble_method
    getINDI camwfs.descramble_status
    ```
 
-5. Repeat steps 3–4 for `descramble_method.optimized=On`, requiring
-   `applied=optimized`. This gives SDK/compact/SDK/optimized/SDK under one fixed
-   setup, with a settled baseline on both sides of each candidate.
+5. Return to compact, confirm the same acknowledgment as step 3, settle, and
+   collect another 60-second control interval:
+
+   ```bash
+   setINDI -s camwfs.descramble_method.compact=On
+   getINDI camwfs.descramble_method
+   getINDI camwfs.descramble_status
+   ```
+
+   This brackets mapped with compact under one fixed setup. Apply the same
+   settling interval after every acknowledged selection.
+
+6. Return to the SDK, wait for `applied=sdk` with an Ok selection state, settle,
+   and repeat the reference capture:
+
+   ```bash
+   setINDI -s camwfs.descramble_method.sdk=On
+   getINDI camwfs.descramble_method
+   getINDI camwfs.descramble_status
+   ```
+
+The existing structured choice remains available through
+`descramble_method.optimized=On`. Compare it separately between settled SDK
+references, requiring `applied=optimized`, `availability=ready`, and an Ok
+selection state. Return to SDK using step 6 afterward.
 
 Record the applied selection with each capture. Compare camera
 `fg_timing.delta_aw`, its jitter, dropped/rejected frames and end-to-end loop
@@ -119,10 +148,11 @@ timestamp through the stream write timestamp; neither is pure kernel time.
 
 Use the [existing timing guide](camera-timing-trace.md) for capture details.
 Do not count overlapping rolling windows as independent samples or derive
-percentiles from summary mean/jitter alone. Repeat the SDK/candidate/SDK
-sequence if drift changes the baseline. Retain optimization only if the
-camera and complete loop show no repeatable regression in mean, jitter/tails
-or frame delivery. Leave the SDK selected if qualification is inconclusive.
+percentiles from summary mean/jitter alone. Repeat compact/mapped/compact and
+the SDK reference captures if drift changes the controls. Retain a candidate
+only if the camera and complete loop show no repeatable regression in mean,
+jitter/tails or frame delivery. Leave the SDK selected if qualification is
+inconclusive.
 
 ## Hardware-free tests and benchmark
 
