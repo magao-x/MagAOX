@@ -67,8 +67,8 @@ class hwpTracker_test : public MagAOX::app::hwpTracker
     using MagAOX::app::hwpTracker::m_tcsDevName;
     using MagAOX::app::hwpTracker::m_telemCurPos;
     using MagAOX::app::hwpTracker::m_telemTracking;
-    using MagAOX::app::hwpTracker::m_trackOffsetSign;
     using MagAOX::app::hwpTracker::m_tracking;
+    using MagAOX::app::hwpTracker::m_trackOffsetSign;
     using MagAOX::app::hwpTracker::m_updateInterval;
     using MagAOX::app::hwpTracker::m_zero;
 
@@ -298,11 +298,8 @@ TEST_CASE( "hwpTracker configuration loading", "[hwpTracker]" )
 
             hwpTracker_test app( "hwptrack" );
 
-            REQUIRE( loadFromConfig( "config_bad" + std::to_string( n ),
-                                     { bad[n][0] },
-                                     { bad[n][1] },
-                                     { bad[n][2] },
-                                     app ) == -1 );
+            REQUIRE( loadFromConfig(
+                         "config_bad" + std::to_string( n ), { bad[n][0] }, { bad[n][1] }, { bad[n][2] }, app ) == -1 );
         }
     }
 

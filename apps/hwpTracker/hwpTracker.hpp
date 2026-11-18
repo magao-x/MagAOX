@@ -63,7 +63,7 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
 
     std::string m_devName{ "stagepolrot" }; ///< The device name of the HWP stage.  Default is 'stagepolrot'.
 
-    std::string m_tcsDevName{ "tcsi" }; ///< The device name of the TCS interface providing 'teldata'.  Default is 'tcsi'.
+    std::string m_tcsDevName{ "tcsi" }; ///< The TCS interface device providing 'teldata'.  Default is 'tcsi'.
 
     float m_updateInterval{ 10 }; ///< The interval at which to update positions while tracking [sec].  Default is 10.
 
@@ -172,10 +172,10 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
     /**
      * \returns the tracking offset [deg]
      */
-    static float trackingOffset( float altitude,    /**< [in] the telescope altitude [deg] */
-                                 float parang,      /**< [in] the parallactic angle [deg] */
-                                 int   trackSign,   /**< [in] the sign of the parallactic angle term */
-                                 float pupilOffset  /**< [in] the pupil offset [deg] */ );
+    static float trackingOffset( float altitude,  /**< [in] the telescope altitude [deg] */
+                                 float parang,    /**< [in] the parallactic angle [deg] */
+                                 int   trackSign, /**< [in] the sign of the parallactic angle term */
+                                 float pupilOffset /**< [in] the pupil offset [deg] */ );
 
     /// Convert a HWP angle to a stage target in [0, 360).
     /**
@@ -183,14 +183,14 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
      */
     static float stageTarget( float hwpPos, /**< [in] the HWP angle including any tracking offset [deg] */
                               float zero,   /**< [in] the stage position at HWP angle 0 [deg] */
-                              int   sign    /**< [in] the sign relating HWP angle to stage position */ );
+                              int   sign /**< [in] the sign relating HWP angle to stage position */ );
 
     /// Shift an angle by a multiple of 360 degrees to lie within 180 degrees of a reference.
     /**
      * \returns the shifted angle [deg]
      */
     static float nearestAngle( float angle, /**< [in] the angle to shift [deg] */
-                               float ref    /**< [in] the reference angle [deg] */ );
+                               float ref /**< [in] the reference angle [deg] */ );
 
     /// Get the name of a HWP angle, matching the named positions modulo 90 degrees.
     /**
@@ -452,7 +452,7 @@ int hwpTracker::appLogic()
 
     bool move = false;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
         if( m_stageState == stateCodes::READY )
@@ -541,7 +541,7 @@ int hwpTracker::requestMove()
     float hwpPos = 0;
     float offset = 0;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
         if( m_stageState != stateCodes::READY )
@@ -628,7 +628,7 @@ INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_hwpSetPos )( const pcf::IndiProperty 
         return log<software_error, 0>( { __FILE__, __LINE__, "ignoring non-finite HWP position request" } );
     }
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
         m_hwpSetPos = target;
     } // mutex scope
@@ -653,7 +653,7 @@ INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_tracking )( const pcf::IndiProperty &
     {
         bool haveTelData = false;
 
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_indiMutex );
 
             haveTelData = m_haveTelData;
@@ -680,7 +680,7 @@ INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_tracking )( const pcf::IndiProperty &
     }
     else
     {
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> guard( m_indiMutex );
             m_tracking = false;
         } // mutex scope
@@ -713,7 +713,7 @@ INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_teldata )( const pcf::IndiProperty &i
 
     bool changed = false;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
         changed        = ( valid != m_telDataValid );
@@ -770,7 +770,7 @@ INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stagePos )( const pcf::IndiProperty &
     float       curPos    = 0;
     std::string posName;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
         // Report angles in the user's frame, i.e. nearest to the commanded angle, since the target was wrapped.
@@ -824,7 +824,7 @@ INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stageFsm )( const pcf::IndiProperty &
 
     bool move = false;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
         m_stageState     = stageState;
@@ -858,7 +858,7 @@ int hwpTracker::recordPolTrack( bool force )
     std::string posName;
     bool        tracking = false;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
         if( !force && m_hwpCurPos == m_telemCurPos && m_hwpActualPos == m_telemActualPos &&
