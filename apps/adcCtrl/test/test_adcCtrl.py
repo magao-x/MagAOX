@@ -998,6 +998,34 @@ def messages(handler, level, text):
     return [m for lvl, m in handler.records if lvl == level and text in m]
 
 
+def test_debug_logs_state_settings_and_cycle():
+    """State changes (including the automatic oneshot -> idle), setting changes and one line per cycle are logged at DEBUG."""
+    dev, handler = recording_device("adcCtrl-test-debug", camera=FakeCamera(make_frame(dispersion=(0.02, 0.0))))
+    send(dev, "gain", target=0.2)
+    send(dev, "n_avg", target=3)
+    send(dev, "no_measurements", number=2)
+    send(dev, "ctrl_mtx", m00=dev.properties["ctrl_mtx"]["m00"])  # unchanged: not logged
+    assert messages(handler, logging.DEBUG, "control matrix changed") == []
+    send(dev, "ctrl_mtx", m00=-0.5)
+    assert len(messages(handler, logging.DEBUG, "control matrix changed to [-0.5,")) == 1
+    assert len(messages(handler, logging.DEBUG, "loop gain changed to 0.2")) == 1
+    assert len(messages(handler, logging.DEBUG, "averaging over 3 frames")) == 1
+    assert len(messages(handler, logging.DEBUG, "averaging 2 measurements")) == 1
+
+    send(dev, "state", oneshot=ON)
+    dev.loop()
+    assert dev._state == States.IDLE
+    assert len(messages(handler, logging.DEBUG, "state changed from idle to oneshot")) == 1
+    assert len(messages(handler, logging.DEBUG, "state changed from oneshot to idle")) == 1
+    send(dev, "state", idle=ON)  # already idle: not logged again
+    assert len(messages(handler, logging.DEBUG, "state changed")) == 2
+
+    cycles = messages(handler, logging.DEBUG, "cycle oneshot (standard)")
+    assert len(cycles) == 1
+    for text in ["gain 0.2", "n_avg 3", "no_measurements 2", "ctrl_mtx [-0.5,", "spot angles [", "step "]:
+        assert text in cycles[0], (text, cycles[0])
+
+
 def test_coronagraph_switch_only_when_idle_and_keeps_delta1():
     """The coronagraph mode changes only while idle, and leaves delta_1 alone."""
     dev = make_device(client=ke_client())

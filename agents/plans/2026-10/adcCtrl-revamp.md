@@ -1146,6 +1146,18 @@ The stages are Newport SMC100 controllers (`apps/smc100ccCtrl`). Error "U" means
   - `test_stage_move_timeout_goes_on_with_warning`.
   - Both fail if `adc_busy` ignores the stages. All 56 tests pass locally.
 
+### DEBUG Logging (2026-11-17)
+
+**Request (user).** Log at DEBUG: the state (when it changes), the gain, `n_avg`, `no_measurements`, the control matrix (when it changes), and the four speckle angles, preferably in one entry.
+
+**Already there.** DEBUG messages for gain, `n_avg` and `no_measurements` changes; state changes made through INDI; and the four angles for each frame, in one entry ("measured speckle angles: …", or "knife-edge angles: …"). If these did not show up, the app's log level is probably above DEBUG.
+
+**Changes.**
+- **State.** The message moved from `handle_state` to `set_state`, so it also covers the app's own transitions (oneshot → idle, dropping to idle after `max_consecutive_failures`). It is logged only on an actual change, as "state changed from <old> to <new>", using the INDI element names.
+- **Control matrix.** Logged only when an element actually changes. It used to be logged on every `ctrl_mtx` message.
+- **One entry per cycle** (`log_cycle`, from `run_cycle`): state and coronagraph mode, gain, `n_avg`, `no_measurements`, `ctrl_mtx`, the four averaged spot angles and deviations (NaN for unmeasured knife-edge spots), the error and the step. In knife-edge mode it also has `ke_gain`, `m` and the set point.
+- **Test.** `test_debug_logs_state_settings_and_cycle`. All 57 tests pass locally (the stand-in packages and runner had to be recreated in the scratchpad).
+
 ### References
 - MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
 - Satellite-spot dispersion method: arXiv:2608.10307

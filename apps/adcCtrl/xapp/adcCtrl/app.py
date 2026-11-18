@@ -1425,7 +1425,10 @@ class adcCtrl(XDevice):
         self.set_status(last_error=message)
 
     def set_state(self, state):
-        """Switch operating state, updating the state switch and fsm."""
+        """Switch operating state, updating the state switch and fsm; a change is logged at DEBUG."""
+        if state != self._state:
+            names = {s: name for name, s in STATE_ELEMENTS.items()}
+            self.log.debug(f"state changed from {names[self._state]} to {names[state]}")
         self._state = state
         for name, s in STATE_ELEMENTS.items():
             self.properties["state"][name] = constants.SwitchState.ON if s == state else constants.SwitchState.OFF
@@ -1448,7 +1451,6 @@ class adcCtrl(XDevice):
             self.check_indi_props()
             self._consecutive_failures = 0
         self.set_state(state)
-        self.log.debug(f"State changed to {target}")
 
     def handle_spots(self, existing_property, new_message):
         """INDI callback for `satellite_spots`: choose sparkles or DM spots."""
@@ -1689,11 +1691,14 @@ class adcCtrl(XDevice):
 
     def handle_ctrl_mtx(self, existing_property, new_message):
         """INDI callback for `ctrl_mtx` (m00, m01)."""
+        changed = False
         for index, key in enumerate(["m00", "m01"]):
             if key in new_message and new_message[key] != existing_property[key]:
                 self._control_mtx[index] = float(new_message[key])
                 existing_property[key] = self._control_mtx[index]
-        self.log.debug(f"control matrix changed to {self._control_mtx}")
+                changed = True
+        if changed:
+            self.log.debug(f"control matrix changed to {self._control_mtx.tolist()}")
         self.update_property(existing_property)
 
     def set_command(self, d1, d2):
@@ -2052,6 +2057,19 @@ class adcCtrl(XDevice):
             self.log.error(f"{self._consecutive_failures} consecutive failed cycles, going idle")
             self.transition_to_idle()
 
+    def log_cycle(self, state, result, step):
+        """One DEBUG entry per cycle: settings used, the four averaged spot angles, the error and the step."""
+        names = {s: name for name, s in STATE_ELEMENTS.items()}
+        message = (
+            f"cycle {names[state]} ({self.coronagraph_name()}): gain {self._gain}, n_avg {self._n_avg}, "
+            f"no_measurements {self._no_measurements}, ctrl_mtx {self._control_mtx.tolist()}, "
+            f"spot angles {np.round(result['raw'], 3).tolist()} deg, "
+            f"deviations {np.round(result['dev'], 3).tolist()} deg, error {result['error']:.4f}, step {step:.4f}"
+        )
+        if self._knife_edge:
+            message += f", ke_gain {self._ke_gain}, m {result['m']:.4f}, set point {result['setpoint']:.4f}"
+        self.log.debug(message)
+
     def run_cycle(self):
         """One measure (and possibly command) cycle for the current state."""
         state = self._state
@@ -2068,6 +2086,7 @@ class adcCtrl(XDevice):
         step, accepted = compute_step(error, self._gain, self._loop_sign, self.config.step_limit_deg)
         self.properties["command"]["step"] = step
         self.update_property(self.properties["command"])
+        self.log_cycle(state, result, step)
         record = {
             "state": state.name,
             "mode": self.coronagraph_name(),
