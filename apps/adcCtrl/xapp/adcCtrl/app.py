@@ -965,7 +965,7 @@ class AdcCtrlConfig(BaseConfig):
     gain : float = xconf.field(default=0.1, help="Initial loop gain")
     ctrl_mtx : list[float] = xconf.field(default_factory=lambda: [-0.4156, -0.24515], help="Initial control matrix [m00, m01]; default calibrated on the instrument with DM spots (2026-10-25)")
     loop_sign : str = xconf.field(default="negative", help="Initial feedback polarity, 'positive' or 'negative'; negative converges with the default ctrl_mtx")
-    step_limit_deg : float = xconf.field(default=0.7, help="Steps with |step| at or above this [deg] are rejected")
+    step_limit_deg : float = xconf.field(default=1.0, help="Steps with |step| at or above this [deg] are rejected")
     send_timeout_sec : float = xconf.field(default=30.0, help="Time to wait for adctrack to accept a commanded offset")
     min_send_interval_sec : float = xconf.field(default=10.0, help="Minimum time between ADC writes, and from a write to the next measurement [s]; must exceed adctrack's tracking.updateInterval (5 s) plus the stage move")
     adc_stage_devices : list[str] = xconf.field(default_factory=lambda: ["stageadc1", "stageadc2"], help="INDI devices of the ADC 1 and ADC 2 rotation stages that adctrack drives, read to confirm each move")

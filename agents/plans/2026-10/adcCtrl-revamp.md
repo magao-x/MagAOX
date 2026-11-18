@@ -258,7 +258,7 @@ All with explicit `hp.`/`ndimage` imports.
 - `AdcCtrlConfig`:
   - Cameras: `cameras: dict[str, CameraConfig]`, defaulting to camsci1→fwsci1 and camsci2→fwsci2, and `default_camera = "camsci1"`.
   - Geometry and wavelengths: `pixel_scale_lod = 6/21`, `reference_wavelength = 656e-9`, `filter_wavelengths` (i/z/r), `dm_spot_separation = 47`, `dm_spot_angle = 28`, window and search sizes, `mask_factor = 0.7`, `pad = 50`.
-  - Control: `step_limit_deg = 0.7`, `send_timeout_sec = 30`, `send_tolerance_deg = 0.05`, `max_consecutive_failures = 5`, `outlier_k = 3`, `min_valid_fraction = 0.5`, `ctrl_mtx = [0.21178766, 0.19275196]`.
+  - Control: `step_limit_deg = 1.0`, `send_timeout_sec = 30`, `send_tolerance_deg = 0.05`, `max_consecutive_failures = 5`, `outlier_k = 3`, `min_valid_fraction = 0.5`, `ctrl_mtx = [0.21178766, 0.19275196]`.
 
   All defaults equal today's values.
 
@@ -485,7 +485,7 @@ Here δ1* is wherever the pair offsets are zero under the current conditions. Th
 
 - **Gain meaning.** With gain = 0.1 the loop removes 10% of the residual per cycle: about 22 cycles to 90%, about 7 to 50%. The gain becomes independent of filter, spot source and camera, because those differences are absorbed into `s`.
 - **`loop_sign`.** The measured `s` already carries the platform's sign, so a calibration done on the platform it runs on needs `loop_sign = positive`. `loop_sign` then only matters for an uncalibrated or inherited matrix.
-- **Step limit.** `step_limit_deg` (0.7°) rejects rather than clips. With gain 0.1, a residual above about 7° is never corrected. Because δ1 is absolute and bounded at ±5°, a calibrated `e` larger than the safe range is itself a sign of a bad measurement. A natural replacement is to reject when `|δ1 + step|` would leave ±5°, and to keep the per-step limit only as a sanity check.
+- **Step limit.** `step_limit_deg` (1.0°, raised from 0.7° on 2026-11-18) rejects rather than clips. With gain 0.1, a residual above about 7° is never corrected. Because δ1 is absolute and bounded at ±5°, a calibrated `e` larger than the safe range is itself a sign of a bad measurement. A natural replacement is to reject when `|δ1 + step|` would leave ±5°, and to keep the per-step limit only as a sanity check.
 - **Co-rotation diagnostic.** Counter-rotation always disperses vertically on the science camera; only co-rotation turns the dispersion direction, because the ADC is downstream of the pupil derotator. The pair-space component orthogonal to `s` therefore measures co-rotation error. It is **reported** (in the measurement property and telemetry) but **not corrected**.
 - **Noise floor.** At steady state, the δ1 jitter is about `σ_e · sqrt(gain / (2 − gain))`, where `σ_e` is the error noise propagated from `σ` through `ctrl_mtx`.
 - **Two degrees of freedom.** Out of scope: δ2 is not poked or controlled, per the user.
