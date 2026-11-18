@@ -6,15 +6,23 @@ CC ?= cc
 CXXFLAGS ?= -O3 -march=native -ffast-math -std=c++20 -Wall -Wextra
 CFLAGS ?= -O3 -march=native -ffast-math
 SDK_DEFINES = -DOCAMSDK_VERSION=\"2\" -DOCAMSDK_BUILD=\"0\"
+THREAD_FLAGS = -pthread
+TEST_CPUS ?= 2 4
 
-.PHONY: all clean
+.PHONY: all check clean
 all: ocamDescramble_bench
 
-ocamDescramble_bench: ocamDescramble_bench.cpp ../ocamDescrambler.hpp ../../../libMagAOX/common/streamCopy.hpp ocam2_sdk.o
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -DOCAM_BENCH_CXXFLAGS='"$(CPPFLAGS) $(CXXFLAGS)"' -DOCAM_BENCH_CFLAGS='"$(CFLAGS)"' $< ocam2_sdk.o $(LDFLAGS) $(LDLIBS) -o $@
+ocamDescramble_bench: ocamDescramble_bench.cpp ocamDescrambleWorker.hpp ../ocamDescrambler.hpp ../../../libMagAOX/common/streamCopy.hpp ocam2_sdk.o
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(THREAD_FLAGS) -DOCAM_BENCH_CXXFLAGS='"$(CPPFLAGS) $(CXXFLAGS) $(THREAD_FLAGS)"' -DOCAM_BENCH_CFLAGS='"$(CFLAGS)"' $< ocam2_sdk.o $(LDFLAGS) $(LDLIBS) -o $@
+
+ocamDescrambleWorker_test: ocamDescrambleWorker_test.cpp ocamDescrambleWorker.hpp ../ocamDescrambler.hpp ../tests/ocamDescrambleFixture.hpp ocam2_sdk.o
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(THREAD_FLAGS) $< ocam2_sdk.o $(LDFLAGS) $(LDLIBS) -o $@
+
+check: ocamDescrambleWorker_test
+	./ocamDescrambleWorker_test $(TEST_CPUS)
 
 ocam2_sdk.o: ../fli/ocam2_sdk.c ../fli/ocam2_sdk.h ../fli/ocam2_pvt.h
 	$(CC) $(CPPFLAGS) $(CFLAGS) $(SDK_DEFINES) -c $< -o $@
 
 clean:
-	rm -f ocamDescramble_bench ocam2_sdk.o
+	rm -f ocamDescramble_bench ocamDescrambleWorker_test ocam2_sdk.o

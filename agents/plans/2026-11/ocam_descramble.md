@@ -49,9 +49,13 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 Investigation date: 2026-11-16. Source baseline: `dev`, `cbc1d5cf`.
 Host verified as `mx11`. This pass inspects local source and configuration
 only; no instrument commands, benchmarks, or implementation were run.
-Status: **single-core implementation complete; first RTC comparison shows lower mean and higher jitter, so qualification remains open**.
-The answers below and the subsequent user request authorize phases 1–3.
-The second-thread experiment remains deferred.
+Status as of 2026-11-18: **single-core implementation complete; current RTC
+captures show about 3.9 us lower mean with a small positive jitter difference.
+The local second-thread experiment is complete: its kernel improves, but its
+staged result depends strongly on cadence; RTC qualification remains open**.
+The answers below and subsequent user requests authorize phases 1–3 and an
+offline worker experiment. A runtime worker and instrument CPU reassignment
+remain separate from this local test.
 
 ## Task Summary
 
@@ -964,8 +968,8 @@ Further qualification should prioritize repeated matched SDK/optimized/SDK
 captures at this verified FPS and workload, including frame delivery and
 end-to-end loop timing. Mapped remains a diagnostic control rather than the
 preferred performance candidate in this result. A second descrambling worker
-has not been implemented or tested; this comparison covers single-thread
-conversion only.
+had not yet been implemented or tested at this point; this comparison covers
+single-thread conversion only.
 
 Parsed values and arithmetic are retained in
 `/tmp/ocam-descramble-rtc-20261118.json`. This update changes documentation only;
@@ -1046,3 +1050,188 @@ reports; tail latency and complete-loop performance are not established here.
 Parsed values are retained in `/tmp/ocam-descramble-stageoff-20261118.json`.
 Only documentation changes accompany this analysis; no instrument commands
 or runtime modifications were made.
+
+
+## Local second-thread experiment — 2026-11-18
+
+The operator requested: "ok. let's do a local test of a 2nd thread."
+Implemented a benchmark-only persistent worker and ran it on the verified
+personal workstation `mx11`. Production `ocamDescrambler`, the camera app,
+runtime method choices and instrument configuration remain unchanged. No
+camera, INDI, DMA or shared-memory stream was accessed.
+
+### Implementation and correctness
+
+`benchmarks/ocamDescrambleWorker.hpp` prepares its own immutable row bases and
+strides through the existing validated helper's public mapping operation.
+It mirrors the production four-amplifier row loop without changing the helper.
+One persistent `std::thread` and the caller process disjoint output regions:
+
+- `parallel_halves`: 60 output rows per thread. Both traverse overlapping raw
+  working sets with the installed mapping.
+- `parallel_paired28`: caller handles 28 matching `y`/`119-y` row pairs and
+  worker handles 32. At a 64-byte-aligned output base, ownership boundaries
+  are aligned and the observed map gives separate raw-row groups.
+- `parallel_paired30`: 30 matching row pairs each. Work is balanced, but two
+  output boundary cache lines are shared even at an aligned base.
+
+Separate cache lines hold release/acquire job and completion counters. There
+is no per-frame allocation, thread creation or logging. Each call returns only
+after the worker has finished using both buffers. Optional caller/worker
+clocks run in a separate diagnostic pass. Handoff-only timing measures a
+mandatory empty job. The worker acknowledges blocking park before every
+single-thread baseline, and park/resume are outside measured calls.
+
+The unchanged production `optimized` path remains the principal reference.
+`range_serial` uses the mirrored loop with ordinary output-row traversal;
+`paired_serial` processes complementary rows consecutively on one thread.
+These controls separate worker handoff from compiler/traversal differences.
+All staged measurements include the primary thread's existing `streamCopy`
+after completion; they therefore include cross-core private-buffer reads.
+
+The standalone worker checks passed **1,162 checks** in each of the ordinary
+optimized, AddressSanitizer plus UndefinedBehaviorSanitizer, and ThreadSanitizer
+builds. Leak detection was disabled for the sandboxed ASan run. Checks cover
+SDK pixel equivalence, multiple input patterns, guards and source immutability,
+offsets 0/2/16, all partitions, repeated jobs and input reuse, park/resume,
+invalid setup and affinity, owned mapping lifetime, and active/parked shutdown
+after completed calls. Benchmark validation also compares every generated raw
+frame against the real SDK at offsets 0/16/requested before timing. All six
+performance invocations finished with valid output guards. Legacy CLI and SDK
+validation passed in all four modes; diagnostics, pacing and invalid-argument
+smoke checks passed. Changed C++ files were formatted and reviewed;
+`git diff --check` passed.
+
+This is a blocking, single-caller prototype. Concurrent destruction, camera
+reconfiguration/recovery with outstanding work, and verified FIFO scheduling
+remain requirements for any future runtime integration, not claims of these
+offline tests. The existing app methods are still entirely single-threaded.
+
+### Measurement setup
+
+- Intel Core i9-12900HK, caller logical CPU 2 and worker CPU 4, verified separate
+  P-cores with private L2 caches and shared L3. Their SMT siblings are 3 and 5.
+  Only benchmark-thread affinity changed; ordinary `SCHED_OTHER`, priority 0.
+- GCC 15.2.0, C++20, `-O3 -march=native -ffast-math -Wall -Wextra -pthread`;
+  SDK C object uses `-O3 -march=native -ffast-math`.
+- Local table `/opt/MagAOX/config/ocam2k/fli/ocam2_descrambling.txt`, SHA-256
+  `477a1aa37cab3d9cd9b087cce3204675c6e45cbea904ec1a20e754a48602b324`;
+  bin2, 32,736 raw samples and 14,400 output samples.
+- Every invocation measures one hot raw buffer and a 64-frame ring. Methods
+  rotate in 128-frame blocks across rounds, after 1,024 unpaced warmup calls
+  per path. Output checksums are outside the timer. Baselines have a parked
+  worker; parallel blocks have a spinning worker, including between paced
+  frames. This difference is part of the proposed resource cost.
+- Private and publication buffers use a 64-byte-aligned base plus offset
+  0 or 16 bytes. Unpaced: 10,000 samples/round, seven rounds, two invocations
+  per offset (order 0,16,16,0). Paced: 1,000 samples/round, three rounds,
+  one invocation per offset, with `sleep_until` outside timing at 500 us.
+  No builds, sanitizer runs or other agent benchmarks overlapped timing.
+
+Exact trailing benchmark arguments after `TABLE` were:
+
+```text
+bin2 10000 64 2 7 4 0 1 0
+bin2 10000 64 2 7 4 16 0 0
+bin2 10000 64 2 7 4 16 0 0
+bin2 10000 64 2 7 4 0 0 0
+bin2 1000 64 2 3 4 0 0 500
+bin2 1000 64 2 3 4 16 0 500
+```
+
+Raw CSV summaries, per-round means, metadata, hashes and parsed values are in
+`/tmp/ocam-two-thread-20261118/`; sanitizer logs are in
+`/tmp/ocam-worker-checks/`. These local temporary artifacts are not repository
+files. Tables below report populations as measured, without pooling runs or
+subtracting clock overhead.
+
+### Tight-loop results
+
+First aligned invocation, 64-buffer ring, **70,000 samples per path**. All
+durations are microseconds; staged includes dispatch/wait where applicable
+and the final caller-side copy.
+
+| Method | Kernel mean | Staged mean | Staged standard deviation | Staged p99 | Staged maximum |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Production optimized | 2.9199 | 3.6415 | 1.1047 | 4.4200 | 55.7390 |
+| Range serial control | 2.9148 | 3.6494 | 1.0305 | 4.6290 | 35.7400 |
+| Paired serial control | 2.6357 | 3.3473 | 1.0395 | 4.0010 | 32.8410 |
+| Parallel halves | 2.0642 | 4.8851 | 2.0728 | 8.8110 | 36.4940 |
+| Parallel paired 28/32 | 1.7130 | 4.3149 | 1.8992 | 7.9050 | 37.3240 |
+| Parallel paired 30/30 | 1.6306 | 3.7818 | 1.1947 | 5.4840 | 36.8600 |
+
+The balanced two-thread kernel saves 1.2893 us (44.2%), but **loses 0.1403 us
+(3.85%) after staging**. Its staged standard deviation and p99 are higher;
+its smaller observed maximum alone does not establish better tails. Across
+the four invocations, ring64 handoff-only means are 0.1672–0.1964 us.
+
+Repeated ring64 staged means:
+
+| Output offset / invocation | Production optimized | Paired serial | Parallel paired 30/30 |
+| --- | ---: | ---: | ---: |
+| 0 / first | 3.6415 | 3.3473 | 3.7818 |
+| 16 / first | 3.7061 | 3.4133 | 3.9893 |
+| 16 / repeat | 3.6770 | 3.3922 | 3.8042 |
+| 0 / repeat | 3.7216 | 3.4290 | 4.0983 |
+
+The balanced worker loses **0.1272–0.3767 us (3.46–10.12%)** after staging in
+these four ring64 populations. Its p99 is higher in every one, although
+standard deviations and maxima do not uniformly worsen. Hot-buffer totals
+show the same mean ordering. The paired single-thread control instead saves
+0.2848–0.2942 us (about 8%) in the ring64 staged path. That traversal is a
+possible later single-core experiment, not a production change in this patch.
+
+The separate diagnostic pass is consistent with ownership costs recurring
+on the following frame: for ring64 paired30, the worker kernel mean rises
+from 1.3747 us without staging to 2.3178 us with staging, while the caller's
+kernel stays near 1.38 us. The caller reads worker-written lines during the
+copy; the worker then writes those lines again on the next job. Diagnostics
+use extra clocks and consecutive method blocks, so these numbers must not be
+subtracted from headline totals to assign an exact cost. Cache ownership is
+a plausible mechanism, not proven by these timings. Paired30 beats paired28
+despite its shared boundary lines: boundary alignment alone does not predict
+the total cost, and balancing work matters too.
+
+### Sleeping at a nominal 2 kHz cadence
+
+The result changes substantially when the caller sleeps between frames.
+Ring64 staged populations below contain **3,000 samples per path**:
+
+| Offset | Method | Mean | Median | Standard deviation | p99 | Maximum |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 0 | Production optimized | 31.4250 | 40.0150 | 15.2147 | 53.2050 | 65.4890 |
+| 0 | Paired serial | 29.0648 | 36.5800 | 14.5282 | 53.5110 | 63.4210 |
+| 0 | Parallel paired 30/30 | 17.1059 | 20.9100 | 7.4924 | 25.1370 | 56.5790 |
+| 16 | Production optimized | 35.8405 | 40.0780 | 11.0810 | 55.1450 | 109.0160 |
+| 16 | Paired serial | 29.8911 | 36.6195 | 12.9680 | 49.8950 | 57.0510 |
+| 16 | Parallel paired 30/30 | 16.5552 | 21.0640 | 7.8817 | 28.1460 | 45.4220 |
+
+Here the worker clearly improves the measured staged populations, but all
+methods are much slower and more variable than in tight loops. These clocks
+measure conversion after waking, excluding the sleep and scheduling delay
+before the start clock. Both cores
+use `intel_pstate` with governor `powersave`, EPP `performance`, and allowed
+frequencies from 400 MHz to 4.9/5.0 GHz. Frequency, power states and system
+scheduling were not controlled or recorded per sample. Sleep/wake behavior,
+cache residency and the extra spinning core can change the comparison;
+the observed reversal cannot be assigned solely to any one of them.
+
+Whole lost pacing slots across all 42 hot/ring method paths totaled 132 at
+offset0 (0–14 per path) and 313 at offset16 (0–33 per path). Those are late
+synthetic sample starts under ordinary scheduling, not camera dropped frames.
+No catch-up bursts are intentionally issued after losing whole periods.
+Sleeping synthetically is not a reproduction of EDT DMA or the RTC's power,
+FIFO, AMD CCD and shared-reader conditions.
+
+### Decision and remaining qualification
+
+The local test establishes correctness and a substantial two-thread kernel
+speedup. It also shows why kernel-only timing is insufficient: staging erases
+that gain in tight loops, while a sleeping workload reverses the result.
+Neither case establishes the RTC's acquisition-to-write gain or jitter.
+Retain this as an offline experiment; keep the current production methods.
+Before a runtime worker proposal, obtain a controlled same-CCD target-CPU
+comparison including staging, actual placement and frequency conditions,
+then qualify frame delivery and end-to-end loop latency with the operator.
+A production implementation would additionally need framework thread startup,
+verified scheduling, fault/recovery handling and configuration lifecycle tests.
