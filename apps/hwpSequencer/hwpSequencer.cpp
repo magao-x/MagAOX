@@ -1,5 +1,5 @@
 /** \file hwpSequencer.cpp
- * \brief The MagAO-X K-mirror rotation tracker main program source file.
+ * \brief The MagAO-X HWP sequencer main program source file.
  *
  * \ingroup hwpSequencer_files
  */

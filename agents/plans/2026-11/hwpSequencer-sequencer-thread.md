@@ -548,4 +548,31 @@ Update this plan's Decisions and Status as each step lands.
 - 2026-11-18: plan drafted; `hwpTracker` `hwp_position` registration fixed in
   `eb5e10b7`. Grilling session resolved D0–D19. The user's uncommitted
   `appShutdown` reorder is folded into step 2 (it does not fix F2 on its own).
-  Ready for user implementation, starting with step 1.
+- 2026-11-18: implemented by the agent at the user's request (the user had
+  planned to write it). Commits: step 1 `5dd5e9d0`, step 2 `2bdfae73`, step 3
+  `a3b5e5bc`, step 4 `a6cb8eda`, then documentation. **Not compiled or run**:
+  the workstation used for the work has no mxlib/MagAO-X build environment
+  and no `clang-format`. The user builds and runs the tests on a Linux
+  workstation (`make -f Makefile.one t=../apps/hwpSequencer/tests/hwpSequencer_test`
+  from `tests/`), runs `clang-format` (step 6) and then the instrument
+  checks V1–V5.
+
+### Implementation notes
+
+- Seams (D16): `waitFor` is a static template and cannot be virtual, so the
+  virtual waits are the specific ones: `waitTrigger(bool)`, `waitHwp(float)`,
+  `waitFrame(double)`, `dwell(double)`, alongside `sendTrigger`,
+  `sendHwpTarget`, `sendObsOn`.
+- `appShutdown` no longer turns the trigger On unconditionally. Cleanup does it
+  for every sequence ending, including shutdown; when no sequence is running
+  the app leaves the trigger as it is. This changes the old behavior, where an
+  idle shutdown always sent "On".
+- Logging went into step 2 because the restructure replaced every `std::cerr`
+  line; step 3 is config only.
+- Remaining race, accepted: a stop that arrives after the thread has accepted a
+  start but before it sets `m_sequencing` is cleared and the sequence runs.
+  Pressing stop again stops it.
+- The `last_cycle` time estimate includes the current dwell:
+  (remaining positions + 1) × `time_per_pos`.
+- The `gslInterpolation`, `readColumns` and ImageStreamIO includes were unused
+  and are removed; the Makefile's `-lgsl` is left in place.
