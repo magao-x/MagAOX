@@ -886,8 +886,8 @@ jitter result is claimed by this integration.
 The operator supplied five conversion snapshots, each accompanied by four
 `fgtimes` summaries, spanning telemetry timestamps 19:54:38–19:58:50.
 The first four blocks are labeled SDK, optimized, compact and mapped. The
-final block is unlabeled; clarification was requested, and it is not assigned
-to a method based on similarity of its timings. Source attachment SHA-256:
+operator subsequently confirmed that the initially unlabeled final block is
+a return to SDK. Source attachment SHA-256:
 `72441231fa28ccb6e5aeb560bd86e8aa32ab6e2f1b2b7359ed8e1f25e5ca8613`.
 
 All conversion snapshots have **count=4,000 and valid=1**. Acquisition means
@@ -900,11 +900,11 @@ per-frame distributions and end-to-end loop measurements were not included.
 
 | Conversion, us | Mean | Standard deviation | Minimum | Maximum |
 | --- | ---: | ---: | ---: | ---: |
-| SDK | 14.798577 | 0.832616 | 11.602 | 17.493 |
+| SDK before | 14.798577 | 0.832616 | 11.602 | 17.493 |
 | Optimized | 10.800893 | 0.935667 | 9.007 | 15.499 |
 | Compact | 14.931164 | 0.937344 | 11.472 | 17.933 |
 | Mapped | 11.579746 | 1.250348 | 8.817 | 16.211 |
-| Final, unlabeled | 14.768896 | 0.854879 | 11.391 | 17.723 |
+| SDK return | 14.768896 | 0.854879 | 11.391 | 17.723 |
 
 Average each block's four reported telemetry means and standard deviations
 arithmetically for the table below. These are **not pooled distributions**:
@@ -913,25 +913,33 @@ experiments. Standard deviations are not standard errors.
 
 | Telemetry summaries, us | Acquisition-to-write mean | Acquisition-to-write standard deviation | Publication-interval standard deviation |
 | --- | ---: | ---: | ---: |
-| SDK | 38.509216 | 0.950821 | 1.350043 |
+| SDK before | 38.509216 | 0.950821 | 1.350043 |
 | Optimized | 34.683247 | 1.024190 | 1.422580 |
 | Compact | 39.007829 | 1.040668 | 1.436183 |
 | Mapped | 35.363765 | 1.302363 | 1.821928 |
-| Final, unlabeled | 38.652514 | 0.963074 | 1.288670 |
+| SDK return | 38.652514 | 0.963074 | 1.288670 |
 
-Using the explicitly labeled SDK block as reference:
+The SDK return restores conversion closely: its mean is 0.029681 us lower
+and standard deviation 0.022263 us higher than the first SDK capture.
+Acquisition-to-write mean drifts upward by 0.143297 us, so the full pipeline
+baseline is not identical, but this drift is much smaller than the optimized
+gain. Use arithmetic midpoints of the two SDK reference summaries below:
+conversion mean/standard deviation 14.783736/0.843747 us and
+acquisition-to-write mean/standard deviation 38.580865/0.956947 us. These
+midpoints are descriptive averages, not pooled distributions or uncertainties.
 
-- Optimized saves **3.997684 us (27.01%)** in conversion. Its standard
-  deviation increases **0.103052 us (12.38%)**, and its observed maximum is
-  **1.994 us lower**. Acquisition-to-write improves **3.825969 us (9.94%)**;
-  its average reported standard deviation increases **0.073369 us (7.72%)**.
-- Compact is **0.132587 us slower** in conversion and **0.498612 us slower**
-  acquisition-to-write. Its conversion standard deviation is 0.104728 us
+- Optimized saves **3.982843 us (26.94%)** in conversion. Its standard
+  deviation increases **0.091920 us (10.89%)**, and its observed maximum is
+  **1.994–2.224 us below** the two SDK maxima. Acquisition-to-write improves
+  **3.897618 us (10.10%)**; its average reported standard deviation increases
+  **0.067243 us (7.03%)**.
+- Compact is **0.147427 us slower** in conversion and **0.426964 us slower**
+  acquisition-to-write. Its conversion standard deviation is 0.093596 us
   above SDK, approximately equal to optimized in this run. Thus this numeric
   capture refines, rather than exactly reproduces, the earlier qualitative
   report of matching SDK jitter.
-- Mapped saves **3.218831 us (21.75%)** in conversion, but its standard
-  deviation increases **0.417733 us (50.17%)**. It is **0.778853 us slower**
+- Mapped saves **3.203991 us (21.67%)** in conversion, but its standard
+  deviation increases **0.406601 us (48.19%)**. It is **0.778853 us slower**
   than optimized, with **0.314681 us greater standard deviation** and a
   **0.712 us higher observed maximum**. Its acquisition-to-write mean is
   0.680517 us slower than optimized and its spread is also greater.
