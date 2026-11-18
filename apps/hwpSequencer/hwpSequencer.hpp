@@ -41,7 +41,13 @@ namespace app
  * checks for shutdown and abort, and every ending (completed, stopped, aborted, error, shutdown) goes through
  * finishSequence().
  *
- * See agents/plans/2026-11/hwpSequencer-sequencer-thread.md for the design record.
+ * When the camera exposure and readout times are known, trigger pauses are locked to the function generator's pulse
+ * grid: the trigger is turned Off between pulses and the pause waits for the frame of the last pulse, which is still
+ * being read out after the next frame has started. In frames mode (`frames_per_pos` > 0) the trigger is also turned On
+ * between pulses, so exactly N pulses fire at each position.
+ *
+ * See agents/plans/2026-11/hwpSequencer-sequencer-thread.md and agents/plans/2026-11/hwpSequencer-frames-per-pos.md
+ * for the design records.
  *
  * \ingroup hwpSequencer
  */
@@ -84,6 +90,12 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
 
     std::string m_obsAppName{ "observers" }; ///< The observerCtrl device name, which owns `obs_on`.
 
+    unsigned m_obsTimeout{ 5000 }; ///< The time to wait for `obs_on` to confirm On [msec].
+
+    std::string m_cameraDevName; ///< The camera device for `exptime` and `readout_time`, default is the shmim name.
+
+    double m_framesMinPeriod{ 1.0 }; ///< The shortest trigger period allowed in frames mode [sec].
+
     std::vector<float> m_hwpPositions{ { 0.0, 45.0, 22.5, 67.5 } }; ///< The HWP positions of one cycle [deg].
 
     float m_hwpTolerance{ 0.5 }; ///< The tolerance for the HWP to be considered in position [deg].
@@ -94,18 +106,21 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
 
     unsigned m_fxngenTimeout{ 5000 }; ///< The time to wait for the trigger output to confirm a change [msec].
 
-    double m_frameMargin{ 0.5 }; ///< Margin added to the trigger period for a frame wait [sec].
+    double m_frameMargin{ 0.5 }; ///< Margin added to the trigger period and frame latency for a frame wait [sec].
 
     double m_frameMaxTimeout{ 610 }; ///< Maximum frame wait, and the fallback when the trigger rate is unknown [sec].
 
     ///@}
 
     /** \name Sequence Parameters - Data
-     * Set over INDI. Both may change during a sequence (see the time_per_pos and num_cycles callbacks).
+     * Set over INDI. All may change during a sequence (see the time_per_pos, frames_per_pos and num_cycles callbacks).
      *@{
      */
 
     std::atomic<double> m_timePerPos{ 0 }; ///< Dwell time at each position [sec], read at the start of each dwell.
+
+    /// Frames per position, 0 for time mode; read when the trigger resumes at each position.
+    std::atomic<int> m_framesPerPos{ 0 };
 
     std::atomic<int> m_numCycles{ 0 }; ///< Number of cycles to run, 0 means run until stopped.
 
@@ -140,6 +155,36 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
 
     ///@}
 
+    /** \name Pulse Timing - Data
+     * Owned by the sequencer thread. Pulses fire at m_anchor + k P, where P is the trigger period.
+     *@{
+     */
+
+    double m_anchor{ 0 }; ///< Time of a known trigger pulse, from the most recent landed frame [sec, CLOCK_REALTIME].
+
+    bool m_haveAnchor{ false }; ///< True when m_anchor is valid for the current sequence.
+
+    int m_posFrames{ 0 }; ///< Frames requested at the current position, 0 for time mode.
+
+    bool m_posActive{ false }; ///< True from a trigger resume until the following pause counts its frames.
+
+    uint64_t m_posCountStart{ 0 }; ///< m_framesSeen when the trigger resumed at the current position.
+
+    double m_dwellUntil{ 0 }; ///< Frames mode: when to turn the trigger Off at the current position [sec].
+
+    ///@}
+
+    /** \name Frame Arrival - Data
+     * Written by processImage(), read by the sequencer thread.
+     *@{
+     */
+
+    std::atomic<double> m_lastFrameAtime{ 0 }; ///< Acquisition time of the most recent frame [sec, CLOCK_REALTIME].
+
+    std::atomic<uint64_t> m_framesSeen{ 0 }; ///< Number of frames received since startup.
+
+    ///@}
+
     /** \name Remote Device State - Data
      * Last values received from other devices. Values are kept until updated; only "never received" blocks a start.
      *@{
@@ -160,6 +205,14 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
     std::atomic<bool> m_obsOn{ false }; ///< Last `obs_on` state from observers.
 
     std::atomic<bool> m_haveObsOn{ false }; ///< True once `obs_on` has been received.
+
+    std::atomic<double> m_camExptime{ 0 }; ///< Last camera exposure time [sec].
+
+    std::atomic<bool> m_haveCamExptime{ false }; ///< True once the camera exposure time has been received.
+
+    std::atomic<double> m_camReadout{ 0 }; ///< Last camera readout time [sec].
+
+    std::atomic<bool> m_haveCamReadout{ false }; ///< True once the camera readout time has been received.
 
     ///@}
 
@@ -246,14 +299,43 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
      */
     bool canStart( std::string &why /**< [out] the reason a start is refused */ );
 
+    /// Check whether frames mode can be used with the current trigger and camera state.
+    /**
+     * \returns true if the trigger period and camera timing are known and the period is at least frames.minPeriod
+     * \returns false otherwise, with the reason in \p why
+     */
+    bool framesModeOk( std::string &why /**< [out] the reason frames mode is refused */ );
+
     /// Run the cycles of a sequence until it ends.
     /**
      * \returns the reason the sequence ended
      */
     endReason runSequence( const std::vector<float> &positions /**< [in] the positions snapshot for this sequence */ );
 
-    /// Perform one step: pause the trigger, wait for the in-flight frame, move the HWP, resume the trigger.
-    /** A step that has started always completes unless aborted, shut down, or failed.
+    /// Anchor the pulse grid on a fresh frame at the start of a sequence.
+    /** Does nothing if the trigger period or camera timing is unknown. Otherwise turns the trigger On if it is Off
+     * and waits for one frame, which is not saved because `obs_on` is still Off.
+     *
+     * \returns 0 on success, or if no frame arrived in time mode (logged as a warning)
+     * \returns 1 if interrupted by abort or shutdown
+     * \returns -1 on error, including no frame in frames mode, which is logged
+     */
+    int primeAnchor();
+
+    /// Pause the trigger and wait until no frame is exposing.
+    /** With a pulse anchor, turns the trigger Off between pulses and waits for the frame of the last pulse, then
+     * re-anchors on it. Without one, turns the trigger Off and waits for the next frame. Then counts the frames of the
+     * position that just ended.
+     *
+     * \returns 0 on success
+     * \returns 1 if interrupted by abort or shutdown
+     * \returns -1 on error, which is logged
+     */
+    int pauseTrigger( bool partial /**< [in] true if the position was cut short, which skips the count warning */ );
+
+    /// Perform one step: pause the trigger, move the HWP, resume the trigger.
+    /** A step that has started always completes unless aborted, shut down, or failed. The first step turns `obs_on`
+     * On, and waits for it, before resuming the trigger. In frames mode the trigger resumes between pulses.
      *
      * \returns 0 on success
      * \returns 1 if interrupted by abort or shutdown
@@ -263,9 +345,9 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
                 bool  first /**< [in] true for the first step of a sequence, which turns `obs_on` On */ );
 
     /// Clean up after a sequence ends, for any reason.
-    /** Turns the trigger On; for a normal ending waits for the in-flight frame; turns `obs_on` Off if the sequencer
-     * turned it On; returns the HWP to the first position unless the sequence ended in error; resets switches and
-     * the FSM state.
+    /** For a normal ending, pauses the trigger to catch the last frame (or, without a pulse anchor, waits for the
+     * next frame); turns `obs_on` Off if the sequencer turned it On; leaves the trigger On; returns the HWP to the
+     * first position unless the sequence ended in error; resets switches and the FSM state.
      *
      * \returns 0 on success
      * \returns -1 if a step of the cleanup failed, which is logged
@@ -278,12 +360,21 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
                         int    cycle, /**< [in] the cycle number */
                         float  target /**< [in] the HWP position [deg] */ );
 
+    /// Publish the number of frames counted at the last position.
+    void publishFrames( uint64_t count /**< [in] the number of frames */ );
+
     /// Update the sequence, last_cycle and abort switches.
     void publishSwitches( bool sequencing /**< [in] the sequence switch state */ );
 
-    /// Get the frame-wait timeout from the trigger frequency.
+    /// Get the time from a trigger pulse until its frame lands.
     /**
-     * \returns the trigger period plus margin, capped at the maximum, or the maximum if the rate is unknown [sec]
+     * \returns the camera exposure plus readout time [sec], or -1 if either is unknown
+     */
+    double frameLatency();
+
+    /// Get the frame-wait timeout from the trigger frequency and camera timing.
+    /**
+     * \returns the result of calcFrameTimeout() for the current state [sec]
      */
     double frameTimeout();
 
@@ -298,6 +389,54 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
      * \returns the positions, e.g. "0,45,22.5,67.5"
      */
     std::string positionsString();
+
+    ///@}
+
+    /** \name Pulse Timing
+     * Pure calculations on the pulse grid, separated for testing. Times are in seconds.
+     *@{
+     */
+
+    /// Get the time of the pulse that triggered a frame.
+    /**
+     * \returns \p atime minus \p latency
+     */
+    static double pulseTime( double atime, /**< [in] the frame acquisition time */
+                             double latency /**< [in] the time from pulse to frame, see frameLatency() */ );
+
+    /// Get the first midpoint between pulses at or after a time.
+    /**
+     * \returns the smallest \p anchor + (k + 1/2) \p period, for integer k, that is not before \p after
+     */
+    static double nextMidpoint( double anchor, /**< [in] the time of a pulse */
+                                double period, /**< [in] the trigger period, must be positive */
+                                double after /**< [in] the earliest acceptable time */ );
+
+    /// Get the acquisition time from which a frame belongs to a pulse.
+    /** Halfway between the landing times of the pulse's frame and the previous pulse's frame.
+     *
+     * \returns \p pulse + \p latency - \p period / 2
+     */
+    static double landedThreshold( double pulse,   /**< [in] the time of the pulse */
+                                   double latency, /**< [in] the time from pulse to frame */
+                                   double period /**< [in] the trigger period */ );
+
+    /// Calculate the frame-wait timeout.
+    /** One period covers waiting for the next pulse, the latency covers exposure and readout of its frame.
+     *
+     * \returns \p period + \p latency + \p margin capped at \p maxTimeout, without the latency if it is unknown
+     *          (negative), or \p maxTimeout if the period is not positive [sec]
+     */
+    static double calcFrameTimeout( double period,  /**< [in] the trigger period, 0 if unknown */
+                                    double latency, /**< [in] the frame latency, negative if unknown */
+                                    double margin,  /**< [in] the margin */
+                                    double maxTimeout /**< [in] the maximum timeout */ );
+
+    /// Get the current CLOCK_REALTIME, the clock of frame acquisition times.
+    /**
+     * \returns the current time [sec]
+     */
+    static double currentTime();
 
     ///@}
 
@@ -380,6 +519,27 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
      */
     virtual waitResult dwell( double seconds /**< [in] the dwell time [sec] */ );
 
+    /// Wait until a time, ignoring stop requests.
+    /**
+     * \returns waitResult::done at \p t, waitResult::interrupted on abort or shutdown, waitResult::error on a
+     *          semaphore error
+     */
+    virtual waitResult waitUntil( double t /**< [in] the time to wait for [sec, CLOCK_REALTIME] */ );
+
+    /// Wait for a frame acquired at or after a threshold.
+    /**
+     * \returns waitResult::done when such a frame has arrived, waitResult::timeout if none arrived within
+     *          frameTimeout(), or the waitFrame() result that ended the wait
+     */
+    virtual waitResult
+    waitLanded( double threshold /**< [in] the acquisition time threshold, see landedThreshold() */ );
+
+    /// Wait for `obs_on` to report On.
+    /**
+     * \returns the wait result
+     */
+    virtual waitResult waitObsOn();
+
     ///@}
 
     /** \name shmimMonitor Interface
@@ -392,7 +552,7 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
      */
     int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents */ );
 
-    /// Signal a new frame to the sequencer thread.
+    /// Record the frame's acquisition time and count, and signal the sequencer thread.
     /**
      * \returns 0 on success
      * \returns -1 on error, which is logged
@@ -414,9 +574,11 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
 
     pcf::IndiProperty m_indiP_timePerPos; ///< The dwell time at each position [sec].
 
+    pcf::IndiProperty m_indiP_framesPerPos; ///< The number of frames at each position, 0 for time mode.
+
     pcf::IndiProperty m_indiP_numCycles; ///< The number of cycles, 0 for until stopped.
 
-    pcf::IndiProperty m_indiP_status; ///< Read-only sequence status: pos_index, cycle, target.
+    pcf::IndiProperty m_indiP_status; ///< Read-only sequence status: pos_index, cycle, target, frames.
 
     pcf::IndiProperty m_indiP_positions; ///< Read-only list of configured positions.
 
@@ -431,6 +593,10 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
     pcf::IndiProperty m_indiP_fxngenFreq; ///< Subscription to the trigger frequency.
 
     pcf::IndiProperty m_indiP_obsOn; ///< Subscription to `obs_on` from observers.
+
+    pcf::IndiProperty m_indiP_camExptime; ///< Subscription to the camera `exptime`.
+
+    pcf::IndiProperty m_indiP_camReadout; ///< Subscription to the camera `readout_time`.
 
     ///@}
 
@@ -447,6 +613,8 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
 
     INDI_NEWCALLBACK_DECL( hwpSequencer, m_indiP_timePerPos );
 
+    INDI_NEWCALLBACK_DECL( hwpSequencer, m_indiP_framesPerPos );
+
     INDI_NEWCALLBACK_DECL( hwpSequencer, m_indiP_numCycles );
 
     INDI_SETCALLBACK_DECL( hwpSequencer, m_indiP_hwpPosition );
@@ -456,6 +624,10 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
     INDI_SETCALLBACK_DECL( hwpSequencer, m_indiP_fxngenFreq );
 
     INDI_SETCALLBACK_DECL( hwpSequencer, m_indiP_obsOn );
+
+    INDI_SETCALLBACK_DECL( hwpSequencer, m_indiP_camExptime );
+
+    INDI_SETCALLBACK_DECL( hwpSequencer, m_indiP_camReadout );
 
     ///@}
 };
@@ -571,6 +743,26 @@ inline void hwpSequencer::setupConfig()
                 "double",
                 "Maximum time to wait for a frame [sec], default is 610" );
 
+    config.add( "frames.minPeriod",
+                "",
+                "frames.minPeriod",
+                argType::Required,
+                "frames",
+                "minPeriod",
+                false,
+                "double",
+                "Shortest trigger period allowed in frames mode [sec], default is 1" );
+
+    config.add( "camera.devName",
+                "",
+                "camera.devName",
+                argType::Required,
+                "camera",
+                "devName",
+                false,
+                "string",
+                "Camera device name for exptime and readout_time, default is shmimMonitor.shmimName" );
+
     config.add( "observers.devName",
                 "",
                 "observers.devName",
@@ -580,6 +772,16 @@ inline void hwpSequencer::setupConfig()
                 false,
                 "string",
                 "Observers application name, default is 'observers'" );
+
+    config.add( "observers.timeout",
+                "",
+                "observers.timeout",
+                argType::Required,
+                "observers",
+                "timeout",
+                false,
+                "unsigned",
+                "Time to wait for obs_on to confirm On [msec], default is 5000" );
 
     SHMIMMONITOR_SETUP_CONFIG( config );
 }
@@ -596,9 +798,17 @@ inline int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fxngenTimeout, "fxngen.timeout" );
     _config( m_frameMargin, "frame.margin" );
     _config( m_frameMaxTimeout, "frame.maxTimeout" );
+    _config( m_framesMinPeriod, "frames.minPeriod" );
+    _config( m_cameraDevName, "camera.devName" );
     _config( m_obsAppName, "observers.devName" );
+    _config( m_obsTimeout, "observers.timeout" );
 
     SHMIMMONITOR_LOAD_CONFIG( _config );
+
+    if( m_cameraDevName == "" )
+    {
+        m_cameraDevName = shmimName();
+    }
 
     if( m_hwpPositions.empty() )
     {
@@ -621,16 +831,18 @@ inline int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &_config )
         }
     }
 
-    if( m_hwpTolerance <= 0 || m_hwpTimeout == 0 || m_hwpWait == 0 || m_fxngenTimeout == 0 )
+    if( m_hwpTolerance <= 0 || m_hwpTimeout == 0 || m_hwpWait == 0 || m_fxngenTimeout == 0 || m_obsTimeout == 0 )
     {
-        return log<text_log, -1>( "hwp.tolerance, hwp.timeout, hwp.wait and fxngen.timeout must be positive",
-                                  logPrio::LOG_CRITICAL );
+        return log<text_log, -1>(
+            "hwp.tolerance, hwp.timeout, hwp.wait, fxngen.timeout and observers.timeout must be positive",
+            logPrio::LOG_CRITICAL );
     }
 
-    if( m_frameMargin < 0 || m_frameMaxTimeout <= 0 )
+    if( m_frameMargin < 0 || m_frameMaxTimeout <= 0 || m_framesMinPeriod <= 0 )
     {
-        return log<text_log, -1>( "frame.margin must not be negative and frame.maxTimeout must be positive",
-                                  logPrio::LOG_CRITICAL );
+        return log<text_log, -1>(
+            "frame.margin must not be negative, frame.maxTimeout and frames.minPeriod must be positive",
+            logPrio::LOG_CRITICAL );
     }
 
     return 0;
@@ -657,6 +869,17 @@ inline int hwpSequencer::appStartup()
     m_indiP_timePerPos["current"].set( m_timePerPos.load() );
     m_indiP_timePerPos["target"].set( m_timePerPos.load() );
 
+    CREATE_REG_INDI_NEW_NUMBERI( m_indiP_framesPerPos,
+                                 "frames_per_pos",
+                                 0,
+                                 10000,
+                                 1,
+                                 "%d",
+                                 "Frames per position (0 = use time_per_pos)",
+                                 "Sequencer" );
+    m_indiP_framesPerPos["current"].set( m_framesPerPos.load() );
+    m_indiP_framesPerPos["target"].set( m_framesPerPos.load() );
+
     CREATE_REG_INDI_NEW_NUMBERI(
         m_indiP_numCycles, "num_cycles", 0, 10800, 1, "%d", "Number of cycles (0 = until stopped)", "Sequencer" );
     m_indiP_numCycles["current"].set( m_numCycles.load() );
@@ -669,6 +892,8 @@ inline int hwpSequencer::appStartup()
     m_indiP_status["cycle"].set( 0 );
     m_indiP_status.add( pcf::IndiElement( "target" ) );
     m_indiP_status["target"].set( m_hwpPositions[0] );
+    m_indiP_status.add( pcf::IndiElement( "frames" ) );
+    m_indiP_status["frames"].set( 0 );
 
     if( createROIndiText( m_indiP_positions, "positions", "value", "HWP positions [deg]", "Sequencer" ) < 0 )
     {
@@ -699,6 +924,10 @@ inline int hwpSequencer::appStartup()
     REG_INDI_SETPROP( m_indiP_fxngenFreq, m_fxngenName, m_fxngenChannel + "freq" );
 
     REG_INDI_SETPROP( m_indiP_obsOn, m_obsAppName, "obs_on" );
+
+    REG_INDI_SETPROP( m_indiP_camExptime, m_cameraDevName, "exptime" );
+
+    REG_INDI_SETPROP( m_indiP_camReadout, m_cameraDevName, "readout_time" );
 
     SHMIMMONITOR_APP_STARTUP;
 
@@ -825,6 +1054,9 @@ inline void hwpSequencer::sequencerThreadExec()
         m_weStartedObs   = false;
         m_posIndex       = 0;
         m_cycle          = 0;
+        m_haveAnchor     = false;
+        m_posFrames      = 0;
+        m_posActive      = false;
         m_sequencing     = true;
 
         // The shmimMonitor only reads frames while OPERATING, so stay OPERATING until cleanup is done.
@@ -832,12 +1064,21 @@ inline void hwpSequencer::sequencerThreadExec()
 
         publishSwitches( true );
 
-        int numCycles = m_numCycles;
+        int numCycles    = m_numCycles;
+        int framesPerPos = m_framesPerPos;
 
         log<text_log>( "starting sequence: positions " + positionsString() + ", " +
-                           std::to_string( m_timePerPos.load() ) + " s per position, " +
+                           ( framesPerPos > 0 ? std::to_string( framesPerPos ) + " frames per position, "
+                                              : std::to_string( m_timePerPos.load() ) + " s per position, " ) +
                            ( numCycles > 0 ? std::to_string( numCycles ) + " cycles" : std::string( "until stopped" ) ),
                        logPrio::LOG_NOTICE );
+
+        if( frameLatency() < 0 )
+        {
+            log<text_log>( "no exptime or readout_time from " + m_cameraDevName +
+                               ": trigger pauses are not locked to the pulses",
+                           logPrio::LOG_WARNING );
+        }
 
         endReason whyEnded = runSequence( positions );
 
@@ -891,6 +1132,11 @@ inline bool hwpSequencer::canStart( std::string &why )
         return false;
     }
 
+    if( m_framesPerPos > 0 )
+    {
+        return framesModeOk( why );
+    }
+
     double timePerPos = m_timePerPos;
 
     if( timePerPos <= 0 )
@@ -909,9 +1155,53 @@ inline bool hwpSequencer::canStart( std::string &why )
     return true;
 }
 
+inline bool hwpSequencer::framesModeOk( std::string &why )
+{
+    double freq = m_fxngenFreq;
+
+    if( !m_haveFxngenFreq || freq <= 0 )
+    {
+        why = "trigger frequency is unknown or not positive";
+        return false;
+    }
+
+    if( !m_haveCamExptime )
+    {
+        why = "no exptime received from " + m_cameraDevName;
+        return false;
+    }
+
+    if( !m_haveCamReadout )
+    {
+        why = "no readout_time received from " + m_cameraDevName;
+        return false;
+    }
+
+    if( 1.0 / freq < m_framesMinPeriod )
+    {
+        why = "trigger period (" + std::to_string( 1.0 / freq ) + " s) is shorter than frames.minPeriod (" +
+              std::to_string( m_framesMinPeriod ) + " s): use time_per_pos";
+        return false;
+    }
+
+    return true;
+}
+
 inline hwpSequencer::endReason hwpSequencer::runSequence( const std::vector<float> &positions )
 {
     bool first = true;
+
+    int rv = primeAnchor();
+
+    if( rv < 0 )
+    {
+        return endReason::error;
+    }
+
+    if( rv > 0 )
+    {
+        return m_abortRequested ? endReason::aborted : endReason::stopped;
+    }
 
     for( int cycle = 1;; ++cycle )
     {
@@ -927,7 +1217,7 @@ inline hwpSequencer::endReason hwpSequencer::runSequence( const std::vector<floa
                 return endReason::stopped;
             }
 
-            int rv = stepTo( positions[idx], first );
+            rv = stepTo( positions[idx], first );
 
             if( rv < 0 )
             {
@@ -947,7 +1237,8 @@ inline hwpSequencer::endReason hwpSequencer::runSequence( const std::vector<floa
                                std::to_string( positions[idx] ) + " deg): trigger on",
                            logPrio::LOG_INFO );
 
-            waitResult wr = dwell( m_timePerPos );
+            // Frames mode dwells until the Off midpoint set when the trigger resumed.
+            waitResult wr = ( m_posFrames > 0 ) ? dwell( m_dwellUntil - currentTime() ) : dwell( m_timePerPos );
 
             if( wr == waitResult::interrupted )
             {
@@ -978,27 +1269,37 @@ inline hwpSequencer::endReason hwpSequencer::runSequence( const std::vector<floa
     }
 }
 
-inline int hwpSequencer::stepTo( float target, bool first )
+inline int hwpSequencer::primeAnchor()
 {
-    // Pause the trigger and wait for the function generator to confirm it.
-    if( sendTrigger( false ) < 0 )
+    double latency = frameLatency();
+
+    if( m_fxngenFreq <= 0 || latency < 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "failed to turn the trigger off" } );
+        return 0;
     }
 
-    waitResult wr = waitTrigger( false );
+    waitResult wr = waitResult::done;
 
-    if( wr == waitResult::interrupted )
+    if( !m_fxngenOutp )
     {
-        return 1;
+        if( sendTrigger( true ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "failed to turn the trigger on to prime" } );
+        }
+
+        wr = waitTrigger( true );
+
+        if( wr == waitResult::interrupted )
+        {
+            return 1;
+        }
+
+        if( wr != waitResult::done )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "timed out waiting for the trigger to turn on" } );
+        }
     }
 
-    if( wr != waitResult::done )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__, "timed out waiting for the trigger to turn off" } );
-    }
-
-    // Frames that finished before the confirmed Off are discarded, so the next frame is the one in flight.
     XWC_SEM_FLUSH( m_smSemaphore );
 
     wr = waitFrame( frameTimeout() );
@@ -1015,7 +1316,166 @@ inline int hwpSequencer::stepTo( float target, bool first )
 
     if( wr == waitResult::timeout )
     {
-        log<text_log>( "no frame in flight after trigger off", logPrio::LOG_DEBUG );
+        if( m_framesPerPos > 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "no frame arrived to anchor the trigger pulses" } );
+        }
+
+        log<text_log>( "no frame arrived to anchor the trigger pulses", logPrio::LOG_WARNING );
+
+        return 0;
+    }
+
+    m_anchor     = pulseTime( m_lastFrameAtime, latency );
+    m_haveAnchor = true;
+
+    return 0;
+}
+
+inline int hwpSequencer::pauseTrigger( bool partial )
+{
+    double latency = frameLatency();
+    double freq    = m_fxngenFreq;
+    bool   locked  = m_haveAnchor && latency >= 0 && freq > 0;
+    double period  = locked ? 1.0 / freq : 0;
+    double pulse   = 0;
+
+    waitResult wr = waitResult::done;
+
+    if( m_posActive && m_posFrames > 0 && !locked )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "frames mode lost the trigger pulse timing" } );
+    }
+
+    // Turn Off between pulses, so the last pulse is unambiguous: at the end of a completed frames dwell, or else at
+    // the next midpoint.
+    if( locked )
+    {
+        double now   = currentTime();
+        double offAt = ( m_posActive && m_posFrames > 0 && now >= m_dwellUntil )
+                           ? m_dwellUntil
+                           : nextMidpoint( m_anchor, period, now );
+
+        wr = waitUntil( offAt );
+
+        if( wr == waitResult::interrupted )
+        {
+            return 1;
+        }
+
+        if( wr == waitResult::error )
+        {
+            return -1;
+        }
+
+        pulse = offAt - 0.5 * period;
+    }
+
+    if( sendTrigger( false ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "failed to turn the trigger off" } );
+    }
+
+    wr = waitTrigger( false );
+
+    if( wr == waitResult::interrupted )
+    {
+        return 1;
+    }
+
+    if( wr != waitResult::done )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "timed out waiting for the trigger to turn off" } );
+    }
+
+    if( locked )
+    {
+        // In frame transfer the previous frame lands after the last pulse fires, so wait for the last pulse's frame.
+        wr = waitLanded( landedThreshold( pulse, latency, period ) );
+
+        if( wr == waitResult::interrupted )
+        {
+            return 1;
+        }
+
+        if( wr == waitResult::error )
+        {
+            return -1;
+        }
+
+        if( wr == waitResult::timeout )
+        {
+            if( m_posActive && m_posFrames > 0 )
+            {
+                return log<software_error, -1>(
+                    { __FILE__, __LINE__, "the frame of the last trigger pulse did not arrive" } );
+            }
+
+            log<text_log>( "the frame of the last trigger pulse did not arrive: pulse timing lost",
+                           logPrio::LOG_WARNING );
+
+            m_haveAnchor = false;
+        }
+        else
+        {
+            m_anchor = pulseTime( m_lastFrameAtime, latency );
+        }
+    }
+    else
+    {
+        // Frames that finished before the confirmed Off are discarded, so the next frame is the one in flight.
+        XWC_SEM_FLUSH( m_smSemaphore );
+
+        wr = waitFrame( frameTimeout() );
+
+        if( wr == waitResult::interrupted )
+        {
+            return 1;
+        }
+
+        if( wr == waitResult::error )
+        {
+            return -1;
+        }
+
+        if( wr == waitResult::timeout )
+        {
+            log<text_log>( "no frame in flight after trigger off", logPrio::LOG_DEBUG );
+        }
+        else if( latency >= 0 && freq > 0 )
+        {
+            m_anchor     = pulseTime( m_lastFrameAtime, latency );
+            m_haveAnchor = true;
+        }
+    }
+
+    if( m_posActive )
+    {
+        m_posActive = false;
+
+        uint64_t count = m_framesSeen - m_posCountStart;
+
+        publishFrames( count );
+
+        if( m_posFrames > 0 && !partial && count != static_cast<uint64_t>( m_posFrames ) )
+        {
+            log<text_log>( "position " + std::to_string( m_posIndex.load() ) + " of cycle " +
+                               std::to_string( m_cycle.load() ) + ": expected " + std::to_string( m_posFrames ) +
+                               " frames, counted " + std::to_string( count ),
+                           logPrio::LOG_WARNING );
+        }
+    }
+
+    return 0;
+}
+
+inline int hwpSequencer::stepTo( float target, bool first )
+{
+    int rv = pauseTrigger( false );
+
+    if( rv != 0 )
+    {
+        return rv;
     }
 
     // Move the HWP and wait for it to arrive.
@@ -1024,7 +1484,7 @@ inline int hwpSequencer::stepTo( float target, bool first )
         return log<software_error, -1>( { __FILE__, __LINE__, "failed to send the HWP position" } );
     }
 
-    wr = waitHwp( target );
+    waitResult wr = waitHwp( target );
 
     if( wr == waitResult::interrupted )
     {
@@ -1036,6 +1496,68 @@ inline int hwpSequencer::stepTo( float target, bool first )
         return log<software_error, -1>(
             { __FILE__, __LINE__, "timed out waiting for the HWP to reach " + std::to_string( target ) + " deg" } );
     }
+
+    // Start saving once the HWP is at the first position, before the trigger resumes so the first frame is saved.
+    if( first )
+    {
+        if( sendObsOn( true ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "failed to turn obs_on on" } );
+        }
+
+        m_weStartedObs = true;
+
+        wr = waitObsOn();
+
+        if( wr == waitResult::interrupted )
+        {
+            return 1;
+        }
+
+        if( wr != waitResult::done )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "timed out waiting for obs_on to turn on" } );
+        }
+    }
+
+    // In frames mode, resume between pulses so pulses k+1 to k+N fire before the Off midpoint N periods later.
+    int framesPerPos = m_framesPerPos;
+
+    if( framesPerPos > 0 )
+    {
+        std::string why;
+
+        if( !framesModeOk( why ) )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "cannot use frames mode: " + why } );
+        }
+
+        if( !m_haveAnchor )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "cannot use frames mode: no trigger pulse timing" } );
+        }
+
+        double period = 1.0 / m_fxngenFreq;
+        double onAt   = nextMidpoint( m_anchor, period, currentTime() );
+
+        wr = waitUntil( onAt );
+
+        if( wr == waitResult::interrupted )
+        {
+            return 1;
+        }
+
+        if( wr == waitResult::error )
+        {
+            return -1;
+        }
+
+        m_dwellUntil = onAt + framesPerPos * period;
+    }
+
+    m_posFrames     = framesPerPos;
+    m_posCountStart = m_framesSeen;
+    m_posActive     = true;
 
     // Resume the trigger.
     if( sendTrigger( true ) < 0 )
@@ -1055,23 +1577,35 @@ inline int hwpSequencer::stepTo( float target, bool first )
         return log<software_error, -1>( { __FILE__, __LINE__, "timed out waiting for the trigger to turn on" } );
     }
 
-    // Start saving once the HWP is at the first position.
-    if( first )
-    {
-        if( sendObsOn( true ) < 0 )
-        {
-            return log<software_error, -1>( { __FILE__, __LINE__, "failed to turn obs_on on" } );
-        }
-
-        m_weStartedObs = true;
-    }
-
     return 0;
 }
 
 inline int hwpSequencer::finishSequence( endReason why, const std::vector<float> &positions )
 {
     int rv = 0;
+
+    // Let the in-flight frame land before observers stops, unless aborted, failed or shutting down.
+    bool normalEnd = ( why == endReason::completed || why == endReason::stopped ) && !interrupted();
+
+    // With pulse timing, pause between pulses to catch the last frame (and count it) before observers stops.
+    bool paused = normalEnd && m_haveAnchor && frameLatency() >= 0 && m_fxngenFreq > 0;
+
+    if( paused )
+    {
+        if( pauseTrigger( why == endReason::stopped ) < 0 )
+        {
+            rv = -1;
+        }
+
+        if( m_weStartedObs.exchange( false ) )
+        {
+            if( sendObsOn( false ) < 0 )
+            {
+                log<software_error>( { __FILE__, __LINE__, "failed to turn obs_on off during cleanup" } );
+                rv = -1;
+            }
+        }
+    }
 
     // Leave the camera triggering.
     if( sendTrigger( true ) < 0 )
@@ -1085,8 +1619,8 @@ inline int hwpSequencer::finishSequence( endReason why, const std::vector<float>
         rv = -1;
     }
 
-    // Let the in-flight frame land before observers stops, unless aborted, failed or shutting down.
-    if( ( why == endReason::completed || why == endReason::stopped ) && !interrupted() )
+    // Without pulse timing, wait for the next frame instead.
+    if( normalEnd && !paused )
     {
         XWC_SEM_FLUSH( m_smSemaphore );
 
@@ -1118,6 +1652,9 @@ inline int hwpSequencer::finishSequence( endReason why, const std::vector<float>
     m_lastCycle      = false;
     m_stopRequested  = false;
     m_abortRequested = false;
+    m_haveAnchor     = false;
+    m_posFrames      = 0;
+    m_posActive      = false;
     m_sequencing     = false;
 
     publishSwitches( false );
@@ -1157,6 +1694,13 @@ inline void hwpSequencer::publishStatus( size_t idx, int cycle, float target )
         { static_cast<double>( idx ), static_cast<double>( cycle ), static_cast<double>( target ) } );
 }
 
+inline void hwpSequencer::publishFrames( uint64_t count )
+{
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    updateIfChanged<double>( m_indiP_status, "frames", static_cast<double>( count ) );
+}
+
 inline void hwpSequencer::publishSwitches( bool sequencing )
 {
     std::lock_guard<std::mutex> guard( m_indiMutex );
@@ -1171,16 +1715,21 @@ inline void hwpSequencer::publishSwitches( bool sequencing )
     updateSwitchIfChanged( m_indiP_abort, "toggle", pcf::IndiElement::Off, INDI_IDLE );
 }
 
+inline double hwpSequencer::frameLatency()
+{
+    if( !m_haveCamExptime || !m_haveCamReadout )
+    {
+        return -1;
+    }
+
+    return m_camExptime + m_camReadout;
+}
+
 inline double hwpSequencer::frameTimeout()
 {
     double freq = m_fxngenFreq;
 
-    if( freq <= 0 )
-    {
-        return m_frameMaxTimeout;
-    }
-
-    return std::min( 1.0 / freq + m_frameMargin, m_frameMaxTimeout );
+    return calcFrameTimeout( freq > 0 ? 1.0 / freq : 0, frameLatency(), m_frameMargin, m_frameMaxTimeout );
 }
 
 inline bool hwpSequencer::interrupted()
@@ -1203,6 +1752,40 @@ inline std::string hwpSequencer::positionsString()
     }
 
     return str.str();
+}
+
+inline double hwpSequencer::pulseTime( double atime, double latency )
+{
+    return atime - latency;
+}
+
+inline double hwpSequencer::nextMidpoint( double anchor, double period, double after )
+{
+    return anchor + ( std::ceil( ( after - anchor ) / period - 0.5 ) + 0.5 ) * period;
+}
+
+inline double hwpSequencer::landedThreshold( double pulse, double latency, double period )
+{
+    return pulse + latency - 0.5 * period;
+}
+
+inline double hwpSequencer::calcFrameTimeout( double period, double latency, double margin, double maxTimeout )
+{
+    if( period <= 0 )
+    {
+        return maxTimeout;
+    }
+
+    return std::min( period + std::max( latency, 0.0 ) + margin, maxTimeout );
+}
+
+inline double hwpSequencer::currentTime()
+{
+    timespec ts;
+
+    clock_gettime( CLOCK_REALTIME, &ts );
+
+    return ts.tv_sec + ts.tv_nsec / 1e9;
 }
 
 inline int hwpSequencer::deadline( timespec &ts, double seconds )
@@ -1374,6 +1957,76 @@ inline hwpSequencer::waitResult hwpSequencer::dwell( double seconds )
     }
 }
 
+inline hwpSequencer::waitResult hwpSequencer::waitUntil( double t )
+{
+    timespec ts;
+
+    ts.tv_sec  = static_cast<time_t>( t );
+    ts.tv_nsec = static_cast<long>( ( t - ts.tv_sec ) * 1e9 );
+
+    while( true )
+    {
+        if( interrupted() )
+        {
+            return waitResult::interrupted;
+        }
+
+        // Wake-ups from other requests just loop back to the check above.
+        if( sem_timedwait( &m_wakeSemaphore, &ts ) == 0 || errno == EINTR )
+        {
+            continue;
+        }
+
+        if( errno == ETIMEDOUT )
+        {
+            return waitResult::done;
+        }
+
+        log<software_error>( { __FILE__, __LINE__, errno, "sem_timedwait" } );
+
+        return waitResult::error;
+    }
+}
+
+inline hwpSequencer::waitResult hwpSequencer::waitLanded( double threshold )
+{
+    double end = currentTime() + frameTimeout();
+
+    while( m_lastFrameAtime < threshold )
+    {
+        double remaining = end - currentTime();
+
+        if( remaining <= 0 )
+        {
+            return waitResult::timeout;
+        }
+
+        waitResult wr = waitFrame( remaining );
+
+        if( wr != waitResult::done )
+        {
+            return wr;
+        }
+    }
+
+    return waitResult::done;
+}
+
+inline hwpSequencer::waitResult hwpSequencer::waitObsOn()
+{
+    return waitFor(
+        [this]()
+        {
+            return m_obsOn.load();
+        },
+        [this]()
+        {
+            return interrupted();
+        },
+        m_obsTimeout / 1000.0,
+        m_hwpWait );
+}
+
 inline int hwpSequencer::allocate( const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
@@ -1385,6 +2038,11 @@ inline int hwpSequencer::processImage( void *curr_src, const dev::shmimT &dummy 
 {
     static_cast<void>( curr_src );
     static_cast<void>( dummy );
+
+    timespec atime = currAtime();
+
+    m_lastFrameAtime = atime.tv_sec + atime.tv_nsec / 1e9;
+    ++m_framesSeen;
 
     if( sem_post( &m_smSemaphore ) < 0 )
     {
@@ -1459,12 +2117,15 @@ INDI_NEWCALLBACK_DEFN( hwpSequencer, m_indiP_lastCycle )( const pcf::IndiPropert
 
         m_lastCycle = true;
 
-        size_t nPos      = m_hwpPositions.size();
-        size_t idx       = m_posIndex;
-        size_t remaining = ( idx + 1 < nPos ) ? nPos - idx - 1 : 0;
+        size_t nPos         = m_hwpPositions.size();
+        size_t idx          = m_posIndex;
+        size_t remaining    = ( idx + 1 < nPos ) ? nPos - idx - 1 : 0;
+        int    framesPerPos = m_framesPerPos;
+        double freq         = m_fxngenFreq;
+        double perPos       = ( framesPerPos > 0 && freq > 0 ) ? framesPerPos / freq : m_timePerPos.load();
 
         log<text_log>( "last cycle: will finish after " + std::to_string( remaining ) + " more positions (approx. " +
-                           std::to_string( ( remaining + 1 ) * m_timePerPos.load() ) + " s)",
+                           std::to_string( ( remaining + 1 ) * perPos ) + " s)",
                        logPrio::LOG_INFO );
 
         std::lock_guard<std::mutex> guard( m_indiMutex );
@@ -1560,6 +2221,55 @@ INDI_NEWCALLBACK_DEFN( hwpSequencer, m_indiP_timePerPos )( const pcf::IndiProper
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
     updatesIfChanged<double>( m_indiP_timePerPos, { "current", "target" }, { current, current } );
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( hwpSequencer, m_indiP_framesPerPos )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_framesPerPos, ipRecv );
+
+    if( !ipRecv.find( "target" ) )
+    {
+        return 0;
+    }
+
+    int target = ipRecv["target"].get<int>();
+
+    std::string reject;
+
+    if( target < 0 )
+    {
+        reject = "frames_per_pos cannot be negative (0 uses time_per_pos)";
+    }
+    else if( target > 0 && m_sequencing )
+    {
+        std::string why;
+
+        if( !framesModeOk( why ) )
+        {
+            reject = "frames_per_pos rejected: " + why;
+        }
+    }
+
+    if( reject != "" )
+    {
+        log<text_log>( reject, logPrio::LOG_WARNING );
+    }
+    else
+    {
+        m_framesPerPos = target;
+
+        log<text_log>( "frames_per_pos set to " + std::to_string( target ) +
+                           ( target == 0 ? std::string( " (time mode)" ) : std::string( "" ) ) +
+                           ( m_sequencing ? std::string( ", applies from the next position" ) : std::string( "" ) ),
+                       logPrio::LOG_NOTICE );
+    }
+
+    int current = m_framesPerPos;
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+    updatesIfChanged<int>( m_indiP_framesPerPos, { "current", "target" }, { current, current } );
 
     return 0;
 }
@@ -1671,6 +2381,36 @@ INDI_SETCALLBACK_DEFN( hwpSequencer, m_indiP_obsOn )( const pcf::IndiProperty &i
     {
         log<text_log>( "obs_on turned off during the sequence; continuing without saving", logPrio::LOG_WARNING );
     }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( hwpSequencer, m_indiP_camExptime )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_camExptime, ipRecv );
+
+    if( !ipRecv.find( "current" ) )
+    {
+        return 0;
+    }
+
+    m_camExptime     = ipRecv["current"].get<double>();
+    m_haveCamExptime = true;
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( hwpSequencer, m_indiP_camReadout )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_camReadout, ipRecv );
+
+    if( !ipRecv.find( "value" ) )
+    {
+        return 0;
+    }
+
+    m_camReadout     = ipRecv["value"].get<double>();
+    m_haveCamReadout = true;
 
     return 0;
 }
