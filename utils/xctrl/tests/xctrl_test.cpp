@@ -143,7 +143,7 @@ TEST_CASE( "xctrl reads MagAO-X and TOML configuration", "[xctrl]" )
     REQUIRE( c["systemd.restart"] == "on-failure" );
 }
 
-/// App [systemd] settings become systemd directives; bad values and the old [resurrectee] section are errors.
+/// App [systemd] settings match systemd directives.
 /**
  * \ingroup xctrl_unit_test
  */
@@ -171,13 +171,6 @@ TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
         REQUIRE( d["RestartSec"] == "2" );
         REQUIRE( d["Restart"] == "on-failure" );
         REQUIRE( d["StartLimitBurst"] == "3" );
-    }
-
-    SECTION( "the old [resurrectee] section is an error" )
-    {
-        appDirectives( app, { { "resurrectee.timeout", "20,90" } }, errors );
-        REQUIRE( errors.size() == 1 );
-        REQUIRE( errors[0].find( "watchdogSec" ) != std::string::npos );
     }
 
     SECTION( "bad values and unknown keys are errors" )

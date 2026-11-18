@@ -231,8 +231,7 @@ void systemdSettings( directiveMap             &dirs,   /**< [in.out] directives
                       const std::string        &source /**< [in] the configuration's name, for messages */ );
 
 /// Collect the systemd directives of one app from the `[systemd]` section of its configuration
-/** Apps that do not notify get Type=simple and no watchdog.  A `[resurrectee]` section is an error: its timeouts are
- * now `[systemd] watchdogSec` and `timeoutStartSec`.
+/** Apps that do not notify get Type=simple and no watchdog.
  *
  * \returns the directives that differ from the template
  */
@@ -998,16 +997,6 @@ inline directiveMap appDirectives( const appEntry &app, const confMap &conf, std
 {
     directiveMap dirs;
     std::string  source = app.name + ".conf";
-
-    // the old [resurrectee] timeouts are [systemd] settings now
-    for( const auto &kv : conf )
-    {
-        if( kv.first.compare( 0, 12, "resurrectee." ) == 0 )
-        {
-            errors.push_back( source + ": [resurrectee] " + kv.first.substr( 12 ) +
-                              " is replaced by [systemd] watchdogSec and timeoutStartSec" );
-        }
-    }
 
     systemdSettings( dirs, errors, conf, source );
 

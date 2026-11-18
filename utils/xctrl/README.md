@@ -8,7 +8,7 @@ xctrl
 
 | Term          | Meaning                                                                                       |
 |---------------|-----------------------------------------------------------------------------------------------|
-| `xctrl`       | this program: the one command for registering, starting, stopping and checking the apps        |
+| `xctrl`       | this program: the one command for registering, starting, stopping and checking the apps       |
 | sentinel      | the systemd supervision of a role's apps: the units `xctrl register` generates, their watchdog and restart policy, and the proclist record in `sys/sentinel_proclist` |
 | watchdog      | systemd's check that an app is alive: the app sends `WATCHDOG=1` at least every `watchdogSec`, or systemd restarts it |
 | `[systemd]`   | the configuration section, in `magaox.conf` or an app's `.conf`, holding the sentinel settings |
@@ -52,7 +52,7 @@ Unit names use the role in lower case. App names may contain `-`; units use them
 |--------------------------|----------------------------------------------------------------------------------|
 | `camsci1  picamCtrl`     | an app, registered and started automatically, with a watchdog                    |
 | `-camsci1  picamCtrl`    | an app, registered and started automatically, without a watchdog                 |
-| `#!camsci1  picamCtrl`   | a disabled app: registered if `camsci1.conf` exists, but started only by hand     |
+| `#!camsci1  picamCtrl`   | a disabled app: registered if `camsci1.conf` exists, but started only by hand    |
 | `#!-camsci1  picamCtrl`  | a disabled app without a watchdog                                                |
 | `#camsci1  picamCtrl`    | a comment, like any line starting with `#` but not `#!`: not an app, not registered |
 | `#-camsci1  picamCtrl`   | a comment too                                                                    |
@@ -83,15 +83,13 @@ changes them for that app, both under `[systemd]`, with the same keys:
 | `restart`               | `Restart=`               | always   | when systemd restarts the app, e.g. `always`, `on-failure`, `no` |
 | `restartSec`            | `RestartSec=`            | 5        | wait before a restart                                    |
 | `startLimitBurst`       | `StartLimitBurst=`       | 10       | starts allowed within `startLimitIntervalSec`            |
-| `startLimitIntervalSec` | `StartLimitIntervalSec=` | 600      |                                                          |
+| `startLimitIntervalSec` | `StartLimitIntervalSec=` | 600      | time interval for limiting `startLimitIntervalSec`, 0 allows infinite restarts    |
 | `timeoutStopSec`        | `TimeoutStopSec=`        | 30       | time allowed to stop before SIGKILL                      |
 | `killSignal`            | `KillSignal=`            | SIGTERM  | signal that asks the app to stop                         |
 
-Times are seconds, or `infinity`. The apps ignore the whole `[systemd]` section; only `xctrl` reads it. `register` reports an
+Times are seconds, or `infinity`. The apps ignore the `[systemd]` section; only `xctrl` reads it. `register` reports an
 unknown or misspelled key, or a bad value, as an error on the console and does not (re)register that app; `start`,
-`startup` and `restart` warn and start it with its last good settings. The
-`[resurrectee]` section is no longer used: `register` reports it as an error, and its `timeout = RUN,STARTUP` becomes
-`watchdogSec = RUN` and `timeoutStartSec = STARTUP`.
+`startup` and `restart` warn and start it with its last good settings.
 
 Example, in `camsci1.conf`:
 
@@ -128,14 +126,15 @@ Any user can run `xctrl`. It is installed setuid root, and decides from who ran 
 |-----------------------------|------------------------|--------------------------------------------------------------------------|
 | anyone                      | `status [NAME...]`     | Every registered app, one line each, `name: state (pid: N)`, colored and sorted by state: running green, manually started (running with autostart off) blue, disabled (`#!`, not running) yellow, not started cyan, starting/stopping magenta, dead red. `-v` adds a table with autostart, restarts, uptime, seconds since the last watchdog notification, watchdog timeout, CPU % now, memory and GPU memory. |
 | anyone                      | `peek [NAME...]`       | State and the last `logdump` lines of the apps (`-n LINES`, default 10), with the console output of an app that is not running. |
-| anyone                      | `inspect NAME`         | Follow the app's console output.                                         |
+| anyone                      | `inspect NAME`         | Follow the app's console output. `journalctl` on the .service will show similar output. |
 | xsup, group magaox          | `startup [NAME...]`    | Start the apps enabled for automatic startup, then the INDI server; with names, start those apps. |
 | xsup, group magaox          | `start NAME...`        | Start apps, enabled or not. The sentinel supervises them either way.     |
 | xsup, group magaox          | `stop NAME...`         | Stop apps. They stay stopped until started again: systemd does not restart an app that was stopped on purpose, but `startup` or a reboot with `boot on` starts enabled ones. |
 | xsup, group magaox          | `shutdown NAME...\|--all` | As `stop`; `--all` stops every running app of the role, enabled or not, then the INDI server. |
 | xsup, group magaox          | `restart NAME...\|--all` | Restart apps; `--all` is `shutdown --all` then `startup`.              |
 | privileged                  | `register`             | Register the proclist's apps with systemd, generate their drop-ins, enable them for automatic startup. Disabled apps (`#!`) with a valid `NAME.conf` are registered but not enabled: `start NAME` runs them, `startup` does not. Apps that became disabled are stopped (`--keep-running` leaves them running). Apps no longer in the proclist are stopped and deregistered. New apps start at once if the role is up. |
-| privileged                  | `add NAME EXECUTABLE`  | Add the app to the proclist, disabled (`#!NAME EXECUTABLE`), and register it, to start by hand or `enable`. It needs `NAME.conf`, and must not be in the proclist already; otherwise nothing changes. |
+| privileged                  | `add NAME EXECUTABLE`  | Add the app to the proclist, disabled (`#!NAME EXECUTABLE`), and register it, to start by hand or `enable`. It needs `NAME.conf`, and must not be in the proclist already; otherwise nothing changes. Cannot `add` an app with `-` prefix 
+for disabling watchdog. |
 | privileged                  | `enable NAME...\|--all` | Autostart on: remove the app's `#!` in the proclist, or add it, and register it if needed. `--all` enables every app in the proclist and every registered app. Does not start them. |
 | privileged                  | `disable NAME...\|--all` | Autostart off: disable the app with `#!` in the proclist. It stays registered, to start by hand. `--all` disables every app. Does not stop them. |
 | privileged                  | `delete NAME...\|--all` | Remove the app's lines from the proclist, stop it and deregister it. `--all` empties the role's proclist of apps, keeping `#` comments, and deregisters every app. |
