@@ -69,7 +69,7 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
 
         u_int m_hwpPosIndex{ 0 };
 
-        bool m_sequencing{ false };
+        std::atomic<bool> m_sequencing{ false };
 
         bool m_lastCycle{ false };
 
@@ -77,17 +77,17 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
 
         std::vector<float> m_hwpPositions{ {0.0, 45.0, 22.5, 67.5} };
 
-        float m_reportedHwpPos{ 0 };
-        ///<
+        std::atomic<float> m_reportedHwpPos{ 0 };
+        ///< Current HWP position--atomic to avoid race condition between INDI callback and doHwpAction threads
 
         unsigned m_hwpWait {100};  ///< The time to pause between checks of the hwp state during open/shut [msec]. Default is 100.
 
-        unsigned m_hwpTimeout {5000}; ///< Total time to wait for sensor to change state before timing out [msec]. Default is 2000.
+        unsigned m_hwpTimeout {5000}; ///< Total time to wait for sensor to change state before timing out [msec]. Default is 5000.
         ///@}
 
-        bool m_doMoveHwp {false}; ///< Flag telling the hwp thread that it should actually move the hwp, not just go back to sleep.
+        std::atomic<bool> m_doMoveHwp {false}; ///< Flag telling the hwp thread that it should actually move the hwp, not just go back to sleep.
 
-        bool m_fxngenOutp {false};
+        std::atomic<bool> m_fxngenOutp {false};
 
         sem_t m_smSemaphore{ 0 }; ///< Semaphore used to synchronize the hwp thread and the sm thread.
 
@@ -477,7 +477,7 @@ int hwpSequencer::doHwpAction()
     sendNewProperty(m_indiP_hwpTracker_target);
 
     // check if the HWP is in position (note, depends on the callback for m_reportedHwpPos)
-    float angle_tol = 0.1;
+    float angle_tol = 0.5;
     double t0 = mx::sys::get_curr_time();
     while (fabs(m_reportedHwpPos - target_hwp_angle) > angle_tol)
     {
