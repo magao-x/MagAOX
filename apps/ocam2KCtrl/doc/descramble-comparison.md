@@ -41,10 +41,17 @@ separate `optimized` mean/spread tradeoff are recorded in the engineering plan.
 The later four-method capture at approximately 2,000 FPS favors `optimized`
 among the candidates: relative to the two confirmed SDK reference captures,
 conversion improves by about 3.98 us, with standard deviation increasing by
-about 0.09 us. Mapped is both slower and more
-variable than optimized in that capture. These short windows support further
+about 0.09 us. Mapped is both slower and more variable than optimized in that
+capture. These short windows support further
 SDK/optimized/SDK qualification; they do not establish longer-run tail or
 end-to-end loop performance. See the engineering plan for the full statistics.
+
+A subsequent 2,000-FPS comparison with stage timing disabled retains about
+3.91 us acquisition-to-write improvement, with standard deviation increasing
+by about 0.059 us (5.8%). The smaller spread penalty therefore persists without
+stage instrumentation; the cause of the earlier larger penalty remains
+unresolved. Final qualification should also use the intended operating
+instrumentation setting, fixed throughout each matched comparison.
 
 | INDI property / element | Meaning |
 | --- | --- |

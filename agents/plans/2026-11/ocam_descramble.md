@@ -970,3 +970,79 @@ conversion only.
 Parsed values and arithmetic are retained in
 `/tmp/ocam-descramble-rtc-20261118.json`. This update changes documentation only;
 no instrument command or runtime modification was made.
+
+
+## Operator comparison with stage timing disabled — 2026-11-18
+
+The operator reconfigured with stage timing off and supplied five SDK
+`fgtimes` reports at 20:30:04.431607705–20:30:08.433582739 and six optimized
+reports at 20:30:16.967600434–20:30:22.502998826. Acquisition and publication
+means remain approximately 500 us, or **2,000 FPS**. No return-to-SDK segment,
+sample counts, extrema, frame-quality counters or end-to-end loop timing are
+included in this excerpt. These are ordinary acquisition-to-write statistics;
+they cannot provide a new conversion-stage measurement with stage timing off.
+
+Arithmetic averages of all supplied window summaries, in microseconds:
+
+| Metric | SDK | Optimized |
+| --- | ---: | ---: |
+| Acquisition-to-write mean | 37.727338 | 33.817002 |
+| Acquisition-to-write standard deviation | 1.009026 | 1.067993 |
+| Acquisition-interval standard deviation | 0.329715 | 0.421443 |
+| Publication-interval standard deviation | 1.354402 | 1.470970 |
+
+Optimized saves **3.910337 us (10.36%)**, with **0.058967 us (5.84%)** greater
+reported acquisition-to-write standard deviation. Publication-interval
+standard deviation increases 0.116568 us (8.61%). These are averages of
+reported rolling-window statistics, not pooled distributions or independent
+trials; no confidence interval or percentile is inferred from them.
+
+The optimized acquisition-to-write standard deviations range from
+1.04788–1.09477 us, above the SDK range of 0.987757–1.03165 us. The first
+optimized mean is somewhat higher at 33.937264 us; retaining all reports
+avoids assuming that it is a transition sample. Excluding it as a sensitivity
+check would give 33.792949 us mean and 1.062638 us average standard deviation,
+leaving the same small-penalty conclusion.
+
+The optimized report at 20:30:20.502015567 has acquisition-interval standard
+deviation 0.825282 us and follows a longer reporting interval. Its
+acquisition-to-write standard deviation is the lowest optimized value,
+1.04788 us. That isolated acquisition/reporting disturbance does not explain
+the acquisition-to-write spread increase. Excluding this report leaves
+optimized acquisition-interval standard deviation 0.340675 us, much closer to
+SDK, while acquisition-to-write standard deviation remains 1.072016 us.
+
+### Comparison with stage timing enabled
+
+Using the earlier SDK endpoint midpoint and optimized summaries:
+
+| Acquisition-to-write, us | Stage timing on | Stage timing off |
+| --- | ---: | ---: |
+| SDK mean | 38.580865 | 37.727338 |
+| Optimized mean | 34.683247 | 33.817002 |
+| Optimized mean saving | 3.897618 | 3.910337 |
+| SDK standard deviation | 0.956947 | 1.009026 |
+| Optimized standard deviation | 1.024190 | 1.067993 |
+| Optimized standard-deviation increase | 0.067243 | 0.058967 |
+
+The approximately 3.9 us mean gain and small spread penalty persist with the
+extra stage instrumentation disabled. Enabled stage markers are therefore
+not necessary for observing this better tradeoff, and disabling them does not
+recreate the earlier approximately 42% acquisition-to-write spread increase.
+It still does not identify why that earlier run behaved differently.
+
+The off captures have means lower by 0.853527 us for SDK and 0.866246 us for
+optimized, consistent with removing a common timing cost. They were taken
+after reconfiguration at a different time, rather than in a controlled
+on/off/on crossover, so these differences are not an isolated measurement of
+instrumentation overhead. Both absolute standard deviations increase slightly
+with stage timing off; the difference between methods shrinks by only
+0.008276 us. This is not evidence that disabling stage timing fixed jitter.
+
+The current single-thread optimized path remains the most promising candidate
+for longer matched SDK/optimized/SDK qualification in the intended operating
+configuration. A small positive spread difference remains in the supplied
+reports; tail latency and complete-loop performance are not established here.
+Parsed values are retained in `/tmp/ocam-descramble-stageoff-20261118.json`.
+Only documentation changes accompany this analysis; no instrument commands
+or runtime modifications were made.
