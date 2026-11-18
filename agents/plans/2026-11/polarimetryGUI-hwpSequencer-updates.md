@@ -221,6 +221,12 @@ Builds and tests are run by the user (no MagAO-X build environment on this machi
 
 - 2026-11-18: plan drafted and grilled (D1–D8). Awaiting go-ahead to implement.
 - 2026-11-18: step 1 (functional) implemented.
+- 2026-11-18: step 2 (tests) implemented. `polarimetry_test` built by the agent on macOS
+  (Homebrew Qt, `qmake`, INDI static libs built in a scratch copy of the tree) and run
+  with `QT_QPA_PLATFORM=offscreen`: all 5 test cases pass (134 assertions). A mutation
+  check (empty stagepollin property; `num_cycles` locked while sequencing) failed 2 cases
+  as expected. The full `polarimetryGUI` app was not built (needs mxlib). M1–M4 remain
+  for the user.
 
 ### Implementation notes
 
