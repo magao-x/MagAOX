@@ -253,3 +253,40 @@ QT_QPA_PLATFORM=offscreen \
 ```
 
 No unresolved implementation issue remains. Deployment follow-up: install/rebuild both plugins on the workstation and add the relevant `[valueDisplay]` configuration snippet from the plugin README. Very small windows and long labels/numbers can clip as documented; broader movable-overlay collision handling remains outside this version.
+
+### Appearance follow-up after instrument use (2026-11-17)
+
+The user reports that the merged plugin works, but its font is smaller than native overlays and its background is too dark. This follow-up supersedes the initial fixed-background/status-font choice and the initial expectation that no companion rtimv change would be needed.
+
+- Root causes: the status font defaults to 19 pixels (`14 * 1.4`, converted to integer), while native statistics use a 22-pixel font. The plugin also used a fixed background alpha of 150, which is the maximum opacity of native `fontLuminance`, even over dark image regions.
+- The plugin now copies the native global-statistics font/color and follows subsequent font changes on normal overlay refresh. It initializes the background as transparent.
+- The companion rtimv change exposes the existing nonblocking `mtxTry_fontLuminance(QTextEdit*, bool)` via `Q_INVOKABLE`. The plugin discovers/caches that method through the existing main-window QObject and invokes it after placing its widget, including refreshes with unchanged values. No image-sampling algorithm, new image reader, timer, overlay-access layout, or interface IID is introduced.
+- Older viewers without the invokable method remain supported with a transparent background and no warning. Adaptive opacity requires the updated viewer; it samples the plugin's own footprint instead of copying the statistics widget's background.
+- Qt's `setTextBackgroundColor()` changes the insertion format when no text is selected. The plugin therefore saves its cursor, selects its document during native invocation, and restores the cursor. This updates existing rendered text even when the INDI values remain unchanged; tests inspect every text fragment rather than only the current-format getter.
+- MagAOX follow-up branch: `jrmales/value-display-appearance`, based on merged `origin/dev` at `26355d9f`. Companion checkout: `local/rtimv-value-display`, based on the clean sibling rtimv `dev` at `4778f30`; the original sibling checkout stays untouched.
+- Standalone plugin suite: **554 assertions in 11 cases passed**, including matching native fonts and rendered fragments, runtime font changes, transparent/quiet compatibility with older viewers, host destruction, metadata dispatch after placement, and real shared-plugin loading.
+- Built the plugin plus companion `rtimv`, `rtimvClient`, `rtimvServer`, and both GUI test executables. Four native/client global-statistics and viewport-bounds regression tests passed. Two additional actual-plugin integrations (local and loopback client) passed rendered-opacity transitions `0 -> 150 -> 0`, unchanged values, a bright value-display region below a dark statistics region, changed values, and resizing.
+- Inspected `/tmp/value-display-native-appearance.png` and `/tmp/value-display-client-appearance.png`: font size matches native statistics and the fixed dark background is gone. C++ formatting and whitespace checks pass. Functional changes, usage documentation, and companion test formatting are committed separately.
+- Client tests required sandbox escalation for loopback sockets only. No live instrument access, installation, or operational configuration change was performed. Rebuild the viewer and `valueDisplay` plugin to deploy this follow-up; no configuration changes or additional INDI requests are needed.
+
+Companion verification, from the MagAOX workspace:
+
+```sh
+cmake -S local/rtimv-value-display -B local/rtimv-value-display/_build \
+  -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE=OFF
+cmake --build local/rtimv-value-display/_build --parallel 6 \
+  --target rtimv rtimvClient rtimvServer rtimvGlobalStatsGuiTest rtimvGlobalStatsClientGuiTest
+env -u RTIMV_TEST_VALUE_DISPLAY_PLUGIN -u RTIMV_TEST_SCREENSHOT \
+  RTIMV_PLUGIN_PATH=/nonexistent \
+  ctest --test-dir local/rtimv-value-display/_build --output-on-failure -j 2 \
+  -R '^(rtimvGlobalStats_(gui|clientGui)|rtimvViewportBounds_(gui|clientGui))$'
+QT_QPA_PLATFORM=offscreen RTIMV_PLUGIN_PATH=/nonexistent \
+  RTIMV_TEST_VALUE_DISPLAY_PLUGIN="$PWD/gui/rtimv/plugins/valueDisplay/librtimv_valueDisplayPlugin.so" \
+  local/rtimv-value-display/_build/tests/rtimvGlobalStatsGuiTest
+QT_QPA_PLATFORM=offscreen RTIMV_PLUGIN_PATH=/nonexistent \
+  RTIMV_TEST_VALUE_DISPLAY_PLUGIN="$PWD/gui/rtimv/plugins/valueDisplay/librtimv_valueDisplayPlugin.so" \
+  local/rtimv-value-display/_build/tests/rtimvGlobalStatsClientGuiTest \
+  "$PWD/local/rtimv-value-display/_build/rtimvServer"
+```
+
+The standalone plugin test uses the same isolated-build commands recorded above with the updated source and plugin binary. The original task text and both user answers remain unchanged.

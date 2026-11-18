@@ -11,6 +11,8 @@
 #include <QPluginLoader>
 #include <QPointer>
 #include <QTemporaryFile>
+#include <QTextBlock>
+#include <QTextDocument>
 
 #include <sstream>
 
@@ -22,6 +24,41 @@ namespace libXWCTest
 namespace valueDisplayTest
 {
 /// \cond TEST_HARNESS
+
+/// Host exposing the optional native opacity entry point without simulating its image calculations.
+class LuminanceHost : public QObject
+{
+    Q_OBJECT
+
+  public:
+    /// Number of refreshes delivered through the real Qt meta-object path.
+    int m_calls{ 0 };
+
+    /// Widget passed by the overlay, invalidated when that widget is destroyed.
+    QPointer<QTextEdit> m_widget;
+
+    /// Screen rectangle observed by the host when it receives a refresh.
+    QRect m_geometry;
+
+    /// Whether the overlay requested debug output from the native routine.
+    bool m_print{ false };
+
+    /// Opacity supplied by the test to verify native updates reach the rendered characters.
+    int m_opacity{ 0 };
+
+    /// Record an invocation after the plugin has updated its text and placement.
+    Q_INVOKABLE void mtxTry_fontLuminance( QTextEdit *widget, /**< [in] Text whose background needs refreshing. */
+                                           bool print /**< [in] Whether to print native sampling diagnostics. */ );
+};
+
+void LuminanceHost::mtxTry_fontLuminance( QTextEdit *widget, bool print )
+{
+    ++m_calls;
+    m_widget   = widget;
+    m_geometry = widget->geometry();
+    m_print    = print;
+    widget->setTextBackgroundColor( QColor( 0, 0, 0, m_opacity ) );
+}
 
 /// INDI parser with a simulated connection and no client, timer, socket, or outgoing command path.
 class Provider : public indiDictionary
@@ -76,7 +113,7 @@ void Provider::reconnectTransport()
     m_connected = true;
 }
 
-/// Capture ordinary plugin diagnostics while restoring the stream even if a test fails.
+/// Capture plugin and Qt diagnostics while restoring handlers even if a test fails.
 class Diagnostics
 {
   protected:
@@ -86,25 +123,56 @@ class Diagnostics
     /// Non-owning original stream buffer to restore on destruction.
     std::streambuf *m_previous{ nullptr };
 
+    /// Previously installed Qt diagnostic handler to restore on destruction.
+    QtMessageHandler m_previousHandler{ nullptr };
+
+    /// Previous nested capture, if any, to restore when this scope ends.
+    Diagnostics *m_previousCapture{ nullptr };
+
+    /// Active capture used by Qt's callback, scoped to these serial offline tests.
+    static Diagnostics *m_active;
+
+    /// Capture warnings and errors emitted through Qt rather than the C++ stderr stream.
+    static void qtMessage( QtMsgType                 type,    /**< [in] Diagnostic severity. */
+                           const QMessageLogContext &context, /**< [in] Source context supplied by Qt. */
+                           const QString            &message /**< [in] Diagnostic text. */ );
+
   public:
-    /// Begin capturing stderr stream diagnostics.
+    /// Begin capturing stderr stream and Qt diagnostics.
     Diagnostics();
 
-    /// Restore the original stream buffer.
+    /// Restore the original stream buffer and Qt handler.
     ~Diagnostics();
 
     /// Return the captured diagnostics.
     std::string text() const;
 };
 
+Diagnostics *Diagnostics::m_active = nullptr;
+
 Diagnostics::Diagnostics()
 {
-    m_previous = std::cerr.rdbuf( m_output.rdbuf() );
+    m_previous        = std::cerr.rdbuf( m_output.rdbuf() );
+    m_previousCapture = m_active;
+    m_active          = this;
+    m_previousHandler = qInstallMessageHandler( qtMessage );
 }
 
 Diagnostics::~Diagnostics()
 {
+    qInstallMessageHandler( m_previousHandler );
+    m_active = m_previousCapture;
     std::cerr.rdbuf( m_previous );
+}
+
+void Diagnostics::qtMessage( QtMsgType type, const QMessageLogContext &context, const QString &message )
+{
+    static_cast<void>( context );
+
+    if( m_active && ( type == QtWarningMsg || type == QtCriticalMsg || type == QtFatalMsg ) )
+    {
+        m_active->m_output << message.toStdString() << '\n';
+    }
 }
 
 std::string Diagnostics::text() const
@@ -116,7 +184,8 @@ std::string Diagnostics::text() const
 int attach( rtimvOverlayInterface &overlay, /**< [in,out] Overlay to configure. */
             rtimvGraphicsView     &view,    /**< [in,out] Offline graphics view. */
             dictionaryT      *dictionary,   /**< [in,out] Local dictionary, or null to simulate a missing provider. */
-            const QByteArray &settings      /**< [in] Entries in the valueDisplay configuration section. */
+            const QByteArray &settings,     /**< [in] Entries in the valueDisplay configuration section. */
+            QObject *host = nullptr         /**< [in] Optional main-window object exposing native opacity adjustment. */
 )
 {
     QTemporaryFile file;
@@ -128,9 +197,49 @@ int attach( rtimvOverlayInterface &overlay, /**< [in,out] Overlay to configure. 
     REQUIRE( config.readConfig( file.fileName().toStdString() ) == 0 );
 
     rtimvOverlayAccess access;
-    access.m_graphicsView = &view;
-    access.m_dictionary   = dictionary;
+    access.m_graphicsView     = &view;
+    access.m_dictionary       = dictionary;
+    access.m_mainWindowObject = host;
     return overlay.attachOverlay( access, config );
+}
+
+/// Check both the insertion format and every rendered fragment against the native statistics font.
+void checkFont( QTextEdit   *text, /**< [in] Value widget under test. */
+                const QFont &font /**< [in] Native statistics font to match. */ )
+{
+    CHECK( text->currentFont() == font );
+    CHECK( text->document()->defaultFont() == font );
+
+    for( QTextBlock block = text->document()->begin(); block.isValid(); block = block.next() )
+    {
+        for( auto it = block.begin(); !it.atEnd(); ++it )
+        {
+            const auto fragment = it.fragment();
+
+            if( fragment.isValid() )
+            {
+                CHECK( fragment.charFormat().font().resolve( text->document()->defaultFont() ) == font );
+            }
+        }
+    }
+}
+
+/// Check that a native opacity update reached every rendered character rather than only the insertion format.
+void checkBackground( QTextEdit *text, /**< [in] Value widget under test. */
+                      int        opacity /**< [in] Expected opacity on all rendered fragments. */ )
+{
+    for( QTextBlock block = text->document()->begin(); block.isValid(); block = block.next() )
+    {
+        for( auto it = block.begin(); !it.atEnd(); ++it )
+        {
+            const auto fragment = it.fragment();
+
+            if( fragment.isValid() )
+            {
+                CHECK( fragment.charFormat().background().color().alpha() == opacity );
+            }
+        }
+    }
 }
 
 /// Numeric message built without a server or serialized INDI transport.
@@ -174,8 +283,9 @@ struct Fixture
     Fixture();
 
     /// Configure the real overlay and optionally withhold the dictionary.
-    int configure( const QByteArray &settings,             /**< [in] Value display settings. */
-                   bool              withDictionary = true /**< [in] Whether to expose the local dictionary. */
+    int configure( const QByteArray &settings,                /**< [in] Value display settings. */
+                   bool              withDictionary = true,   /**< [in] Whether to expose the local dictionary. */
+                   QObject          *host           = nullptr /**< [in] Optional host for native opacity integration. */
     );
 
     /// Return the plugin's private widget, failing if attachment did not create it.
@@ -200,9 +310,9 @@ Fixture::Fixture()
     QCoreApplication::processEvents();
 }
 
-int Fixture::configure( const QByteArray &settings, bool withDictionary )
+int Fixture::configure( const QByteArray &settings, bool withDictionary, QObject *host )
 {
-    return attach( m_overlay, m_view, withDictionary ? &m_dictionary : nullptr, settings );
+    return attach( m_overlay, m_view, withDictionary ? &m_dictionary : nullptr, settings, host );
 }
 
 QTextEdit *Fixture::widget()
@@ -332,9 +442,9 @@ TEST_CASE( "Value display formats finite numbers at fixed precision", "[valueDis
     f.value( "fit.average.dx", "-0.482002258300781" );
     f.value( "fit.average.dy", "-1.89847564697266" );
     CHECK( f.text() == "dx: -0.482\ndy: -1.898" );
-    CHECK( f.widget()->currentFont().pixelSize() == static_cast<int>( f.m_view.statusTextFontSize() ) );
-    CHECK( f.widget()->textColor() == QColor( f.m_view.statusTextFontColor() ) );
-    CHECK( f.widget()->textBackgroundColor() == QColor( 0, 0, 0, 150 ) );
+    checkFont( f.widget(), f.m_view.globalStatsText()->currentFont() );
+    CHECK( f.widget()->textColor() == f.m_view.globalStatsText()->textColor() );
+    CHECK( f.widget()->textBackgroundColor() == QColor( 0, 0, 0, 0 ) );
 
     const std::vector<std::pair<std::string, QString>> cases{ { "0", "0.000" },
                                                               { "1.2344", "1.234" },
@@ -357,9 +467,9 @@ TEST_CASE( "Value display formats finite numbers at fixed precision", "[valueDis
     CHECK_FALSE( large.contains( 'e', Qt::CaseInsensitive ) );
     CHECK( large.endsWith( ".000" ) );
     CHECK( f.widget()->geometry().right() < f.m_view.viewport()->width() );
-    CHECK( f.widget()->currentFont().pixelSize() == static_cast<int>( f.m_view.statusTextFontSize() ) );
-    CHECK( f.widget()->textColor() == QColor( f.m_view.statusTextFontColor() ) );
-    CHECK( f.widget()->textBackgroundColor() == QColor( 0, 0, 0, 150 ) );
+    checkFont( f.widget(), f.m_view.globalStatsText()->currentFont() );
+    CHECK( f.widget()->textColor() == f.m_view.globalStatsText()->textColor() );
+    CHECK( f.widget()->textBackgroundColor() == QColor( 0, 0, 0, 0 ) );
 
     Fixture rms;
     REQUIRE( rms.configure( "key1=fit.values.x_rms\nprecision1=2\nkey2=fit.values.y_rms\nprecision2=2\n" ) == 0 );
@@ -372,6 +482,101 @@ TEST_CASE( "Value display formats finite numbers at fixed precision", "[valueDis
     extremes.value( "fit.values.x", "2.6" );
     extremes.value( "fit.values.y", "0.125" );
     CHECK( extremes.text() == "x: 3\ny: 0.125000000000000" );
+}
+
+/** \brief Value text matches native statistics styling before and after value and native-font changes.
+ * \ingroup valueDisplay_unit_test
+ */
+TEST_CASE( "Value display uses the native statistics font", "[valueDisplay]" )
+{
+    // clang-format off
+#ifdef VALUE_DISPLAY_TEST_DOXYGEN_REF
+    valueDisplay::attachOverlay; valueDisplay::updateOverlay;
+#endif
+    // clang-format on
+    Fixture f;
+    auto   *native = f.m_view.globalStatsText();
+    QFont   font   = native->currentFont();
+    font.setPixelSize( 29 );
+    font.setBold( true );
+    font.setItalic( true );
+    native->setCurrentFont( font );
+    native->setTextColor( QColor( "#42d67d" ) );
+    REQUIRE( f.configure( "key1=fit.values.x\nkey2=fit.values.y\n" ) == 0 );
+    CHECK( f.text() == "x: \ny: " );
+    checkFont( f.widget(), font );
+    CHECK( f.widget()->textColor() == native->textColor() );
+    f.value( "fit.values.x", "1.25" );
+    f.value( "fit.values.y", "2.75" );
+    CHECK( f.text() == "x: 1.250\ny: 2.750" );
+    checkFont( f.widget(), font );
+
+    font.setPixelSize( 34 );
+    font.setItalic( false );
+    native->setCurrentFont( font );
+    CHECK( f.text() == "x: 1.250\ny: 2.750" );
+    checkFont( f.widget(), font );
+    CHECK( f.widget()->textBackgroundColor() == QColor( 0, 0, 0, 0 ) );
+}
+
+/** \brief Supported hosts receive opacity refreshes at the final geometry, while older hosts remain quiet and
+ * transparent.
+ * \ingroup valueDisplay_unit_test
+ */
+TEST_CASE( "Value display requests native opacity after placement", "[valueDisplay]" )
+{
+    // clang-format off
+#ifdef VALUE_DISPLAY_TEST_DOXYGEN_REF
+    valueDisplay::attachOverlay; valueDisplay::updateOverlay; valueDisplay::layoutText;
+#endif
+    // clang-format on
+    SECTION( "host invocation observes updated text placement even when values do not change" )
+    {
+        Fixture f;
+
+        {
+            LuminanceHost host;
+            REQUIRE( f.configure( "key1=fit.values.x\nkey2=fit.values.y\n", true, &host ) == 0 );
+            f.value( "fit.values.x", "0.25" );
+            CHECK( f.text() == "x: 0.250\ny: " );
+            REQUIRE( host.m_calls > 0 );
+            CHECK( host.m_widget == f.widget() );
+            CHECK( host.m_geometry == f.widget()->geometry() );
+            CHECK_FALSE( host.m_print );
+            const int calls = host.m_calls;
+            checkBackground( f.widget(), 0 );
+            host.m_opacity = 150;
+            CHECK( f.text() == "x: 0.250\ny: " );
+            CHECK( host.m_calls > calls );
+            checkBackground( f.widget(), 150 );
+            host.m_opacity = 0;
+            CHECK( f.text() == "x: 0.250\ny: " );
+            checkBackground( f.widget(), 0 );
+
+            auto *stats = f.m_view.globalStatsText();
+            stats->setPlainText( "min: 0" );
+            stats->setGeometry( 6, 6, 180, 130 );
+            stats->show();
+            QCoreApplication::processEvents();
+            CHECK( host.m_geometry == f.widget()->geometry() );
+            CHECK( host.m_geometry.top() > stats->geometry().bottom() );
+        }
+
+        CHECK( f.text() == "x: 0.250\ny: " );
+        CHECK( f.widget()->textBackgroundColor() == QColor( 0, 0, 0, 0 ) );
+    }
+
+    SECTION( "an older host without the method leaves a transparent background without warnings" )
+    {
+        Fixture     f;
+        QObject     olderHost;
+        Diagnostics diagnostics;
+        REQUIRE( f.configure( "key1=fit.values.x\n", true, &olderHost ) == 0 );
+        f.value( "fit.values.x", "1" );
+        CHECK( f.text() == "x: 1.000" );
+        CHECK( f.widget()->textBackgroundColor() == QColor( 0, 0, 0, 0 ) );
+        CHECK( diagnostics.text().empty() );
+    }
 }
 
 /** \brief Missing or invalid payloads produce blank value portions without warnings or apparent numeric zero.
@@ -701,3 +906,5 @@ int main( int    argc, /**< [in] Argument count. */
     QApplication app( argc, argv );
     return Catch::Session().run( argc, argv );
 }
+
+#include "value_display_test.moc"

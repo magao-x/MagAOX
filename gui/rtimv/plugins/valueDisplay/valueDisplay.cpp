@@ -5,6 +5,7 @@
 #include "valueDisplay.hpp"
 
 #include <QEvent>
+#include <QTextCursor>
 #include <QTextDocument>
 
 #include <algorithm>
@@ -31,8 +32,10 @@ void valueDisplay::detachOverlay()
     }
 
     delete m_text.data();
-    m_view       = nullptr;
-    m_dictionary = nullptr;
+    m_view          = nullptr;
+    m_host          = nullptr;
+    m_fontLuminance = {};
+    m_dictionary    = nullptr;
 }
 
 int valueDisplay::attachOverlay( rtimvOverlayAccess &access, mx::app::appConfigurator &config )
@@ -82,7 +85,18 @@ int valueDisplay::attachOverlay( rtimvOverlayAccess &access, mx::app::appConfigu
     }
 
     m_view       = access.m_graphicsView;
+    m_host       = access.m_mainWindowObject;
     m_dictionary = access.m_dictionary;
+
+    if( m_host )
+    {
+        const int method = m_host->metaObject()->indexOfMethod( "mtxTry_fontLuminance(QTextEdit*,bool)" );
+
+        if( method >= 0 )
+        {
+            m_fontLuminance = m_host->metaObject()->method( method );
+        }
+    }
 
     if( m_dictionary )
     {
@@ -100,12 +114,11 @@ int valueDisplay::attachOverlay( rtimvOverlayAccess &access, mx::app::appConfigu
     m_view->textEditSetup( m_text );
     m_text->setLineWrapMode( QTextEdit::NoWrap );
 
-    QFont font( m_view->statusTextFontFamily() );
-    font.setPixelSize( std::max( 1, static_cast<int>( m_view->statusTextFontSize() ) ) );
+    const QFont font = m_view->globalStatsText()->currentFont();
     m_text->setCurrentFont( font );
     m_text->document()->setDefaultFont( font );
-    m_text->setTextColor( QColor( m_view->statusTextFontColor() ) );
-    m_text->setTextBackgroundColor( QColor( 0, 0, 0, 150 ) );
+    m_text->setTextColor( m_view->globalStatsText()->textColor() );
+    m_text->setTextBackgroundColor( QColor( 0, 0, 0, 0 ) );
     m_text->stackUnder( m_view->helpText() );
 
     m_view->installEventFilter( this );
@@ -168,9 +181,17 @@ int valueDisplay::updateOverlay()
         }
     }
 
-    const QString text = rows.join( '\n' );
+    const QString text        = rows.join( '\n' );
+    const QFont   font        = m_view->globalStatsText()->currentFont();
+    const bool    fontChanged = m_text->currentFont() != font;
 
-    if( m_text->toPlainText() != text )
+    if( fontChanged )
+    {
+        m_text->setCurrentFont( font );
+        m_text->document()->setDefaultFont( font );
+    }
+
+    if( fontChanged || m_text->toPlainText() != text )
     {
         m_text->setPlainText( text );
     }
@@ -211,6 +232,16 @@ void valueDisplay::layoutText()
                          std::min( bounds.width(), textSize.width() + padding ),
                          std::min( height, textSize.height() + padding ) );
     m_text->show();
+
+    if( m_host && m_fontLuminance.isValid() )
+    {
+        // Apply the native background to existing text, not just the insertion format.
+        const QTextCursor cursor = m_text->textCursor();
+        m_text->selectAll();
+        m_fontLuminance.invoke(
+            m_host, Qt::DirectConnection, Q_ARG( QTextEdit *, m_text.data() ), Q_ARG( bool, false ) );
+        m_text->setTextCursor( cursor );
+    }
 }
 
 bool valueDisplay::eventFilter( QObject *watched, QEvent *event )
