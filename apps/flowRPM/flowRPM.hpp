@@ -285,6 +285,12 @@ inline std::vector<std::string> splitPipeDelimited( const std::string &line )
     return fields;
 }
 
+/// Determine whether the IPMI sensor status token represents a valid flow reading.
+inline bool isValidStatusField( const std::string &statusField )
+{
+    return statusField == "'OK'" || statusField == "'At or Below (<=) Lower Non-Recoverable Threshold'";
+}
+
 /// Split file contents into non-empty logical lines.
 inline std::vector<std::string> splitLogicalLines( const std::string &contents )
 {
@@ -515,7 +521,7 @@ inline flowRPM::parseStatus flowRPM::parseRecordLine( double &flowRate, const st
         return parseStatus::wrongUnits;
     }
 
-    if( fields[5] != "'OK'" )
+    if( !flowRPMDetail::isValidStatusField( fields[5] ) )
     {
         return parseStatus::badStatus;
     }

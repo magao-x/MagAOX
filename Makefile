@@ -23,6 +23,7 @@ apps_common = \
 	closedLoopIndi
 
 apps_aoc = \
+	virtualPDU \
 	trippLitePDU \
 	xt1121Ctrl \
 	xt1121DCDU \
@@ -36,6 +37,7 @@ apps_aoc = \
 	xInstGraph
 
 pythonapps_aoc = \
+	virtualPDU \
 	audibleAlerts
 
 # Apps common to RTC and ICC on MagAO-X
@@ -65,12 +67,15 @@ apps_rtc = \
 	alpaoCtrl \
 	ocam2KCtrl \
 	andorCtrl \
+	cred2Ctrl \
 	siglentSDG \
 	ttmModulator \
 	pi335Ctrl \
 	pupilFit \
 	t2wOffloader \
 	dmSpeckle \
+	dmSyncopation \
+	loopTimingMonitor \
 	w2tcsOffloader \
 	pwfsSlopeCalc \
     kcubeCtrl \
@@ -116,9 +121,12 @@ apps_tic = \
 
 # Apps with simulator mode
 apps_sim = \
+	virtualPDU \
 	trippLitePDU
 
 all_buildable_apps = \
+	virtualPDU \
+	acronameUsbHub \
 	adcTracker \
 	alignLoop \
 	cacaoInterface \
@@ -127,6 +135,8 @@ all_buildable_apps = \
 	dmPokeCenter \
 	dmPokeXCorr \
 	dmSpeckle \
+	dmSyncopation \
+	loopTimingMonitor \
 	filterWheelCtrl \
 	flipperCtrl \
 	flowRPM \
@@ -172,6 +182,14 @@ all_buildable_apps = \
 	xt1121DCDU \
 	zaberCtrl \
 	zaberLowLevel
+
+# EDT-backed camera controllers remain in the generic ALL_APPS coverage build
+# only when the SDK headers are present locally. Otherwise they are covered
+# through their unit-test harnesses instead of direct app-binary builds.
+ifneq ($(wildcard /opt/EDTpdv/edtinc.h),)
+all_buildable_apps += \
+	cred2Ctrl
+endif
 
 libs_to_build = libtelnet
 
@@ -237,7 +255,7 @@ else ifeq ($(findstring ACC,$(MAGAOX_ROLE)),ACC)
   guis_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   guis_to_build =
-else ifeq ($(MAGAOX_ROLE),container)
+else ifeq ($(MAGAOX_ROLE),headless)
   guis_to_build =
 else
   guis_to_build = $(all_guis)
@@ -249,7 +267,8 @@ all_rtimv_plugins = \
 	pwfsAlignment \
 	dmStatus \
 	warnings \
-	acquisition
+	acquisition \
+	valueDisplay
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -259,7 +278,7 @@ else ifeq ($(findstring ACC,$(MAGAOX_ROLE)),ACC)
   rtimv_plugins_to_build =
 else ifeq ($(MAGAOX_ROLE),TIC)
   rtimv_plugins_to_build =
-else ifeq ($(MAGAOX_ROLE),container)
+else ifeq ($(MAGAOX_ROLE),headless)
   rtimv_plugins_to_build =
 else
   rtimv_plugins_to_build = $(all_rtimv_plugins)
@@ -269,6 +288,7 @@ utils_to_build = \
 	logdump \
 	logsurgeon \
 	cursesINDI \
+	shmimDelta \
 	xrif2fits \
 	xrif2shmim
 
@@ -293,7 +313,7 @@ scripts_to_install = \
 	inventory_files \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
-	cyverse_replicate
+	cyverse_replicate 
 
 ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup
@@ -310,7 +330,7 @@ else ifeq ($(MAGAOX_ROLE),ICC)
   scripts_to_install += cacao/ICC/ncpc-rootdir-scripts/post-calib-apply
   scripts_to_install += cacao/hoblockleaks
   scripts_to_install += cacao/ICC/lowfs_switch
-
+  scripts_to_install += shift_ncpc
 else ifeq ($(MAGAOX_ROLE),TIC)
   scripts_to_install += cacao/TIC/cacao-startup
   scripts_to_install += cacao/TIC/cacao-shutdown
@@ -320,13 +340,13 @@ else ifeq ($(MAGAOX_ROLE),TIC)
 endif
 
 .PHONY: all
-all: indi_all libs_all flatlogs/bin/flatlogcodes apps_all guis_all utils_all
+all: indi_all libs_all flatlogs/bin/flatlogcodes apps_all guis_all rtimv_plugins_all utils_all
 
 .PHONY: basic
 basic: indi_all libs_all flatlogs/bin/flatlogcodes
 
 .PHONY: install
-install: indi_install libs_install pythonlibs_install apps_install pythonapps_install utils_install scripts_install rtscripts_install
+install: indi_install libs_install pythonlibs_install apps_install pythonapps_install guis_install rtimv_plugins_install utils_install scripts_install rtscripts_install
 
 #We clean just libMagAOX, and the apps, guis, and utils for normal devel work.
 .PHONY: clean
@@ -476,7 +496,7 @@ scripts_install:
 
 .PHONY: rtscripts_install
 rtscripts_install:
-	for scriptname in make_cpusets move_irqs; do \
+	for scriptname in make_cpusets move_irqs remove_cpusets; do \
 		sudo -H install -d /opt/MagAOX/bin && \
 		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
 			sudo -H install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \
@@ -540,7 +560,7 @@ print_role:
 	@echo "MAGAOX_ROLE=$(MAGAOX_ROLE)"
 
 .PHONY: coverage
-coverage:
+coverage: coverage_clean
 	${MAKE} all COVERAGE=1 ALL_APPS=1 NO_GUIS=1
 
 .PHONY: coverage_clean
@@ -549,6 +569,8 @@ coverage_clean:
 	find . -name '*.gcda' -delete
 	find . -name '*.gcov' -delete
 	${MAKE} all_clean COVERAGE=1 ALL_APPS=1
+	cd tests && ${MAKE} realclean COVERAGE=1 || exit 1;
+	cd libMagAOX/logger/tests && ${MAKE} really_clean COVERAGE=1 || exit 1;
 
 .PHONY: valgrind
 valgrind:

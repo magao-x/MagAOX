@@ -1,0 +1,11 @@
+#!/bin/bash
+set -eo pipefail
+
+#######################################################
+# update the coverage report from existing gcov data
+#
+# run in the top level MagAO-X source directory after
+# building/running one or more tests with COVERAGE=1
+#######################################################
+
+tests/coverage/update_coverage --fast

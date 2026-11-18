@@ -75,7 +75,8 @@ The original prompt leaves a few points ambiguous. This plan resolves them as fo
 - the parser should validate that the units token in the file is literally `RPM`
   - even though the numeric value is then converted as though it represents `mL/min`
   - this preserves the explicit requested parse check while following the requested conversion behavior
-- the status token requirement is interpreted as requiring the literal token `'OK'`
+- the status token requirement accepts the literal token `'OK'` and the IPMI zero-flow threshold token
+  - `'At or Below (<=) Lower Non-Recoverable Threshold'` is treated as a valid zero-flow reading
   - any other status string is a parse failure
 - `status.flow_rate` and `status.age` should be implemented as two elements of a single RO INDI number property named `status`
 - `status.age` should be computed from the timestamp in line 1, not from filesystem metadata
@@ -199,7 +200,7 @@ Split the app-specific logic so tests can cover it without depending on the full
 4. Semantic validation
    - descriptor must equal configured `m_fanDescriptor`
    - units must equal `RPM`
-   - status must equal `'OK'`
+   - status must equal `'OK'` or the IPMI zero-flow threshold token
    - numeric field must parse as `double`
 
 5. Conversion

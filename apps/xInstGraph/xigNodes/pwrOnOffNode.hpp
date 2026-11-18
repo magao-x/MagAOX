@@ -9,36 +9,49 @@
 
 #include "xigNode.hpp"
 
+/// Graph node that follows a power controller channel's text state.
 class pwrOnOffNode : public xigNode
 {
-
   protected:
+    /// INDI device.property key for the channel state.
     std::string m_pwrKey;
-    int         m_pwrState{ -1 };
 
   public:
-    pwrOnOffNode( const std::string &name, ingr::instGraphXML *parentGraph ) : xigNode( name, parentGraph )
-    {
-        if( m_parentGraph )
-        {
-            m_parentGraph->valueExtra( m_node->name(), "fsmstate", "---" );
-            m_parentGraph->valueExtra( m_node->name(), "state", "" );
-        }
-    }
+    /// Construct a power node for an existing graph node.
+    pwrOnOffNode( const std::string  &name, /**< [in] graph node name */
+                  ingr::instGraphXML *parentGraph /**< [in] parent graph */ );
 
-    void pwrKey( const std::string &pk );
+    /// Set the INDI power-channel property key.
+    void pwrKey( const std::string &pk /**< [in] device.property key */ );
 
-    const std::string & pwrKey() const;
+    /// Get the INDI power-channel property key.
+    const std::string &pwrKey() const;
 
-    /// INDI SetProperty callback
-    virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property to handle*/ );
+    /// Apply an INDI channel state update.
+    virtual int handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] received INDI property */ );
 
+    /// Turn on the node puts and display ON.
     virtual void toggleOn();
 
+    /// Turn off the node puts and display OFF.
     virtual void toggleOff();
 
-    void loadConfig( mx::app::appConfigurator &config );
+    /// Turn off the node puts and display an unresolved power state.
+    void toggleUnknown( const std::string &label /**< [in] INT or UNK display text */ );
+
+    /// Load the required power property key from configuration.
+    void loadConfig( mx::app::appConfigurator &config /**< [in] node configuration */ );
 };
+
+inline pwrOnOffNode::pwrOnOffNode( const std::string &name, ingr::instGraphXML *parentGraph )
+    : xigNode( name, parentGraph )
+{
+    if( m_parentGraph )
+    {
+        m_parentGraph->valueExtra( m_node->name(), "fsmstate", "---" );
+        m_parentGraph->valueExtra( m_node->name(), "state", "" );
+    }
+}
 
 inline void pwrOnOffNode::pwrKey( const std::string &pk )
 {
@@ -47,7 +60,7 @@ inline void pwrOnOffNode::pwrKey( const std::string &pk )
     key( m_pwrKey );
 }
 
-inline const std::string & pwrOnOffNode::pwrKey() const
+inline const std::string &pwrOnOffNode::pwrKey() const
 {
     return m_pwrKey;
 }
@@ -64,40 +77,46 @@ inline int pwrOnOffNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
         return -1;
     }
 
-    if( ipRecv["state"].get<std::string>() == "On" )
+    const std::string state = ipRecv["state"].get<std::string>();
+    if( state == "On" )
     {
         toggleOn();
-        return 0;
+    }
+    else if( state == "Off" )
+    {
+        toggleOff();
     }
     else
     {
-        toggleOff();
-        return 0;
+        toggleUnknown( state == "Int" ? "INT" : "UNK" );
     }
+    return 0;
 }
 
 inline void pwrOnOffNode::toggleOn()
 {
-    m_pwrState = 1;
-
     togglePutsOn();
-
     if( m_parentGraph )
     {
-        std::cerr << "writing\n";
         m_parentGraph->valueExtra( m_node->name(), "fsmstate", "ON" );
     }
 }
 
 inline void pwrOnOffNode::toggleOff()
 {
-    m_pwrState = 1;
-
     togglePutsOff();
-
     if( m_parentGraph )
     {
         m_parentGraph->valueExtra( m_node->name(), "fsmstate", "OFF" );
+    }
+}
+
+inline void pwrOnOffNode::toggleUnknown( const std::string &label )
+{
+    togglePutsOff();
+    if( m_parentGraph )
+    {
+        m_parentGraph->valueExtra( m_node->name(), "fsmstate", label );
     }
 }
 

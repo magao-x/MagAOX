@@ -1,19 +1,8 @@
-
-// header only version of modbuspp
-//
-//
-// Moduspp was created by Fanzhe on 5/28/2017.
-//
-// MagAO-X:
-// Cloned from https://github.com/fanzhe98/modbuspp
-// On commit 73cabdc, Date:   Sat Nov 24 23:16:51 2018 -0500
-//
-// License: GPLv3
-//
-// Header only version created by Jared Males
-// -- Added    to all class function definitions, and removed "using namespace std".
-// -- commented out all cout diagnostics
-//
+/** \file modbus.hpp
+ * \brief The MagAO-X Modbus TCP client interface.
+ *
+ * \author Jared R. Males (jaredmales@gmail.com)
+ */
 
 #ifndef MODBUSPP_MODBUS_H
 #define MODBUSPP_MODBUS_H
@@ -65,7 +54,7 @@ class modbus
   private:
     bool               _connected{ false };
     uint16_t           PORT{ 502 };
-    int                _socket{ 0 };
+    int                _socket{ -1 };
     int                _msg_id{ 1 };
     int                _slaveid{ 1 };
     std::string        HOST;

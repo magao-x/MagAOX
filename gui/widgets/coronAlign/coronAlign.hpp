@@ -1,1862 +1,2573 @@
+/** \file coronAlign.hpp
+ * \brief Coronagraph alignment control widget for coordinated filter-wheel, pico, and PIAA positioning.
+ */
 #ifndef coronAlign_hpp
 #define coronAlign_hpp
 
+#include <array>
 #include <cmath>
+#include <limits>
+#include <map>
+#include <sstream>
 #include <unistd.h>
 
-#include <QWidget>
-#include <QMutex>
+#include <QElapsedTimer>
 #include <QTimer>
+#include <QWidget>
 
 #include "ui_coronAlign.h"
 
 #include "../xWidgets/xWidget.hpp"
 
-
 namespace xqt
 {
 
+/// Main coronagraph alignment control panel.
+/** Transport loss disables the full panel. Device/FSM loss invalidates only that
+ * device's readiness, positions, and pending moves; individual motion-property
+ * deletion leaves other axes available. Commands require fresh current values
+ * and observed target elements. Callbacks and motion slots run on the Qt thread.
+ */
 class coronAlign : public xWidget
 {
-   Q_OBJECT
+    Q_OBJECT
 
-   enum camera {FLOWFS, LLOWFS, CAMSCIS};
+    /// Camera view defining the existing horizontal and vertical motion mappings.
+    enum camera
+    {
+        FLOWFS,
+        LLOWFS,
+        CAMSCIS
+    };
 
-protected:
-   QMutex m_mutex;
+  protected:
+    bool m_connected{ false }; ///< Shared transport availability; device loss does not change it.
 
-   int m_camera {CAMSCIS};
+    int m_camera{ CAMSCIS }; ///< Active camera view that determines which motion axes map onto the GUI arrows.
 
-   //Pico Motors
-   std::string m_picoState;
+    // Pico Motors
+    std::string m_picoState; ///< Last observed FSM shared by all picomotor axes.
 
-   //Pupil Plane
+    /// Tracks a just-issued pico move until the controller publishes an FSM update.
+    bool m_picoCommandPending{ false };
 
-   std::string m_fwPupilState;
+    /// Timeout interval in milliseconds before a non-pico pending latch requests a refresh or falls back locally.
+    static constexpr int m_pendingTimeoutMs{ 2000 };
 
+    // Pupil Plane
 
-   double m_fwPupilPos;
-   long m_picoPupilPos;
+    std::string m_fwPupilState; ///< Last observed pupil filter-wheel FSM.
 
-   double m_fwPupilStepSize {0.0001};
-   double m_picoPupilStepSize {100};
+    /// Tracks a just-issued pupil filter-wheel move until the controller publishes an FSM update.
+    bool m_fwPupilCommandPending{ false };
 
-   int m_pupilScale {100};
+    /// Measures how long the current pupil filter-wheel pending latch has been active.
+    QElapsedTimer m_fwPupilPendingTimer;
 
-   //Focal Plane
+    /// Records whether the GUI has already requested a fresh pupil filter-wheel status during this pending latch.
+    bool m_fwPupilPendingRefreshRequested{ false };
 
-   std::string m_fwFocalState;
+    /// Last pupil filter-wheel target requested by the GUI.
+    double m_fwPupilTarget{ 0 };
 
+    double m_fwPupilPos{ 0 }; ///< Last valid pupil filter-wheel position; availability is tracked separately.
 
-   double m_fwFocalPos;
-   long m_picoFocalPos;
+    long m_picoPupilPos{ 0 }; ///< Last valid pupil picomotor position; availability is tracked separately.
 
-   double m_fwFocalStepSize {0.0001};
-   double m_picoFocalStepSize {100};
+    double m_fwPupilStepSize{ 0.0001 }; ///< Base pupil filter-wheel movement step before applying the local scale.
 
-   int m_focalScale {100};
+    double m_picoPupilStepSize{ 100 }; ///< Base pupil picomotor movement step before applying the local scale.
 
-   //Lyot Plane
+    int m_pupilScale{ 100 }; ///< Selected pupil-plane step multiplier; preserved across device loss.
 
-   std::string m_fwLyotState;
+    // Focal Plane
 
+    std::string m_fwFocalState; ///< Last observed focal-plane filter-wheel FSM.
 
-   double m_fwLyotPos;
-   long m_picoLyotPos;
+    /// Tracks a just-issued focal filter-wheel move until the controller publishes an FSM update.
+    bool m_fwFocalCommandPending{ false };
 
-   double m_fwLyotStepSize {0.0001};
-   double m_picoLyotStepSize {100};
+    /// Measures how long the current focal filter-wheel pending latch has been active.
+    QElapsedTimer m_fwFocalPendingTimer;
 
-   int m_lyotScale {100};
+    /// Records whether the GUI has already requested a fresh focal filter-wheel status during this pending latch.
+    bool m_fwFocalPendingRefreshRequested{ false };
 
-    //PIAA
-    std::string m_piaaState;
-    double m_piaaPos;
-    int m_piaaScale {1};
-    double m_piaaStepSize {0.1};
+    /// Last focal filter-wheel target requested by the GUI.
+    double m_fwFocalTarget{ 0 };
 
-    //PIAA0;
-    long m_piaa0xPos;
-    int m_piaa0Scale {1};
-    double m_piaa0StepSize {20};
+    double m_fwFocalPos{ 0 }; ///< Last valid focal-plane filter-wheel position; availability is tracked separately.
 
-    //PIAA1;
-    long m_piaa1xPos;
-    long m_piaa1yPos;
-    int m_piaa1Scale {1};
-    double m_piaa1StepSize {20};
+    long m_picoFocalPos{ 0 }; ///< Last valid focal-plane picomotor position; availability is tracked separately.
 
-    //iPIAA
-    std::string m_ipiaaState;
-    double m_ipiaaPos;
-    int m_ipiaaScale {1};
-    double m_ipiaaStepSize {0.1};
+    double m_fwFocalStepSize{
+        0.0001 }; ///< Base focal-plane filter-wheel movement step before applying the local scale.
 
-    //iPIAA0;
-    long m_ipiaa0xPos;
-    int m_ipiaa0Scale {1};
-    double m_ipiaa0StepSize {20};
+    double m_picoFocalStepSize{ 100 }; ///< Base focal-plane picomotor movement step before applying the local scale.
 
-    //iPIAA1;
-    long m_ipiaa1xPos;
-    long m_ipiaa1yPos;
-    int m_ipiaa1Scale {1};
-    double m_ipiaa1StepSize {20};
+    int m_focalScale{ 100 }; ///< Selected focal-plane step multiplier; preserved across device loss.
 
-public:
-   coronAlign( QWidget * Parent = 0,
-               Qt::WindowFlags f = Qt::WindowFlags()
-             );
+    // Lyot Plane
 
-   ~coronAlign();
+    std::string m_fwLyotState; ///< Last observed Lyot filter-wheel FSM.
 
-   void subscribe();
+    /// Tracks a just-issued Lyot filter-wheel move until the controller publishes an FSM update.
+    bool m_fwLyotCommandPending{ false };
 
-   virtual void onConnect();
-   virtual void onDisconnect();
+    /// Measures how long the current Lyot filter-wheel pending latch has been active.
+    QElapsedTimer m_fwLyotPendingTimer;
 
-   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
-   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
-   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+    /// Records whether the GUI has already requested a fresh Lyot filter-wheel status during this pending latch.
+    bool m_fwLyotPendingRefreshRequested{ false };
 
-   void enablePicoButtons();
-   void disablePicoButtons();
+    /// Last Lyot filter-wheel target requested by the GUI.
+    double m_fwLyotTarget{ 0 };
 
-public slots:
-   void updateGUI();
+    double m_fwLyotPos{ 0 }; ///< Last valid Lyot filter-wheel position; availability is tracked separately.
 
-   void on_checkCamflowfs_clicked()
-   {
-      ui.checkCamflowfs->setCheckState(Qt::Checked);
-      ui.checkCamllowfs->setCheckState(Qt::Unchecked);
-      ui.checkCamsci12->setCheckState(Qt::Unchecked);
-      m_camera = FLOWFS;
-   }
+    long m_picoLyotPos{ 0 }; ///< Last valid Lyot picomotor position; availability is tracked separately.
 
-   void on_checkCamllowfs_clicked()
-   {
-      ui.checkCamllowfs->setCheckState(Qt::Unchecked);
-   }
+    double m_fwLyotStepSize{ 0.0001 }; ///< Base Lyot filter-wheel movement step before applying the local scale.
 
-   void on_checkCamsci12_clicked()
-   {
-      ui.checkCamflowfs->setCheckState(Qt::Unchecked);
-      ui.checkCamllowfs->setCheckState(Qt::Unchecked);
-      ui.checkCamsci12->setCheckState(Qt::Checked);
-      m_camera = CAMSCIS;
-   }
+    double m_picoLyotStepSize{ 100 }; ///< Base Lyot picomotor movement step before applying the local scale.
 
-   void on_button_pupil_u_pressed();
-   void on_button_pupil_d_pressed();
-   void on_button_pupil_l_pressed();
-   void on_button_pupil_r_pressed();
-   void on_button_pupil_scale_pressed();
+    int m_lyotScale{ 100 }; ///< Selected Lyot-plane step multiplier; preserved across device loss.
 
-   void on_button_focal_u_pressed();
-   void on_button_focal_d_pressed();
-   void on_button_focal_l_pressed();
-   void on_button_focal_r_pressed();
-   void on_button_focal_scale_pressed();
+    // PIAA
+    std::string m_piaaState; ///< Last observed PIAA longitudinal-stage FSM.
 
-   void on_button_lyot_u_pressed();
-   void on_button_lyot_d_pressed();
-   void on_button_lyot_l_pressed();
-   void on_button_lyot_r_pressed();
-   void on_button_lyot_scale_pressed();
+    /// Tracks a just-issued PIAA stage move until the controller publishes an FSM update.
+    bool m_piaaCommandPending{ false };
 
-   void on_button_piaa_l_pressed();
-   void on_button_piaa_r_pressed();
-   void on_button_piaa_u_pressed();
-   void on_button_piaa_d_pressed();
-   void on_button_piaa_scale_pressed();
+    /// Measures how long the current PIAA stage pending latch has been active.
+    QElapsedTimer m_piaaPendingTimer;
 
-   void on_button_piaa0_l_pressed();
-   void on_button_piaa0_r_pressed();
-   void on_button_piaa0_scale_pressed();
+    /// Records whether the GUI has already requested a fresh PIAA stage status during this pending latch.
+    bool m_piaaPendingRefreshRequested{ false };
 
-   void on_button_piaa1_l_pressed();
-   void on_button_piaa1_r_pressed();
-   void on_button_piaa1_u_pressed();
-   void on_button_piaa1_d_pressed();
-   void on_button_piaa1_scale_pressed();
+    /// Last PIAA stage target requested by the GUI.
+    double m_piaaTarget{ 0 };
 
-   void on_button_ipiaa_l_pressed();
-   void on_button_ipiaa_r_pressed();
-   void on_button_ipiaa_u_pressed();
-   void on_button_ipiaa_d_pressed();
-   void on_button_ipiaa_scale_pressed();
+    double m_piaaPos{ 0 }; ///< Last valid PIAA longitudinal-stage position; availability is tracked separately.
 
-   void on_button_ipiaa0_l_pressed();
-   void on_button_ipiaa0_r_pressed();
-   void on_button_ipiaa0_scale_pressed();
+    int m_piaaScale{ 1 }; ///< Selected PIAA longitudinal-stage step multiplier; preserved across device loss.
 
-   void on_button_ipiaa1_l_pressed();
-   void on_button_ipiaa1_r_pressed();
-   void on_button_ipiaa1_u_pressed();
-   void on_button_ipiaa1_d_pressed();
-   void on_button_ipiaa1_scale_pressed();
+    double m_piaaStepSize{ 0.1 }; ///< Base PIAA longitudinal-stage movement step before applying the local scale.
 
-private:
+    // PIAA0;
 
-   Ui::coronAlign ui;
+    long m_piaa0xPos{ 0 }; ///< Last valid PIAA 0 X-axis position; availability is tracked separately.
+
+    int m_piaa0Scale{ 1 }; ///< Selected PIAA 0 step multiplier; preserved across device loss.
+
+    double m_piaa0StepSize{ 20 }; ///< Base PIAA 0 movement step before applying the local scale.
+
+    // PIAA1;
+
+    long m_piaa1xPos{ 0 }; ///< Last valid PIAA 1 X-axis position; availability is tracked separately.
+
+    long m_piaa1yPos{ 0 }; ///< Last valid PIAA 1 Y-axis position; availability is tracked separately.
+
+    int m_piaa1Scale{ 1 }; ///< Selected PIAA 1 step multiplier; preserved across device loss.
+
+    double m_piaa1StepSize{ 20 }; ///< Base PIAA 1 movement step before applying the local scale.
+
+    // iPIAA
+    std::string m_ipiaaState; ///< Last observed inverse-PIAA longitudinal-stage FSM.
+
+    /// Tracks a just-issued iPIAA stage move until the controller publishes an FSM update.
+    bool m_ipiaaCommandPending{ false };
+
+    /// Measures how long the current iPIAA stage pending latch has been active.
+    QElapsedTimer m_ipiaaPendingTimer;
+
+    /// Records whether the GUI has already requested a fresh iPIAA stage status during this pending latch.
+    bool m_ipiaaPendingRefreshRequested{ false };
+
+    /// Last iPIAA stage target requested by the GUI.
+    double m_ipiaaTarget{ 0 };
+
+    double m_ipiaaPos{
+        0 }; ///< Last valid inverse-PIAA longitudinal-stage position; availability is tracked separately.
+
+    int m_ipiaaScale{ 1 }; ///< Selected inverse-PIAA longitudinal-stage step multiplier; preserved across device loss.
+
+    double m_ipiaaStepSize{
+        0.1 }; ///< Base inverse-PIAA longitudinal-stage movement step before applying the local scale.
+
+    // iPIAA0;
+
+    long m_ipiaa0xPos{ 0 }; ///< Last valid inverse-PIAA 0 X-axis position; availability is tracked separately.
+
+    int m_ipiaa0Scale{ 1 }; ///< Selected inverse-PIAA 0 step multiplier; preserved across device loss.
+
+    double m_ipiaa0StepSize{ 20 }; ///< Base inverse-PIAA 0 movement step before applying the local scale.
+
+    // iPIAA1;
+
+    long m_ipiaa1xPos{ 0 }; ///< Last valid inverse-PIAA 1 X-axis position; availability is tracked separately.
+
+    long m_ipiaa1yPos{ 0 }; ///< Last valid inverse-PIAA 1 Y-axis position; availability is tracked separately.
+
+    int m_ipiaa1Scale{ 1 }; ///< Selected inverse-PIAA 1 step multiplier; preserved across device loss.
+
+    double m_ipiaa1StepSize{ 20 }; ///< Base inverse-PIAA 1 movement step before applying the local scale.
+
+  public:
+    /// Construct the coronagraph alignment control widget.
+    coronAlign( QWidget        *Parent = 0, /**< [in] Optional Qt parent owning the widget. */
+                Qt::WindowFlags f      = Qt::WindowFlags() /**< [in] Qt window flags. */ );
+
+    /// Destroy the coronagraph alignment control widget.
+    ~coronAlign();
+
+    /// Register the widget and its direct child subscribers with the shared INDI manager.
+    void subscribe();
+
+    /// Apply connected-state GUI initialization after the shared INDI layer reconnects.
+    virtual void onConnect();
+
+    /// Apply disconnected-state GUI initialization and clear cached connection state.
+    virtual void onDisconnect();
+
+    /// Replace a known property definition and refresh dependent controls.
+    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update. */ );
+
+    /// Invalidate only the deleted property or device and its dependent state.
+    void handleDelProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] Deleted property; an empty name means the entire device. */ );
+
+    /// Merge valid partial observations and refresh dependent controls.
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update. */ );
+
+    /// Starts a non-pico pending latch and its timeout timer.
+    void startPendingCommand(
+        bool          &pending /**< [in,out] pending flag to assert */,
+        QElapsedTimer &pendingTimer /**< [in,out] timer tracking the pending age */,
+        bool          &refreshRequested /**< [in,out] refresh flag tracking whether a status query was sent */ );
+
+    /// Clears a non-pico pending latch and invalidates its timeout timer.
+    void clearPendingCommand(
+        bool          &pending /**< [in,out] pending flag to clear */,
+        QElapsedTimer &pendingTimer /**< [in,out] timer tracking the pending age */,
+        bool          &refreshRequested /**< [in,out] refresh flag tracking whether a status query was sent */ );
+
+    /// Requests a fresh motion-property and FSM update for a pending non-pico device.
+    void requestPendingRefresh( const std::string &device /**< [in] Device name to query. */,
+                                const std::string &property /**< [in] Motion property name to query. */ );
+
+    /// Handles timeout processing for a single non-pico pending latch.
+    void
+    expirePendingCommand( bool          &pending /**< [in,out] pending flag under evaluation */,
+                          QElapsedTimer &pendingTimer /**< [in,out] timer tracking the pending age */,
+                          bool &refreshRequested /**< [in,out] refresh flag tracking whether a status query was sent */,
+                          const std::string &device /**< [in] Device name to query on timeout */,
+                          const std::string &property /**< [in] Motion property name to query on timeout */ );
+
+    /// Expire stale non-pico motion latches after one status-refresh attempt.
+    void expirePendingCommands();
+
+    /// Apply picomotor FSM readiness to the mapped motion buttons.
+    void enablePicoButtons();
+
+    /// Disable picomotor motion and latch pending state when a READY device is commanded.
+    void disablePicoButtons();
+
+  public slots:
+    /// Refresh motion availability from connection, readiness, pending commands, and observed inputs.
+    void updateGUI();
+
+    /// Select the FLOWFS camera mapping and refresh motion availability.
+    void on_checkCamflowfs_clicked();
+
+    /// Keep the unsupported LLOWFS selector unchecked.
+    void on_checkCamllowfs_clicked();
+
+    /// Select the science-camera mapping and refresh motion availability.
+    void on_checkCamsci12_clicked();
+
+    /// Move pupil-plane upward when all required inputs are available.
+    void on_button_pupil_u_pressed();
+
+    /// Move pupil-plane downward when all required inputs are available.
+    void on_button_pupil_d_pressed();
+
+    /// Move pupil-plane left when all required inputs are available.
+    void on_button_pupil_l_pressed();
+
+    /// Move pupil-plane right when all required inputs are available.
+    void on_button_pupil_r_pressed();
+
+    /// Cycle the local pupil-plane movement scale.
+    void on_button_pupil_scale_pressed();
+
+    /// Move focal-plane upward when all required inputs are available.
+    void on_button_focal_u_pressed();
+
+    /// Move focal-plane downward when all required inputs are available.
+    void on_button_focal_d_pressed();
+
+    /// Move focal-plane left when all required inputs are available.
+    void on_button_focal_l_pressed();
+
+    /// Move focal-plane right when all required inputs are available.
+    void on_button_focal_r_pressed();
+
+    /// Cycle the local focal-plane movement scale.
+    void on_button_focal_scale_pressed();
+
+    /// Move Lyot-plane upward when all required inputs are available.
+    void on_button_lyot_u_pressed();
+
+    /// Move Lyot-plane downward when all required inputs are available.
+    void on_button_lyot_d_pressed();
+
+    /// Move Lyot-plane left when all required inputs are available.
+    void on_button_lyot_l_pressed();
+
+    /// Move Lyot-plane right when all required inputs are available.
+    void on_button_lyot_r_pressed();
+
+    /// Cycle the local Lyot-plane movement scale.
+    void on_button_lyot_scale_pressed();
+
+    /// Move PIAA left when all required inputs are available.
+    void on_button_piaa_l_pressed();
+
+    /// Move PIAA right when all required inputs are available.
+    void on_button_piaa_r_pressed();
+
+    /// Move PIAA upward when all required inputs are available.
+    void on_button_piaa_u_pressed();
+
+    /// Move PIAA downward when all required inputs are available.
+    void on_button_piaa_d_pressed();
+
+    /// Cycle the local PIAA movement scale.
+    void on_button_piaa_scale_pressed();
+
+    /// Move PIAA 0 left when all required inputs are available.
+    void on_button_piaa0_l_pressed();
+
+    /// Move PIAA 0 right when all required inputs are available.
+    void on_button_piaa0_r_pressed();
+
+    /// Cycle the local PIAA 0 movement scale.
+    void on_button_piaa0_scale_pressed();
+
+    /// Move PIAA 1 left when all required inputs are available.
+    void on_button_piaa1_l_pressed();
+
+    /// Move PIAA 1 right when all required inputs are available.
+    void on_button_piaa1_r_pressed();
+
+    /// Move PIAA 1 upward when all required inputs are available.
+    void on_button_piaa1_u_pressed();
+
+    /// Move PIAA 1 downward when all required inputs are available.
+    void on_button_piaa1_d_pressed();
+
+    /// Cycle the local PIAA 1 movement scale.
+    void on_button_piaa1_scale_pressed();
+
+    /// Move inverse-PIAA left when all required inputs are available.
+    void on_button_ipiaa_l_pressed();
+
+    /// Move inverse-PIAA right when all required inputs are available.
+    void on_button_ipiaa_r_pressed();
+
+    /// Move inverse-PIAA upward when all required inputs are available.
+    void on_button_ipiaa_u_pressed();
+
+    /// Move inverse-PIAA downward when all required inputs are available.
+    void on_button_ipiaa_d_pressed();
+
+    /// Cycle the local inverse-PIAA movement scale.
+    void on_button_ipiaa_scale_pressed();
+
+    /// Move inverse-PIAA 0 left when all required inputs are available.
+    void on_button_ipiaa0_l_pressed();
+
+    /// Move inverse-PIAA 0 right when all required inputs are available.
+    void on_button_ipiaa0_r_pressed();
+
+    /// Cycle the local inverse-PIAA 0 movement scale.
+    void on_button_ipiaa0_scale_pressed();
+
+    /// Move inverse-PIAA 1 left when all required inputs are available.
+    void on_button_ipiaa1_l_pressed();
+
+    /// Move inverse-PIAA 1 right when all required inputs are available.
+    void on_button_ipiaa1_r_pressed();
+
+    /// Move inverse-PIAA 1 upward when all required inputs are available.
+    void on_button_ipiaa1_u_pressed();
+
+    /// Move inverse-PIAA 1 downward when all required inputs are available.
+    void on_button_ipiaa1_d_pressed();
+
+    /// Cycle the local inverse-PIAA 1 movement scale.
+    void on_button_ipiaa1_scale_pressed();
+
+  private:
+    /// Availability of one subscribed motion property or FSM.
+    struct propertyState
+    {
+        bool m_current{ false }; ///< A valid current value or FSM state has been observed.
+
+        bool m_target{ false }; ///< The numeric command's target element has been observed.
+    };
+
+    /// Bounded inventory of the parent panel's motion and readiness subscriptions.
+    std::map<std::pair<std::string, std::string>, propertyState> m_properties;
+
+    /// Populate the parent subscription inventory before connection callbacks.
+    void initializeProperties();
+
+    /// Validate and merge a definition or partial update before reading cached values.
+    void receiveProperty( const pcf::IndiProperty &property, /**< [in] Incoming observation. */
+                          bool                     definition /**< [in] Replace prior observations when true. */ );
+
+    /// Apply a validated observation to legacy motion and pending-state caches.
+    void cacheProperty( const pcf::IndiProperty &property /**< [in] Validated observation. */ );
+
+    /// Clear one device's readiness and pending command state.
+    void resetDevice( const std::string &device /**< [in] Device being invalidated. */ );
+
+    /// Check the fresh baseline and command element for one motion property.
+    bool motionAvailable( const std::string &device, /**< [in] Motion controller. */
+                          const std::string &property /**< [in] Position property. */ ) const;
+
+    /// Restrict the FSM-derived controls to their own observed motion inputs.
+    void updateAvailability();
+
+    /// Refresh control eligibility before constructing commands.
+    bool commandEnabled( QWidget *control /**< [in] Requested motion control. */ );
+
+    /// Applies a callable to each child widget subscribed directly through this GUI.
+    template <typename funcT>
+    void forEachChildSubscriber(
+        funcT &&func /**< [in] Callable receiving the child device name and stageStatus pointer. */ );
+
+    /// Clears cached connection-dependent state so timer-driven GUI logic stays disconnected-safe.
+    void resetConnectionState();
+
+    Ui::coronAlign ui; ///< Generated Qt UI facade for the coronagraph-alignment widget layout.
 };
 
-coronAlign::coronAlign( QWidget * Parent, Qt::WindowFlags f) : xWidget(Parent, f)
+coronAlign::coronAlign( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, f )
 {
-   ui.setupUi(this);
-   ui.button_pupil_scale->setProperty("isScaleButton", true);
-   ui.button_focal_scale->setProperty("isScaleButton", true);
-   ui.button_lyot_scale->setProperty("isScaleButton", true);
-   ui.button_piaa_scale->setProperty("isScaleButton", true);
-   ui.button_piaa0_scale->setProperty("isScaleButton", true);
-   ui.button_piaa1_scale->setProperty("isScaleButton", true);
-   ui.button_ipiaa_scale->setProperty("isScaleButton", true);
-   ui.button_ipiaa0_scale->setProperty("isScaleButton", true);
-   ui.button_ipiaa1_scale->setProperty("isScaleButton", true);
+    ui.setupUi( this );
+    ui.button_pupil_scale->setProperty( "isScaleButton", true );
+    ui.button_focal_scale->setProperty( "isScaleButton", true );
+    ui.button_lyot_scale->setProperty( "isScaleButton", true );
+    ui.button_piaa_scale->setProperty( "isScaleButton", true );
+    ui.button_piaa0_scale->setProperty( "isScaleButton", true );
+    ui.button_piaa1_scale->setProperty( "isScaleButton", true );
+    ui.button_ipiaa_scale->setProperty( "isScaleButton", true );
+    ui.button_ipiaa0_scale->setProperty( "isScaleButton", true );
+    ui.button_ipiaa1_scale->setProperty( "isScaleButton", true );
 
-   QTimer *timer = new QTimer(this);
-   connect(timer, SIGNAL(timeout()), this, SLOT(updateGUI()));
-   timer->start(250);
+    QTimer *timer = new QTimer( this );
+    connect( timer, SIGNAL( timeout() ), this, SLOT( updateGUI() ) );
+    timer->start( 250 );
 
-   char ss[5];
-   snprintf(ss, 5, "%d", m_pupilScale);
-   ui.button_pupil_scale->setText(ss);
+    char ss[5];
+    snprintf( ss, 5, "%d", m_pupilScale );
+    ui.button_pupil_scale->setText( ss );
 
-   snprintf(ss, 5, "%d", m_focalScale);
-   ui.button_focal_scale->setText(ss);
+    snprintf( ss, 5, "%d", m_focalScale );
+    ui.button_focal_scale->setText( ss );
 
-   snprintf(ss, 5, "%d", m_lyotScale);
-   ui.button_lyot_scale->setText(ss);
+    snprintf( ss, 5, "%d", m_lyotScale );
+    ui.button_lyot_scale->setText( ss );
 
-   snprintf(ss, 5, "%d", m_piaaScale);
-   ui.button_piaa_scale->setText(ss);
+    snprintf( ss, 5, "%d", m_piaaScale );
+    ui.button_piaa_scale->setText( ss );
 
-   snprintf(ss, 5, "%d", m_piaa0Scale);
-   ui.button_piaa0_scale->setText(ss);
+    snprintf( ss, 5, "%d", m_piaa0Scale );
+    ui.button_piaa0_scale->setText( ss );
 
-   snprintf(ss, 5, "%d", m_piaa1Scale);
-   ui.button_piaa1_scale->setText(ss);
+    snprintf( ss, 5, "%d", m_piaa1Scale );
+    ui.button_piaa1_scale->setText( ss );
 
-   snprintf(ss, 5, "%d", m_ipiaaScale);
-   ui.button_ipiaa_scale->setText(ss);
+    snprintf( ss, 5, "%d", m_ipiaaScale );
+    ui.button_ipiaa_scale->setText( ss );
 
-   snprintf(ss, 5, "%d", m_ipiaa0Scale);
-   ui.button_ipiaa0_scale->setText(ss);
+    snprintf( ss, 5, "%d", m_ipiaa0Scale );
+    ui.button_ipiaa0_scale->setText( ss );
 
-   snprintf(ss, 5, "%d", m_ipiaa1Scale);
-   ui.button_ipiaa1_scale->setText(ss);
+    snprintf( ss, 5, "%d", m_ipiaa1Scale );
+    ui.button_ipiaa1_scale->setText( ss );
 
-   ui.checkCamllowfs->setEnabled(false);
+    ui.checkCamllowfs->setEnabled( false );
 
-   ui.fwpupil->setup("fwpupil");
-   //ui.fwpupil->setup("fwpupil", "filterName", "", "fwpupil", "");
+    ui.fwpupil->setup( "fwpupil" );
+    // ui.fwpupil->setup("fwpupil", "filterName", "", "fwpupil", "");
 
-   ui.fwfpm->setup("fwfpm");
-   ui.fwlyot->setup("fwlyot");
-   ui.stagepiaa->setup("stagepiaa");
-   ui.stageipiaa->setup("stageipiaa");
+    ui.fwfpm->setup( "fwfpm" );
+    ui.fwlyot->setup( "fwlyot" );
+    ui.stagepiaa->setup( "stagepiaa" );
+    ui.stageipiaa->setup( "stageipiaa" );
 
-   onDisconnect();
+    initializeProperties();
+    onDisconnect();
 }
 
 coronAlign::~coronAlign()
 {
 }
 
+void coronAlign::on_checkCamflowfs_clicked()
+{
+    ui.checkCamflowfs->setCheckState( Qt::Checked );
+    ui.checkCamllowfs->setCheckState( Qt::Unchecked );
+    ui.checkCamsci12->setCheckState( Qt::Unchecked );
+    m_camera = FLOWFS;
+    updateGUI();
+}
+
+void coronAlign::on_checkCamllowfs_clicked()
+{
+    ui.checkCamllowfs->setCheckState( Qt::Unchecked );
+    updateGUI();
+}
+
+void coronAlign::on_checkCamsci12_clicked()
+{
+    ui.checkCamflowfs->setCheckState( Qt::Unchecked );
+    ui.checkCamllowfs->setCheckState( Qt::Unchecked );
+    ui.checkCamsci12->setCheckState( Qt::Checked );
+    m_camera = CAMSCIS;
+    updateGUI();
+}
+
+template <typename funcT>
+void coronAlign::forEachChildSubscriber( funcT &&func )
+{
+    func( "fwpupil", ui.fwpupil );
+    func( "fwfpm", ui.fwfpm );
+    func( "fwlyot", ui.fwlyot );
+    func( "stagepiaa", ui.stagepiaa );
+    func( "stageipiaa", ui.stageipiaa );
+}
+
+void coronAlign::resetConnectionState()
+{
+    for( auto &entry : m_properties )
+        entry.second = propertyState{};
+    for( const auto *device : { "picomotors", "fwpupil", "fwfpm", "fwlyot", "stagepiaa", "stageipiaa" } )
+        resetDevice( device );
+    forEachChildSubscriber(
+        []( const char *, stageStatus *sub )
+        {
+            sub->onDisconnect();
+            sub->ctrlWidget()->onDisconnect();
+        } );
+}
+
+void coronAlign::resetDevice( const std::string &device )
+{
+    if( device == "picomotors" )
+    {
+        m_picoState.clear();
+        m_picoCommandPending = false;
+    }
+    else if( device == "fwpupil" )
+    {
+        m_fwPupilState.clear();
+        clearPendingCommand( m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
+    }
+    else if( device == "fwfpm" )
+    {
+        m_fwFocalState.clear();
+        clearPendingCommand( m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
+    }
+    else if( device == "fwlyot" )
+    {
+        m_fwLyotState.clear();
+        clearPendingCommand( m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
+    }
+    else if( device == "stagepiaa" )
+    {
+        m_piaaState.clear();
+        clearPendingCommand( m_piaaCommandPending, m_piaaPendingTimer, m_piaaPendingRefreshRequested );
+    }
+    else if( device == "stageipiaa" )
+    {
+        m_ipiaaState.clear();
+        clearPendingCommand( m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested );
+    }
+}
+
+void coronAlign::startPendingCommand( bool &pending, QElapsedTimer &pendingTimer, bool &refreshRequested )
+{
+    pending          = true;
+    refreshRequested = false;
+    pendingTimer.start();
+}
+
+void coronAlign::clearPendingCommand( bool &pending, QElapsedTimer &pendingTimer, bool &refreshRequested )
+{
+    pending          = false;
+    refreshRequested = false;
+    pendingTimer.invalidate();
+}
+
+void coronAlign::requestPendingRefresh( const std::string &device, const std::string &property )
+{
+    pcf::IndiProperty ipReq;
+
+    ipReq.setDevice( device );
+    ipReq.setName( property );
+    sendGetProperties( ipReq );
+
+    ipReq.setName( "fsm" );
+    sendGetProperties( ipReq );
+}
+
+void coronAlign::expirePendingCommand( bool              &pending,
+                                       QElapsedTimer     &pendingTimer,
+                                       bool              &refreshRequested,
+                                       const std::string &device,
+                                       const std::string &property )
+{
+    if( !pending || ( pendingTimer.isValid() && pendingTimer.elapsed() < m_pendingTimeoutMs ) )
+    {
+        return;
+    }
+
+    if( !refreshRequested )
+    {
+        requestPendingRefresh( device, property );
+        refreshRequested = true;
+        pendingTimer.start();
+        return;
+    }
+
+    clearPendingCommand( pending, pendingTimer, refreshRequested );
+}
+
+void coronAlign::expirePendingCommands()
+{
+    expirePendingCommand(
+        m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested, "fwpupil", "filter" );
+
+    expirePendingCommand(
+        m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested, "fwfpm", "filter" );
+
+    expirePendingCommand(
+        m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested, "fwlyot", "filter" );
+
+    expirePendingCommand(
+        m_piaaCommandPending, m_piaaPendingTimer, m_piaaPendingRefreshRequested, "stagepiaa", "position" );
+
+    expirePendingCommand(
+        m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested, "stageipiaa", "position" );
+}
+
+void coronAlign::initializeProperties()
+{
+    m_properties.emplace( std::make_pair( "fwpupil", "filter" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "fwpupil", "fsm" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "fwfpm", "filter" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "fwfpm", "fsm" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "fwlyot", "filter" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "fwlyot", "fsm" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "picopupil_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "picofpm_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "picolyot_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "piaa0x_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "piaa1x_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "piaa1y_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "ipiaa0x_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "ipiaa1x_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "ipiaa1y_pos" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "picomotors", "fsm" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "stagepiaa", "position" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "stagepiaa", "fsm" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "stageipiaa", "position" ), propertyState{} );
+    m_properties.emplace( std::make_pair( "stageipiaa", "fsm" ), propertyState{} );
+}
+
 void coronAlign::subscribe()
 {
-   if(m_parent == nullptr) return;
+    if( m_parent == nullptr )
+        return;
 
-   m_parent->addSubscriberProperty(this, "fwpupil", "filter");
-   m_parent->addSubscriberProperty(this, "fwpupil", "fsm");
+    for( const auto &entry : m_properties )
+        m_parent->addSubscriberProperty( this, entry.first.first, entry.first.second );
+    forEachChildSubscriber( [this]( const char *, stageStatus *sub ) { m_parent->addSubscriber( sub ); } );
 
-   m_parent->addSubscriberProperty(this, "fwfpm", "filter");
-   m_parent->addSubscriberProperty(this, "fwfpm", "fsm");
-
-   m_parent->addSubscriberProperty(this, "fwlyot", "filter");
-   m_parent->addSubscriberProperty(this, "fwlyot", "fsm");
-
-   m_parent->addSubscriberProperty(this, "picomotors", "picopupil_pos");
-   m_parent->addSubscriberProperty(this, "picomotors", "picofpm_pos");
-   m_parent->addSubscriberProperty(this, "picomotors", "picolyot_pos");
-   m_parent->addSubscriberProperty(this, "picomotors", "piaa0x_pos");
-   m_parent->addSubscriberProperty(this, "picomotors", "piaa1x_pos");
-   m_parent->addSubscriberProperty(this, "picomotors", "piaa1y_pos");
-   m_parent->addSubscriberProperty(this, "picomotors", "ipiaa0x_pos");
-   m_parent->addSubscriberProperty(this, "picomotors", "ipiaa1x_pos");
-   m_parent->addSubscriberProperty(this, "picomotors", "ipiaa1y_pos");
-   m_parent->addSubscriberProperty(this, "picomotors", "fsm");
-
-   m_parent->addSubscriberProperty(this, "stagepiaa", "position");
-   m_parent->addSubscriberProperty(this, "stagepiaa", "fsm");
-
-   m_parent->addSubscriberProperty(this, "stageipiaa", "position");
-   m_parent->addSubscriberProperty(this, "stageipiaa", "fsm");
-
-   m_parent->addSubscriber(ui.fwpupil);
-   m_parent->addSubscriber(ui.fwfpm);
-   m_parent->addSubscriber(ui.fwlyot);
-   m_parent->addSubscriber(ui.stagepiaa);
-   m_parent->addSubscriber(ui.stageipiaa);
-
-   return;
+    return;
 }
 
 void coronAlign::onConnect()
 {
-   ui.labelPupil->setEnabled(true);
-   ui.labelFocal->setEnabled(true);
-   ui.labelLyot->setEnabled(true);
+    m_connected = true;
+    setEnabled( true );
+    ui.labelPupil->setEnabled( true );
+    ui.labelFocal->setEnabled( true );
+    ui.labelLyot->setEnabled( true );
 
-   ui.button_pupil_u->setEnabled(true);
-   ui.button_pupil_d->setEnabled(true);
-   ui.button_pupil_l->setEnabled(true);
-   ui.button_pupil_r->setEnabled(true);
-   ui.button_pupil_scale->setEnabled(true);
+    ui.button_pupil_u->setEnabled( true );
+    ui.button_pupil_d->setEnabled( true );
+    ui.button_pupil_l->setEnabled( true );
+    ui.button_pupil_r->setEnabled( true );
+    ui.button_pupil_scale->setEnabled( true );
 
-   ui.button_focal_u->setEnabled(true);
-   ui.button_focal_d->setEnabled(true);
-   ui.button_focal_l->setEnabled(true);
-   ui.button_focal_r->setEnabled(true);
-   ui.button_focal_scale->setEnabled(true);
+    ui.button_focal_u->setEnabled( true );
+    ui.button_focal_d->setEnabled( true );
+    ui.button_focal_l->setEnabled( true );
+    ui.button_focal_r->setEnabled( true );
+    ui.button_focal_scale->setEnabled( true );
 
-   ui.button_lyot_u->setEnabled(true);
-   ui.button_lyot_d->setEnabled(true);
-   ui.button_lyot_l->setEnabled(true);
-   ui.button_lyot_r->setEnabled(true);
-   ui.button_lyot_scale->setEnabled(true);
+    ui.button_lyot_u->setEnabled( true );
+    ui.button_lyot_d->setEnabled( true );
+    ui.button_lyot_l->setEnabled( true );
+    ui.button_lyot_r->setEnabled( true );
+    ui.button_lyot_scale->setEnabled( true );
 
-   ui.labelPIAA->setEnabled(true);
-   ui.button_piaa_l->setEnabled(true);
-   ui.button_piaa_r->setEnabled(true);
-   ui.button_piaa_u->setEnabled(true);
-   ui.button_piaa_d->setEnabled(true);
-   ui.button_piaa_scale->setEnabled(true);
+    ui.labelPIAA->setEnabled( true );
+    ui.button_piaa_l->setEnabled( true );
+    ui.button_piaa_r->setEnabled( true );
+    ui.button_piaa_u->setEnabled( true );
+    ui.button_piaa_d->setEnabled( true );
+    ui.button_piaa_scale->setEnabled( true );
 
-   ui.labelPIAA0->setEnabled(true);
-   ui.button_piaa0_l->setEnabled(true);
-   ui.button_piaa0_r->setEnabled(true);
-   ui.button_piaa0_scale->setEnabled(true);
+    ui.labelPIAA0->setEnabled( true );
+    ui.button_piaa0_l->setEnabled( true );
+    ui.button_piaa0_r->setEnabled( true );
+    ui.button_piaa0_scale->setEnabled( true );
 
-   ui.labelPIAA1->setEnabled(true);
-   ui.button_piaa1_l->setEnabled(true);
-   ui.button_piaa1_r->setEnabled(true);
-   ui.button_piaa1_u->setEnabled(true);
-   ui.button_piaa1_d->setEnabled(true);
-   ui.button_piaa1_scale->setEnabled(true);
+    ui.labelPIAA1->setEnabled( true );
+    ui.button_piaa1_l->setEnabled( true );
+    ui.button_piaa1_r->setEnabled( true );
+    ui.button_piaa1_u->setEnabled( true );
+    ui.button_piaa1_d->setEnabled( true );
+    ui.button_piaa1_scale->setEnabled( true );
 
-   ui.labeliPIAA->setEnabled(true);
-   ui.button_ipiaa_l->setEnabled(true);
-   ui.button_ipiaa_r->setEnabled(true);
-   ui.button_ipiaa_u->setEnabled(true);
-   ui.button_ipiaa_d->setEnabled(true);
-   ui.button_ipiaa_scale->setEnabled(true);
+    ui.labeliPIAA->setEnabled( true );
+    ui.button_ipiaa_l->setEnabled( true );
+    ui.button_ipiaa_r->setEnabled( true );
+    ui.button_ipiaa_u->setEnabled( true );
+    ui.button_ipiaa_d->setEnabled( true );
+    ui.button_ipiaa_scale->setEnabled( true );
 
-   ui.labeliPIAA0->setEnabled(true);
-   ui.button_ipiaa0_l->setEnabled(true);
-   ui.button_ipiaa0_r->setEnabled(true);
-   ui.button_ipiaa0_scale->setEnabled(true);
+    ui.labeliPIAA0->setEnabled( true );
+    ui.button_ipiaa0_l->setEnabled( true );
+    ui.button_ipiaa0_r->setEnabled( true );
+    ui.button_ipiaa0_scale->setEnabled( true );
 
-   ui.labeliPIAA1->setEnabled(true);
-   ui.button_ipiaa1_l->setEnabled(true);
-   ui.button_ipiaa1_r->setEnabled(true);
-   ui.button_ipiaa1_u->setEnabled(true);
-   ui.button_ipiaa1_d->setEnabled(true);
-   ui.button_ipiaa1_scale->setEnabled(true);
+    ui.labeliPIAA1->setEnabled( true );
+    ui.button_ipiaa1_l->setEnabled( true );
+    ui.button_ipiaa1_r->setEnabled( true );
+    ui.button_ipiaa1_u->setEnabled( true );
+    ui.button_ipiaa1_d->setEnabled( true );
+    ui.button_ipiaa1_scale->setEnabled( true );
 
-
-   ui.fwpupil->setEnabled(true);
-   ui.fwpupil->onConnect();
-
-   ui.fwfpm->setEnabled(true);
-   ui.fwfpm->onConnect();
-
-   ui.fwlyot->setEnabled(true);
-   ui.fwlyot->onConnect();
-
-   ui.stagepiaa->setEnabled(true);
-   ui.stagepiaa->onConnect();
-
-   ui.stageipiaa->setEnabled(true);
-   ui.stageipiaa->onConnect();
-
-   setWindowTitle("Coronagraph Alignment");
+    setWindowTitle( "Coronagraph Alignment" );
+    updateGUI();
 }
 
 void coronAlign::onDisconnect()
 {
-   m_picoState = "";
-   m_fwPupilState = "";
-   m_fwFocalState = "";
-   m_fwLyotState = "";
-   m_piaaState = "";
-   m_ipiaaState = "";
+    m_connected = false;
+    setEnabled( false );
+    resetConnectionState();
 
-   ui.labelPupil->setEnabled(false);
-   ui.labelFocal->setEnabled(false);
-   ui.labelLyot->setEnabled(false);
+    ui.labelPupil->setEnabled( false );
+    ui.labelFocal->setEnabled( false );
+    ui.labelLyot->setEnabled( false );
 
-   ui.button_pupil_u->setEnabled(false);
-   ui.button_pupil_d->setEnabled(false);
-   ui.button_pupil_l->setEnabled(false);
-   ui.button_pupil_r->setEnabled(false);
-   ui.button_pupil_scale->setEnabled(false);
+    ui.button_pupil_u->setEnabled( false );
+    ui.button_pupil_d->setEnabled( false );
+    ui.button_pupil_l->setEnabled( false );
+    ui.button_pupil_r->setEnabled( false );
+    ui.button_pupil_scale->setEnabled( false );
 
-   ui.button_focal_u->setEnabled(false);
-   ui.button_focal_d->setEnabled(false);
-   ui.button_focal_l->setEnabled(false);
-   ui.button_focal_r->setEnabled(false);
-   ui.button_focal_scale->setEnabled(false);
+    ui.button_focal_u->setEnabled( false );
+    ui.button_focal_d->setEnabled( false );
+    ui.button_focal_l->setEnabled( false );
+    ui.button_focal_r->setEnabled( false );
+    ui.button_focal_scale->setEnabled( false );
 
-   ui.button_lyot_u->setEnabled(false);
-   ui.button_lyot_d->setEnabled(false);
-   ui.button_lyot_l->setEnabled(false);
-   ui.button_lyot_r->setEnabled(false);
-   ui.button_lyot_scale->setEnabled(false);
+    ui.button_lyot_u->setEnabled( false );
+    ui.button_lyot_d->setEnabled( false );
+    ui.button_lyot_l->setEnabled( false );
+    ui.button_lyot_r->setEnabled( false );
+    ui.button_lyot_scale->setEnabled( false );
 
-   ui.labelPIAA->setEnabled(false);
-   ui.button_piaa_l->setEnabled(false);
-   ui.button_piaa_r->setEnabled(false);
-   ui.button_piaa_u->setEnabled(false);
-   ui.button_piaa_d->setEnabled(false);
-   ui.button_piaa_scale->setEnabled(false);
+    ui.labelPIAA->setEnabled( false );
+    ui.button_piaa_l->setEnabled( false );
+    ui.button_piaa_r->setEnabled( false );
+    ui.button_piaa_u->setEnabled( false );
+    ui.button_piaa_d->setEnabled( false );
+    ui.button_piaa_scale->setEnabled( false );
 
-   ui.labelPIAA0->setEnabled(false);
-   ui.button_piaa0_l->setEnabled(false);
-   ui.button_piaa0_r->setEnabled(false);
-   ui.button_piaa0_scale->setEnabled(false);
+    ui.labelPIAA0->setEnabled( false );
+    ui.button_piaa0_l->setEnabled( false );
+    ui.button_piaa0_r->setEnabled( false );
+    ui.button_piaa0_scale->setEnabled( false );
 
-   ui.labelPIAA1->setEnabled(false);
-   ui.button_piaa1_l->setEnabled(false);
-   ui.button_piaa1_r->setEnabled(false);
-   ui.button_piaa1_u->setEnabled(false);
-   ui.button_piaa1_d->setEnabled(false);
-   ui.button_piaa1_scale->setEnabled(false);
+    ui.labelPIAA1->setEnabled( false );
+    ui.button_piaa1_l->setEnabled( false );
+    ui.button_piaa1_r->setEnabled( false );
+    ui.button_piaa1_u->setEnabled( false );
+    ui.button_piaa1_d->setEnabled( false );
+    ui.button_piaa1_scale->setEnabled( false );
 
-   ui.labeliPIAA->setEnabled(false);
-   ui.button_ipiaa_l->setEnabled(false);
-   ui.button_ipiaa_r->setEnabled(false);
-   ui.button_ipiaa_u->setEnabled(false);
-   ui.button_ipiaa_d->setEnabled(false);
-   ui.button_ipiaa_scale->setEnabled(false);
+    ui.labeliPIAA->setEnabled( false );
+    ui.button_ipiaa_l->setEnabled( false );
+    ui.button_ipiaa_r->setEnabled( false );
+    ui.button_ipiaa_u->setEnabled( false );
+    ui.button_ipiaa_d->setEnabled( false );
+    ui.button_ipiaa_scale->setEnabled( false );
 
-   ui.labeliPIAA0->setEnabled(false);
-   ui.button_ipiaa0_l->setEnabled(false);
-   ui.button_ipiaa0_r->setEnabled(false);
-   ui.button_ipiaa0_scale->setEnabled(false);
+    ui.labeliPIAA0->setEnabled( false );
+    ui.button_ipiaa0_l->setEnabled( false );
+    ui.button_ipiaa0_r->setEnabled( false );
+    ui.button_ipiaa0_scale->setEnabled( false );
 
-   ui.labeliPIAA1->setEnabled(false);
-   ui.button_ipiaa1_l->setEnabled(false);
-   ui.button_ipiaa1_r->setEnabled(false);
-   ui.button_ipiaa1_u->setEnabled(false);
-   ui.button_ipiaa1_d->setEnabled(false);
-   ui.button_ipiaa1_scale->setEnabled(false);
+    ui.labeliPIAA1->setEnabled( false );
+    ui.button_ipiaa1_l->setEnabled( false );
+    ui.button_ipiaa1_r->setEnabled( false );
+    ui.button_ipiaa1_u->setEnabled( false );
+    ui.button_ipiaa1_d->setEnabled( false );
+    ui.button_ipiaa1_scale->setEnabled( false );
 
-   ui.fwpupil->setEnabled(false);
-   ui.fwpupil->onDisconnect();
-
-   ui.fwfpm->setEnabled(true);
-   ui.fwfpm->onDisconnect();
-
-   ui.fwlyot->setEnabled(true);
-   ui.fwlyot->onDisconnect();
-
-   ui.stagepiaa->setEnabled(true);
-   ui.stagepiaa->onDisconnect();
-
-   ui.stageipiaa->setEnabled(true);
-   ui.stageipiaa->onDisconnect();
-
-   setWindowTitle("Coronagraph Alignment (disconnected)");
+    setWindowTitle( "Coronagraph Alignment (disconnected)" );
 }
 
-void coronAlign::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void coronAlign::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
-   std::string dev = ipRecv.getDevice();
-   if( dev == "picomotors" ||
-       dev == "fwpupil" ||
-       dev == "fwlyot" ||
-       dev == "fwfpm" ||
-       dev == "stagepiaa" ||
-       dev == "stageipiaa"
-     )
-   {
-      return handleSetProperty(ipRecv);
-   }
-
-   return;
+    receiveProperty( ipRecv, true );
 }
 
-void coronAlign::handleDelProperty( const pcf::IndiProperty & ipRecv)
+void coronAlign::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
-   std::string dev = ipRecv.getDevice();
-   if( dev == "picomotors" ||
-       dev == "fwpupil" ||
-       dev == "fwlyot" ||
-       dev == "fwfpm" ||
-       dev == "stagepiaa" ||
-       dev == "stageipiaa" )
-   {
-      onDisconnect();
-   }
+    const auto device      = ipRecv.getDevice();
+    const auto name        = ipRecv.getName();
+    const bool wholeDevice = name.empty() || name == "fsm";
+    if( !wholeDevice && m_properties.count( { device, name } ) == 0 )
+        return;
+    for( auto &entry : m_properties )
+        if( entry.first.first == device && ( wholeDevice || entry.first.second == name ) )
+            entry.second = propertyState{};
+    if( wholeDevice )
+    {
+        resetDevice( device );
+        forEachChildSubscriber(
+            [&device]( const char *childDevice, stageStatus *sub )
+            {
+                if( device == childDevice )
+                {
+                    sub->onDisconnect();
+                    sub->ctrlWidget()->onDisconnect();
+                }
+            } );
+    }
+    else if( device != "picomotors" )
+    {
+        // A non-pico device has one motion property; cancel only its pending latch.
+        // Preserve readiness: the named motion property, rather than the device, disappeared.
+        if( device == "fwpupil" )
+            clearPendingCommand( m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
+        if( device == "fwfpm" )
+            clearPendingCommand( m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
+        if( device == "fwlyot" )
+            clearPendingCommand( m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
+        if( device == "stagepiaa" )
+            clearPendingCommand( m_piaaCommandPending, m_piaaPendingTimer, m_piaaPendingRefreshRequested );
+        if( device == "stageipiaa" )
+            clearPendingCommand( m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested );
+    }
+    updateGUI();
 }
 
-void coronAlign::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void coronAlign::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-   std::string dev = ipRecv.getDevice();
+    receiveProperty( ipRecv, false );
+}
 
-   if(dev == "fwpupil")
-   {
-      if(ipRecv.getName() == "filter")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_fwPupilPos = ipRecv["current"].get<double>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "fsm")
-      {
-         if(ipRecv.find("state"))
-         {
-            m_fwPupilState = ipRecv["state"].get();
-            return;
-         }
-      }
-   }
-   else if(dev == "fwfpm")
-   {
-      if(ipRecv.getName() == "filter")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_fwFocalPos = ipRecv["current"].get<double>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "fsm")
-      {
-         if(ipRecv.find("state"))
-         {
-            m_fwFocalState = ipRecv["state"].get();
-            return;
-         }
-      }
-   }
-   else if(dev == "fwlyot")
-   {
-      if(ipRecv.getName() == "filter")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_fwLyotPos = ipRecv["current"].get<double>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "fsm")
-      {
-         if(ipRecv.find("state"))
-         {
-            m_fwLyotState = ipRecv["state"].get();
-            return;
-         }
-      }
-   }
-   else if(dev == "stagepiaa")
-   {
-      if(ipRecv.getName() == "position")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_piaaPos = ipRecv["current"].get<double>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "fsm")
-      {
-         if(ipRecv.find("state"))
-         {
-            m_piaaState = ipRecv["state"].get();
-            return;
-         }
-      }
-   }
-   else if(dev == "stageipiaa")
-   {
-      if(ipRecv.getName() == "position")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_ipiaaPos = ipRecv["current"].get<double>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "fsm")
-      {
-         if(ipRecv.find("state"))
-         {
-            m_ipiaaState = ipRecv["state"].get();
-            return;
-         }
-      }
-   }
-   else if(dev == "picomotors")
-   {
-      if(ipRecv.getName() == "picopupil_pos")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_picoPupilPos = ipRecv["current"].get<long>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "picofpm_pos")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_picoFocalPos = ipRecv["current"].get<long>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "picolyot_pos")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_picoLyotPos = ipRecv["current"].get<long>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "piaa0x_pos")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_piaa0xPos  = ipRecv["current"].get<long>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "piaa1x_pos")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_piaa1xPos  = ipRecv["current"].get<long>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "piaa1y_pos")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_piaa1yPos  = ipRecv["current"].get<long>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "ipiaa0x_pos")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_ipiaa0xPos  = ipRecv["current"].get<long>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "ipiaa1x_pos")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_ipiaa1xPos  = ipRecv["current"].get<long>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "ipiaa1y_pos")
-      {
-         if(ipRecv.find("current"))
-         {
-            m_ipiaa1yPos  = ipRecv["current"].get<long>();
-            return;
-         }
-      }
-      else if(ipRecv.getName() == "fsm")
-      {
-         if(ipRecv.find("state"))
-         {
-            m_picoState = ipRecv["state"].get();
-            return;
-         }
-      }
-   }
+void coronAlign::receiveProperty( const pcf::IndiProperty &property, bool definition )
+{
+    if( !m_connected )
+        return;
+    const auto found = m_properties.find( { property.getDevice(), property.getName() } );
+    if( found == m_properties.end() )
+        return;
+    auto      &observed = found->second;
+    const bool fsm      = property.getName() == "fsm";
+    const auto type     = fsm ? pcf::IndiProperty::Text : pcf::IndiProperty::Number;
+    if( definition || property.getType() != type )
+        observed = propertyState{};
+    pcf::IndiProperty validated( type, property.getDevice(), property.getName() );
+    const std::string current = fsm ? "state" : "current";
+    if( property.getType() == type )
+    {
+        if( property.find( "target" ) )
+            observed.m_target = true;
+        if( property.find( current ) )
+        {
+            auto element = property[current];
+            bool valid   = !element.get().empty();
+            if( !fsm )
+            {
+                long double        value = 0;
+                std::istringstream input( element.get() );
+                valid = bool( input >> value );
+                if( valid )
+                {
+                    input >> std::ws;
+                    valid = input.eof() && std::isfinite( value );
+                    if( property.getDevice() == "picomotors" )
+                    {
+                        valid = valid && std::trunc( value ) == value && value >= std::numeric_limits<long>::min() &&
+                                value <= std::numeric_limits<long>::max();
+                        if( valid )
+                            element.set( static_cast<long>( value ) );
+                    }
+                    else
+                        valid = valid && std::fabs( value ) <= std::numeric_limits<double>::max();
+                }
+            }
+            observed.m_current = valid;
+            if( valid )
+                validated.add( element );
+        }
+    }
+    if( fsm && !observed.m_current )
+        resetDevice( property.getDevice() );
+    cacheProperty( validated );
+    updateGUI();
+}
 
-   return;
+void coronAlign::cacheProperty( const pcf::IndiProperty &ipRecv )
+{
+    std::string dev = ipRecv.getDevice();
 
+    if( dev == "fwpupil" )
+    {
+        if( ipRecv.getName() == "filter" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_fwPupilPos = ipRecv["current"].get<double>();
+                if( m_fwPupilCommandPending && std::fabs( m_fwPupilPos - m_fwPupilTarget ) <= 0.25 * m_fwPupilStepSize )
+                {
+                    clearPendingCommand(
+                        m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
+                }
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "fsm" )
+        {
+            if( ipRecv.find( "state" ) )
+            {
+                m_fwPupilState = ipRecv["state"].get();
+                clearPendingCommand( m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
+                return;
+            }
+        }
+    }
+    else if( dev == "fwfpm" )
+    {
+        if( ipRecv.getName() == "filter" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_fwFocalPos = ipRecv["current"].get<double>();
+                if( m_fwFocalCommandPending && std::fabs( m_fwFocalPos - m_fwFocalTarget ) <= 0.25 * m_fwFocalStepSize )
+                {
+                    clearPendingCommand(
+                        m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
+                }
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "fsm" )
+        {
+            if( ipRecv.find( "state" ) )
+            {
+                m_fwFocalState = ipRecv["state"].get();
+                clearPendingCommand( m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
+                return;
+            }
+        }
+    }
+    else if( dev == "fwlyot" )
+    {
+        if( ipRecv.getName() == "filter" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_fwLyotPos = ipRecv["current"].get<double>();
+                if( m_fwLyotCommandPending && std::fabs( m_fwLyotPos - m_fwLyotTarget ) <= 0.25 * m_fwLyotStepSize )
+                {
+                    clearPendingCommand(
+                        m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
+                }
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "fsm" )
+        {
+            if( ipRecv.find( "state" ) )
+            {
+                m_fwLyotState = ipRecv["state"].get();
+                clearPendingCommand( m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
+                return;
+            }
+        }
+    }
+    else if( dev == "stagepiaa" )
+    {
+        if( ipRecv.getName() == "position" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_piaaPos = ipRecv["current"].get<double>();
+                if( m_piaaCommandPending && std::fabs( m_piaaPos - m_piaaTarget ) <= 0.25 * m_piaaStepSize )
+                {
+                    clearPendingCommand( m_piaaCommandPending, m_piaaPendingTimer, m_piaaPendingRefreshRequested );
+                }
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "fsm" )
+        {
+            if( ipRecv.find( "state" ) )
+            {
+                m_piaaState = ipRecv["state"].get();
+                clearPendingCommand( m_piaaCommandPending, m_piaaPendingTimer, m_piaaPendingRefreshRequested );
+                return;
+            }
+        }
+    }
+    else if( dev == "stageipiaa" )
+    {
+        if( ipRecv.getName() == "position" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_ipiaaPos = ipRecv["current"].get<double>();
+                if( m_ipiaaCommandPending && std::fabs( m_ipiaaPos - m_ipiaaTarget ) <= 0.25 * m_ipiaaStepSize )
+                {
+                    clearPendingCommand( m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested );
+                }
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "fsm" )
+        {
+            if( ipRecv.find( "state" ) )
+            {
+                m_ipiaaState = ipRecv["state"].get();
+                clearPendingCommand( m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested );
+                return;
+            }
+        }
+    }
+    else if( dev == "picomotors" )
+    {
+        if( ipRecv.getName() == "picopupil_pos" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_picoPupilPos = ipRecv["current"].get<long>();
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "picofpm_pos" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_picoFocalPos = ipRecv["current"].get<long>();
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "picolyot_pos" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_picoLyotPos = ipRecv["current"].get<long>();
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "piaa0x_pos" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_piaa0xPos = ipRecv["current"].get<long>();
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "piaa1x_pos" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_piaa1xPos = ipRecv["current"].get<long>();
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "piaa1y_pos" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_piaa1yPos = ipRecv["current"].get<long>();
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "ipiaa0x_pos" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_ipiaa0xPos = ipRecv["current"].get<long>();
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "ipiaa1x_pos" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_ipiaa1xPos = ipRecv["current"].get<long>();
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "ipiaa1y_pos" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_ipiaa1yPos = ipRecv["current"].get<long>();
+                return;
+            }
+        }
+        else if( ipRecv.getName() == "fsm" )
+        {
+            if( ipRecv.find( "state" ) )
+            {
+                m_picoState          = ipRecv["state"].get();
+                m_picoCommandPending = false;
+                return;
+            }
+        }
+    }
+
+    return;
 }
 
 void coronAlign::updateGUI()
 {
+    if( !m_connected )
+        return;
+    expirePendingCommands();
 
-   if(m_fwPupilState != "READY")
-   {
-      if(m_camera == FLOWFS)
-      {
-         ui.button_pupil_l->setEnabled(false);
-         ui.button_pupil_r->setEnabled(false);
-         ui.button_pupil_scale->setEnabled(false);
-         ui.labelPupil->setEnabled(false);
-      }
-      else
-      {
-         ui.button_pupil_u->setEnabled(false);
-         ui.button_pupil_d->setEnabled(false);
-         ui.button_pupil_scale->setEnabled(false);
-         ui.labelPupil->setEnabled(false);
-      }
-   }
-   else
-   {
-      if(m_camera == FLOWFS)
-      {
-         ui.button_pupil_l->setEnabled(true);
-         ui.button_pupil_r->setEnabled(true);
-         ui.button_pupil_scale->setEnabled(true);
-         ui.labelPupil->setEnabled(true);
-      }
-      else
-      {
-         ui.button_pupil_u->setEnabled(true);
-         ui.button_pupil_d->setEnabled(true);
-         ui.button_pupil_scale->setEnabled(true);
-         ui.labelPupil->setEnabled(true);
-      }
-   }
+    if( m_fwPupilCommandPending || m_fwPupilState != "READY" )
+    {
+        if( m_camera == FLOWFS )
+        {
+            ui.button_pupil_l->setEnabled( false );
+            ui.button_pupil_r->setEnabled( false );
+            ui.button_pupil_scale->setEnabled( false );
+            ui.labelPupil->setEnabled( false );
+        }
+        else
+        {
+            ui.button_pupil_u->setEnabled( false );
+            ui.button_pupil_d->setEnabled( false );
+            ui.button_pupil_scale->setEnabled( false );
+            ui.labelPupil->setEnabled( false );
+        }
+    }
+    else
+    {
+        if( m_camera == FLOWFS )
+        {
+            ui.button_pupil_l->setEnabled( true );
+            ui.button_pupil_r->setEnabled( true );
+            ui.button_pupil_scale->setEnabled( true );
+            ui.labelPupil->setEnabled( true );
+        }
+        else
+        {
+            ui.button_pupil_u->setEnabled( true );
+            ui.button_pupil_d->setEnabled( true );
+            ui.button_pupil_scale->setEnabled( true );
+            ui.labelPupil->setEnabled( true );
+        }
+    }
 
-   if(m_fwFocalState != "READY")
-   {
-      if(m_camera == FLOWFS)
-      {
-         ui.button_focal_l->setEnabled(false);
-         ui.button_focal_r->setEnabled(false);
-         ui.button_focal_scale->setEnabled(false);
-         ui.labelFocal->setEnabled(false);
-      }
-      else
-      {
-         ui.button_focal_u->setEnabled(false);
-         ui.button_focal_d->setEnabled(false);
-         ui.button_focal_scale->setEnabled(false);
-         ui.labelFocal->setEnabled(false);
-      }
-   }
-   else
-   {
-      if(m_camera == FLOWFS)
-      {
-         ui.button_focal_l->setEnabled(true);
-         ui.button_focal_r->setEnabled(true);
-         ui.button_focal_scale->setEnabled(true);
-         ui.labelFocal->setEnabled(true);
-      }
-      else
-      {
-         ui.button_focal_u->setEnabled(true);
-         ui.button_focal_d->setEnabled(true);
-         ui.button_focal_scale->setEnabled(true);
-         ui.labelFocal->setEnabled(true);
-      }
-   }
+    if( m_fwFocalCommandPending || m_fwFocalState != "READY" )
+    {
+        if( m_camera == FLOWFS )
+        {
+            ui.button_focal_l->setEnabled( false );
+            ui.button_focal_r->setEnabled( false );
+            ui.button_focal_scale->setEnabled( false );
+            ui.labelFocal->setEnabled( false );
+        }
+        else
+        {
+            ui.button_focal_u->setEnabled( false );
+            ui.button_focal_d->setEnabled( false );
+            ui.button_focal_scale->setEnabled( false );
+            ui.labelFocal->setEnabled( false );
+        }
+    }
+    else
+    {
+        if( m_camera == FLOWFS )
+        {
+            ui.button_focal_l->setEnabled( true );
+            ui.button_focal_r->setEnabled( true );
+            ui.button_focal_scale->setEnabled( true );
+            ui.labelFocal->setEnabled( true );
+        }
+        else
+        {
+            ui.button_focal_u->setEnabled( true );
+            ui.button_focal_d->setEnabled( true );
+            ui.button_focal_scale->setEnabled( true );
+            ui.labelFocal->setEnabled( true );
+        }
+    }
 
-   if(m_fwLyotState != "READY")
-   {
-      if(m_camera == FLOWFS)
-      {
-         ui.button_lyot_u->setEnabled(false);
-         ui.button_lyot_d->setEnabled(false);
-         ui.button_lyot_scale->setEnabled(false);
-         ui.labelLyot->setEnabled(false);
-      }
-      else
-      {
-         ui.button_lyot_l->setEnabled(false);
-         ui.button_lyot_r->setEnabled(false);
-         ui.button_lyot_scale->setEnabled(false);
-         ui.labelLyot->setEnabled(false);
-      }
-   }
-   else
-   {
-      if(m_camera == FLOWFS)
-      {
-         ui.button_lyot_u->setEnabled(true);
-         ui.button_lyot_d->setEnabled(true);
-         ui.button_lyot_scale->setEnabled(true);
-         ui.labelLyot->setEnabled(true);
-      }
-      else
-      {
-         ui.button_lyot_l->setEnabled(true);
-         ui.button_lyot_r->setEnabled(true);
-         ui.button_lyot_scale->setEnabled(true);
-         ui.labelLyot->setEnabled(true);
-      }
-   }
+    if( m_fwLyotCommandPending || m_fwLyotState != "READY" )
+    {
+        if( m_camera == LLOWFS )
+        {
+            ui.button_lyot_l->setEnabled( false );
+            ui.button_lyot_r->setEnabled( false );
+            ui.button_lyot_scale->setEnabled( false );
+            ui.labelLyot->setEnabled( false );
+        }
+        else
+        {
+            ui.button_lyot_u->setEnabled( false );
+            ui.button_lyot_d->setEnabled( false );
+            ui.button_lyot_scale->setEnabled( false );
+            ui.labelLyot->setEnabled( false );
+        }
+    }
+    else
+    {
+        if( m_camera == LLOWFS )
+        {
+            ui.button_lyot_l->setEnabled( true );
+            ui.button_lyot_r->setEnabled( true );
+            ui.button_lyot_scale->setEnabled( true );
+            ui.labelLyot->setEnabled( true );
+        }
+        else
+        {
+            ui.button_lyot_u->setEnabled( true );
+            ui.button_lyot_d->setEnabled( true );
+            ui.button_lyot_scale->setEnabled( true );
+            ui.labelLyot->setEnabled( true );
+        }
+    }
 
-   if(m_piaaState != "READY")
-   {
-      ui.button_piaa_u->setEnabled(false);
-      ui.button_piaa_d->setEnabled(false);
-      ui.button_piaa_scale->setEnabled(false);
-      ui.labelPIAA->setEnabled(false);
-   }
-   else
-   {
-      ui.button_piaa_u->setEnabled(true);
-      ui.button_piaa_d->setEnabled(true);
-      ui.button_piaa_scale->setEnabled(true);
-      ui.labelPIAA->setEnabled(true);
-   }
+    if( m_piaaCommandPending || m_piaaState != "READY" )
+    {
+        ui.button_piaa_u->setEnabled( false );
+        ui.button_piaa_d->setEnabled( false );
+        ui.button_piaa_scale->setEnabled( false );
+        ui.labelPIAA->setEnabled( false );
+    }
+    else
+    {
+        ui.button_piaa_u->setEnabled( true );
+        ui.button_piaa_d->setEnabled( true );
+        ui.button_piaa_scale->setEnabled( true );
+        ui.labelPIAA->setEnabled( true );
+    }
 
-   if(m_ipiaaState != "READY")
-   {
-      ui.button_ipiaa_u->setEnabled(false);
-      ui.button_ipiaa_d->setEnabled(false);
-      ui.button_ipiaa_scale->setEnabled(false);
-      ui.labeliPIAA->setEnabled(false);
-   }
-   else
-   {
-      ui.button_ipiaa_u->setEnabled(true);
-      ui.button_ipiaa_d->setEnabled(true);
-      ui.button_ipiaa_scale->setEnabled(true);
-      ui.labeliPIAA->setEnabled(true);
-   }
+    if( m_ipiaaCommandPending || m_ipiaaState != "READY" )
+    {
+        ui.button_ipiaa_u->setEnabled( false );
+        ui.button_ipiaa_d->setEnabled( false );
+        ui.button_ipiaa_scale->setEnabled( false );
+        ui.labeliPIAA->setEnabled( false );
+    }
+    else
+    {
+        ui.button_ipiaa_u->setEnabled( true );
+        ui.button_ipiaa_d->setEnabled( true );
+        ui.button_ipiaa_scale->setEnabled( true );
+        ui.labeliPIAA->setEnabled( true );
+    }
 
-   if(m_picoState != "READY")
-   {
-      disablePicoButtons();
-   }
-   else
-   {
-      enablePicoButtons();
-   }
+    if( m_picoCommandPending || m_picoState != "READY" )
+    {
+        disablePicoButtons();
+    }
+    else
+    {
+        enablePicoButtons();
+    }
 
+    if( m_camera == FLOWFS )
+    {
+        ui.checkCamflowfs->setCheckState( Qt::Checked );
+        ui.checkCamllowfs->setCheckState( Qt::Unchecked );
+        ui.checkCamsci12->setCheckState( Qt::Unchecked );
+    }
+    else if( m_camera == LLOWFS )
+    {
+        ui.checkCamflowfs->setCheckState( Qt::Unchecked );
+        ui.checkCamllowfs->setCheckState( Qt::Checked );
+        ui.checkCamsci12->setCheckState( Qt::Unchecked );
+    }
+    else
+    {
+        ui.checkCamflowfs->setCheckState( Qt::Unchecked );
+        ui.checkCamllowfs->setCheckState( Qt::Unchecked );
+        ui.checkCamsci12->setCheckState( Qt::Checked );
+    }
 
-   if(m_camera == FLOWFS)
-   {
-      ui.checkCamflowfs->setCheckState(Qt::Checked);
-      ui.checkCamllowfs->setCheckState(Qt::Unchecked);
-      ui.checkCamsci12->setCheckState(Qt::Unchecked);
-   }
-   else if(m_camera == LLOWFS)
-   {
-      ui.checkCamflowfs->setCheckState(Qt::Unchecked);
-      ui.checkCamllowfs->setCheckState(Qt::Checked);
-      ui.checkCamsci12->setCheckState(Qt::Unchecked);
-   }
-   else
-   {
-      ui.checkCamflowfs->setCheckState(Qt::Unchecked);
-      ui.checkCamllowfs->setCheckState(Qt::Unchecked);
-      ui.checkCamsci12->setCheckState(Qt::Checked);
-   }
+    updateAvailability();
+} // updateGUI()
 
-   ui.fwpupil->updateGUI();
+bool coronAlign::motionAvailable( const std::string &device, const std::string &property ) const
+{
+    const auto found = m_properties.find( { device, property } );
+    return m_connected && found != m_properties.end() && found->second.m_current && found->second.m_target;
+}
 
-} //updateGUI()
+bool coronAlign::commandEnabled( QWidget *control )
+{
+    updateGUI();
+    return m_connected && control->isEnabled();
+}
+
+void coronAlign::updateAvailability()
+{
+    const auto limit = []( QWidget *control, bool available )
+    { control->setEnabled( control->isEnabled() && available ); };
+    const bool pupilWheel = motionAvailable( "fwpupil", "filter" );
+    const bool pupilPico  = motionAvailable( "picomotors", "picopupil_pos" );
+    limit( ui.button_pupil_u, m_camera == FLOWFS ? pupilPico : pupilWheel );
+    limit( ui.button_pupil_d, m_camera == FLOWFS ? pupilPico : pupilWheel );
+    limit( ui.button_pupil_l, m_camera == FLOWFS ? pupilWheel : pupilPico );
+    limit( ui.button_pupil_r, m_camera == FLOWFS ? pupilWheel : pupilPico );
+    ui.button_pupil_scale->setEnabled( ui.button_pupil_u->isEnabled() || ui.button_pupil_l->isEnabled() );
+    const bool focalWheel = motionAvailable( "fwfpm", "filter" );
+    const bool focalPico  = motionAvailable( "picomotors", "picofpm_pos" );
+    limit( ui.button_focal_u, m_camera == FLOWFS ? focalPico : focalWheel );
+    limit( ui.button_focal_d, m_camera == FLOWFS ? focalPico : focalWheel );
+    limit( ui.button_focal_l, m_camera == FLOWFS ? focalWheel : focalPico );
+    limit( ui.button_focal_r, m_camera == FLOWFS ? focalWheel : focalPico );
+    ui.button_focal_scale->setEnabled( ui.button_focal_u->isEnabled() || ui.button_focal_l->isEnabled() );
+    const bool lyotWheel = motionAvailable( "fwlyot", "filter" );
+    const bool lyotPico  = motionAvailable( "picomotors", "picolyot_pos" );
+    limit( ui.button_lyot_u, m_camera == LLOWFS ? lyotPico : lyotWheel );
+    limit( ui.button_lyot_d, m_camera == LLOWFS ? lyotPico : lyotWheel );
+    limit( ui.button_lyot_l, m_camera == LLOWFS ? lyotWheel : lyotPico );
+    limit( ui.button_lyot_r, m_camera == LLOWFS ? lyotWheel : lyotPico );
+    ui.button_lyot_scale->setEnabled( ui.button_lyot_u->isEnabled() || ui.button_lyot_l->isEnabled() );
+    const bool piaa0  = motionAvailable( "picomotors", "piaa0x_pos" );
+    const bool piaa1x = motionAvailable( "picomotors", "piaa1x_pos" );
+    const bool piaa1y = motionAvailable( "picomotors", "piaa1y_pos" );
+    limit( ui.button_piaa_l, piaa0 && piaa1x );
+    limit( ui.button_piaa_r, piaa0 && piaa1x );
+    limit( ui.button_piaa_u, motionAvailable( "stagepiaa", "position" ) );
+    limit( ui.button_piaa_d, motionAvailable( "stagepiaa", "position" ) );
+    limit( ui.button_piaa0_l, piaa0 );
+    limit( ui.button_piaa0_r, piaa0 );
+    limit( ui.button_piaa1_l, piaa1x );
+    limit( ui.button_piaa1_r, piaa1x );
+    limit( ui.button_piaa1_u, piaa1y );
+    limit( ui.button_piaa1_d, piaa1y );
+    ui.button_piaa_scale->setEnabled( ui.button_piaa_u->isEnabled() || ui.button_piaa_l->isEnabled() );
+    ui.button_piaa0_scale->setEnabled( ui.button_piaa0_l->isEnabled() );
+    ui.button_piaa1_scale->setEnabled( ui.button_piaa1_u->isEnabled() || ui.button_piaa1_l->isEnabled() );
+    const bool ipiaa0  = motionAvailable( "picomotors", "ipiaa0x_pos" );
+    const bool ipiaa1x = motionAvailable( "picomotors", "ipiaa1x_pos" );
+    const bool ipiaa1y = motionAvailable( "picomotors", "ipiaa1y_pos" );
+    limit( ui.button_ipiaa_l, ipiaa0 && ipiaa1x );
+    limit( ui.button_ipiaa_r, ipiaa0 && ipiaa1x );
+    limit( ui.button_ipiaa_u, motionAvailable( "stageipiaa", "position" ) );
+    limit( ui.button_ipiaa_d, motionAvailable( "stageipiaa", "position" ) );
+    limit( ui.button_ipiaa0_l, ipiaa0 );
+    limit( ui.button_ipiaa0_r, ipiaa0 );
+    limit( ui.button_ipiaa1_l, ipiaa1x );
+    limit( ui.button_ipiaa1_r, ipiaa1x );
+    limit( ui.button_ipiaa1_u, ipiaa1y );
+    limit( ui.button_ipiaa1_d, ipiaa1y );
+    ui.button_ipiaa_scale->setEnabled( ui.button_ipiaa_u->isEnabled() || ui.button_ipiaa_l->isEnabled() );
+    ui.button_ipiaa0_scale->setEnabled( ui.button_ipiaa0_l->isEnabled() );
+    ui.button_ipiaa1_scale->setEnabled( ui.button_ipiaa1_u->isEnabled() || ui.button_ipiaa1_l->isEnabled() );
+}
 
 void coronAlign::enablePicoButtons()
 {
-   if(m_camera == FLOWFS)
-   {
-      ui.button_pupil_u->setEnabled(true);
-      ui.button_pupil_d->setEnabled(true);
-      ui.button_focal_u->setEnabled(true);
-      ui.button_focal_d->setEnabled(true);
-      ui.button_lyot_l->setEnabled(true);
-      ui.button_lyot_r->setEnabled(true);
-   }
-   else
-   {
-      ui.button_pupil_l->setEnabled(true);
-      ui.button_pupil_r->setEnabled(true);
-      ui.button_focal_l->setEnabled(true);
-      ui.button_focal_r->setEnabled(true);
-      ui.button_lyot_u->setEnabled(true);
-      ui.button_lyot_d->setEnabled(true);
-   }
+    if( m_camera == FLOWFS )
+    {
+        ui.button_pupil_u->setEnabled( true );
+        ui.button_pupil_d->setEnabled( true );
+        ui.button_focal_u->setEnabled( true );
+        ui.button_focal_d->setEnabled( true );
+    }
+    else
+    {
+        ui.button_pupil_l->setEnabled( true );
+        ui.button_pupil_r->setEnabled( true );
+        ui.button_focal_l->setEnabled( true );
+        ui.button_focal_r->setEnabled( true );
+    }
 
-   ui.button_piaa_l->setEnabled(true);
-   ui.button_piaa_r->setEnabled(true);
+    if( m_camera == LLOWFS )
+    {
+        ui.button_lyot_u->setEnabled( true );
+        ui.button_lyot_d->setEnabled( true );
+    }
+    else
+    {
+        ui.button_lyot_l->setEnabled( true );
+        ui.button_lyot_r->setEnabled( true );
+    }
 
-   ui.button_piaa0_l->setEnabled(true);
-   ui.button_piaa0_r->setEnabled(true);
-   ui.button_piaa0_scale->setEnabled(true);
+    ui.button_piaa_l->setEnabled( true );
+    ui.button_piaa_r->setEnabled( true );
 
-   ui.button_piaa1_l->setEnabled(true);
-   ui.button_piaa1_r->setEnabled(true);
-   ui.button_piaa1_u->setEnabled(true);
-   ui.button_piaa1_d->setEnabled(true);
-   ui.button_piaa1_scale->setEnabled(true);
+    ui.button_piaa0_l->setEnabled( true );
+    ui.button_piaa0_r->setEnabled( true );
+    ui.button_piaa0_scale->setEnabled( true );
 
-   ui.button_ipiaa_l->setEnabled(true);
-   ui.button_ipiaa_r->setEnabled(true);
+    ui.button_piaa1_l->setEnabled( true );
+    ui.button_piaa1_r->setEnabled( true );
+    ui.button_piaa1_u->setEnabled( true );
+    ui.button_piaa1_d->setEnabled( true );
+    ui.button_piaa1_scale->setEnabled( true );
 
-   ui.button_ipiaa0_l->setEnabled(true);
-   ui.button_ipiaa0_r->setEnabled(true);
-   ui.button_ipiaa0_scale->setEnabled(true);
+    ui.button_ipiaa_l->setEnabled( true );
+    ui.button_ipiaa_r->setEnabled( true );
 
-   ui.button_ipiaa1_l->setEnabled(true);
-   ui.button_ipiaa1_r->setEnabled(true);
-   ui.button_ipiaa1_u->setEnabled(true);
-   ui.button_ipiaa1_d->setEnabled(true);
-   ui.button_ipiaa1_scale->setEnabled(true);
+    ui.button_ipiaa0_l->setEnabled( true );
+    ui.button_ipiaa0_r->setEnabled( true );
+    ui.button_ipiaa0_scale->setEnabled( true );
+
+    ui.button_ipiaa1_l->setEnabled( true );
+    ui.button_ipiaa1_r->setEnabled( true );
+    ui.button_ipiaa1_u->setEnabled( true );
+    ui.button_ipiaa1_d->setEnabled( true );
+    ui.button_ipiaa1_scale->setEnabled( true );
 }
 
 void coronAlign::disablePicoButtons()
 {
-   if(m_camera == FLOWFS)
-   {
-      ui.button_pupil_u->setEnabled(false);
-      ui.button_pupil_d->setEnabled(false);
-      ui.button_focal_u->setEnabled(false);
-      ui.button_focal_d->setEnabled(false);
-      ui.button_lyot_l->setEnabled(false);
-      ui.button_lyot_r->setEnabled(false);
-   }
-   else
-   {
-      ui.button_pupil_l->setEnabled(false);
-      ui.button_pupil_r->setEnabled(false);
-      ui.button_focal_l->setEnabled(false);
-      ui.button_focal_r->setEnabled(false);
-      ui.button_lyot_u->setEnabled(false);
-      ui.button_lyot_d->setEnabled(false);
-   }
+    if( m_picoState == "READY" )
+    {
+        m_picoCommandPending = true;
+    }
 
-   ui.button_piaa_l->setEnabled(false);
-   ui.button_piaa_r->setEnabled(false);
+    if( m_camera == FLOWFS )
+    {
+        ui.button_pupil_u->setEnabled( false );
+        ui.button_pupil_d->setEnabled( false );
+        ui.button_focal_u->setEnabled( false );
+        ui.button_focal_d->setEnabled( false );
+    }
+    else
+    {
+        ui.button_pupil_l->setEnabled( false );
+        ui.button_pupil_r->setEnabled( false );
+        ui.button_focal_l->setEnabled( false );
+        ui.button_focal_r->setEnabled( false );
+    }
 
-   ui.button_piaa0_l->setEnabled(false);
-   ui.button_piaa0_r->setEnabled(false);
-   ui.button_piaa0_scale->setEnabled(false);
+    if( m_camera == LLOWFS )
+    {
+        ui.button_lyot_u->setEnabled( false );
+        ui.button_lyot_d->setEnabled( false );
+    }
+    else
+    {
+        ui.button_lyot_l->setEnabled( false );
+        ui.button_lyot_r->setEnabled( false );
+    }
 
-   ui.button_piaa1_l->setEnabled(false);
-   ui.button_piaa1_r->setEnabled(false);
-   ui.button_piaa1_u->setEnabled(false);
-   ui.button_piaa1_d->setEnabled(false);
-   ui.button_piaa1_scale->setEnabled(false);
+    ui.button_piaa_l->setEnabled( false );
+    ui.button_piaa_r->setEnabled( false );
 
-   ui.button_ipiaa_l->setEnabled(false);
-   ui.button_ipiaa_r->setEnabled(false);
+    ui.button_piaa0_l->setEnabled( false );
+    ui.button_piaa0_r->setEnabled( false );
+    ui.button_piaa0_scale->setEnabled( false );
 
-   ui.button_ipiaa0_l->setEnabled(false);
-   ui.button_ipiaa0_r->setEnabled(false);
-   ui.button_ipiaa0_scale->setEnabled(false);
+    ui.button_piaa1_l->setEnabled( false );
+    ui.button_piaa1_r->setEnabled( false );
+    ui.button_piaa1_u->setEnabled( false );
+    ui.button_piaa1_d->setEnabled( false );
+    ui.button_piaa1_scale->setEnabled( false );
 
-   ui.button_ipiaa1_l->setEnabled(false);
-   ui.button_ipiaa1_r->setEnabled(false);
-   ui.button_ipiaa1_u->setEnabled(false);
-   ui.button_ipiaa1_d->setEnabled(false);
-   ui.button_ipiaa1_scale->setEnabled(false);
+    ui.button_ipiaa_l->setEnabled( false );
+    ui.button_ipiaa_r->setEnabled( false );
+
+    ui.button_ipiaa0_l->setEnabled( false );
+    ui.button_ipiaa0_r->setEnabled( false );
+    ui.button_ipiaa0_scale->setEnabled( false );
+
+    ui.button_ipiaa1_l->setEnabled( false );
+    ui.button_ipiaa1_r->setEnabled( false );
+    ui.button_ipiaa1_u->setEnabled( false );
+    ui.button_ipiaa1_d->setEnabled( false );
+    ui.button_ipiaa1_scale->setEnabled( false );
 }
 
 void coronAlign::on_button_pupil_u_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_pupil_u ) )
+        return;
 
-   if(m_camera == FLOWFS)
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picopupil_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoPupilPos + m_pupilScale*m_picoPupilStepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-      disablePicoButtons();
-   }
-   else
-   {
-      ip.setDevice("fwpupil");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwPupilPos + m_pupilScale*m_fwPupilStepSize;
+    if( m_camera == FLOWFS )
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picopupil_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoPupilPos + m_pupilScale * m_picoPupilStepSize;
 
-      ui.button_pupil_l->setEnabled(false);
-      ui.button_pupil_r->setEnabled(false);
-   }
+        disablePicoButtons();
+    }
+    else
+    {
+        ip.setDevice( "fwpupil" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwPupilTarget = m_fwPupilPos + m_pupilScale * m_fwPupilStepSize;
+        ip["target"]    = m_fwPupilTarget;
 
-   sendNewProperty(ip);
+        startPendingCommand( m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
+        ui.button_pupil_u->setEnabled( false );
+        ui.button_pupil_d->setEnabled( false );
+        ui.button_pupil_scale->setEnabled( false );
+        ui.labelPupil->setEnabled( false );
+    }
+
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_pupil_d_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_pupil_d ) )
+        return;
 
-   if(m_camera == FLOWFS)
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picopupil_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoPupilPos - m_pupilScale*m_picoPupilStepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-      disablePicoButtons();
-   }
-   else
-   {
-      ip.setDevice("fwpupil");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwPupilPos - m_pupilScale*m_fwPupilStepSize;
+    if( m_camera == FLOWFS )
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picopupil_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoPupilPos - m_pupilScale * m_picoPupilStepSize;
 
-      ui.button_pupil_l->setEnabled(false);
-      ui.button_pupil_r->setEnabled(false);
-   }
-   sendNewProperty(ip);
+        disablePicoButtons();
+    }
+    else
+    {
+        ip.setDevice( "fwpupil" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwPupilTarget = m_fwPupilPos - m_pupilScale * m_fwPupilStepSize;
+        ip["target"]    = m_fwPupilTarget;
+
+        startPendingCommand( m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
+        ui.button_pupil_u->setEnabled( false );
+        ui.button_pupil_d->setEnabled( false );
+        ui.button_pupil_scale->setEnabled( false );
+        ui.labelPupil->setEnabled( false );
+    }
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_pupil_l_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_pupil_l ) )
+        return;
 
-   if(m_camera == FLOWFS)
-   {
-      ip.setDevice("fwpupil");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwPupilPos + m_pupilScale*m_fwPupilStepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-      ui.button_pupil_l->setEnabled(false);
-      ui.button_pupil_r->setEnabled(false);
-   }
-   else
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picopupil_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoPupilPos + m_pupilScale*m_picoPupilStepSize;
+    if( m_camera == FLOWFS )
+    {
+        ip.setDevice( "fwpupil" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwPupilTarget = m_fwPupilPos + m_pupilScale * m_fwPupilStepSize;
+        ip["target"]    = m_fwPupilTarget;
 
-      disablePicoButtons();
-   }
+        startPendingCommand( m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
+        ui.button_pupil_l->setEnabled( false );
+        ui.button_pupil_r->setEnabled( false );
+        ui.button_pupil_scale->setEnabled( false );
+        ui.labelPupil->setEnabled( false );
+    }
+    else
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picopupil_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoPupilPos + m_pupilScale * m_picoPupilStepSize;
 
-   sendNewProperty(ip);
+        disablePicoButtons();
+    }
+
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_pupil_r_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_pupil_r ) )
+        return;
 
-   if(m_camera == FLOWFS)
-   {
-      ip.setDevice("fwpupil");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwPupilPos - m_pupilScale*m_fwPupilStepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-      ui.button_pupil_l->setEnabled(false);
-      ui.button_pupil_r->setEnabled(false);
-   }
-   else
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picopupil_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoPupilPos - m_pupilScale*m_picoPupilStepSize;
+    if( m_camera == FLOWFS )
+    {
+        ip.setDevice( "fwpupil" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwPupilTarget = m_fwPupilPos - m_pupilScale * m_fwPupilStepSize;
+        ip["target"]    = m_fwPupilTarget;
 
-      disablePicoButtons();
-   }
+        startPendingCommand( m_fwPupilCommandPending, m_fwPupilPendingTimer, m_fwPupilPendingRefreshRequested );
+        ui.button_pupil_l->setEnabled( false );
+        ui.button_pupil_r->setEnabled( false );
+        ui.button_pupil_scale->setEnabled( false );
+        ui.labelPupil->setEnabled( false );
+    }
+    else
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picopupil_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoPupilPos - m_pupilScale * m_picoPupilStepSize;
 
-   sendNewProperty(ip);
+        disablePicoButtons();
+    }
 
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_pupil_scale_pressed()
 {
-   if( m_pupilScale == 100)
-   {
-      m_pupilScale = 10;
-   }
-   else if(m_pupilScale == 10)
-   {
-      m_pupilScale = 5;
-   }
-   else if(m_pupilScale == 5)
-   {
-      m_pupilScale = 1;
-   }
-   else if(m_pupilScale == 1)
-   {
-      m_pupilScale = 100;
-   }
-   else
-   {
-      m_pupilScale = 1;
-   }
+    if( m_pupilScale == 100 )
+    {
+        m_pupilScale = 10;
+    }
+    else if( m_pupilScale == 10 )
+    {
+        m_pupilScale = 5;
+    }
+    else if( m_pupilScale == 5 )
+    {
+        m_pupilScale = 1;
+    }
+    else if( m_pupilScale == 1 )
+    {
+        m_pupilScale = 100;
+    }
+    else
+    {
+        m_pupilScale = 1;
+    }
 
-   char ss[5];
-   snprintf(ss, 5, "%d", m_pupilScale);
-   std::cerr << m_pupilScale << " " << ss << "\n";
-   ui.button_pupil_scale->setText(ss);
-
-
+    char ss[5];
+    snprintf( ss, 5, "%d", m_pupilScale );
+    std::cerr << m_pupilScale << " " << ss << "\n";
+    ui.button_pupil_scale->setText( ss );
 }
-
 
 void coronAlign::on_button_focal_u_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_focal_u ) )
+        return;
 
-   if(m_camera == FLOWFS)
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picofpm_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoFocalPos + m_focalScale*m_picoFocalStepSize;
-   }
-   else
-   {
-      ip.setDevice("fwfpm");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwFocalPos - m_focalScale*m_fwFocalStepSize;
-      ui.button_focal_l->setEnabled(false);
-      ui.button_focal_r->setEnabled(false);
-   }
-   disablePicoButtons();
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-   sendNewProperty(ip);
+    if( m_camera == FLOWFS )
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picofpm_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoFocalPos + m_focalScale * m_picoFocalStepSize;
 
+        disablePicoButtons();
+    }
+    else
+    {
+        ip.setDevice( "fwfpm" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwFocalTarget = m_fwFocalPos - m_focalScale * m_fwFocalStepSize;
+        ip["target"]    = m_fwFocalTarget;
+        startPendingCommand( m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
+        ui.button_focal_u->setEnabled( false );
+        ui.button_focal_d->setEnabled( false );
+        ui.button_focal_scale->setEnabled( false );
+        ui.labelFocal->setEnabled( false );
+    }
+
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_focal_d_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_focal_d ) )
+        return;
 
-   if(m_camera == FLOWFS)
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picofpm_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoFocalPos - m_focalScale*m_picoFocalStepSize;
-   }
-   else
-   {
-      ip.setDevice("fwfpm");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwFocalPos + m_focalScale*m_fwFocalStepSize;
-      ui.button_focal_l->setEnabled(false);
-      ui.button_focal_r->setEnabled(false);
-   }
-   disablePicoButtons();
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-   sendNewProperty(ip);
+    if( m_camera == FLOWFS )
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picofpm_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoFocalPos - m_focalScale * m_picoFocalStepSize;
 
+        disablePicoButtons();
+    }
+    else
+    {
+        ip.setDevice( "fwfpm" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwFocalTarget = m_fwFocalPos + m_focalScale * m_fwFocalStepSize;
+        ip["target"]    = m_fwFocalTarget;
+        startPendingCommand( m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
+        ui.button_focal_u->setEnabled( false );
+        ui.button_focal_d->setEnabled( false );
+        ui.button_focal_scale->setEnabled( false );
+        ui.labelFocal->setEnabled( false );
+    }
+
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_focal_l_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_focal_l ) )
+        return;
 
-   if(m_camera == FLOWFS)
-   {
-      ip.setDevice("fwfpm");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwFocalPos + m_focalScale*m_fwFocalStepSize;
-      ui.button_focal_l->setEnabled(false);
-      ui.button_focal_r->setEnabled(false);
-   }
-   else
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picofpm_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoFocalPos - m_focalScale*m_picoFocalStepSize;
-   }
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-   sendNewProperty(ip);
+    if( m_camera == FLOWFS )
+    {
+        ip.setDevice( "fwfpm" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwFocalTarget = m_fwFocalPos + m_focalScale * m_fwFocalStepSize;
+        ip["target"]    = m_fwFocalTarget;
+        startPendingCommand( m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
+        ui.button_focal_l->setEnabled( false );
+        ui.button_focal_r->setEnabled( false );
+        ui.button_focal_scale->setEnabled( false );
+        ui.labelFocal->setEnabled( false );
+    }
+    else
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picofpm_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoFocalPos - m_focalScale * m_picoFocalStepSize;
+
+        disablePicoButtons();
+    }
+
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_focal_r_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_focal_r ) )
+        return;
 
-   if(m_camera == FLOWFS)
-   {
-      ip.setDevice("fwfpm");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwFocalPos - m_focalScale*m_fwFocalStepSize;
-      ui.button_focal_l->setEnabled(false);
-      ui.button_focal_r->setEnabled(false);
-   }
-   else
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picofpm_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoFocalPos + m_focalScale*m_picoFocalStepSize;
-   }
-   sendNewProperty(ip);
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    if( m_camera == FLOWFS )
+    {
+        ip.setDevice( "fwfpm" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwFocalTarget = m_fwFocalPos - m_focalScale * m_fwFocalStepSize;
+        ip["target"]    = m_fwFocalTarget;
+        startPendingCommand( m_fwFocalCommandPending, m_fwFocalPendingTimer, m_fwFocalPendingRefreshRequested );
+        ui.button_focal_l->setEnabled( false );
+        ui.button_focal_r->setEnabled( false );
+        ui.button_focal_scale->setEnabled( false );
+        ui.labelFocal->setEnabled( false );
+    }
+    else
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picofpm_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoFocalPos + m_focalScale * m_picoFocalStepSize;
+
+        disablePicoButtons();
+    }
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_focal_scale_pressed()
 {
-   if( m_focalScale == 100)
-   {
-      m_focalScale = 10;
-   }
-   else if(m_focalScale == 10)
-   {
-      m_focalScale = 5;
-   }
-   else if(m_focalScale == 5)
-   {
-      m_focalScale = 1;
-   }
-   else if(m_focalScale == 1)
-   {
-      m_focalScale = 100;
-   }
-   else
-   {
-      m_focalScale = 1;
-   }
+    if( m_focalScale == 100 )
+    {
+        m_focalScale = 10;
+    }
+    else if( m_focalScale == 10 )
+    {
+        m_focalScale = 5;
+    }
+    else if( m_focalScale == 5 )
+    {
+        m_focalScale = 1;
+    }
+    else if( m_focalScale == 1 )
+    {
+        m_focalScale = 100;
+    }
+    else
+    {
+        m_focalScale = 1;
+    }
 
-   char ss[5];
-   snprintf(ss, 5, "%d", m_focalScale);
-   ui.button_focal_scale->setText(ss);
-
-
+    char ss[5];
+    snprintf( ss, 5, "%d", m_focalScale );
+    ui.button_focal_scale->setText( ss );
 }
-
 
 void coronAlign::on_button_lyot_u_pressed()
 {
+    if( !commandEnabled( ui.button_lyot_u ) )
+        return;
 
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-   if(m_camera == FLOWFS || m_camera == CAMSCIS)
-   {
-      ip.setDevice("fwlyot");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwLyotPos - m_lyotScale*m_fwLyotStepSize;
+    if( m_camera == FLOWFS || m_camera == CAMSCIS )
+    {
+        ip.setDevice( "fwlyot" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwLyotTarget = m_fwLyotPos - m_lyotScale * m_fwLyotStepSize;
+        ip["target"]   = m_fwLyotTarget;
 
-      ui.button_lyot_u->setEnabled(false);
-      ui.button_lyot_d->setEnabled(false);
-   }
-   else
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picolyot_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoLyotPos - m_lyotScale*m_picoLyotStepSize;
+        startPendingCommand( m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
+        ui.button_lyot_u->setEnabled( false );
+        ui.button_lyot_d->setEnabled( false );
+        ui.button_lyot_scale->setEnabled( false );
+        ui.labelLyot->setEnabled( false );
+    }
+    else
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picolyot_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoLyotPos - m_lyotScale * m_picoLyotStepSize;
 
-      disablePicoButtons();
-   }
+        disablePicoButtons();
+    }
 
-   sendNewProperty(ip);
-
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_lyot_d_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_lyot_d ) )
+        return;
 
-   if(m_camera == FLOWFS || m_camera == CAMSCIS)
-   {
-      ip.setDevice("fwlyot");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwLyotPos + m_lyotScale*m_fwLyotStepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-      ui.button_lyot_u->setEnabled(false);
-      ui.button_lyot_d->setEnabled(false);
-   }
-   else
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picolyot_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoLyotPos + m_lyotScale*m_picoLyotStepSize;
+    if( m_camera == FLOWFS || m_camera == CAMSCIS )
+    {
+        ip.setDevice( "fwlyot" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwLyotTarget = m_fwLyotPos + m_lyotScale * m_fwLyotStepSize;
+        ip["target"]   = m_fwLyotTarget;
 
-      disablePicoButtons();
-   }
+        startPendingCommand( m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
+        ui.button_lyot_u->setEnabled( false );
+        ui.button_lyot_d->setEnabled( false );
+        ui.button_lyot_scale->setEnabled( false );
+        ui.labelLyot->setEnabled( false );
+    }
+    else
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picolyot_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoLyotPos + m_lyotScale * m_picoLyotStepSize;
 
-   sendNewProperty(ip);
+        disablePicoButtons();
+    }
 
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_lyot_l_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_lyot_l ) )
+        return;
 
-   if(m_camera == FLOWFS || m_camera == CAMSCIS)
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picolyot_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoLyotPos + m_lyotScale*m_picoLyotStepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-      disablePicoButtons();
-   }
-   else
-   {
-      ip.setDevice("fwlyot");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwLyotPos - m_lyotScale*m_fwLyotStepSize;
+    if( m_camera == FLOWFS || m_camera == CAMSCIS )
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picolyot_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoLyotPos + m_lyotScale * m_picoLyotStepSize;
 
-      ui.button_lyot_u->setEnabled(false);
-      ui.button_lyot_d->setEnabled(false);
-   }
+        disablePicoButtons();
+    }
+    else
+    {
+        ip.setDevice( "fwlyot" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwLyotTarget = m_fwLyotPos - m_lyotScale * m_fwLyotStepSize;
+        ip["target"]   = m_fwLyotTarget;
 
-   sendNewProperty(ip);
+        startPendingCommand( m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
+        ui.button_lyot_l->setEnabled( false );
+        ui.button_lyot_r->setEnabled( false );
+        ui.button_lyot_scale->setEnabled( false );
+        ui.labelLyot->setEnabled( false );
+    }
 
-
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_lyot_r_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_lyot_r ) )
+        return;
 
-   if(m_camera == FLOWFS || m_camera == CAMSCIS)
-   {
-      ip.setDevice("picomotors");
-      ip.setName("picolyot_pos");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_picoLyotPos - m_lyotScale*m_picoLyotStepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-      disablePicoButtons();
-   }
-   else
-   {
-      ip.setDevice("fwlyot");
-      ip.setName("filter");
-      ip.add(pcf::IndiElement("target"));
-      ip["target"] = m_fwLyotPos + m_lyotScale*m_fwLyotStepSize;
+    if( m_camera == FLOWFS || m_camera == CAMSCIS )
+    {
+        ip.setDevice( "picomotors" );
+        ip.setName( "picolyot_pos" );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"] = m_picoLyotPos - m_lyotScale * m_picoLyotStepSize;
 
-      ui.button_lyot_u->setEnabled(false);
-      ui.button_lyot_d->setEnabled(false);
-   }
+        disablePicoButtons();
+    }
+    else
+    {
+        ip.setDevice( "fwlyot" );
+        ip.setName( "filter" );
+        ip.add( pcf::IndiElement( "target" ) );
+        m_fwLyotTarget = m_fwLyotPos + m_lyotScale * m_fwLyotStepSize;
+        ip["target"]   = m_fwLyotTarget;
 
-   sendNewProperty(ip);
+        startPendingCommand( m_fwLyotCommandPending, m_fwLyotPendingTimer, m_fwLyotPendingRefreshRequested );
+        ui.button_lyot_l->setEnabled( false );
+        ui.button_lyot_r->setEnabled( false );
+        ui.button_lyot_scale->setEnabled( false );
+        ui.labelLyot->setEnabled( false );
+    }
 
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_lyot_scale_pressed()
 {
-   if( m_lyotScale == 100)
-   {
-      m_lyotScale = 10;
-   }
-   else if(m_lyotScale == 10)
-   {
-      m_lyotScale = 5;
-   }
-   else if(m_lyotScale == 5)
-   {
-      m_lyotScale = 1;
-   }
-   else if(m_lyotScale == 1)
-   {
-      m_lyotScale = 100;
-   }
-   else
-   {
-      m_lyotScale = 1;
-   }
+    if( m_lyotScale == 100 )
+    {
+        m_lyotScale = 10;
+    }
+    else if( m_lyotScale == 10 )
+    {
+        m_lyotScale = 5;
+    }
+    else if( m_lyotScale == 5 )
+    {
+        m_lyotScale = 1;
+    }
+    else if( m_lyotScale == 1 )
+    {
+        m_lyotScale = 100;
+    }
+    else
+    {
+        m_lyotScale = 1;
+    }
 
-   char ss[5];
-   snprintf(ss, 5, "%d", m_lyotScale);
-   ui.button_lyot_scale->setText(ss);
-
-
+    char ss[5];
+    snprintf( ss, 5, "%d", m_lyotScale );
+    ui.button_lyot_scale->setText( ss );
 }
 
 void coronAlign::on_button_piaa_l_pressed()
 {
+    if( !commandEnabled( ui.button_piaa_l ) )
+        return;
 
     disablePicoButtons();
 
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-    ip.setDevice("picomotors");
-    ip.setName("piaa0x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa0xPos - m_piaaScale*m_piaa0StepSize;
+    ip.setDevice( "picomotors" );
+    ip.setName( "piaa0x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_piaa0xPos - m_piaaScale * m_piaa0StepSize;
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 
-    pcf::IndiProperty ip1(pcf::IndiProperty::Number);
+    pcf::IndiProperty ip1( pcf::IndiProperty::Number );
 
-    ip1.setDevice("picomotors");
-    ip1.setName("piaa1x_pos");
-    ip1.add(pcf::IndiElement("target"));
-    ip1["target"] = m_piaa1xPos - m_piaaScale*m_piaa1StepSize;
+    ip1.setDevice( "picomotors" );
+    ip1.setName( "piaa1x_pos" );
+    ip1.add( pcf::IndiElement( "target" ) );
+    ip1["target"] = m_piaa1xPos - m_piaaScale * m_piaa1StepSize;
 
-    sendNewProperty(ip1);
-
+    sendNewProperty( ip1 );
 }
 
 void coronAlign::on_button_piaa_r_pressed()
 {
+    if( !commandEnabled( ui.button_piaa_r ) )
+        return;
+
     disablePicoButtons();
 
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-    ip.setDevice("picomotors");
-    ip.setName("piaa0x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa0xPos + m_piaaScale*m_piaa0StepSize;
+    ip.setDevice( "picomotors" );
+    ip.setName( "piaa0x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_piaa0xPos + m_piaaScale * m_piaa0StepSize;
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 
-    pcf::IndiProperty ip1(pcf::IndiProperty::Number);
+    pcf::IndiProperty ip1( pcf::IndiProperty::Number );
 
-    ip1.setDevice("picomotors");
-    ip1.setName("piaa1x_pos");
-    ip1.add(pcf::IndiElement("target"));
-    ip1["target"] = m_piaa1xPos + m_piaaScale*m_piaa1StepSize;
+    ip1.setDevice( "picomotors" );
+    ip1.setName( "piaa1x_pos" );
+    ip1.add( pcf::IndiElement( "target" ) );
+    ip1["target"] = m_piaa1xPos + m_piaaScale * m_piaa1StepSize;
 
-    sendNewProperty(ip1);
+    sendNewProperty( ip1 );
 }
 
 void coronAlign::on_button_piaa_u_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_piaa_u ) )
+        return;
 
-    ip.setDevice("stagepiaa");
-    ip.setName("position");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaaPos - m_piaaScale*m_piaaStepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-    sendNewProperty(ip);
+    ip.setDevice( "stagepiaa" );
+    ip.setName( "position" );
+    ip.add( pcf::IndiElement( "target" ) );
+    m_piaaTarget = m_piaaPos - m_piaaScale * m_piaaStepSize;
+    ip["target"] = m_piaaTarget;
 
+    startPendingCommand( m_piaaCommandPending, m_piaaPendingTimer, m_piaaPendingRefreshRequested );
+    ui.button_piaa_u->setEnabled( false );
+    ui.button_piaa_d->setEnabled( false );
+    ui.button_piaa_scale->setEnabled( false );
+    ui.labelPIAA->setEnabled( false );
+
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_piaa_d_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_piaa_d ) )
+        return;
 
-    ip.setDevice("stagepiaa");
-    ip.setName("position");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaaPos + m_piaaScale*m_piaaStepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-    sendNewProperty(ip);
+    ip.setDevice( "stagepiaa" );
+    ip.setName( "position" );
+    ip.add( pcf::IndiElement( "target" ) );
+    m_piaaTarget = m_piaaPos + m_piaaScale * m_piaaStepSize;
+    ip["target"] = m_piaaTarget;
 
+    startPendingCommand( m_piaaCommandPending, m_piaaPendingTimer, m_piaaPendingRefreshRequested );
+    ui.button_piaa_u->setEnabled( false );
+    ui.button_piaa_d->setEnabled( false );
+    ui.button_piaa_scale->setEnabled( false );
+    ui.labelPIAA->setEnabled( false );
+
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_piaa_scale_pressed()
 {
-    if( m_piaaScale == 100)
-   {
-      m_piaaScale = 10;
-   }
-   else if(m_piaaScale == 10)
-   {
-      m_piaaScale = 5;
-   }
-   else if(m_piaaScale == 5)
-   {
-      m_piaaScale = 1;
-   }
-   else if(m_piaaScale == 1)
-   {
-      m_piaaScale = 100;
-   }
-   else
-   {
-      m_piaaScale = 1;
-   }
+    if( m_piaaScale == 100 )
+    {
+        m_piaaScale = 10;
+    }
+    else if( m_piaaScale == 10 )
+    {
+        m_piaaScale = 5;
+    }
+    else if( m_piaaScale == 5 )
+    {
+        m_piaaScale = 1;
+    }
+    else if( m_piaaScale == 1 )
+    {
+        m_piaaScale = 100;
+    }
+    else
+    {
+        m_piaaScale = 1;
+    }
 
-   char ss[5];
-   snprintf(ss, 5, "%d", m_piaaScale);
-   ui.button_piaa_scale->setText(ss);
-
+    char ss[5];
+    snprintf( ss, 5, "%d", m_piaaScale );
+    ui.button_piaa_scale->setText( ss );
 }
 
 void coronAlign::on_button_piaa0_l_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_piaa0_l ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("piaa0x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa0xPos - m_piaa0Scale*m_piaa0StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "piaa0x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_piaa0xPos - m_piaa0Scale * m_piaa0StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
-
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_piaa0_r_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_piaa0_r ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("piaa0x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa0xPos + m_piaa0Scale*m_piaa0StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "piaa0x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_piaa0xPos + m_piaa0Scale * m_piaa0StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_piaa0_scale_pressed()
 {
-   if( m_piaa0Scale == 100)
-   {
-      m_piaa0Scale = 10;
-   }
-   else if(m_piaa0Scale == 10)
-   {
-      m_piaa0Scale = 5;
-   }
-   else if(m_piaa0Scale == 5)
-   {
-      m_piaa0Scale = 1;
-   }
-   else if(m_piaa0Scale == 1)
-   {
-      m_piaa0Scale = 100;
-   }
-   else
-   {
-      m_piaa0Scale = 1;
-   }
+    if( m_piaa0Scale == 100 )
+    {
+        m_piaa0Scale = 10;
+    }
+    else if( m_piaa0Scale == 10 )
+    {
+        m_piaa0Scale = 5;
+    }
+    else if( m_piaa0Scale == 5 )
+    {
+        m_piaa0Scale = 1;
+    }
+    else if( m_piaa0Scale == 1 )
+    {
+        m_piaa0Scale = 100;
+    }
+    else
+    {
+        m_piaa0Scale = 1;
+    }
 
-   char ss[5];
-   snprintf(ss, 5, "%d", m_piaa0Scale);
-   ui.button_piaa0_scale->setText(ss);
-
+    char ss[5];
+    snprintf( ss, 5, "%d", m_piaa0Scale );
+    ui.button_piaa0_scale->setText( ss );
 }
 
 void coronAlign::on_button_piaa1_l_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_piaa1_l ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("piaa1x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa1xPos - m_piaa1Scale*m_piaa1StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "piaa1x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_piaa1xPos - m_piaa1Scale * m_piaa1StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_piaa1_r_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_piaa1_r ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("piaa1x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa1xPos + m_piaa1Scale*m_piaa1StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "piaa1x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_piaa1xPos + m_piaa1Scale * m_piaa1StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_piaa1_u_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_piaa1_u ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("piaa1y_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa1yPos - m_piaa1Scale*m_piaa1StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "piaa1y_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_piaa1yPos - m_piaa1Scale * m_piaa1StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_piaa1_d_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_piaa1_d ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("piaa1y_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_piaa1yPos + m_piaa1Scale*m_piaa1StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "piaa1y_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_piaa1yPos + m_piaa1Scale * m_piaa1StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_piaa1_scale_pressed()
 {
-    if( m_piaa1Scale == 100)
-   {
-      m_piaa1Scale = 10;
-   }
-   else if(m_piaa1Scale == 10)
-   {
-      m_piaa1Scale = 5;
-   }
-   else if(m_piaa1Scale == 5)
-   {
-      m_piaa1Scale = 1;
-   }
-   else if(m_piaa1Scale == 1)
-   {
-      m_piaa1Scale = 100;
-   }
-   else
-   {
-      m_piaa1Scale = 1;
-   }
+    if( m_piaa1Scale == 100 )
+    {
+        m_piaa1Scale = 10;
+    }
+    else if( m_piaa1Scale == 10 )
+    {
+        m_piaa1Scale = 5;
+    }
+    else if( m_piaa1Scale == 5 )
+    {
+        m_piaa1Scale = 1;
+    }
+    else if( m_piaa1Scale == 1 )
+    {
+        m_piaa1Scale = 100;
+    }
+    else
+    {
+        m_piaa1Scale = 1;
+    }
 
-   char ss[5];
-   snprintf(ss, 5, "%d", m_piaa1Scale);
-   ui.button_piaa1_scale->setText(ss);
-
+    char ss[5];
+    snprintf( ss, 5, "%d", m_piaa1Scale );
+    ui.button_piaa1_scale->setText( ss );
 }
 
 void coronAlign::on_button_ipiaa_l_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa_l ) )
+        return;
+
     disablePicoButtons();
 
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-    ip.setDevice("picomotors");
-    ip.setName("ipiaa0x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaa0xPos + m_ipiaaScale*m_ipiaa0StepSize;
+    ip.setDevice( "picomotors" );
+    ip.setName( "ipiaa0x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_ipiaa0xPos + m_ipiaaScale * m_ipiaa0StepSize;
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 
-    pcf::IndiProperty ip1(pcf::IndiProperty::Number);
+    pcf::IndiProperty ip1( pcf::IndiProperty::Number );
 
-    ip1.setDevice("picomotors");
-    ip1.setName("ipiaa1x_pos");
-    ip1.add(pcf::IndiElement("target"));
-    ip1["target"] = m_ipiaa1xPos + m_ipiaaScale*m_ipiaa1StepSize;
+    ip1.setDevice( "picomotors" );
+    ip1.setName( "ipiaa1x_pos" );
+    ip1.add( pcf::IndiElement( "target" ) );
+    ip1["target"] = m_ipiaa1xPos + m_ipiaaScale * m_ipiaa1StepSize;
 
-    sendNewProperty(ip1);
+    sendNewProperty( ip1 );
 }
 
 void coronAlign::on_button_ipiaa_r_pressed()
 {
+    if( !commandEnabled( ui.button_ipiaa_r ) )
+        return;
+
     disablePicoButtons();
 
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-    ip.setDevice("picomotors");
-    ip.setName("ipiaa0x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaa0xPos - m_ipiaaScale*m_ipiaa0StepSize;
+    ip.setDevice( "picomotors" );
+    ip.setName( "ipiaa0x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_ipiaa0xPos - m_ipiaaScale * m_ipiaa0StepSize;
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 
-    pcf::IndiProperty ip1(pcf::IndiProperty::Number);
+    pcf::IndiProperty ip1( pcf::IndiProperty::Number );
 
-    ip1.setDevice("picomotors");
-    ip1.setName("ipiaa1x_pos");
-    ip1.add(pcf::IndiElement("target"));
-    ip1["target"] = m_ipiaa1xPos - m_ipiaaScale*m_ipiaa1StepSize;
+    ip1.setDevice( "picomotors" );
+    ip1.setName( "ipiaa1x_pos" );
+    ip1.add( pcf::IndiElement( "target" ) );
+    ip1["target"] = m_ipiaa1xPos - m_ipiaaScale * m_ipiaa1StepSize;
 
-    sendNewProperty(ip1);
+    sendNewProperty( ip1 );
 }
 
 void coronAlign::on_button_ipiaa_u_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_ipiaa_u ) )
+        return;
 
-    ip.setDevice("stageipiaa");
-    ip.setName("position");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaaPos - m_ipiaaScale*m_ipiaaStepSize;
-    sendNewProperty(ip);
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "stageipiaa" );
+    ip.setName( "position" );
+    ip.add( pcf::IndiElement( "target" ) );
+    m_ipiaaTarget = m_ipiaaPos - m_ipiaaScale * m_ipiaaStepSize;
+    ip["target"]  = m_ipiaaTarget;
+
+    startPendingCommand( m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested );
+    ui.button_ipiaa_u->setEnabled( false );
+    ui.button_ipiaa_d->setEnabled( false );
+    ui.button_ipiaa_scale->setEnabled( false );
+    ui.labeliPIAA->setEnabled( false );
+
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_ipiaa_d_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_ipiaa_d ) )
+        return;
 
-    ip.setDevice("stageipiaa");
-    ip.setName("position");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaaPos + m_ipiaaScale*m_ipiaaStepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-    sendNewProperty(ip);
+    ip.setDevice( "stageipiaa" );
+    ip.setName( "position" );
+    ip.add( pcf::IndiElement( "target" ) );
+    m_ipiaaTarget = m_ipiaaPos + m_ipiaaScale * m_ipiaaStepSize;
+    ip["target"]  = m_ipiaaTarget;
 
+    startPendingCommand( m_ipiaaCommandPending, m_ipiaaPendingTimer, m_ipiaaPendingRefreshRequested );
+    ui.button_ipiaa_u->setEnabled( false );
+    ui.button_ipiaa_d->setEnabled( false );
+    ui.button_ipiaa_scale->setEnabled( false );
+    ui.labeliPIAA->setEnabled( false );
+
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_ipiaa_scale_pressed()
 {
-    if( m_ipiaaScale == 100)
-   {
-      m_ipiaaScale = 10;
-   }
-   else if(m_ipiaaScale == 10)
-   {
-      m_ipiaaScale = 5;
-   }
-   else if(m_ipiaaScale == 5)
-   {
-      m_ipiaaScale = 1;
-   }
-   else if(m_ipiaaScale == 1)
-   {
-      m_ipiaaScale = 100;
-   }
-   else
-   {
-      m_ipiaaScale = 1;
-   }
+    if( m_ipiaaScale == 100 )
+    {
+        m_ipiaaScale = 10;
+    }
+    else if( m_ipiaaScale == 10 )
+    {
+        m_ipiaaScale = 5;
+    }
+    else if( m_ipiaaScale == 5 )
+    {
+        m_ipiaaScale = 1;
+    }
+    else if( m_ipiaaScale == 1 )
+    {
+        m_ipiaaScale = 100;
+    }
+    else
+    {
+        m_ipiaaScale = 1;
+    }
 
-   char ss[5];
-   snprintf(ss, 5, "%d", m_ipiaaScale);
-   ui.button_ipiaa_scale->setText(ss);
-
+    char ss[5];
+    snprintf( ss, 5, "%d", m_ipiaaScale );
+    ui.button_ipiaa_scale->setText( ss );
 }
 
 void coronAlign::on_button_ipiaa0_l_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_ipiaa0_l ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("ipiaa0x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaa0xPos + m_ipiaa0Scale*m_ipiaa0StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "ipiaa0x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_ipiaa0xPos + m_ipiaa0Scale * m_ipiaa0StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_ipiaa0_r_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_ipiaa0_r ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("ipiaa0x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaa0xPos - m_ipiaa0Scale*m_ipiaa0StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "ipiaa0x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_ipiaa0xPos - m_ipiaa0Scale * m_ipiaa0StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_ipiaa0_scale_pressed()
 {
-    if( m_ipiaa0Scale == 100)
-   {
-      m_ipiaa0Scale = 10;
-   }
-   else if(m_ipiaa0Scale == 10)
-   {
-      m_ipiaa0Scale = 5;
-   }
-   else if(m_ipiaa0Scale == 5)
-   {
-      m_ipiaa0Scale = 1;
-   }
-   else if(m_ipiaa0Scale == 1)
-   {
-      m_ipiaa0Scale = 100;
-   }
-   else
-   {
-      m_ipiaa0Scale = 1;
-   }
+    if( m_ipiaa0Scale == 100 )
+    {
+        m_ipiaa0Scale = 10;
+    }
+    else if( m_ipiaa0Scale == 10 )
+    {
+        m_ipiaa0Scale = 5;
+    }
+    else if( m_ipiaa0Scale == 5 )
+    {
+        m_ipiaa0Scale = 1;
+    }
+    else if( m_ipiaa0Scale == 1 )
+    {
+        m_ipiaa0Scale = 100;
+    }
+    else
+    {
+        m_ipiaa0Scale = 1;
+    }
 
-   char ss[5];
-   snprintf(ss, 5, "%d", m_ipiaa0Scale);
-   ui.button_ipiaa0_scale->setText(ss);
-
+    char ss[5];
+    snprintf( ss, 5, "%d", m_ipiaa0Scale );
+    ui.button_ipiaa0_scale->setText( ss );
 }
 
 void coronAlign::on_button_ipiaa1_l_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_ipiaa1_l ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("ipiaa1x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaa1xPos + m_ipiaa1Scale*m_ipiaa1StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "ipiaa1x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_ipiaa1xPos + m_ipiaa1Scale * m_ipiaa1StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_ipiaa1_r_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_ipiaa1_r ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("ipiaa1x_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaa1xPos - m_ipiaa1Scale*m_ipiaa1StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "ipiaa1x_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_ipiaa1xPos - m_ipiaa1Scale * m_ipiaa1StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_ipiaa1_u_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_ipiaa1_u ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("ipiaa1y_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaa1yPos + m_ipiaa1Scale*m_ipiaa1StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "ipiaa1y_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_ipiaa1yPos + m_ipiaa1Scale * m_ipiaa1StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_ipiaa1_d_pressed()
 {
-    pcf::IndiProperty ip(pcf::IndiProperty::Number);
+    if( !commandEnabled( ui.button_ipiaa1_d ) )
+        return;
 
-    ip.setDevice("picomotors");
-    ip.setName("ipiaa1y_pos");
-    ip.add(pcf::IndiElement("target"));
-    ip["target"] = m_ipiaa1yPos - m_ipiaa1Scale*m_ipiaa1StepSize;
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+
+    ip.setDevice( "picomotors" );
+    ip.setName( "ipiaa1y_pos" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = m_ipiaa1yPos - m_ipiaa1Scale * m_ipiaa1StepSize;
 
     disablePicoButtons();
 
-    sendNewProperty(ip);
+    sendNewProperty( ip );
 }
 
 void coronAlign::on_button_ipiaa1_scale_pressed()
 {
-    if( m_ipiaa1Scale == 100)
-   {
-      m_ipiaa1Scale = 10;
-   }
-   else if(m_ipiaa1Scale == 10)
-   {
-      m_ipiaa1Scale = 5;
-   }
-   else if(m_ipiaa1Scale == 5)
-   {
-      m_ipiaa1Scale = 1;
-   }
-   else if(m_ipiaa1Scale == 1)
-   {
-      m_ipiaa1Scale = 100;
-   }
-   else
-   {
-      m_ipiaa1Scale = 1;
-   }
+    if( m_ipiaa1Scale == 100 )
+    {
+        m_ipiaa1Scale = 10;
+    }
+    else if( m_ipiaa1Scale == 10 )
+    {
+        m_ipiaa1Scale = 5;
+    }
+    else if( m_ipiaa1Scale == 5 )
+    {
+        m_ipiaa1Scale = 1;
+    }
+    else if( m_ipiaa1Scale == 1 )
+    {
+        m_ipiaa1Scale = 100;
+    }
+    else
+    {
+        m_ipiaa1Scale = 1;
+    }
 
-   char ss[5];
-   snprintf(ss, 5, "%d", m_ipiaa1Scale);
-   ui.button_ipiaa1_scale->setText(ss);
-
+    char ss[5];
+    snprintf( ss, 5, "%d", m_ipiaa1Scale );
+    ui.button_ipiaa1_scale->setText( ss );
 }
 
-} //namespace xqt
+} // namespace xqt
 
 #include "moc_coronAlign.cpp"
 

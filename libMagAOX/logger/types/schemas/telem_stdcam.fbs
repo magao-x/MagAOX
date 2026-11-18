@@ -54,6 +54,10 @@ table Telem_stdcam_fb
 
    readout_speed:string;
 
+   analog_gain:string;
+
+   led:int8 = -1;
+
 }
 
 root_type Telem_stdcam_fb;

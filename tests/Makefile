@@ -1,7 +1,8 @@
 ############################################################
 #                makefile for MagAOX tests                 #
 #                                                          #
-# Add tests to tests.list  and build with `make`           #
+# Add tests to tests.list and build with `make`.            #
+# `make test` runs all suites and saves logs in results/.   #
 #                                                          #
 #                                                          #
 # notes:                                                   #
@@ -24,9 +25,7 @@ all:
 
 .PHONY: test
 test: all
-	@for test in ${TESTOBJS}; do \
-	  ./$$test || exit 1; \
-	done
+	@bash ./testMagAOX.bash
 
 .PHONY: clean
 clean:
@@ -41,11 +40,13 @@ realclean: clean
 	@rm -f test_stderr.txt
 
 .PHONY: coverage
-coverage:
+coverage: coverage_clean
 	${MAKE} all COVERAGE=1
 
 coverage_clean:
 	find .. -path '*/tests/*.gcno' -delete
 	find .. -path '*/tests/*.gcda' -delete
 	find .. -path '*/tests/*.gcov' -delete
-	${MAKE} clean COVERAGE=1
+	@rm -f testMain.gcno
+	@rm -f testMain.gcda
+	${MAKE} realclean COVERAGE=1

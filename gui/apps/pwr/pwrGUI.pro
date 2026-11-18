@@ -6,6 +6,8 @@ TARGET = pwrGUI
 include(../magaoxQtApp.pri)
 
 # Input
+INCLUDEPATH += ../../widgets/pwr
+
 HEADERS += ../../widgets/xWidgets/app.hpp \
            ../../widgets/xWidgets/xWidget.hpp \
            ../../widgets/pwr/pwr.hpp \

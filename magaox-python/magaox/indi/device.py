@@ -9,7 +9,8 @@ from functools import partial
 import logging
 import subprocess
 import psutil
-from purepyindi2 import Device, transports, messages
+from purepyindi2.device import Device
+from purepyindi2 import transports, messages
 from purepyindi2.properties import IndiProperty
 import pathlib
 import typing
@@ -17,7 +18,7 @@ import xconf
 import atexit
 
 
-from ..utils import PUREPYINDI_DEVICE_FILENAME_TIME_FORMAT, XFILENAME_TIME_FORMAT_OUT
+from ..utils import XFILENAME_TIME_FORMAT_OUT
 from ..constants import DEFAULT_PREFIX
 
 # n.b. replaced with logger scoped to device name during device init
@@ -159,10 +160,12 @@ class XDevice(Device):
 
     @classmethod
     def get_default_config_prefix(cls):
+        # needed before config is loaded, so only cls attributes
         return cls.prefix_dir + "/" + cls.config_dir + "/"
 
     @classmethod
     def get_default_config_path(cls):
+        # needed before config is loaded, so only cls attributes
         return cls.get_default_config_prefix() + cls.__name__ + ".conf"
 
     @property

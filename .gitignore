@@ -13,14 +13,18 @@ local/
 **/.*~
 **/*.stash
 **/*-swp
+
+#Qt:
 **/res/
 ui*.h
-
 **/bin/
 **/moc/
 **/moc_*
 makefile.*GUI
 gui/**/makefile.*
+
+#Agents:
+.codex
 
 #Ignore any old folders
 **/old/
@@ -57,6 +61,7 @@ apps/bmcCtrl/bmcCtrl
 apps/cacaoInterface/cacaoInterface
 apps/cameraSim/cameraSim
 apps/closedLoopIndi/closedLoopIndi
+apps/cred2Ctrl/cred2Ctrl
 
 #d
 apps/dmMode/dmMode
@@ -65,6 +70,7 @@ apps/dmPokeCenter/dmPokeCenter
 apps/dmPokeXCorr/dmPokeXCorr
 apps/dmRecon/dmRecon
 apps/dmSpeckle/dmSpeckle
+apps/dmSyncopation/dmSyncopation
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl
@@ -100,6 +106,7 @@ apps/koolanceCtrl/koolanceCtrl
 
 #l
 apps/loPredCtrl/loPredCtrl
+apps/loopTimingMonitor/loopTimingMonitor
 
 #m
 apps/mcp3008Ctrl/mcp3008Ctrl
@@ -197,6 +204,8 @@ utils/logdump/logdump
 utils/logsurgeon/logsurgeon
 utils/cursesINDI/cursesINDI
 utils/logstream/logstream
+utils/shmimDelta/shmimDelta
+utils/shmimInfo/shmimInfo
 utils/shmimPlot/shmimPlot
 utils/xrif2shmim/xrif2shmim
 utils/xrif2fits/xrif2fits
@@ -210,6 +219,7 @@ tests/singleTest
 tests/testMagAOX
 tests/testMagAOXsetuid
 tests/test_stderr.txt
+tests/results/
 
 
 #Devel stuff in flatlogs
@@ -244,3 +254,5 @@ coverage_report/
 
 # Valgrind logs
 tests/valgrind/logs/*
+
+apps/virtualPDU/virtualPDU

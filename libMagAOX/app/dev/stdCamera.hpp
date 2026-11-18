@@ -1,20 +1,26 @@
 /** \file stdCamera.hpp
  * \brief Standard camera interface
  *
- * \author Jared R. Males (jaredmales@gmail.com)
- *
  * \ingroup app_files
  */
 
 #ifndef stdCamera_hpp
 #define stdCamera_hpp
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <sstream>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
+#include <vector>
 
 #include <mx/app/application.hpp>
+#include <mx/math/floatUtils.hpp>
 
 #include "../MagAOXApp.hpp"
+#include "../../common/roiGeometry.hpp"
 
 namespace MagAOX
 {
@@ -30,27 +36,123 @@ namespace dev
  */
 struct cameraConfig
 {
-    std::string m_configFile;    ///< The file to use for this mode, e.g. an EDT configuration file.
+    std::string m_configFile; ///< The file to use for this mode, e.g. an EDT configuration file.
+
     std::string m_serialCommand; ///< The command to send to the camera to place it in this mode.
-    unsigned    m_centerX{ 0 };
-    unsigned    m_centerY{ 0 };
-    unsigned    m_sizeX{ 0 };
-    unsigned    m_sizeY{ 0 };
-    unsigned    m_binningX{ 0 };
-    unsigned    m_binningY{ 0 };
 
-    unsigned m_digitalBinX{ 0 };
-    unsigned m_digitalBinY{ 0 };
+    unsigned m_centerX{ 0 }; ///< Mode ROI center column.
 
-    float m_maxFPS{ 0 };
+    unsigned m_centerY{ 0 }; ///< Mode ROI center row.
+
+    unsigned m_sizeX{ 0 }; ///< Mode ROI width before binning.
+
+    unsigned m_sizeY{ 0 }; ///< Mode ROI height before binning.
+
+    unsigned m_binningX{ 0 }; ///< Mode horizontal camera binning.
+
+    unsigned m_binningY{ 0 }; ///< Mode vertical camera binning.
+
+    unsigned m_digitalBinX{ 0 }; ///< Mode horizontal software binning.
+
+    unsigned m_digitalBinY{ 0 }; ///< Mode vertical software binning.
+
+    float m_maxFPS{ 0 }; ///< Maximum supported frame rate for this mode, in Hz.
 };
 
 typedef std::unordered_map<std::string, cameraConfig> cameraConfigMap;
 
+/// Strip leading and trailing whitespace and one matching pair of wrapping double quotes.
+inline void stripQuotedWhitespace( std::string &value /**< [in/out] Text to trim and unquote. */ )
+{
+    if( value.size() == 0 )
+    {
+        return;
+    }
+
+    size_t first = value.find_first_not_of( " \t\r\n" );
+    if( first == std::string::npos )
+    {
+        value.clear();
+        return;
+    }
+
+    size_t last = value.find_last_not_of( " \t\r\n" );
+    value       = value.substr( first, last - first + 1 );
+
+    if( value.size() >= 2 && value.front() == '\"' && value.back() == '\"' )
+    {
+        value = value.substr( 1, value.size() - 2 );
+    }
+}
+
 /// Load the camera configurations contained in the app configuration into a map
-int loadCameraConfig( cameraConfigMap &ccmap, ///< [out] the map in which to place the configurations found in config
-                      mx::app::appConfigurator &config ///< [in] the application configuration structure
-);
+int loadCameraConfig( cameraConfigMap          &ccmap /**< [out] The map receiving the camera configurations. */,
+                      mx::app::appConfigurator &config /**< [in] The application configuration. */ );
+
+/// Detect whether a derived camera enables configurable temperature limits.
+template <class derivedT, class = void>
+struct stdCameraHasTempLimits : std::false_type
+{
+};
+
+/// Specialization for cameras that define `c_stdCamera_tempLimits`.
+template <class derivedT>
+struct stdCameraHasTempLimits<derivedT, std::void_t<decltype( derivedT::c_stdCamera_tempLimits )>>
+    : std::bool_constant<derivedT::c_stdCamera_tempLimits>
+{
+};
+
+/// Detect whether a derived camera exposes stdCamera fan-speed control support.
+template <class derivedT, class = void>
+struct stdCameraHasFanSpeed : std::false_type
+{
+};
+
+/// Specialization for cameras that define `c_stdCamera_fanSpeed`.
+template <class derivedT>
+struct stdCameraHasFanSpeed<derivedT, std::void_t<decltype( derivedT::c_stdCamera_fanSpeed )>>
+    : std::bool_constant<derivedT::c_stdCamera_fanSpeed>
+{
+};
+
+/// Detect whether a derived camera exposes stdCamera LED control support.
+template <class derivedT, class = void>
+struct stdCameraHasLED : std::false_type
+{
+};
+
+/// Specialization for cameras that define `c_stdCamera_led`.
+template <class derivedT>
+struct stdCameraHasLED<derivedT, std::void_t<decltype( derivedT::c_stdCamera_led )>>
+    : std::bool_constant<derivedT::c_stdCamera_led>
+{
+};
+
+/// Detect whether a derived camera exposes stdCamera analog-gain control support.
+template <class derivedT, class = void>
+struct stdCameraHasAnalogGain : std::false_type
+{
+};
+
+/// Specialization for cameras that define `c_stdCamera_analogGain`.
+template <class derivedT>
+struct stdCameraHasAnalogGain<derivedT, std::void_t<decltype( derivedT::c_stdCamera_analogGain )>>
+    : std::bool_constant<derivedT::c_stdCamera_analogGain>
+{
+};
+
+/// Detect whether a derived camera exposes stdCamera focus-state and goto-focus support.
+template <class derivedT, class = void>
+struct stdCameraHasFocus : std::false_type
+{
+};
+
+/// Specialization for cameras that define `c_stdCamera_hasFocus`.
+template <class derivedT>
+struct stdCameraHasFocus<derivedT, std::void_t<decltype( derivedT::c_stdCamera_hasFocus )>>
+    : std::bool_constant<derivedT::c_stdCamera_hasFocus>
+{
+};
 
 /// MagAO-X standard camera interface
 /** Implements the standard interface to a MagAO-X camera.  The derived class `derivedT` must
@@ -84,6 +186,16 @@ int loadCameraConfig( cameraConfigMap &ccmap, ///< [out] the map in which to pla
  *               int setTempControl(); // set temp control status according to m_tempControlStatusSet
  *               int setTempSetPt(); // set the temperature set point accordin to m_ccdTempSetpt
  *           \endcode
+ *
+ *         - Set \ref m_startupTemp in the derived constructor to the camera's default power-on target.
+ *           The \c camera.startupTemp setting overrides that default and is applied after powerOnDefaults().
+ *         - Define the optional static configuration variable in derivedT as
+ *           \code
+ *               static constexpr bool c_stdCamera_tempLimits = true; //or: false
+ *           \endcode
+ *           to expose \c camera.minTemp and \c camera.maxTemp, defaulting to inclusive -55 and 20 C.
+ *           If omitted, configurable limits are disabled. Call \ref setTempLimits with the camera's hardware
+ *           bounds; it intersects them with the user range. Validated callbacks restore the old target on rejection.
  *
  *         - A static configuration variable must be defined in derivedT as
  *           \code
@@ -160,10 +272,10 @@ int loadCameraConfig( cameraConfigMap &ccmap, ///< [out] the map in which to pla
  *          function must be defined which sets the camera according to \ref m_fanSpeedNameSet.
  *          The implementation must also manage \ref m_fanSpeedName, keeping it up to date.
  *
- *        - The configuration settings "camera.fanSpeedControl" and "camera.defaultFanSpeed"
- *          are also exposed. The former determines whether the INDI control is published, and the latter
- *          sets the default fan speed applied after power-on. The value of \ref m_defaultFanSpeed must
- *          be one of `high`, `medium`, `low`, or `off`.
+ *        - The configuration settings `camera.fanSpeedControl` and `camera.defaultFanSpeed` are exposed.
+ *          `camera.fanSpeedControl` controls whether the INDI fan-speed property is published and defaults to `true`.
+ *          `camera.defaultFanSpeed` sets the default fan speed applied after power-on and must match one of the
+ *          configured entries in \ref m_fanSpeedNames.
  *
  *     - Exposure Time:
  *        - A static configuration variable must be defined in derivedT as
@@ -197,6 +309,39 @@ int loadCameraConfig( cameraConfigMap &ccmap, ///< [out] the map in which to pla
  *         - If either `c_stdCamera_fpsCtrl == true` or `c_stdCamera_fps == true` then derivedT must also
  *           keep \ref m_fps up to date.
  *
+ *     - Analog Gain:
+ *
+ *       - A static configuration variable may be defined in derivedT as
+ *         \code
+ *             static constexpr bool c_stdCamera_analogGain = true; //or: false
+ *         \endcode
+ *         which determines whether or not discrete analog-gain controls are exposed. If omitted, analog-gain
+ *         controls default to off.
+ *
+ *       - If that is set to true the derivedT must implement
+ *         \code
+ *             int setAnalogGain(); // configure the camera based on m_analogGainNameSet
+ *         \endcode
+ *         and should populate \ref m_analogGainNames (and optionally \ref m_analogGainNameLabels) before
+ *         stdCamera::appStartup().
+ *
+ *     - LED Control:
+ *
+ *       - A static configuration variable may be defined in derivedT as
+ *         \code
+ *             static constexpr bool c_stdCamera_led = true; //or: false
+ *         \endcode
+ *         which determines whether or not status LED controls are exposed. If omitted, LED controls default to off.
+ *
+ *       - If that is set to true the derivedT must implement
+ *         \code
+ *             int setLED(); // configure the camera according to m_ledStateSet
+ *         \endcode
+ *         and should keep \ref m_ledState up to date.
+ *
+ *       - The configuration setting `camera.startupLED` is exposed for LED-capable cameras and sets the default
+ *         LED state applied after power-on.
+ *
  *     - Synchro Control:
  *
  *       - A static configuration variable must be defined in derivedT as
@@ -223,10 +368,27 @@ int loadCameraConfig( cameraConfigMap &ccmap, ///< [out] the map in which to pla
  *          \endcode
  *          must be defined which sets the camera EM Gain to \ref m_emGainSet.
  *
+ *        - The standard `emgain_off` request calls `int setEMGainOff()` with the INDI mutex held.
+ *          The derived camera chooses unity gain or disables EM gain, updates \ref m_emGainSet, and
+ *          applies it through its normal gain setter. This request remains available without temperature lock.
+ *          The callback returns zero on success or a negative value on failure; it must not increase gain above 1.
+ *
  *        - If true the implementation must keep \ref m_emGain up to date.
  *
  *        - If true the value of \ref m_maxEMGain should be set by the implementation and managed
  *          as needed. Additionally the configuration setting "camera.maxEMGain" is exposed.
+ *
+ *        - For cameras with temperature control, `camera.emGainRequiresTemp` optionally requires active,
+ *          on-target cooling at the setpoint specified by `camera.emGainTemp` before accepting EM gain above 1.
+ *          The guard defaults to false; enabling it requires a finite `camera.emGainTemp`, in C, independent of
+ *          `camera.startupTemp`. The requested setpoint must match exactly; the camera determines temperature lock.
+ *          Gain 0 or 1 remains available subject to the derived camera's limits. This guards new requests; it does
+ *          not reduce existing gain when temperature lock is lost or the setpoint changes.
+ *          `camera.emGainTempMode` defaults to `locked`. The optional `maxTemp` mode instead requires a valid
+ *          measured temperature at or below `camera.emGainMaxTemp`, ignoring lock status but retaining active
+ *          cooling and the required setpoint. Derived cameras must invalidate readings during power, target,
+ *          and configuration transitions, then call updateTempReading() after a complete successful poll.
+ *          The read-only `emgain_temp_ready.toggle` reports the same temperature permission used by the guard.
  *
  *     - Camera Modes:
  *
@@ -284,6 +446,37 @@ int loadCameraConfig( cameraConfigMap &ccmap, ///< [out] the map in which to pla
  *         \endcode
  *         which shuts the shutter if the argument is 0, opens it otherwise.
  *
+ *     - Focus State and Control:
+ *
+ *       - A static configuration variable may be defined in derivedT as
+ *         \code
+ *             static constexpr bool c_stdCamera_hasFocus = true; //or: false
+ *         \endcode
+ *         which determines whether or not focus-state reporting and goto-focus control are available. If omitted,
+ *         focus support defaults to off.
+ *
+ *       - If true then the derived class must implement
+ *         \code
+ *             bool checkFocus(); // return true when the current instrument state is in focus
+ *             int gotoFocus(); // command the focus stage to the current in-focus position
+ *         \endcode
+ *
+ *       - The focus controls are only published when \ref m_hasFocus is true at runtime. Derived classes may set
+ *         \ref m_hasFocus directly when they provide custom focus logic. When both stdCamera focus helpers are fully
+ *         configured, stdCamera enables \ref m_hasFocus automatically.
+ *
+ *       - When focus control is enabled, stdCamera publishes the read-only switch `focus.state`, which is `On` when
+ *         \ref checkFocus returns `true`, and the request switch `goto_focus.request`, which dispatches to
+ *         \ref gotoFocus when pressed.
+ *
+ *       - Derived classes can use \ref checkFocusSwitchState when an external switch property indicates focus state
+ *         via a configured switch element. By default that element being `On` means "out of focus", and
+ *         `focus.stateElementOnMeansInFocus=true` flips the interpretation so `On` means "in focus".
+ *
+ *       - Derived classes can use \ref sendGotoFocusCommand to derive and send a target preset name from the
+ *         configuration keys `focus.gotoFocus.numSwitches`, `focus.gotoFocus.property1...propertyN`,
+ *         `focus.gotoFocus.format`, and `focus.gotoFocus.targetProperty`.
+ *
  *     - State:
  *
  *       - A static configuration variable must be defined in derivedT as
@@ -313,7 +506,23 @@ template <class derivedT>
 class stdCamera
 {
   protected:
-    /** \name Configurable Parameters
+    static constexpr bool c_hasTempLimits =
+        stdCameraHasTempLimits<derivedT>::value; ///< True when the derived camera enables configurable temperature
+                                                 ///< limits.
+
+    static constexpr bool c_hasFanSpeed =
+        stdCameraHasFanSpeed<derivedT>::value; ///< True when the derived camera exposes fan-speed control.
+
+    static constexpr bool c_hasLED =
+        stdCameraHasLED<derivedT>::value; ///< True when the derived camera exposes LED control.
+
+    static constexpr bool c_hasAnalogGain =
+        stdCameraHasAnalogGain<derivedT>::value; ///< True when the derived camera exposes analog-gain control.
+
+    static constexpr bool c_hasFocus = stdCameraHasFocus<derivedT>::value; ///< True when the derived camera exposes
+                                                                           ///< focus-state and goto-focus support.
+
+    /** \name Configurable Parameters - Data
      * @{
      */
 
@@ -321,37 +530,70 @@ class stdCamera
 
     std::string m_startupMode; ///< The camera mode to load during first init after a power-on.
 
-    float m_startupTemp{ -999 }; ///< The temperature to set after a power-on.  Set to <= -999 to not use [default].
+    float m_startupTemp{ -999 }; ///< Configured power-on target, in C; values <= -999 retain the derived app's target.
 
-    std::string m_defaultReadoutSpeed;             ///< The default readout speed of the camera.
-    std::string m_defaultVShiftSpeed;              ///< The default readout speed of the camera.
-    bool        m_fanSpeedControlEnabled{ false }; ///< Whether or not fan-speed control is published through INDI.
-    std::string m_defaultFanSpeed;                 ///< The default fan speed to apply after power on.
+    float m_configMinTemp{ -55 }; ///< User-configured inclusive minimum temperature setpoint, in C.
+
+    float m_configMaxTemp{ 20 }; ///< User-configured inclusive maximum temperature setpoint, in C.
+
+    std::string m_defaultReadoutSpeed; ///< The default readout speed of the camera.
+
+    std::string m_defaultVShiftSpeed; ///< The default readout speed of the camera.
+
+    bool m_fanSpeedControlEnabled{ true }; ///< Whether or not fan-speed control is published through INDI.
+
+    std::string m_defaultFanSpeed; ///< The default fan speed to apply after power on.
+
+    bool m_defaultLEDState{ true }; ///< The default LED state to apply after power on.
+
+    /// Enable the configured temperature requirement for EM gain above 1 when temperature control is supported.
+    bool m_emGainRequiresTemp{ false };
+
+    /// Required EM-gain temperature setpoint, in C; nonfinite until explicitly configured.
+    float m_emGainTemp{ std::numeric_limits<float>::quiet_NaN() };
+
+    std::string m_emGainTempMode{ "locked" }; ///< Temperature criterion: camera lock or a maximum measured temperature.
+
+    /// Inclusive measured-temperature ceiling in C, required when maxTemp enforcement is enabled.
+    float m_emGainMaxTemp{ std::numeric_limits<float>::quiet_NaN() };
 
     ///@}
 
-    /** \name Temperature Control Interface
+    /** \name Temperature Control Interface - Data
      * @{
      */
 
-    float m_minTemp{ -60 };
-    float m_maxTemp{ 30 };
-    float m_stepTemp{ 0 };
+    float m_minTemp{ -60 }; ///< Effective inclusive minimum temperature target, in C.
+
+    float m_maxTemp{ 30 }; ///< Effective inclusive maximum temperature target, in C.
+
+    float m_stepTemp{ 0 }; ///< Temperature step reported to INDI clients.
+
+    double m_minTempCamera{ std::numeric_limits<float>::lowest() }; ///< Minimum permitted by the camera, in C.
+
+    double m_maxTempCamera{ std::numeric_limits<float>::max() }; ///< Maximum permitted by the camera, in C.
 
     float m_ccdTemp{ -999 }; ///< The current temperature, in C
 
+    bool m_ccdTempValid{ false }; ///< A complete temperature poll succeeded since the last invalidating transition.
+
     float m_ccdTempSetpt{ -999 }; ///< The desired temperature, in C
 
-    bool m_tempControlStatus{ false };    ///< Whether or not temperature control is active
+    bool m_tempControlStatus{ false }; ///< Whether or not temperature control is active
+
     bool m_tempControlStatusSet{ false }; ///< Desired state of temperature control
 
     bool m_tempControlOnTarget{ false }; ///< Whether or not the temperature control system is on its target temperature
 
     std::string m_tempControlStatusStr; ///< Camera specific description of temperature control status.
 
-    pcf::IndiProperty m_indiP_temp;
-    pcf::IndiProperty m_indiP_tempcont;
-    pcf::IndiProperty m_indiP_tempstat;
+    pcf::IndiProperty m_indiP_temp; ///< INDI sensor temperature and requested target.
+
+    pcf::IndiProperty m_indiP_tempcont; ///< INDI temperature-controller enable request.
+
+    pcf::IndiProperty m_indiP_tempstat; ///< INDI temperature-control status text.
+
+    pcf::IndiProperty m_indiP_emGainTempReady; ///< Read-only temperature permission for EM-gain requests above 1.
 
     ///@}
 
@@ -359,66 +601,115 @@ class stdCamera
      * @{
      */
 
-    std::vector<std::string> m_readoutSpeedNames;
-    std::vector<std::string> m_readoutSpeedNameLabels;
+    std::vector<std::string> m_readoutSpeedNames; ///< Supported readout-speed identifiers.
 
-    std::string m_readoutSpeedName;    ///< The current readout speed name
+    std::vector<std::string> m_readoutSpeedNameLabels; ///< Display labels for supported readout speeds.
+
+    std::string m_readoutSpeedName; ///< The current readout speed name
+
     std::string m_readoutSpeedNameSet; ///< The user requested readout speed name, to be set by derived()
 
-    std::vector<std::string> m_vShiftSpeedNames;
-    std::vector<std::string> m_vShiftSpeedNameLabels;
+    std::vector<std::string> m_vShiftSpeedNames; ///< Supported vertical-shift identifiers.
 
-    std::string m_vShiftSpeedName;    ///< The current vshift speed name
+    std::vector<std::string> m_vShiftSpeedNameLabels; ///< Display labels for supported vertical-shift speeds.
+
+    std::string m_vShiftSpeedName; ///< The current vshift speed name
+
     std::string m_vShiftSpeedNameSet; ///< The user requested vshift speed name, to be set by derived()
 
-    float m_adcSpeed{ 0 };
-    float m_vshiftSpeed{ 0 };
+    float m_adcSpeed{ 0 }; ///< Reported ADC sampling speed.
 
-    float m_emGain{ 1 };    ///< The camera's current EM gain (if available).
+    float m_vshiftSpeed{ 0 }; ///< Reported vertical-shift speed.
+
+    float m_emGain{ 1 }; ///< The camera's current EM gain (if available).
+
     float m_emGainSet{ 1 }; ///< The camera's EM gain, as set by the user.
+
     float m_maxEMGain{ 1 }; ///< The configurable maximum EM gain.  To be enforced in derivedT.
 
-    pcf::IndiProperty m_indiP_readoutSpeed;
-    pcf::IndiProperty m_indiP_vShiftSpeed;
+    pcf::IndiProperty m_indiP_readoutSpeed; ///< INDI readout-speed selection.
 
-    pcf::IndiProperty m_indiP_emGain;
+    pcf::IndiProperty m_indiP_vShiftSpeed; ///< INDI vertical-shift selection.
 
-    ///@}
+    pcf::IndiProperty m_indiP_emGain; ///< INDI electron-multiplication gain and target.
 
-    /** \name Fan Speed Control
-     * @{
-     */
-
-    std::vector<std::string> m_fanSpeedNames;      ///< The selectable fan-speed names.
-    std::vector<std::string> m_fanSpeedNameLabels; ///< User-facing labels for the fan-speed names.
-
-    std::string m_fanSpeedName;    ///< The current fan-speed name.
-    std::string m_fanSpeedNameSet; ///< The requested fan-speed name to be applied by derivedT.
-
-    pcf::IndiProperty m_indiP_fanSpeed; ///< Property used to control the selected fan speed.
+    pcf::IndiProperty m_indiP_emGainOff; ///< Momentary request for the camera-specific unity or disabled EM gain.
 
     ///@}
 
     /** \name Exposure Control
      * @{
      */
-    float m_minExpTime{ 0 };                                 ///< The minimum exposure time, used for INDI attributes
+    float m_minExpTime{ 0 }; ///< The minimum exposure time, used for INDI attributes
+
     float m_maxExpTime{ std::numeric_limits<float>::max() }; ///< The maximum exposure time, used for INDI attributes
+
     float m_stepExpTime{ 0 }; ///< The maximum exposure time stepsize, used for INDI attributes
 
-    float m_expTime{ 0 };    ///< The current exposure time, in seconds.
+    float m_expTime{ 0 }; ///< The current exposure time, in seconds.
+
     float m_expTimeSet{ 0 }; ///< The exposure time, in seconds, as set by user.
 
-    float m_minFPS{ 0 };                                 ///< The minimum FPS, used for INDI attributes
-    float m_maxFPS{ std::numeric_limits<float>::max() }; ///< The maximum FPS, used for INDI attributes
-    float m_stepFPS{ 0 };                                ///< The FPS step size, used for INDI attributes
+    float m_minFPS{ 0 }; ///< The minimum FPS, used for INDI attributes
 
-    float m_fps{ 0 };    ///< The current FPS.
+    float m_maxFPS{ std::numeric_limits<float>::max() }; ///< The maximum FPS, used for INDI attributes
+
+    float m_stepFPS{ 0 }; ///< The FPS step size, used for INDI attributes
+
+    float m_fps{ 0 }; ///< The current FPS.
+
     float m_fpsSet{ 0 }; ///< The commanded fps, as set by user.
 
-    pcf::IndiProperty m_indiP_exptime;
+    pcf::IndiProperty m_indiP_exptime; ///< INDI exposure time and target.
 
-    pcf::IndiProperty m_indiP_fps;
+    pcf::IndiProperty m_indiP_fps; ///< INDI frame rate and target.
+
+    ///@}
+
+    /** \name Fan Control
+     * @{
+     */
+    std::vector<std::string> m_fanSpeedNames; ///< Valid fan-control option names for the INDI selection switch.
+
+    std::vector<std::string> m_fanSpeedNameLabels; ///< Optional GUI labels for the fan-control options.
+
+    std::string m_fanSpeedName{ "" }; ///< Current fan-control option name.
+
+    std::string m_fanSpeedNameSet{ "" }; ///< Requested fan-control option name.
+
+    bool m_fanSpeedValid{ false }; ///< True once the current fan-control state is known.
+
+    pcf::IndiProperty m_indiP_fanSpeed; ///< Property used to select the fan-speed mode.
+
+    ///@}
+
+    /** \name Analog Gain
+     * @{
+     */
+    std::vector<std::string> m_analogGainNames; ///< Valid analog-gain option names for the INDI selection switch.
+
+    std::vector<std::string> m_analogGainNameLabels; ///< Optional GUI labels for the analog-gain options.
+
+    std::string m_analogGainName{ "" }; ///< Current analog-gain option name.
+
+    std::string m_analogGainNameSet{ "" }; ///< Requested analog-gain option name.
+
+    bool m_analogGainValid{ false }; ///< True once the current analog-gain state is known.
+
+    pcf::IndiProperty m_indiP_analogGain; ///< Property used to select the analog-gain mode.
+
+    ///@}
+
+    /** \name LED Control
+     * @{
+     */
+    bool m_ledState{ false }; ///< Current status LED state.
+
+    bool m_ledStateSet{ false }; ///< Requested status LED state.
+
+    bool m_ledStateValid{ false }; ///< True once the current LED state is known.
+
+    pcf::IndiProperty m_indiP_led; ///< Property used to control the status LED state.
 
     ///@}
 
@@ -429,7 +720,7 @@ class stdCamera
 
     bool m_synchro{ false }; ///< Status of synchronization, true is on, false is off.
 
-    pcf::IndiProperty m_indiP_synchro;
+    pcf::IndiProperty m_indiP_synchro; ///< INDI external-synchronization toggle.
 
     ///@}
 
@@ -448,72 +739,118 @@ class stdCamera
 
     ///@}
 
-    /** \name ROIs
+    /** \name ROIs - Data
      * ROI controls are exposed if derivedT::c_stdCamera_usesROI==true
      * @{
      */
-    struct roi
-    {
-        float x{ 0 };
-        float y{ 0 };
-        int   w{ 0 };
-        int   h{ 0 };
-        int   bin_x{ 0 };
-        int   bin_y{ 0 };
-    };
+    /// Native ROI representation retained for derived camera applications.
+    using roi = MagAOX::roi::region;
 
-    roi m_currentROI;
-    roi m_nextROI;
-    roi m_lastROI;
+    /// Coordinate convention of the existing absolute interface.
+    MagAOX::roi::units m_roiUnits{ MagAOX::roi::units::sensor };
 
-    float m_minROIx{ 0 };
-    float m_maxROIx{ 1023 };
-    float m_stepROIx{ 0 };
+    /// Image-relative horizontal target; the absolute target remains authoritative.
+    pcf::IndiProperty m_indiP_roi_x_relative;
 
-    float m_minROIy{ 0 };
-    float m_maxROIy{ 1023 };
-    float m_stepROIy{ 0 };
+    /// Image-relative vertical target.
+    pcf::IndiProperty m_indiP_roi_y_relative;
 
-    int m_minROIWidth{ 1 };
-    int m_maxROIWidth{ 1024 };
-    int m_stepROIWidth{ 1 };
+    /// Advertised native coordinate convention.
+    pcf::IndiProperty m_indiP_roi_coordinate_system;
 
-    int m_minROIHeight{ 1 };
-    int m_maxROIHeight{ 1024 };
-    int m_stepROIHeight{ 1 };
+    /// Coherent applied/target ROI and preset classification.
+    pcf::IndiProperty m_indiP_roi_region_state;
 
-    int m_minROIBinning_x{ 1 };
-    int m_maxROIBinning_x{ 4 };
-    int m_stepROIBinning_x{ 1 };
+    /// Completed validation, including before/after and reference geometry.
+    pcf::IndiProperty m_indiP_roi_check_result;
 
-    int m_minROIBinning_y{ 1 };
-    int m_maxROIBinning_y{ 4 };
-    int m_stepROIBinning_y{ 1 };
+    /// Monotonic completion identifier, independent of unchanged target values.
+    uint64_t m_roiCheckSequence{ 0 };
 
-    float m_default_x{ 0 };     ///< Power-on ROI center x coordinate.
-    float m_default_y{ 0 };     ///< Power-on ROI center y coordinate.
-    int   m_default_w{ 0 };     ///< Power-on ROI width.
-    int   m_default_h{ 0 };     ///< Power-on ROI height.
-    int   m_default_bin_x{ 1 }; ///< Power-on ROI x binning.
-    int   m_default_bin_y{ 1 }; ///< Power-on ROI y binning.
+    roi m_currentROI; ///< Currently applied camera ROI.
 
-    float m_full_x{ 0 };     ///< The full ROI center x coordinate.
-    float m_full_y{ 0 };     ///< The full ROI center y coordinate.
-    int   m_full_w{ 0 };     ///< The full ROI width.
-    int   m_full_h{ 0 };     ///< The full ROI height.
-    int   m_full_bin_x{ 1 }; ///< The x-binning in the full ROI.
-    int   m_full_bin_y{ 1 }; ///< The y-binning in the full ROI.
+    roi m_nextROI; ///< Requested camera ROI awaiting validation and application.
+
+    roi m_lastROI; ///< Previous applied ROI retained for restoration.
+
+    float m_minROIx{ 0 }; ///< Minimum permitted ROI horizontal center.
+
+    float m_maxROIx{ 1023 }; ///< Maximum permitted ROI horizontal center.
+
+    float m_stepROIx{ 0 }; ///< Step size for permitted ROI horizontal center.
+
+    float m_minROIy{ 0 }; ///< Minimum permitted ROI vertical center.
+
+    float m_maxROIy{ 1023 }; ///< Maximum permitted ROI vertical center.
+
+    float m_stepROIy{ 0 }; ///< Step size for permitted ROI vertical center.
+
+    int m_minROIWidth{ 1 }; ///< Minimum permitted ROI width.
+
+    int m_maxROIWidth{ 1024 }; ///< Maximum permitted ROI width.
+
+    int m_stepROIWidth{ 1 }; ///< Step size for permitted ROI width.
+
+    int m_minROIHeight{ 1 }; ///< Minimum permitted ROI height.
+
+    int m_maxROIHeight{ 1024 }; ///< Maximum permitted ROI height.
+
+    int m_stepROIHeight{ 1 }; ///< Step size for permitted ROI height.
+
+    int m_minROIBinning_x{ 1 }; ///< Minimum permitted ROI horizontal binning.
+
+    int m_maxROIBinning_x{ 4 }; ///< Maximum permitted ROI horizontal binning.
+
+    int m_stepROIBinning_x{ 1 }; ///< Step size for permitted ROI horizontal binning.
+
+    int m_minROIBinning_y{ 1 }; ///< Minimum permitted ROI vertical binning.
+
+    int m_maxROIBinning_y{ 4 }; ///< Maximum permitted ROI vertical binning.
+
+    int m_stepROIBinning_y{ 1 }; ///< Step size for permitted ROI vertical binning.
+
+    float m_default_x{ 0 }; ///< Power-on ROI center x coordinate.
+
+    float m_default_y{ 0 }; ///< Power-on ROI center y coordinate.
+
+    int m_default_w{ 0 }; ///< Power-on ROI width.
+
+    int m_default_h{ 0 }; ///< Power-on ROI height.
+
+    int m_default_bin_x{ 1 }; ///< Power-on ROI x binning.
+
+    int m_default_bin_y{ 1 }; ///< Power-on ROI y binning.
+
+    float m_full_x{ 0 }; ///< The full ROI center x coordinate.
+
+    float m_full_y{ 0 }; ///< The full ROI center y coordinate.
+
+    int m_full_w{ 0 }; ///< The full ROI width.
+
+    int m_full_h{ 0 }; ///< The full ROI height.
+
+    int m_full_bin_x{ 1 }; ///< The x-binning in the full ROI.
+
+    int m_full_bin_y{ 1 }; ///< The y-binning in the full ROI.
 
     float m_full_currbin_x{ 0 }; ///< The current-binning full ROI center x coordinate.
-    float m_full_currbin_y{ 0 }; ///< The current-binning full ROI center y coordinate.
-    int   m_full_currbin_w{ 0 }; ///< The current-binning full ROI width.
-    int   m_full_currbin_h{ 0 }; ///< The current-binning full ROI height.
 
-    pcf::IndiProperty m_indiP_roi_x;     ///< Property used to set the ROI x center coordinate
-    pcf::IndiProperty m_indiP_roi_y;     ///< Property used to set the ROI x center coordinate
-    pcf::IndiProperty m_indiP_roi_w;     ///< Property used to set the ROI width
-    pcf::IndiProperty m_indiP_roi_h;     ///< Property used to set the ROI height
+    float m_full_currbin_y{ 0 }; ///< The current-binning full ROI center y coordinate.
+
+    int m_full_currbin_w{ 0 }; ///< The current-binning full ROI width.
+
+    int m_full_currbin_h{ 0 }; ///< The current-binning full ROI height.
+
+    pcf::IndiProperty m_indiP_roi_x; ///< Property used to set the ROI x center coordinate
+
+    pcf::IndiProperty m_indiP_roi_y; ///< Property used to set the ROI x center coordinate
+
+    pcf::IndiProperty m_indiP_roi_w; ///< Property used to set the ROI width
+
+    pcf::IndiProperty m_indiP_roi_h; ///< Property used to set the ROI height
+
     pcf::IndiProperty m_indiP_roi_bin_x; ///< Property used to set the ROI x binning
+
     pcf::IndiProperty m_indiP_roi_bin_y; ///< Property used to set the ROI y binning
 
     pcf::IndiProperty m_indiP_fullROI; ///< Property used to preset the full ROI dimensions.
@@ -522,11 +859,15 @@ class stdCamera
 
     pcf::IndiProperty m_indiP_roi_set; ///< Property used to trigger setting the ROI
 
-    pcf::IndiProperty m_indiP_roi_full;     ///< Property used to trigger setting the full ROI.
-    pcf::IndiProperty m_indiP_roi_fullbin;  ///< Property used to trigger setting the full in current binning ROI.
+    pcf::IndiProperty m_indiP_roi_full; ///< Property used to trigger setting the full ROI.
+
+    pcf::IndiProperty m_indiP_roi_fullbin; ///< Property used to trigger setting the full in current binning ROI.
+
     pcf::IndiProperty m_indiP_roi_loadlast; ///< Property used to trigger loading the last ROI as the target.
-    pcf::IndiProperty m_indiP_roi_last;     ///< Property used to trigger setting the last ROI.
-    pcf::IndiProperty m_indiP_roi_default;  ///< Property used to trigger setting the default and startup ROI.
+
+    pcf::IndiProperty m_indiP_roi_last; ///< Property used to trigger setting the last ROI.
+
+    pcf::IndiProperty m_indiP_roi_default; ///< Property used to trigger setting the default and startup ROI.
 
     ///@}
 
@@ -534,21 +875,76 @@ class stdCamera
      * Crop mode controls are exposed if derivedT::c_stdCamera_cropMode==true
      * @{
      */
-    bool m_cropMode{ false };    ///< Status of crop mode ROIs, if enabled for this camera.
+    bool m_cropMode{ false }; ///< Status of crop mode ROIs, if enabled for this camera.
+
     bool m_cropModeSet{ false }; ///< Desired status of crop mode ROIs, if enabled for this camera.
 
     pcf::IndiProperty m_indiP_cropMode; ///< Property used to toggle crop mode on and off.
+
     ///@}
 
     /** \name Shutter Control
      * Shutter controls are exposed if derivedT::c_stdCamera_hasShutter == true.
      * @{
      */
-    std::string m_shutterStatus{ "UNKNOWN" };
-    int         m_shutterState{ -1 }; /// State of the shutter.  0 = shut, 1 = open, -1 = unknown.
+    std::string m_shutterStatus{ "UNKNOWN" }; ///< Reported shutter status description.
+
+    int m_shutterState{ -1 }; ///< State of the shutter.  0 = shut, 1 = open, -1 = unknown.
 
     pcf::IndiProperty m_indiP_shutterStatus; ///< Property to report shutter status
-    pcf::IndiProperty m_indiP_shutter;       ///< Property used to control the shutter, a switch.
+
+    pcf::IndiProperty m_indiP_shutter; ///< Property used to control the shutter, a switch.
+
+    ///@}
+
+    /** \name Focus Control - Data
+     * Focus controls are exposed if the derived camera supports focus and m_hasFocus is true.
+     * @{
+     */
+    bool m_hasFocus{ false }; ///< Runtime flag enabling focus-state reporting and goto-focus control publication.
+
+    bool m_focusStateHelperConfigured{
+        false }; ///< True when stdCamera should evaluate focus state from an external switch property.
+
+    std::string
+        m_focusStateSource; ///< INDI key (`device.property`) of the switch property used by checkFocusSwitchState.
+
+    std::string m_focusStateElement{ "toggle" }; ///< Element within m_focusStateSource whose `On` state is interpreted
+                                                 ///< according to m_focusStateOnMeansInFocus.
+
+    bool m_focusStateOnMeansInFocus{ false }; ///< True when m_focusStateElement being `On` means "in focus". Default
+                                              ///< false means `On` is interpreted as "out of focus".
+
+    int m_focusStateSourceIndex{
+        -1 }; ///< Index of m_focusStateSource within m_indiP_focusMonitoredProperties, or `-1` when unused.
+
+    bool m_focusGotoHelperConfigured{
+        false }; ///< True when stdCamera should derive goto-focus commands from external switch properties.
+
+    std::vector<std::string> m_focusGotoSourceProperties; ///< INDI keys (`device.property`) of the switch properties
+                                                          ///< combined for gotoFocus().
+
+    std::vector<int>
+        m_focusGotoSourceIndices; ///< Indices of m_focusGotoSourceProperties within m_indiP_focusMonitoredProperties.
+
+    std::string m_focusGotoFormat; ///< Literal `{}` placeholder format used to build the goto-focus preset name.
+
+    std::string
+        m_focusGotoTargetProperty; ///< INDI key (`device.property`) of the switch property commanded by gotoFocus().
+
+    std::string m_focusGotoTargetDevice; ///< Device portion parsed from m_focusGotoTargetProperty.
+
+    std::string m_focusGotoTargetName; ///< Property-name portion parsed from m_focusGotoTargetProperty.
+
+    std::vector<std::string>
+        m_focusMonitoredPropertyKeys; ///< Unique INDI keys monitored for the focus-state and goto-focus helpers.
+
+    std::vector<pcf::IndiProperty>
+        m_indiP_focusMonitoredProperties; ///< Cached external switch properties monitored for the focus helpers.
+
+    pcf::IndiProperty m_indiP_focus; ///< Read-only switch property reporting whether the current state is in focus.
+
+    pcf::IndiProperty m_indiP_gotoFocus; ///< Request switch property used to command the current focus target.
 
     ///@}
 
@@ -556,7 +952,8 @@ class stdCamera
      * The State string is exposed if derivedT::c_stdCamera_usesStateString is true.
      * @{
      */
-    pcf::IndiProperty m_indiP_stateString;
+    pcf::IndiProperty m_indiP_stateString; ///< INDI persistent camera state description and validity.
+
     ///@}
 
   public:
@@ -568,6 +965,7 @@ class stdCamera
       * This should be called in `derivedT::setupConfig` as
       * \code
         stdCamera<derivedT>::setupConfig(config);
+
         \endcode
       * with appropriate error checking.
       */
@@ -578,24 +976,84 @@ class stdCamera
       * This should be called in `derivedT::loadConfig` as
       * \code
         stdCamera<derivedT>::loadConfig(config);
+
         \endcode
       * with appropriate error checking.
       */
     int loadConfig( mx::app::appConfigurator &config /**< [in] the derived classes configurator*/ );
 
+    /** \name Temperature Control Interface
+     * @{
+     */
+
+    /// Intersect camera capabilities with the configured inclusive limits and publish the effective range.
+    /** \returns 0 on success, or -1 when the ranges are invalid or do not overlap. */
+    int setTempLimits( double minimum /**< [in] Camera's inclusive minimum temperature, in C. */,
+                       double maximum /**< [in] Camera's inclusive maximum temperature, in C. */ );
+
+    /// Validate a finite temperature target against the effective inclusive limits.
+    /** \returns 0 for a valid target, or -1 on rejection. */
+    int validateTempSetPt( float target /**< [in] Requested temperature setpoint, in C. */ );
+
+    /// Initialize the target from camera.startupTemp after power on.
+    /** Values <= -999 retain the derived app's target. The shared power-on path calls this after powerOnDefaults().
+     * \returns 0 on success, or -1 when an enabled temperature limit rejects the configured target.
+     */
+    int powerOnTemp();
+
+    ///@}
+
+    /** \name Focus Control
+     * @{
+     */
+
+    /// Evaluate the configured focus-state switch helper as an in-focus boolean.
+    bool checkFocusSwitchState();
+
+    /// Format and send the configured goto-focus switch command.
+    /** \returns 0 on success.
+     *  \returns -1 if formatting fails or the command cannot be dispatched.
+     */
+    int sendGotoFocusCommand();
+
+    ///@}
+
   protected:
     // workers to create indi variables if needed
-    int createReadoutSpeed( const mx::meta::trueFalseT<true> &t );
+    /// Create the readout-speed property when the interface is enabled.
+    int createReadoutSpeed( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
-    int createReadoutSpeed( const mx::meta::trueFalseT<false> &f );
+    /// Create the readout-speed property when the interface is disabled.
+    int createReadoutSpeed( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
-    int createVShiftSpeed( const mx::meta::trueFalseT<true> &t );
+    /// Create the vertical-shift property when the interface is enabled.
+    int createVShiftSpeed( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
-    int createVShiftSpeed( const mx::meta::trueFalseT<false> &f );
+    /// Create the vertical-shift property when the interface is disabled.
+    int createVShiftSpeed( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
-    int createFanSpeed( const mx::meta::trueFalseT<true> &t );
+    /// Create the fan-speed property when the interface is enabled.
+    int createFanSpeed( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
-    int createFanSpeed( const mx::meta::trueFalseT<false> &f );
+    /// Omit the fan-speed property when the interface is disabled.
+    int createFanSpeed( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
+
+    /// Refresh the published focus.state property from the current helper or derived focus implementation.
+    void updateFocusStateProperty();
+
+    /// Invalidate cached measured-temperature evidence; caller holds the INDI mutex.
+    void invalidateTempReading();
+
+    /// Store a complete fresh temperature reading, rejecting nonfinite or physically invalid values.
+    /** Caller holds the INDI mutex and has verified the associated camera status and applied target. */
+    void updateTempReading( float temperature /**< [in] Measured detector temperature, in C. */ );
+
+    /// Evaluate the configured EM-gain temperature requirement; caller holds the INDI mutex.
+    bool emGainTempReady();
+
+    /// Publish the guard's temperature permission without changing the camera's lock status.
+    /** Caller holds the INDI mutex; disabled protection reports permission regardless of temperature. */
+    void updateEMGainTempReady();
 
   public:
     /// Startup function
@@ -603,6 +1061,7 @@ class stdCamera
       * This should be called in `derivedT::appStartup` as
       * \code
         stdCamera<derivedT>::appStartup();
+
         \endcode
       * with appropriate error checking.
       *
@@ -621,6 +1080,7 @@ class stdCamera
       * This should be called from the derived's appLogic() as in
       * \code
         stdCamera<derivedT>::appLogic();
+
         \endcode
       * with appropriate error checking.
       *
@@ -634,6 +1094,7 @@ class stdCamera
       * This should be called from the derived's onPowerOff() as in
       * \code
         stdCamera<derivedT>::onPowerOff();
+
         \endcode
       * with appropriate error checking.
       *
@@ -649,6 +1110,7 @@ class stdCamera
       * This should be called from the derived's whilePowerOff() as in
       * \code
         stdCamera<derivedT>::whilePowerOff();
+
         \endcode
       * with appropriate error checking.
       *
@@ -662,6 +1124,7 @@ class stdCamera
       *
       * \code
         stdCamera<derivedT>::appShutdown();
+
         \endcode
       * with appropriate error checking.
       *
@@ -683,8 +1146,8 @@ class stdCamera
      * \returns -1 on error.
      */
     static int st_newCallBack_stdCamera(
-        void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+        void                    *app /**< [in] a pointer to this, will be static_cast-ed to derivedT. */,
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request. */
     );
 
     /// The callback function for stdCamera properties
@@ -694,19 +1157,19 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_stdCamera(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setTempSetPt when the derivedT has temperature control
     /** Tag-dispatch resolution of c_stdCamera_tempControl==true will call this function.
      * Calls derivedT::setTempSetPt.
      */
-    int setTempSetPt( const mx::meta::trueFalseT<true> &t );
+    int setTempSetPt( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setTempSetPt when the derivedT does not have temperature control
     /** Tag-dispatch resolution of c_stdCamera_tempControl==false will call this function.
      * Prevents requiring derivedT::setTempSetPt.
      */
-    int setTempSetPt( const mx::meta::trueFalseT<false> &f );
+    int setTempSetPt( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW CCD temp request
     /**
@@ -714,19 +1177,19 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_temp(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setTempControl when the derivedT has temperature control
     /** Tag-dispatch resolution of c_stdCamera_tempControl==true will call this function.
      * Calls derivedT::setTempControl.
      */
-    int setTempControl( const mx::meta::trueFalseT<true> &t );
+    int setTempControl( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setTempControl when the derivedT does not have temperature control
     /** Tag-dispatch resolution of c_stdCamera_tempControl==false will call this function.
      * Prevents requiring derivedT::setTempControl.
      */
-    int setTempControl( const mx::meta::trueFalseT<false> &f );
+    int setTempControl( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW CCD temp control request
     /**
@@ -734,19 +1197,19 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_temp_controller(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setReadoutSpeed when the derivedT has readout speed control
     /** Tag-dispatch resolution of c_stdCamera_readoutSpeed==true will call this function.
      * Calls derivedT::setReadoutSpeed.
      */
-    int setReadoutSpeed( const mx::meta::trueFalseT<true> &t );
+    int setReadoutSpeed( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setReadoutSpeed when the derivedT does not have readout speed control
     /** Tag-dispatch resolution of c_stdCamera_readoutSpeed==false will call this function.
      * Just returns 0.
      */
-    int setReadoutSpeed( const mx::meta::trueFalseT<false> &f );
+    int setReadoutSpeed( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW readout speed  request
     /**
@@ -754,19 +1217,19 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_readoutSpeed(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setVShiftSpeed when the derivedT has vshift speed control
     /** Tag-dispatch resolution of c_stdCamera_vShiftSpeed==true will call this function.
      * Calls derivedT::setVShiftSpeed.
      */
-    int setVShiftSpeed( const mx::meta::trueFalseT<true> &t );
+    int setVShiftSpeed( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setVShiftSpeed when the derivedT does not have vshift speed control
     /** Tag-dispatch resolution of c_stdCamera_vShiftSpeed==false will call this function.
      * Just returns 0.
      */
-    int setVShiftSpeed( const mx::meta::trueFalseT<false> &f );
+    int setVShiftSpeed( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW vshift speed  request
     /**
@@ -774,59 +1237,53 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_vShiftSpeed(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
-
-    /// Interface to setFanSpeed when the derivedT has fan-speed control
-    /** Tag-dispatch resolution of c_stdCamera_fanSpeed==true will call this function.
-     * Calls derivedT::setFanSpeed.
-     */
-    int setFanSpeed( const mx::meta::trueFalseT<true> &t );
-
-    /// Interface to setFanSpeed when the derivedT does not have fan-speed control
-    /** Tag-dispatch resolution of c_stdCamera_fanSpeed==false will call this function.
-     * Just returns 0.
-     */
-    int setFanSpeed( const mx::meta::trueFalseT<false> &f );
-
-    /// Callback to process a NEW fan-speed request
-    /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-    int newCallBack_fanSpeed(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setEMGain when the derivedT has EM Gain
     /** Tag-dispatch resolution of c_stdCamera_emGain==true will call this function.
      * Calls derivedT::setEMGain.
      */
-    int setEMGain( const mx::meta::trueFalseT<true> &t );
+    int setEMGain( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setEMGain when the derivedT does not have EM Gain
     /** Tag-dispatch resolution of c_stdCamera_emGain==false will call this function.
      * This prevents requiring derivedT to have its own setEMGain().
      */
-    int setEMGain( const mx::meta::trueFalseT<false> &f );
+    int setEMGain( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
-    /// Callback to process a NEW EM gain request
-    /**
+    /// Validate and dispatch a new EM-gain request, retaining the accepted target on rejection.
+    /** When camera.emGainRequiresTemp is enabled, gain above 1 requires active cooling with the requested
+     * setpoint equal to camera.emGainTemp, READY or OPERATING state, and the configured locked/maxTemp criterion.
+     * Invalid numeric requests are rejected regardless of that setting.
      * \returns 0 on success.
-     * \returns -1 on error.
+     * \returns -1 on rejection or error.
      */
     int newCallBack_emgain(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
+
+    /// Dispatch a unity/off request to an EM-gain camera while the caller holds m_indiMutex.
+    int setEMGainOff( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
+
+    /// No-op interface for cameras without EM gain.
+    int setEMGainOff( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
+
+    /// Apply a momentary EM-gain-off request and reset its switch, reporting failures as INDI_ALERT.
+    /** The camera selects unity or disabled gain regardless of temperature lock.
+     * \returns The derived callback result, or -1 for an invalid property.
+     */
+    int newCallBack_emgain_off( const pcf::IndiProperty &ipRecv /**< [in] The INDI EM-gain-off request. */ );
 
     /// Interface to setExpTime when the derivedT uses exposure time controls
     /** Tag-dispatch resolution of c_stdCamera_exptimeCtrl==true will call this function.
      * Calls derivedT::setExpTime.
      */
-    int setExpTime( const mx::meta::trueFalseT<true> &t );
+    int setExpTime( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setExptime when the derivedT does not use exposure time controls.
     /** Tag-dispatch resolution of c_stdCamera_exptimeCtrl==false will call this function.
      * This prevents requiring derivedT to have its own setExpTime().
      */
-    int setExpTime( const mx::meta::trueFalseT<false> &f );
+    int setExpTime( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW exposure time request
     /**
@@ -834,19 +1291,19 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_exptime(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setFPS when the derivedT uses FPS controls
     /** Tag-dispatch resolution of c_stdCamera_fpsCtrl==true will call this function.
      * Calls derivedT::setFPS.
      */
-    int setFPS( const mx::meta::trueFalseT<true> &t );
+    int setFPS( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setFPS when the derivedT does not use FPS controls.
     /** Tag-dispatch resolution of c_stdCamera_hasFPS==false will call this function.
      * This prevents requiring derivedT to have its own setFPS().
      */
-    int setFPS( const mx::meta::trueFalseT<false> &f );
+    int setFPS( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW fps request
     /**
@@ -854,19 +1311,79 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_fps(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
+
+    /// Interface to setFanSpeed when the derivedT exposes fan controls.
+    /** Tag-dispatch resolution of fan control availability will call this function.
+     * Calls derivedT::setFanSpeed.
+     */
+    int setFanSpeed( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
+
+    /// Interface to setFanSpeed when the derivedT does not expose fan controls.
+    /** Tag-dispatch resolution of fan control availability will call this function.
+     * This prevents requiring derivedT to have its own setFanSpeed().
+     */
+    int setFanSpeed( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
+
+    /// Callback to process a NEW fan speed request.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_fanSpeed(
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
+
+    /// Interface to setAnalogGain when the derivedT exposes analog-gain controls.
+    /** Tag-dispatch resolution of analog-gain control availability will call this function.
+     * Calls derivedT::setAnalogGain.
+     */
+    int setAnalogGain( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
+
+    /// Interface to setAnalogGain when the derivedT does not expose analog-gain controls.
+    /** Tag-dispatch resolution of analog-gain control availability will call this function.
+     * This prevents requiring derivedT to have its own setAnalogGain().
+     */
+    int setAnalogGain( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
+
+    /// Callback to process a NEW analog-gain request.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_analogGain(
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
+
+    /// Interface to setLED when the derivedT exposes LED controls.
+    /** Tag-dispatch resolution of LED control availability will call this function.
+     * Calls derivedT::setLED.
+     */
+    int setLED( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
+
+    /// Interface to setLED when the derivedT does not expose LED controls.
+    /** Tag-dispatch resolution of LED control availability will call this function.
+     * This prevents requiring derivedT to have its own setLED().
+     */
+    int setLED( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
+
+    /// Callback to process a NEW LED request.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_led(
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setSynchro when the derivedT has synchronization
     /** Tag-dispatch resolution of c_stdCamera_synchro==true will call this function.
      * Calls derivedT::setSynchro.
      */
-    int setSynchro( const mx::meta::trueFalseT<true> &t );
+    int setSynchro( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setSynchro when the derivedT does not have synchronization
     /** Tag-dispatch resolution of c_stdCamera_ynchro==false will call this function.
      * This prevents requiring derivedT to have its own setSynchro().
      */
-    int setSynchro( const mx::meta::trueFalseT<false> &f );
+    int setSynchro( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW synchro request
     /**
@@ -874,7 +1391,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_synchro(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW mode request
     /**
@@ -882,7 +1399,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_mode(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW reconfigure request
     /**
@@ -890,19 +1407,19 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_reconfigure(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setCropMode when the derivedT has crop mode
     /** Tag-dispatch resolution of c_stdCamera_cropMode==true will call this function.
      * Calls derivedT::setCropMode.
      */
-    int setCropMode( const mx::meta::trueFalseT<true> &t );
+    int setCropMode( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setCropMode when the derivedT does not have crop mode
     /** Tag-dispatch resolution of c_stdCamera_cropMode==false will call this function.
      * This prevents requiring derivedT to have its own setCropMode().
      */
-    int setCropMode( const mx::meta::trueFalseT<false> &f );
+    int setCropMode( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW cropMode request
     /**
@@ -910,7 +1427,14 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_cropMode(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
+
+    /// Publish coherent ROI geometry and relative targets; caller holds m_indiMutex.
+    void updateROIGeometry( bool available = true /**< [in] False invalidates coordinate-dependent controls. */ );
+
+    /// Convert one image-relative center request under the INDI mutex.
+    int newCallBack_roi_relative( const pcf::IndiProperty &ipRecv, /**< [in] Relative target request. */
+                                  bool horizontal /**< [in] True selects the horizontal center. */ );
 
     /// Callback to process a NEW roi_x request
     /**
@@ -918,7 +1442,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_x(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_y request
     /**
@@ -926,7 +1450,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_y(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_w request
     /**
@@ -934,7 +1458,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_w(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_h request
     /**
@@ -942,7 +1466,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_h(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW bin_x request
     /**
@@ -950,7 +1474,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_bin_x(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW bin_y request
     /**
@@ -958,19 +1482,19 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_bin_y(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to checkNextROI when the derivedT uses ROIs
     /** Tag-dispatch resolution of c_stdCamera_usesROI==true will call this function.
      * Calls derivedT::checkNextROI.
      */
-    int checkNextROI( const mx::meta::trueFalseT<true> &t );
+    int checkNextROI( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to checkNextROI when the derivedT does not use ROIs.
     /** Tag-dispatch resolution of c_stdCamera_usesROI==false will call this function.
      * This prevents requiring derivedT to have its own checkNextROI().
      */
-    int checkNextROI( const mx::meta::trueFalseT<false> &f );
+    int checkNextROI( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW roi_check request
     /**
@@ -978,19 +1502,19 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_check(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setNextROI when the derivedT uses ROIs
     /** Tag-dispatch resolution of c_stdCamera_usesROI==true will call this function.
      * Calls derivedT::setNextROI.
      */
-    int setNextROI( const mx::meta::trueFalseT<true> &t );
+    int setNextROI( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setNextROI when the derivedT does not use ROIs.
     /** Tag-dispatch resolution of c_stdCamera_usesROI==false will call this function.
      * This prevents requiring derivedT to have its own setNextROI().
      */
-    int setNextROI( const mx::meta::trueFalseT<false> &f );
+    int setNextROI( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW roi_set request
     /**
@@ -998,7 +1522,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_set(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_full request
     /**
@@ -1006,7 +1530,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_full(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_fullbin request
     /**
@@ -1014,7 +1538,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_fullbin(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_loadlast request
     /**
@@ -1022,7 +1546,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_loadlast(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_last request
     /**
@@ -1030,7 +1554,7 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_last(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Callback to process a NEW roi_default request
     /**
@@ -1038,19 +1562,21 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_roi_default(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
 
     /// Interface to setShutter when the derivedT has a shutter
     /** Tag-dispatch resolution of c_stdCamera_hasShutter==true will call this function.
      * Calls derivedT::setShutter.
      */
-    int setShutter( int ss, const mx::meta::trueFalseT<true> &t );
+    int setShutter( int                               ss /**< [in] Requested shutter state. */,
+                    const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to setShutter when the derivedT does not have a shutter.
     /** Tag-dispatch resolution of c_stdCamera_hasShutter==false will call this function.
      * This prevents requiring derivedT to have its own setShutter().
      */
-    int setShutter( int ss, const mx::meta::trueFalseT<false> &f );
+    int setShutter( int                                ss /**< [in] Requested shutter state. */,
+                    const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Callback to process a NEW shutter request
     /**
@@ -1058,31 +1584,57 @@ class stdCamera
      * \returns -1 on error.
      */
     int newCallBack_shutter(
-        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
+        const pcf::IndiProperty &ipRecv /**< [in] The INDI property sent with the new property request.*/ );
+
+    /// Interface to checkFocus when the derivedT exposes focus support.
+    bool checkFocus( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
+
+    /// Interface to checkFocus when the derivedT does not expose focus support.
+    bool checkFocus( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
+
+    /// Interface to gotoFocus when the derivedT exposes focus support.
+    int gotoFocus( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
+
+    /// Interface to gotoFocus when the derivedT does not expose focus support.
+    int gotoFocus( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
+
+    /// Callback to process a NEW goto-focus request.
+    int newCallBack_gotoFocus(
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the new property request.*/ );
+
+    /// The static callback function registered for external focus-helper switch properties.
+    static int st_setCallBack_focusMonitored(
+        void                    *app /**< [in] a pointer to this, which will be static_cast-ed to derivedT */,
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the set-property update */
+    );
+
+    /// The callback which caches external focus-helper switch-property updates.
+    int setCallBack_focusMonitored(
+        const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the set-property update.*/ );
 
     /// Interface to stateString when the derivedT provides it
     /** Tag-dispatch resolution of c_stdCamera_usesStateString==true will call this function.
      * Calls derivedT::stateString.
      */
-    std::string stateString( const mx::meta::trueFalseT<true> &t );
+    std::string stateString( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to stateString when the derivedT does not provide it
     /** Tag-dispatch resolution of c_stdCamera_usesStateString==false will call this function.
      * returns "".
      */
-    std::string stateString( const mx::meta::trueFalseT<false> &f );
+    std::string stateString( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Interface to stateStringValid when the derivedT provides it
     /** Tag-dispatch resolution of c_stdCamera_usesStateString==true will call this function.
      * Calls derivedT::stateStringValid.
      */
-    bool stateStringValid( const mx::meta::trueFalseT<true> &t );
+    bool stateStringValid( const mx::meta::trueFalseT<true> &t /**< [in] Enabled interface selector. */ );
 
     /// Interface to stateStringValid when the derivedT does not provide it
     /** Tag-dispatch resolution of c_stdCamera_usesStateString==false will call this function.
      * returns false.
      */
-    bool stateStringValid( const mx::meta::trueFalseT<false> &f );
+    bool stateStringValid( const mx::meta::trueFalseT<false> &f /**< [in] Disabled interface selector. */ );
 
     /// Update the INDI properties for this device controller
     /** You should call this once per main loop.
@@ -1099,11 +1651,13 @@ class stdCamera
      * @{
      */
 
-    int recordCamera( bool force = false );
+    /// Record camera telemetry when state changes or a forced record is requested.
+    int recordCamera( bool force = false /**< [in] Whether to record unchanged camera state. */ );
 
     ///@}
 
   private:
+    /// Access the owning camera application through the CRTP interface.
     derivedT &derived()
     {
         return *static_cast<derivedT *>( this );
@@ -1129,7 +1683,33 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     "startupTemp",
                     false,
                     "float",
-                    "The temperature setpoint to set after a power-on [C].  Default is 20 C." );
+                    "The temperature setpoint after power-on [C]. Default: " +
+                        ( m_startupTemp > -999 ? std::to_string( m_startupTemp ) + " C." : "disabled." ) +
+                        " Where supported, values <= -999 disable the startup override." );
+
+        if( c_hasTempLimits )
+        {
+            config.add(
+                "camera.minTemp",
+                "",
+                "camera.minTemp",
+                argType::Required,
+                "camera",
+                "minTemp",
+                false,
+                "float",
+                "Inclusive minimum temperature setpoint [C], default -55. Camera limits may narrow this range." );
+            config.add(
+                "camera.maxTemp",
+                "",
+                "camera.maxTemp",
+                argType::Required,
+                "camera",
+                "maxTemp",
+                false,
+                "float",
+                "Inclusive maximum temperature setpoint [C], default 20. Camera limits may narrow this range." );
+        }
     }
 
     if( derivedT::c_stdCamera_readoutSpeed )
@@ -1158,27 +1738,62 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     "The default vertical shift speed." );
     }
 
-    if( derivedT::c_stdCamera_fanSpeed )
+    if( c_hasFanSpeed )
     {
         config.add( "camera.fanSpeedControl",
                     "",
                     "camera.fanSpeedControl",
-                    argType::Required,
+                    argType::Optional,
                     "camera",
                     "fanSpeedControl",
                     false,
                     "bool",
                     "Whether or not fan-speed control is exposed." );
+    }
+
+    if( c_hasFanSpeed )
+    {
+        std::string fanSpeedHelp = "The default fan speed. Must be one of the configured fan-control option names.";
+
+        if( !m_fanSpeedNames.empty() )
+        {
+            fanSpeedHelp = "The default fan speed. Must be one of ";
+
+            for( size_t n = 0; n < m_fanSpeedNames.size(); ++n )
+            {
+                if( n > 0 )
+                {
+                    fanSpeedHelp += ", ";
+                }
+
+                fanSpeedHelp += m_fanSpeedNames[n];
+            }
+
+            fanSpeedHelp += ".";
+        }
 
         config.add( "camera.defaultFanSpeed",
                     "",
                     "camera.defaultFanSpeed",
-                    argType::Required,
+                    argType::Optional,
                     "camera",
                     "defaultFanSpeed",
                     false,
                     "string",
-                    "The default fan speed. Must be one of high, medium, low, or off." );
+                    fanSpeedHelp );
+    }
+
+    if( c_hasLED )
+    {
+        config.add( "camera.startupLED",
+                    "",
+                    "camera.startupLED",
+                    argType::Optional,
+                    "camera",
+                    "startupLED",
+                    false,
+                    "bool",
+                    "Whether or not the status LED is turned on after power on." );
     }
 
     if( derivedT::c_stdCamera_emGain )
@@ -1192,6 +1807,51 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     false,
                     "unsigned",
                     "The maximum EM gain which can be set by the user." );
+
+        if( derivedT::c_stdCamera_tempControl )
+        {
+            config.add(
+                "camera.emGainRequiresTemp",
+                "",
+                "camera.emGainRequiresTemp",
+                argType::Optional,
+                "camera",
+                "emGainRequiresTemp",
+                false,
+                "bool",
+                "Require active cooling at camera.emGainTemp satisfying camera.emGainTempMode for EM gain above 1. "
+                "Default: false." );
+            config.add( "camera.emGainTemp",
+                        "",
+                        "camera.emGainTemp",
+                        argType::Required,
+                        "camera",
+                        "emGainTemp",
+                        false,
+                        "float",
+                        "Required temperature setpoint in C for EM gain above 1. Must be configured when "
+                        "camera.emGainRequiresTemp is true; independent of camera.startupTemp." );
+            config.add( "camera.emGainTempMode",
+                        "",
+                        "camera.emGainTempMode",
+                        argType::Optional,
+                        "camera",
+                        "emGainTempMode",
+                        false,
+                        "string",
+                        "EM-gain temperature criterion: locked (default), or maxTemp to ignore lock and require a "
+                        "valid measured temperature at or below camera.emGainMaxTemp." );
+            config.add( "camera.emGainMaxTemp",
+                        "",
+                        "camera.emGainMaxTemp",
+                        argType::Optional,
+                        "camera",
+                        "emGainMaxTemp",
+                        false,
+                        "float",
+                        "Inclusive maximum measured temperature in C for maxTemp mode. Required when enabled; "
+                        "must be finite and no colder than camera.emGainTemp." );
+        }
     }
 
     if( derivedT::c_stdCamera_usesModes )
@@ -1270,6 +1930,74 @@ int stdCamera<derivedT>::setupConfig( mx::app::appConfigurator &config )
                     "The default ROI y binning." );
     }
 
+    if( c_hasFocus )
+    {
+        config.add( "focus.stateProperty",
+                    "",
+                    "focus.stateProperty",
+                    argType::Optional,
+                    "focus",
+                    "stateProperty",
+                    false,
+                    "string",
+                    "The INDI key (device.property) of a switch property whose configured element is used to infer "
+                    "whether the camera is in focus." );
+
+        config.add( "focus.stateElement",
+                    "",
+                    "focus.stateElement",
+                    argType::Optional,
+                    "focus",
+                    "stateElement",
+                    false,
+                    "string",
+                    "The element of focus.stateProperty whose state is interpreted as focus state. Default is "
+                    "\"toggle\"." );
+
+        config.add( "focus.stateElementOnMeansInFocus",
+                    "",
+                    "focus.stateElementOnMeansInFocus",
+                    argType::Optional,
+                    "focus",
+                    "stateElementOnMeansInFocus",
+                    false,
+                    "bool",
+                    "Set true when the configured focus.stateElement being On means the camera is in focus. The "
+                    "default false keeps the original behavior where On means out of focus." );
+
+        config.add( "focus.gotoFocus.numSwitches",
+                    "",
+                    "focus.gotoFocus.numSwitches",
+                    argType::Optional,
+                    "focus.gotoFocus",
+                    "numSwitches",
+                    false,
+                    "int",
+                    "The number of source switch properties combined to derive the goto-focus preset name. Also "
+                    "configure focus.gotoFocus.property1..propertyN, focus.gotoFocus.format, and "
+                    "focus.gotoFocus.targetProperty." );
+
+        config.add( "focus.gotoFocus.format",
+                    "",
+                    "focus.gotoFocus.format",
+                    argType::Optional,
+                    "focus.gotoFocus",
+                    "format",
+                    false,
+                    "string",
+                    "Literal {} placeholder format used to combine the configured goto-focus source switch names." );
+
+        config.add( "focus.gotoFocus.targetProperty",
+                    "",
+                    "focus.gotoFocus.targetProperty",
+                    argType::Optional,
+                    "focus.gotoFocus",
+                    "targetProperty",
+                    false,
+                    "string",
+                    "The INDI key (device.property) of the switch property commanded by gotoFocus()." );
+    }
+
     return 0;
 }
 
@@ -1279,6 +2007,20 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
     if( derivedT::c_stdCamera_tempControl )
     {
         config( m_startupTemp, "camera.startupTemp" );
+
+        if( c_hasTempLimits )
+        {
+            config( m_configMinTemp, "camera.minTemp" );
+            config( m_configMaxTemp, "camera.maxTemp" );
+            if( setTempLimits( m_minTempCamera, m_maxTempCamera ) < 0 )
+                return -1;
+            if( !mx::math::isFinite( m_startupTemp ) ||
+                ( m_startupTemp > -999 && validateTempSetPt( m_startupTemp ) < 0 ) )
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__,
+                      __LINE__,
+                      "camera.startupTemp must be finite and within the effective temperature range" } );
+        }
     }
 
     if( derivedT::c_stdCamera_readoutSpeed )
@@ -1291,25 +2033,100 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
         config( m_defaultVShiftSpeed, "camera.defaultVShiftSpeed" );
     }
 
-    if( derivedT::c_stdCamera_fanSpeed )
+    if( c_hasFanSpeed )
     {
+        m_fanSpeedControlEnabled = true;
         config( m_fanSpeedControlEnabled, "camera.fanSpeedControl" );
         config( m_defaultFanSpeed, "camera.defaultFanSpeed" );
 
-        if( m_defaultFanSpeed != "high" && m_defaultFanSpeed != "medium" && m_defaultFanSpeed != "low" &&
-            m_defaultFanSpeed != "off" )
+        bool fanSpeedValid = false;
+
+        for( size_t n = 0; n < m_fanSpeedNames.size(); ++n )
         {
-            return derivedT::template log<software_critical, -1>(
-                { __FILE__,
-                  __LINE__,
-                  "invalid camera.defaultFanSpeed: '" + m_defaultFanSpeed +
-                      "'. Must be one of high, medium, low, or off." } );
+            if( m_defaultFanSpeed == m_fanSpeedNames[n] )
+            {
+                fanSpeedValid = true;
+                break;
+            }
         }
+
+        if( !fanSpeedValid )
+        {
+            std::string allowedFanSpeeds;
+
+            if( m_fanSpeedNames.empty() )
+            {
+                allowedFanSpeeds = "<none configured>";
+            }
+            else
+            {
+                for( size_t n = 0; n < m_fanSpeedNames.size(); ++n )
+                {
+                    if( n > 0 )
+                    {
+                        allowedFanSpeeds += ", ";
+                    }
+
+                    allowedFanSpeeds += m_fanSpeedNames[n];
+                }
+            }
+
+            return derivedT::template log<software_critical, -1>( { __FILE__,
+                                                                    __LINE__,
+                                                                    "invalid camera.defaultFanSpeed: '" +
+                                                                        m_defaultFanSpeed + "'. Must be one of " +
+                                                                        allowedFanSpeeds + "." } );
+        }
+    }
+
+    if( c_hasLED )
+    {
+        config( m_defaultLEDState, "camera.startupLED" );
     }
 
     if( derivedT::c_stdCamera_emGain )
     {
         config( m_maxEMGain, "camera.maxEMGain" );
+        if( derivedT::c_stdCamera_tempControl )
+        {
+            config( m_emGainRequiresTemp, "camera.emGainRequiresTemp" );
+            m_emGainTempMode = "locked";
+            config( m_emGainTempMode, "camera.emGainTempMode" );
+            if( m_emGainTempMode != "locked" && m_emGainTempMode != "maxTemp" )
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "camera.emGainTempMode must be locked or maxTemp" } );
+
+            for( const std::string key : { "camera.emGainTemp", "camera.emGainMaxTemp" } )
+            {
+                float &temperature = key == "camera.emGainTemp" ? m_emGainTemp : m_emGainMaxTemp;
+                temperature        = std::numeric_limits<float>::quiet_NaN();
+                if( config.isSet( key ) )
+                {
+                    std::string target;
+                    config( target, key );
+                    std::istringstream value( target );
+                    bool               parsed = static_cast<bool>( value >> temperature );
+                    if( parsed )
+                        value >> std::ws;
+                    if( !parsed || !value.eof() || !mx::math::isFinite( temperature ) )
+                    {
+                        temperature = std::numeric_limits<float>::quiet_NaN();
+                        return derivedT::template log<software_critical, -1>(
+                            { __FILE__, __LINE__, key + " must be a finite temperature" } );
+                    }
+                }
+            }
+            if( m_emGainRequiresTemp && ( !mx::math::isFinite( m_emGainTemp ) ||
+                                          ( c_hasTempLimits && validateTempSetPt( m_emGainTemp ) < 0 ) ) )
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__,
+                      __LINE__,
+                      "camera.emGainRequiresTemp requires camera.emGainTemp within the effective temperature range" } );
+            if( m_emGainRequiresTemp && m_emGainTempMode == "maxTemp" &&
+                ( !mx::math::isFinite( m_emGainMaxTemp ) || m_emGainMaxTemp < m_emGainTemp ) )
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "maxTemp mode requires finite camera.emGainMaxTemp >= camera.emGainTemp" } );
+        }
     }
 
     if( derivedT::c_stdCamera_usesModes )
@@ -1380,16 +2197,18 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
         config( m_default_bin_y, "camera.default_bin_y" );
 
         // If default is not setup properly, it defaults to full
-        if( m_default_x == 0 || m_default_y == 0 || m_default_w == 0 || m_default_h == 0 || m_default_bin_x < 1 ||
-            m_default_bin_y < 1 )
-        {
-            m_default_x     = m_full_x;
-            m_default_y     = m_full_y;
-            m_default_w     = m_full_w;
-            m_default_h     = m_full_h;
-            m_default_bin_x = m_default_bin_x;
-            m_default_bin_y = m_default_bin_y;
-        }
+        if( m_default_x == 0 )
+            m_default_x = m_full_x;
+        if( m_default_y == 0 )
+            m_default_y = m_full_y;
+        if( m_default_w == 0 )
+            m_default_w = m_full_w;
+        if( m_default_h == 0 )
+            m_default_h = m_full_h;
+        if( m_default_bin_x < 1 )
+            m_default_bin_x = m_full_bin_x;
+        if( m_default_bin_y < 1 )
+            m_default_bin_y = m_full_bin_y;
 
         // now always start with current and next set to default
 
@@ -1408,7 +2227,314 @@ int stdCamera<derivedT>::loadConfig( mx::app::appConfigurator &config )
         m_nextROI.bin_y = m_default_bin_y;
     }
 
+    if( c_hasFocus )
+    {
+        config( m_focusStateSource, "focus.stateProperty" );
+        config( m_focusStateElement, "focus.stateElement" );
+        config( m_focusStateOnMeansInFocus, "focus.stateElementOnMeansInFocus" );
+        if( m_focusStateElement == "" )
+        {
+            m_focusStateElement = "toggle";
+        }
+
+        m_focusStateHelperConfigured = false;
+        m_focusStateSourceIndex      = -1;
+        m_focusGotoHelperConfigured  = false;
+        m_focusGotoSourceProperties.clear();
+        m_focusGotoSourceIndices.clear();
+        m_focusGotoFormat.clear();
+        m_focusGotoTargetProperty.clear();
+        m_focusGotoTargetDevice.clear();
+        m_focusGotoTargetName.clear();
+        m_focusMonitoredPropertyKeys.clear();
+        m_indiP_focusMonitoredProperties.clear();
+
+        auto addFocusMonitoredProperty = [&]( const std::string &propertyKey ) -> int
+        {
+            for( size_t n = 0; n < m_focusMonitoredPropertyKeys.size(); ++n )
+            {
+                if( m_focusMonitoredPropertyKeys[n] == propertyKey )
+                {
+                    return static_cast<int>( n );
+                }
+            }
+
+            std::string devName;
+            std::string propName;
+            if( indi::parseIndiKey( devName, propName, propertyKey ) < 0 )
+            {
+                return -1;
+            }
+
+            m_focusMonitoredPropertyKeys.push_back( propertyKey );
+            m_indiP_focusMonitoredProperties.emplace_back();
+            return static_cast<int>( m_focusMonitoredPropertyKeys.size() - 1 );
+        };
+
+        if( m_focusStateSource != "" )
+        {
+            m_focusStateSourceIndex = addFocusMonitoredProperty( m_focusStateSource );
+            if( m_focusStateSourceIndex < 0 )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "invalid focus.stateProperty: " + m_focusStateSource } );
+            }
+
+            m_focusStateHelperConfigured = true;
+        }
+
+        int numFocusGotoSwitches = 0;
+        config( numFocusGotoSwitches, "focus.gotoFocus.numSwitches" );
+        config( m_focusGotoFormat, "focus.gotoFocus.format" );
+        stripQuotedWhitespace( m_focusGotoFormat );
+        config( m_focusGotoTargetProperty, "focus.gotoFocus.targetProperty" );
+
+        bool focusGotoConfigPresent =
+            numFocusGotoSwitches > 0 || m_focusGotoFormat != "" || m_focusGotoTargetProperty != "";
+
+        if( focusGotoConfigPresent )
+        {
+            if( numFocusGotoSwitches < 1 )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "focus.gotoFocus.numSwitches must be greater than zero" } );
+            }
+
+            if( m_focusGotoFormat == "" )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "focus.gotoFocus.format must be set when goto-focus helper is used" } );
+            }
+
+            if( m_focusGotoTargetProperty == "" )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__,
+                      __LINE__,
+                      "focus.gotoFocus.targetProperty must be set when goto-focus helper is used" } );
+            }
+
+            bool   invalidBraces = false;
+            size_t placeholders  = 0;
+            for( size_t n = 0; n < m_focusGotoFormat.size(); ++n )
+            {
+                if( m_focusGotoFormat[n] == '{' )
+                {
+                    if( n + 1 < m_focusGotoFormat.size() && m_focusGotoFormat[n + 1] == '}' )
+                    {
+                        ++placeholders;
+                        ++n;
+                    }
+                    else
+                    {
+                        invalidBraces = true;
+                        break;
+                    }
+                }
+                else if( m_focusGotoFormat[n] == '}' )
+                {
+                    invalidBraces = true;
+                    break;
+                }
+            }
+
+            if( invalidBraces )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "focus.gotoFocus.format only supports literal {} placeholders" } );
+            }
+
+            if( placeholders != static_cast<size_t>( numFocusGotoSwitches ) )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__,
+                      __LINE__,
+                      "focus.gotoFocus.format placeholder count does not match focus.gotoFocus.numSwitches" } );
+            }
+
+            if( indi::parseIndiKey( m_focusGotoTargetDevice, m_focusGotoTargetName, m_focusGotoTargetProperty ) < 0 )
+            {
+                return derivedT::template log<software_critical, -1>(
+                    { __FILE__, __LINE__, "invalid focus.gotoFocus.targetProperty: " + m_focusGotoTargetProperty } );
+            }
+
+            for( int n = 0; n < numFocusGotoSwitches; ++n )
+            {
+                std::string propKey = std::string( "property" ) + std::to_string( n + 1 );
+                std::string property;
+                config.configUnused( property, mx::app::iniFile::makeKey( "focus.gotoFocus", propKey ) );
+
+                if( property == "" )
+                {
+                    return derivedT::template log<software_critical, -1>(
+                        { __FILE__, __LINE__, "focus.gotoFocus." + propKey + " must be set" } );
+                }
+
+                int propertyIndex = addFocusMonitoredProperty( property );
+                if( propertyIndex < 0 )
+                {
+                    return derivedT::template log<software_critical, -1>(
+                        { __FILE__, __LINE__, "invalid focus.gotoFocus." + propKey + ": " + property } );
+                }
+
+                m_focusGotoSourceProperties.push_back( property );
+                m_focusGotoSourceIndices.push_back( propertyIndex );
+            }
+
+            m_focusGotoHelperConfigured = true;
+        }
+
+        if( !m_hasFocus && m_focusStateHelperConfigured && m_focusGotoHelperConfigured )
+        {
+            m_hasFocus = true;
+        }
+    }
+
     return 0;
+}
+
+template <class derivedT>
+bool stdCamera<derivedT>::checkFocusSwitchState()
+{
+    if( !m_focusStateHelperConfigured || m_focusStateSourceIndex < 0 ||
+        m_focusStateSourceIndex >= static_cast<int>( m_indiP_focusMonitoredProperties.size() ) )
+    {
+        return false;
+    }
+
+    const pcf::IndiProperty &focusProperty = m_indiP_focusMonitoredProperties[m_focusStateSourceIndex];
+    if( !focusProperty.find( m_focusStateElement ) )
+    {
+        return false;
+    }
+
+    if( m_focusStateOnMeansInFocus )
+    {
+        return focusProperty[m_focusStateElement].getSwitchState() == pcf::IndiElement::On;
+    }
+
+    return focusProperty[m_focusStateElement].getSwitchState() != pcf::IndiElement::On;
+}
+
+template <class derivedT>
+void stdCamera<derivedT>::updateFocusStateProperty()
+{
+    if( !( c_hasFocus && m_hasFocus ) || !m_indiP_focus.find( "state" ) )
+    {
+        return;
+    }
+
+    mx::meta::trueFalseT<c_hasFocus> tf;
+    bool                             inFocus = checkFocus( tf );
+
+    pcf::IndiElement::SwitchStateType    focusState = pcf::IndiElement::Off;
+    pcf::IndiProperty::PropertyStateType indiState  = INDI_IDLE;
+
+    if( inFocus )
+    {
+        focusState = pcf::IndiElement::On;
+        indiState  = INDI_OK;
+    }
+
+    if( derived().m_indiDriver )
+    {
+        derived().updateSwitchIfChanged( m_indiP_focus, "state", focusState, indiState );
+        return;
+    }
+
+    m_indiP_focus["state"].setSwitchState( focusState );
+    m_indiP_focus.setState( indiState );
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::sendGotoFocusCommand()
+{
+    if( !m_focusGotoHelperConfigured )
+    {
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "goto-focus helper is not configured" } );
+    }
+
+    std::vector<std::string> activeNames;
+    activeNames.reserve( m_focusGotoSourceIndices.size() );
+
+    for( size_t n = 0; n < m_focusGotoSourceIndices.size(); ++n )
+    {
+        int propertyIndex = m_focusGotoSourceIndices[n];
+        if( propertyIndex < 0 || propertyIndex >= static_cast<int>( m_indiP_focusMonitoredProperties.size() ) )
+        {
+            return derivedT::template log<software_error, -1>(
+                { __FILE__, __LINE__, "goto-focus helper property index is out of range" } );
+        }
+
+        const pcf::IndiProperty &sourceProperty = m_indiP_focusMonitoredProperties[propertyIndex];
+
+        size_t      onCount = 0;
+        std::string activeName;
+        for( auto &&el : sourceProperty.getElements() )
+        {
+            if( el.second.getSwitchState() == pcf::IndiElement::On )
+            {
+                if( onCount == 0 )
+                {
+                    activeName = el.first;
+                }
+
+                ++onCount;
+            }
+        }
+
+        if( onCount == 0 )
+        {
+            return derivedT::template log<software_error, -1>(
+                { __FILE__,
+                  __LINE__,
+                  "goto-focus helper found no active switch element in " + m_focusGotoSourceProperties[n] } );
+        }
+
+        if( onCount > 1 )
+        {
+            return derivedT::template log<software_error, -1>(
+                { __FILE__,
+                  __LINE__,
+                  "goto-focus helper found multiple active switch elements in " + m_focusGotoSourceProperties[n] } );
+        }
+
+        activeNames.push_back( activeName );
+    }
+
+    std::string targetElement;
+    size_t      valueIndex = 0;
+    for( size_t n = 0; n < m_focusGotoFormat.size(); ++n )
+    {
+        if( m_focusGotoFormat[n] == '{' && n + 1 < m_focusGotoFormat.size() && m_focusGotoFormat[n + 1] == '}' )
+        {
+            targetElement += activeNames[valueIndex];
+            ++valueIndex;
+            ++n;
+        }
+        else
+        {
+            targetElement += m_focusGotoFormat[n];
+        }
+    }
+
+    if( targetElement == "" )
+    {
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "goto-focus helper produced an empty target element name" } );
+    }
+
+    pcf::IndiProperty ipSend( pcf::IndiProperty::Switch );
+    ipSend.setDevice( m_focusGotoTargetDevice );
+    ipSend.setName( m_focusGotoTargetName );
+    ipSend.setRule( pcf::IndiProperty::AtMostOne );
+    ipSend.add( pcf::IndiElement( targetElement, pcf::IndiElement::On ) );
+
+    derivedT::template log<text_log>( "goto-focus helper commanding " + m_focusGotoTargetProperty + "." +
+                                      targetElement );
+
+    return derived().sendNewProperty( ipSend );
 }
 
 template <class derivedT>
@@ -1572,18 +2698,6 @@ int stdCamera<derivedT>::appStartup()
         }
     }
 
-    if( derivedT::c_stdCamera_fanSpeed && m_fanSpeedControlEnabled )
-    {
-        mx::meta::trueFalseT<derivedT::c_stdCamera_fanSpeed> tf;
-        if( createFanSpeed( tf ) < 0 )
-        {
-#ifndef STDCAMERA_TEST_NOLOG
-            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
-#endif
-            return -1;
-        }
-    }
-
     if( derivedT::c_stdCamera_emGain )
     {
         derived().createStandardIndiNumber( m_indiP_emGain, "emgain", 0, 1000, 1, "%0.3f" );
@@ -1593,6 +2707,23 @@ int stdCamera<derivedT>::appStartup()
             derivedT::template log<software_error>( { __FILE__, __LINE__ } );
 #endif
             return -1;
+        }
+
+        derived().createStandardIndiRequestSw( m_indiP_emGainOff, "emgain_off" );
+        if( derived().registerIndiPropertyNew( m_indiP_emGainOff, st_newCallBack_stdCamera ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
+
+        if( derivedT::c_stdCamera_tempControl )
+        {
+            derived().createStandardIndiToggleSw( m_indiP_emGainTempReady, "emgain_temp_ready" );
+            m_indiP_emGainTempReady.setPerm( pcf::IndiProperty::ReadOnly );
+            if( derived().registerIndiPropertyReadOnly( m_indiP_emGainTempReady ) < 0 )
+                return -1;
         }
     }
 
@@ -1630,6 +2761,78 @@ int stdCamera<derivedT>::appStartup()
         m_indiP_fps["current"].setFormat( "%0.2f" );
 
         if( derived().registerIndiPropertyReadOnly( m_indiP_fps ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
+    }
+
+    if( c_hasFanSpeed && m_fanSpeedControlEnabled )
+    {
+        if( m_fanSpeedNames.empty() )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__, "no fan control options configured" } );
+#endif
+            return -1;
+        }
+
+        if( m_fanSpeedNameLabels.size() == m_fanSpeedNames.size() )
+        {
+            derived().createStandardIndiSelectionSw(
+                m_indiP_fanSpeed, "fan_speed", m_fanSpeedNames, m_fanSpeedNameLabels, "Fan Speed", "Fan" );
+        }
+        else
+        {
+            derived().createStandardIndiSelectionSw(
+                m_indiP_fanSpeed, "fan_speed", m_fanSpeedNames, "Fan Speed", "Fan" );
+        }
+
+        if( derived().registerIndiPropertyNew( m_indiP_fanSpeed, st_newCallBack_stdCamera ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
+    }
+
+    if( c_hasAnalogGain )
+    {
+        if( m_analogGainNames.empty() )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__, "no analog gain options configured" } );
+#endif
+            return -1;
+        }
+
+        if( m_analogGainNameLabels.size() == m_analogGainNames.size() )
+        {
+            derived().createStandardIndiSelectionSw(
+                m_indiP_analogGain, "analog_gain", m_analogGainNames, m_analogGainNameLabels, "Analog Gain", "Gain" );
+        }
+        else
+        {
+            derived().createStandardIndiSelectionSw(
+                m_indiP_analogGain, "analog_gain", m_analogGainNames, "Analog Gain", "Gain" );
+        }
+
+        if( derived().registerIndiPropertyNew( m_indiP_analogGain, st_newCallBack_stdCamera ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
+    }
+
+    if( c_hasLED )
+    {
+        derived().createStandardIndiToggleSw( m_indiP_led, "led", "Status LED", "LED" );
+        if( derived().registerIndiPropertyNew( m_indiP_led, st_newCallBack_stdCamera ) < 0 )
         {
 #ifndef STDCAMERA_TEST_NOLOG
             derivedT::template log<software_error>( { __FILE__, __LINE__ } );
@@ -1741,6 +2944,52 @@ int stdCamera<derivedT>::appStartup()
 #endif
             return -1;
         }
+
+        const std::vector<std::pair<pcf::IndiProperty *, const char *>> relativeProperties{
+            { &m_indiP_roi_x_relative, "roi_region_x_relative" },
+            { &m_indiP_roi_y_relative, "roi_region_y_relative" } };
+        for( const auto &entry : relativeProperties )
+        {
+            derived().createROIndiNumber( *entry.first, entry.second );
+            entry.first->setPerm( pcf::IndiProperty::ReadWrite );
+            entry.first->add( pcf::IndiElement( "target" ) );
+            ( *entry.first )["target"].setMin( -std::numeric_limits<float>::max() );
+            ( *entry.first )["target"].setMax( std::numeric_limits<float>::max() );
+            ( *entry.first )["target"].setFormat( "%0.3f" );
+            ( *entry.first )["target"] = 0;
+            if( derived().registerIndiPropertyNew( *entry.first, st_newCallBack_stdCamera ) < 0 )
+                return -1;
+        }
+        derived().createROIndiNumber( m_indiP_roi_coordinate_system, "roi_coordinate_system" );
+        m_indiP_roi_coordinate_system.add( pcf::IndiElement( "units" ) );
+        m_indiP_roi_coordinate_system["units"] = static_cast<int>( m_roiUnits );
+        if( derived().registerIndiPropertyReadOnly( m_indiP_roi_coordinate_system ) < 0 )
+            return -1;
+
+        derived().createROIndiNumber( m_indiP_roi_region_state, "roi_region_state" );
+        auto stateNames = MagAOX::roi::names();
+        for( const auto &name : MagAOX::roi::names( "target_" ) )
+            stateNames.push_back( name );
+        for( const auto &name : { "units", "is_full", "is_default", "preset_known" } )
+            stateNames.push_back( name );
+        for( const auto &name : stateNames )
+        {
+            m_indiP_roi_region_state.add( pcf::IndiElement( name ) );
+            m_indiP_roi_region_state[name] = 0;
+        }
+        if( derived().registerIndiPropertyReadOnly( m_indiP_roi_region_state ) < 0 )
+            return -1;
+        derived().createROIndiNumber( m_indiP_roi_check_result, "roi_check_result" );
+        for( const auto &prefix : { "requested_", "checked_", "current_" } )
+            for( const auto &name : MagAOX::roi::names( prefix ) )
+            {
+                m_indiP_roi_check_result.add( pcf::IndiElement( name ) );
+                m_indiP_roi_check_result[name] = 0;
+            }
+        m_indiP_roi_check_result.add( pcf::IndiElement( "sequence" ) );
+        m_indiP_roi_check_result["sequence"] = 0;
+        if( derived().registerIndiPropertyReadOnly( m_indiP_roi_check_result ) < 0 )
+            return -1;
 
         derived().createROIndiNumber( m_indiP_fullROI, "roi_full_region" );
         m_indiP_fullROI.add( pcf::IndiElement( "x" ) );
@@ -1859,6 +3108,61 @@ int stdCamera<derivedT>::appStartup()
         }
     }
 
+    if( c_hasFocus && m_hasFocus )
+    {
+        m_indiP_focus = pcf::IndiProperty( pcf::IndiProperty::Switch );
+        m_indiP_focus.setDevice( derived().configName() );
+        m_indiP_focus.setName( "focus" );
+        m_indiP_focus.setPerm( pcf::IndiProperty::ReadOnly );
+        m_indiP_focus.setState( pcf::IndiProperty::Idle );
+        m_indiP_focus.setRule( pcf::IndiProperty::AtMostOne );
+        m_indiP_focus.setLabel( "Focus" );
+        m_indiP_focus.setGroup( "Focus" );
+        m_indiP_focus.add( pcf::IndiElement( "state", pcf::IndiElement::Off ) );
+        if( derived().registerIndiPropertyReadOnly( m_indiP_focus ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
+
+        derived().createStandardIndiRequestSw( m_indiP_gotoFocus, "goto_focus", "Goto Focus", "Focus" );
+        if( derived().registerIndiPropertyNew( m_indiP_gotoFocus, st_newCallBack_stdCamera ) < 0 )
+        {
+#ifndef STDCAMERA_TEST_NOLOG
+            derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+            return -1;
+        }
+    }
+
+    if( c_hasFocus && !m_focusMonitoredPropertyKeys.empty() )
+    {
+        for( size_t n = 0; n < m_focusMonitoredPropertyKeys.size(); ++n )
+        {
+            std::string devName;
+            std::string propName;
+            if( indi::parseIndiKey( devName, propName, m_focusMonitoredPropertyKeys[n] ) < 0 )
+            {
+#ifndef STDCAMERA_TEST_NOLOG
+                derivedT::template log<software_error>(
+                    { __FILE__, __LINE__, "invalid monitored focus property: " + m_focusMonitoredPropertyKeys[n] } );
+#endif
+                return -1;
+            }
+
+            if( derived().registerIndiPropertySet(
+                    m_indiP_focusMonitoredProperties[n], devName, propName, st_setCallBack_focusMonitored ) < 0 )
+            {
+#ifndef STDCAMERA_TEST_NOLOG
+                derivedT::template log<software_error>( { __FILE__, __LINE__ } );
+#endif
+                return -1;
+            }
+        }
+    }
+
     if( derivedT::c_stdCamera_usesStateString )
     {
         derived().createROIndiText( m_indiP_stateString, "state_string", "current", "State String", "State", "String" );
@@ -1881,6 +3185,18 @@ int stdCamera<derivedT>::appLogic()
 {
     try
     {
+        if( derivedT::c_stdCamera_emGain && derivedT::c_stdCamera_tempControl )
+        { //mutex scope
+            std::unique_lock<std::mutex> lock( derived().m_indiMutex, std::try_to_lock );
+            if( lock.owns_lock() )
+                updateEMGainTempReady();
+        }
+
+        if( derivedT::c_stdCamera_usesROI )
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( derived().m_indiMutex );
+            updateROIGeometry();
+        }
 
         if( derived().state() == stateCodes::POWERON )
         {
@@ -1902,15 +3218,18 @@ int stdCamera<derivedT>::appLogic()
                 m_nextROI.bin_x = m_default_bin_x;
                 m_nextROI.bin_y = m_default_bin_y;
 
-                // Set power-on defaults
-                derived().powerOnDefaults();
+                { //mutex scope
+                    std::unique_lock<std::mutex> lock( derived().m_indiMutex, std::defer_lock );
+                    if( derivedT::c_stdCamera_emGain && derivedT::c_stdCamera_tempControl )
+                        lock.lock();
 
-                if( derivedT::c_stdCamera_tempControl )
-                {
-                    // then set startupTemp if configured
-                    if( m_startupTemp > -999 )
-                        m_ccdTempSetpt = m_startupTemp;
-                    derived().updateIfChanged( m_indiP_temp, "target", m_ccdTempSetpt, INDI_IDLE );
+                    // Set power-on defaults before invalidating the temperature reading and applying startupTemp.
+                    derived().powerOnDefaults();
+                    if( derivedT::c_stdCamera_tempControl )
+                    {
+                        if( powerOnTemp() < 0 )
+                            return -1;
+                    }
                 }
 
                 if( derivedT::c_stdCamera_usesROI )
@@ -1967,6 +3286,12 @@ int stdCamera<derivedT>::appLogic()
                     }
                 }
 
+                if( c_hasFocus && m_hasFocus )
+                {
+                    updateFocusStateProperty();
+                    derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
+                }
+
                 return 0;
             }
             else
@@ -1976,6 +3301,30 @@ int stdCamera<derivedT>::appLogic()
         }
         else if( derived().state() == stateCodes::READY || derived().state() == stateCodes::OPERATING )
         {
+            if( c_hasFanSpeed && m_fanSpeedControlEnabled && m_fanSpeedValid )
+            {
+                indi::updateSelectionSwitchIfChanged(
+                    m_indiP_fanSpeed, m_fanSpeedName, derived().m_indiDriver, INDI_IDLE );
+            }
+
+            if( c_hasAnalogGain && m_analogGainValid )
+            {
+                indi::updateSelectionSwitchIfChanged(
+                    m_indiP_analogGain, m_analogGainName, derived().m_indiDriver, INDI_IDLE );
+            }
+
+            if( c_hasLED && m_ledStateValid )
+            {
+                if( m_ledState )
+                {
+                    derived().updateSwitchIfChanged( m_indiP_led, "toggle", pcf::IndiElement::On, INDI_IDLE );
+                }
+                else
+                {
+                    derived().updateSwitchIfChanged( m_indiP_led, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+                }
+            }
+
             if( derivedT::c_stdCamera_usesROI )
             {
                 derived().updateIfChanged( m_indiP_roi_x, "current", m_currentROI.x, INDI_IDLE );
@@ -2010,10 +3359,17 @@ int stdCamera<derivedT>::appLogic()
 template <class derivedT>
 int stdCamera<derivedT>::onPowerOff()
 {
+    invalidateTempReading();
+    if( derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+        m_tempControlOnTarget = false;
+
     if( !derived().m_indiDriver )
     {
         return 0;
     }
+
+    if( m_indiP_emGainTempReady.find( "toggle" ) )
+        derived().updateSwitchIfChanged( m_indiP_emGainTempReady, "toggle", pcf::IndiElement::Off, INDI_IDLE );
 
     if( derivedT::c_stdCamera_usesModes )
     {
@@ -2025,6 +3381,7 @@ int stdCamera<derivedT>::onPowerOff()
 
     if( derivedT::c_stdCamera_usesROI )
     {
+        updateROIGeometry( false );
         // Blank these values
         indi::updateIfChanged( m_indiP_roi_x, "current", std::string( "" ), derived().m_indiDriver, INDI_IDLE );
         indi::updateIfChanged( m_indiP_roi_x, "target", std::string( "" ), derived().m_indiDriver, INDI_IDLE );
@@ -2086,6 +3443,34 @@ int stdCamera<derivedT>::onPowerOff()
         }
     }
 
+    if( c_hasFocus && m_hasFocus )
+    {
+        updateFocusStateProperty();
+        derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
+    }
+
+    if( c_hasFanSpeed && m_fanSpeedControlEnabled && m_fanSpeedValid )
+    {
+        indi::updateSelectionSwitchIfChanged( m_indiP_fanSpeed, m_fanSpeedName, derived().m_indiDriver, INDI_IDLE );
+    }
+
+    if( c_hasAnalogGain && m_analogGainValid )
+    {
+        indi::updateSelectionSwitchIfChanged( m_indiP_analogGain, m_analogGainName, derived().m_indiDriver, INDI_IDLE );
+    }
+
+    if( c_hasLED && m_ledStateValid )
+    {
+        if( m_ledState )
+        {
+            derived().updateSwitchIfChanged( m_indiP_led, "toggle", pcf::IndiElement::On, INDI_IDLE );
+        }
+        else
+        {
+            derived().updateSwitchIfChanged( m_indiP_led, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+        }
+    }
+
     return 0;
 }
 
@@ -2115,6 +3500,34 @@ int stdCamera<derivedT>::whilePowerOff()
         else
         {
             derived().updateSwitchIfChanged( m_indiP_shutter, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+        }
+    }
+
+    if( c_hasFocus && m_hasFocus )
+    {
+        updateFocusStateProperty();
+        derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
+    }
+
+    if( c_hasFanSpeed && m_fanSpeedControlEnabled && m_fanSpeedValid )
+    {
+        indi::updateSelectionSwitchIfChanged( m_indiP_fanSpeed, m_fanSpeedName, derived().m_indiDriver, INDI_IDLE );
+    }
+
+    if( c_hasAnalogGain && m_analogGainValid )
+    {
+        indi::updateSelectionSwitchIfChanged( m_indiP_analogGain, m_analogGainName, derived().m_indiDriver, INDI_IDLE );
+    }
+
+    if( c_hasLED && m_ledStateValid )
+    {
+        if( m_ledState )
+        {
+            derived().updateSwitchIfChanged( m_indiP_led, "toggle", pcf::IndiElement::On, INDI_IDLE );
+        }
+        else
+        {
+            derived().updateSwitchIfChanged( m_indiP_led, "toggle", pcf::IndiElement::Off, INDI_IDLE );
         }
     }
 
@@ -2161,20 +3574,30 @@ int stdCamera<derivedT>::newCallBack_stdCamera( const pcf::IndiProperty &ipRecv 
         return newCallBack_readoutSpeed( ipRecv );
     else if( derivedT::c_stdCamera_vShiftSpeed && name == "vshift_speed" )
         return newCallBack_vShiftSpeed( ipRecv );
-    else if( derivedT::c_stdCamera_fanSpeed && m_fanSpeedControlEnabled && name == "fan_speed" )
-        return newCallBack_fanSpeed( ipRecv );
     else if( derivedT::c_stdCamera_emGain && name == "emgain" )
         return newCallBack_emgain( ipRecv );
+    else if( derivedT::c_stdCamera_emGain && name == "emgain_off" )
+        return newCallBack_emgain_off( ipRecv );
     else if( derivedT::c_stdCamera_exptimeCtrl && name == "exptime" )
         return newCallBack_exptime( ipRecv );
     else if( derivedT::c_stdCamera_fpsCtrl && name == "fps" )
         return newCallBack_fps( ipRecv );
+    else if( c_hasFanSpeed && m_fanSpeedControlEnabled && name == "fan_speed" )
+        return newCallBack_fanSpeed( ipRecv );
+    else if( c_hasAnalogGain && name == "analog_gain" )
+        return newCallBack_analogGain( ipRecv );
+    else if( c_hasLED && name == "led" )
+        return newCallBack_led( ipRecv );
     else if( derivedT::c_stdCamera_synchro && name == "synchro" )
         return newCallBack_synchro( ipRecv );
     else if( derivedT::c_stdCamera_usesModes && name == "mode" )
         return newCallBack_mode( ipRecv );
     else if( derivedT::c_stdCamera_cropMode && name == "roi_crop_mode" )
         return newCallBack_cropMode( ipRecv );
+    else if( derivedT::c_stdCamera_usesROI && name == "roi_region_x_relative" )
+        return newCallBack_roi_relative( ipRecv, true );
+    else if( derivedT::c_stdCamera_usesROI && name == "roi_region_y_relative" )
+        return newCallBack_roi_relative( ipRecv, false );
     else if( derivedT::c_stdCamera_usesROI && name == "roi_region_x" )
         return newCallBack_roi_x( ipRecv );
     else if( derivedT::c_stdCamera_usesROI && name == "roi_region_y" )
@@ -2203,12 +3626,129 @@ int stdCamera<derivedT>::newCallBack_stdCamera( const pcf::IndiProperty &ipRecv 
         return newCallBack_roi_default( ipRecv );
     else if( derivedT::c_stdCamera_hasShutter && name == "shutter" )
         return newCallBack_shutter( ipRecv );
+    else if( c_hasFocus && m_hasFocus && name == "goto_focus" )
+        return newCallBack_gotoFocus( ipRecv );
 
 #ifndef XWCTEST_INDI_CALLBACK_VALIDATION
     derivedT::template log<software_error>( { __FILE__, __LINE__, "unknown INDI property" } );
 #endif
 
     return -1;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setTempLimits( double minimum, double maximum )
+{
+    if( !mx::math::isFinite( m_configMinTemp ) || !mx::math::isFinite( m_configMaxTemp ) ||
+        m_configMinTemp > m_configMaxTemp )
+        return derivedT::template log<software_critical, -1>(
+            { __FILE__, __LINE__, "camera.minTemp and camera.maxTemp must be finite and ordered" } );
+
+    if( !mx::math::isFinite( minimum ) || !mx::math::isFinite( maximum ) || minimum > maximum )
+        return derivedT::template log<software_error, -1>( { __FILE__, __LINE__, "Invalid camera temperature range" } );
+
+    double lower   = std::max<double>( m_configMinTemp, minimum );
+    double upper   = std::min<double>( m_configMaxTemp, maximum );
+    float  minTemp = lower;
+    float  maxTemp = upper;
+    // Round inward when converting camera doubles to the stdCamera float limits.
+    if( minTemp < lower )
+        minTemp = std::nextafter( minTemp, std::numeric_limits<float>::infinity() );
+    if( maxTemp > upper )
+        maxTemp = std::nextafter( maxTemp, -std::numeric_limits<float>::infinity() );
+    if( lower > upper || minTemp > maxTemp )
+        return derivedT::template log<software_error, -1>(
+            { __FILE__, __LINE__, "Configured temperature range has no overlap with the camera's valid range" } );
+
+    m_minTempCamera = minimum;
+    m_maxTempCamera = maximum;
+    m_minTemp       = minTemp;
+    m_maxTemp       = maxTemp;
+    if( m_indiP_temp.find( "target" ) )
+    {
+        for( const char *element : { "current", "target" } )
+        {
+            m_indiP_temp[element].setMin( m_minTemp );
+            m_indiP_temp[element].setMax( m_maxTemp );
+        }
+        if( derived().m_indiDriver )
+            derived().m_indiDriver->sendDefProperty( m_indiP_temp );
+    }
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::validateTempSetPt( float target )
+{
+    if( !mx::math::isFinite( target ) || target < m_minTemp || target > m_maxTemp )
+        return derivedT::template log<text_log, -1>( "Temperature setpoint " + std::to_string( target ) +
+                                                         " outside inclusive range [" + std::to_string( m_minTemp ) +
+                                                         ", " + std::to_string( m_maxTemp ) + "] C",
+                                                     logPrio::LOG_ERROR );
+    return 0;
+}
+
+template <class derivedT>
+void stdCamera<derivedT>::invalidateTempReading()
+{
+    m_ccdTempValid = false;
+}
+
+template <class derivedT>
+void stdCamera<derivedT>::updateTempReading( float temperature )
+{
+    m_ccdTemp      = temperature;
+    m_ccdTempValid = mx::math::isFinite( temperature ) && temperature >= -273.15f;
+}
+
+template <class derivedT>
+bool stdCamera<derivedT>::emGainTempReady()
+{
+    if( !m_emGainRequiresTemp )
+        return true;
+    if( derived().state() != stateCodes::READY && derived().state() != stateCodes::OPERATING )
+        return false;
+    if( !mx::math::isFinite( m_emGainTemp ) || !mx::math::isFinite( m_ccdTempSetpt ) ||
+        m_ccdTempSetpt != m_emGainTemp || !m_tempControlStatus )
+        return false;
+    if( m_emGainTempMode == "locked" )
+        return m_tempControlOnTarget;
+    return m_emGainTempMode == "maxTemp" && m_ccdTempValid && mx::math::isFinite( m_ccdTemp ) &&
+           m_ccdTemp >= -273.15f && mx::math::isFinite( m_emGainMaxTemp ) && m_emGainMaxTemp >= m_emGainTemp &&
+           m_ccdTemp <= m_emGainMaxTemp;
+}
+
+template <class derivedT>
+void stdCamera<derivedT>::updateEMGainTempReady()
+{
+    if( !m_indiP_emGainTempReady.find( "toggle" ) )
+        return;
+    bool ready = emGainTempReady();
+    derived().updateSwitchIfChanged( m_indiP_emGainTempReady,
+                                     "toggle",
+                                     ready ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                                     ready ? INDI_OK : INDI_IDLE );
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::powerOnTemp()
+{
+    invalidateTempReading();
+    if( derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+        m_tempControlOnTarget = false;
+
+    if( c_hasTempLimits && !mx::math::isFinite( m_startupTemp ) )
+        return validateTempSetPt( m_startupTemp );
+    if( m_startupTemp > -999 )
+    {
+        if( c_hasTempLimits && validateTempSetPt( m_startupTemp ) < 0 )
+            return -1;
+        m_ccdTempSetpt = m_startupTemp;
+    }
+    if( m_indiP_temp.find( "target" ) )
+        derived().updateIfChanged( m_indiP_temp, "target", m_ccdTempSetpt, INDI_IDLE );
+    updateEMGainTempReady();
+    return 0;
 }
 
 template <class derivedT>
@@ -2238,6 +3778,27 @@ int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
 
         std::unique_lock<std::mutex> lock( derived().m_indiMutex );
 
+        float previous = m_ccdTempSetpt;
+        if( c_hasTempLimits && ipRecv.createUniqueKey() == m_indiP_temp.createUniqueKey() &&
+            ( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+        {
+            const auto        &element = ipRecv[ipRecv.find( "target" ) ? "target" : "current"];
+            std::istringstream value( element.getValue() );
+            bool               parsed = static_cast<bool>( value >> target );
+            if( parsed )
+                value >> std::ws;
+            if( !parsed || !value.eof() )
+            {
+                derived().updateIfChanged( m_indiP_temp, "target", previous, INDI_ALERT );
+                return derivedT::template log<text_log, -1>( "Invalid temperature target: " + element.getValue(),
+                                                             logPrio::LOG_ERROR );
+            }
+            if( derived().validateTempSetPt( target ) < 0 )
+            {
+                derived().updateIfChanged( m_indiP_temp, "target", previous, INDI_ALERT );
+                return -1;
+            }
+        }
         if( derived().indiTargetUpdate( m_indiP_temp, target, ipRecv, true ) < 0 )
         {
             derivedT::template log<software_error>( { __FILE__, __LINE__ } );
@@ -2245,9 +3806,22 @@ int stdCamera<derivedT>::newCallBack_temp( const pcf::IndiProperty &ipRecv )
         }
 
         m_ccdTempSetpt = target;
-
         mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
-        return setTempSetPt( tf );
+        int                                                     rv = setTempSetPt( tf );
+        if( rv >= 0 && target != previous )
+        {
+            invalidateTempReading();
+            if( derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+                m_tempControlOnTarget = false;
+        }
+
+        if( rv < 0 && c_hasTempLimits )
+        {
+            m_ccdTempSetpt = previous;
+            derived().updateIfChanged( m_indiP_temp, "target", previous, INDI_ALERT );
+        }
+        updateEMGainTempReady();
+        return rv;
     }
     else
     {
@@ -2281,9 +3855,10 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
         if( !ipRecv.find( "toggle" ) )
             return 0;
 
-        m_tempControlStatusSet = false;
-
         std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        bool previous          = m_tempControlStatusSet;
+        m_tempControlStatusSet = false;
 
         if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
         {
@@ -2296,8 +3871,16 @@ int stdCamera<derivedT>::newCallBack_temp_controller( const pcf::IndiProperty &i
             derived().updateSwitchIfChanged( m_indiP_tempcont, "toggle", pcf::IndiElement::Off, INDI_BUSY );
         }
 
-        mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
-        return setTempControl( tf );
+        mx::meta::trueFalseT<derivedT::c_stdCamera_tempControl> tf;
+        int                                                     rv = setTempControl( tf );
+        if( rv >= 0 && ( !m_tempControlStatusSet || m_tempControlStatusSet != previous ) )
+        {
+            invalidateTempReading();
+            if( derivedT::c_stdCamera_emGain && m_emGainRequiresTemp )
+                m_tempControlOnTarget = false;
+        }
+        updateEMGainTempReady();
+        return rv;
     }
     else
     {
@@ -2428,66 +4011,6 @@ int stdCamera<derivedT>::newCallBack_vShiftSpeed( const pcf::IndiProperty &ipRec
 }
 
 template <class derivedT>
-int stdCamera<derivedT>::setFanSpeed( const mx::meta::trueFalseT<true> &t )
-{
-    static_cast<void>( t );
-    return derived().setFanSpeed();
-}
-
-template <class derivedT>
-int stdCamera<derivedT>::setFanSpeed( const mx::meta::trueFalseT<false> &f )
-{
-    static_cast<void>( f );
-    return 0;
-}
-
-template <class derivedT>
-int stdCamera<derivedT>::newCallBack_fanSpeed( const pcf::IndiProperty &ipRecv )
-{
-    if( derivedT::c_stdCamera_fanSpeed && m_fanSpeedControlEnabled )
-    {
-#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
-        return 0;
-#endif
-
-        std::unique_lock<std::mutex> lock( derived().m_indiMutex );
-
-        std::string newspeed;
-
-        for( size_t i = 0; i < m_fanSpeedNames.size(); ++i )
-        {
-            if( !ipRecv.find( m_fanSpeedNames[i] ) )
-                continue;
-
-            if( ipRecv[m_fanSpeedNames[i]].getSwitchState() == pcf::IndiElement::On )
-            {
-                if( newspeed != "" )
-                {
-                    derivedT::template log<text_log>( "More than one fan speed selected", logPrio::LOG_ERROR );
-                    return -1;
-                }
-
-                newspeed = m_fanSpeedNames[i];
-            }
-        }
-
-        if( newspeed == "" )
-        {
-            m_fanSpeedNameSet = m_fanSpeedName;
-        }
-        else
-        {
-            m_fanSpeedNameSet = newspeed;
-        }
-
-        mx::meta::trueFalseT<derivedT::c_stdCamera_fanSpeed> tf;
-        return setFanSpeed( tf );
-    }
-
-    return 0;
-}
-
-template <class derivedT>
 int stdCamera<derivedT>::setEMGain( const mx::meta::trueFalseT<true> &t )
 {
     static_cast<void>( t );
@@ -2510,9 +4033,41 @@ int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv )
         return 0;
 #endif
 
-        float target;
+        float target{ 0 };
 
         std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        if( ipRecv.createUniqueKey() == m_indiP_emGain.createUniqueKey() &&
+            ( ipRecv.find( "target" ) || ipRecv.find( "current" ) ) )
+        {
+            const auto        &element = ipRecv[ipRecv.find( "target" ) ? "target" : "current"];
+            std::istringstream value( element.getValue() );
+            bool               parsed = static_cast<bool>( value >> target );
+            if( parsed )
+                value >> std::ws;
+            if( !parsed || !value.eof() || !mx::math::isFinite( target ) )
+            {
+                derived().updateIfChanged( m_indiP_emGain, "target", m_emGainSet, INDI_ALERT );
+                return derivedT::template log<text_log, -1>( "Invalid EM gain target: " + element.getValue(),
+                                                             logPrio::LOG_WARNING );
+            }
+
+            updateEMGainTempReady();
+            if( derivedT::c_stdCamera_tempControl && m_emGainRequiresTemp && target > 1 && !emGainTempReady() )
+            {
+                derived().updateIfChanged( m_indiP_emGain, "target", m_emGainSet, INDI_ALERT );
+                if( m_emGainTempMode == "maxTemp" )
+                    return derivedT::template log<text_log, -1>(
+                        "EM gain above 1 requires active temperature control at " + std::to_string( m_emGainTemp ) +
+                            " C and a valid measured temperature at or below " + std::to_string( m_emGainMaxTemp ) +
+                            " C",
+                        logPrio::LOG_WARNING );
+                return derivedT::template log<text_log, -1>(
+                    "EM gain above 1 requires on-target temperature control at " + std::to_string( m_emGainTemp ) +
+                        " C",
+                    logPrio::LOG_WARNING );
+            }
+        }
 
         if( derived().indiTargetUpdate( m_indiP_emGain, target, ipRecv, true ) < 0 )
         {
@@ -2524,6 +4079,52 @@ int stdCamera<derivedT>::newCallBack_emgain( const pcf::IndiProperty &ipRecv )
 
         mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
         return setEMGain( tf );
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setEMGainOff( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().setEMGainOff();
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setEMGainOff( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::newCallBack_emgain_off( const pcf::IndiProperty &ipRecv )
+{
+    if( derivedT::c_stdCamera_emGain )
+    {
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+        return 0;
+#endif
+
+        if( ipRecv.createUniqueKey() != m_indiP_emGainOff.createUniqueKey() )
+            return -1;
+
+        if( !ipRecv.find( "request" ) || ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+            return 0;
+
+        std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        indi::updateSwitchIfChanged(
+            m_indiP_emGainOff, "request", pcf::IndiElement::On, derived().m_indiDriver, INDI_BUSY );
+
+        mx::meta::trueFalseT<derivedT::c_stdCamera_emGain> tf;
+        int                                                rv    = setEMGainOff( tf );
+        auto                                               state = rv < 0 ? INDI_ALERT : INDI_IDLE;
+        derived().updateIfChanged( m_indiP_emGain, "target", m_emGainSet, state );
+        indi::updateSwitchIfChanged(
+            m_indiP_emGainOff, "request", pcf::IndiElement::Off, derived().m_indiDriver, state );
+        return rv;
     }
 
     return 0;
@@ -2608,6 +4209,177 @@ int stdCamera<derivedT>::newCallBack_fps( const pcf::IndiProperty &ipRecv )
 
         mx::meta::trueFalseT<derivedT::c_stdCamera_fpsCtrl> tf;
         return setFPS( tf );
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setFanSpeed( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().setFanSpeed();
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setFanSpeed( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::newCallBack_fanSpeed( const pcf::IndiProperty &ipRecv )
+{
+    if( c_hasFanSpeed )
+    {
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+        return 0;
+#endif
+
+        std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        std::string newFanSpeed;
+
+        for( size_t i = 0; i < m_fanSpeedNames.size(); ++i )
+        {
+            if( !ipRecv.find( m_fanSpeedNames[i] ) )
+            {
+                continue;
+            }
+
+            if( ipRecv[m_fanSpeedNames[i]].getSwitchState() == pcf::IndiElement::On )
+            {
+                if( newFanSpeed != "" )
+                {
+                    derivedT::template log<text_log>( "More than one fan speed selected", logPrio::LOG_ERROR );
+                    return -1;
+                }
+
+                newFanSpeed = m_fanSpeedNames[i];
+            }
+        }
+
+        if( newFanSpeed == "" )
+        {
+            m_fanSpeedNameSet = m_fanSpeedName;
+        }
+        else
+        {
+            m_fanSpeedNameSet = newFanSpeed;
+        }
+
+        mx::meta::trueFalseT<c_hasFanSpeed> tf;
+        return setFanSpeed( tf );
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setAnalogGain( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().setAnalogGain();
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setAnalogGain( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::newCallBack_analogGain( const pcf::IndiProperty &ipRecv )
+{
+    if( c_hasAnalogGain )
+    {
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+        return 0;
+#endif
+
+        std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        std::string newAnalogGain;
+
+        for( size_t i = 0; i < m_analogGainNames.size(); ++i )
+        {
+            if( !ipRecv.find( m_analogGainNames[i] ) )
+            {
+                continue;
+            }
+
+            if( ipRecv[m_analogGainNames[i]].getSwitchState() == pcf::IndiElement::On )
+            {
+                if( newAnalogGain != "" )
+                {
+                    derivedT::template log<text_log>( "More than one analog gain selected", logPrio::LOG_ERROR );
+                    return -1;
+                }
+
+                newAnalogGain = m_analogGainNames[i];
+            }
+        }
+
+        if( newAnalogGain == "" )
+        {
+            m_analogGainNameSet = m_analogGainName;
+        }
+        else
+        {
+            m_analogGainNameSet = newAnalogGain;
+        }
+
+        mx::meta::trueFalseT<c_hasAnalogGain> tf;
+        return setAnalogGain( tf );
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setLED( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().setLED();
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setLED( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::newCallBack_led( const pcf::IndiProperty &ipRecv )
+{
+    if( c_hasLED )
+    {
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+        return 0;
+#endif
+
+        if( !ipRecv.find( "toggle" ) )
+        {
+            return 0;
+        }
+
+        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
+        {
+            m_ledStateSet = false;
+        }
+
+        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+        {
+            m_ledStateSet = true;
+        }
+
+        std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+        mx::meta::trueFalseT<c_hasLED> tf;
+        return setLED( tf );
     }
 
     return 0;
@@ -2781,6 +4553,102 @@ int stdCamera<derivedT>::newCallBack_cropMode( const pcf::IndiProperty &ipRecv )
     return 0;
 }
 
+template <class derivedT>
+void stdCamera<derivedT>::updateROIGeometry( bool available )
+{
+    if( !derivedT::c_stdCamera_usesROI || !derived().m_indiDriver )
+        return;
+    using namespace MagAOX::roi;
+    available = available && ( derived().state() == stateCodes::READY || derived().state() == stateCodes::OPERATING ) &&
+                m_roiUnits != units::unsupported && valid( m_currentROI ) && valid( m_nextROI );
+    if( m_roiUnits == units::sensor && valid( m_currentROI ) )
+        available = available && m_currentROI.w % m_currentROI.bin_x == 0 && m_currentROI.h % m_currentROI.bin_y == 0;
+    auto st     = available ? INDI_OK : INDI_IDLE;
+    auto names  = MagAOX::roi::names();
+    auto values = MagAOX::roi::values( m_currentROI );
+    auto tn     = MagAOX::roi::names( "target_" );
+    auto tv     = MagAOX::roi::values( m_nextROI );
+    names.insert( names.end(), tn.begin(), tn.end() );
+    values.insert( values.end(), tv.begin(), tv.end() );
+    roi full{ m_full_x, m_full_y, m_full_w, m_full_h, m_full_bin_x, m_full_bin_y };
+    if( m_full_currbin_w > 0 && m_full_currbin_h > 0 )
+        full = { m_full_currbin_x,
+                 m_full_currbin_y,
+                 m_full_currbin_w,
+                 m_full_currbin_h,
+                 m_currentROI.bin_x,
+                 m_currentROI.bin_y };
+    else if( m_roiUnits == units::sensor )
+    {
+        full.bin_x = m_currentROI.bin_x;
+        full.bin_y = m_currentROI.bin_y;
+    }
+    roi  def{ m_default_x, m_default_y, m_default_w, m_default_h, m_default_bin_x, m_default_bin_y };
+    bool known = valid( full ) && valid( def ) && full.bin_x == m_currentROI.bin_x && full.bin_y == m_currentROI.bin_y;
+    for( const auto &name : { "units", "is_full", "is_default", "preset_known" } )
+        names.push_back( name );
+    values.insert( values.end(),
+                   { static_cast<double>( m_roiUnits ),
+                     static_cast<double>( same( m_currentROI, full ) ),
+                     static_cast<double>( same( m_currentROI, def ) ),
+                     static_cast<double>( known ) } );
+    indi::updatesIfChanged( m_indiP_roi_region_state, names, values, derived().m_indiDriver, st );
+    derived().updateIfChanged( m_indiP_roi_coordinate_system, "units", static_cast<int>( m_roiUnits ), st );
+    double x =
+        available
+            ? relative( m_nextROI.x, m_nextROI.bin_x, m_currentROI.x, m_currentROI.w, m_currentROI.bin_x, m_roiUnits )
+            : 0;
+    double y =
+        available
+            ? relative( m_nextROI.y, m_nextROI.bin_y, m_currentROI.y, m_currentROI.h, m_currentROI.bin_y, m_roiUnits )
+            : 0;
+    derived().updateIfChanged( m_indiP_roi_x_relative, "target", x, st );
+    derived().updateIfChanged( m_indiP_roi_y_relative, "target", y, st );
+    if( !available )
+    {
+        derived().updateIfChanged( m_indiP_roi_check_result, "sequence", m_roiCheckSequence, INDI_IDLE );
+    }
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::newCallBack_roi_relative( const pcf::IndiProperty &ipRecv, bool horizontal )
+{
+    using namespace MagAOX::roi;
+    std::lock_guard<std::mutex> lock( derived().m_indiMutex );
+    auto                       &property = horizontal ? m_indiP_roi_x_relative : m_indiP_roi_y_relative;
+    if( !derivedT::c_stdCamera_usesROI || ipRecv.getType() != pcf::IndiProperty::Number ||
+        ipRecv.createUniqueKey() != property.createUniqueKey() || !ipRecv.find( "target" ) ||
+        m_roiUnits == units::unsupported || !valid( m_currentROI ) || !valid( m_nextROI ) ||
+        ( derived().state() != stateCodes::READY && derived().state() != stateCodes::OPERATING ) )
+        return -1;
+    double             input;
+    std::istringstream parser( ipRecv["target"].get() );
+    if( !( parser >> input ) || !std::isfinite( input ) )
+        return -1;
+    parser >> std::ws;
+    if( !parser.eof() )
+        return -1;
+    if( m_roiUnits == units::sensor && ( m_currentROI.w % m_currentROI.bin_x || m_currentROI.h % m_currentROI.bin_y ) )
+        return -1;
+    double result =
+        horizontal ? absolute( input, m_nextROI.bin_x, m_currentROI.x, m_currentROI.w, m_currentROI.bin_x, m_roiUnits )
+                   : absolute( input, m_nextROI.bin_y, m_currentROI.y, m_currentROI.h, m_currentROI.bin_y, m_roiUnits );
+    if( !std::isfinite( result ) || std::abs( result ) > std::numeric_limits<float>::max() )
+        return -1;
+    if( horizontal )
+    {
+        m_nextROI.x = result;
+        derived().updateIfChanged( m_indiP_roi_x, "target", m_nextROI.x );
+    }
+    else
+    {
+        m_nextROI.y = result;
+        derived().updateIfChanged( m_indiP_roi_y, "target", m_nextROI.y );
+    }
+    updateROIGeometry();
+    return 0;
+}
+
 ///\todo why don't these check if usesROI is true?
 template <class derivedT>
 int stdCamera<derivedT>::newCallBack_roi_x( const pcf::IndiProperty &ipRecv )
@@ -2801,6 +4669,7 @@ int stdCamera<derivedT>::newCallBack_roi_x( const pcf::IndiProperty &ipRecv )
     }
 
     m_nextROI.x = target;
+    updateROIGeometry();
 
     return 0;
 }
@@ -2824,6 +4693,7 @@ int stdCamera<derivedT>::newCallBack_roi_y( const pcf::IndiProperty &ipRecv )
     }
 
     m_nextROI.y = target;
+    updateROIGeometry();
 
     return 0;
 }
@@ -2847,6 +4717,7 @@ int stdCamera<derivedT>::newCallBack_roi_w( const pcf::IndiProperty &ipRecv )
     }
 
     m_nextROI.w = target;
+    updateROIGeometry();
 
     return 0;
 }
@@ -2870,6 +4741,7 @@ int stdCamera<derivedT>::newCallBack_roi_h( const pcf::IndiProperty &ipRecv )
     }
 
     m_nextROI.h = target;
+    updateROIGeometry();
 
     return 0;
 }
@@ -2893,6 +4765,7 @@ int stdCamera<derivedT>::newCallBack_roi_bin_x( const pcf::IndiProperty &ipRecv 
     }
 
     m_nextROI.bin_x = target;
+    updateROIGeometry();
 
     return 0;
 }
@@ -2916,6 +4789,7 @@ int stdCamera<derivedT>::newCallBack_roi_bin_y( const pcf::IndiProperty &ipRecv 
     }
 
     m_nextROI.bin_y = target;
+    updateROIGeometry();
 
     return 0;
 }
@@ -2954,7 +4828,27 @@ int stdCamera<derivedT>::newCallBack_roi_check( const pcf::IndiProperty &ipRecv 
                 m_indiP_roi_check, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE );
 
             mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
-            return checkNextROI( tf );
+            const roi                                           requested = m_nextROI;
+            const roi                                           reference = m_currentROI;
+            int                                                 rv        = checkNextROI( tf );
+            updateROIGeometry();
+            std::vector<std::string> names;
+            std::vector<double>      values;
+            for( const auto &entry : { std::make_pair( "requested_", requested ),
+                                       std::make_pair( "checked_", m_nextROI ),
+                                       std::make_pair( "current_", reference ) } )
+            {
+                auto n = MagAOX::roi::names( entry.first );
+                auto v = MagAOX::roi::values( entry.second );
+                names.insert( names.end(), n.begin(), n.end() );
+                values.insert( values.end(), v.begin(), v.end() );
+            }
+            names.push_back( "sequence" );
+            values.push_back( ++m_roiCheckSequence );
+            bool good = rv == 0 && MagAOX::roi::valid( m_nextROI ) && MagAOX::roi::valid( reference );
+            indi::updatesIfChanged(
+                m_indiP_roi_check_result, names, values, derived().m_indiDriver, good ? INDI_OK : INDI_ALERT );
+            return rv;
         }
 
         return 0;
@@ -2999,7 +4893,9 @@ int stdCamera<derivedT>::newCallBack_roi_set( const pcf::IndiProperty &ipRecv )
             m_lastROI = m_currentROI;
 
             mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
-            return setNextROI( tf );
+            int                                                 rv = setNextROI( tf );
+            updateROIGeometry();
+            return rv;
         }
 
         return 0;
@@ -3035,7 +4931,9 @@ int stdCamera<derivedT>::newCallBack_roi_full( const pcf::IndiProperty &ipRecv )
             m_nextROI.bin_y = m_full_bin_y;
             m_lastROI       = m_currentROI;
             mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
-            return setNextROI( tf );
+            int                                                 rv = setNextROI( tf );
+            updateROIGeometry();
+            return rv;
         }
 
         return 0;
@@ -3100,7 +4998,9 @@ int stdCamera<derivedT>::newCallBack_roi_fullbin( const pcf::IndiProperty &ipRec
 
             m_lastROI = m_currentROI;
             mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
-            return setNextROI( tf );
+            int                                                 rv = setNextROI( tf );
+            updateROIGeometry();
+            return rv;
         }
 
         return 0;
@@ -3129,6 +5029,7 @@ int stdCamera<derivedT>::newCallBack_roi_loadlast( const pcf::IndiProperty &ipRe
                 m_indiP_roi_loadlast, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE );
 
             m_nextROI = m_lastROI;
+            updateROIGeometry();
             return 0;
         }
 
@@ -3159,7 +5060,9 @@ int stdCamera<derivedT>::newCallBack_roi_last( const pcf::IndiProperty &ipRecv )
             m_nextROI = m_lastROI;
             m_lastROI = m_currentROI;
             mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
-            return setNextROI( tf );
+            int                                                 rv = setNextROI( tf );
+            updateROIGeometry();
+            return rv;
         }
 
         return 0;
@@ -3195,7 +5098,9 @@ int stdCamera<derivedT>::newCallBack_roi_default( const pcf::IndiProperty &ipRec
             m_nextROI.bin_y = m_default_bin_y;
             m_lastROI       = m_currentROI;
             mx::meta::trueFalseT<derivedT::c_stdCamera_usesROI> tf;
-            return setNextROI( tf );
+            int                                                 rv = setNextROI( tf );
+            updateROIGeometry();
+            return rv;
         }
 
         return 0;
@@ -3249,6 +5154,92 @@ int stdCamera<derivedT>::newCallBack_shutter( const pcf::IndiProperty &ipRecv )
 }
 
 template <class derivedT>
+bool stdCamera<derivedT>::checkFocus( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().checkFocus();
+}
+
+template <class derivedT>
+bool stdCamera<derivedT>::checkFocus( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return false;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::gotoFocus( const mx::meta::trueFalseT<true> &t )
+{
+    static_cast<void>( t );
+    return derived().gotoFocus();
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::gotoFocus( const mx::meta::trueFalseT<false> &f )
+{
+    static_cast<void>( f );
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::newCallBack_gotoFocus( const pcf::IndiProperty &ipRecv )
+{
+    if( c_hasFocus && m_hasFocus )
+    {
+#ifdef XWCTEST_INDI_CALLBACK_VALIDATION
+        return 0;
+#endif
+
+        if( !ipRecv.find( "request" ) )
+        {
+            return 0;
+        }
+
+        if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+        {
+            std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+
+            indi::updateSwitchIfChanged(
+                m_indiP_gotoFocus, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE );
+
+            mx::meta::trueFalseT<c_hasFocus> tf;
+            return gotoFocus( tf );
+        }
+    }
+
+    return 0;
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::st_setCallBack_focusMonitored( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<derivedT *>( app )->setCallBack_focusMonitored( ipRecv );
+}
+
+template <class derivedT>
+int stdCamera<derivedT>::setCallBack_focusMonitored( const pcf::IndiProperty &ipRecv )
+{
+    for( size_t n = 0; n < m_indiP_focusMonitoredProperties.size(); ++n )
+    {
+        if( ipRecv.getDevice() == m_indiP_focusMonitoredProperties[n].getDevice() &&
+            ipRecv.getName() == m_indiP_focusMonitoredProperties[n].getName() )
+        {
+            m_indiP_focusMonitoredProperties[n] = ipRecv;
+
+            if( c_hasFocus && m_hasFocus && static_cast<int>( n ) == m_focusStateSourceIndex )
+            {
+                std::unique_lock<std::mutex> lock( derived().m_indiMutex );
+                updateFocusStateProperty();
+            }
+
+            return 0;
+        }
+    }
+
+    return 0;
+}
+
+template <class derivedT>
 std::string stdCamera<derivedT>::stateString( const mx::meta::trueFalseT<true> &t )
 {
     static_cast<void>( t );
@@ -3284,6 +5275,8 @@ int stdCamera<derivedT>::updateINDI()
         if( !derived().m_indiDriver )
             return 0;
 
+        updateEMGainTempReady();
+
         if( derivedT::c_stdCamera_readoutSpeed )
         {
             indi::updateSelectionSwitchIfChanged(
@@ -3294,11 +5287,6 @@ int stdCamera<derivedT>::updateINDI()
         {
             indi::updateSelectionSwitchIfChanged(
                 m_indiP_vShiftSpeed, m_vShiftSpeedName, derived().m_indiDriver, INDI_OK );
-        }
-
-        if( derivedT::c_stdCamera_fanSpeed && m_fanSpeedControlEnabled )
-        {
-            indi::updateSelectionSwitchIfChanged( m_indiP_fanSpeed, m_fanSpeedName, derived().m_indiDriver, INDI_OK );
         }
 
         if( derivedT::c_stdCamera_emGain )
@@ -3321,6 +5309,23 @@ int stdCamera<derivedT>::updateINDI()
         else if( derivedT::c_stdCamera_fps )
         {
             derived().updateIfChanged( m_indiP_fps, "current", m_fps, INDI_IDLE );
+        }
+
+        if( c_hasFanSpeed && m_fanSpeedControlEnabled && m_fanSpeedValid )
+        {
+            indi::updateSelectionSwitchIfChanged( m_indiP_fanSpeed, m_fanSpeedName, derived().m_indiDriver, INDI_OK );
+        }
+
+        if( c_hasLED && m_ledStateValid )
+        {
+            if( m_ledState )
+            {
+                derived().updateSwitchIfChanged( m_indiP_led, "toggle", pcf::IndiElement::On, INDI_OK );
+            }
+            else
+            {
+                derived().updateSwitchIfChanged( m_indiP_led, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+            }
         }
 
         if( derivedT::c_stdCamera_synchro )
@@ -3364,6 +5369,7 @@ int stdCamera<derivedT>::updateINDI()
 
         if( derivedT::c_stdCamera_usesROI )
         {
+            updateROIGeometry();
             // These can't change after initialization, but might not be discoverable until powered on and connected.
             // so we'll check every time I guess.
             derived().updateIfChanged( m_indiP_fullROI, "x", m_full_x, INDI_IDLE );
@@ -3429,6 +5435,12 @@ int stdCamera<derivedT>::updateINDI()
             }
         }
 
+        if( c_hasFocus && m_hasFocus )
+        {
+            updateFocusStateProperty();
+            derived().updateSwitchIfChanged( m_indiP_gotoFocus, "request", pcf::IndiElement::Off, INDI_IDLE );
+        }
+
         if( derivedT::c_stdCamera_usesStateString )
         {
             mx::meta::trueFalseT<derivedT::c_stdCamera_usesStateString> tf;
@@ -3471,6 +5483,8 @@ int stdCamera<derivedT>::recordCamera( bool force )
     static float       last_vshiftSpeed  = -1;
     static bool        last_cropMode     = false;
     static std::string last_fanSpeed;
+    static std::string last_analogGain;
+    static bool        last_ledState = false;
     static std::string last_readoutSpeed;
 
     if( force || m_modeName != last_mode || m_currentROI.x != last_roi.x || m_currentROI.y != last_roi.y ||
@@ -3480,32 +5494,37 @@ int stdCamera<derivedT>::recordCamera( bool force )
         m_ccdTempSetpt != last_ccdTempSetpt || m_tempControlStatus != last_tempControlStatus ||
         m_tempControlOnTarget != last_tempControlOnTarget || m_tempControlStatusStr != last_tempControlStatusStr ||
         m_shutterStatus != last_shutterStatus || m_shutterState != last_shutterState || m_synchro != last_synchro ||
-        m_vshiftSpeed != last_vshiftSpeed || m_cropMode != last_cropMode || m_fanSpeedName != last_fanSpeed ||
-        m_readoutSpeedName != last_readoutSpeed )
+        m_vshiftSpeed != last_vshiftSpeed || m_cropMode != last_cropMode || m_readoutSpeedName != last_readoutSpeed ||
+        ( c_hasFanSpeed && m_fanSpeedValid && m_fanSpeedName != last_fanSpeed ) ||
+        ( c_hasAnalogGain && m_analogGainValid && m_analogGainName != last_analogGain ) ||
+        ( c_hasLED && m_ledStateValid && m_ledState != last_ledState ) )
     {
-        derived().template telem<telem_stdcam>( { m_modeName,
-                                                  m_currentROI.x,
-                                                  m_currentROI.y,
-                                                  m_currentROI.w,
-                                                  m_currentROI.h,
-                                                  m_currentROI.bin_x,
-                                                  m_currentROI.bin_y,
-                                                  m_expTime,
-                                                  m_fps,
-                                                  m_emGain,
-                                                  m_adcSpeed,
-                                                  m_ccdTemp,
-                                                  m_ccdTempSetpt,
-                                                  (uint8_t)m_tempControlStatus,
-                                                  (uint8_t)m_tempControlOnTarget,
-                                                  m_tempControlStatusStr,
-                                                  m_shutterStatus,
-                                                  (int8_t)m_shutterState,
-                                                  (uint8_t)m_synchro,
-                                                  m_vshiftSpeed,
-                                                  (uint8_t)m_cropMode,
-                                                  m_fanSpeedName,
-                                                  m_readoutSpeedName } );
+        derived().template telem<telem_stdcam>(
+            { m_modeName,
+              m_currentROI.x,
+              m_currentROI.y,
+              m_currentROI.w,
+              m_currentROI.h,
+              m_currentROI.bin_x,
+              m_currentROI.bin_y,
+              m_expTime,
+              m_fps,
+              m_emGain,
+              m_adcSpeed,
+              m_ccdTemp,
+              m_ccdTempSetpt,
+              (uint8_t)m_tempControlStatus,
+              (uint8_t)m_tempControlOnTarget,
+              m_tempControlStatusStr,
+              m_shutterStatus,
+              (int8_t)m_shutterState,
+              (uint8_t)m_synchro,
+              m_vshiftSpeed,
+              (uint8_t)m_cropMode,
+              c_hasFanSpeed && m_fanSpeedValid ? m_fanSpeedName : std::string( "" ),
+              m_readoutSpeedName,
+              c_hasAnalogGain && m_analogGainValid ? m_analogGainName : std::string( "" ),
+              c_hasLED && m_ledStateValid ? static_cast<int8_t>( m_ledState ? 1 : 0 ) : static_cast<int8_t>( -1 ) } );
 
         last_mode                 = m_modeName;
         last_roi                  = m_currentROI;
@@ -3523,7 +5542,9 @@ int stdCamera<derivedT>::recordCamera( bool force )
         last_synchro              = m_synchro;
         last_vshiftSpeed          = m_vshiftSpeed;
         last_cropMode             = m_cropMode;
-        last_fanSpeed             = m_fanSpeedName;
+        last_fanSpeed             = c_hasFanSpeed && m_fanSpeedValid ? m_fanSpeedName : std::string( "" );
+        last_analogGain           = c_hasAnalogGain && m_analogGainValid ? m_analogGainName : std::string( "" );
+        last_ledState             = m_ledState;
         last_readoutSpeed         = m_readoutSpeedName;
     }
 

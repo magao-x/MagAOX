@@ -74,6 +74,7 @@ Because `cameraGUI` stage rows are built from `stageStatus`, fixing the shared w
 
 In `gui/rtimv/plugins/cameraStatus/cameraStatus.cpp`:
 
+- register subscribable placeholder keys for both `presetName` and `filterName` (`device.property.element`) so `indiDictionary` actually requests those switch properties even when no other widget has subscribed to them yet
 - subscribe to each filter/stage device `parked` property in addition to `fsm.state` and preset property blobs
 - treat `POWEROFF && parked` as eligible for preset lookup, just like `READY` and `OPERATING`
 - if no preset switch is active, optionally show the parked numeric position if that is already available in the plugin dictionary; otherwise keep the existing state text fallback

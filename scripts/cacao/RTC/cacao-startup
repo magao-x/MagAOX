@@ -27,6 +27,9 @@ ln -sf /milk/shm/aol1_imWFS2.im.shm /milk/shm/camwfs_refsub.im.shm
 
 ln -sf /milk/shm/camwfs_avg.im.shm /milk/shm/aol1_wfsavg.im.shm
 
+#Setup mfilt input symlink for default operation at startup
+ln -s /milk/shm/aol1_modevalWFS.im.shm /milk/shm/aol1_mfiltINPUT.im.shm
+
 #start NVIDIA CUDA MPS server for this user
 nvidia-cuda-mps-control -d
 

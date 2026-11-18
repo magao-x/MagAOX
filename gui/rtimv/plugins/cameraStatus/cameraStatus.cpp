@@ -1,11 +1,37 @@
 
 /** \file cameraStatus.cpp
  * \brief Overlay status rendering for camera-associated devices.
+ *
  */
 
 #include "cameraStatus.hpp"
 
 #define errPrint( expl ) std::cerr << "cameraStatus: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
+
+namespace
+{
+/// Choose the preferred selection property for the associated device.
+std::string preferredPresetProperty( const std::string &deviceName /**< [in] Associated filter or stage. */ )
+{
+    if( deviceName.find( "fw" ) == 0 )
+    {
+        return "filterName";
+    }
+
+    return "presetName";
+}
+
+/// Return the other supported selection-property convention.
+std::string alternatePresetProperty( const std::string &propertyName /**< [in] Preferred property. */ )
+{
+    if( propertyName == "filterName" )
+    {
+        return "presetName";
+    }
+
+    return "filterName";
+}
+} // namespace
 
 cameraStatus::cameraStatus() : rtimvOverlayInterface()
 {
@@ -13,6 +39,11 @@ cameraStatus::cameraStatus() : rtimvOverlayInterface()
 
 cameraStatus::~cameraStatus()
 {
+    if( m_roiBox )
+    {
+        m_roiBox->emitDeSelected();
+        delete m_roiBox;
+    }
 }
 
 int cameraStatus::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurator &config )
@@ -39,6 +70,10 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurat
 
     if( m_roa.m_dictionary != nullptr )
     {
+        // The dictionary keys request definitions through the existing INDI connection.
+        for( const auto &key :
+             { "roi_region_state.x", "roi_check_result.sequence", "roi_region_check.request", "roi_set.request" } )
+            ( *m_roa.m_dictionary )[m_deviceName + "." + key].setBlob( nullptr, 0 );
         // Register these
         ( *m_roa.m_dictionary )[m_deviceName + ".temp_ccd.current"].setBlob( nullptr, 0 );
         ( *m_roa.m_dictionary )[m_deviceName + ".fg_frameSize.width"].setBlob( nullptr, 0 );
@@ -61,20 +96,16 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurat
         ( *m_roa.m_dictionary )[m_deviceName + ".shutter_status.status"].setBlob( nullptr, 0 );
         ( *m_roa.m_dictionary )[m_deviceName + ".shutter.toggle"].setBlob( nullptr, 0 );
 
-        m_presetNames.resize( m_filterDeviceNames.size() );
+        m_primaryPresetProperties.resize( m_filterDeviceNames.size() );
 
         for( size_t f = 0; f < m_filterDeviceNames.size(); ++f )
         {
-            if( m_filterDeviceNames[f].find( "fw" ) == 0 )
-                m_presetNames[f] = ".filterName";
-            else if( m_filterDeviceNames[f].find( "flip" ) == 0 )
-                m_presetNames[f] = ".presetName";
-            else
-                m_presetNames[f] = ".presetName";
+            m_primaryPresetProperties[f] = preferredPresetProperty( m_filterDeviceNames[f] );
 
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".fsm.state"].setBlob( nullptr, 0 );
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".parked.current"].setBlob( nullptr, 0 );
-            ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + m_presetNames[f]].setBlob( nullptr, 0 );
+            ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".filterName.current"].setBlob( nullptr, 0 );
+            ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".presetName.current"].setBlob( nullptr, 0 );
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".position.current"].setBlob( nullptr, 0 );
             ( *m_roa.m_dictionary )[m_filterDeviceNames[f] + ".filter.current"].setBlob( nullptr, 0 );
         }
@@ -93,6 +124,15 @@ int cameraStatus::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurat
              SIGNAL( savingState( rtimv::savingState ) ),
              m_roa.m_mainWindowObject,
              SLOT( savingState( rtimv::savingState ) ) );
+
+    connect( this,
+             SIGNAL( newInteractiveBox( StretchBox * ) ),
+             m_roa.m_mainWindowObject,
+             SLOT( addInteractiveBox( StretchBox * ) ) );
+    connect( this,
+             SIGNAL( roiMessage( const QString & ) ),
+             m_roa.m_mainWindowObject,
+             SLOT( showStatusMessage( const QString & ) ) );
 
     if( m_enabled )
         enableOverlay();
@@ -143,6 +183,66 @@ bool cameraStatus::getBlobStr( const std::string &propel )
     return getBlobStr( m_deviceName, propel );
 }
 
+bool cameraStatus::findActivePropertySelection( const std::string &deviceName,
+                                                const std::string &propertyName,
+                                                std::string       &selection )
+{
+    if( m_roa.m_dictionary == nullptr )
+    {
+        return false;
+    }
+
+    std::string propertyPrefix = deviceName + "." + propertyName + ".";
+
+    dictionaryIteratorT it = m_roa.m_dictionary->lower_bound( propertyPrefix );
+
+    while( it != m_roa.m_dictionary->end() )
+    {
+        if( it->first.rfind( propertyPrefix, 0 ) != 0 )
+        {
+            break;
+        }
+
+        if( ( it->second.getBlobStr( m_blob, sizeof( m_blob ) ) ) == sizeof( m_blob ) )
+        {
+            errPrint( "bad string" );
+        }
+
+        if( m_blob[0] != '\0' && std::string( m_blob ) == "on" )
+        {
+            size_t elementPos = it->first.rfind( '.' );
+
+            if( elementPos != std::string::npos && elementPos < it->first.size() - 1 )
+            {
+                selection = it->first.substr( elementPos + 1 );
+                return true;
+            }
+        }
+
+        ++it;
+    }
+
+    return false;
+}
+
+bool cameraStatus::findActivePresetSelection( size_t deviceIndex, std::string &selection )
+{
+    if( deviceIndex >= m_filterDeviceNames.size() || deviceIndex >= m_primaryPresetProperties.size() )
+    {
+        return false;
+    }
+
+    if( findActivePropertySelection(
+            m_filterDeviceNames[deviceIndex], m_primaryPresetProperties[deviceIndex], selection ) )
+    {
+        return true;
+    }
+
+    return findActivePropertySelection( m_filterDeviceNames[deviceIndex],
+                                        alternatePresetProperty( m_primaryPresetProperties[deviceIndex] ),
+                                        selection );
+}
+
 template <>
 int cameraStatus::getBlobVal<int>( const std::string &propel, int defVal )
 {
@@ -172,7 +272,13 @@ float cameraStatus::getBlobVal<float>( const std::string &propel, float defVal )
 int cameraStatus::updateOverlay()
 {
     if( !m_enabled )
+    {
+        if( m_roiPhase == roiPhase::applying )
+            updateROI();
+        if( m_roiBox )
+            m_roiBox->setVisible( false );
         return 0;
+    }
 
     if( m_roa.m_dictionary == nullptr )
         return 0;
@@ -180,278 +286,36 @@ int cameraStatus::updateOverlay()
     if( m_roa.m_graphicsView == nullptr )
         return 0;
 
+    const bool coherentROI = updateROI();
+
     size_t n = 0;
     // char * str;
     char        tstr[128];
     std::string sstr;
+    bool        statusTextOverflowed{ false };
 
-    if( getBlobStr( "temp_ccd.current" ) )
+    auto appendStatusText = [&]( const char *text )
     {
-        snprintf( tstr, sizeof( tstr ), "%0.1f C", strtod( m_blob, 0 ) );
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
-    }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
+        size_t slotCount = m_roa.m_graphicsView->statusTextNo();
 
-    // Get curr size
-    m_width = -1;
-    if( getBlobStr( "fg_frameSize.width" ) )
-    {
-        m_width = atoi( m_blob );
-    }
-
-    m_height = -1;
-    if( getBlobStr( "fg_frameSize.height" ) )
-    {
-        m_height = atoi( m_blob );
-    }
-
-    if( blobExists( "roi_region_w.current" ) && blobExists( "roi_region_h.current" ) &&
-        blobExists( "roi_region_x.current" ) && blobExists( "roi_region_y.current" ) &&
-        blobExists( "roi_region_bin_x.current" ) && blobExists( "roi_region_bin_y.current" ) )
-    {
-        int   w   = getBlobVal<int>( "roi_region_w.current", -1 );
-        int   h   = getBlobVal<int>( "roi_region_h.current", -1 );
-        int   ibx = getBlobVal<int>( "roi_region_bin_x.current", -1 );
-        int   iby = getBlobVal<int>( "roi_region_bin_y.current", -1 );
-        float x   = getBlobVal<float>( "roi_region_x.current", -1 );
-        float y   = getBlobVal<float>( "roi_region_y.current", -1 );
-
-        // Only go on if we got good values
-        if( w > 0 && h > 0 && x > 0 && y > 0 && ibx > 0 && iby > 0 )
+        if( n < slotCount )
         {
-            snprintf( tstr, sizeof( tstr ), "%dx%d [%dx%d]", w, h, ibx, iby );
-
-            //****************
-            m_roa.m_graphicsView->statusTextText( n, tstr );
+            m_roa.m_graphicsView->statusTextText( n, text );
             ++n;
-
-            float bx = ibx;
-            float by = iby;
-
-            if( blobExists( "roi_region_w.target" ) && blobExists( "roi_region_h.target" ) &&
-                blobExists( "roi_region_x.target" ) && blobExists( "roi_region_y.target" ) &&
-                blobExists( "roi_region_bin_x.target" ) && blobExists( "roi_region_bin_y.target" ) )
-            {
-
-                std::lock_guard<std::mutex> guard( m_roiBoxMutex );
-
-                int   wt  = getBlobVal<int>( "roi_region_w.target", -1 );
-                int   ht  = getBlobVal<int>( "roi_region_h.target", -1 );
-                float bxt = getBlobVal<float>( "roi_region_bin_x.target", -1 );
-                float byt = getBlobVal<float>( "roi_region_bin_y.target", -1 );
-                float xt  = getBlobVal<float>( "roi_region_x.target", -1 );
-                float yt  = getBlobVal<float>( "roi_region_y.target", -1 );
-
-                if( ( wt > 0 && ht > 0 && xt > 0 && yt > 0 && bxt >= 1 && byt >= 1 ) &&
-                    ( wt != w || ht != h || xt != x || yt != y ) )
-                {
-                    if( !m_roiBox )
-                    {
-                        m_roiBox = new StretchBox( xt - 0.5 * ( wt - 1 ), yt - 0.5 * ( ht - 1 ), wt, ht );
-                        m_roiBox->setPenColor( Qt::magenta );
-                        m_roiBox->setPenWidth( 1 );
-                        m_roiBox->setVisible( true );
-                        m_roiBox->setStretchable( false );
-                        m_roiBox->setRemovable( false );
-                        std::cerr << "Connecting\n";
-                        connect( m_roiBox,
-                                 SIGNAL( remove( StretchBox * ) ),
-                                 this,
-                                 SLOT( stretchBoxRemove( StretchBox * ) ) );
-                        emit newStretchBox( m_roiBox );
-                    }
-                    // note: can only be here if bx > 0
-                    float xc = ( xt * bxt - x * bx + 0.5 * ( (float)m_width * bx - 1 ) ) / bx;
-                    float yc = ( m_height * by - ( yt * byt - y * by + 0.5 * ( (float)m_height * by - 1 ) ) ) / by;
-
-                    float bxleftX = xc - 0.5 * ( wt * bxt / bx - 1.0 );
-                    float bxleftY = yc - 0.5 * ( ht * byt / by - 1.0 );
-                    float bxW     = wt * bxt / bx;
-                    float bxH     = ht * byt / by;
-
-                    m_roiBox->setRect( m_roiBox->mapRectFromScene( bxleftX, bxleftY, bxW, bxH ) );
-                    m_roiBox->setVisible( true );
-                }
-                else
-                {
-                    if( m_roiBox )
-                        m_roiBox->setVisible( false );
-                }
-
-            } // if(blobExists("roi_region_w.target")
-
-        } // if(w > 0 && h > 0 && x > 0 && y > 0 && ibx > 0 && iby > 0)
-
-    } // if(blobExists("roi_region_w.current") ...
-
-    //***********************
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
-
-    float et = getBlobVal<float>( "exptime.current", -1 );
-    if( et >= 0 )
-    {
-        if( et >= 100 )
-        {
-            snprintf( tstr, sizeof( tstr ), "%0.1f s", et );
-        }
-        else if( et >= 10 )
-        {
-            snprintf( tstr, sizeof( tstr ), "%0.2f s", et );
-        }
-        else if( et >= 0.1 )
-        {
-            snprintf( tstr, sizeof( tstr ), "%0.3f s", et );
-        }
-        else
-        {
-            if( et >= 0.00009999 )
-            {
-                snprintf( tstr, sizeof( tstr ), "%0.2f ms", et * 1000.0 );
-            }
-            else
-            {
-                snprintf( tstr, sizeof( tstr ), "%0.2f us", et * 1000000.0 );
-            }
+            return true;
         }
 
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
-    }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
+        statusTextOverflowed = true;
 
-    float fps = getBlobVal<float>( "fps.current", -1 );
-    if( fps >= 0 )
-    {
-        snprintf( tstr, sizeof( tstr ), "%0.1f FPS", fps );
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
-    }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
-
-    int emg = getBlobVal<int>( "emgain.current", -1 );
-    if( emg >= 0 )
-    {
-        snprintf( tstr, sizeof( tstr ), "EMG: %d", emg );
-        m_roa.m_graphicsView->statusTextText( n, tstr );
-        ++n;
-    }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
-
-    for( size_t f = 0; f < m_filterDeviceNames.size(); ++f )
-    {
-        if( getBlobStr( m_filterDeviceNames[f], "fsm.state" ) )
+        if( !m_statusTextOverflowWarned )
         {
-            std::string fwstate = std::string( m_blob );
-            bool        parked  = false;
-
-            if( getBlobStr( m_filterDeviceNames[f], "parked.current" ) )
-            {
-                parked = ( atoi( m_blob ) != 0 );
-            }
-
-            if( fwstate == "READY" || fwstate == "OPERATING" || ( fwstate == "POWEROFF" && parked ) )
-            {
-                dictionaryIteratorT start =
-                    m_roa.m_dictionary->lower_bound( m_filterDeviceNames[f] + m_presetNames[f] );
-                dictionaryIteratorT end =
-                    m_roa.m_dictionary->upper_bound( m_filterDeviceNames[f] + m_presetNames[f] + "Z" );
-
-                std::string fkey;
-                while( start != end )
-                {
-                    if( ( start->second.getBlobStr( m_blob, sizeof( m_blob ) ) ) == sizeof( m_blob ) )
-                        errPrint( "bad string" ); // Don't trust this as a string
-
-                    if( m_blob[0] != '\0' )
-                    {
-                        if( std::string( m_blob ) == "on" )
-                        {
-                            fkey = start->first;
-                            break;
-                        }
-                    }
-                    ++start;
-                }
-
-                size_t      pp = fkey.rfind( '.' );
-                std::string filn;
-                if( pp != std::string::npos && pp < fkey.size() - 1 ) // need to be able to add 1
-                {
-                    filn = m_filterDeviceNames[f] + ": " + fkey.substr( pp + 1 ).c_str();
-                }
-                else
-                {
-                    bool   havePos = false;
-                    double pos     = 0;
-
-                    if( getBlobStr( m_filterDeviceNames[f], "filter.current" ) )
-                    {
-                        pos     = strtod( m_blob, nullptr );
-                        havePos = true;
-                    }
-                    else if( getBlobStr( m_filterDeviceNames[f], "position.current" ) )
-                    {
-                        pos     = strtod( m_blob, nullptr );
-                        havePos = true;
-                    }
-
-                    if( havePos )
-                    {
-                        snprintf( tstr, sizeof( tstr ), "%s: %0.4f", m_filterDeviceNames[f].c_str(), pos );
-                        filn = tstr;
-                    }
-                    else
-                    {
-                        filn = m_filterDeviceNames[f] + ": unk";
-                    }
-                }
-                m_roa.m_graphicsView->statusTextText( n, filn.c_str() );
-                ++n;
-            }
-            else
-            {
-                fwstate = m_filterDeviceNames[f] + ": " + fwstate;
-                m_roa.m_graphicsView->statusTextText( n, fwstate.c_str() );
-                ++n;
-            }
+            pluginLogError( std::format(
+                "status text overflow for {}: need slot {}, only {} configured", m_deviceName, n + 1, slotCount ) );
+            m_statusTextOverflowWarned = true;
         }
-        if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-            return 0;
-    }
 
-    if( getBlobStr( "shutter_status.status" ) )
-    {
-        sstr = std::string( m_blob );
-
-        if( sstr == "READY" )
-        {
-            if( getBlobStr( "shutter.toggle" ) )
-            {
-                sstr = std::string( m_blob );
-                if( sstr == "on" )
-                    sstr = "sh SHUT";
-                else
-                    sstr = "sh OPEN";
-                m_roa.m_graphicsView->statusTextText( n, sstr.c_str() );
-                ++n;
-            }
-        }
-        else
-        {
-
-            sstr = "sh " + sstr;
-            m_roa.m_graphicsView->statusTextText( n, sstr.c_str() );
-            ++n;
-        }
-    }
-    if( n > m_roa.m_graphicsView->statusTextNo() - 1 )
-        return 0;
+        return false;
+    };
 
     if( getBlobStr( m_deviceName + "-sw", "fsm.state" ) )
     {
@@ -480,25 +344,259 @@ int cameraStatus::updateOverlay()
             emit savingState( rtimv::savingState::off );
         }
     }
+    else
+    {
+        emit savingState( rtimv::savingState::off );
+    }
+
+    if( getBlobStr( "temp_ccd.current" ) )
+    {
+        snprintf( tstr, sizeof( tstr ), "%0.1f C", strtod( m_blob, 0 ) );
+        if( !appendStatusText( tstr ) )
+            return 0;
+    }
+
+    // Get curr size
+    m_width = -1;
+    if( getBlobStr( "fg_frameSize.width" ) )
+    {
+        m_width = atoi( m_blob );
+    }
+
+    m_height = -1;
+    if( getBlobStr( "fg_frameSize.height" ) )
+    {
+        m_height = atoi( m_blob );
+    }
+
+    if( blobExists( "roi_region_w.current" ) && blobExists( "roi_region_h.current" ) &&
+        blobExists( "roi_region_x.current" ) && blobExists( "roi_region_y.current" ) &&
+        blobExists( "roi_region_bin_x.current" ) && blobExists( "roi_region_bin_y.current" ) )
+    {
+        int   w   = getBlobVal<int>( "roi_region_w.current", -1 );
+        int   h   = getBlobVal<int>( "roi_region_h.current", -1 );
+        int   ibx = getBlobVal<int>( "roi_region_bin_x.current", -1 );
+        int   iby = getBlobVal<int>( "roi_region_bin_y.current", -1 );
+        float x   = getBlobVal<float>( "roi_region_x.current", -1 );
+        float y   = getBlobVal<float>( "roi_region_y.current", -1 );
+
+        // Only go on if we got good values
+        if( w > 0 && h > 0 && std::isfinite( x ) && std::isfinite( y ) && ibx > 0 && iby > 0 )
+        {
+            snprintf( tstr, sizeof( tstr ), "%dx%d [%dx%d]", w, h, ibx, iby );
+
+            //****************
+            if( !appendStatusText( tstr ) )
+                return 0;
+
+            float bx = ibx;
+            float by = iby;
+
+            if( !coherentROI && blobExists( "roi_region_w.target" ) && blobExists( "roi_region_h.target" ) &&
+                blobExists( "roi_region_x.target" ) && blobExists( "roi_region_y.target" ) &&
+                blobExists( "roi_region_bin_x.target" ) && blobExists( "roi_region_bin_y.target" ) )
+            {
+
+                int   wt  = getBlobVal<int>( "roi_region_w.target", -1 );
+                int   ht  = getBlobVal<int>( "roi_region_h.target", -1 );
+                float bxt = getBlobVal<float>( "roi_region_bin_x.target", -1 );
+                float byt = getBlobVal<float>( "roi_region_bin_y.target", -1 );
+                float xt  = getBlobVal<float>( "roi_region_x.target", -1 );
+                float yt  = getBlobVal<float>( "roi_region_y.target", -1 );
+
+                if( ( wt > 0 && ht > 0 && std::isfinite( xt ) && std::isfinite( yt ) && bxt >= 1 && byt >= 1 ) &&
+                    ( wt != w || ht != h || xt != x || yt != y ) )
+                {
+                    makeROIBox();
+                    m_roiBox->setStretchable( false );
+                    // note: can only be here if bx > 0
+                    float xc = ( xt * bxt - x * bx + 0.5 * ( (float)m_width * bx - 1 ) ) / bx;
+                    float yc = ( m_height * by - ( yt * byt - y * by + 0.5 * ( (float)m_height * by - 1 ) ) ) / by;
+
+                    float bxleftX = xc - 0.5 * ( wt * bxt / bx - 1.0 );
+                    float bxleftY = yc - 0.5 * ( ht * byt / by - 1.0 );
+                    float bxW     = wt * bxt / bx;
+                    float bxH     = ht * byt / by;
+
+                    m_roiBox->setRect( m_roiBox->mapRectFromScene( bxleftX, bxleftY, bxW, bxH ) );
+                    m_roiBox->setVisible( true );
+                }
+                else
+                {
+                    if( m_roiBox )
+                        m_roiBox->setVisible( false );
+                }
+
+            } // if(blobExists("roi_region_w.target")
+
+        } // if(w > 0 && h > 0 && std::isfinite(x) && std::isfinite(y) && ibx > 0 && iby > 0)
+
+    } // if(blobExists("roi_region_w.current") ...
+
+    //***********************
+    float et = getBlobVal<float>( "exptime.current", -1 );
+    if( et >= 0 )
+    {
+        if( et >= 100 )
+        {
+            snprintf( tstr, sizeof( tstr ), "%0.1f s", et );
+        }
+        else if( et >= 10 )
+        {
+            snprintf( tstr, sizeof( tstr ), "%0.2f s", et );
+        }
+        else if( et >= 0.1 )
+        {
+            snprintf( tstr, sizeof( tstr ), "%0.3f s", et );
+        }
+        else
+        {
+            if( et >= 0.00009999 )
+            {
+                snprintf( tstr, sizeof( tstr ), "%0.2f ms", et * 1000.0 );
+            }
+            else
+            {
+                snprintf( tstr, sizeof( tstr ), "%0.2f us", et * 1000000.0 );
+            }
+        }
+
+        if( !appendStatusText( tstr ) )
+            return 0;
+    }
+
+    float fps = getBlobVal<float>( "fps.current", -1 );
+    if( fps >= 0 )
+    {
+        snprintf( tstr, sizeof( tstr ), "%0.1f FPS", fps );
+        if( !appendStatusText( tstr ) )
+            return 0;
+    }
+
+    int emg = getBlobVal<int>( "emgain.current", -1 );
+    if( emg >= 0 )
+    {
+        snprintf( tstr, sizeof( tstr ), "EMG: %d", emg );
+        if( !appendStatusText( tstr ) )
+            return 0;
+    }
+
+    for( size_t f = 0; f < m_filterDeviceNames.size(); ++f )
+    {
+        if( getBlobStr( m_filterDeviceNames[f], "fsm.state" ) )
+        {
+            std::string fwstate = std::string( m_blob );
+            bool        parked  = false;
+
+            if( getBlobStr( m_filterDeviceNames[f], "parked.current" ) )
+            {
+                parked = ( atoi( m_blob ) != 0 );
+            }
+
+            if( fwstate == "READY" || fwstate == "OPERATING" ||
+                ( parked && ( fwstate == "UNINITIALIZED" || fwstate == "INITIALIZED" || fwstate == "NODEVICE" ||
+                              fwstate == "POWEROFF" || fwstate == "POWERON" || fwstate == "NOTCONNECTED" ||
+                              fwstate == "LOGGEDIN" || fwstate == "CONFIGURING" || fwstate == "CONNECTED" ||
+                              fwstate == "NOTHOMED" ) ) )
+            {
+                std::string filn;
+
+                if( findActivePresetSelection( f, filn ) && filn != "none" )
+                {
+                    filn = m_filterDeviceNames[f] + ": " + filn;
+                }
+                else
+                {
+                    bool   havePos = false;
+                    double pos     = 0;
+
+                    if( getBlobStr( m_filterDeviceNames[f], "filter.current" ) )
+                    {
+                        pos     = strtod( m_blob, nullptr );
+                        havePos = true;
+                    }
+                    else if( getBlobStr( m_filterDeviceNames[f], "position.current" ) )
+                    {
+                        pos     = strtod( m_blob, nullptr );
+                        havePos = true;
+                    }
+
+                    if( havePos )
+                    {
+                        snprintf( tstr, sizeof( tstr ), "%s: %0.4f", m_filterDeviceNames[f].c_str(), pos );
+                        filn = tstr;
+                    }
+                    else
+                    {
+                        filn = m_filterDeviceNames[f] + ": unk";
+                    }
+                }
+                if( !appendStatusText( filn.c_str() ) )
+                    return 0;
+            }
+            else
+            {
+                fwstate = m_filterDeviceNames[f] + ": " + fwstate;
+                if( !appendStatusText( fwstate.c_str() ) )
+                    return 0;
+            }
+        }
+    }
+
+    if( getBlobStr( "shutter_status.status" ) )
+    {
+        sstr = std::string( m_blob );
+
+        if( sstr == "READY" )
+        {
+            if( getBlobStr( "shutter.toggle" ) )
+            {
+                sstr = std::string( m_blob );
+                if( sstr == "on" )
+                    sstr = "sh SHUT";
+                else
+                    sstr = "sh OPEN";
+                if( !appendStatusText( sstr.c_str() ) )
+                    return 0;
+            }
+        }
+        else
+        {
+
+            sstr = "sh " + sstr;
+            if( !appendStatusText( sstr.c_str() ) )
+                return 0;
+        }
+    }
+
+    if( !statusTextOverflowed )
+    {
+        m_statusTextOverflowWarned = false;
+    }
 
     return 0;
 }
 
 void cameraStatus::keyPressEvent( QKeyEvent *ke )
 {
-    char key = ke->text()[0].toLatin1();
-
-    if( key == 'C' )
+    if( ke->isAutoRepeat() )
+        return;
+    if( ke->key() == Qt::Key_C && ke->modifiers() == Qt::ShiftModifier )
     {
         if( m_enabled )
             disableOverlay();
         else
             enableOverlay();
+        return;
     }
-    else if( key == 'R' )
-    {
-        std::cerr << "ROI\n";
-    }
+    if( !m_enabled )
+        return;
+    if( ke->key() == Qt::Key_R && ke->modifiers() == Qt::ShiftModifier )
+        beginROI();
+    else if( ke->key() == Qt::Key_R && ke->modifiers() == Qt::AltModifier )
+        applyROI();
+    else if( ke->key() == Qt::Key_Delete && ke->modifiers() == Qt::NoModifier && m_explicitROI )
+        cancelROI();
 }
 
 bool cameraStatus::overlayEnabled()
@@ -521,28 +619,18 @@ void cameraStatus::disableOverlay()
         m_roa.m_graphicsView->statusTextText( n, "" );
     }
 
+    leaveROI();
+    if( m_roiBox )
+        m_roiBox->setVisible( false );
     m_enabled = false;
 }
 
 void cameraStatus::stretchBoxRemove( StretchBox *sb )
 {
-    std::cerr << "cameraStatus::stretchBoxRemove 1\n";
-    std::lock_guard<std::mutex> guard( m_roiBoxMutex );
-    if( !m_roiBox )
-    {
-        return;
-    }
-
-    std::cerr << "cameraStatus::stretchBoxRemove 2\n";
-
     if( sb != m_roiBox )
-    {
         return;
-    }
-
-    std::cerr << "cameraStatus::stretchBoxRemove 3\n";
-
     m_roiBox = nullptr;
+    failROI( "ROI box removed" );
 }
 
 std::vector<std::string> cameraStatus::info()
@@ -550,5 +638,8 @@ std::vector<std::string> cameraStatus::info()
     std::vector<std::string> vinfo;
     vinfo.push_back( "Camera Status overlay: " + m_deviceName );
 
+    vinfo.push_back( "   Shift+R: edit ROI" );
+    vinfo.push_back( "   Alt+R: check & apply ROI" );
+    vinfo.push_back( "   del: cancel ROI" );
     return vinfo;
 }

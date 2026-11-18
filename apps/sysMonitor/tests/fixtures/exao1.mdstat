@@ -1,0 +1,18 @@
+Personalities : [raid1] [raid4] [raid5] [raid6]
+md124 : broken raid5 sdg[2](F) sdf[4](F) sdi[3](F) sdh[1](F) sde[0](F)
+      78126772224 blocks super 1.2 level 5, 512k chunk, algorithm 2 [5/0] [_____]
+      bitmap: 0/146 pages [0KB], 65536KB chunk
+
+md125 : active raid5 sda[1] sdb[2] sdc[4] sdd[5]
+      23441682432 blocks super 1.2 level 5, 512k chunk, algorithm 2 [4/4] [UUUU]
+      bitmap: 13/59 pages [52KB], 65536KB chunk
+
+md126 : active raid1 nvme1n1p1[0] nvme0n1p1[1]
+      1099776 blocks super 1.0 [2/2] [UU]
+      bitmap: 0/1 pages [0KB], 65536KB chunk
+
+md127 : active raid1 nvme0n1p2[1] nvme1n1p2[0]
+      975527104 blocks super 1.2 [2/2] [UU]
+      bitmap: 4/8 pages [16KB], 65536KB chunk
+
+unused devices: <none>

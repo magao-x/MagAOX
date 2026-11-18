@@ -50,6 +50,47 @@ struct ruleRuleKeys
     std::string rule2;
 };
 
+/// Extract a property-only reference from a rule configuration.
+/** Reads the property, adding it to the property map if necessary.
+ *
+ * \throws mx::err::invalidconfig if the property is not configured or if the
+ *         property already exists in the map but with a different type
+ */
+void extractRuleProperty(
+    pcf::IndiProperty **prop,     ///< [out] pointer to the property, newly created or existing, which is in the map.
+    std::string        &property, ///< [out] the property name from the configuration
+    indiRuleMaps       &maps,     ///< [in] contains the property map to which the property is added
+    const std::string  &section,  ///< [in] name of the section for this rule
+    const std::string  &propkey,  ///< [in] the key for the property name
+    const pcf::IndiProperty::Type &type,  ///< [in] the type of the property
+    mx::app::appConfigurator      &config ///< [in] the application configuration structure
+)
+{
+    config.configUnused( property, mx::app::iniFile::makeKey( section, propkey ) );
+    if( property == "" )
+    {
+        throw mx::exception( mx::error_t::invalidconfig, std::format( "{} for rule {} not found", propkey, section ) );
+    }
+
+    if( maps.props.count( property ) > 0 )
+    {
+        if( maps.props[property]->getType() != type )
+        {
+            throw mx::exception( mx::error_t::invalidconfig,
+                                 "property " + property + " exists but is not correct type" );
+        }
+
+        *prop = maps.props[property];
+    }
+    else
+    {
+        *prop = new pcf::IndiProperty( type );
+        maps.props.insert( std::pair<std::string, pcf::IndiProperty *>( { property, *prop } ) );
+
+        ///\todo have to split device and propertyName
+    }
+}
+
 /// Extract a property from a rule configuration
 /** Reads the property and element, adding the property to the property map if necessary.
  *
@@ -67,27 +108,7 @@ void extractRuleProp(
 )
 {
     std::string property;
-    config.configUnused( property, mx::app::iniFile::makeKey( section, propkey ) );
-
-    if( maps.props.count( property ) > 0 )
-    {
-        // If the property already exists we just check if it's the right type
-        if( maps.props[property]->getType() != type )
-        {
-            throw mx::exception( mx::error_t::invalidconfig,
-                                 "property " + property + " exists but is not correct type" );
-        }
-
-        *prop = maps.props[property];
-    }
-    else
-    {
-        // Otherwise we create it
-        *prop = new pcf::IndiProperty( type );
-        maps.props.insert( std::pair<std::string, pcf::IndiProperty *>( { property, *prop } ) );
-
-        ///\todo have to split device and propertyName
-    }
+    extractRuleProperty( prop, property, maps, section, propkey, type, config );
 
     config.configUnused( element, mx::app::iniFile::makeKey( section, elkey ) );
 }
@@ -213,18 +234,22 @@ void loadRuleConfig( indiRuleMaps &maps,                          /**< [out] con
         config.configUnused( message, mx::app::iniFile::makeKey( sections[i], "message" ) );
         stripQuotesWS( message ); // strips "" and any leading/trailing whitespace
 
-        std::string compstr = "Eq";
-        config.configUnused( compstr, mx::app::iniFile::makeKey( sections[i], "comp" ) );
-        ruleComparison comparison = string2comp( compstr );
+        auto configureRuleBase = [&]( indiCompRule *rule )
+        {
+            std::string compstr = comp2string( rule->defaultComparison() );
+            config.configUnused( compstr, mx::app::iniFile::makeKey( sections[i], "comp" ) );
+
+            rule->priority( priority );
+            rule->message( message );
+            rule->comparison( string2comp( compstr ) );
+        };
 
         if( ruleType == numValRule::name )
         {
             numValRule *nvr = new numValRule;
             maps.rules.insert( std::pair<std::string, indiCompRule *>( { sections[i], nvr } ) );
 
-            nvr->priority( priority );
-            nvr->message( message );
-            nvr->comparison( comparison );
+            configureRuleBase( nvr );
 
             pcf::IndiProperty *prop = nullptr;
             std::string        element;
@@ -247,9 +272,7 @@ void loadRuleConfig( indiRuleMaps &maps,                          /**< [out] con
             txtValRule *tvr = new txtValRule;
             maps.rules.insert( std::pair<std::string, indiCompRule *>( { sections[i], tvr } ) );
 
-            tvr->priority( priority );
-            tvr->message( message );
-            tvr->comparison( comparison );
+            configureRuleBase( tvr );
 
             pcf::IndiProperty *prop = nullptr;
             std::string        element;
@@ -268,9 +291,7 @@ void loadRuleConfig( indiRuleMaps &maps,                          /**< [out] con
             swValRule *svr = new swValRule;
             maps.rules.insert( std::pair<std::string, indiCompRule *>( { sections[i], svr } ) );
 
-            svr->priority( priority );
-            svr->message( message );
-            svr->comparison( comparison );
+            configureRuleBase( svr );
 
             pcf::IndiProperty *prop = nullptr;
             std::string        element;
@@ -289,9 +310,7 @@ void loadRuleConfig( indiRuleMaps &maps,                          /**< [out] con
             timeDiffRule *nvr = new timeDiffRule;
             maps.rules.insert( std::pair<std::string, indiCompRule *>( { sections[i], nvr } ) );
 
-            nvr->priority( priority );
-            nvr->message( message );
-            nvr->comparison( comparison );
+            configureRuleBase( nvr );
 
             pcf::IndiProperty *prop = nullptr;
             std::string        element;
@@ -314,9 +333,7 @@ void loadRuleConfig( indiRuleMaps &maps,                          /**< [out] con
             elCompNumRule *nvr = new elCompNumRule;
             maps.rules.insert( std::pair<std::string, indiCompRule *>( { sections[i], nvr } ) );
 
-            nvr->priority( priority );
-            nvr->message( message );
-            nvr->comparison( comparison );
+            configureRuleBase( nvr );
 
             pcf::IndiProperty *prop1;
             std::string        element1;
@@ -339,9 +356,7 @@ void loadRuleConfig( indiRuleMaps &maps,                          /**< [out] con
             elCompTxtRule *tvr = new elCompTxtRule;
             maps.rules.insert( std::pair<std::string, indiCompRule *>( { sections[i], tvr } ) );
 
-            tvr->priority( priority );
-            tvr->message( message );
-            tvr->comparison( comparison );
+            configureRuleBase( tvr );
 
             pcf::IndiProperty *prop1;
             std::string        element1;
@@ -364,9 +379,7 @@ void loadRuleConfig( indiRuleMaps &maps,                          /**< [out] con
             elCompSwRule *svr = new elCompSwRule;
             maps.rules.insert( std::pair<std::string, indiCompRule *>( { sections[i], svr } ) );
 
-            svr->priority( priority );
-            svr->message( message );
-            svr->comparison( comparison );
+            configureRuleBase( svr );
 
             pcf::IndiProperty *prop1;
             std::string        element1;
@@ -397,9 +410,7 @@ void loadRuleConfig( indiRuleMaps &maps,                          /**< [out] con
             ruleCompRule *rcr = new ruleCompRule;
             maps.rules.insert( std::pair<std::string, indiCompRule *>( { sections[i], rcr } ) );
 
-            rcr->priority( priority );
-            rcr->message( message );
-            rcr->comparison( comparison );
+            configureRuleBase( rcr );
 
             ruleRuleKeys rrk;
 
@@ -428,6 +439,55 @@ void loadRuleConfig( indiRuleMaps &maps,                          /**< [out] con
             }
 
             rrkMap.insert( std::pair<std::string, ruleRuleKeys>( sections[i], rrk ) );
+        }
+        else if( ruleType == multiSwitchComboRule::name )
+        {
+            multiSwitchComboRule *mscr = new multiSwitchComboRule;
+            maps.rules.insert( std::pair<std::string, indiCompRule *>( { sections[i], mscr } ) );
+
+            configureRuleBase( mscr );
+            mscr->ruleName( sections[i] );
+
+            int numSwitches = 0;
+            config.configUnused( numSwitches, mx::app::iniFile::makeKey( sections[i], "numSwitches" ) );
+            if( numSwitches < 1 )
+            {
+                throw mx::exception(
+                    mx::error_t::invalidconfig,
+                    std::format( "numSwitches for multiSwitchCombo rule {} must be greater than zero", sections[i] ) );
+            }
+
+            for( int n = 0; n < numSwitches; ++n )
+            {
+                pcf::IndiProperty *prop = nullptr;
+                std::string        property;
+
+                std::string propKey = std::format( "property{}", n + 1 );
+                extractRuleProperty( &prop, property, maps, sections[i], propKey, pcf::IndiProperty::Switch, config );
+
+                mscr->property( prop, property );
+            }
+
+            std::string format;
+            config.configUnused( format, mx::app::iniFile::makeKey( sections[i], "format" ) );
+            stripQuotesWS( format );
+            mscr->format( format );
+
+            pcf::IndiProperty *targetProp = nullptr;
+            std::string        targetProperty;
+            extractRuleProperty(
+                &targetProp, targetProperty, maps, sections[i], "targetProperty", pcf::IndiProperty::Switch, config );
+            mscr->targetProperty( targetProp );
+            mscr->targetPropertyKey( targetProperty );
+
+            indiCompRule::boolorerr_t rv = mscr->valid();
+            if( mscr->isError( rv ) )
+            {
+                throw mx::exception( mx::error_t::invalidconfig,
+                                     std::format( "multiSwitchCombo rule {} is invalid: {}",
+                                                  sections[i],
+                                                  std::get<std::string>( rv ) ) );
+            }
         }
         else
         {

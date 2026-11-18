@@ -1,27 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file usbtempMon_test.cpp
+ * \brief Catch2 tests for the usbtempMon app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup usbtempMon_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../usbtempMon.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
-{
-   GIVEN("xxxxx")
-   {
-      WHEN("xxxx")
-      {
-         int rv = 0;
+/** \defgroup usbtempMon_unit_test usbtempMon Unit Tests
+ * \brief Unit tests for the usbtempMon application.
+ *
+ * \ingroup application_unit_test
+ */
 
-         REQUIRE(rv == 0);
-      }
-   }
+/// Namespace for `usbtempMon` unit tests.
+/** \ingroup usbtempMon_unit_test
+ */
+namespace usbtempMonTest
+{
+
+/// Verify the placeholder usbtempMon test harness instantiates the app cleanly.
+/**
+ * \ingroup usbtempMon_unit_test
+ */
+TEST_CASE( "usbtempMon placeholder harness instantiates the app", "[usbtempMon]" )
+{
+    // clang-format off
+    #ifdef USBTEMPMON_TEST_DOXYGEN_REF
+    usbtempMon();
+    #endif
+    // clang-format on
+
+    SECTION( "default construction succeeds" )
+    {
+        usbtempMon app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace usbtempMonTest
+
+} // namespace libXWCTest

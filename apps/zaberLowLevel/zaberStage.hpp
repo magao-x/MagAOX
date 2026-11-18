@@ -722,13 +722,37 @@ bool zaberStage<parentT>::isCommandReply( const za_reply &rep )
 template <class parentT>
 int zaberStage<parentT>::sendCommand( std::string &response, z_port port, const std::string &command )
 {
-    za_send( port, command.c_str(), command.size() );
+    if( port <= 0 )
+    {
+        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+        {
+            return -1; // don't log, but propagate error
+        }
+
+        MagAOXAppT::log<software_error>( { 0, "invalid zaber port" } );
+        response = "";
+        return -1;
+    }
+
+    int rv = za_send( port, command.c_str(), command.size() );
+
+    if( rv < 0 )
+    {
+        if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )
+        {
+            return rv; // don't log, but propagate error
+        }
+
+        MagAOXAppT::log<software_error>( { rv, "za_send !=Z_SUCCESS" } );
+        response = "";
+        return -1;
+    }
 
     char buff[256];
 
     while( 1 )
     {
-        int rv = za_receive( port, buff, sizeof( buff ) );
+        rv = za_receive( port, buff, sizeof( buff ) );
 
         if( rv == Z_ERROR_TIMEOUT )
         {
@@ -752,7 +776,7 @@ int zaberStage<parentT>::sendCommand( std::string &response, z_port port, const 
         }
         za_reply rep;
 
-        rv = za_decode( &rep, buff, sizeof( buff ) );
+        rv = za_decode( &rep, buff, static_cast<size_t>( rv ) );
         if( rv != Z_SUCCESS )
         {
             if( m_parent->powerState() != 1 || m_parent->powerStateTarget() != 1 )

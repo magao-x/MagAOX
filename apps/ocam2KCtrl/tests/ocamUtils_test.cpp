@@ -1,182 +1,456 @@
 /** \file ocamUtils_test.cpp
  * \brief Catch2 tests for the ocamUtils in the ocam2KCtrl app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
- * History:
+ * \ingroup ocam2KCtrl_files
  */
-#include "../../../tests/catch2/catch.hpp"
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../ocamUtils.hpp"
 
 using namespace MagAOX::app;
 
-namespace ocamUtils_test
+namespace libXWCTest
 {
 
-/** \test Scenario: Parsing the temp response
+/** \addtogroup ocam2KCtrl_unit_test
+ * \brief Additional utility tests for the ocam2KCtrl application.
  *
- * \anchor tests_MagAOX_app_ocamUtils_parse_temp_response
+ * \ingroup application_unit_test
  */
-SCENARIO( "Parsing the temp response", "[ocamUtils]" )
+
+/// Namespace for `ocam2KCtrl` utility unit tests.
+/** \ingroup ocam2KCtrl_unit_test
+ */
+namespace ocam2KCtrlTest
 {
-    GIVEN( "A valid response to temp from the OCAM" )
+
+/// Verify `parseTemps()` accepts a valid OCAM temperature response and rejects truncated data.
+/**
+ * \ingroup ocam2KCtrl_unit_test
+ */
+TEST_CASE( "ocam2KCtrl utility helpers parse temperature responses", "[ocamUtils]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    parseTemps( *(ocamTemps *)nullptr, "" );
+    #endif
+    // clang-format on
+
+    SECTION( "valid temperature responses are parsed" )
     {
-        int rv;
+        std::string tstr = "Temperatures : CCD[26.3] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                           "SET[200]\nCooling Power [102]mW.\n\n";
+        ocamTemps   temps;
+        int         rv = parseTemps( temps, tstr );
 
-        WHEN( "Valid temp response" )
+        REQUIRE( rv == 0 );
+        REQUIRE( temps.CCD == (float)26.3 );
+        REQUIRE( temps.CPU == (float)41 );
+        REQUIRE( temps.POWER == (float)34 );
+        REQUIRE( temps.BIAS == (float)47 );
+        REQUIRE( temps.WATER == (float)24.2 );
+        REQUIRE( temps.LEFT == (float)33 );
+        REQUIRE( temps.RIGHT == (float)38 );
+        REQUIRE( temps.SET == (float)20.0 );
+        REQUIRE( temps.COOLING_POWER == (float)102 );
+    }
+
+    SECTION( "truncated temperature responses are rejected" )
+    {
+        std::string tstr = "Temperatures : CCD[26.3] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                           "SET[200]\nCooling Power";
+        ocamTemps   temps;
+        int         rv = parseTemps( temps, tstr );
+
+        REQUIRE( rv == -1 );
+    }
+}
+
+/// Reject invalid temperature fields and framing without partially updating the output.
+/** \ingroup ocam2KCtrl_unit_test
+ */
+TEST_CASE( "ocam2KCtrl utility helpers validate every temperature field", "[ocamUtils]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    parseTemps( *(ocamTemps *)nullptr, "" );
+    #endif
+    // clang-format on
+
+    const std::string valid = "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                              "SET[-450]\nCooling Power [102]mW.\n\n";
+
+    SECTION( "each numeric field requires a complete finite value" )
+    {
+        for( const std::string field :
+             { "CCD[", "CPU[", "POWER[", "BIAS[", "WATER[", "LEFT[", "RIGHT[", "SET[", "Cooling Power [" } )
         {
-            std::string tstr = "Temperatures : CCD[26.3] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
-                               "SET[200]\nCooling Power [102]mW.\n\n";
-            ocamTemps   temps;
+            for( const std::string invalid :
+                 { "", "rubbish", "3.0junk", "nan", "inf", "-inf", "1e100", "1e-100", "0x1p2", "+-1" } )
+            {
+                DYNAMIC_SECTION( field << invalid )
+                {
+                    std::string response = valid;
+                    size_t      first    = response.find( field ) + field.size();
+                    response.replace( first, response.find( ']', first ) - first, invalid );
 
-            rv = parseTemps( temps, tstr );
+                    ocamTemps temps;
+                    temps.setInvalid();
 
-            REQUIRE( rv == 0 );
-            REQUIRE( temps.CCD == (float)26.3 );
-            REQUIRE( temps.CPU == (float)41 );
-            REQUIRE( temps.POWER == (float)34 );
-            REQUIRE( temps.BIAS == (float)47 );
-            REQUIRE( temps.WATER == (float)24.2 );
-            REQUIRE( temps.LEFT == (float)33 );
-            REQUIRE( temps.RIGHT == (float)38 );
-            REQUIRE( temps.SET == (float)20.0 );
-            REQUIRE( temps.COOLING_POWER == (float)102 );
+                    REQUIRE( parseTemps( temps, response ) == -1 );
+                    REQUIRE( temps.CCD == -999 );
+                    REQUIRE( temps.CPU == -999 );
+                    REQUIRE( temps.COOLING_POWER == -999 );
+                }
+            }
         }
     }
 
-    GIVEN( "An invalid response to temp from the OCAM, too short" )
+    SECTION( "malformed labels delimiters and physical values are rejected" )
     {
-        int rv;
-
-        WHEN( "Temp response is too short" )
+        for( const std::string response :
+             { "Temperatures : CCD[-999] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-450]\nCooling Power [102]mW.\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-9999]\nCooling Power [102]mW.\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-450]\nCooling Power [-1]mW.\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-450]\nCooling Power [102mW.\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-450]\nCooling Power [102]mW.[1]\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] WRONG[38] "
+               "SET[-450]\nCooling Power [102]mW.\n\n",
+               "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+               "SET[-450]\nCooling Power [102]mW. rubbish\n\n" } )
         {
-            std::string tstr = "Temperatures : CCD[26.3] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
-                               "SET[200]\nCooling Power";
-            ocamTemps   temps;
+            CAPTURE( response );
+            ocamTemps temps;
+            temps.setInvalid();
 
-            rv = parseTemps( temps, tstr );
+            REQUIRE( parseTemps( temps, response ) == -1 );
+            REQUIRE( temps.SET == -999 );
+            REQUIRE( temps.CPU == -999 );
+        }
+    }
 
-            REQUIRE( rv == -1 );
+    SECTION( "surrounding whitespace and decimal exponent values are accepted" )
+    {
+        std::string response = valid;
+        response.replace( response.find( "CCD[-45]" ), 8, "CCD[ -4.5e1 ]" );
+        response.replace( response.find( "CPU[41]" ), 7, "CPU[ +4.1e1 ]" );
+        ocamTemps temps;
+
+        REQUIRE( parseTemps( temps, "\r\n" + response ) == 0 );
+        REQUIRE( temps.CCD == -45 );
+        REQUIRE( temps.CPU == 41 );
+        REQUIRE( temps.SET == -45 );
+    }
+}
+
+/// A terminal firmware prompt can share a temperature or gain report without relaxing field validation.
+/** \ingroup ocam2KCtrl_unit_test */
+TEST_CASE( "ocam2KCtrl utility helpers accept terminal camera prompts", "[ocamUtils]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    parseTemps( *(ocamTemps *)nullptr, "" ); parseEMGain( *(unsigned *)nullptr, "" );
+    #endif
+    // clang-format on
+    const std::string temperature = "Temperatures : CCD[-45] CPU[41] POWER[34] BIAS[47] WATER[24.2] LEFT[33] RIGHT[38] "
+                                    "SET[-450]\nCooling Power [102]mW.\n\n";
+
+    for( const std::string prompt : { "Ok :", "Ok :\r\n" } )
+    {
+        ocamTemps temps;
+        unsigned  gain = 0;
+
+        REQUIRE( parseTemps( temps, temperature + prompt ) == 0 );
+        REQUIRE( temps.CCD == -45 );
+        REQUIRE( temps.SET == -45 );
+        REQUIRE( parseEMGain( gain, "Gain set to 42 \r\n" + prompt ) == 0 );
+        REQUIRE( gain == 42 );
+    }
+
+    for( const std::string suffix : { "rubbish Ok :", "Error :", "Ok :junk", "Ok :Ok :" } )
+    {
+        ocamTemps temps;
+        temps.setInvalid();
+        unsigned gain = 0;
+
+        REQUIRE( parseTemps( temps, temperature + suffix ) == -1 );
+        REQUIRE( temps.CCD == -999 );
+        REQUIRE( parseEMGain( gain, "Gain set to 42 \r\n" + suffix ) == -1 );
+        REQUIRE( gain == 0 );
+    }
+}
+
+/// Accept complete positive FPS replies and reject invalid numbers or framing.
+/** \ingroup ocam2KCtrl_unit_test
+ */
+TEST_CASE( "ocam2KCtrl utility helpers parse FPS responses", "[ocamUtils]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    parseFPS( *(float *)nullptr, "" );
+    #endif
+    // clang-format on
+
+    SECTION( "valid rates retain fractional precision" )
+    {
+        for( const std::string response : { "fps [150.5] Hz\n",
+                                            "\r\nfps [ +1.505e2 ] Hz\r\n",
+                                            "Camera rate is [150.5] fps.Ok :",
+                                            "\r\nCamera rate is [ +1.505e2 ] fps.\r\nOk :\r\n",
+                                            "Camera rate is [150.5] fps.",
+                                            "fps [150.5] Hz\nOk :\r\n" } )
+        {
+            float fps = 0;
+
+            REQUIRE( parseFPS( fps, response ) == 0 );
+            REQUIRE( fps == 150.5F );
+        }
+    }
+
+    SECTION( "the observed hardware reply retains its actual rate" )
+    {
+        float fps = 0;
+
+        REQUIRE( parseFPS( fps, "Camera rate is [2000] fps.Ok :" ) == 0 );
+        REQUIRE( fps == 2000 );
+    }
+
+    SECTION( "hardware framing does not weaken numeric or response validation" )
+    {
+        for( const std::string value : { "0", "-1", "nan", "inf", "2000junk", "", "1e100", "1e-100" } )
+        {
+            float fps = 12.5;
+
+            REQUIRE( parseFPS( fps, "Camera rate is [" + value + "] fps.Ok :" ) == -1 );
+            REQUIRE( fps == 12.5 );
+        }
+
+        for( const std::string response : { "Camera rate is [2000] fps.Error :",
+                                            "Camera rate is [2000] fps.Ok :junk",
+                                            "Camera rate is [2000] fps.Ok :Ok :",
+                                            "Camera rate is [2000] fps. rubbish Ok :",
+                                            "Camera rate is [2000] fps.[1]Ok :",
+                                            "Camera rate is ]2000[ fps.Ok :",
+                                            "Camera rate is [2000] HzOk :",
+                                            "fps [2000] fps.Ok :",
+                                            "Error [2000] fps.Ok :",
+                                            "Ok :" } )
+        {
+            CAPTURE( response );
+            float fps = 12.5;
+
+            REQUIRE( parseFPS( fps, response ) == -1 );
+            REQUIRE( fps == 12.5 );
+        }
+    }
+
+    SECTION( "malformed nonpositive nonfinite and out of range rates are rejected" )
+    {
+        for( const std::string response : { "",
+                                            "fps [0] Hz\n",
+                                            "fps [-0] Hz\n",
+                                            "fps [-1] Hz\n",
+                                            "fps [] Hz\n",
+                                            "fps [x] Hz\n",
+                                            "fps [150.5x] Hz\n",
+                                            "fps [nan] Hz\n",
+                                            "fps [inf] Hz\n",
+                                            "fps [-inf] Hz\n",
+                                            "fps [1e100] Hz\n",
+                                            "fps [1e-100] Hz\n",
+                                            "fps [0x1p2] Hz\n",
+                                            "fps [+-1] Hz\n",
+                                            "fps [150.5 Hz\n",
+                                            "wrong [150.5] Hz\n",
+                                            "fps [150.5] wrong\n",
+                                            "fps [150.5] Hz[2]\n" } )
+        {
+            CAPTURE( response );
+            float fps = 12.5;
+
+            REQUIRE( parseFPS( fps, response ) == -1 );
+            REQUIRE( fps == 12.5F );
         }
     }
 }
 
-/** \test Scenario: Parsing the gain response
- *
- * \anchor tests_MagAOX_app_ocamUtils_parse_gain_response
+/// Verify `parseEMGain()` accepts valid OCAM gain responses and rejects malformed strings.
+/**
+ * \ingroup ocam2KCtrl_unit_test
  */
-SCENARIO( "Parsing the gain response", "[ocamUtils]" )
+TEST_CASE( "ocam2KCtrl utility helpers parse gain responses", "[ocamUtils]" )
 {
-    GIVEN( "A valid response to gain from the OCAM" )
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    parseEMGain( *(unsigned *)nullptr, "" );
+    #endif
+    // clang-format on
+
+    SECTION( "valid gain responses are parsed" )
     {
-        int rv;
+        unsigned emgain = 1;
+        int      rv     = parseEMGain( emgain, "Gain set to 2 \n\n" );
 
-        WHEN( "Valid gain response, gain=2" )
-        {
-            std::string tstr = "Gain set to 2 \n\n";
-
-            unsigned emgain = 1;
-
-            rv = parseEMGain( emgain, tstr );
-
-            REQUIRE( rv == 0 );
-            REQUIRE( emgain == 2 );
-        }
+        REQUIRE( rv == 0 );
+        REQUIRE( emgain == 2 );
     }
 
-    GIVEN( "A valid response to gain from the OCAM" )
+    SECTION( "maximum supported gains are parsed" )
     {
-        int rv;
+        unsigned emgain = 1;
+        int      rv     = parseEMGain( emgain, "Gain set to 512 \n\n" );
 
-        WHEN( "Valid gain response, gain=512" )
+        REQUIRE( rv == 0 );
+        REQUIRE( emgain == 512 );
+    }
+
+    SECTION( "gain responses do not require whitespace after the numeric value" )
+    {
+        for( const std::string response : { "Gain set to 512",
+                                            "Gain set to 512\n\n",
+                                            "Gain set to 512Ok :",
+                                            "\r\nGain set to 512Ok :\r\n",
+                                            "Gain set to 512 \r\nOk :" } )
         {
-            std::string tstr = "Gain set to 512 \n\n";
+            CAPTURE( response );
+            unsigned emgain = 0;
 
-            unsigned emgain = 1;
-
-            rv = parseEMGain( emgain, tstr );
-
-            REQUIRE( rv == 0 );
+            REQUIRE( parseEMGain( emgain, response ) == 0 );
             REQUIRE( emgain == 512 );
         }
     }
 
-    GIVEN( "An invalid response to gain from the OCAM" )
+    SECTION( "the exact startup reply is gain one followed by the prompt" )
     {
-        int rv;
+        unsigned emgain = 42;
 
-        WHEN( "Invalid gain response, too short, no trailing space" )
+        REQUIRE( parseEMGain( emgain, "Gain set to 1Ok :" ) == 0 );
+        REQUIRE( emgain == 1 );
+    }
+
+    SECTION( "an adjacent prompt does not permit invalid numbers or trailing text" )
+    {
+        for( const std::string value : { "0",
+                                         "601",
+                                         "10000",
+                                         "10k",
+                                         "1x",
+                                         "1.5",
+                                         "1e1",
+                                         "-1",
+                                         "+1",
+                                         "nan",
+                                         "inf",
+                                         "99999999999999999999999",
+                                         "" } )
         {
-            std::string tstr = "Gain set to 512\n\n";
+            CAPTURE( value );
+            unsigned emgain = 42;
 
-            unsigned emgain = 1;
-
-            rv = parseEMGain( emgain, tstr );
-
-            REQUIRE( rv == -1 );
+            REQUIRE( parseEMGain( emgain, "Gain set to " + value + "Ok :" ) == -1 );
             REQUIRE( emgain == 0 );
         }
 
-        WHEN( "Invalid gain response, too short, no gain" )
+        for( const std::string response : { "Gain set to 1Ok :junk",
+                                            "Gain set to 1Ok :Ok :",
+                                            "Gain set to 1 rubbish Ok :",
+                                            "Gain set to 1Error :",
+                                            "Gain was to 1Ok :",
+                                            "HV tripOk :" } )
         {
-            std::string tstr = "Gain set to \n\n";
+            CAPTURE( response );
+            unsigned emgain = 42;
 
-            unsigned emgain = 1;
-
-            rv = parseEMGain( emgain, tstr );
-
-            REQUIRE( rv == -1 );
-            REQUIRE( emgain == 0 );
-        }
-
-        WHEN( "Invalid gain response, too long" )
-        {
-            std::string tstr = "Gain set to 512 rubbish added\n\n";
-
-            unsigned emgain = 1;
-
-            rv = parseEMGain( emgain, tstr );
-
-            REQUIRE( rv == -1 );
-            REQUIRE( emgain == 0 );
-        }
-
-        WHEN( "Invalid gain response, low gain" )
-        {
-            std::string tstr = "Gain set to 0 \n\n";
-
-            unsigned emgain = 1;
-
-            rv = parseEMGain( emgain, tstr );
-
-            REQUIRE( rv == -1 );
-            REQUIRE( emgain == 0 );
-        }
-
-        WHEN( "Invalid gain response, high gain" )
-        {
-            std::string tstr = "Gain set to 601 \n\n";
-
-            unsigned emgain = 1;
-
-            rv = parseEMGain( emgain, tstr );
-
-            REQUIRE( rv == -1 );
-            REQUIRE( emgain == 0 );
-        }
-
-        WHEN( "Invalid gain response, bad gain" )
-        {
-            std::string tstr = "Gain set to x \n\n";
-
-            unsigned emgain = 1;
-
-            rv = parseEMGain( emgain, tstr );
-
-            REQUIRE( rv == -1 );
+            REQUIRE( parseEMGain( emgain, response ) == -1 );
             REQUIRE( emgain == 0 );
         }
     }
+
+    SECTION( "gain responses without a numeric value are rejected" )
+    {
+        unsigned emgain = 1;
+        int      rv     = parseEMGain( emgain, "Gain set to \n\n" );
+
+        REQUIRE( rv == -1 );
+        REQUIRE( emgain == 0 );
+    }
+
+    SECTION( "gain responses with trailing junk are rejected" )
+    {
+        unsigned emgain = 1;
+        int      rv     = parseEMGain( emgain, "Gain set to 512 rubbish added\n\n" );
+
+        REQUIRE( rv == -1 );
+        REQUIRE( emgain == 0 );
+    }
+
+    SECTION( "gain responses below the supported range are rejected" )
+    {
+        unsigned emgain = 1;
+        int      rv     = parseEMGain( emgain, "Gain set to 0 \n\n" );
+
+        REQUIRE( rv == -1 );
+        REQUIRE( emgain == 0 );
+    }
+
+    SECTION( "gain responses above the supported range are rejected" )
+    {
+        unsigned emgain = 1;
+        int      rv     = parseEMGain( emgain, "Gain set to 601 \n\n" );
+
+        REQUIRE( rv == -1 );
+        REQUIRE( emgain == 0 );
+    }
+
+    SECTION( "gain responses with invalid tokens are rejected" )
+    {
+        unsigned emgain = 1;
+        int      rv     = parseEMGain( emgain, "Gain set to x \n\n" );
+
+        REQUIRE( rv == -1 );
+        REQUIRE( emgain == 0 );
+    }
+
+    SECTION( "gain responses require matching labels and a complete integer" )
+    {
+        for( const std::string response : { "Other set to 42 \n\n",
+                                            "Gain was to 42 \n\n",
+                                            "Gain set xx 42 \n\n",
+                                            "Gain set to 42 rubbish",
+                                            "Gain set to 42x \n\n",
+                                            "Gain set to 42.5 \n\n",
+                                            "Gain set to 4e1 \n\n",
+                                            "Gain set to -1 \n\n",
+                                            "Gain set to +1 \n\n",
+                                            "Gain set to nan \n\n",
+                                            "Gain set to inf \n\n",
+                                            "Gain set to 99999999999999999999999 \n\n" } )
+        {
+            CAPTURE( response );
+            unsigned emgain = 42;
+
+            REQUIRE( parseEMGain( emgain, response ) == -1 );
+            REQUIRE( emgain == 0 );
+        }
+    }
+
+    SECTION( "the gain range includes both endpoints" )
+    {
+        unsigned emgain = 0;
+
+        REQUIRE( parseEMGain( emgain, "Gain set to 1 \r\n" ) == 0 );
+        REQUIRE( emgain == 1 );
+        REQUIRE( parseEMGain( emgain, "Gain set to 600 \r\n" ) == 0 );
+        REQUIRE( emgain == 600 );
+    }
 }
 
-} // namespace ocamUtils_test
+} // namespace ocam2KCtrlTest
+
+} // namespace libXWCTest

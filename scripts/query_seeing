@@ -45,7 +45,7 @@ def main():
             else:
                 utcdate, utctime_usec = seeing['ts'].split('T')
                 utctime = utctime_usec.split('.', 1)[0]
-                seeing_corr = seeing['seeing'] if seeing['seeing'] > 0 else -1
+                seeing_corr = seeing['seeing'] if float(seeing['seeing']) > 0 else -1
                 outstr = f"{utcdate} {utctime} {name} {seeing_corr}"
             print(outstr)
             fh.write(outstr + "\n")

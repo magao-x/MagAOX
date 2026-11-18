@@ -14,7 +14,7 @@ MAKEFILE = makefile.cameraStatus
 QT           += widgets
 
 HEADERS       = cameraStatus.hpp
-SOURCES       = cameraStatus.cpp
+SOURCES       = cameraStatus.cpp cameraStatus_roi.cpp
 LIBS          += -lrtimv
 TARGET        = $$qtLibraryTarget(rtimv_cameraStatusPlugin)
 DESTDIR       = ./
@@ -24,3 +24,10 @@ PKGCONFIG += mxlib
 
 unix:target.path=/usr/local/bin/plugins
 INSTALLS+=target
+
+# Optional workspace build of the command interface; system paths remain the default.
+INCLUDEPATH += $$RTIMV_INCLUDEPATH
+!isEmpty(RTIMV_LIBDIR) {
+    LIBS += -L$$RTIMV_LIBDIR
+    QMAKE_RPATHDIR += $$RTIMV_LIBDIR
+}

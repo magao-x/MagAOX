@@ -5,6 +5,7 @@
   */
 #include "../../tests/catch2/catch.hpp"
 
+#include <filesystem>
 #include "../cursesINDI/cursesINDI.hpp"
 #include "../cursesINDI/cursesTableGrid.hpp"
 

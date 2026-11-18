@@ -1,27 +1,51 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../../tests/catch2/catch.hpp"
+/** \file ttmModulator_test.cpp
+ * \brief Catch2 tests for the ttmModulator app.
+ * \author Jared R. Males (jaredmales@gmail.com)
+ *
+ * \ingroup ttmModulator_files
+ */
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../ttmModulator.hpp"
 
 using namespace MagAOX::app;
 
-namespace template_test
+namespace libXWCTest
 {
 
-SCENARIO( "xxxx", "[template]" )
-{
-   GIVEN("xxxxx")
-   {
-      WHEN("xxxx")
-      {
-         int rv = 0;
+/** \defgroup ttmModulator_unit_test ttmModulator Unit Tests
+ * \brief Unit tests for the ttmModulator application.
+ *
+ * \ingroup application_unit_test
+ */
 
-         REQUIRE(rv == 0);
-      }
-   }
+/// Namespace for `ttmModulator` unit tests.
+/** \ingroup ttmModulator_unit_test
+ */
+namespace ttmModulatorTest
+{
+
+/// Verify the placeholder ttmModulator test harness instantiates the app cleanly.
+/**
+ * \ingroup ttmModulator_unit_test
+ */
+TEST_CASE( "ttmModulator placeholder harness instantiates the app", "[ttmModulator]" )
+{
+    // clang-format off
+    #ifdef TTMMODULATOR_TEST_DOXYGEN_REF
+    ttmModulator();
+    #endif
+    // clang-format on
+
+    SECTION( "default construction succeeds" )
+    {
+        ttmModulator app;
+
+        REQUIRE( true );
+    }
 }
-} //namespace template_test
+
+} // namespace ttmModulatorTest
+
+} // namespace libXWCTest

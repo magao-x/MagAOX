@@ -1,6 +1,5 @@
-/** \file magAOXApp.hpp
+/** \file MagAOXApp.hpp
  *  \brief The basic MagAO-X Application
- *  \author Jared R. Males (jaredmales@gmail.com)
  *  \ingroup app_files
  */
 
@@ -83,9 +82,10 @@ namespace XWCTEST_NAMESPACE
  * Through various optional CRTP base classes, many different standard functionalities can be included.
  * The following figure illustrates the facilities provided by a typical app.
  *
- * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default,
- * but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device
- * interfaces are similarly provided."
+ * \image html xwcapp.png "Block diagram of a typical XWCApp."
+ *
+ * Note that ImageStreamIO (ISIO) is not included by default, but there are several ways to interface with 'image
+ * streams' provided in XWCTk.  Many different hardware device interfaces are similarly provided.
  *
  * The following figure illustrates the logic of the XWCApp finite state machine (FSM).
  *
@@ -95,8 +95,7 @@ namespace XWCTEST_NAMESPACE
  * Many XWCApps can be connected across many computers.  Inter-process communication can be conducted with
  * INDI or ISIO.
  *
- * \image html xwcapps_connections.png "Connecting XWCApps across several machines, controlling various hardware"
- * width=1200
+ * \image html xwcapps_connections.png "XWCApp network connections." width=1200
  *
  * XWCApps are designed to be part of control loops. In the following diagram a camera at the focal plane of a
  * coronagraph is used as the wavefront sensor.  An XWCApp reads out the images and publishes them to shared memory with
@@ -104,6 +103,13 @@ namespace XWCTEST_NAMESPACE
  * the deformable mirror controller sends the resultant command to the hardware device.
  *
  * \image html xwcapp_loops.png "XWCApps controlling hardware in a control loop." width=1200
+ */
+
+/** \page page_app_docs Adding an Application
+ *
+ * \subpage page_module_appadd
+ *
+ *
  */
 
 /// The base-class for XWCTk applications.
@@ -542,8 +548,11 @@ class MagAOXApp : public application
       * where `impl` is the derived class, and `mThreadStart` and `myThreadExec` are members
       * of `impl`.
       *
-      * \returns 0 on success
-      * \returns -1 on error
+      * A scheduler-policy failure is logged using the returned pthread error code. The worker still starts
+      * with its inherited scheduling policy, preserving the existing startup behavior.
+      *
+      * \returns 0 when thread initialization completes, even if setting the requested scheduler failed.
+      * \returns -1 on a thread, PID or cpuset initialization error.
       */
     template <class thisPtr, class Function>
     int threadStart( std::thread &thrd,           /**< [out] The thread object to start executing */
@@ -917,10 +926,11 @@ class MagAOXApp : public application
     );
 
     /// Register an INDI property which is monitored for updates from others.
-    /**
+    /** An empty device or property name is rejected.  Neither can match a received property, and indiserver would
+     * fan a getProperties without a device out to every device, each of which replies with all of its properties.
      *
      * \returns 0 on success.
-     * \returns -1 on error.
+     * \returns -1 on error, including an empty device or property name.
      *
      */
     int registerIndiPropertySet(
@@ -1148,6 +1158,50 @@ class MagAOXApp : public application
     int newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
                                                                              the new property request.*/ );
 
+    /// Indi property to request rotation of the process log file. The new file is created with the next log entry.
+    pcf::IndiProperty m_indiP_rotateLogs;
+
+    /// The static callback function to be registered for requesting log file rotation
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_rotateLogs( void *app,                      /**< [in] a pointer to this, will be
+                                                                                    static_cast-ed to MagAOXApp. */
+                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                    the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the log rotation request.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_rotateLogs( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                          the new property request.*/ );
+
+    /// indi Property to report and update the process log file time interval, in minutes.
+    pcf::IndiProperty m_indiP_maxLogTime;
+
+    /// The static callback function to be registered for setting the log file time interval
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_maxLogTime( void *app,                      /**< [in] a pointer to this, will be
+                                                                                    static_cast-ed to MagAOXApp. */
+                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                    the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the log interval change.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_maxLogTime( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                          the new property request.*/ );
+
     ///@} --INDI Interface
 
     /** \name Power Management
@@ -1173,7 +1227,7 @@ class MagAOXApp : public application
     std::string m_powerElement{ "state" }; ///< The INDI element name to monitor for this device's power state.
     std::string m_powerTargetElement{ "target" }; ///< The INDI element name to monitor for this device's power state.
 
-    unsigned long m_powerOnWait{ 0 }; ///< Time in sec to wait for device to boot after power on.
+    unsigned long m_powerOnWait{ 55 }; ///< Default time in sec to wait for device to boot after power on.
 
     /* Power on waiting counter . . . */
     int m_powerOnCounter{ -1 }; ///< Counts numer of loops after power on, implements delay for device bootup.  If -1,
@@ -1481,7 +1535,20 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
     createStandardIndiRequestSw( m_indiP_clearFSMAlert, "fsm_clear_alert", "Clear FSM Alert", "FSM" );
     if( registerIndiPropertyNew( m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "failed to register new fsm_alert property" } );
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new fsm_alert property" } );
+    }
+
+    createStandardIndiRequestSw( m_indiP_rotateLogs, "logs_rotate", "New Log File", "Logging" );
+    if( registerIndiPropertyNew( m_indiP_rotateLogs, st_newCallBack_rotateLogs ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new logs_rotate property" } );
+    }
+
+    createStandardIndiNumber<unsigned>(
+        m_indiP_maxLogTime, "logs_maxtime", 0, MAGAOX_max_maxLogTime, 1, "", "Max Log Interval [minutes]", "Logging" );
+    if( registerIndiPropertyNew( m_indiP_maxLogTime, st_newCallBack_maxLogTime ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new logs_maxtime property" } );
     }
 
     return;
@@ -1604,7 +1671,21 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
 
     //---------- Setup the logger ----------//
     m_log.logName( m_configName );
-    m_log.loadConfig( config );
+    // An invalid setting is not applied and the default is used instead
+    std::string logConfigErr;
+    if( m_log.loadConfig( config, &logConfigErr ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, logConfigErr } );
+    }
+
+    // Set the INDI property to the configured interval.
+    // The elements are created by setDefaults, which is not called in all contexts (e.g. unit tests),
+    // so check before assigning.
+    if( m_indiP_maxLogTime.find( "current" ) && m_indiP_maxLogTime.find( "target" ) )
+    {
+        m_indiP_maxLogTime["current"] = m_log.maxLogTime();
+        m_indiP_maxLogTime["target"]  = m_log.maxLogTime();
+    }
 
     //--------- Loop Pause Time --------//
     config( m_loopPause, "loopPause" );
@@ -2490,9 +2571,14 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
     // Now set the RT priority.
 
     if( thrdPrio < 0 )
+    {
         thrdPrio = 0;
+    }
+
     if( thrdPrio > 99 )
+    {
         thrdPrio = 99;
+    }
 
     sched_param sp;
     sp.sched_priority = thrdPrio;
@@ -2503,21 +2589,23 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
         // Get the maximum privileges available
         elevatedPrivileges elPriv( this );
 
-        // We set return value based on result from sched_setscheduler
-        // But we make sure to restore privileges no matter what happens.
-        errno = 0;
+        // pthread_setschedparam returns its error code directly; privilege restoration may change errno.
         if( thrdPrio > 0 )
+        {
             rv = pthread_setschedparam( thrd.native_handle(), MAGAOX_RT_SCHED_POLICY, &sp );
+        }
         else
+        {
             rv = pthread_setschedparam( thrd.native_handle(), SCHED_OTHER, &sp );
+        }
     }
 
-    if( rv < 0 )
+    if( rv != 0 )
     {
         log<software_error>(
             { __FILE__,
               __LINE__,
-              errno,
+              rv,
               "Setting " + thrdName + " thread scheduler priority to " + std::to_string( thrdPrio ) + " failed." } );
     }
     else
@@ -2532,7 +2620,9 @@ int MagAOXApp<_useINDI>::threadStart( std::thread &thrd,
         {
             mx::sys::milliSleep( 100 );
             if( tpid != 0 )
+            {
                 break;
+            }
         }
     }
 
@@ -3133,6 +3223,15 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty &prop,
     if( !m_useINDI )
     {
         return 0;
+    }
+
+    if( devName.empty() || propName.empty() )
+    {
+        return log<software_error, -1>( { __FILE__,
+                                           __LINE__,
+                                           "refusing INDI set-property subscription with an empty device or property "
+                                           "name: '" +
+                                               devName + "." + propName + "'" } );
     }
 
     try
@@ -3865,6 +3964,89 @@ int MagAOXApp<_useINDI>::newCallBack_clearFSMAlert( const pcf::IndiProperty &ipR
         }
 
     }
+    return 0;
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::st_newCallBack_rotateLogs( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<MagAOXApp<_useINDI> *>( app )->newCallBack_rotateLogs( ipRecv );
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::newCallBack_rotateLogs( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.createUniqueKey() != m_indiP_rotateLogs.createUniqueKey() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "wrong indi property received" } );
+    }
+
+    if( ipRecv.find( "request" ) )
+    {
+        if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+        {
+            // This only sets a flag. The new file is created by the log thread on the next entry.
+            m_log.requestRotation();
+            updateSwitchIfChanged( m_indiP_rotateLogs, "request", pcf::IndiElement::Off, INDI_IDLE );
+        }
+    }
+
+    return 0;
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::st_newCallBack_maxLogTime( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<MagAOXApp<_useINDI> *>( app )->newCallBack_maxLogTime( ipRecv );
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::newCallBack_maxLogTime( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.createUniqueKey() != m_indiP_maxLogTime.createUniqueKey() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "wrong indi property received" } );
+    }
+
+    // Parse the raw string, as the typed element accessor cannot detect invalid input
+    std::string str;
+    if( ipRecv.find( "target" ) )
+    {
+        str = ipRecv["target"].get();
+    }
+    else if( ipRecv.find( "current" ) )
+    {
+        str = ipRecv["current"].get();
+    }
+    else
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "no target or current element in INDI property" } );
+    }
+
+    unsigned target = 0;
+    if( m_log.parseMaxLogTime( target, str ) != mx::error_t::noerror )
+    {
+        log<software_error>( { __FILE__,
+                               __LINE__,
+                               "rejected log file interval \"" + str + "\": must be a number from 0 to " +
+                                   std::to_string( MAGAOX_max_maxLogTime ) } );
+
+        // Send back the unchanged value. The alert state ensures it is sent, as updateIfChanged only sends
+        // when the value or state changes.
+        updateIfChanged( m_indiP_maxLogTime, "target", m_log.maxLogTime(), INDI_ALERT );
+
+        return -1;
+    }
+
+    m_log.maxLogTime( target ); // cannot fail, as the range was checked by parseMaxLogTime
+
+    log<software_info>( { __FILE__, __LINE__, "Set log file interval to " + std::to_string( target ) + " minutes" } );
+
+    updateIfChanged( m_indiP_maxLogTime,
+                     std::vector<std::string>{ "current", "target" },
+                     std::vector<unsigned>{ target, target },
+                     INDI_IDLE );
+
     return 0;
 }
 

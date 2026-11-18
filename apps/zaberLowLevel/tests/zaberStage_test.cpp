@@ -2,9 +2,10 @@
  * \brief Catch2 tests for the zaberStage in the zaberLowLevel app
  * \author Jared R. Males (jaredmales@gmail.com)
  *
- * History:
+ * \ingroup zaberLowLevel_files
  */
-#include "../../../tests/catch2/catch.hpp"
+
+#include "../../../tests/testXWC.hpp"
 
 #include "../zaberLowLevel.hpp"
 
@@ -15,11 +16,34 @@ extern "C"
 
 using namespace MagAOX::app;
 
-namespace zaberStage_test
+namespace libXWCTest
 {
 
+/** \addtogroup zaberLowLevel_unit_test
+ * \brief Additional unit tests for the zaberLowLevel application.
+ *
+ * \ingroup application_unit_test
+ */
+
+/// Namespace for `zaberLowLevel` unit tests.
+/** \ingroup zaberLowLevel_unit_test
+ */
+namespace zaberLowLevelTest
+{
+
+/// Verify `zaberStage` classifies replies and decodes warning tokens from ASCII responses.
+/**
+ * \ingroup zaberLowLevel_unit_test
+ */
 SCENARIO( "Classifying decoded device messages", "[zaberStage]" )
 {
+    // clang-format off
+    #ifdef ZABERLOWLEVEL_TEST_DOXYGEN_REF
+    zaberStage<zaberLowLevel>::isCommandReply( za_reply() );
+    zaberStage<zaberLowLevel>::parseWarnings( "" );
+    #endif
+    // clang-format on
+
     GIVEN( "A configured stage and decoded ASCII messages" )
     {
         zaberLowLevel zll;
@@ -300,4 +324,6 @@ SCENARIO( "Parsing the warnings response", "[zaberStage]" )
     }
 }
 
-} // namespace zaberStage_test
+} // namespace zaberLowLevelTest
+
+} // namespace libXWCTest

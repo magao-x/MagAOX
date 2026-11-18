@@ -2,14 +2,41 @@
 
 # This script is under version control in the MagAO-X source
 
-echo $1
-echo $2
-echo ${CACAO_LOOPNUMBER}
+ARCHDIR="../$2"
 
 #zero the gain factors
 milk-shmim-zero "aol${CACAO_LOOPNUMBER}_mgainfact"
 
+#apply the standard leak to high orders
 hoblockleaks 5 0.98
 
+#load gain opt structures
+if [[ -f "$ARCHDIR/aol${CACAO_LOOPNUMBER}_looptau.fits" ]]; then
+    milk-FITS2shm "$ARCHDIR/aol${CACAO_LOOPNUMBER}_looptau.fits" aol1_looptau
+else
+    echo "$ARCHDIR/aol${CACAO_LOOPNUMBER}_looptau.fits not found"
+fi
 
+if [[ -f "$ARCHDIR/aol${CACAO_LOOPNUMBER}_mgaincal.fits" ]]; then
+    milk-FITS2shm "$ARCHDIR/aol${CACAO_LOOPNUMBER}_mgaincal.fits" aol1_mgaincal
+else
+    echo "$ARCHDIR/aol${CACAO_LOOPNUMBER}_mgaincal.fits not found"
+fi
 
+if [[ -f "$ARCHDIR/aol${CACAO_LOOPNUMBER}_mgaincalfact.fits" ]]; then
+    milk-FITS2shm "$ARCHDIR/aol${CACAO_LOOPNUMBER}_mgaincalfact.fits" aol1_mgaincalfact
+else
+    echo "$ARCHDIR/aol${CACAO_LOOPNUMBER}_mgaincalfact.fits not found"
+fi
+
+if [[ -f "$ARCHDIR/aol${CACAO_LOOPNUMBER}_acoeff.fits" ]]; then
+    milk-FITS2shm "$ARCHDIR/aol${CACAO_LOOPNUMBER}_acoeff.fits" aol1_acoeff
+else
+    echo "$ARCHDIR/aol${CACAO_LOOPNUMBER}_acoeff.fits not found"
+fi
+
+if [[ -f "$ARCHDIR/aol${CACAO_LOOPNUMBER}_bcoeff.fits" ]]; then
+    milk-FITS2shm "$ARCHDIR/aol${CACAO_LOOPNUMBER}_bcoeff.fits" aol1_bcoeff
+else
+    echo "$ARCHDIR/aol${CACAO_LOOPNUMBER}_bcoeff.fits not found"
+fi
