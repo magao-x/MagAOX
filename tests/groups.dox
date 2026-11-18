@@ -189,6 +189,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup hwpSequencer_unit_test hwpSequencer Unit Tests
+ * \brief Offline tests of the HWP sequencer callbacks, configuration, bounded waits, and sequence logic.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup filterWheelCtrl_unit_test Filter Wheel Controller Unit Tests
  * \brief Offline communication recovery, homing, and power-transition tests.
  * \ingroup application_unit_test
