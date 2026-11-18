@@ -102,6 +102,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup raidTelemetry_unit_test RAID Telemetry Unit Tests
+ * \brief Compact MD array health, counts, and metadata tests.
+ * \ingroup unit_test
+ */
+
 /** \defgroup logdump_unit_test Logdump Unit Tests
  * \brief Complete-record decoding, live partial appends, filtering, and log rotation tests.
  * \ingroup application_unit_test
@@ -241,6 +246,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
 
 /** \defgroup rtimvROI_unit_test rtimv ROI Plugin Unit Tests
  * \brief Offline INDI command lifecycle and ROI interaction tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup valueDisplay_unit_test rtimv Value Display Plugin Unit Tests
+ * \brief Offline numeric display, INDI availability, and overlay placement tests.
  * \ingroup application_unit_test
  */
 

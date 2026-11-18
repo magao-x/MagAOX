@@ -143,6 +143,8 @@
 ../libMagAOX/sys/tests/cpuList_test
 ../libMagAOX/logger/tests/gpuTelemetry_test
 ../libMagAOX/logger/tests/irqTelemetry_test
+../libMagAOX/logger/tests/raidTelemetry_test
+../apps/sysMonitor/tests/raidMonitor_test
 ../apps/t2wOffloader/tests/t2wOffloader_test
 ../apps/tcsInterface/tests/tcsInterface_test
 ../apps/timeSeriesSimulator/tests/timeSeriesSimulator_test
