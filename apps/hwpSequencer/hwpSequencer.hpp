@@ -481,6 +481,46 @@ inline void hwpSequencer::setupConfig()
                 "string",
                 "HWP tracker app name, default is 'hwptrack'" );
 
+    config.add( "hwp.positions",
+                "",
+                "hwp.positions",
+                argType::Required,
+                "hwp",
+                "positions",
+                false,
+                "vector<float>",
+                "HWP positions of one cycle in order [deg], no repeats, default is 0,45,22.5,67.5" );
+
+    config.add( "hwp.tolerance",
+                "",
+                "hwp.tolerance",
+                argType::Required,
+                "hwp",
+                "tolerance",
+                false,
+                "float",
+                "Tolerance for the HWP to be in position [deg], default is 0.5" );
+
+    config.add( "hwp.timeout",
+                "",
+                "hwp.timeout",
+                argType::Required,
+                "hwp",
+                "timeout",
+                false,
+                "unsigned",
+                "Time to wait for the HWP to reach a position [msec], default is 5000" );
+
+    config.add( "hwp.wait",
+                "",
+                "hwp.wait",
+                argType::Required,
+                "hwp",
+                "wait",
+                false,
+                "unsigned",
+                "Polling interval while waiting for the HWP or trigger state [msec], default is 100" );
+
     config.add( "fxngen.devName",
                 "",
                 "fxngen.devName",
@@ -501,6 +541,36 @@ inline void hwpSequencer::setupConfig()
                 "string",
                 "Function generator output channel, default is 'C2'." );
 
+    config.add( "fxngen.timeout",
+                "",
+                "fxngen.timeout",
+                argType::Required,
+                "fxngen",
+                "timeout",
+                false,
+                "unsigned",
+                "Time to wait for the trigger output to confirm a change [msec], default is 5000" );
+
+    config.add( "frame.margin",
+                "",
+                "frame.margin",
+                argType::Required,
+                "frame",
+                "margin",
+                false,
+                "double",
+                "Margin added to the trigger period when waiting for a frame [sec], default is 0.5" );
+
+    config.add( "frame.maxTimeout",
+                "",
+                "frame.maxTimeout",
+                argType::Required,
+                "frame",
+                "maxTimeout",
+                false,
+                "double",
+                "Maximum time to wait for a frame [sec], default is 610" );
+
     config.add( "observers.devName",
                 "",
                 "observers.devName",
@@ -517,11 +587,51 @@ inline void hwpSequencer::setupConfig()
 inline int hwpSequencer::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     _config( m_hwpTracker, "hwp.devName" );
+    _config( m_hwpPositions, "hwp.positions" );
+    _config( m_hwpTolerance, "hwp.tolerance" );
+    _config( m_hwpTimeout, "hwp.timeout" );
+    _config( m_hwpWait, "hwp.wait" );
     _config( m_fxngenName, "fxngen.devName" );
     _config( m_fxngenChannel, "fxngen.channel" );
+    _config( m_fxngenTimeout, "fxngen.timeout" );
+    _config( m_frameMargin, "frame.margin" );
+    _config( m_frameMaxTimeout, "frame.maxTimeout" );
     _config( m_obsAppName, "observers.devName" );
 
     SHMIMMONITOR_LOAD_CONFIG( _config );
+
+    if( m_hwpPositions.empty() )
+    {
+        return log<text_log, -1>( "hwp.positions must not be empty", logPrio::LOG_CRITICAL );
+    }
+
+    for( size_t n = 0; n < m_hwpPositions.size(); ++n )
+    {
+        if( m_hwpPositions[n] < -360 || m_hwpPositions[n] > 360 )
+        {
+            return log<text_log, -1>( "hwp.positions values must be within -360 to 360 deg", logPrio::LOG_CRITICAL );
+        }
+
+        for( size_t m = 0; m < n; ++m )
+        {
+            if( m_hwpPositions[m] == m_hwpPositions[n] )
+            {
+                return log<text_log, -1>( "hwp.positions must not repeat a position", logPrio::LOG_CRITICAL );
+            }
+        }
+    }
+
+    if( m_hwpTolerance <= 0 || m_hwpTimeout == 0 || m_hwpWait == 0 || m_fxngenTimeout == 0 )
+    {
+        return log<text_log, -1>( "hwp.tolerance, hwp.timeout, hwp.wait and fxngen.timeout must be positive",
+                                  logPrio::LOG_CRITICAL );
+    }
+
+    if( m_frameMargin < 0 || m_frameMaxTimeout <= 0 )
+    {
+        return log<text_log, -1>( "frame.margin must not be negative and frame.maxTimeout must be positive",
+                                  logPrio::LOG_CRITICAL );
+    }
 
     return 0;
 }
