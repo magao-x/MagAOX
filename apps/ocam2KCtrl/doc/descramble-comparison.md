@@ -176,15 +176,15 @@ inconclusive.
 ## Operator-run parallel comparison
 
 Reserve a separate physical core on the framegrabber's L3/CCD before starting
-this test. CPU numbers alone do not establish topology. The operator proposed
-`spare31` (CPU 31) if it shares L3 with `camwfs` (CPU 33), with `camwfs_sw`
-(CPU 32) as another candidate. Confirm the actual RTC sharing lists first;
-these names are not an automatic reassignment. Preserve the EDT IRQ core.
-Stop or relocate the previous occupant and keep that workload change identical
-through all reference and parallel intervals. Do not change these cpusets
-while the worker is active.
+this test. The [operator-confirmed RTC topology](../../../agents/plans/2026-10/rtc-cpuset-restructuring.md#operator-confirmed-topology)
+places CPU 31 in L3 domain 24–31, while CPUs 32 and 33 share L3 domain 32–39.
+Use `camwfs_sw` (CPU 32) after freeing its previous occupant; `spare31` is on
+a different CCD from `camwfs` (CPU 33). The application verifies the actual
+placement at startup. Preserve the EDT IRQ core. Keep the freed-core workload
+change identical through all reference and parallel intervals. Do not change
+these cpusets while the worker is active.
 
-Add the following using the verified, reserved cpuset name:
+Merge these settings into the existing configuration after reserving CPU 32:
 
 ```ini
 [camera]
@@ -194,7 +194,7 @@ descrambleMethod=sdk
 staged=true
 
 [descramble]
-cpuset=<reserved-worker-cpuset>
+cpuset=camwfs_sw
 threadPrio=-1
 partition=paired30
 ```

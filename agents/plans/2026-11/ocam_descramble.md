@@ -1244,8 +1244,15 @@ The operator requested an instrument comparison and offered to free a cpuset
 on the framegrabber's CCD. Candidate placement is `spare31` (logical CPU 31)
 if actual topology confirms shared L3 with `camwfs` (CPU 33); `camwfs_sw`
 (CPU 32) is another proposed candidate. CPU numbers alone are insufficient.
-The operator was asked for the RTC's SMT and L3-sharing lists. This change
-adds configuration and verification, not a cpuset reassignment. The local
+The operator was initially asked for the RTC's SMT and L3-sharing lists.
+The repository already contains an [operator-confirmed topology table](../2026-10/rtc-cpuset-restructuring.md#operator-confirmed-topology):
+CPU 31 belongs to L3 domain 24–31, whereas CPUs 32 and 33 share L3 domain 32–39.
+The current `rtSetup/RTC/make_cpusets` comments and the later
+[camwfs shared-memory timing record](shmim-monitor-speedups.md#camwfs-avg-shmimintegrator-on-the-camera-stream)
+agree with that placement. Therefore recommend `camwfs_sw` (CPU 32) after the
+operator frees it; `spare31` does not satisfy the same-CCD condition. The app
+rechecks live topology before admission. This change adds configuration and
+verification, not a cpuset reassignment. The local
 host remains `mx11`; no agent-side instrument commands or camera execution
 are authorized or performed.
 
@@ -1386,7 +1393,8 @@ plan prefix is unchanged and `git diff --check` passes.
 - `tests/Makefile.one`, `tests/tests.list`, this plan, and
   `apps/ocam2KCtrl/doc/descramble-comparison.md`.
 
-Local implementation and checks are complete. Instrument topology confirmation,
-core reservation, deployment/restart and the matched measurement crossover
-remain operator steps. No cpuset was chosen or altered on the instrument,
-and no instrument performance result has yet been obtained for `parallel`.
+Local implementation and checks are complete. Reserving `camwfs_sw`/CPU 32,
+deployment/restart, checking actual placement readbacks and the matched
+measurement crossover remain operator steps. No cpuset assignment was changed
+on the instrument, and no instrument performance result has yet been obtained
+for `parallel`.
