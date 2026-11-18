@@ -1000,6 +1000,17 @@ def messages(handler, level, text):
 
 def test_debug_logs_state_settings_and_cycle():
     """State changes (including the automatic oneshot -> idle), setting changes and one line per cycle are logged at DEBUG."""
+    logger = logging.getLogger("adcCtrl-test")  # make_device's logger, so init_state's messages are caught
+    startup, level = RecordingHandler(), logger.level
+    logger.addHandler(startup)
+    logger.setLevel(logging.DEBUG)
+    try:
+        make_device(ctrl_mtx=[-0.3, -0.2])
+    finally:
+        logger.removeHandler(startup)
+        logger.setLevel(level)
+    assert messages(startup, logging.DEBUG, "control matrix at startup: [-0.3, -0.2]")
+
     dev, handler = recording_device("adcCtrl-test-debug", camera=FakeCamera(make_frame(dispersion=(0.02, 0.0))))
     send(dev, "gain", target=0.2)
     send(dev, "n_avg", target=3)

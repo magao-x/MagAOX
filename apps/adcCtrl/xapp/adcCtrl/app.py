@@ -1084,6 +1084,7 @@ class adcCtrl(XDevice):
         self._offset = 0.0
         # 1x2 control matrix mapping pair offsets to the dispersion error
         self._control_mtx = np.array(self.config.ctrl_mtx, dtype=float)
+        self.log.debug(f"control matrix at startup: {self._control_mtx.tolist()}")
         # True for active sparkles, False for passive DM spots
         self._use_sparkles = True
         # Selected camera (key of config.cameras) and its XCam, None until opened

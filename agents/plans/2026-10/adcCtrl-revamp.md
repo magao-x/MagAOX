@@ -1154,7 +1154,7 @@ The stages are Newport SMC100 controllers (`apps/smc100ccCtrl`). Error "U" means
 
 **Changes.**
 - **State.** The message moved from `handle_state` to `set_state`, so it also covers the app's own transitions (oneshot → idle, dropping to idle after `max_consecutive_failures`). It is logged only on an actual change, as "state changed from <old> to <new>", using the INDI element names.
-- **Control matrix.** Logged only when an element actually changes. It used to be logged on every `ctrl_mtx` message.
+- **Control matrix.** Logged only when an element actually changes. It used to be logged on every `ctrl_mtx` message Also logged once at startup ("control matrix at startup: …", from `init_state`), so every log shows the matrix in use (user request).
 - **One entry per cycle** (`log_cycle`, from `run_cycle`): state and coronagraph mode, gain, `n_avg`, `no_measurements`, `ctrl_mtx`, the four averaged spot angles and deviations (NaN for unmeasured knife-edge spots), the error and the step. In knife-edge mode it also has `ke_gain`, `m` and the set point.
 - **Test.** `test_debug_logs_state_settings_and_cycle`. All 57 tests pass locally (the stand-in packages and runner had to be recreated in the scratchpad).
 
