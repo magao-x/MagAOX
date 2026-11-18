@@ -557,6 +557,10 @@ Update this plan's Decisions and Status as each step lands.
   from `tests/`), runs `clang-format` (step 6) and then the instrument
   checks V1–V5.
 
+- 2026-11-18: user reports the app builds without errors and all
+  `hwpSequencer_test` cases pass (built and run by the user with
+  `tests/Makefile.one`). `clang-format` (step 6) and V1–V5 still to do.
+
 ### Implementation notes
 
 - Seams (D16): `waitFor` is a static template and cannot be virtual, so the
