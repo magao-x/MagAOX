@@ -31,6 +31,11 @@ runs and changes traversal order. The compiler can schedule memory operations
 differently; this controls source-level traversal, not exact machine accesses.
 Neither candidate has established jitter qualification on the RTC.
 
+On 2026-11-18 the operator reported `compact` a few hundred nanoseconds slower
+than SDK with the same observed jitter. It remains a diagnostic control; the
+local benchmark speedup did not carry over to that RTC test. Details and the
+separate `optimized` mean/spread tradeoff are recorded in the engineering plan.
+
 | INDI property / element | Meaning |
 | --- | --- |
 | `descramble_method.sdk` / `.compact` / `.optimized` | Requested method; exactly one switch is On. |

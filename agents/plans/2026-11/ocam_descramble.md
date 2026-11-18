@@ -787,3 +787,47 @@ The CSV includes hot-input statistics, all round means, timer overhead and
 buffer alignments: `/tmp/ocamDescramble-compact-bin2.csv`. The mean ordering is
 consistent within this run; no further repetitions were needed to establish
 its role as a control. RTC qualification remains the operator's next step.
+
+
+## Operator compact-control result — 2026-11-18
+
+The operator reports that `compact` is **a few hundred nanoseconds slower than
+SDK, with the same observed jitter as SDK**. This is a qualitative comparison:
+the report does not include raw summaries, timing-metric identity, FPS, sample
+counts, applied-method snapshots, percentiles, or frame-quality counters.
+Do not assign it to one of the earlier FPS populations or infer exact timings.
+
+The local synthetic benchmark's modest compact-map mean gain did not carry
+over to this RTC comparison. Compact therefore offers no demonstrated
+operational advantage over SDK in the reported test; retain it as a diagnostic
+control, with SDK remaining the default/reference. The earlier structured
+`optimized` result remains a separate mean-versus-spread tradeoff, rather than
+a qualified improvement under the no-jitter-regression criterion.
+
+Matching SDK jitter while retaining its source-level pixel traversal supports
+investigating traversal and generated memory-access code as contributors to
+the structured kernel's extra spread. It weakens the explanation that the
+common selector/applied-status path alone causes that increase. It does not
+prove a cache mechanism: compact also changes table layout and compiler code,
+and the reported metric may include the staged copy and its interaction with
+the kernel. No conclusion about extreme latency or frame delivery follows
+from the qualitative jitter comparison alone.
+
+The narrowest next diagnostic is to expose the already tested `mapped()`
+helper for a matched compact/mapped/compact operator comparison. Both use the
+same prepared 16-bit index map, while mapped traverses output sequentially.
+This avoids introducing another kernel and tests whether the extra spread
+also occurs with sequential output rather than only with the structured
+four-amplifier loop. Staging, instrumentation, FPS and reader workload must
+remain fixed; generated code and copy interactions still prevent interpreting
+this as a pure hardware cache experiment.
+
+A subsequent performance candidate could remove per-pixel map loads while
+retaining SDK traversal: for first-half row `y`, visit amplifier runs in order
+and alternate each pixel with the same column in row `y+60`, using validated
+row bases and strides. This differs from the earlier `y`/`119-y` experiment,
+which deliberately changed SDK order. It would need offline validation and
+an operator RTC comparison before a performance or jitter claim.
+
+This update records the result and its interpretation only. Runtime code,
+defaults and instrument state are unchanged.
