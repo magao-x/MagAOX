@@ -1,4 +1,4 @@
-# OCAM single-core descramble comparison
+# OCAM descramble comparison
 
 The optional bin2 methods produce the same pixels as the SDK using a mapping
 prepared and validated during camera configuration. The SDK remains the
@@ -19,10 +19,11 @@ been qualified, the optional setting is:
 descrambleMethod=mapped
 ```
 
-The accepted values are `sdk`, `compact`, `mapped`, and `optimized`; the default
-is `sdk`. An unknown value fails configuration. All three candidates require
-the same validated structured bin2 mapping in the app. The offline helper can
-compare other modes.
+The accepted values are `sdk`, `compact`, `mapped`, `optimized`, and `parallel`;
+the default is `sdk`. An unknown value fails configuration. All candidates
+require the same validated structured bin2 mapping in the app. `parallel`
+also requires the explicit worker setup below. The offline helper can compare
+other modes.
 
 `compact` and `mapped` use the same prepared 16-bit index table. `compact`
 follows the SDK's alternating-half pixel traversal; `mapped` writes output
@@ -55,9 +56,12 @@ instrumentation setting, fixed throughout each matched comparison.
 
 | INDI property / element | Meaning |
 | --- | --- |
-| `descramble_method.sdk` / `.compact` / `.mapped` / `.optimized` | Requested method; exactly one switch is On. |
-| `descramble_status.applied` | `sdk`, `compact`, `mapped`, `optimized`, or `none` when no active completed load is reported. |
+| `descramble_method.sdk` / `.compact` / `.mapped` / `.optimized` / `.parallel` | Requested method; exactly one switch is On. |
+| `descramble_status.applied` | `sdk`, `compact`, `mapped`, `optimized`, `parallel`, or `none` when no active completed load is reported. |
 | `descramble_status.availability` | `ready`, `unsupported mode`, `unavailable table`, or `unconfigured`. |
+| `descramble_status.parallel` | `disabled`, `requires staging`, `unverified worker`, `unavailable table`, `parking`, `parked`, or `running`. |
+| `descramble_status.caller_cpu` / `.worker_cpu` | Verified logical CPUs, or `-1` before verification. |
+| `th-descramble.pid` / `.prio` | Worker thread ID and requested RT priority; actual scheduling is verified before use. |
 
 The request is latched once for an entire frame. `applied` changes after the
 load completes and is published by the ordinary app thread. A changed request
@@ -80,7 +84,7 @@ Agents must not execute these commands or control the instrument.
    Verify bin2/FPS after restart, then keep FPS, gain, synchronization,
    IRQ/cpuset placement, stage-timing settings and reader workload fixed. Retain
    `framegrabber.staged=true` and the existing `stagedCopyNT` setting. This change
-   needs no additional core.
+   needs no additional core for the single-thread methods.
 
 2. Inspect preparation and establish the reference selection:
 
@@ -169,6 +173,89 @@ only if the camera and complete loop show no repeatable regression in mean,
 jitter/tails or frame delivery. Leave the SDK selected if qualification is
 inconclusive.
 
+## Operator-run parallel comparison
+
+Reserve a separate physical core on the framegrabber's L3/CCD before starting
+this test. CPU numbers alone do not establish topology. The operator proposed
+`spare31` (CPU 31) if it shares L3 with `camwfs` (CPU 33), with `camwfs_sw`
+(CPU 32) as another candidate. Confirm the actual RTC sharing lists first;
+these names are not an automatic reassignment. Preserve the EDT IRQ core.
+Stop or relocate the previous occupant and keep that workload change identical
+through all reference and parallel intervals. Do not change these cpusets
+while the worker is active.
+
+Add the following using the verified, reserved cpuset name:
+
+```ini
+[camera]
+descrambleMethod=sdk
+
+[framegrabber]
+staged=true
+
+[descramble]
+cpuset=<reserved-worker-cpuset>
+threadPrio=-1
+partition=paired30
+```
+
+`threadPrio=-1` inherits `framegrabber.threadPrio`; an explicit priority must
+be 1–99. `partition` accepts `paired30` (default, balanced row pairs),
+`paired28` (28/32 pairs), or `halves` (60 output rows each). Changing worker
+configuration requires an app restart. Keep the current `stagedCopyNT`, FPS,
+gain, synchronization, readers and stage-timing setting fixed during each
+comparison. Restart through the normal operator deployment procedure and
+verify the actual FPS afterward.
+
+An empty `descramble.cpuset` disables the worker. A configured worker starts
+parked, then verifies both threads' actual priorities/policy, exact single-CPU
+cpuset membership, different physical cores, and shared L3. Both framegrabber
+and worker need explicit single-CPU cpusets. Failure leaves `parallel`
+unavailable and the existing single-thread methods usable. Placement is
+checked again during acquisition configuration. Startup verification does not
+detect another task later being assigned to the same core; the operator owns
+that resource reservation.
+
+With SDK selected, check:
+
+```bash
+getINDI camwfs.descramble_status camwfs.th-descramble
+```
+
+Require `availability=ready`, `parallel=parked`, and the intended
+`caller_cpu`/`worker_cpu`. Capture a settled SDK interval. Then test
+**optimized → parallel → optimized**, with the same settling and capture
+intervals used above:
+
+```bash
+setINDI -s camwfs.descramble_method.optimized=On
+getINDI camwfs.descramble_status
+
+# After collecting the settled optimized interval:
+setINDI -s camwfs.descramble_method.parallel=On
+getINDI camwfs.descramble_status
+
+# After collecting the settled parallel interval:
+setINDI -s camwfs.descramble_method.optimized=On
+getINDI camwfs.descramble_status
+```
+
+Require `applied=parallel`, `parallel=running`, and an Ok selection state for
+the worker capture. Require `parallel=parked` in SDK/optimized captures.
+Discard at least one full timing window after each acknowledged transition;
+parking/resuming costs can affect the first frame. Finish with a return-to-SDK
+capture. The worker completes both image portions before digital sampling,
+the existing primary-thread staging copy, publication and raw-buffer reuse.
+Unsupported modes/tables, missing staging or unavailable worker placement
+fall back to SDK and report the unmet parallel request.
+
+Compare conversion and acquisition-to-write mean, spread and tails, plus frame
+quality and full-loop latency. The local experiment found a kernel improvement
+whose staged result depended strongly on cadence. The instrument test must
+include the final copy and the cost of reserving this core. Keep stage timing
+fixed for a crossover; if it is disabled, use ordinary `fgtimes`/`fg_timing`
+rather than expecting new conversion-stage samples.
+
 ## Hardware-free tests and benchmark
 
 From the repository root:
@@ -218,8 +305,8 @@ make does not track command-line flag changes as dependencies.
 
 ## Offline second-thread experiment
 
-The optional benchmark worker is a local experiment, separate from the
-application's four runtime methods. It uses one persistent worker and the
+The optional benchmark worker uses the same mandatory-job engine as the
+application's `parallel` method, with local thread/affinity setup. It uses one persistent worker and the
 calling thread. The caller and worker must use distinct physical cores;
 choose logical CPU numbers from the workstation's topology, not from their
 numeric proximity. The example below uses CPUs 2 and 4, verified as separate
@@ -265,9 +352,9 @@ allocation or thread creation.
 All generated raw frames and parallel/serial outputs are checked against the
 SDK before timing, including source immutability and output guards. The
 standalone checks additionally exercise repeated jobs, input reuse, parking,
-startup failures and shutdown after completed calls. The prototype has a
-blocking, single-caller contract; concurrent destruction and camera recovery
-with outstanding jobs require separate engineering before runtime integration.
+startup failures and shutdown after completed calls. The engine has a blocking, single-caller contract; asynchronous park/stop
+requests drain admitted work before buffer reuse. Its owner joins the worker
+before destroying the engine or its mapping.
 
 Compare complete staged times and tails against `optimized`, not only the
 worker's own kernel duration. Local Intel results cannot establish behavior on
@@ -278,4 +365,6 @@ The [2026-11-18 execution record](../../../agents/plans/2026-11/ocam_descramble.
 includes local correctness checks and both timing workloads. Two threads
 improved the kernel, but staging erased the gain in tight loops; sleeping
 between frames reversed the result under the laptop's ordinary power and
-scheduling settings. This establishes cadence sensitivity, not an RTC gain.
+scheduling settings. This establishes cadence sensitivity, not an RTC gain. Those measurements
+precede the later shared engine with admission checks; repeat the benchmark
+when comparing the current runtime handoff implementation.
