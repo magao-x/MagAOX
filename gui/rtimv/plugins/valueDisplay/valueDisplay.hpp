@@ -7,6 +7,7 @@
 
 #include <rtimv/rtimvInterfaces.hpp>
 
+#include <QMetaMethod>
 #include <QPointer>
 #include <QTextEdit>
 
@@ -44,6 +45,12 @@ class valueDisplay : public rtimvOverlayInterface
     /// Private text widget deleted by this plugin or its parent view.
     QPointer<QTextEdit> m_text;
 
+    /// Optional viewer owning the native image-dependent background calculation.
+    QPointer<QObject> m_host;
+
+    /// Native nonblocking background updater, invalid on older viewers.
+    QMetaMethod m_fontLuminance;
+
     /// Shared dictionary, valid while the host view and plugin are attached.
     dictionaryT *m_dictionary{ nullptr };
 
@@ -59,7 +66,7 @@ class valueDisplay : public rtimvOverlayInterface
     /// Read and format one finite number, returning an empty string when unavailable.
     QString valueText( const valueSlot &value /**< [in] Key and display precision for the row. */ );
 
-    /// Position the text below the heading and any visible global statistics.
+    /// Position the text below native overlays and refresh its image-dependent background.
     void layoutText();
 
     /// Follow geometry and visibility changes without consuming view events.
