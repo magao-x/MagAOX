@@ -58,12 +58,20 @@ provider invalidates the connection, deletes the property/device, or replaces a
 definition without that element. Rebuild `indiDictionary` with this change to
 include replacement-definition invalidation.
 
-The values use the viewer's status font/color with a translucent text background.
+The values use the native global-statistics font and color. Their background
+opacity follows rtimv's `fontLuminance` calculation at the value widget's own
+image position: transparent over dark pixels and darker over bright pixels.
+The background refreshes even when the INDI values have not changed.
 They appear below the save/loop heading, and below native global statistics
 when those are visible. Resizing or moving the statistics readout updates the
 placement. Small windows clip the value display to the remaining space; help
 stays above it. Movable box-statistics and arbitrary other plugin overlays do
 not participate in this placement policy.
+
+Adaptive background opacity requires a viewer that exposes
+`mtxTry_fontLuminance(QTextEdit*, bool)` through Qt's meta-object interface.
+Rebuild rtimv/rtimvClient with the companion appearance update, then rebuild this
+plugin. An older viewer still loads the plugin and uses a transparent background.
 
 ## Build and test
 
