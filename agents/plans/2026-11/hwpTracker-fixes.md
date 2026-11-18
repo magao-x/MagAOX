@@ -261,6 +261,47 @@ Build and run the hwpTracker test locally; no instrument commands.
   Bug 4 (`tracking.sign` not loaded) is present on `dev` and is fixed in
   commit 1.
 
+### Implementation notes
+
+- Commits 2-6 of the implementation plan were made as one functional commit:
+  the changes all touch the same callbacks and the shared move path, so
+  splitting them would not give independently useful steps. New and
+  rewritten declarations were documented as written; the separate
+  documentation commit covers the remaining files.
+- Shared state is protected by `m_indiMutex`, following `adcTracker`. INDI
+  callbacks are not serialized by the framework, and `appLogic()` runs on
+  the main thread. `state()` try-locks `m_indiMutex`, so it is only called
+  from `appLogic()` with the mutex released.
+- All stage commands go through `requestMove()`; `sendStageTarget()` is the
+  virtual test seam. The tracking offset applied is computed at send time
+  and stored as `m_hwpTrackingOffset`, which the readback uses, so a queued
+  move does not change the reported angle until it is actually sent.
+- A periodic tracking update skipped because the stage is not `READY` is
+  retried on the next `appLogic()` pass after the stage becomes `READY`,
+  not a full `updateInterval` later (`m_lastUpdate` is only advanced when
+  the update is sent). This reduces lag near transit.
+- Readback: the measured angle is shifted by a multiple of 360 to lie
+  nearest the commanded angle (`setpoint + offset`), so
+  `hwp_position_actual` and `hwp_position.current` stay in the user's frame
+  even though the stage target is wrapped into [0, 360).
+- Stage state strings are parsed with `stateCodes::str2Code` and checked by
+  round trip through `codeText`; unrecognized strings are logged and
+  treated as `NOTCONNECTED`.
+- The app now starts in `NOTCONNECTED` instead of `READY`.
+- Internal renames (no INDI name changes): `m_indiP_hwpStagePos` ->
+  `m_indiP_stageTarget`, `m_indiP_stagePolRot` -> `m_indiP_stagePos`,
+  `m_indiP_stagePolRotFsm` -> `m_indiP_stageFsm`, since the stage device
+  name is configurable. `getHwpStatus()`/`getHwpTrackingOffset()`/
+  `updateHwpPos()` are replaced by static `positionName()`,
+  `trackingOffset()`, `stageTarget()`, `nearestAngle()` and `requestMove()`.
+- Unused includes (`gslInterpolation.hpp`, `readColumns.hpp`) removed;
+  `mx/math/geo.hpp` added for `angleMod`.
+- Known race, accepted: between sending a target and the stage publishing
+  `OPERATING`, the stage still appears `READY`, so a request arriving in
+  that window (one stage poll period) is sent mid-move. Tracking updates
+  are 10 s apart and `hwpSequencer` waits for arrival before its next
+  request, so this window is rarely hit.
+
 ## Follow-up and Edge Cases
 
 - User to verify on the instrument that tracking commands reach
