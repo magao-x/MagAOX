@@ -59,6 +59,7 @@
 ../apps/loPredCtrl/tests/loPredCtrl_test
 ../apps/mcp3208Ctrl/tests/mcp3208Ctrl_test
 ../apps/ad7689Ctrl/tests/AD7689_test
+../apps/ad7689Ctrl/tests/ad7689Sync_test
 ../apps/ad7689Ctrl/tests/ad7689Ctrl_test
 ../apps/magAOXMaths/tests/magAOXMaths_test
 ../apps/modalFilter/tests/modalFilter_test
