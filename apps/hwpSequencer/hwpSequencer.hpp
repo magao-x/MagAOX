@@ -1064,6 +1064,9 @@ inline void hwpSequencer::sequencerThreadExec()
 
         publishSwitches( true );
 
+        // Clear the previous sequence's count: no position has been counted yet.
+        publishFrames( 0 );
+
         int numCycles    = m_numCycles;
         int framesPerPos = m_framesPerPos;
 

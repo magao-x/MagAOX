@@ -101,6 +101,7 @@ class hwpSequencer_test : public MagAOX::app::hwpSequencer
     using MagAOX::app::hwpSequencer::m_hwpTolerance;
     using MagAOX::app::hwpSequencer::m_hwpTracker;
     using MagAOX::app::hwpSequencer::m_hwpWait;
+    using MagAOX::app::hwpSequencer::m_indiP_status;
     using MagAOX::app::hwpSequencer::m_lastCycle;
     using MagAOX::app::hwpSequencer::m_lastFrameAtime;
     using MagAOX::app::hwpSequencer::m_numCycles;
@@ -1600,6 +1601,9 @@ TEST_CASE( "hwpSequencer starts and stops through its callbacks without blocking
     app.m_realDwell           = true;
     app.m_sequencerThreadInit = false;
 
+    // A count left over from an earlier sequence.
+    app.m_indiP_status["frames"].set( 3 );
+
     std::thread thrd( &hwpSequencer_test::sequencerThreadExec, &app );
 
     auto waitUntil = []( std::function<bool()> cond )
@@ -1624,6 +1628,12 @@ TEST_CASE( "hwpSequencer starts and stops through its callbacks without blocking
             return app.m_dwells.load() > 0;
         } ) );
     REQUIRE( app.m_sequencing.load() );
+
+    // Cleared at start, and not published again until the first position ends.
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( app.m_indiMutex );
+        REQUIRE( app.m_indiP_status["frames"].get<double>() == 0 );
+    }
 
     t0 = std::chrono::steady_clock::now();
     REQUIRE( app.newCallBack_m_indiP_sequence( toggleProp( "hwpseq", "sequence", false ) ) == 0 );

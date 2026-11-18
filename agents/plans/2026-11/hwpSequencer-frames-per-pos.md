@@ -127,3 +127,7 @@ On the instrument (user runs; agents do not touch hardware):
     is only logged in frames mode and is skipped for a position cut short by `stop`.
   - The fallback pause (no camera timing) still sets the anchor from the frame it
     catches, so switching to frames mode mid-sequence works after one time-mode position.
+- 2026-11-18: `status.frames` is published as 0 at sequence start, so clients
+  (polarimetryGUI) no longer see the previous sequence's count during the first position.
+  The threaded start/stop test checks it. Not compiled by the agent (no mxlib); the user
+  builds and runs `hwpSequencer_test`.
