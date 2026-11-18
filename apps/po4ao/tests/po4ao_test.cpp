@@ -370,7 +370,7 @@ TEST_CASE( "PO4AO collection completes only after snapshot publication", "[po4ao
     WarmupCollection collection;
     REQUIRE( WarmupCollection::phase( collection.token() ) == CollectionPhase::idle );
     collection.begin( 10, 2, 3, 42, 1 );
-    collection.validate( 3, 42, 1, true );
+    collection.validate( 3, 42, 1 );
     REQUIRE( collection.frames() == 0 );
     REQUIRE_FALSE( collection.published( 10 ) );
     collection.emitted();
@@ -384,7 +384,7 @@ TEST_CASE( "PO4AO collection completes only after snapshot publication", "[po4ao
     REQUIRE( collection.published( 10 ) );
     REQUIRE( WarmupCollection::phase( collection.token() ) == CollectionPhase::ready );
     REQUIRE_FALSE( collection.published( 10 ) );
-    collection.validate( 4, 0, 2, false );
+    collection.validate( 4, 0, 2 );
     REQUIRE( WarmupCollection::phase( collection.token() ) == CollectionPhase::ready );
 }
 
@@ -394,7 +394,7 @@ TEST_CASE( "PO4AO can collect under the disabled integrator", "[po4ao]" )
 {
     WarmupCollection collection;
     collection.begin( 2, 1, 4, 0, 1 );
-    collection.validate( 4, 0, 1, true );
+    collection.validate( 4, 0, 1 );
     collection.emitted();
     REQUIRE( collection.published( 2 ) );
     REQUIRE( collection.frames() == 1 );
@@ -402,30 +402,26 @@ TEST_CASE( "PO4AO can collect under the disabled integrator", "[po4ao]" )
 
 /// Verify incompatible samples, failed publication and reset cannot complete a fixed-policy dataset.
 /** \ingroup po4ao_unit_test */
-TEST_CASE( "PO4AO interrupts collection on controller changes and source gaps", "[po4ao]" )
+TEST_CASE( "PO4AO interrupts collection on controller changes and publication failures", "[po4ao]" )
 {
     WarmupCollection collection;
     collection.begin( 5, 2, 3, 42, 1 );
     collection.emitted();
     SECTION( "control changed" )
     {
-        collection.validate( 4, 42, 1, true );
+        collection.validate( 4, 42, 1 );
     }
     SECTION( "policy changed" )
     {
-        collection.validate( 3, 43, 1, true );
+        collection.validate( 3, 43, 1 );
     }
     SECTION( "inference fell back" )
     {
-        collection.validate( 3, 0, 1, true );
+        collection.validate( 3, 0, 1 );
     }
     SECTION( "reset" )
     {
-        collection.validate( 3, 42, 2, true );
-    }
-    SECTION( "source gap" )
-    {
-        collection.validate( 3, 42, 1, false );
+        collection.validate( 3, 42, 2 );
     }
     SECTION( "publisher backlog or failure" )
     {
@@ -691,7 +687,7 @@ class po4ao : public MagAOXApp<true>
                        IMAGE   &metadataStream /**< [in,out] Metadata. */,
                        bool     metadataOpened /**< [in] Availability. */,
                        uint64_t episodeIdentifier /**< [in] Episode ID. */,
-                       uint64_t modelId /**< [in] Effective policy. */ );
+                       uint64_t modelId /**< [in] Selected collection policy. */ );
 
     /// Queue a completed production episode.
     void finishEpisode();
@@ -702,7 +698,7 @@ class po4ao : public MagAOXApp<true>
     /// Start a new collection using the production method.
     void beginWarmupCollection( uint64_t generation /**< [in] Collection ID. */,
                                 uint64_t control /**< [in] Request. */,
-                                uint64_t modelId /**< [in] Effective policy. */,
+                                uint64_t modelId /**< [in] Selected collection policy. */,
                                 uint64_t reset /**< [in] Reset ID. */ );
 
     /// Process one production frame with fake SDK boundaries.
@@ -879,6 +875,172 @@ TEST_CASE( "PO4AO production warmup works with control disabled", "[po4ao][contr
     REQUIRE( app.m_useNeuralNetwork.load() );
 }
 
+/// Verify gaps retain complete episodes and reuse the discarded partial episode's exploration indices.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO production resumes warmup after input gaps", "[po4ao][control][gap]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::processImage;
+    MagAOX::app::po4ao::finishEpisode;
+    MagAOX::app::po4ao::replayPublisherLoop;
+#endif
+    // clang-format on
+    po4aoControlHarness::po4ao app;
+    bool                       learned = true;
+    SECTION( "retained learned policy" )
+    {
+    }
+    SECTION( "initial integrator warmup" )
+    {
+        app.m_useNeuralNetwork.store( false );
+        learned = false;
+    }
+    SECTION( "disabled control with retained policy" )
+    {
+        app.m_controlRequest.store( 4 );
+        learned = false;
+    }
+    app.m_warmupRecollectRequest.store( 1 );
+    REQUIRE( app.frame( 1 ) == 0 );
+    REQUIRE( app.frame( 2 ) == 0 );
+    REQUIRE( app.frame( 3 ) == 0 );
+    const auto discarded = app.m_emitted.back();
+    REQUIRE( app.m_collection.frames() == 3 );
+    REQUIRE( app.frame( 5 ) == 0 );
+    REQUIRE( app.m_collection.frames() == 2 );
+    REQUIRE( app.m_episodeCounter.load() == 1 );
+    REQUIRE( app.m_episodeBuffers[app.m_activeEpisodeSlot].count == 0 );
+    REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::collecting );
+    uint64_t next = 6;
+    if( learned )
+    {
+        REQUIRE( app.frame( 6 ) == 0 );
+        REQUIRE( app.m_effectiveModelId.load() == 0 );
+        REQUIRE( app.m_emitted.back()[1] == Approx( -1.F ) ); // No exploration during history refill.
+        REQUIRE( app.frame( 8 ) == 0 );                       // Another gap before the history has refilled.
+        REQUIRE( app.frame( 9 ) == 0 );
+        REQUIRE( app.m_collection.frames() == 2 );
+        next = 10;
+    }
+    const auto resumed = app.m_emitted.size();
+    REQUIRE( app.frame( next ) == 0 );
+    REQUIRE( app.m_emitted.size() == resumed + 1 );
+    REQUIRE( app.m_emitted.back() == discarded );
+    REQUIRE( app.m_effectiveModelId.load() == ( learned ? 42 : 0 ) );
+    REQUIRE( app.m_collection.frames() == 3 );
+    REQUIRE( app.frame( next ) == 0 ); // A duplicate never consumes an exploration sample.
+    REQUIRE( app.m_collection.frames() == 3 );
+    REQUIRE( app.m_emitted.size() == resumed + 1 );
+    REQUIRE( app.frame( next + 1 ) == 0 );
+    app.drain();
+    REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::ready );
+    REQUIRE( WarmupCollection::generation( app.m_collection.token() ) == 1 );
+    REQUIRE( app.m_collection.frames() == 4 );
+    const auto *metadata = static_cast<uint32_t *>( app.m_warmupMetadataStream.array.raw );
+    REQUIRE( metadata[0] == 4 );
+    REQUIRE( metadata[2] == ( learned ? 42 : 0 ) );
+    const auto                 *replay = static_cast<float *>( app.m_warmupStream.array.raw );
+    const std::array<size_t, 4> accepted{ resumed + 1, resumed, 1, 0 };
+    for( size_t sample = 0; sample < accepted.size(); ++sample )
+    {
+        for( size_t mode = 0; mode < 3; ++mode )
+        {
+            REQUIRE( replay[12 + sample * 3 + mode] == app.m_emitted[accepted[sample]][mode] );
+        }
+    }
+}
+
+/// Verify a retained policy's initial history refill is excluded from its collected episodes.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO production waits for policy history before accepting warmup", "[po4ao][control][gap]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::processImage;
+    MagAOX::app::po4ao::beginWarmupCollection;
+    MagAOX::app::po4ao::replayPublisherLoop;
+#endif
+    // clang-format on
+    po4aoControlHarness::po4ao app;
+    app.m_observationHistory->reset();
+    app.m_commandHistory->reset();
+    app.m_warmupRecollectRequest.store( 1 );
+    REQUIRE( app.frame( 1 ) == 0 );
+    REQUIRE( app.m_effectiveModelId.load() == 0 );
+    REQUIRE( app.m_collection.frames() == 0 );
+    REQUIRE( app.m_episodeBuffers[app.m_activeEpisodeSlot].count == 0 );
+    for( uint64_t frame = 2; frame <= 5; ++frame )
+    {
+        REQUIRE( app.frame( frame ) == 0 );
+        REQUIRE( app.m_effectiveModelId.load() == 42 );
+    }
+    app.drain();
+    REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::ready );
+    REQUIRE( static_cast<uint32_t *>( app.m_warmupMetadataStream.array.raw )[2] == 42 );
+}
+
+/// Verify a later gap cannot invalidate complete episodes queued for the matching frozen publication.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO production publishes completed warmup despite a later gap", "[po4ao][control][gap]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::processImage;
+    MagAOX::app::po4ao::replayPublisherLoop;
+#endif
+    // clang-format on
+    po4aoControlHarness::po4ao app;
+    app.m_warmupRecollectRequest.store( 1 );
+    for( uint64_t frame = 1; frame <= 4; ++frame )
+    {
+        REQUIRE( app.frame( frame ) == 0 );
+    }
+    REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::publishing );
+    REQUIRE( app.frame( 6 ) == 0 );
+    REQUIRE( app.frame( 7 ) == 0 );
+    REQUIRE( app.m_collection.frames() == 4 );
+    REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::publishing );
+    app.drain();
+    REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::ready );
+    REQUIRE( WarmupCollection::generation( app.m_collection.token() ) == 1 );
+    const auto *replay = static_cast<float *>( app.m_warmupStream.array.raw );
+    for( size_t sample = 0; sample < 4; ++sample )
+    {
+        REQUIRE( replay[12 + sample * 3 + 1] == app.m_emitted[3 - sample][1] );
+    }
+    REQUIRE( app.frame( 8 ) == 0 );
+    REQUIRE( app.m_emitted.size() == 7 );
+    REQUIRE( app.m_effectiveModelId.load() == 42 );
+}
+
+/// Verify disabling and re-enabling prediction after a gap needs history, not fresh collection or reload.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO production resumes the same policy without warmup", "[po4ao][control][gap]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::processImage;
+#endif
+    // clang-format on
+    po4aoControlHarness::po4ao app;
+    REQUIRE( app.frame( 1 ) == 0 );
+    REQUIRE( app.m_effectiveModelId.load() == 42 );
+    app.m_controlRequest.store( 4 );
+    REQUIRE( app.frame( 3 ) == 0 );
+    app.m_controlRequest.store( 5 );
+    REQUIRE( app.frame( 4 ) == 0 );
+    REQUIRE( app.m_effectiveModelId.load() == 0 );
+    REQUIRE( app.frame( 5 ) == 0 );
+    REQUIRE( app.m_emitted.size() == 4 );
+    REQUIRE( app.m_effectiveModelId.load() == 42 );
+    REQUIRE( app.m_effectiveController.load() == 2 );
+    REQUIRE( app.m_emitted.back()[1] == Approx( -1.F ) );
+    REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::idle );
+    REQUIRE_FALSE( app.m_reloadRequested.load() );
+    REQUIRE( app.m_modelResetRequest.load() == 0 );
+}
+
 /// Verify interruption removes noise, rejects incomplete snapshots and preserves ordinary fault handling.
 /** \ingroup po4ao_unit_test */
 TEST_CASE( "PO4AO production rejects interrupted warmup", "[po4ao][control]" )
@@ -894,11 +1056,6 @@ TEST_CASE( "PO4AO production rejects interrupted warmup", "[po4ao][control]" )
     po4aoControlHarness::po4ao app;
     app.m_warmupRecollectRequest.store( 1 );
     REQUIRE( app.frame( 1 ) == 0 );
-    uint64_t next = 2;
-    SECTION( "source gap" )
-    {
-        next = 3;
-    }
     SECTION( "policy reload" )
     {
         app.m_model.modelId = 43;
@@ -916,7 +1073,7 @@ TEST_CASE( "PO4AO production rejects interrupted warmup", "[po4ao][control]" )
         app.m_modelGeneration.store( 2 );
         app.m_modelResetRequest.store( 2 );
     }
-    REQUIRE( app.frame( next ) == 0 );
+    REQUIRE( app.frame( 2 ) == 0 );
     REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::interrupted );
     REQUIRE( app.m_collection.frames() == 1 );
     app.drain();

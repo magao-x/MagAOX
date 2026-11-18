@@ -410,7 +410,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     /// Restart warm-up collection at a real-time frame boundary.
     void beginWarmupCollection( uint64_t generation /**< [in] New collection generation. */,
                                 uint64_t control /**< [in] Control request captured for this collection. */,
-                                uint64_t modelId /**< [in] Effective policy for the first collection frame. */,
+                                uint64_t modelId /**< [in] Selected policy, or zero for integrator. */,
                                 uint64_t reset /**< [in] Model-reset generation captured at the frame boundary. */ );
 
     /// Assemble modal history and run CPU-linear or dedicated-stream TensorRT inference.

@@ -61,14 +61,14 @@ inline bool sourceCounterIsConsecutive( uint64_t current /**< [in] Current sourc
 enum class CollectionPhase : uint64_t
 {
     idle        = 0, ///< No collection has started.
-    collecting  = 1, ///< Exploration is active and frames are being accumulated.
+    collecting  = 1, ///< Accept samples and explore once controller history is ready.
     publishing  = 2, ///< All commands were emitted; the frozen snapshot is pending.
     ready       = 3, ///< A complete snapshot was published.
     interrupted = 4  ///< This generation cannot produce a valid warmup snapshot.
 };
 
 /// Track a fixed-controller collection without owning or clearing controller history.
-/** The frame producer alone calls begin, validate and emitted. The publisher may
+/** The frame producer alone calls begin, validate, discard and emitted. The publisher may
  * interrupt or acknowledge publication. The generation and phase share one atomic
  * token so a late publisher cannot complete or interrupt a newer collection.
  */
@@ -76,18 +76,18 @@ class WarmupCollection
 {
   private:
     std::atomic<uint64_t> m_token{ 0 };   ///< Collection generation and phase, published together.
-    std::atomic<uint64_t> m_frames{ 0 };  ///< Successfully emitted collection commands.
+    std::atomic<uint64_t> m_frames{ 0 };  ///< Accepted samples, excluding discarded partial episodes.
     uint64_t              m_target{ 0 };  ///< Requested frame count, owned by the frame producer.
     uint64_t              m_control{ 0 }; ///< Captured control request identity, including enable state.
-    uint64_t              m_model{ 0 };   ///< Captured effective policy hash; zero means integrator.
+    uint64_t              m_model{ 0 };   ///< Captured selected policy hash; zero means integrator.
     uint64_t              m_reset{ 0 };   ///< Captured model-reset generation.
 
   public:
     /// Start one collection, without touching history or model state.
     void begin( uint64_t generation /**< [in] Monotonically increasing collection identity. */,
-                uint64_t target /**< [in] Number of emitted commands required. */,
+                uint64_t target /**< [in] Number of accepted samples required. */,
                 uint64_t control /**< [in] Current control request identity. */,
-                uint64_t model /**< [in] Effective policy hash, or zero for integrator. */,
+                uint64_t model /**< [in] Selected policy hash, or zero for integrator. */,
                 uint64_t reset /**< [in] Current model-reset generation. */ );
 
     /// Return the generation and phase in one atomic snapshot.
@@ -99,16 +99,18 @@ class WarmupCollection
     /// Decode the collection identity of a previously read token.
     static uint64_t generation( uint64_t token /**< [in] Atomic collection snapshot. */ );
 
-    /// Return the number of collection commands successfully emitted.
+    /// Return the accepted sample count, including the current partial episode.
     uint64_t frames() const;
 
-    /// Interrupt a pending collection if its controller or source continuity changed.
+    /// Interrupt a pending collection if its selected controller changed.
     void validate( uint64_t control /**< [in] Current control request identity. */,
-                   uint64_t model /**< [in] Effective policy hash for this frame. */,
-                   uint64_t reset /**< [in] Current model-reset generation. */,
-                   bool     consecutive /**< [in] Whether the input follows the preceding frame. */ );
+                   uint64_t model /**< [in] Selected policy hash, independent of temporary history refill. */,
+                   uint64_t reset /**< [in] Current model-reset generation. */ );
 
-    /// Advance the exploration schedule only after a successful command publication.
+    /// Reuse the exploration indices of a discarded partial episode; preserve completed collections.
+    void discard( uint64_t frames /**< [in] Accepted samples in the discarded partial episode. */ );
+
+    /// Advance the exploration schedule only after accepting a successfully emitted sample.
     void emitted();
 
     /// Invalidate a collecting or pending-publication generation; preserve an already completed snapshot.
@@ -151,11 +153,19 @@ inline uint64_t WarmupCollection::frames() const
     return m_frames.load( std::memory_order_acquire );
 }
 
-inline void WarmupCollection::validate( uint64_t control, uint64_t model, uint64_t reset, bool consecutive )
+inline void WarmupCollection::validate( uint64_t control, uint64_t model, uint64_t reset )
 {
-    if( control != m_control || model != m_model || reset != m_reset || !consecutive )
+    if( control != m_control || model != m_model || reset != m_reset )
     {
         interrupt( generation( token() ) );
+    }
+}
+
+inline void WarmupCollection::discard( uint64_t frames )
+{
+    if( phase( token() ) == CollectionPhase::collecting )
+    {
+        m_frames.fetch_sub( frames, std::memory_order_acq_rel );
     }
 }
 

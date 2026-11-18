@@ -284,19 +284,21 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
     {
         m_observationHistory->reset();
         m_commandHistory->reset();
-        m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )].reset();
+        EpisodeBuffer &episode = m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )];
+        m_collection.discard( episode.count );
+        episode.reset();
     }
     else
     {
         m_observationHistory->add( observation );
     }
 
-    const bool inferenceReady = consecutive && enabled && m_activeEngine != nullptr &&
-                                m_activeEngine->generation == modelGeneration &&
-                                m_useNeuralNetwork.load( std::memory_order_acquire ) &&
+    const bool policySelected = enabled && m_activeEngine != nullptr && m_activeEngine->generation == modelGeneration &&
+                                m_useNeuralNetwork.load( std::memory_order_acquire );
+    const bool inferenceReady = consecutive && policySelected &&
                                 m_observationHistory->size() >= static_cast<size_t>( m_activeEngine->historyLength ) &&
                                 m_commandHistory->size() + 1 >= static_cast<size_t>( m_activeEngine->historyLength );
-    const uint64_t expectedModel       = inferenceReady ? m_activeEngine->modelId : 0;
+    const uint64_t expectedModel       = policySelected ? m_activeEngine->modelId : 0;
     const uint64_t recollectRequest    = m_warmupRecollectRequest.load( std::memory_order_acquire );
     const uint64_t recollectGeneration = recollectRequest > m_activeCollectionGeneration ? recollectRequest : 0;
     if( recollectGeneration != 0 || ( m_initialWarmupPending && enabled ) )
@@ -306,7 +308,7 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
                                expectedModel,
                                modelGeneration );
     }
-    m_collection.validate( control, expectedModel, modelGeneration, consecutive );
+    m_collection.validate( control, expectedModel, modelGeneration );
 
     bool inferenceOk = inferenceReady && runInference( observation );
     if( inferenceReady && !inferenceOk )
@@ -319,7 +321,10 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
         makeIntegratorCommand( observation );
     }
 
-    const bool exploring = WarmupCollection::phase( m_collection.token() ) == CollectionPhase::collecting;
+    // Refill prediction history without adding fallback samples or consuming exploration.
+    bool       sampleAccepted = consecutive && ( !policySelected || inferenceOk );
+    const bool exploring =
+        sampleAccepted && WarmupCollection::phase( m_collection.token() ) == CollectionPhase::collecting;
     if( exploring && !m_explorationNoise.empty() )
     {
         const uint64_t frame = m_collection.frames();
@@ -349,6 +354,11 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
         memset( m_output.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );
         effectiveController = 0;
         inferenceOk         = false;
+        sampleAccepted      = false;
+    }
+    if( !sampleAccepted )
+    {
+        m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )].reset();
     }
     if( sendOutput() < 0 )
     {
@@ -371,11 +381,10 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
         uint64_t expected = resetGeneration;
         m_modelResetRequest.compare_exchange_strong( expected, 0, std::memory_order_acq_rel );
     }
-    m_collection.emitted();
     if( consecutive )
     {
         m_commandHistory->add( m_output.get() );
-        if( enabled || WarmupCollection::phase( m_collection.token() ) != CollectionPhase::idle )
+        if( sampleAccepted && ( enabled || WarmupCollection::phase( m_collection.token() ) != CollectionPhase::idle ) )
         {
             EpisodeBuffer &episode = m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )];
             episode.modelId        = emittedModel;
@@ -384,9 +393,13 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
                 m_replayDrops.fetch_add( 1, std::memory_order_relaxed );
                 m_collection.interrupt( m_activeCollectionGeneration );
             }
-            else if( episode.count == episode.capacity )
+            else
             {
-                finishEpisode();
+                m_collection.emitted();
+                if( episode.count == episode.capacity )
+                {
+                    finishEpisode();
+                }
             }
         }
     }
