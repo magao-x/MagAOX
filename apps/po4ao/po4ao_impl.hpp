@@ -221,7 +221,7 @@ inline void po4ao::setupConfig()
                 "control_enabled",
                 false,
                 "bool",
-                "Whether the learned policy is initially selected instead of the proportional fallback." );
+                "Legacy option, ignored: predictive control always starts Off; use control_enable to enable it." );
     config.add( "parameters.max_command_abs",
                 "",
                 "parameters.max_command_abs",
@@ -1075,7 +1075,13 @@ inline int po4ao::appStartup()
     {
         state.store( 0, std::memory_order_relaxed );
     }
-    m_controlRequest.store( 2 | static_cast<uint64_t>( m_controlEnabledConfig ), std::memory_order_release );
+    // A retained configuration must never select prediction before an explicit operator request.
+    m_controlRequest.store( 2, std::memory_order_release );
+    if( m_controlEnabledConfig )
+    {
+        log<text_log>( "Ignoring parameters.control_enabled: use control_enable to enable predictive control",
+                       logPrio::LOG_WARNING );
+    }
     m_lastStatsUpdate = std::chrono::steady_clock::now();
 
     createStandardIndiToggleSw( m_indiP_run, "run_enable" );

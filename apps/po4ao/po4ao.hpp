@@ -171,7 +171,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     int         m_cudaDevice{ 0 };               ///< CUDA device used by the inference stream.
     uint32_t    m_latencyDeadlineUs{ 0 };        ///< Callback duration counted as a deadline miss.
     double      m_statsPeriodSeconds{ 10.0 };    ///< Runtime-statistics publication period.
-    bool        m_controlEnabledConfig{ false }; ///< Initial learned-policy selection state.
+    bool        m_controlEnabledConfig{ false }; ///< Legacy startup-enable request; ignored.
     ///@}
 
     /** \name Inference and History - Data

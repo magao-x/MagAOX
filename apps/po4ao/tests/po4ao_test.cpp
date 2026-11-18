@@ -791,6 +791,51 @@ namespace libXWCTest
 {
 namespace po4aoTest
 {
+/// Verify a loaded policy cannot start prediction or initial exploration before an explicit Enable request.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO starts with prediction disabled until explicit Enable", "[po4ao][control]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::processImage;
+    MagAOX::app::po4ao::newCallBack_m_indiP_controlToggle;
+    MagAOX::app::po4ao::updateControlStatus;
+#endif
+    // clang-format on
+    po4aoControlHarness::po4ao app;
+    app.m_controlRequest.store( 2 ); // Startup request, with the enable bit Off.
+    app.m_initialWarmupPending = true;
+    // The fixture already has a loaded model: loading alone must not enable prediction.
+    for( uint64_t frame = 1; frame <= 2; ++frame )
+    {
+        REQUIRE( app.frame( frame ) == 0 );
+        app.updateControlStatus();
+        REQUIRE( app.m_indiP_controlToggle["toggle"].getSwitchState() == pcf::IndiElement::Off );
+        REQUIRE( app.m_indiP_controlToggle.getState() == INDI_OK );
+        REQUIRE( app.m_effectiveModelId.load() == 0 );
+        REQUIRE( app.m_effectiveController.load() == 1 );
+        REQUIRE( app.m_emitted.back()[0] == Approx( 1.F ) );
+        REQUIRE( app.m_emitted.back()[1] == Approx( -1.F ) );
+        REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::idle );
+    }
+    auto request = app.m_indiP_controlToggle;
+    request["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_controlToggle( request ) == 0 );
+    REQUIRE( app.frame( 3 ) == 0 );
+    app.updateControlStatus();
+    REQUIRE( app.m_emitted.size() == 3 );
+    REQUIRE( app.m_effectiveModelId.load() == 42 );
+    REQUIRE( app.m_indiP_controlToggle["toggle"].getSwitchState() == pcf::IndiElement::On );
+    REQUIRE( app.m_collection.frames() == 1 );
+    request["toggle"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( app.newCallBack_m_indiP_controlToggle( request ) == 0 );
+    REQUIRE( app.frame( 4 ) == 0 );
+    REQUIRE( app.m_emitted.size() == 4 );
+    REQUIRE( app.m_effectiveModelId.load() == 0 );
+    REQUIRE( app.m_effectiveController.load() == 1 );
+    REQUIRE( app.m_runAdmission.load() );
+}
+
 /// Verify the production callback retains history, explores the learned output and publishes complete replay.
 /** \ingroup po4ao_unit_test */
 TEST_CASE( "PO4AO production recollection preserves learned control and emitted history", "[po4ao][control]" )
