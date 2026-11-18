@@ -210,8 +210,9 @@ Builds and tests are run by the user (no MagAO-X build environment on this machi
 
 - `positions` text could be malformed or empty; fall back to `pos_index + 1` with no
   total.
-- `status.frames` is stale at the first position of a sequence (D6). A cleaner fix is
-  for the app to publish `frames` = 0 at sequence start; out of scope here.
+- Done: hwpSequencer now publishes `status.frames` = 0 at sequence start
+  (`ml/hwpSequencer` `203cf5f4`). The GUI still shows `---` at cycle 1, position 0, since
+  0 would otherwise show as a mismatch.
 - `frames_per_pos` changed via `setINDI` mid-sequence still updates the GUI (greying,
   frames row) since both follow `frames_per_pos.current`.
 - If `stagepollin`/`stageqwplin` are renamed in config, the GUI device names are
@@ -245,3 +246,6 @@ Builds and tests are run by the user (no MagAO-X build environment on this machi
 - Abort button colours: `#a32a2a` background, `#d04040` border; warning label
   `#f0c419`. No existing red/yellow convention in `magaox.qss`.
 - Abort button carries a tooltip: "Stop now: the frame being exposed is discarded".
+- 2026-11-18: user could not run `polarimetry_test` ("no Qt platform plugin could be
+  initialized"); the test `main` now sets `QT_QPA_PLATFORM=offscreen`, as `camera_test`
+  does. Branch rebased onto `ml/hwpSequencer` at `203cf5f4` (status.frames reset).
