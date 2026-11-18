@@ -38,6 +38,13 @@ than SDK with the same observed jitter. It remains a diagnostic control; the
 local benchmark speedup did not carry over to that RTC test. Details and the
 separate `optimized` mean/spread tradeoff are recorded in the engineering plan.
 
+The later four-method capture at approximately 2,000 FPS favors `optimized`
+among the candidates: conversion improves by about 4.00 us over SDK, with
+standard deviation increasing by about 0.10 us. Mapped is both slower and more
+variable than optimized in that capture. These short windows support further
+SDK/optimized/SDK qualification; they do not establish longer-run tail or
+end-to-end loop performance. See the engineering plan for the full statistics.
+
 | INDI property / element | Meaning |
 | --- | --- |
 | `descramble_method.sdk` / `.compact` / `.mapped` / `.optimized` | Requested method; exactly one switch is On. |

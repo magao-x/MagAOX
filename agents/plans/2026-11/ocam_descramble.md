@@ -879,3 +879,86 @@ Logs are under `/tmp/ocam-mapped-*-{build,test}.log` and
 
 Mapped is ready for the operator's RTC comparison; no new RTC performance or
 jitter result is claimed by this integration.
+
+
+## Four-method operator timing comparison — 2026-11-18
+
+The operator supplied five conversion snapshots, each accompanied by four
+`fgtimes` summaries, spanning telemetry timestamps 19:54:38–19:58:50.
+The first four blocks are labeled SDK, optimized, compact and mapped. The
+final block is unlabeled; clarification was requested, and it is not assigned
+to a method based on similarity of its timings. Source attachment SHA-256:
+`72441231fa28ccb6e5aeb560bd86e8aa32ab6e2f1b2b7359ed8e1f25e5ca8613`.
+
+All conversion snapshots have **count=4,000 and valid=1**. Acquisition means
+are approximately 500 us, establishing approximately **2,000 FPS** and
+approximately two-second conversion populations. These are separate from the
+earlier nominal 3,600-FPS run. The individual stage snapshots are not precisely
+timestamped; the adjacent telemetry supports the cadence but does not prove
+identical sample populations. Applied-method readbacks, frame-quality counters,
+per-frame distributions and end-to-end loop measurements were not included.
+
+| Conversion, us | Mean | Standard deviation | Minimum | Maximum |
+| --- | ---: | ---: | ---: | ---: |
+| SDK | 14.798577 | 0.832616 | 11.602 | 17.493 |
+| Optimized | 10.800893 | 0.935667 | 9.007 | 15.499 |
+| Compact | 14.931164 | 0.937344 | 11.472 | 17.933 |
+| Mapped | 11.579746 | 1.250348 | 8.817 | 16.211 |
+| Final, unlabeled | 14.768896 | 0.854879 | 11.391 | 17.723 |
+
+Average each block's four reported telemetry means and standard deviations
+arithmetically for the table below. These are **not pooled distributions**:
+the rolling windows overlap, and the four reports are not four independent
+experiments. Standard deviations are not standard errors.
+
+| Telemetry summaries, us | Acquisition-to-write mean | Acquisition-to-write standard deviation | Publication-interval standard deviation |
+| --- | ---: | ---: | ---: |
+| SDK | 38.509216 | 0.950821 | 1.350043 |
+| Optimized | 34.683247 | 1.024190 | 1.422580 |
+| Compact | 39.007829 | 1.040668 | 1.436183 |
+| Mapped | 35.363765 | 1.302363 | 1.821928 |
+| Final, unlabeled | 38.652514 | 0.963074 | 1.288670 |
+
+Using the explicitly labeled SDK block as reference:
+
+- Optimized saves **3.997684 us (27.01%)** in conversion. Its standard
+  deviation increases **0.103052 us (12.38%)**, and its observed maximum is
+  **1.994 us lower**. Acquisition-to-write improves **3.825969 us (9.94%)**;
+  its average reported standard deviation increases **0.073369 us (7.72%)**.
+- Compact is **0.132587 us slower** in conversion and **0.498612 us slower**
+  acquisition-to-write. Its conversion standard deviation is 0.104728 us
+  above SDK, approximately equal to optimized in this run. Thus this numeric
+  capture refines, rather than exactly reproduces, the earlier qualitative
+  report of matching SDK jitter.
+- Mapped saves **3.218831 us (21.75%)** in conversion, but its standard
+  deviation increases **0.417733 us (50.17%)**. It is **0.778853 us slower**
+  than optimized, with **0.314681 us greater standard deviation** and a
+  **0.712 us higher observed maximum**. Its acquisition-to-write mean is
+  0.680517 us slower than optimized and its spread is also greater.
+
+Optimized is the most promising replacement in this capture. Its jitter
+penalty is much smaller than in the earlier runs, including the first 2 kHz
+excerpt, but conditions and build history differ; this does not establish
+that a particular change fixed jitter. SDK still has the lowest measured
+standard deviation among labeled methods, so the strict no-jitter-regression
+criterion is not met. Observed maxima favor optimized, but 4,000 samples and
+summary statistics do not establish p99 or longer-run tail behavior.
+
+The compact/mapped contrast strengthens the case that traversal and generated
+memory-access code matter: the same compact map yields a large speed change
+and larger spread when output traversal changes. It does not prove a cache
+mechanism or attribute the variance exclusively to the kernel, because
+conversion includes metadata handling and staged copy. Mapped's broader
+acquisition-to-write spread persists across all four reports, not solely the
+one report with a larger acquisition-interval standard deviation.
+
+Further qualification should prioritize repeated matched SDK/optimized/SDK
+captures at this verified FPS and workload, including frame delivery and
+end-to-end loop timing. Mapped remains a diagnostic control rather than the
+preferred performance candidate in this result. A second descrambling worker
+has not been implemented or tested; this comparison covers single-thread
+conversion only.
+
+Parsed values and arithmetic are retained in
+`/tmp/ocam-descramble-rtc-20261118.json`. This update changes documentation only;
+no instrument command or runtime modification was made.
