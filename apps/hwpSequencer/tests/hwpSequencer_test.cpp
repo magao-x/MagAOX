@@ -70,10 +70,10 @@ class hwpSequencer_test : public MagAOX::app::hwpSequencer
 
     using MagAOX::app::hwpSequencer::m_abortRequested;
     using MagAOX::app::hwpSequencer::m_cycle;
-    using MagAOX::app::hwpSequencer::m_fxngenFreq;
-    using MagAOX::app::hwpSequencer::m_fxngenOutp;
     using MagAOX::app::hwpSequencer::m_frameMargin;
     using MagAOX::app::hwpSequencer::m_frameMaxTimeout;
+    using MagAOX::app::hwpSequencer::m_fxngenFreq;
+    using MagAOX::app::hwpSequencer::m_fxngenOutp;
     using MagAOX::app::hwpSequencer::m_fxngenTimeout;
     using MagAOX::app::hwpSequencer::m_haveFxngenFreq;
     using MagAOX::app::hwpSequencer::m_haveFxngenOutp;
@@ -587,11 +587,38 @@ TEST_CASE( "hwpSequencer waits are bounded and interruptible", "[hwpSequencer]" 
     SECTION( "waitFor returns done, timeout, or interrupted" )
     {
         REQUIRE( hwpSequencer_test::waitFor(
-                     []() { return true; }, []() { return false; }, 1.0, 1 ) == waitResult::done );
+                     []()
+                     {
+                         return true;
+                     },
+                     []()
+                     {
+                         return false;
+                     },
+                     1.0,
+                     1 ) == waitResult::done );
         REQUIRE( hwpSequencer_test::waitFor(
-                     []() { return false; }, []() { return false; }, 0.05, 1 ) == waitResult::timeout );
+                     []()
+                     {
+                         return false;
+                     },
+                     []()
+                     {
+                         return false;
+                     },
+                     0.05,
+                     1 ) == waitResult::timeout );
         REQUIRE( hwpSequencer_test::waitFor(
-                     []() { return false; }, []() { return true; }, 10.0, 1 ) == waitResult::interrupted );
+                     []()
+                     {
+                         return false;
+                     },
+                     []()
+                     {
+                         return true;
+                     },
+                     10.0,
+                     1 ) == waitResult::interrupted );
     }
 
     SECTION( "waitHwp uses the tolerance" )
@@ -834,7 +861,10 @@ TEST_CASE( "hwpSequencer sequences end as requested", "[hwpSequencer]" )
 
     SECTION( "stop during a dwell ends the sequence" )
     {
-        app.m_dwellHook = []( int n ) { return n == 2 ? waitResult::stopped : waitResult::done; };
+        app.m_dwellHook = []( int n )
+        {
+            return n == 2 ? waitResult::stopped : waitResult::done;
+        };
 
         REQUIRE( app.runSequence( positions ) == endReason::stopped );
         REQUIRE( app.m_dwells.load() == 2 );
@@ -973,14 +1003,22 @@ TEST_CASE( "hwpSequencer starts and stops through its callbacks without blocking
     REQUIRE( app.newCallBack_m_indiP_sequence( toggleProp( "hwpseq", "sequence", true ) ) == 0 );
     REQUIRE( std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds( 100 ) );
 
-    REQUIRE( waitUntil( [&app]() { return app.m_dwells.load() > 0; } ) );
+    REQUIRE( waitUntil(
+        [&app]()
+        {
+            return app.m_dwells.load() > 0;
+        } ) );
     REQUIRE( app.m_sequencing.load() );
 
     t0 = std::chrono::steady_clock::now();
     REQUIRE( app.newCallBack_m_indiP_sequence( toggleProp( "hwpseq", "sequence", false ) ) == 0 );
     REQUIRE( std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds( 100 ) );
 
-    REQUIRE( waitUntil( [&app]() { return !app.m_sequencing.load(); } ) );
+    REQUIRE( waitUntil(
+        [&app]()
+        {
+            return !app.m_sequencing.load();
+        } ) );
 
     app.setShutdown( 1 );
     sem_post( &app.m_wakeSemaphore );

@@ -260,7 +260,7 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
      * \returns -1 on error, which is logged
      */
     int stepTo( float target, /**< [in] the HWP position for this step [deg] */
-                bool  first   /**< [in] true for the first step of a sequence, which turns `obs_on` On */ );
+                bool  first /**< [in] true for the first step of a sequence, which turns `obs_on` On */ );
 
     /// Clean up after a sequence ends, for any reason.
     /** Turns the trigger On; for a normal ending waits for the in-flight frame; turns `obs_on` Off if the sequencer
@@ -270,7 +270,7 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
      * \returns 0 on success
      * \returns -1 if a step of the cleanup failed, which is logged
      */
-    int finishSequence( endReason                 why,      /**< [in] the reason the sequence ended */
+    int finishSequence( endReason                 why, /**< [in] the reason the sequence ended */
                         const std::vector<float> &positions /**< [in] the positions snapshot for this sequence */ );
 
     /// Publish the sequence status after a step.
@@ -311,7 +311,7 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
      * \returns 0 on success
      * \returns -1 on error, which is logged
      */
-    int deadline( timespec &ts,     /**< [out] the deadline */
+    int deadline( timespec &ts, /**< [out] the deadline */
                   double    seconds /**< [in] seconds from now */ );
 
     /// Poll a condition until it holds, the wait times out, or it is stopped.
@@ -324,7 +324,7 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
     static waitResult waitFor( doneT    done,    /**< [in] returns true when the condition holds */
                                stopT    stop,    /**< [in] returns true when the wait should end early */
                                double   timeout, /**< [in] the timeout [sec] */
-                               unsigned pollMs   /**< [in] the polling interval [msec] */ );
+                               unsigned pollMs /**< [in] the polling interval [msec] */ );
 
     ///@}
 
@@ -398,7 +398,7 @@ class hwpSequencer : public MagAOXApp<true>, public dev::shmimMonitor<hwpSequenc
      * \returns -1 on error, which is logged
      */
     int processImage( void              *curr_src, /**< [in] pointer to the frame, unused */
-                      const dev::shmimT &dummy     /**< [in] tag to differentiate shmimMonitor parents */ );
+                      const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents */ );
 
     ///@}
 
@@ -1265,18 +1265,32 @@ inline int hwpSequencer::sendObsOn( bool on )
 
 inline hwpSequencer::waitResult hwpSequencer::waitTrigger( bool on )
 {
-    return waitFor( [this, on]() { return m_haveFxngenOutp && m_fxngenOutp == on; },
-                    [this]() { return interrupted(); },
-                    m_fxngenTimeout / 1000.0,
-                    m_hwpWait );
+    return waitFor(
+        [this, on]()
+        {
+            return m_haveFxngenOutp && m_fxngenOutp == on;
+        },
+        [this]()
+        {
+            return interrupted();
+        },
+        m_fxngenTimeout / 1000.0,
+        m_hwpWait );
 }
 
 inline hwpSequencer::waitResult hwpSequencer::waitHwp( float target )
 {
-    return waitFor( [this, target]() { return std::fabs( m_reportedHwpPos.load() - target ) <= m_hwpTolerance; },
-                    [this]() { return interrupted(); },
-                    m_hwpTimeout / 1000.0,
-                    m_hwpWait );
+    return waitFor(
+        [this, target]()
+        {
+            return std::fabs( m_reportedHwpPos.load() - target ) <= m_hwpTolerance;
+        },
+        [this]()
+        {
+            return interrupted();
+        },
+        m_hwpTimeout / 1000.0,
+        m_hwpWait );
 }
 
 inline hwpSequencer::waitResult hwpSequencer::waitFrame( double timeout )
