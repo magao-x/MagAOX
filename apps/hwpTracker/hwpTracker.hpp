@@ -262,6 +262,7 @@ int hwpTracker::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_devName, "hwp.devName" );
     _config( m_tcsDevName, "tcs.devName" );
     _config( m_updateInterval, "tracking.updateInterval" );
+    _config( m_trackOffsetSign, "tracking.sign" );
     _config( m_pupilOffset, "tracking.pupilOffset" );
 
     TELEMETER_LOAD_CONFIG( _config );
