@@ -23,784 +23,778 @@ namespace xqt
  */
 class polarimetry : public xWidget
 {
-   Q_OBJECT
+    Q_OBJECT
 
-protected:
+  protected:
+    /** \name hwptrack State
+     * @{
+     */
 
-   /** \name hwptrack State
-    * @{
-    */
+    /// Last `hwptrack.hwp_position.current` [deg].
+    float m_hwpSetAngle{ 0 };
 
-   /// Last `hwptrack.hwp_position.current` [deg].
-   float m_hwpSetAngle{0};
+    /// Last `hwptrack.hwp_tracking_offset.value` [deg].
+    float m_hwpTrackingOffset{ 0 };
 
-   /// Last `hwptrack.hwp_tracking_offset.value` [deg].
-   float m_hwpTrackingOffset{0};
+    /// Last `hwptrack.hwp_position_actual.value` [deg].
+    float m_hwpActualAngle{ 0 };
 
-   /// Last `hwptrack.hwp_position_actual.value` [deg].
-   float m_hwpActualAngle{0};
+    /// Last `hwptrack.hwp_position_name.value`.
+    std::string m_hwpAngleName{ "" };
 
-   /// Last `hwptrack.hwp_position_name.value`.
-   std::string m_hwpAngleName{""};
+    /// Whether `hwptrack.tracking` is On.
+    bool m_hwpTracking{ false };
 
-   /// Whether `hwptrack.tracking` is On.
-   bool m_hwpTracking{false};
+    /// Whether `hwptrack` is READY or OPERATING.
+    bool m_hwptrackFsmOk{ false };
 
-   /// Whether `hwptrack` is READY or OPERATING.
-   bool m_hwptrackFsmOk{ false };
+    ///@}
 
-   ///@}
+    /** \name hwpsequence State
+     * @{
+     */
 
-   /** \name hwpsequence State
-    * @{
-    */
+    /// Whether `hwpsequence.sequence` is On.
+    bool m_sequencing{ false };
 
-   /// Whether `hwpsequence.sequence` is On.
-   bool m_sequencing{false};
+    /// Whether `hwpsequence.abort` is On, i.e. an abort is in progress.
+    bool m_aborting{ false };
 
-   /// Whether `hwpsequence.abort` is On, i.e. an abort is in progress.
-   bool m_aborting{false};
+    /// Last `hwpsequence.status.pos_index` (0-based).
+    int m_hwpPosIndex{ 0 };
 
-   /// Last `hwpsequence.status.pos_index` (0-based).
-   int m_hwpPosIndex{0};
+    /// Last `hwpsequence.status.cycle`.
+    int m_curCycle{ 0 };
 
-   /// Last `hwpsequence.status.cycle`.
-   int m_curCycle{0};
+    /// Last `hwpsequence.num_cycles.current` (0 = until stopped).
+    int m_numCycles{ 0 };
 
-   /// Last `hwpsequence.num_cycles.current` (0 = until stopped).
-   int m_numCycles{0};
+    /// Last `hwpsequence.frames_per_pos.current` (0 = time mode).
+    int m_framesPerPos{ 0 };
 
-   /// Last `hwpsequence.frames_per_pos.current` (0 = time mode).
-   int m_framesPerPos{0};
+    /// Last `hwpsequence.status.frames`: frames that landed at the previous position.
+    int m_framesLast{ 0 };
 
-   /// Last `hwpsequence.status.frames`: frames that landed at the previous position.
-   int m_framesLast{0};
+    /// Number of positions in `hwpsequence.positions`, 0 if unknown.
+    int m_numPositions{ 0 };
 
-   /// Number of positions in `hwpsequence.positions`, 0 if unknown.
-   int m_numPositions{0};
+    /// Whether `hwpsequence` is READY or OPERATING.
+    bool m_hwpseqFsmOk{ false };
 
-   /// Whether `hwpsequence` is READY or OPERATING.
-   bool m_hwpseqFsmOk{ false };
+    ///@}
 
-   ///@}
+    /** \name qwptrack State
+     * @{
+     */
 
-   /** \name qwptrack State
-    * @{
-    */
+    /// Whether `qwptrack.tracking` is On.
+    bool m_qwpTracking{ false };
 
-   /// Whether `qwptrack.tracking` is On.
-   bool m_qwpTracking{false};
+    /// Whether `qwptrack` is READY or OPERATING.
+    bool m_qwptrackFsmOk{ false };
 
-   /// Whether `qwptrack` is READY or OPERATING.
-   bool m_qwptrackFsmOk{ false };
+    ///@}
 
-   ///@}
+    /// Set or clear the bold font on a label.
+    void setBold( QLabel *label, /**< [in] the label to change */
+                  bool    onoff  /**< [in] true for bold */
+    );
 
-   /// Set or clear the bold font on a label.
-   void setBold( QLabel * label, /**< [in] the label to change */
-                 bool onoff      /**< [in] true for bold */
-               );
+    /// Set or clear the `isWarning` style property on a label and re-polish it.
+    void setWarning( QLabel *label, /**< [in] the label to change */
+                     bool    onoff  /**< [in] true to show the warning style */
+    );
 
-   /// Set or clear the `isWarning` style property on a label and re-polish it.
-   void setWarning( QLabel * label, /**< [in] the label to change */
-                    bool onoff      /**< [in] true to show the warning style */
-                  );
+  public:
+    /// Count the entries in a comma-separated positions list.
+    /**
+     * \returns the number of positions, or 0 if the list is empty or any entry is not a number.
+     */
+    static int countPositions( const std::string &positions /**< [in] the `hwpsequence.positions` text */ );
 
-public:
+    /// Construct the panel and configure its child widgets.
+    explicit polarimetry( QWidget        *Parent = 0,                /**< [in] the parent widget */
+                          Qt::WindowFlags f      = Qt::WindowFlags() /**< [in] Qt window flags */
+    );
 
-   /// Count the entries in a comma-separated positions list.
-   /**
-    * \returns the number of positions, or 0 if the list is empty or any entry is not a number.
-    */
-   static int countPositions( const std::string & positions /**< [in] the `hwpsequence.positions` text */ );
+    /// Unsubscribe from the parent publisher.
+    ~polarimetry();
 
-   /// Construct the panel and configure its child widgets.
-   explicit polarimetry( QWidget * Parent = 0,                   /**< [in] the parent widget */
-                         Qt::WindowFlags f = Qt::WindowFlags()   /**< [in] Qt window flags */
-                       );
+    /// Subscribe the panel and its child widgets to their INDI properties.
+    void subscribe();
 
-   /// Unsubscribe from the parent publisher.
-   ~polarimetry();
+    /// Enable the panel and its children when the INDI connection is made.
+    virtual void onConnect();
 
-   /// Subscribe the panel and its child widgets to their INDI properties.
-   void subscribe();
+    /// Reset displays and disable controls when the INDI connection is lost.
+    virtual void onDisconnect();
 
-   /// Enable the panel and its children when the INDI connection is made.
-   virtual void onConnect();
+    /// Handle a property definition by treating it as a set.
+    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
 
-   /// Reset displays and disable controls when the INDI connection is lost.
-   virtual void onDisconnect();
+    /// Update the cached device state from a property and request a GUI update.
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
 
-   /// Handle a property definition by treating it as a set.
-   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+  public slots:
 
-   /// Update the cached device state from a property and request a GUI update.
-   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+    /// Update displays and control availability from the cached device state.
+    void updateGUI();
 
-public slots:
+    /// Request a sequence start (`hwpsequence.sequence` On).
+    void on_buttonStartSequence_pressed();
 
-   /// Update displays and control availability from the cached device state.
-   void updateGUI();
+    /// Request or cancel ending after the current cycle (`hwpsequence.last_cycle`).
+    void on_buttonLastCycle_clicked( bool checked /**< [in] true to end after the current cycle */ );
 
-   /// Request a sequence start (`hwpsequence.sequence` On).
-   void on_buttonStartSequence_pressed();
+    /// Request a graceful stop (`hwpsequence.sequence` Off).
+    void on_buttonStopSequence_pressed();
 
-   /// Request or cancel ending after the current cycle (`hwpsequence.last_cycle`).
-   void on_buttonLastCycle_clicked( bool checked /**< [in] true to end after the current cycle */ );
+    /// Request an immediate abort (`hwpsequence.abort` On); the in-flight frame is discarded.
+    void on_buttonAbortSequence_pressed();
 
-   /// Request a graceful stop (`hwpsequence.sequence` Off).
-   void on_buttonStopSequence_pressed();
+  signals:
 
-   /// Request an immediate abort (`hwpsequence.abort` On); the in-flight frame is discarded.
-   void on_buttonAbortSequence_pressed();
+    /// Request a GUI update on the GUI thread.
+    void doUpdateGUI();
 
-signals:
-
-   /// Request a GUI update on the GUI thread.
-   void doUpdateGUI();
-
-private:
-
-   /// Generated UI.
-   Ui::polarimetry ui;
+  private:
+    /// Generated UI.
+    Ui::polarimetry ui;
 };
 
-polarimetry::polarimetry(
-                QWidget * Parent,
-                Qt::WindowFlags f) : xWidget(Parent, f)
+polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, f )
 {
-   ui.setupUi(this);
+    ui.setupUi( this );
 
-   setWindowTitle(QString("Polarimetry (disconnected)"));
+    setWindowTitle( QString( "Polarimetry (disconnected)" ) );
 
-   setXwFont(ui.labelHwptrack);
-   setXwFont(ui.labelHwpseq);
-   setXwFont(ui.labelStagePolRot);
-   setXwFont(ui.labelStagePolLin);
-   setXwFont(ui.labelQwpTrack);
-   setXwFont(ui.labelStageQwpLin);
+    setXwFont( ui.labelHwptrack );
+    setXwFont( ui.labelHwpseq );
+    setXwFont( ui.labelStagePolRot );
+    setXwFont( ui.labelStagePolLin );
+    setXwFont( ui.labelQwpTrack );
+    setXwFont( ui.labelStageQwpLin );
 
-   setXwFont(ui.labelAngle);
-   setXwFont(ui.labelOffset);
-   setXwFont(ui.labelActual);
-   setXwFont(ui.labelName);
-   setXwFont(ui.labelHwp);
+    setXwFont( ui.labelAngle );
+    setXwFont( ui.labelOffset );
+    setXwFont( ui.labelActual );
+    setXwFont( ui.labelName );
+    setXwFont( ui.labelHwp );
 
-   setXwFont(ui.hwpSetAngle);
-   setXwFont(ui.hwpTrackingOffset);
-   setXwFont(ui.labelHwpTracking);
-   setXwFont(ui.hwpActualAngle);
-   setXwFont(ui.hwpAngleName);
+    setXwFont( ui.hwpSetAngle );
+    setXwFont( ui.hwpTrackingOffset );
+    setXwFont( ui.labelHwpTracking );
+    setXwFont( ui.hwpActualAngle );
+    setXwFont( ui.hwpAngleName );
 
-   setXwFont(ui.labelCycleStatus);
-   setXwFont(ui.hwpPosIndex);
-   setXwFont(ui.labelCycleNum);
-   setXwFont(ui.cycleNumStatus);
-   setXwFont(ui.labelFramesStatus);
-   setXwFont(ui.framesStatus);
+    setXwFont( ui.labelCycleStatus );
+    setXwFont( ui.hwpPosIndex );
+    setXwFont( ui.labelCycleNum );
+    setXwFont( ui.cycleNumStatus );
+    setXwFont( ui.labelFramesStatus );
+    setXwFont( ui.framesStatus );
 
-   setXwFont(ui.buttonStartSequence);
-   setXwFont(ui.buttonLastCycle);
-   setXwFont(ui.buttonStopSequence);
-   setXwFont(ui.buttonAbortSequence);
-   setXwFont(ui.labelNumCyclesHint);
-   setXwFont(ui.labelFramesHint);
-   setXwFont(ui.labelTimeHint);
+    setXwFont( ui.buttonStartSequence );
+    setXwFont( ui.buttonLastCycle );
+    setXwFont( ui.buttonStopSequence );
+    setXwFont( ui.buttonAbortSequence );
+    setXwFont( ui.labelNumCyclesHint );
+    setXwFont( ui.labelFramesHint );
+    setXwFont( ui.labelTimeHint );
 
-   ui.hwptrackFsm->highlightChanges(false);
-   ui.hwpseqFsm->highlightChanges(false);
-   ui.stagePolRotFsm->highlightChanges(false);
-   ui.stagePolLinFsm->highlightChanges(false);
-   ui.qwpTrackFsm->highlightChanges(false);
-   ui.stageQwpLinFsm->highlightChanges(false);
+    ui.hwptrackFsm->highlightChanges( false );
+    ui.hwpseqFsm->highlightChanges( false );
+    ui.stagePolRotFsm->highlightChanges( false );
+    ui.stagePolLinFsm->highlightChanges( false );
+    ui.qwpTrackFsm->highlightChanges( false );
+    ui.stageQwpLinFsm->highlightChanges( false );
 
-   ui.labelHwpTracking->setVisible(false);
-   ui.labelHwpTracking->setText(QString("SYNCHRO_ADI"));
-   
-   ui.labelHwptrack->setText(QString("hwptrack"));
-   ui.hwptrackFsm->device("hwptrack");
-   
-   ui.labelHwpseq->setText(QString("hwpsequence"));
-   ui.hwpseqFsm->device("hwpsequence");
-   
-   ui.labelStagePolRot->setText(QString("stagepolrot"));
-   ui.stagePolRotFsm->device("stagepolrot");
-   
-   ui.labelStagePolLin->setText(QString("stagepollin"));
-   ui.stagePolLinFsm->device("stagepollin");
-   
-   ui.labelQwpTracking->setVisible(false);
-   ui.labelQwpTracking->setText(QString("COMP_IMR"));
+    ui.labelHwpTracking->setVisible( false );
+    ui.labelHwpTracking->setText( QString( "SYNCHRO_ADI" ) );
 
-   ui.labelQwpTrack->setText(QString("qwptrack"));
-   ui.qwpTrackFsm->device("qwptrack");
+    ui.labelHwptrack->setText( QString( "hwptrack" ) );
+    ui.hwptrackFsm->device( "hwptrack" );
 
-   ui.labelStageQwpLin->setText(QString("stageqwplin"));
-   ui.stageQwpLinFsm->device("stageqwplin");
+    ui.labelHwpseq->setText( QString( "hwpsequence" ) );
+    ui.hwpseqFsm->device( "hwpsequence" );
 
-   ui.buttonLastCycle->setCheckable(true);
-   ui.buttonLastCycle->setProperty("isHighlightButton", true);
-   ui.buttonAbortSequence->setProperty("isAbortButton", true);
+    ui.labelStagePolRot->setText( QString( "stagepolrot" ) );
+    ui.stagePolRotFsm->device( "stagepolrot" );
 
-   ui.labelFramesStatus->setVisible(false);
-   ui.framesStatus->setVisible(false);
+    ui.labelStagePolLin->setText( QString( "stagepollin" ) );
+    ui.stagePolLinFsm->device( "stagepollin" );
 
-   ui.entryHwpAngle->setup("hwptrack", "hwp_position", statusEntry::FLOAT, "HWP target", "°");
-   ui.entryHwpAngle->format("%.01f");
-   ui.entryHwpAngle->setStretch(0, 2, 1);
+    ui.labelQwpTracking->setVisible( false );
+    ui.labelQwpTracking->setText( QString( "COMP_IMR" ) );
 
-   ui.sliderHwpTracking->setup("hwptrack", "tracking", "toggle", "HWP Tracking");
-   ui.sliderHwpTracking->setStretch(0, 1, 3, true, false);
+    ui.labelQwpTrack->setText( QString( "qwptrack" ) );
+    ui.qwpTrackFsm->device( "qwptrack" );
 
-   ui.comboHwpLin->setup("stagepollin", "presetName", "", "HWP lin. stage", "");
-   ui.comboHwpLin->ctrlWidget(nullptr);
+    ui.labelStageQwpLin->setText( QString( "stageqwplin" ) );
+    ui.stageQwpLinFsm->device( "stageqwplin" );
 
+    ui.buttonLastCycle->setCheckable( true );
+    ui.buttonLastCycle->setProperty( "isHighlightButton", true );
+    ui.buttonAbortSequence->setProperty( "isAbortButton", true );
 
-   ui.sliderQwpTracking->setup("qwptrack", "tracking", "toggle", "QWP Tracking");
-   ui.sliderQwpTracking->setStretch(0, 1, 3, true, false);
+    ui.labelFramesStatus->setVisible( false );
+    ui.framesStatus->setVisible( false );
 
-   ui.comboQwpLin->setup("stageqwplin", "presetName", "", "QWP lin. stage", "");
-   ui.comboQwpLin->ctrlWidget(nullptr);
+    ui.entryHwpAngle->setup( "hwptrack", "hwp_position", statusEntry::FLOAT, "HWP target", "°" );
+    ui.entryHwpAngle->format( "%.01f" );
+    ui.entryHwpAngle->setStretch( 0, 2, 1 );
 
-   ui.entryNumCycles->setup("hwpsequence", "num_cycles", statusEntry::INT, "Num. cycles", "");
-   ui.entryNumCycles->setStretch(0, 2, 1);
+    ui.sliderHwpTracking->setup( "hwptrack", "tracking", "toggle", "HWP Tracking" );
+    ui.sliderHwpTracking->setStretch( 0, 1, 3, true, false );
 
-   ui.entryFramesPerPos->setup("hwpsequence", "frames_per_pos", statusEntry::INT, "Frames per pos.", "");
-   ui.entryFramesPerPos->setStretch(0, 2, 1);
+    ui.comboHwpLin->setup( "stagepollin", "presetName", "", "HWP lin. stage", "" );
+    ui.comboHwpLin->ctrlWidget( nullptr );
 
-   ui.entryTimePerPos->setup("hwpsequence", "time_per_pos", statusEntry::FLOAT, "Time per pos.", "s");
-   ui.entryTimePerPos->format("%.01f");
-   ui.entryTimePerPos->setStretch(0, 2, 1);
+    ui.sliderQwpTracking->setup( "qwptrack", "tracking", "toggle", "QWP Tracking" );
+    ui.sliderQwpTracking->setStretch( 0, 1, 3, true, false );
 
+    ui.comboQwpLin->setup( "stageqwplin", "presetName", "", "QWP lin. stage", "" );
+    ui.comboQwpLin->ctrlWidget( nullptr );
 
-   connect(this, SIGNAL(doUpdateGUI()), this, SLOT(updateGUI()));
+    ui.entryNumCycles->setup( "hwpsequence", "num_cycles", statusEntry::INT, "Num. cycles", "" );
+    ui.entryNumCycles->setStretch( 0, 2, 1 );
 
-   onDisconnect();
+    ui.entryFramesPerPos->setup( "hwpsequence", "frames_per_pos", statusEntry::INT, "Frames per pos.", "" );
+    ui.entryFramesPerPos->setStretch( 0, 2, 1 );
+
+    ui.entryTimePerPos->setup( "hwpsequence", "time_per_pos", statusEntry::FLOAT, "Time per pos.", "s" );
+    ui.entryTimePerPos->format( "%.01f" );
+    ui.entryTimePerPos->setStretch( 0, 2, 1 );
+
+    connect( this, SIGNAL( doUpdateGUI() ), this, SLOT( updateGUI() ) );
+
+    onDisconnect();
 }
 
 polarimetry::~polarimetry()
 {
-   if(m_parent) m_parent->unsubscribe(this);
+    if( m_parent )
+    {
+        m_parent->unsubscribe( this );
+    }
 }
 
 void polarimetry::subscribe()
 {
-   if(!m_parent) return;
+    if( !m_parent )
+    {
+        return;
+    }
 
-   m_parent->addSubscriberProperty(this, "hwptrack", "fsm");
-   m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position");
-   m_parent->addSubscriberProperty(this, "hwptrack", "hwp_tracking_offset");
-   m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_actual");
-   m_parent->addSubscriberProperty(this, "hwptrack", "hwp_position_name");
-   m_parent->addSubscriberProperty(this, "hwptrack", "tracking");
+    m_parent->addSubscriberProperty( this, "hwptrack", "fsm" );
+    m_parent->addSubscriberProperty( this, "hwptrack", "hwp_position" );
+    m_parent->addSubscriberProperty( this, "hwptrack", "hwp_tracking_offset" );
+    m_parent->addSubscriberProperty( this, "hwptrack", "hwp_position_actual" );
+    m_parent->addSubscriberProperty( this, "hwptrack", "hwp_position_name" );
+    m_parent->addSubscriberProperty( this, "hwptrack", "tracking" );
 
-   m_parent->addSubscriberProperty(this, "hwpsequence", "fsm");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "sequence");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "last_cycle");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "abort");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "num_cycles");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "frames_per_pos");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "status");
-   m_parent->addSubscriberProperty(this, "hwpsequence", "positions");
+    m_parent->addSubscriberProperty( this, "hwpsequence", "fsm" );
+    m_parent->addSubscriberProperty( this, "hwpsequence", "sequence" );
+    m_parent->addSubscriberProperty( this, "hwpsequence", "last_cycle" );
+    m_parent->addSubscriberProperty( this, "hwpsequence", "abort" );
+    m_parent->addSubscriberProperty( this, "hwpsequence", "num_cycles" );
+    m_parent->addSubscriberProperty( this, "hwpsequence", "frames_per_pos" );
+    m_parent->addSubscriberProperty( this, "hwpsequence", "status" );
+    m_parent->addSubscriberProperty( this, "hwpsequence", "positions" );
 
-   // m_parent->addSubscriberProperty(this, "qwptrack", "tracking");
+    // m_parent->addSubscriberProperty(this, "qwptrack", "tracking");
 
-   m_parent->addSubscriber(ui.hwptrackFsm);
-   m_parent->addSubscriber(ui.hwpseqFsm);
-   m_parent->addSubscriber(ui.stagePolRotFsm);
-   m_parent->addSubscriber(ui.stagePolLinFsm);
-   m_parent->addSubscriber(ui.qwpTrackFsm);
-   m_parent->addSubscriber(ui.stageQwpLinFsm);
-   m_parent->addSubscriber(ui.entryHwpAngle);
-   m_parent->addSubscriber(ui.sliderHwpTracking);
-   m_parent->addSubscriber(ui.comboHwpLin);
-   m_parent->addSubscriber(ui.sliderQwpTracking);
-   m_parent->addSubscriber(ui.comboQwpLin);
-   m_parent->addSubscriber(ui.entryNumCycles);
-   m_parent->addSubscriber(ui.entryFramesPerPos);
-   m_parent->addSubscriber(ui.entryTimePerPos);
+    m_parent->addSubscriber( ui.hwptrackFsm );
+    m_parent->addSubscriber( ui.hwpseqFsm );
+    m_parent->addSubscriber( ui.stagePolRotFsm );
+    m_parent->addSubscriber( ui.stagePolLinFsm );
+    m_parent->addSubscriber( ui.qwpTrackFsm );
+    m_parent->addSubscriber( ui.stageQwpLinFsm );
+    m_parent->addSubscriber( ui.entryHwpAngle );
+    m_parent->addSubscriber( ui.sliderHwpTracking );
+    m_parent->addSubscriber( ui.comboHwpLin );
+    m_parent->addSubscriber( ui.sliderQwpTracking );
+    m_parent->addSubscriber( ui.comboQwpLin );
+    m_parent->addSubscriber( ui.entryNumCycles );
+    m_parent->addSubscriber( ui.entryFramesPerPos );
+    m_parent->addSubscriber( ui.entryTimePerPos );
 
-   return;
+    return;
 }
 
 void polarimetry::onConnect()
 {
 
-   setWindowTitle(QString("Polarimetry"));
-   ui.hwptrackFsm->onConnect();
-   ui.hwpseqFsm->onConnect();
-   ui.stagePolRotFsm->onConnect();
-   ui.stagePolLinFsm->onConnect();
-   ui.qwpTrackFsm->onConnect();
-   ui.stageQwpLinFsm->onConnect();
-   ui.labelQwpTrack->setEnabled(false);
+    setWindowTitle( QString( "Polarimetry" ) );
+    ui.hwptrackFsm->onConnect();
+    ui.hwpseqFsm->onConnect();
+    ui.stagePolRotFsm->onConnect();
+    ui.stagePolLinFsm->onConnect();
+    ui.qwpTrackFsm->onConnect();
+    ui.stageQwpLinFsm->onConnect();
+    ui.labelQwpTrack->setEnabled( false );
 
+    setBold( ui.hwpSetAngle, true );
+    setBold( ui.hwpTrackingOffset, true );
+    setBold( ui.hwpActualAngle, true );
+    setBold( ui.hwpAngleName, true );
 
-   setBold(ui.hwpSetAngle, true);
-   setBold(ui.hwpTrackingOffset, true);
-   setBold(ui.hwpActualAngle, true);
-   setBold(ui.hwpAngleName, true);
+    ui.entryHwpAngle->onConnect();
+    ui.sliderHwpTracking->onConnect();
+    ui.comboHwpLin->onConnect();
+    ui.sliderQwpTracking->onConnect();
+    ui.comboQwpLin->onConnect();
+    ui.entryNumCycles->onConnect();
+    ui.entryFramesPerPos->onConnect();
+    ui.entryTimePerPos->onConnect();
 
-   ui.entryHwpAngle->onConnect();
-   ui.sliderHwpTracking->onConnect();
-   ui.comboHwpLin->onConnect();
-   ui.sliderQwpTracking->onConnect();
-   ui.comboQwpLin->onConnect();
-   ui.entryNumCycles->onConnect();
-   ui.entryFramesPerPos->onConnect();
-   ui.entryTimePerPos->onConnect();
+    ui.entryHwpAngle->setEnabled( true );
+    ui.sliderHwpTracking->setEnabled( true );
+    ui.comboHwpLin->setEnabled( true );
+    ui.sliderQwpTracking->setEnabled( false );
+    ui.comboQwpLin->setEnabled( true );
+    ui.entryNumCycles->setEnabled( true );
+    ui.labelNumCyclesHint->setEnabled( true );
+    ui.entryFramesPerPos->setEnabled( true );
+    ui.labelFramesHint->setEnabled( true );
+    ui.entryTimePerPos->setEnabled( true );
+    ui.labelTimeHint->setEnabled( true );
 
-   ui.entryHwpAngle->setEnabled(true);
-   ui.sliderHwpTracking->setEnabled(true);
-   ui.comboHwpLin->setEnabled(true);
-   ui.sliderQwpTracking->setEnabled(false);
-   ui.comboQwpLin->setEnabled(true);
-   ui.entryNumCycles->setEnabled(true);
-   ui.labelNumCyclesHint->setEnabled(true);
-   ui.entryFramesPerPos->setEnabled(true);
-   ui.labelFramesHint->setEnabled(true);
-   ui.entryTimePerPos->setEnabled(true);
-   ui.labelTimeHint->setEnabled(true);
-
-   ui.buttonStartSequence->setEnabled(true);
-   ui.buttonLastCycle->setEnabled(true);
-   ui.buttonStopSequence->setEnabled(true);
-   ui.buttonAbortSequence->setEnabled(true);
+    ui.buttonStartSequence->setEnabled( true );
+    ui.buttonLastCycle->setEnabled( true );
+    ui.buttonStopSequence->setEnabled( true );
+    ui.buttonAbortSequence->setEnabled( true );
 }
-
 
 void polarimetry::onDisconnect()
 {
-   setWindowTitle(QString("Polarimetry (disconnected)"));
+    setWindowTitle( QString( "Polarimetry (disconnected)" ) );
 
-   ui.hwptrackFsm->onDisconnect();
-   ui.hwpseqFsm->onDisconnect();
-   ui.stagePolRotFsm->onDisconnect();
-   ui.stagePolLinFsm->onDisconnect();
-   ui.qwpTrackFsm->onDisconnect();
-   ui.stageQwpLinFsm->onDisconnect();
+    ui.hwptrackFsm->onDisconnect();
+    ui.hwpseqFsm->onDisconnect();
+    ui.stagePolRotFsm->onDisconnect();
+    ui.stagePolLinFsm->onDisconnect();
+    ui.qwpTrackFsm->onDisconnect();
+    ui.stageQwpLinFsm->onDisconnect();
 
-   ui.hwpSetAngle->setText(QString("---"));
-   ui.hwpTrackingOffset->setText(QString("---"));
-   ui.hwpActualAngle->setText(QString("---"));
-   ui.hwpAngleName->setText(QString("---"));
-   setBold(ui.hwpSetAngle, false);
-   setBold(ui.hwpTrackingOffset, false);
-   setBold(ui.hwpActualAngle, false);
-   setBold(ui.hwpAngleName, false);
+    ui.hwpSetAngle->setText( QString( "---" ) );
+    ui.hwpTrackingOffset->setText( QString( "---" ) );
+    ui.hwpActualAngle->setText( QString( "---" ) );
+    ui.hwpAngleName->setText( QString( "---" ) );
+    setBold( ui.hwpSetAngle, false );
+    setBold( ui.hwpTrackingOffset, false );
+    setBold( ui.hwpActualAngle, false );
+    setBold( ui.hwpAngleName, false );
 
-   ui.hwpPosIndex->setText(QString("---"));
-   ui.cycleNumStatus->setText(QString("---"));
-   setBold(ui.hwpPosIndex, false);
-   setBold(ui.cycleNumStatus, false);
+    ui.hwpPosIndex->setText( QString( "---" ) );
+    ui.cycleNumStatus->setText( QString( "---" ) );
+    setBold( ui.hwpPosIndex, false );
+    setBold( ui.cycleNumStatus, false );
 
-   ui.framesStatus->setText(QString("---"));
-   setWarning(ui.framesStatus, false);
+    ui.framesStatus->setText( QString( "---" ) );
+    setWarning( ui.framesStatus, false );
 
-   ui.entryHwpAngle->onDisconnect();
-   ui.sliderHwpTracking->onDisconnect();
-   ui.comboHwpLin->onDisconnect();
-   ui.sliderQwpTracking->onDisconnect();
-   ui.comboQwpLin->onDisconnect();
-   ui.entryNumCycles->onDisconnect();
-   ui.entryFramesPerPos->onDisconnect();
-   ui.entryTimePerPos->onDisconnect();
+    ui.entryHwpAngle->onDisconnect();
+    ui.sliderHwpTracking->onDisconnect();
+    ui.comboHwpLin->onDisconnect();
+    ui.sliderQwpTracking->onDisconnect();
+    ui.comboQwpLin->onDisconnect();
+    ui.entryNumCycles->onDisconnect();
+    ui.entryFramesPerPos->onDisconnect();
+    ui.entryTimePerPos->onDisconnect();
 
-   ui.entryHwpAngle->setEnabled(false);
-   ui.sliderHwpTracking->setEnabled(false);
-   ui.comboHwpLin->setEnabled(false);
-   ui.sliderQwpTracking->setEnabled(false);
-   ui.comboQwpLin->setEnabled(false);
-   ui.entryNumCycles->setEnabled(false);
-   ui.labelNumCyclesHint->setEnabled(false);
-   ui.entryFramesPerPos->setEnabled(false);
-   ui.labelFramesHint->setEnabled(false);
-   ui.entryTimePerPos->setEnabled(false);
-   ui.labelTimeHint->setEnabled(false);
+    ui.entryHwpAngle->setEnabled( false );
+    ui.sliderHwpTracking->setEnabled( false );
+    ui.comboHwpLin->setEnabled( false );
+    ui.sliderQwpTracking->setEnabled( false );
+    ui.comboQwpLin->setEnabled( false );
+    ui.entryNumCycles->setEnabled( false );
+    ui.labelNumCyclesHint->setEnabled( false );
+    ui.entryFramesPerPos->setEnabled( false );
+    ui.labelFramesHint->setEnabled( false );
+    ui.entryTimePerPos->setEnabled( false );
+    ui.labelTimeHint->setEnabled( false );
 
-   ui.buttonStartSequence->setEnabled(false);
-   ui.buttonLastCycle->setEnabled(false);
-   ui.buttonStopSequence->setEnabled(false);
-   ui.buttonAbortSequence->setEnabled(false);
+    ui.buttonStartSequence->setEnabled( false );
+    ui.buttonLastCycle->setEnabled( false );
+    ui.buttonStopSequence->setEnabled( false );
+    ui.buttonAbortSequence->setEnabled( false );
 
-   multiIndiSubscriber::onDisconnect();
+    multiIndiSubscriber::onDisconnect();
 }
 
-void polarimetry::handleDefProperty( const pcf::IndiProperty & ipRecv)
+void polarimetry::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
-   return handleSetProperty(ipRecv);
+    return handleSetProperty( ipRecv );
 }
 
-void polarimetry::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void polarimetry::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-   if (ipRecv.getDevice() == "hwptrack")
-   {
-      if (ipRecv.getName() == "fsm")
-      {
-         if (ipRecv.find("state"))
-         {
-            std::string fsmString = ipRecv["state"].get<std::string>();
-            m_hwptrackFsmOk = fsmString == "READY" || fsmString == "OPERATING";
-         }
-      }
-      else if (ipRecv.getName() == "hwp_position")
-      {
-         if (ipRecv.find("current"))
-         {
-            m_hwpSetAngle = ipRecv["current"].get<float>();
-         }
-      }
-      else if (ipRecv.getName() == "hwp_tracking_offset")
-      {
-         if (ipRecv.find("value"))
-         {
-            m_hwpTrackingOffset = ipRecv["value"].get<float>();
-         }
-      }
-      else if (ipRecv.getName() == "hwp_position_actual")
-      {
-         if (ipRecv.find("value"))
-         {
-            m_hwpActualAngle = ipRecv["value"].get<float>();
-         }
-      }
-      else if (ipRecv.getName() == "hwp_position_name")
-      {
-         if (ipRecv.find("value"))
-         {
-            m_hwpAngleName = ipRecv["value"].get<std::string>();
-         }
-      }
-      else if (ipRecv.getName() == "tracking")
-      {
-         if (ipRecv.find("toggle"))
-         {
-            m_hwpTracking = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
-         }
-      }
-   }
-   else if (ipRecv.getDevice() == "hwpsequence")
-   {
-      if (ipRecv.getName() == "fsm")
-      {
-         if (ipRecv.find("state"))
-         {
-            std::string fsmString = ipRecv["state"].get<std::string>();
-            m_hwpseqFsmOk = fsmString == "READY" || fsmString == "OPERATING";
-         }
-      }
-      else if (ipRecv.getName() == "sequence")
-      {
-         if (ipRecv.find("toggle"))
-         {
-            m_sequencing = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
-         }
-      }
-      else if (ipRecv.getName() == "status")
-      {
-         // status elements are published as doubles
-         if (ipRecv.find("pos_index"))
-         {
-            m_hwpPosIndex = static_cast<int>(ipRecv["pos_index"].get<double>());
-         }
+    if( ipRecv.getDevice() == "hwptrack" )
+    {
+        if( ipRecv.getName() == "fsm" )
+        {
+            if( ipRecv.find( "state" ) )
+            {
+                std::string fsmString = ipRecv["state"].get<std::string>();
+                m_hwptrackFsmOk       = fsmString == "READY" || fsmString == "OPERATING";
+            }
+        }
+        else if( ipRecv.getName() == "hwp_position" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_hwpSetAngle = ipRecv["current"].get<float>();
+            }
+        }
+        else if( ipRecv.getName() == "hwp_tracking_offset" )
+        {
+            if( ipRecv.find( "value" ) )
+            {
+                m_hwpTrackingOffset = ipRecv["value"].get<float>();
+            }
+        }
+        else if( ipRecv.getName() == "hwp_position_actual" )
+        {
+            if( ipRecv.find( "value" ) )
+            {
+                m_hwpActualAngle = ipRecv["value"].get<float>();
+            }
+        }
+        else if( ipRecv.getName() == "hwp_position_name" )
+        {
+            if( ipRecv.find( "value" ) )
+            {
+                m_hwpAngleName = ipRecv["value"].get<std::string>();
+            }
+        }
+        else if( ipRecv.getName() == "tracking" )
+        {
+            if( ipRecv.find( "toggle" ) )
+            {
+                m_hwpTracking = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+            }
+        }
+    }
+    else if( ipRecv.getDevice() == "hwpsequence" )
+    {
+        if( ipRecv.getName() == "fsm" )
+        {
+            if( ipRecv.find( "state" ) )
+            {
+                std::string fsmString = ipRecv["state"].get<std::string>();
+                m_hwpseqFsmOk         = fsmString == "READY" || fsmString == "OPERATING";
+            }
+        }
+        else if( ipRecv.getName() == "sequence" )
+        {
+            if( ipRecv.find( "toggle" ) )
+            {
+                m_sequencing = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+            }
+        }
+        else if( ipRecv.getName() == "status" )
+        {
+            // status elements are published as doubles
+            if( ipRecv.find( "pos_index" ) )
+            {
+                m_hwpPosIndex = static_cast<int>( ipRecv["pos_index"].get<double>() );
+            }
 
-         if (ipRecv.find("cycle"))
-         {
-            m_curCycle = static_cast<int>(ipRecv["cycle"].get<double>());
-         }
+            if( ipRecv.find( "cycle" ) )
+            {
+                m_curCycle = static_cast<int>( ipRecv["cycle"].get<double>() );
+            }
 
-         if (ipRecv.find("frames"))
-         {
-            m_framesLast = static_cast<int>(ipRecv["frames"].get<double>());
-         }
-      }
-      else if (ipRecv.getName() == "positions")
-      {
-         if (ipRecv.find("value"))
-         {
-            m_numPositions = countPositions(ipRecv["value"].get<std::string>());
-         }
-      }
-      else if (ipRecv.getName() == "last_cycle")
-      {
-         if (ipRecv.find("toggle"))
-         {
-            ui.buttonLastCycle->setChecked(ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On);
-         }
-      }
-      else if (ipRecv.getName() == "abort")
-      {
-         if (ipRecv.find("toggle"))
-         {
-            m_aborting = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
-         }
-      }
-      else if (ipRecv.getName() == "num_cycles")
-      {
-         if (ipRecv.find("current"))
-         {
-            m_numCycles = ipRecv["current"].get<int>();
-         }
-      }
-      else if (ipRecv.getName() == "frames_per_pos")
-      {
-         if (ipRecv.find("current"))
-         {
-            m_framesPerPos = ipRecv["current"].get<int>();
-         }
-      }
-   }
-   else if (ipRecv.getDevice() == "qwptrack")
-   {
-      if (ipRecv.getName() == "fsm")
-      {
-         if (ipRecv.find("state"))
-         {
-            std::string fsmString = ipRecv["state"].get<std::string>();
-            m_qwptrackFsmOk = fsmString == "READY" || fsmString == "OPERATING";
-         }
-      }
-      else if (ipRecv.getName() == "tracking")
-      {
-         if (ipRecv.find("toggle"))
-         {
-            m_qwpTracking = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
-         }
-      }
-   }
-   else
-   {
-      return;
-   }
+            if( ipRecv.find( "frames" ) )
+            {
+                m_framesLast = static_cast<int>( ipRecv["frames"].get<double>() );
+            }
+        }
+        else if( ipRecv.getName() == "positions" )
+        {
+            if( ipRecv.find( "value" ) )
+            {
+                m_numPositions = countPositions( ipRecv["value"].get<std::string>() );
+            }
+        }
+        else if( ipRecv.getName() == "last_cycle" )
+        {
+            if( ipRecv.find( "toggle" ) )
+            {
+                ui.buttonLastCycle->setChecked( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On );
+            }
+        }
+        else if( ipRecv.getName() == "abort" )
+        {
+            if( ipRecv.find( "toggle" ) )
+            {
+                m_aborting = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+            }
+        }
+        else if( ipRecv.getName() == "num_cycles" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_numCycles = ipRecv["current"].get<int>();
+            }
+        }
+        else if( ipRecv.getName() == "frames_per_pos" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_framesPerPos = ipRecv["current"].get<int>();
+            }
+        }
+    }
+    else if( ipRecv.getDevice() == "qwptrack" )
+    {
+        if( ipRecv.getName() == "fsm" )
+        {
+            if( ipRecv.find( "state" ) )
+            {
+                std::string fsmString = ipRecv["state"].get<std::string>();
+                m_qwptrackFsmOk       = fsmString == "READY" || fsmString == "OPERATING";
+            }
+        }
+        else if( ipRecv.getName() == "tracking" )
+        {
+            if( ipRecv.find( "toggle" ) )
+            {
+                m_qwpTracking = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+            }
+        }
+    }
+    else
+    {
+        return;
+    }
 
-   emit doUpdateGUI();
+    emit doUpdateGUI();
 }
-
 
 void polarimetry::updateGUI()
 {
-   if (m_hwptrackFsmOk)
-   {
-      ui.hwpSetAngle->setText(QString("%1°").arg(m_hwpSetAngle, 0, 'f', 1));
-      ui.hwpTrackingOffset->setText(QString("%1°").arg(m_hwpTrackingOffset, 0, 'f', 1));
-      ui.hwpActualAngle->setText(QString("%1°").arg(m_hwpActualAngle, 0, 'f', 1));
-      ui.hwpAngleName->setText(QString(m_hwpAngleName.c_str()));
-   }
-   else
-   {
-      ui.hwpSetAngle->setText(QString("---"));
-      ui.hwpTrackingOffset->setText(QString("---"));
-      ui.hwpActualAngle->setText(QString("---"));
-      ui.hwpAngleName->setText(QString("---"));
-   }
+    if( m_hwptrackFsmOk )
+    {
+        ui.hwpSetAngle->setText( QString( "%1°" ).arg( m_hwpSetAngle, 0, 'f', 1 ) );
+        ui.hwpTrackingOffset->setText( QString( "%1°" ).arg( m_hwpTrackingOffset, 0, 'f', 1 ) );
+        ui.hwpActualAngle->setText( QString( "%1°" ).arg( m_hwpActualAngle, 0, 'f', 1 ) );
+        ui.hwpAngleName->setText( QString( m_hwpAngleName.c_str() ) );
+    }
+    else
+    {
+        ui.hwpSetAngle->setText( QString( "---" ) );
+        ui.hwpTrackingOffset->setText( QString( "---" ) );
+        ui.hwpActualAngle->setText( QString( "---" ) );
+        ui.hwpAngleName->setText( QString( "---" ) );
+    }
 
-   setBold(ui.hwpSetAngle, m_hwptrackFsmOk);
-   setBold(ui.hwpTrackingOffset, m_hwptrackFsmOk);
-   setBold(ui.hwpActualAngle, m_hwptrackFsmOk);
-   setBold(ui.hwpAngleName, m_hwptrackFsmOk);
+    setBold( ui.hwpSetAngle, m_hwptrackFsmOk );
+    setBold( ui.hwpTrackingOffset, m_hwptrackFsmOk );
+    setBold( ui.hwpActualAngle, m_hwptrackFsmOk );
+    setBold( ui.hwpAngleName, m_hwptrackFsmOk );
 
-   // disable things that we shouldn't change while sequencing
-   ui.entryHwpAngle->setEnabled(!m_sequencing && m_hwptrackFsmOk);
-   // we actually don't want to disable the toggleSlider because it will appear "off" even if tracking is on
-   if (m_sequencing || !m_hwptrackFsmOk)
-   {
-      ui.sliderHwpTracking->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-      ui.sliderHwpTracking->setFocusPolicy(Qt::NoFocus);
+    // disable things that we shouldn't change while sequencing
+    ui.entryHwpAngle->setEnabled( !m_sequencing && m_hwptrackFsmOk );
+    // we actually don't want to disable the toggleSlider because it will appear "off" even if tracking is on
+    if( m_sequencing || !m_hwptrackFsmOk )
+    {
+        ui.sliderHwpTracking->setAttribute( Qt::WA_TransparentForMouseEvents, true );
+        ui.sliderHwpTracking->setFocusPolicy( Qt::NoFocus );
 
-      ui.sliderQwpTracking->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-      ui.sliderQwpTracking->setFocusPolicy(Qt::NoFocus);
-   }
-   else
-   {
-      ui.sliderHwpTracking->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-      ui.sliderHwpTracking->setFocusPolicy(Qt::StrongFocus);
+        ui.sliderQwpTracking->setAttribute( Qt::WA_TransparentForMouseEvents, true );
+        ui.sliderQwpTracking->setFocusPolicy( Qt::NoFocus );
+    }
+    else
+    {
+        ui.sliderHwpTracking->setAttribute( Qt::WA_TransparentForMouseEvents, false );
+        ui.sliderHwpTracking->setFocusPolicy( Qt::StrongFocus );
 
-      ui.sliderQwpTracking->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-      ui.sliderQwpTracking->setFocusPolicy(Qt::StrongFocus);
-   }
-   
-   ui.sliderHwpTracking->setLabelEnabled(!m_sequencing && m_hwptrackFsmOk);
-   ui.labelHwpTracking->setVisible(m_hwpTracking);
-   ui.labelHwpTracking->setEnabled(!m_sequencing && m_hwptrackFsmOk);
-   
-   ui.comboHwpLin->setEnabled(!m_sequencing);
+        ui.sliderQwpTracking->setAttribute( Qt::WA_TransparentForMouseEvents, false );
+        ui.sliderQwpTracking->setFocusPolicy( Qt::StrongFocus );
+    }
 
-   ui.sliderQwpTracking->setLabelEnabled(!m_sequencing && m_qwptrackFsmOk);
-   ui.labelQwpTracking->setVisible(m_qwpTracking);
-   ui.labelQwpTracking->setEnabled(!m_sequencing && m_qwptrackFsmOk);
+    ui.sliderHwpTracking->setLabelEnabled( !m_sequencing && m_hwptrackFsmOk );
+    ui.labelHwpTracking->setVisible( m_hwpTracking );
+    ui.labelHwpTracking->setEnabled( !m_sequencing && m_hwptrackFsmOk );
 
-   ui.comboQwpLin->setEnabled(!m_sequencing);
-   
-   // num_cycles may be changed during a sequence, it is checked at the end of each cycle
-   ui.entryNumCycles->setEnabled(m_hwpseqFsmOk);
-   ui.labelNumCyclesHint->setEnabled(m_hwpseqFsmOk);
+    ui.comboHwpLin->setEnabled( !m_sequencing );
 
-   ui.entryFramesPerPos->setEnabled(!m_sequencing && m_hwpseqFsmOk);
-   ui.labelFramesHint->setEnabled(!m_sequencing && m_hwpseqFsmOk);
+    ui.sliderQwpTracking->setLabelEnabled( !m_sequencing && m_qwptrackFsmOk );
+    ui.labelQwpTracking->setVisible( m_qwpTracking );
+    ui.labelQwpTracking->setEnabled( !m_sequencing && m_qwptrackFsmOk );
 
-   // time_per_pos is ignored in frames mode
-   bool timeMode = m_framesPerPos == 0;
+    ui.comboQwpLin->setEnabled( !m_sequencing );
 
-   ui.entryTimePerPos->setEnabled(!m_sequencing && m_hwpseqFsmOk && timeMode);
-   ui.labelTimeHint->setEnabled(!m_sequencing && m_hwpseqFsmOk && timeMode);
+    // num_cycles may be changed during a sequence, it is checked at the end of each cycle
+    ui.entryNumCycles->setEnabled( m_hwpseqFsmOk );
+    ui.labelNumCyclesHint->setEnabled( m_hwpseqFsmOk );
 
-   ui.buttonStartSequence->setVisible(!m_sequencing);
-   ui.buttonStartSequence->setEnabled(!m_sequencing && m_hwpseqFsmOk && m_hwptrackFsmOk);
+    ui.entryFramesPerPos->setEnabled( !m_sequencing && m_hwpseqFsmOk );
+    ui.labelFramesHint->setEnabled( !m_sequencing && m_hwpseqFsmOk );
 
-   ui.buttonStopSequence->setVisible(m_sequencing);
-   ui.buttonStopSequence->setEnabled(m_sequencing && m_hwpseqFsmOk);
+    // time_per_pos is ignored in frames mode
+    bool timeMode = m_framesPerPos == 0;
 
-   ui.buttonLastCycle->setVisible(m_sequencing);
-   ui.buttonLastCycle->setEnabled(m_sequencing && m_hwpseqFsmOk);
+    ui.entryTimePerPos->setEnabled( !m_sequencing && m_hwpseqFsmOk && timeMode );
+    ui.labelTimeHint->setEnabled( !m_sequencing && m_hwpseqFsmOk && timeMode );
 
-   ui.buttonAbortSequence->setVisible(m_sequencing);
-   ui.buttonAbortSequence->setEnabled(m_sequencing && m_hwpseqFsmOk && !m_aborting);
+    ui.buttonStartSequence->setVisible( !m_sequencing );
+    ui.buttonStartSequence->setEnabled( !m_sequencing && m_hwpseqFsmOk && m_hwptrackFsmOk );
 
-   // the frames count is only checked in frames mode
-   bool showFrames = m_sequencing && !timeMode;
+    ui.buttonStopSequence->setVisible( m_sequencing );
+    ui.buttonStopSequence->setEnabled( m_sequencing && m_hwpseqFsmOk );
 
-   ui.labelFramesStatus->setVisible(showFrames);
-   ui.framesStatus->setVisible(showFrames);
+    ui.buttonLastCycle->setVisible( m_sequencing );
+    ui.buttonLastCycle->setEnabled( m_sequencing && m_hwpseqFsmOk );
 
-   // status.frames is not reset at sequence start, so it is stale until the first position completes
-   if (showFrames && !(m_curCycle <= 1 && m_hwpPosIndex == 0))
-   {
-      ui.framesStatus->setText(QString("%1 / %2").arg(m_framesLast).arg(m_framesPerPos));
-      setWarning(ui.framesStatus, m_framesLast != m_framesPerPos);
-   }
-   else
-   {
-      ui.framesStatus->setText(QString("---"));
-      setWarning(ui.framesStatus, false);
-   }
+    ui.buttonAbortSequence->setVisible( m_sequencing );
+    ui.buttonAbortSequence->setEnabled( m_sequencing && m_hwpseqFsmOk && !m_aborting );
 
-   if (m_sequencing)
-   {
-      if (m_numPositions > 0)
-      {
-         ui.hwpPosIndex->setText(QString("%1 / %2").arg(m_hwpPosIndex + 1).arg(m_numPositions));
-      }
-      else
-      {
-         ui.hwpPosIndex->setText(QString("%1").arg(m_hwpPosIndex + 1));
-      }
+    // the frames count is only checked in frames mode
+    bool showFrames = m_sequencing && !timeMode;
 
-      if (m_numCycles > 0)
-      {
-         ui.cycleNumStatus->setText(QString("%1 / %2").arg(m_curCycle).arg(m_numCycles));
-      }
-      else
-      {
-         ui.cycleNumStatus->setText(QString("%1").arg(m_curCycle));
-      }
-   }
-   else
-   {
-      ui.hwpPosIndex->setText(QString("---"));
+    ui.labelFramesStatus->setVisible( showFrames );
+    ui.framesStatus->setVisible( showFrames );
 
-      ui.cycleNumStatus->setText(QString("---"));
-   }
+    // status.frames is not reset at sequence start, so it is stale until the first position completes
+    if( showFrames && !( m_curCycle <= 1 && m_hwpPosIndex == 0 ) )
+    {
+        ui.framesStatus->setText( QString( "%1 / %2" ).arg( m_framesLast ).arg( m_framesPerPos ) );
+        setWarning( ui.framesStatus, m_framesLast != m_framesPerPos );
+    }
+    else
+    {
+        ui.framesStatus->setText( QString( "---" ) );
+        setWarning( ui.framesStatus, false );
+    }
 
-   setBold(ui.hwpPosIndex, m_sequencing);
-   setBold(ui.cycleNumStatus, m_sequencing);
-   setBold(ui.framesStatus, showFrames);
+    if( m_sequencing )
+    {
+        if( m_numPositions > 0 )
+        {
+            ui.hwpPosIndex->setText( QString( "%1 / %2" ).arg( m_hwpPosIndex + 1 ).arg( m_numPositions ) );
+        }
+        else
+        {
+            ui.hwpPosIndex->setText( QString( "%1" ).arg( m_hwpPosIndex + 1 ) );
+        }
 
+        if( m_numCycles > 0 )
+        {
+            ui.cycleNumStatus->setText( QString( "%1 / %2" ).arg( m_curCycle ).arg( m_numCycles ) );
+        }
+        else
+        {
+            ui.cycleNumStatus->setText( QString( "%1" ).arg( m_curCycle ) );
+        }
+    }
+    else
+    {
+        ui.hwpPosIndex->setText( QString( "---" ) );
+
+        ui.cycleNumStatus->setText( QString( "---" ) );
+    }
+
+    setBold( ui.hwpPosIndex, m_sequencing );
+    setBold( ui.cycleNumStatus, m_sequencing );
+    setBold( ui.framesStatus, showFrames );
 
 } //updateGUI()
 
 void polarimetry::on_buttonStartSequence_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
-   ip.setDevice("hwpsequence");
-   ip.setName("sequence");
-   ip.add(pcf::IndiElement("toggle"));
-   ip["toggle"] = pcf::IndiElement::On;
-   sendNewProperty(ip);
+    pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+    ip.setDevice( "hwpsequence" );
+    ip.setName( "sequence" );
+    ip.add( pcf::IndiElement( "toggle" ) );
+    ip["toggle"] = pcf::IndiElement::On;
+    sendNewProperty( ip );
 
-   emit doUpdateGUI();
-   return;
+    emit doUpdateGUI();
+    return;
 }
 
 void polarimetry::on_buttonStopSequence_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
-   ip.setDevice("hwpsequence");
-   ip.setName("sequence");
-   ip.add(pcf::IndiElement("toggle"));
-   ip["toggle"] = pcf::IndiElement::Off;
-   sendNewProperty(ip);
+    pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+    ip.setDevice( "hwpsequence" );
+    ip.setName( "sequence" );
+    ip.add( pcf::IndiElement( "toggle" ) );
+    ip["toggle"] = pcf::IndiElement::Off;
+    sendNewProperty( ip );
 
-   emit doUpdateGUI();
-   return;
+    emit doUpdateGUI();
+    return;
 }
 
 void polarimetry::on_buttonAbortSequence_pressed()
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
-   ip.setDevice("hwpsequence");
-   ip.setName("abort");
-   ip.add(pcf::IndiElement("toggle"));
-   ip["toggle"] = pcf::IndiElement::On;
-   sendNewProperty(ip);
+    pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+    ip.setDevice( "hwpsequence" );
+    ip.setName( "abort" );
+    ip.add( pcf::IndiElement( "toggle" ) );
+    ip["toggle"] = pcf::IndiElement::On;
+    sendNewProperty( ip );
 
-   emit doUpdateGUI();
-   return;
+    emit doUpdateGUI();
+    return;
 }
 
-void polarimetry::on_buttonLastCycle_clicked(bool checked)
+void polarimetry::on_buttonLastCycle_clicked( bool checked )
 {
-   pcf::IndiProperty ip(pcf::IndiProperty::Switch);
-   ip.setDevice("hwpsequence");
-   ip.setName("last_cycle");
-   ip.add(pcf::IndiElement("toggle"));
-   ip["toggle"] = checked ? pcf::IndiElement::On : pcf::IndiElement::Off;
-   sendNewProperty(ip);
+    pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+    ip.setDevice( "hwpsequence" );
+    ip.setName( "last_cycle" );
+    ip.add( pcf::IndiElement( "toggle" ) );
+    ip["toggle"] = checked ? pcf::IndiElement::On : pcf::IndiElement::Off;
+    sendNewProperty( ip );
 
-   emit doUpdateGUI();
-   return;
-
+    emit doUpdateGUI();
+    return;
 }
 
-void polarimetry::setBold(QLabel *label, bool onoff)
+void polarimetry::setBold( QLabel *label, bool onoff )
 {
-   QFont font = label->font();
-   font.setBold(onoff);
-   label->setFont(font);
+    QFont font = label->font();
+    font.setBold( onoff );
+    label->setFont( font );
 }
 
-void polarimetry::setWarning(QLabel *label, bool onoff)
+void polarimetry::setWarning( QLabel *label, bool onoff )
 {
-   if (label->property("isWarning").toBool() == onoff)
-   {
-      return;
-   }
+    if( label->property( "isWarning" ).toBool() == onoff )
+    {
+        return;
+    }
 
-   label->setProperty("isWarning", onoff);
-   label->style()->unpolish(label);
-   label->style()->polish(label);
+    label->setProperty( "isWarning", onoff );
+    label->style()->unpolish( label );
+    label->style()->polish( label );
 }
 
-int polarimetry::countPositions(const std::string & positions)
+int polarimetry::countPositions( const std::string &positions )
 {
-   QStringList list = QString(positions.c_str()).split(',');
+    QStringList list = QString( positions.c_str() ).split( ',' );
 
-   int n = 0;
+    int n = 0;
 
-   for (const QString & pos : list)
-   {
-      bool ok = false;
+    for( const QString &pos : list )
+    {
+        bool ok = false;
 
-      pos.trimmed().toDouble(&ok);
+        pos.trimmed().toDouble( &ok );
 
-      if (!ok)
-      {
-         return 0;
-      }
+        if( !ok )
+        {
+            return 0;
+        }
 
-      ++n;
-   }
+        ++n;
+    }
 
-   return n;
+    return n;
 }
 
 } //namespace xqt

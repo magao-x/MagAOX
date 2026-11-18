@@ -230,6 +230,9 @@ Builds and tests are run by the user (no MagAO-X build environment on this machi
 - 2026-11-18: step 3 (documentation) done: `\file` block, class doc, grouped member docs,
   `///` and inline parameter docs on every declaration. Removed the unused `m_appState`
   member and `<iostream>` include (no behavior change). Tests rebuilt and pass.
+- 2026-11-18: step 4 (`clang-format` on `polarimetry.hpp`; `polarimetry_test.cpp` was
+  already clean). Tests rebuilt and pass. Remaining: user builds `polarimetryGUI` and
+  runs M1–M4 on the instrument.
 
 ### Implementation notes
 
