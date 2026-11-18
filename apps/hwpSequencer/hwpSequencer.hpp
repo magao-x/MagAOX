@@ -330,12 +330,13 @@ int hwpSequencer::appStartup()
 
 int hwpSequencer::appLogic()
 {
-
-    if (!m_sequencing)
-        return 0;
-
     SHMIMMONITOR_APP_LOGIC;
     SHMIMMONITOR_UPDATE_INDI;
+
+    if( !m_sequencing )
+    {
+        return 0;
+    }
 
     if (!m_doMoveHwp)
     {
@@ -620,12 +621,6 @@ INDI_NEWCALLBACK_DEFN( hwpSequencer, m_indiP_sequence )( const pcf::IndiProperty
 
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_sequence, ipRecv );
 
-    if( ipRecv.getName() != m_indiP_sequence.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
-        return -1;
-    }
-
     if( !ipRecv.find( "toggle" ) ) return 0;
 
     if (ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
@@ -641,18 +636,12 @@ INDI_NEWCALLBACK_DEFN( hwpSequencer, m_indiP_numCycles )( const pcf::IndiPropert
 
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_numCycles, ipRecv );
 
-    if( ipRecv.getName() != m_indiP_numCycles.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
-        return -1;
-    }
-
     if( !ipRecv.find( "target" ) )
         return 0;
 
     if (m_sequencing)
     {
-        std::cerr << "Cannot change sequence parameters while sequencing" << std::endl;
+        log<text_log>( "cannot change sequence parameters while sequencing", logPrio::LOG_NOTICE );
         return 0;
     }
 
@@ -660,8 +649,8 @@ INDI_NEWCALLBACK_DEFN( hwpSequencer, m_indiP_numCycles )( const pcf::IndiPropert
 
     if (numCycles == 0)
     {
-        log<software_error>( { __FILE__, __LINE__, "numCycles cannot be 0" } );
-        return -1;
+        log<text_log>( "numCycles cannot be 0", logPrio::LOG_WARNING );
+        return 0;
     }
 
     m_numCycles = numCycles;
@@ -675,18 +664,12 @@ INDI_NEWCALLBACK_DEFN( hwpSequencer, m_indiP_timePerPos )( const pcf::IndiProper
 
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_timePerPos, ipRecv );
 
-    if( ipRecv.getName() != m_indiP_timePerPos.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
-        return -1;
-    }
-
     if( !ipRecv.find( "target" ) )
         return 0;
 
     if (m_sequencing)
     {
-        std::cerr << "Cannot change sequence parameters while sequencing" << std::endl;
+        log<text_log>( "cannot change sequence parameters while sequencing", logPrio::LOG_NOTICE );
         return 0;
     }
 
@@ -703,17 +686,11 @@ INDI_NEWCALLBACK_DEFN( hwpSequencer, m_indiP_lastCycle )( const pcf::IndiPropert
 
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_lastCycle, ipRecv );
 
-    if( ipRecv.getName() != m_indiP_lastCycle.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
-        return -1;
-    }
-
     if( !ipRecv.find( "toggle" ) ) return 0;
 
     if (!m_sequencing)
     {
-        std::cerr << "Cannot stop sequencing while not sequencing" << std::endl;
+        log<text_log>( "lastCycle ignored: not sequencing", logPrio::LOG_NOTICE );
         return 0;
     }
 
@@ -748,13 +725,6 @@ INDI_SETCALLBACK_DEFN(hwpSequencer, m_indiP_hwpTracker_current)(const pcf::IndiP
 
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_hwpTracker_current, ipRecv );
 
-   if(ipRecv.getName() != m_indiP_hwpTracker_current.getName())
-   {
-      log<software_error>({__FILE__,__LINE__,"wrong INDI property received"});
-
-      return -1;
-   }
-
    if(!ipRecv.find("current")) return 0;
 
    m_reportedHwpPos = ipRecv["current"].get<float>();
@@ -768,13 +738,6 @@ INDI_SETCALLBACK_DEFN(hwpSequencer, m_indiP_fxngenOutput_status)(const pcf::Indi
 {
 
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fxngenOutput_status, ipRecv );
-
-   if(ipRecv.getName() != m_indiP_fxngenOutput_status.getName())
-   {
-      log<software_error>({__FILE__,__LINE__,"wrong INDI property received"});
-
-      return -1;
-   }
 
    if(!ipRecv.find("value")) return 0;
 
