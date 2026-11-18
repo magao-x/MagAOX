@@ -128,7 +128,6 @@ class hwpTracker_test : public MagAOX::app::hwpTracker
     {
         if( !m_tel.logThreadRunning() )
         {
-            m_tel.m_writePause = 1000000;
             m_tel.logThreadStart();
 
             for( unsigned attempt = 0; attempt < 1000 && !m_tel.logThreadRunning(); ++attempt )
