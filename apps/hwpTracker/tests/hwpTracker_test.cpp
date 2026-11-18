@@ -9,8 +9,10 @@
 #include "../../../tests/testMacrosINDI.hpp"
 #include "../../../tests/testXWC.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <limits>
+#include <thread>
 
 /** \defgroup hwpTracker_unit_test hwpTracker Unit Tests
  * \brief Unit tests for the hwpTracker application.
@@ -121,9 +123,20 @@ class hwpTracker_test : public MagAOX::app::hwpTracker
         loadConfig();
     }
 
-    /// Run appLogic.
+    /// Run appLogic, starting the telemetry thread it requires.
     int logic()
     {
+        if( !m_tel.logThreadRunning() )
+        {
+            m_tel.m_writePause = 1000000;
+            m_tel.logThreadStart();
+
+            for( unsigned attempt = 0; attempt < 1000 && !m_tel.logThreadRunning(); ++attempt )
+            {
+                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            }
+        }
+
         return appLogic();
     }
 
@@ -354,6 +367,7 @@ TEST_CASE( "hwpTracker angle calculations", "[hwpTracker]" )
     MagAOX::app::hwpTracker::stageTarget( 0, 0, 0 );
     MagAOX::app::hwpTracker::nearestAngle( 0, 0 );
     MagAOX::app::hwpTracker::positionName( 0 );
+    MagAOX::app::hwpTracker::isFinite( 0 );
 #endif
     // clang-format on
 
@@ -392,6 +406,16 @@ TEST_CASE( "hwpTracker angle calculations", "[hwpTracker]" )
         REQUIRE( hwpTracker::nearestAngle( 330, -30 ) == Approx( -30 ) );
         REQUIRE( hwpTracker::nearestAngle( 10, 20 ) == Approx( 10 ) );
         REQUIRE( hwpTracker::nearestAngle( 5, 725 ) == Approx( 725 ) );
+    }
+
+    SECTION( "finiteness check works under -ffast-math" )
+    {
+        REQUIRE( hwpTracker::isFinite( 0 ) );
+        REQUIRE( hwpTracker::isFinite( -360.5 ) );
+        REQUIRE( hwpTracker::isFinite( std::numeric_limits<float>::max() ) );
+        REQUIRE_FALSE( hwpTracker::isFinite( std::numeric_limits<float>::quiet_NaN() ) );
+        REQUIRE_FALSE( hwpTracker::isFinite( std::numeric_limits<float>::infinity() ) );
+        REQUIRE_FALSE( hwpTracker::isFinite( -std::numeric_limits<float>::infinity() ) );
     }
 
     SECTION( "position names match modulo 90" )
