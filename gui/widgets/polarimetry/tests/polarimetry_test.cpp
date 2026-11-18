@@ -412,9 +412,10 @@ TEST_CASE( "Polarimetry button commands", "[polarimetryGUI]" )
 } // namespace polarimetryGUITest
 } // namespace libXWCTest
 
-/// Run offline Qt tests without an INDI connection.
+/// Run offline Qt tests without an INDI connection, using Qt's offscreen backend.
 int main( int argc, /**< [in] Argument count. */ char **argv /**< [in] Catch options. */ )
 {
+    qputenv( "QT_QPA_PLATFORM", "offscreen" );
     QApplication app( argc, argv );
     return Catch::Session().run( argc, argv );
 }

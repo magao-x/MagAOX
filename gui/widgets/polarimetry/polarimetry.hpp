@@ -658,7 +658,7 @@ void polarimetry::updateGUI()
     ui.labelFramesStatus->setVisible( showFrames );
     ui.framesStatus->setVisible( showFrames );
 
-    // status.frames is not reset at sequence start, so it is stale until the first position completes
+    // status.frames is 0 until the first position completes, so there is no count to show yet
     if( showFrames && !( m_curCycle <= 1 && m_hwpPosIndex == 0 ) )
     {
         ui.framesStatus->setText( QString( "%1 / %2" ).arg( m_framesLast ).arg( m_framesPerPos ) );
