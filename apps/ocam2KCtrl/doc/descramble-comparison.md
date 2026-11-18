@@ -214,3 +214,68 @@ sample count, round means, mean/median/deviation/p95/p99/maximum, and timer
 overhead. It uses synthetic data and cannot reproduce DMA or shared-stream
 reader traffic. Rebuild with `make -B` when changing compiler options because
 make does not track command-line flag changes as dependencies.
+
+
+## Offline second-thread experiment
+
+The optional benchmark worker is a local experiment, separate from the
+application's four runtime methods. It uses one persistent worker and the
+calling thread. The caller and worker must use distinct physical cores;
+choose logical CPU numbers from the workstation's topology, not from their
+numeric proximity. The example below uses CPUs 2 and 4, verified as separate
+P-cores on mx11. No real-time scheduling or instrument cpuset change is made.
+
+```bash
+make -C apps/ocam2KCtrl/benchmarks
+make -C apps/ocam2KCtrl/benchmarks check TEST_CPUS='2 4'
+apps/ocam2KCtrl/benchmarks/ocamDescramble_bench \
+  /opt/MagAOX/config/ocam2k/fli/ocam2_descrambling.txt \
+  bin2 10000 64 2 7 4 0 1 0 > /tmp/ocam-two-thread.csv
+```
+
+After the original `CPU ROUNDS` arguments, the additional arguments are
+`WORKER_CPU OUTPUT_OFFSET_BYTES DIAGNOSTICS PERIOD_US`:
+
+- `WORKER_CPU`: a distinct allowed physical core; omitted or `-1` disables the
+  worker and retains the original single-thread comparisons.
+- `OUTPUT_OFFSET_BYTES`: even offset 0–62 from a 64-byte-aligned private and
+  publication buffer base; default 0. Repeat at 16 to test unaligned ownership
+  boundaries. Actual addresses and split boundaries are recorded.
+- `DIAGNOSTICS`: 1 adds a separate pass reporting caller/worker kernel durations
+  and instrumented totals; default 0. Headline samples omit those extra clocks.
+- `PERIOD_US`: default 0 measures a tight loop. Setting 500 schedules sample
+  starts approximately every 500 us, with sleeping outside the measured call.
+  Lost whole pacing slots are reported. This remains synthetic input with
+  ordinary OS scheduling, not a DMA or real-time camera simulation.
+
+`optimized` measures the unchanged production helper. `range_serial` and
+`paired_serial` measure the benchmark's mirrored row kernel on one thread,
+providing controls for its compiler output and paired traversal. The parallel
+choices split output halves or assign matching rows `y`/`119-y` together,
+using 28/32 or 30/30 raw-row pairs. The latter splits can differ in cache-line
+sharing; even the aligned 30/30 split shares output boundary lines.
+
+Each parallel measurement includes job dispatch and completion waiting. The
+primary thread performs `streamCopy` only after all pixel work completes.
+A handoff-only calibration performs no pixel work. The worker is blocked and
+acknowledged parked during every serial baseline block, and it resumes outside
+timed parallel calls. It is created once per invocation, with no per-frame
+allocation or thread creation.
+
+All generated raw frames and parallel/serial outputs are checked against the
+SDK before timing, including source immutability and output guards. The
+standalone checks additionally exercise repeated jobs, input reuse, parking,
+startup failures and shutdown after completed calls. The prototype has a
+blocking, single-caller contract; concurrent destruction and camera recovery
+with outstanding jobs require separate engineering before runtime integration.
+
+Compare complete staged times and tails against `optimized`, not only the
+worker's own kernel duration. Local Intel results cannot establish behavior on
+the RTC's AMD CCDs or under its shared-stream readers. Keep correctness and
+sanitizer builds separate from performance measurements.
+
+The [2026-11-18 execution record](../../../agents/plans/2026-11/ocam_descramble.md#local-second-thread-experiment--2026-11-18)
+includes local correctness checks and both timing workloads. Two threads
+improved the kernel, but staging erased the gain in tight loops; sleeping
+between frames reversed the result under the laptop's ordinary power and
+scheduling settings. This establishes cadence sensitivity, not an RTC gain.
