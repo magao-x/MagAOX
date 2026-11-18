@@ -318,25 +318,36 @@ TEST_CASE( "hwpTracker configuration loading", "[hwpTracker]" )
     SECTION( "non-finite angles and empty device names are rejected" )
     {
         // Set directly, since these values may not survive the config file parser.
-        hwpTracker_test zero( "hwptrack" );
-        zero.m_zero = std::numeric_limits<float>::quiet_NaN();
-        REQUIRE( loadFromConfig( "config_zero", {}, {}, {}, zero ) == -1 );
+        // Each app is in its own scope: only one MagAOXApp may exist at a time.
+        {
+            hwpTracker_test app( "hwptrack" );
+            app.m_zero = std::numeric_limits<float>::quiet_NaN();
+            REQUIRE( loadFromConfig( "config_zero", {}, {}, {}, app ) == -1 );
+        }
 
-        hwpTracker_test pupil( "hwptrack" );
-        pupil.m_pupilOffset = std::numeric_limits<float>::infinity();
-        REQUIRE( loadFromConfig( "config_pupil", {}, {}, {}, pupil ) == -1 );
+        {
+            hwpTracker_test app( "hwptrack" );
+            app.m_pupilOffset = std::numeric_limits<float>::infinity();
+            REQUIRE( loadFromConfig( "config_pupil", {}, {}, {}, app ) == -1 );
+        }
 
-        hwpTracker_test interval( "hwptrack" );
-        interval.m_updateInterval = std::numeric_limits<float>::quiet_NaN();
-        REQUIRE( loadFromConfig( "config_interval", {}, {}, {}, interval ) == -1 );
+        {
+            hwpTracker_test app( "hwptrack" );
+            app.m_updateInterval = std::numeric_limits<float>::quiet_NaN();
+            REQUIRE( loadFromConfig( "config_interval", {}, {}, {}, app ) == -1 );
+        }
 
-        hwpTracker_test dev( "hwptrack" );
-        dev.m_devName = "";
-        REQUIRE( loadFromConfig( "config_dev", {}, {}, {}, dev ) == -1 );
+        {
+            hwpTracker_test app( "hwptrack" );
+            app.m_devName = "";
+            REQUIRE( loadFromConfig( "config_dev", {}, {}, {}, app ) == -1 );
+        }
 
-        hwpTracker_test tcs( "hwptrack" );
-        tcs.m_tcsDevName = "";
-        REQUIRE( loadFromConfig( "config_tcs", {}, {}, {}, tcs ) == -1 );
+        {
+            hwpTracker_test app( "hwptrack" );
+            app.m_tcsDevName = "";
+            REQUIRE( loadFromConfig( "config_tcs", {}, {}, {}, app ) == -1 );
+        }
     }
 
     SECTION( "loadConfig shuts down on an invalid configuration" )
