@@ -227,6 +227,9 @@ Builds and tests are run by the user (no MagAO-X build environment on this machi
   check (empty stagepollin property; `num_cycles` locked while sequencing) failed 2 cases
   as expected. The full `polarimetryGUI` app was not built (needs mxlib). M1–M4 remain
   for the user.
+- 2026-11-18: step 3 (documentation) done: `\file` block, class doc, grouped member docs,
+  `///` and inline parameter docs on every declaration. Removed the unused `m_appState`
+  member and `<iostream>` include (no behavior change). Tests rebuilt and pass.
 
 ### Implementation notes
 
