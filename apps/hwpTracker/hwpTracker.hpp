@@ -14,8 +14,6 @@
 #include <cstdint>
 #include <cstring>
 
-#include <mx/math/geo.hpp>
-
 /** \defgroup hwpTracker
  * \brief The MagAO-X application to track pupil rotation with the HWP.
  *
@@ -179,7 +177,7 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
                                  int   trackSign, /**< [in] the sign of the parallactic angle term */
                                  float pupilOffset /**< [in] the pupil offset [deg] */ );
 
-    /// Convert a HWP angle to a stage target in [0, 360).
+    /// Convert a HWP angle to a stage target, without wrapping.
     /**
      * \returns the stage target [deg]
      */
@@ -508,15 +506,9 @@ float hwpTracker::trackingOffset( float altitude, float parang, int trackSign, f
 
 float hwpTracker::stageTarget( float hwpPos, float zero, int sign )
 {
-    float target = mx::math::angleMod<mx::math::degreesT<float>>( zero + sign * hwpPos );
-
-    // Guard against fmod rounding a tiny negative angle up to exactly 360.
-    if( target >= 360 )
-    {
-        target = 0;
-    }
-
-    return target;
+    // Not wrapped: the stage moves in absolute position, so wrapping into [0, 360) sends it the long way
+    // round whenever the target crosses the 0/360 boundary.
+    return zero + sign * hwpPos;
 }
 
 float hwpTracker::nearestAngle( float angle, float ref )
@@ -791,7 +783,8 @@ INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stagePos )( const pcf::IndiProperty &
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
-        // Report angles in the user's frame, i.e. nearest to the commanded angle, since the target was wrapped.
+        // Report angles in the user's frame, i.e. nearest to the commanded angle, in case the stage reports a wrapped
+        // position.
         actualPos = nearestAngle( m_sign * ( stagePos - m_zero ), m_hwpSetPos + m_hwpTrackingOffset );
 
         if( std::fabs( actualPos ) < 1e-2 )

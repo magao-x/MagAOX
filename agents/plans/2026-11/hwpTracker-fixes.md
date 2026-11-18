@@ -117,7 +117,8 @@ real coverage. Work on a new branch `ml/hwpTracker-fixes`.
 3. App state per item 2 below; never an invalid state code.
 4. Stage commands are sent only when the stage is `READY`; requested moves
    queue (item 3a); periodic tracking updates skip while not `READY`.
-5. Stage target wrapped into [0, 360); position names matched modulo 90.
+5. Stage target not wrapped (see "Stage target wrapping reverted"); position
+   names matched modulo 90.
 6. Tracking refuses to start before valid `teldata`; invalid `teldata` is
    ignored; `pa` is unwrapped within a tracking session.
 7. Tracking-off behaviour, INDI property names and the `telem_poltrack`
@@ -153,7 +154,8 @@ real coverage. Work on a new branch `ml/hwpTracker-fixes`.
    Periodic tracking updates share the same READY check.
    Working branch: `ml/hwpTracker-updates` (from `dev` at `ccc26f4f`).
 4. **Decided (2026-11-18):**
-   - Stage targets are wrapped into [0, 360). `stagepolrot` rotates freely
+   - **Superseded (2026-11-18), see "Stage target wrapping reverted".**
+     Stage targets are wrapped into [0, 360). `stagepolrot` rotates freely
      with no hard stops, so no shortest-path or forbidden-angle logic.
      No 90/180 deg travel-minimizing wrap (keeps physical orientation).
    - Position names match `hwp_position.current` modulo 90 deg, using the
@@ -283,7 +285,7 @@ Build and run the hwpTracker test locally; no instrument commands.
 - Readback: the measured angle is shifted by a multiple of 360 to lie
   nearest the commanded angle (`setpoint + offset`), so
   `hwp_position_actual` and `hwp_position.current` stay in the user's frame
-  even though the stage target is wrapped into [0, 360).
+  even if the stage reports a wrapped position.
 - Stage state strings are parsed with `stateCodes::str2Code` and checked by
   round trip through `codeText`; unrecognized strings are logged and
   treated as `NOTCONNECTED`.
@@ -348,6 +350,21 @@ wrong-property and invalid-config cases.
 
 Still to do by the user: build the app itself (`make` in `apps/hwpTracker`)
 and the on-instrument checks listed below.
+
+### Stage target wrapping reverted (2026-11-18)
+
+On the instrument, HWP 0 caused a >180 deg stage move, and HWP 45 afterwards
+another one. The stage moves in absolute position, not by shortest path, so
+the [0, 360) wrap sent it the long way round whenever the target crossed
+0/360: with `hwp.zero = 360`, `hwp.sign = -1`, HWP 0 went to stage 0 instead
+of 360 (from a stage near 360), then HWP 45 went to 315 (a 315 deg move).
+
+`stageTarget()` now returns `zero + sign*hwpPos` unwrapped, as before this
+work. The readback still shifts the measured angle nearest the commanded
+angle, which is harmless for an unwrapped stage. Tests now check the
+unwrapped targets and that a 45 deg HWP step is always a 45 deg stage step.
+The stage's own travel limits bound the usable HWP + tracking-offset range,
+as they did before.
 
 ## Follow-up and Edge Cases
 

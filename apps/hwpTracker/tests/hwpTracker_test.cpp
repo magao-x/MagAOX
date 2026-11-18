@@ -390,22 +390,24 @@ TEST_CASE( "hwpTracker angle calculations", "[hwpTracker]" )
         REQUIRE( hwpTracker::trackingOffset( 60, 40, -1, 5 ) == Approx( 45 ) );
     }
 
-    SECTION( "stage target applies zero and sign and wraps into [0, 360)" )
+    SECTION( "stage target applies zero and sign without wrapping" )
     {
         REQUIRE( hwpTracker::stageTarget( 22.5, 360, -1 ) == Approx( 337.5 ) );
-        REQUIRE( hwpTracker::stageTarget( -22.5, 360, -1 ) == Approx( 22.5 ) );
-        REQUIRE( hwpTracker::stageTarget( 0, 360, -1 ) == Approx( 0 ) );
-        REQUIRE( hwpTracker::stageTarget( 400, 360, -1 ) == Approx( 320 ) );
+        REQUIRE( hwpTracker::stageTarget( -22.5, 360, -1 ) == Approx( 382.5 ) );
+        REQUIRE( hwpTracker::stageTarget( 0, 360, -1 ) == Approx( 360 ) );
+        REQUIRE( hwpTracker::stageTarget( 45, 360, -1 ) == Approx( 315 ) );
         REQUIRE( hwpTracker::stageTarget( 50, 10, 1 ) == Approx( 60 ) );
-        REQUIRE( hwpTracker::stageTarget( -50, 10, 1 ) == Approx( 320 ) );
-        REQUIRE( hwpTracker::stageTarget( 700, 10, 1 ) == Approx( 350 ) );
+        REQUIRE( hwpTracker::stageTarget( -50, 10, 1 ) == Approx( -40 ) );
+    }
 
-        for( float pos = -720; pos <= 720; pos += 0.1 )
+    SECTION( "stepping between nearby HWP angles never moves the stage the long way round" )
+    {
+        // Regression: HWP 0 -> 45 previously sent stage targets 0 -> 315 (a 315 deg move).
+        for( float pos = -90; pos <= 90; pos += 0.5 )
         {
-            float target = hwpTracker::stageTarget( pos, 360, -1 );
+            float step = hwpTracker::stageTarget( pos + 45, 360, -1 ) - hwpTracker::stageTarget( pos, 360, -1 );
 
-            REQUIRE( target >= 0 );
-            REQUIRE( target < 360 );
+            REQUIRE( std::fabs( step ) == Approx( 45 ) );
         }
     }
 
@@ -682,8 +684,9 @@ TEST_CASE( "hwpTracker stage readback", "[hwpTracker]" )
     SECTION( "a negative setpoint is reported in the user's frame" )
     {
         REQUIRE( app.setHwp( -22.5 ) == 0 );
-        REQUIRE( app.m_sent.back() == Approx( 22.5 ) );
+        REQUIRE( app.m_sent.back() == Approx( 382.5 ) );
 
+        // A stage that reports its position wrapped into [0, 360) is still read back in the user's frame.
         REQUIRE( app.stagePos( 22.5 ) == 0 );
 
         REQUIRE( app.m_hwpActualPos == Approx( -22.5 ) );
