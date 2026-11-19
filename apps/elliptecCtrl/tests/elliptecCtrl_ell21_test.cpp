@@ -109,7 +109,6 @@ class fakeEll21
     /// PTY slave path the app should open.
     const std::string &slavePath() const
     {
-        /// PTY slave path the app opens.
         return m_slavePath;
     }
 
@@ -139,6 +138,20 @@ class fakeEll21
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         m_failNextCode = code;
+    }
+
+    /// Behave like the ELL21 observed on hardware while it moves.
+    /** Motion commands get no immediate reply, completion is not announced, and queries are mostly ignored while
+     * moving. Every `falseIdleEvery`-th `gp` during motion is answered with the intermediate position and the
+     * following `gs` with a false idle `GS00`, the worst case for deciding completion.
+     */
+    void hardwareQuirks( int falseIdleEvery /**< [in] answer one poll in this many during motion, 0 for never */ )
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        m_ackMotion       = false;
+        m_completionFrame = false;
+        m_silentWhileBusy = true;
+        m_falseIdleEvery  = falseIdleEvery;
     }
 
     /// Ignore the next `n` commands of any kind, as a device does while it boots after power-on.
@@ -208,7 +221,6 @@ class fakeEll21
     std::vector<std::string> commands() const
     {
         std::lock_guard<std::mutex> lock( m_mutex );
-        /// Commands received, without the address character.
         return m_commands;
     }
 
@@ -296,6 +308,24 @@ class fakeEll21
     /// Offset between a move target and the final position, in pulses.
     int32_t m_landingError{ 0 };
 
+    /// Whether motion commands are acknowledged immediately with `GS09`.
+    bool m_ackMotion{ true };
+
+    /// Answer one poll in this many while busy, with a false idle status; 0 for never.
+    int m_falseIdleEvery{ 0 };
+
+    /// Count of `gp` queries received while busy.
+    int m_busyPolls{ 0 };
+
+    /// Whether the next `gs` while busy is answered with a false idle status.
+    bool m_answerNextGs{ false };
+
+    /// Position at the start of the motion in progress.
+    int32_t m_startPos{ 0 };
+
+    /// Time the motion in progress started.
+    clockT::time_point m_startAt;
+
     /// Raw bytes queued to send unprompted.
     std::string m_inject;
 
@@ -351,9 +381,20 @@ class fakeEll21
     /// Start a timed motion toward a target, caller holds m_mutex.
     void startMotion( int32_t target, int ms )
     {
-        m_target = target;
-        m_busy   = true;
-        m_doneAt = clockT::now() + std::chrono::milliseconds( ms );
+        m_startPos = m_pos;
+        m_startAt  = clockT::now();
+        m_target   = target;
+        m_busy     = true;
+        m_doneAt   = m_startAt + std::chrono::milliseconds( ms );
+    }
+
+    /// Position partway through the motion in progress, caller holds m_mutex.
+    int32_t intermediatePosition() const
+    {
+        double total = std::chrono::duration<double>( m_doneAt - m_startAt ).count();
+        double done  = std::chrono::duration<double>( clockT::now() - m_startAt ).count();
+        double f     = ( total > 0 ) ? std::min( 1.0, done / total ) : 1.0;
+        return m_startPos + static_cast<int32_t>( ( m_target - m_startPos ) * f );
     }
 
     /// Complete motion if its time has elapsed, returning any unsolicited frame to send.
@@ -431,6 +472,16 @@ class fakeEll21
             }
             if( m_busy && m_silentWhileBusy )
             {
+                if( mn == "gp" && m_falseIdleEvery > 0 && ++m_busyPolls % m_falseIdleEvery == 0 )
+                {
+                    m_answerNextGs = true;
+                    return po( intermediatePosition() );
+                }
+                if( mn == "gs" && m_answerNextGs )
+                {
+                    m_answerNextGs = false;
+                    return gs( 0 );
+                }
                 return "";
             }
         }
@@ -457,17 +508,17 @@ class fakeEll21
         if( mn == "ho" )
         {
             startMotion( 0, m_motionMs );
-            return gs( 9 );
+            return m_ackMotion ? gs( 9 ) : "";
         }
         if( mn == "ma" )
         {
             startMotion( parseHex8( arg ), m_motionMs );
-            return gs( 9 );
+            return m_ackMotion ? gs( 9 ) : "";
         }
         if( mn == "mr" )
         {
             startMotion( m_pos + parseHex8( arg ), m_motionMs );
-            return gs( 9 );
+            return m_ackMotion ? gs( 9 ) : "";
         }
         if( mn == "st" )
         {
@@ -521,7 +572,6 @@ class fakeEll21
                 }
 
                 out += service();
-                /// Raw bytes queued to send unprompted.
                 out += m_inject;
                 m_inject.clear();
             }
@@ -639,6 +689,12 @@ class ell21App : public MagAOX::app::elliptecCtrl
         m_homeOffsetDeg = deg;
     }
 
+    /// Configure `motion.moveTimeoutSec`.
+    void moveTimeout( double sec /**< [in] motion timeout in seconds */ )
+    {
+        m_moveTimeoutSec = sec;
+    }
+
     /// Configure `stage.powerOnHome`.
     void powerOnHome( bool enable /**< [in] home after power-on */ )
     {
@@ -703,7 +759,6 @@ class ell21App : public MagAOX::app::elliptecCtrl
     std::vector<MagAOX::app::stateCodes::stateCodeT> states()
     {
         std::lock_guard<std::mutex> lock( m_statesMutex );
-        /// FSM states visited, with consecutive duplicates collapsed.
         return m_states;
     }
 
@@ -1228,6 +1283,95 @@ TEST_CASE( "ELL21 slow to answer after power-on is retried before connecting", "
     REQUIRE( dev.count( "ho" ) == 1 );
     REQUIRE( app.homed() );
     REQUIRE_FALSE( app.visited( MagAOX::app::stateCodes::NOTHOMED ) );
+}
+
+/// The ELL21's observed motion behavior: silent while moving, with occasional false idle replies.
+/** Regression for the hardware trace where a home produced no `GS09`, most queries during motion went unanswered,
+ * and one `gs` mid-home answered `GS00`. A long home and move must neither reconnect nor complete early.
+ *
+ * \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "ELL21 silent, falsely idle motion neither reconnects nor completes early", "[elliptecCtrl][ell21]" )
+{
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecCtrl::resolvePending_();
+    MagAOX::app::elliptecCtrl::pollDevice_();
+    // clang-format on
+#endif
+
+    fakeEll21 dev;
+    dev.motionMs( 2000 ); // far longer than the ~0.8 s miss budget at the test timeouts
+    dev.hardwareQuirks( 3 );
+    dev.positionPulses( 30000 );
+
+    ell21App app( "ell21-quirks", dev.slavePath() );
+    app.homeOffset( 45.0 );
+    connectApp( app );
+
+    // Home, then the offset move: each must wait for the stage to actually arrive.
+    REQUIRE( app.pressHome() == 0 );
+    bool earlyHome = false;
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            if( app.homed() && dev.busy() )
+            {
+                earlyHome = true;
+            }
+            return app.state() == MagAOX::app::stateCodes::READY;
+        },
+        10000 ) );
+    REQUIRE_FALSE( earlyHome );
+    REQUIRE( app.positionDeg() == Approx( 45.0 ).margin( 0.01 ) );
+
+    // A long preset move.
+    bool earlyMove = false;
+    REQUIRE( app.requestPreset( 3 ) == 0 ); // 180 deg
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.state() == MagAOX::app::stateCodes::OPERATING;
+        },
+        1000 ) );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            if( app.moving() <= 0 && dev.busy() )
+            {
+                earlyMove = true;
+            }
+            return app.state() == MagAOX::app::stateCodes::READY;
+        },
+        10000 ) );
+    REQUIRE_FALSE( earlyMove );
+    REQUIRE( app.positionDeg() == Approx( 180.0 ).margin( 0.01 ) );
+    REQUIRE( app.preset() == Approx( 3.0F ) );
+
+    REQUIRE_FALSE( app.visited( MagAOX::app::stateCodes::NOTCONNECTED ) );
+}
+
+/// A device that stays silent past the motion timeout fails the move and then reconnects.
+/** \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "ELL21 silent past the motion timeout fails the move", "[elliptecCtrl][ell21]" )
+{
+    fakeEll21 dev;
+    dev.motionMs( 5000 );
+    dev.hardwareQuirks( 0 );
+
+    ell21App app( "ell21-move-timeout", dev.slavePath() );
+    app.moveTimeout( 1.0 );
+    connectApp( app );
+
+    REQUIRE( app.requestPreset( 2 ) == 0 );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.visited( MagAOX::app::stateCodes::NOTCONNECTED );
+        },
+        5000 ) );
+    REQUIRE( app.moving() <= 0 );
 }
 
 } // namespace elliptecCtrlTest

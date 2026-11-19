@@ -184,3 +184,14 @@ Implementation status after the ELL21 design review (2026-11-18):
 - Open hardware questions (resolve with the acceptance checklist and `serial.trace=true`):
   - Whether the ELL21 answers `gs`/`gp` while moving. If it is silent during a home or move, the miss budget will still force a reconnect mid-motion (only optimize suspends the budget). If the trace shows silence, extend the optimize-style suspension to Move/Home with a motion timeout.
   - Whether a motion command produces both an immediate `GS09` and a completion `PO`, or a single reply; the app handles either.
+
+Hardware findings on qwp1 (stageqwprot2, 2026-11-19) and follow-up changes:
+- `address="1"` in the config is read with the quotes, so the app silently fell back to address 0; use `address=N` unquoted. (Possible follow-up: strip quotes and reject an invalid address at startup.)
+- `serial.trace` output only appears with `[logger] logLevel=D2`.
+- The device does not answer for a few seconds after power-on. The first connection got no `in` reply, left pulses/rev unknown, and every move was rejected. Fixed: `connect_()` only succeeds once `in` answers and pulses/rev is known; otherwise it closes the port and retries, keeping the power-on home pending.
+- Confirmed `in` reply: `2IN151210007020251301016800010000` -> ELL21, 360 deg travel, 65536 pulses/rev.
+- Homing trace: `ho0` got no `GS09` acknowledgement; during the ~6 s home most `gp`/`gs` went unanswered and one `gs` answered `GS00` mid-home. This contradicts the review decision "motion completion is decided by status only". Replaced (approved by the user):
+  - New `motion.moveTimeoutSec` (default 30): missed replies during Move/Home/HomeOffset do not count toward the reconnect budget until it elapses, then the operation fails and normal miss counting resumes.
+  - Moves, homes (target 0 pulses) and home offsets record a target in pulses. They complete when a fully answered poll reports idle and the position has held still (within 2 pulses) over two consecutive idle polls at the target (within `stage.presetTolerance`), at least 0.5 s after the command. Holding still away from the target ends the operation normally after a stop request, otherwise fails with "stopped away from target". Optimize keeps the status-only rule.
+  - The simulated ELL21 gained `hardwareQuirks()` reproducing this behavior, with scenarios for a long home + offset + preset move and for exceeding the motion timeout.
+- Still open: the earlier `lab` (115 deg) failures ("command error", "out of range") were not captured in a trace; recheck with the new build.

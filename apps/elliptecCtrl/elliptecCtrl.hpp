@@ -32,8 +32,12 @@ namespace app
  * Elliptec protocol reference (Thorlabs ELLx OEM/Bare modules protocol manual, Issue 12):
  * - TX: `<ADDR><cmd>[args]` with no terminator; command lengths are fixed per command
  * - RX: CRLF-terminated frames `<ADDR><HEADER><payload>`
- * - motion commands (`ho`, `ma`, `mr`, `om`) reply `GS09` while busy (or an error `GS`) and report `PO` or `GS00`
- *   on completion, so they are sent without waiting and their progress is tracked by polling `gs`
+ * - motion commands (`ho`, `ma`, `mr`, `om`) are sent without waiting and tracked by polling `gp` and `gs`
+ *
+ * Observed ELL21 behavior that the motion tracking accommodates: motion commands are not acknowledged, most queries
+ * go unanswered while the stage moves, and `gs` can report idle (`GS00`) mid-motion. So missed replies during a move
+ * do not count toward the reconnect budget until `motion.moveTimeoutSec`, and a move or home completes only when the
+ * stage reports idle and holds still at its target position.
  * - commands used here: `in`, `gs`, `gp`, `hoX`, `st`, `us`, `om`, `svHH`, `maXXXXXXXX`, `mrXXXXXXXX`
  *
  * Threading: all serial I/O is serialized by `m_indiMutex`. `appLogic()` holds it while talking to the
@@ -205,6 +209,10 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Whether the maintenance commands (`optimize`, `save`) are enabled.
     bool m_enableMaintenance{ false };
 
+    /// Maximum duration of a move or home before it is treated as failed, in seconds.
+    /** Missed replies during a move or home do not count toward the reconnect budget until this elapses. */
+    double m_moveTimeoutSec{ 30 };
+
     /// Maximum duration of an optimize routine before it is treated as failed, in seconds.
     double m_optimizeTimeoutSec{ 600 };
 
@@ -260,6 +268,21 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
 
     /// Whether a busy status has been seen since the current pending operation was commanded.
     bool m_sawBusy{ false };
+
+    /// Whether the current pending operation has a target position in `m_targetPulses`.
+    bool m_hasTarget{ false };
+
+    /// Target position in native pulses of the current pending operation.
+    int32_t m_targetPulses{ 0 };
+
+    /// Consecutive successful idle polls with an unchanged position during the current pending operation.
+    int m_idleStreak{ 0 };
+
+    /// Position in pulses at the previous idle poll, for detecting that motion has stopped.
+    int32_t m_lastIdlePulses{ 0 };
+
+    /// Largest change in pulses between idle polls that still counts as stationary (encoder jitter).
+    static constexpr int32_t s_stationaryPulses{ 2 };
 
     /// First error status code reported during the current pending operation, or 0.
     uint8_t m_latchedError{ 0 };
@@ -500,8 +523,17 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
      */
     int pollDevice_();
 
-    /// Resolve the pending operation from the latest status.
+    /// Resolve the pending operation from the latest status and position.
+    /** An operation with a target position completes once the device reports idle and the position has held still
+     * over two consecutive idle polls at the target; holding still away from the target ends it (normally after a
+     * stop request, otherwise as a failure). Operations without a target complete on idle status.
+     */
     void resolvePending_();
+
+    /// Distance in pulses between two positions on the circle.
+    double pulseDistance_( int32_t a, /**< [in] first position in pulses */
+                           int32_t b  /**< [in] second position in pulses */
+    ) const;
 
     /// Complete the pending operation successfully.
     void completePending_();
@@ -713,6 +745,16 @@ inline void elliptecCtrl::setupConfig()
                 "int",
                 "Velocity percent 0..100 (raised to the model minimum)" );
 
+    config.add( "motion.moveTimeoutSec",
+                "30",
+                "motion.moveTimeoutSec",
+                argType::Optional,
+                "motion",
+                "moveTimeoutSec",
+                false,
+                "double",
+                "Maximum duration (s) of a move or home before it is treated as failed" );
+
     config.add( "motion.optimizeTimeoutSec",
                 "600",
                 "motion.optimizeTimeoutSec",
@@ -817,6 +859,7 @@ inline int elliptecCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
         m_velPercent = 100;
     }
 
+    _config( m_moveTimeoutSec, "motion.moveTimeoutSec" );
     _config( m_optimizeTimeoutSec, "motion.optimizeTimeoutSec" );
 
     _config( m_cmdOptimize, "device.optimizeCmd" );
@@ -1942,7 +1985,9 @@ inline int elliptecCtrl::cmd_home_( uint8_t dir )
     }
 
     beginPending_( Pending::Home );
-    m_statusHint = "Homing";
+    m_hasTarget    = true;
+    m_targetPulses = 0; // the home position
+    m_statusHint   = "Homing";
     return 0;
 }
 
@@ -2024,6 +2069,8 @@ inline int elliptecCtrl::cmd_moveAbs_pulses_( int32_t pulses )
     }
 
     beginPending_( Pending::Move );
+    m_hasTarget    = true;
+    m_targetPulses = pulses;
     return 0;
 }
 
@@ -2036,7 +2083,10 @@ inline int elliptecCtrl::cmd_moveRel_pulses_( int32_t pulses )
         return -1;
     }
 
+    const int32_t start = m_posPulses;
     beginPending_( Pending::Move );
+    m_hasTarget    = true;
+    m_targetPulses = start + pulses;
     return 0;
 }
 
@@ -2078,6 +2128,8 @@ inline void elliptecCtrl::beginPending_( Pending p )
     m_sawBusy       = false;
     m_latchedError  = 0;
     m_stopRequested = false;
+    m_hasTarget     = false;
+    m_idleStreak    = 0;
     m_errorText.clear();
     m_moving = ( p == Pending::Home || p == Pending::HomeOffset ) ? 2 : 1;
 }
@@ -2265,17 +2317,22 @@ inline int elliptecCtrl::pollDevice_()
     // Missed replies => debounce; reconnect if too many in a row
     if( rcP > 0 || rcS > 0 )
     {
-        if( m_pending == Pending::Optimize )
+        if( m_pending != Pending::None )
         {
-            // The bus is occupied during optimization; silence is expected until the routine times out.
+            // The ELL21 mostly stops answering while it moves, and the bus is occupied during optimization, so
+            // silence is expected until the operation times out.
+            m_idleStreak = 0;
+
+            const bool   optimizing = ( m_pending == Pending::Optimize );
+            const double timeout    = optimizing ? m_optimizeTimeoutSec : m_moveTimeoutSec;
             double elapsed = std::chrono::duration<double>( std::chrono::steady_clock::now() - m_pendingStart ).count();
-            if( elapsed < m_optimizeTimeoutSec )
+            if( elapsed < timeout )
             {
                 updateStatus_();
                 return +1;
             }
 
-            failPending_( "motor optimization timed out" );
+            failPending_( optimizing ? "motor optimization timed out" : "no response from the device during motion" );
         }
 
         if( ++m_commMisses <= m_commMaxMisses )
@@ -2315,7 +2372,8 @@ inline void elliptecCtrl::resolvePending_()
 
     if( m_gs == 0x09 )
     {
-        m_moving = ( m_pending == Pending::Home || m_pending == Pending::HomeOffset ) ? 2 : 1;
+        m_moving     = ( m_pending == Pending::Home || m_pending == Pending::HomeOffset ) ? 2 : 1;
+        m_idleStreak = 0;
         return;
     }
 
@@ -2324,14 +2382,64 @@ inline void elliptecCtrl::resolvePending_()
         return;
     }
 
-    // Idle reported. Guard against a status read taken before the device started the command.
     double elapsed = std::chrono::duration<double>( std::chrono::steady_clock::now() - m_pendingStart ).count();
-    if( !m_sawBusy && elapsed < 0.2 )
+
+    // Operations without a target position (optimize) complete on idle status, guarded against a status read taken
+    // before the device started the command.
+    if( !m_hasTarget )
+    {
+        if( !m_sawBusy && elapsed < 0.2 )
+        {
+            return;
+        }
+
+        completePending_();
+        return;
+    }
+
+    // The ELL21 can report idle while still moving, so idle status alone is not completion. Require the position to
+    // hold still over two consecutive idle polls, then compare it with the target.
+    if( m_idleStreak > 0 && pulseDistance_( m_posPulses, m_lastIdlePulses ) <= s_stationaryPulses )
+    {
+        ++m_idleStreak;
+    }
+    else
+    {
+        m_idleStreak = 1;
+    }
+    m_lastIdlePulses = m_posPulses;
+
+    if( m_idleStreak < 2 || elapsed < 0.5 )
     {
         return;
     }
 
-    completePending_();
+    const double tolPulses = m_presetToleranceDeg / 360.0 * static_cast<double>( m_pulsesPerRev );
+    if( pulseDistance_( m_posPulses, m_targetPulses ) <= tolPulses )
+    {
+        completePending_();
+        return;
+    }
+
+    if( m_stopRequested )
+    {
+        log<text_log>( "motion stopped by request before reaching its target" );
+        completePending_();
+        return;
+    }
+
+    failPending_( "stopped away from target" );
+}
+
+inline double elliptecCtrl::pulseDistance_( int32_t a, int32_t b ) const
+{
+    double d = std::abs( static_cast<double>( a ) - static_cast<double>( b ) );
+    if( m_pulsesPerRev > 0 )
+    {
+        d = std::fmod( d, static_cast<double>( m_pulsesPerRev ) );
+        d = std::min( d, static_cast<double>( m_pulsesPerRev ) - d );
+    }
+    return d;
 }
 
 inline void elliptecCtrl::completePending_()
@@ -2349,7 +2457,9 @@ inline void elliptecCtrl::completePending_()
             }
 
             beginPending_( Pending::HomeOffset );
-            m_statusHint = "Homed. Applying offset";
+            m_hasTarget    = true;
+            m_targetPulses = p;
+            m_statusHint   = "Homed. Applying offset";
             recordStage( true );
             recordPosition( true );
             return;

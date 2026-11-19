@@ -920,6 +920,24 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
         return m_optimizeTimeoutSec;
     }
 
+    /// Force the motion timeout in seconds.
+    void setMoveTimeout( double sec /**< [in] timeout in seconds */ )
+    {
+        m_moveTimeoutSec = sec;
+    }
+
+    /// Force whether a stop was requested during the pending operation.
+    void setStopRequested( bool requested /**< [in] new flag */ )
+    {
+        m_stopRequested = requested;
+    }
+
+    /// Return the configured motion timeout in seconds.
+    double moveTimeoutSec() const
+    {
+        return m_moveTimeoutSec;
+    }
+
     /// Force the optimize timeout in seconds.
     void setOptimizeTimeout( double sec /**< [in] timeout in seconds */ )
     {
@@ -1718,6 +1736,7 @@ TEST_CASE( "elliptecCtrl loads configuration and formats helper state correctly"
         REQUIRE( appClamp.pulsesPerRev() == 8192 );
         REQUIRE( appClamp.velPercent() == 0 );
         REQUIRE( appClamp.presetToleranceDeg() == Approx( 0.5 ) );
+        REQUIRE( appClamp.moveTimeoutSec() == Approx( 30 ) );
         REQUIRE( appClamp.enableMaintenance() == false );
         REQUIRE( appClamp.serialTrace() == false );
     }
@@ -2879,15 +2898,22 @@ TEST_CASE( "elliptecCtrl poll resolution updates stage state across busy, idle, 
         REQUIRE( app.statusHint() == "Homed. Applying offset" );
         REQUIRE( dev.commands().back() == "0ma00000200" );
 
-        // The offset move completes the home.
-        app.setSawBusy( true );
+        // The offset move completes the home once the stage holds still at the offset angle.
+        dev.handler(
+            []( const std::string &cmd ) -> std::string
+            {
+                return elliptecReply( '0', cmd == "0gp" ? "PO00000200" : "GS00" );
+            } );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 550 ) );
+        REQUIRE( app.pollDeviceDirect() == 0 );
+        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::HomeOffset );
         REQUIRE( app.pollDeviceDirect() == 0 );
         REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
         REQUIRE( app.homed() == true );
         REQUIRE( app.state() == MagAOX::app::stateCodes::READY );
     }
 
-    SECTION( "an idle status before the device reports busy does not complete a fresh command" )
+    SECTION( "a move completes only when the stage holds still at its target" )
     {
         // clang-format off
 #ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
@@ -2905,15 +2931,86 @@ TEST_CASE( "elliptecCtrl poll resolution updates stage state across busy, idle, 
         preparePollingApp( app, dev );
 
         app.setTimeouts( 100 );
+        app.setHomed( true );
+
+        // Idle status right after the command, still at the start position: not complete.
         REQUIRE( app.moveAbsDegDirect( 90.0 ) == 0 );
         REQUIRE( dev.commands().back() == "0ma00000400" ); // let the stateless fake consume the move alone
+        REQUIRE( app.pollDeviceDirect() == 0 );
         REQUIRE( app.pollDeviceDirect() == 0 );
         REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Move );
         REQUIRE( app.moving() == 1 );
 
-        std::this_thread::sleep_for( std::chrono::milliseconds( 250 ) );
+        // Idle and holding still away from the target after the start guard: the move failed.
+        std::this_thread::sleep_for( std::chrono::milliseconds( 550 ) );
         REQUIRE( app.pollDeviceDirect() == 0 );
         REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
+        REQUIRE( app.errorText() == "Error: move failed (stopped away from target)" );
+        REQUIRE( app.homed() == true );
+
+        // Idle at the target, but moving between polls: wait until it holds still.
+        int32_t pos = 0x3F0;
+        dev.handler(
+            [&pos]( const std::string &cmd ) -> std::string
+            {
+                if( cmd == "0gp" )
+                {
+                    char buf[16];
+                    std::snprintf( buf, sizeof( buf ), "PO%08X", static_cast<unsigned>( pos ) );
+                    return elliptecReply( '0', buf );
+                }
+                return elliptecReply( '0', "GS00" );
+            } );
+        REQUIRE( app.moveAbsDegDirect( 90.0 ) == 0 );
+        REQUIRE( dev.commands().back() == "0ma00000400" );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 550 ) );
+        REQUIRE( app.pollDeviceDirect() == 0 );
+        pos = 0x400;
+        REQUIRE( app.pollDeviceDirect() == 0 );
+        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Move );
+        REQUIRE( app.pollDeviceDirect() == 0 );
+        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
+        REQUIRE( app.errorText().empty() );
+
+        // Holding still away from the target after a stop request ends the move normally.
+        pos = 0x100;
+        REQUIRE( app.moveAbsDegDirect( 90.0 ) == 0 );
+        REQUIRE( dev.commands().back() == "0ma00000400" );
+        REQUIRE( app.cmdStopDirect() == 0 );
+        app.setStopRequested( true );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 550 ) );
+        REQUIRE( app.pollDeviceDirect() == 0 );
+        REQUIRE( app.pollDeviceDirect() == 0 );
+        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
+        REQUIRE( app.errorText().empty() );
+    }
+
+    SECTION( "silence during a move is tolerated until the motion timeout" )
+    {
+        fakeElliptecDevice dev(
+            []( const std::string &cmd ) -> std::string
+            {
+                static_cast<void>( cmd );
+                return "";
+            } );
+        elliptecCtrl_test app( "elliptec-move-quiet", testRoot( "move_quiet" ) );
+        preparePollingApp( app, dev );
+        app.setTimeouts( 5 );
+        app.setCommMaxMisses( 1 );
+
+        REQUIRE( app.moveAbsDegDirect( 90.0 ) == 0 );
+        for( int n = 0; n < 4; ++n )
+        {
+            REQUIRE( app.pollDeviceDirect() == 1 );
+        }
+        REQUIRE( app.commMisses() == 0 );
+        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Move );
+
+        app.setMoveTimeout( 0.0 );
+        REQUIRE( app.pollDeviceDirect() == 1 );
+        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
+        REQUIRE( app.errorText() == "Error: move failed (no response from the device during motion)" );
+        REQUIRE( app.commMisses() == 1 );
     }
 
     SECTION( "device errors fail the pending operation without dropping the connection" )
