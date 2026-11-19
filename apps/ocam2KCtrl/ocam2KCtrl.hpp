@@ -185,7 +185,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     std::atomic<int> m_descrambleWorkerCpu{ -1 }; ///< Verified descramble logical CPU, or -1 before verification.
 
     /// Latched once per frame; isolate ordinary-thread snapshots from the worker's changing frame counters.
-    alignas( 64 ) std::atomic<DescrambleMethod> m_descrambleRequested{ DescrambleMethod::sdk };
+    alignas( 64 ) std::atomic<DescrambleMethod> m_descrambleRequested{ DescrambleMethod::optimized };
 
     std::atomic<DescrambleMethod> m_descrambleApplied{ DescrambleMethod::none }; ///< Last completed load's method.
 
@@ -714,7 +714,7 @@ inline void ocam2KCtrl::setupConfig()
         "descrambleMethod",
         false,
         "string",
-        "Descramble implementation: sdk (default), compact, mapped, optimized, or parallel (validated bin2 only)." );
+        "Descramble implementation: sdk, compact, mapped, optimized (default), or parallel (validated bin2 only)." );
 
     config.add( "descramble.cpuset",
                 "",
@@ -795,7 +795,7 @@ inline int ocam2KCtrl::loadConfigImpl()
 
     config( m_ocamDescrambleFile, "camera.ocamDescrambleFile" );
 
-    std::string descrambleMethod = "sdk";
+    std::string descrambleMethod = "optimized";
     config( descrambleMethod, "camera.descrambleMethod" );
 
     if( descrambleMethod != "sdk" && descrambleMethod != "compact" && descrambleMethod != "mapped" &&

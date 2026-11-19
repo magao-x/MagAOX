@@ -49,22 +49,24 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 Investigation date: 2026-11-16. Source baseline: `dev`, `cbc1d5cf`.
 Host verified as `mx11`. This pass inspects local source and configuration
 only; no instrument commands, benchmarks, or implementation were run.
-Status as of 2026-11-18: **single-core implementation complete; current RTC
-captures show about 3.9 us lower mean with a small positive jitter difference.
-The local second-thread experiment is complete: its kernel improves, but its
-staged result depends strongly on cadence. The operator has now authorized an
-instrument test and a configurable runtime worker; RTC qualification remains
-open**. CPU reservation, deployment and hardware execution remain operator
-steps. The implementation and test record below distinguish local validation
-from actual instrument measurements.
+Status as of 2026-11-18: **the operator comparison favors single-thread
+optimized, which is now the default requested method**. The latest
+parallel-labeled RTC capture is about 3.66 us slower acquisition-to-write;
+method/placement readback confirmation is tracked with that measurement below.
+SDK remains explicitly selectable and is the fallback for unsupported modes or
+unvalidated mappings. The earlier small spread penalty versus SDK remains part
+of the default tradeoff; long-run tails and complete-loop qualification are
+not established by short telemetry excerpts. Deployment and hardware execution
+remain operator steps.
 
 ## Task Summary
 
 Reduce camwfs's acquisition-to-publication cost without degrading image
-correctness, jitter, frame delivery, or end-to-end AO latency. Retain the SDK
-descrambler as the default and provide a live INDI comparison with qualified
-alternatives. Start with measured single-core candidates, then evaluate a
-persistent second worker if its gain justifies dedicating another core.
+correctness, jitter, frame delivery, or end-to-end AO latency. Following the
+operator comparisons, default to the validated optimized single-thread path,
+retain SDK as the explicit reference and unsupported-mode/table fallback, and
+keep live INDI comparison methods. The worker experiment has not justified
+dedicating another core in the latest labeled RTC capture.
 
 ### Findings from the current code
 
@@ -1398,3 +1400,111 @@ deployment/restart, checking actual placement readbacks and the matched
 measurement crossover remain operator steps. No cpuset assignment was changed
 on the instrument, and no instrument performance result has yet been obtained
 for `parallel`.
+
+
+## RTC parallel comparison and optimized default — 2026-11-18
+
+The operator supplied five optimized `fgtimes` reports with log timestamps
+2026-11-19T00:40:30.376646582–00:40:34.379166168 and six reports labeled parallel
+at 00:40:45.914394889–00:40:51.448416061. This entry uses the client-local date
+2026-11-18. Acquisition and publication means remain approximately 500 us,
+or **2,000 FPS**. The operator called the result clear and proposed making
+optimized the default unless another experiment was warranted.
+
+Earlier in this session the operator directly confirmed current CPU topology:
+CPU31 has SMT list `31` and L3 list `24-31`; CPU32 has `32` and `32-39`; CPU33
+has `33` and `32-39`. Thus CPU32/33 share L3 and have no other online SMT
+siblings in that readback. CPU31 is not on their CCD. The comparison was
+prepared with `camwfs_sw`/CPU32 for the worker and `camwfs`/CPU33 for acquisition.
+
+The telemetry excerpt itself does not include applied-method or worker-state
+readbacks. Operator confirmation of `applied=parallel`, `parallel=running`,
+`caller_cpu=33`, and `worker_cpu=32` has been requested to distinguish active
+worker timing from SDK fallback. This does not block the default decision,
+which also relies on the earlier SDK/optimized/SDK comparisons. No return-to-
+optimized segment, stage-timing setting, conversion-stage samples, frame-quality
+counters or end-to-end loop measurements are supplied in this excerpt.
+
+Arithmetic averages of every supplied window summary, in microseconds:
+
+| Metric | Optimized | Parallel-labeled |
+| --- | ---: | ---: |
+| Acquisition-to-write mean | 33.760375 | 37.422939 |
+| Acquisition-to-write reported standard deviation | 1.067152 | 1.118703 |
+| Acquisition-interval reported standard deviation | 0.559981 | 0.587159 |
+| Publication-interval reported standard deviation | 1.703262 | 1.770800 |
+
+The parallel-labeled mean is **3.662563 us (10.85%) slower** than optimized,
+with **0.051551 us (4.83%) greater reported standard deviation**. Publication-
+interval standard deviation increases 0.067538 us (3.97%). These are arithmetic
+averages of rolling-window summaries, not pooled frame distributions,
+independent experiments, standard errors or percentile estimates.
+
+All parallel-labeled means, 37.400656–37.439290 us, exceed all optimized means,
+33.714670–33.790704 us. Reported WMA standard deviations likewise do not overlap:
+1.08049–1.18351 us versus 1.04968–1.07959 us. The first two parallel reports have
+larger spread, but excluding both as a sensitivity check gives 37.426396 us
+mean and 1.097645 us average standard deviation; the slower-mean conclusion
+persists. No samples are excluded from the main comparison.
+
+Assuming the worker was active, this result supports retiring parallel as the
+preferred performance direction: it spends another core and regresses the
+complete acquisition-to-write time. It is consistent with the local warning
+that kernel speedup can disappear after staging, but these aggregate timings
+do not isolate handoff, cache ownership, frequency or copy costs. They do not
+establish which component caused the regression.
+
+### Default decision and implementation
+
+Accept the operator's proposed `optimized` default. Earlier matched RTC
+captures found approximately 3.9 us improvement over SDK, with a small positive
+reported spread difference that remains an accepted tradeoff rather than a
+claim that the original strict no-jitter-regression criterion was met.
+No further kernel experiment is required before this default change.
+
+One optional future experiment is paired-row traversal on a single core: the
+local control saved about 0.29 us including staging. It has no RTC measurement
+and is a lower-priority follow-up, not an additional runtime method or a
+reason to postpone this choice. Retain existing SDK/compact/mapped/parallel
+choices for explicit comparison and recovery.
+
+The patch changes the constructor's requested method, the omitted
+`camera.descrambleMethod` configuration value, and configuration help to
+`optimized`. Existing configuration/whole-frame tests now expect the missing
+key and an initial prepared frame to select optimized. Explicit `sdk` and
+other method settings still override the default; fallback, digital sampling,
+worker parking and stream publication code are unchanged.
+
+The existing status contract is retained: when optimized is requested in an
+unsupported mode or with an unvalidated table, conversion uses SDK and the
+unmet request reports Alert. An explicit SDK configuration avoids that Alert
+for intentionally unsupported modes. No silent change to request/readback
+semantics is included in this default-only patch.
+
+The operator should remove any explicit `camera.descrambleMethod=sdk` override
+or set it to `optimized` when adopting the new default. Removing/emptying the
+experimental `descramble.cpuset` setting at the next restart avoids creating
+the unused worker and allows the reserved core's previous workload to be
+restored. Keep any workload restoration outside a matched timing crossover.
+The assistant does not alter instrument configuration or run these steps.
+
+Parsed supplied values and arithmetic are retained in
+`/tmp/ocam-parallel-rtc-20261118.json`. Affected files are the controller header,
+its existing descramble-selection test, this plan and the comparison guide.
+
+
+### Default-change validation
+
+The production app compiled and linked with the local real EDT SDK using the
+explicit SDK include/library paths recorded above. Forced rebuilds of the
+existing descramble-selection and main controller suites passed **29,499
+assertions in eight cases** and **902 assertions in 36 cases**, respectively:
+**30,401 assertions in 44 cases** total. The default config and initial
+prepared frame now exercise optimized, while explicit SDK selection and
+unsupported-mode/table fallback remain covered. No instrument executable was
+run or configuration changed.
+
+Build/test logs are `/tmp/ocam-default-app-build.log` and
+`/tmp/ocam-default-20261118/`. The changed C++ files were formatted, their
+full-file documentation remains consistent, the original plan prefix is
+unchanged, and `git diff --check` passes.

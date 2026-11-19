@@ -108,19 +108,20 @@ TEST_CASE( "ocam2KCtrl validates descramble method configuration", "[ocam2KCtrl]
         else
         {
             REQUIRE( result == 0 );
-            const auto expected = method == "compact"     ? ocam2KCtrl::DescrambleMethod::compact
-                                  : method == "mapped"    ? ocam2KCtrl::DescrambleMethod::mapped
-                                  : method == "optimized" ? ocam2KCtrl::DescrambleMethod::optimized
-                                  : method == "parallel"  ? ocam2KCtrl::DescrambleMethod::parallel
-                                                          : ocam2KCtrl::DescrambleMethod::sdk;
+            const auto expected = method == "compact"  ? ocam2KCtrl::DescrambleMethod::compact
+                                  : method == "mapped" ? ocam2KCtrl::DescrambleMethod::mapped
+                                  : ( method.empty() || method == "optimized" )
+                                      ? ocam2KCtrl::DescrambleMethod::optimized
+                                  : method == "parallel" ? ocam2KCtrl::DescrambleMethod::parallel
+                                                         : ocam2KCtrl::DescrambleMethod::sdk;
             REQUIRE( app.m_descrambleRequested.load() == expected );
             REQUIRE( app.initDescramble() == 0 );
 
             for( const std::string choice : descrambleChoices )
             {
-                REQUIRE(
-                    app.m_indiP_descrambleMethod[choice].getSwitchState() ==
-                    ( choice == ( method.empty() ? "sdk" : method ) ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+                REQUIRE( app.m_indiP_descrambleMethod[choice].getSwitchState() ==
+                         ( choice == ( method.empty() ? "optimized" : method ) ? pcf::IndiElement::On
+                                                                               : pcf::IndiElement::Off ) );
             }
         }
     }
@@ -211,9 +212,9 @@ TEST_CASE( "ocam2KCtrl switches descramblers between complete frames", "[ocam2KC
     g_ocam2StubState.outputImage.assign( map.size(), -777 );
     const auto sdkOutput = g_ocam2StubState.outputImage;
     REQUIRE( app.loadImageIntoStream( output.data() ) == 0 );
-    REQUIRE( output == sdkOutput );
+    REQUIRE( output == expected );
     app.updateDescramble();
-    REQUIRE( app.m_indiP_descrambleStatus["applied"].get<std::string>() == "sdk" );
+    REQUIRE( app.m_indiP_descrambleStatus["applied"].get<std::string>() == "optimized" );
 
     for( const std::string method : { "parallel",
                                       "sdk",
