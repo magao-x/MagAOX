@@ -89,7 +89,7 @@ the operator's responsibility. No source access occurs while initially disabled.
 Startup `enabled=true` is rejected. `scale=0` is the supplied startup default;
 a configured finite scale in [0,1] is also accepted while output remains off.
 
-`dm_status` retains its existing element names:
+The read-only `dm_status` elements describe the producer handshake. Counters accumulate since process startup.
 
 | Element | Meaning |
 | --- | --- |
@@ -99,8 +99,34 @@ a configured finite scale in [0,1] is also accepted while output remains off.
 | `zero_acknowledged` | An exact copied-zero receipt was observed, with no later payload submitted. |
 | `fault` | Calibration unavailable or the current sample cannot produce a finite command; no latched code 5. |
 | `transport_fault` | Current attachment/transport error; clears on recovery. |
+| `poll_waits` | Attached polls returning zero. These include ineligible schedules, repeated slots and waits for a receipt. |
+| `requests` | New eligible slots returned by the base. |
+| `published` | Successful payload and ready-record commits by this instance. |
+| `late_returns` / `rejected` | Failed publish calls observed at or after the cutoff / before the cutoff. The base returns a boolean. A late return alone cannot identify the internal check that failed. |
+| `outstanding` | The base is holding the payload for the scheduler, including a pending commit adopted on startup. |
+| `copied` / `discarded` | Exact dispositions observed for this instance's commits. |
 
-An acknowledgement proves transport copying, not physical mirror motion. Disable
+The scheduler sets the step count for all mapped destinations. On the 2 kHz
+production grid, steps 1, 2, 3 and 0 target 125, 250, 375 and 500 µs. Step 0
+belongs to the next primary cycle. With `readyLeadUs=70`, the input cutoffs
+are 55, 180, 305 and 430 µs. `step0LeadUs` and `copyBudgetUs` govern later
+scheduler work. A candidate for measured wake lateness is `syncopation.writeLeadUs=125`, so a
+producer that discovers a slot within one subframe of cutoff can submit the
+cached surface immediately. The base still checks the exact slot and cutoff.
+This setting passed a virtual-time regression. Its effect on exao2 requires
+live request and deadline counters before choosing a deployment change.
+
+For quiet auxiliary streams, compare counter deltas over the same interval.
+If `poll_waits` rises with `requests=0`, check `outstanding` and the current
+timing payload. The scheduler can publish invalid records at the primary rate
+while its runtime `enable.toggle` is Off. `production.enabled=true` selects
+the scheduler implementation. Check the runtime enable and `settings.steps`
+separately. Rising `requests` and `late_returns` show failures after request
+selection. Once `published` rises, compare `copied` and `discarded` with
+scheduler `production.accepted3`, `missing3` and `rejected3` for the supplied
+destination ordering.
+
+An acknowledgement records the scheduler's private snapshot or discard. Disable
 removal does not require another accelerometer sample. Normal shutdown retains
 the existing bounded 100-ms tagged-zero attempt and reports an unacknowledged
 removal. A tiny CRTP lifetime holder permits that final zero after MagAOXApp sets

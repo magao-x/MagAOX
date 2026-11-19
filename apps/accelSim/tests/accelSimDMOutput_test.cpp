@@ -33,6 +33,9 @@ std::filesystem::path g_directory; ///< Fresh ordinary-file namespace; never the
 int64_t               g_tick{ 1000000000 }; ///< Virtual time for the unchanged producer.
 bool                  g_autoAck{ false };   ///< Copy receipts automatically only in shutdown tests.
 
+int64_t g_wakeDelayNs{ 0 };   ///< Injected latency of a sleeping producer after its requested wake time.
+bool    g_ackOnPoll{ false }; ///< Deliver a receipt as the producer enters its next poll.
+
 /// Allocate a named private image without invoking a native image library.
 dmImage &makeImage( const std::string &name /**< [in] fixture name */,
                     size_t             count /**< [in] element count */,
@@ -64,8 +67,9 @@ dmImage &makeImage( const std::string &name /**< [in] fixture name */,
 /// Advertise the next four standard slots using the production record format.
 void schedule()
 {
-    auto         &words   = g_images.at( "private_timing" ).m_words;
-    const int64_t origin  = g_tick - g_tick % 500000;
+    auto         &words  = g_images.at( "private_timing" ).m_words;
+    const int64_t origin = g_tick - g_tick % 500000;
+    ++g_images.at( "private_timing" ).m_metadata.cnt0;
     words[synco::version] = synco::productionVersion;
     words[synco::epoch] = words[synco::generation] = 1;
     words[synco::state]                            = synco::armed;
@@ -73,11 +77,11 @@ void schedule()
     words[synco::period]                           = 500000;
     words[synco::reference]                        = origin;
     words[synco::cycle]                            = origin / 500000;
-    words[synco::expires]                          = origin + 1500000;
+    words[synco::expires]                          = origin + 1000000;
     for( int step = 0; step < 4; ++step )
     {
-        words[synco::targets + step] = origin + 125000 * ( step + 1 );
-        words[synco::cutoffs + step] = words[synco::targets + step] - 10000;
+        words[synco::targets + step] = origin + 125000 * ( step ? step : 4 );
+        words[synco::cutoffs + step] = words[synco::targets + step] - 70000;
     }
 }
 
@@ -107,11 +111,13 @@ struct dmOutputApp : MagAOX::app::accelSim
     using accelSim::m_dmZeroPending;
     using accelSim::m_indiP_dmEnable;
     using accelSim::m_indiP_dmScale;
+    using accelSim::m_indiP_dmStatus;
     using accelSim::m_model;
     using accelSim::m_shutdown;
     using accelSim::m_syncopationTiming;
     using accelSim::serviceDM;
     using accelSim::setupProperties;
+    using accelSim::updateDMINDI;
 };
 
 /// Own one isolated registry and synthetic calibrated app for the duration of a test.
@@ -120,7 +126,7 @@ struct dmOutputFixture
     dmOutputApp m_app; ///< Actual implementation, with only framework lifecycle and stream APIs doubled.
 
     /// Create ordinary files and calibrated ramps, without native streams or hardware.
-    dmOutputFixture();
+    explicit dmOutputFixture( int writeLeadUs = 50 /**< [in] Configured producer lead before cutoff in us. */ );
 
     /// Release producer ownership before deleting this test's private files.
     ~dmOutputFixture();
@@ -132,20 +138,23 @@ struct dmOutputFixture
     void enable( double scale /**< [in] requested scale */ );
 };
 
-dmOutputFixture::dmOutputFixture()
+dmOutputFixture::dmOutputFixture( int writeLeadUs )
 {
     char path[] = "/tmp/accelSim-producer-XXXXXX";
     REQUIRE( mkdtemp( path ) != nullptr );
     g_directory = path;
     g_images.clear();
-    g_tick    = 1000000000;
-    g_autoAck = false;
+    g_tick        = 1000000000;
+    g_autoAck     = false;
+    g_wakeDelayNs = 0;
+    g_ackOnPoll   = false;
     makeImage( "private_timing", synco::words );
     makeImage( "dm01disp10_aux", 2500, true );
     makeImage( "dm01disp10_aux_ack", synco::ackWords );
     makeImage( "dm10disp10_aux", 2500, true ).m_pixels.assign( 2500, .125f );
     schedule();
     m_app.setupConfig();
+    m_app.config.m_values["syncopation.writeLeadUs"] = std::to_string( writeLeadUs );
     REQUIRE( m_app.loadConfigImpl( m_app.config ) == 0 );
     REQUIRE( m_app.setupProperties() == 0 );
     std::vector<double> x( 2500 ), y( 2500 ), mask( 2500, 1 );
@@ -169,8 +178,9 @@ dmOutputFixture::~dmOutputFixture()
 
 void dmOutputFixture::advance()
 {
-    g_tick += 125000;
-    schedule();
+    g_tick += 125000 - g_tick % 125000;
+    if( g_tick % 500000 == 0 )
+        schedule();
 }
 
 void dmOutputFixture::enable( double scale )
@@ -188,6 +198,11 @@ int dmOutputClock( clockid_t clock, timespec *value )
 {
     if( clock != CLOCK_MONOTONIC )
         return ::clock_gettime( clock, value );
+    if( g_ackOnPoll )
+    {
+        g_ackOnPoll = false;
+        acknowledge();
+    }
     value->tv_sec  = g_tick / 1000000000;
     value->tv_nsec = g_tick % 1000000000;
     return 0;
@@ -195,7 +210,7 @@ int dmOutputClock( clockid_t clock, timespec *value )
 
 int dmOutputSleep( clockid_t, int, const timespec *value, timespec * )
 {
-    g_tick = std::max( g_tick, int64_t( value->tv_sec ) * 1000000000 + value->tv_nsec );
+    g_tick = std::max( g_tick, int64_t( value->tv_sec ) * 1000000000 + value->tv_nsec + g_wakeDelayNs );
     return 0;
 }
 
@@ -347,6 +362,9 @@ TEST_CASE( "accelSim 8000 scaled producer samples and numerical recovery", "[acc
     const auto counter = source.m_metadata.cnt0;
     REQUIRE_FALSE( app.serviceDM() );
     REQUIRE( source.m_metadata.cnt0 == counter );
+    app.updateDMINDI();
+    REQUIRE( app.m_indiP_dmStatus["rejected"].get<int>() == 1 );
+    REQUIRE( app.m_indiP_dmStatus["late_returns"].get<int>() == 0 );
     app.m_model.m_sample.m_pointing[0] = NAN;
     REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
     fixture.advance();
@@ -411,6 +429,142 @@ TEST_CASE( "accelSim producer ownership and automatic transport retry", "[accelS
     close( owner );
     REQUIRE( fixture.m_app.serviceDM() );
     REQUIRE_FALSE( fixture.m_app.m_dmTransportFault );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::serviceDM;
+#endif
+    // clang-format on
+}
+
+/** \brief Repeated disabled records and late absolute wakes both reproduce silent output with a held producer lock.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim distinguishes timing activity from publishable slots", "[accelSim][dm-output]" )
+{
+    dmOutputFixture fixture;
+    auto           &app    = fixture.m_app;
+    auto           &timing = g_images.at( "private_timing" );
+    auto           &source = g_images.at( "dm01disp10_aux" );
+    fixture.enable( .1 );
+    app.m_model.step();
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+
+    for( int frame = 0; frame < 2; ++frame )
+    {
+        g_tick += 500000;
+        schedule();
+        timing.m_words[synco::state] = synco::invalid;
+        std::fill( timing.m_words.begin() + synco::reference, timing.m_words.end(), 0 );
+        REQUIRE_FALSE( app.serviceDM() );
+    }
+    app.updateDMINDI();
+    REQUIRE( app.m_indiP_dmStatus["poll_waits"].get<int>() == 2 );
+    REQUIRE( app.m_indiP_dmStatus["requests"].get<int>() == 0 );
+    REQUIRE( timing.m_metadata.cnt0 == 3 );
+    REQUIRE_FALSE( app.m_dmTransportFault );
+    auto &ready = g_images.at( "dm01disp10_aux_ready" );
+    REQUIRE( ready.m_metadata.cnt0 == 0 );
+
+    g_tick += 500000;
+    schedule();
+    g_wakeDelayNs = 51000; // A wake 51 us late exhausts writeLeadUs=50, even for a valid request.
+    for( int slot = 0; slot < 4; ++slot )
+    {
+        REQUIRE_FALSE( app.serviceDM() );
+        fixture.advance();
+    }
+    REQUIRE( source.m_metadata.cnt0 == 0 );
+    REQUIRE( ready.m_metadata.cnt0 == 0 );
+    REQUIRE_FALSE( app.m_dmActive );
+    app.updateDMINDI();
+    REQUIRE( app.m_indiP_dmStatus["requests"].get<int>() == 4 );
+    REQUIRE( app.m_indiP_dmStatus["late_returns"].get<int>() == 4 );
+    REQUIRE( app.m_indiP_dmStatus["rejected"].get<int>() == 0 );
+    REQUIRE( app.m_indiP_dmStatus["published"].get<int>() == 0 );
+
+    g_wakeDelayNs    = 3000;
+    const auto cycle = timing.m_words[synco::cycle];
+    for( const int step : { 1, 2, 3, 0 } )
+    {
+        REQUIRE( app.serviceDM() );
+        REQUIRE( ready.m_words[synco::cmdStep] == step );
+        REQUIRE( ready.m_words[synco::cmdCycle] == cycle + ( step == 0 ) );
+        REQUIRE( ready.m_words[synco::cmdTarget] - ready.m_words[synco::cmdCutoff] == 70000 );
+        REQUIRE( ready.m_words[synco::cmdReadyNs] < ready.m_words[synco::cmdCutoff] );
+        REQUIRE( source.m_pixels[0] != 0 );
+        g_tick = ready.m_words[synco::cmdCutoff];
+        acknowledge();
+        fixture.advance();
+    }
+    REQUIRE( app.m_dmActive );
+    app.updateDMINDI();
+    REQUIRE( app.m_indiP_dmStatus["published"].get<int>() == 4 );
+    REQUIRE( app.m_indiP_dmStatus["copied"].get<int>() == 3 ); // Fourth receipt awaits the next poll.
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::serviceDM;
+#endif
+    // clang-format on
+}
+
+/** \brief The 8 kHz preset can submit on discovery despite late timer wakes, including first and next-frame slots.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim commits all four scheduler steps with one subframe of write lead", "[accelSim][dm-output]" )
+{
+    dmOutputFixture fixture( 125 );
+    fixture.enable( .1 );
+    auto &app     = fixture.m_app;
+    auto &source  = g_images.at( "dm01disp10_aux" );
+    g_wakeDelayNs = 51000;
+    for( int frame = 0; frame < 2; ++frame )
+    {
+        schedule();
+        const auto origin = g_tick;
+        for( int slot = 1; slot <= 4; ++slot )
+        {
+            app.m_model.step();
+            REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+            REQUIRE( app.serviceDM() );
+            const auto &ready = g_images.at( "dm01disp10_aux_ready" ).m_words;
+            REQUIRE( ready[synco::cmdStep] == slot % 4 );
+            REQUIRE( ready[synco::cmdTarget] == origin + slot * 125000 );
+            REQUIRE( ready[synco::cmdReadyNs] < ready[synco::cmdCutoff] );
+            const MagAOX::app::accelSimDetail::pointingDisturbance pointing( app.m_model.m_sample );
+            REQUIRE( source.m_pixels[0] ==
+                     Approx( .1 * pointing.surface( -24.5 * 6.5 / 48, -24.5 * 6.5 / 48 ) ).margin( 1e-8 ) );
+            // The actual scheduler snapshots at the cutoff; its exact receipt is visible on the next poll.
+            g_tick = ready[synco::cmdCutoff] + 3000;
+            acknowledge();
+        }
+        g_tick = origin + 500000;
+    }
+    REQUIRE( source.m_metadata.cnt0 == 8 );
+    REQUIRE( app.m_dmActive );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::serviceDM;
+    MagAOX::app::accelSim::frameGrabberPostPublish;
+#endif
+    // clang-format on
+}
+
+/** \brief A copied command acknowledged during poll must update status before the buffer is reused.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim recognizes a receipt arriving inside syncopationPoll", "[accelSim][dm-output]" )
+{
+    dmOutputFixture fixture;
+    fixture.enable( .1 );
+    auto &app = fixture.m_app;
+    app.m_model.step();
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    REQUIRE( app.serviceDM() );
+    REQUIRE_FALSE( app.m_dmActive );
+    fixture.advance();
+    g_ackOnPoll = true;
+    REQUIRE( app.serviceDM() );
+    REQUIRE( app.m_dmActive );
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::serviceDM;

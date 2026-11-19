@@ -79,3 +79,67 @@ Concurrent unrelated edits appeared in loPredCtrlAcc/shadow_controller.* and
 libMagAOX/app/syncoOutput.hpp during this task. They were left untouched and are
 not part of this work. No instrument command, live stream access, commit, push,
 installation or deployment was performed.
+
+## November 19 quiet-output investigation
+
+Reviewed scheduler and dmSpeckle at bb5a5d89c594bc7949af2949f457a1520b7a3845.
+The local producer and timing headers match that revision. The archived config
+process list at c673302edbf57a583d0661df240fe9afab8035f6 maps tweeterMod to
+dmSpeckle. Its deployed revision/configuration still needs confirmation.
+
+The scheduler sets all producers' step count through maxSubframes. There is
+no producer-side registration. At 2 kHz, steps 1/2/3/0 target
+125/250/375/500 us, with step zero belonging to the next primary cycle.
+The 70-us ready lead gives cutoffs 55/180/305/430 us. writeLeadUs=50 waits
+until 5/130/255/380 us when called early. Later copy budgets govern scheduler
+work after producer completion.
+
+Poll attaches and locks before validating the schedule. It requires a coherent
+version-2 record with valid identity, state, reference and expiry. Outstanding
+ownership waits for an exact receipt or valid epoch/generation reset. Poll
+selects the earliest future cutoff and suppresses duplicate requests. Zero
+returns do not indicate transport faults. Publish waits, revalidates identity,
+checks deadline and finite pixels, then publishes payload and ready sidecar.
+The scheduler snapshots or discards and echoes the exact commit to release
+ownership. A late wake can fail before either producer stream changes.
+
+accelSim uses a plain std::thread and 50-us unsuccessful-poll sleep. dmSpeckle
+uses threadStart with priority/cpuset configuration and a 10-us poll sleep.
+This difference can affect deadlines. Live thread scheduling remains unmeasured.
+
+A reproduced acknowledgment race is fixed. A receipt arriving between the app's
+receipt check and the base poll could release ownership inside poll, after
+which the app cleared bookkeeping without recording the disposition. Receipt
+observation now follows poll and precedes the next publication. This fixes
+active/zero bookkeeping but cannot explain a source counter that never moves.
+
+Added dm_status counters for requests, zero-result polls, commits, failed
+publishes observed before/after cutoff, exact copied/discarded receipts and
+outstanding ownership. late_returns describes time of observation because
+the base's boolean return does not identify its failed check.
+
+Tests now use realistic slot ordering, cycle labels, 70-us cutoffs and expiry.
+They reproduce quiet sources with disabled records updated every frame and
+with valid requests waking 51 us late against writeLeadUs=50. A candidate
+125-us write lead passes all four scaled slots with receipts at cutoff.
+Configuration defaults remain pending live evidence.
+
+The receipt regression failed before the fix. Afterward 12 DM tests passed
+128276 assertions. Model/synchronization passed 18 tests and 226432 assertions.
+clang-format and diff checks passed. Native compilation on this Mac stops at
+missing generated/logTypes.hpp in the framework precompiled header.
+
+On a provisioned development workstation, rebuild from the repository root:
+
+```sh
+make -C apps/accelSim clean
+make -C apps/accelSim -j4
+make -f apps/accelSim/tests/Makefile.offline -j4 check
+```
+
+The exao2 root cause remains pending runtime enable.toggle, settings.steps,
+a coherent timing payload with monotonic time, and producer counter deltas.
+production.enabled selects the implementation. Runtime enable controls
+scheduling, and a disabled scheduler still updates invalid timing records.
+The operator has been asked for these readbacks. No instrument access, commit,
+push, install or deployment was performed.

@@ -144,7 +144,13 @@ class accelSim : public MagAOXApp<true>,
         m_dmZeroPending{ false }; ///< Operator request and required removal, under control mutex.
     bool m_dmActive{ false }, m_dmZeroAcknowledged{ false }; ///< Last copied contribution and explicit zero receipt.
     bool m_dmTransportFault{ false }; ///< Current transport availability, without fault latching.
-    bool m_dmAwaitingAck{ false }, m_dmPendingZero{ false };     ///< Receipt bookkeeping for this app's latest commit.
+    bool m_dmAwaitingAck{ false }, m_dmPendingZero{ false }; ///< Receipt bookkeeping for this app's latest commit.
+    uint64_t m_dmPollWaits{ 0 }; ///< Attached polls returning zero, including duplicate slots and outstanding receipts.
+    uint64_t m_dmRequests{ 0 };  ///< Eligible requests returned by the producer.
+    uint64_t m_dmLateReturns{ 0 };                ///< Failed publish attempts returning at or after their cutoff.
+    uint64_t m_dmRejected{ 0 };                   ///< Failed publish attempts returning before their cutoff.
+    uint64_t m_dmPublished{ 0 };                  ///< Successful tagged ready commits by this instance.
+    uint64_t m_dmCopied{ 0 }, m_dmDiscarded{ 0 }; ///< Exact transport dispositions for this instance's commits.
     struct stat                 m_dmModesStat{}, m_dmMaskStat{}; ///< Calibration identities checked while loading.
     accelSimDetail::dmInjection m_dmInjection;                   ///< Acquisition-owned precomputed physical synthesis.
     pcf::IndiProperty m_indiP_dmEnable, m_indiP_dmScale, m_indiP_dmStatus; ///< Minimal low-rate DM controls/status.
@@ -433,7 +439,20 @@ inline int accelSim::setupProperties()
     m_indiP_dmScale["current"] = m_dmScale.load();
     m_indiP_dmScale["target"]  = m_dmScale.load();
     CREATE_REG_INDI_RO_NUMBER( m_indiP_dmStatus, "dm_status", "DM readiness", "DM" );
-    for( const char *name : { "ready", "active", "fault", "requested", "zero_acknowledged", "transport_fault" } )
+    for( const char *name : { "ready",
+                              "active",
+                              "fault",
+                              "requested",
+                              "zero_acknowledged",
+                              "transport_fault",
+                              "poll_waits",
+                              "requests",
+                              "late_returns",
+                              "rejected",
+                              "published",
+                              "copied",
+                              "discarded",
+                              "outstanding" } )
         m_indiP_dmStatus.add( pcf::IndiElement( name ) );
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_fps, "fps", 0, 10000, 1, "%d", "", "" );
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_numChannels, "numChannels", 0, 8, 1, "%d", "", "" );
@@ -531,6 +550,14 @@ inline void accelSim::updateDMINDI()
     m_indiP_dmStatus["zero_acknowledged"] = static_cast<int>( m_dmZeroAcknowledged );
     m_indiP_dmStatus["transport_fault"]   = static_cast<int>( m_dmTransportFault );
     m_indiP_dmStatus["fault"]             = static_cast<int>( fault );
+    m_indiP_dmStatus["poll_waits"]        = m_dmPollWaits;
+    m_indiP_dmStatus["requests"]          = m_dmRequests;
+    m_indiP_dmStatus["late_returns"]      = m_dmLateReturns;
+    m_indiP_dmStatus["rejected"]          = m_dmRejected;
+    m_indiP_dmStatus["published"]         = m_dmPublished;
+    m_indiP_dmStatus["copied"]            = m_dmCopied;
+    m_indiP_dmStatus["discarded"]         = m_dmDiscarded;
+    m_indiP_dmStatus["outstanding"]       = static_cast<int>( m_syncopationOutstanding );
     m_indiP_dmStatus.setState( fault || m_dmTransportFault ? INDI_ALERT : INDI_OK );
     if( m_indiDriver )
         m_indiDriver->sendSetProperty( m_indiP_dmStatus );
@@ -564,24 +591,33 @@ inline bool accelSim::serviceDM()
         m_dmImage = {};
         return false;
     }
-    if( m_dmAwaitingAck )
+    synco::Request request{};
+    const int      polled = syncopationPoll( request, m_dmImage );
+    m_dmTransportFault    = polled < 0;
+    // Poll may have released the buffer on a receipt arriving during this call.
+    // The prior commit and its echo remain available until we submit another command.
+    if( m_dmAwaitingAck && polled >= 0 )
     {
         synco::AckRecord ack{};
         if( synco::readRecord( m_syncopationAck, ack ) && synco::acknowledges( ack, m_syncopationPending ) )
         {
             if( ack[synco::ackStatus] == synco::copied )
             {
+                ++m_dmCopied;
                 m_dmActive           = !m_dmPendingZero;
                 m_dmZeroAcknowledged = m_dmPendingZero;
                 if( m_dmPendingZero )
                     m_dmZeroPending = false;
             }
+            else
+                ++m_dmDiscarded;
             m_dmAwaitingAck = false;
         }
     }
-    synco::Request request{};
-    const int      polled = syncopationPoll( request, m_dmImage );
-    m_dmTransportFault    = polled < 0;
+    if( polled == 0 )
+        ++m_dmPollWaits;
+    else if( polled > 0 )
+        ++m_dmRequests;
     if( !m_syncopationOutstanding )
         m_dmAwaitingAck = false; // The base also releases ownership on scheduler reset.
     if( polled < 0 )
@@ -600,7 +636,14 @@ inline bool accelSim::serviceDM()
         pixels = m_dmPixels;
     }
     if( !syncopationPublish( pixels.data(), request, m_dmImage ) )
-        return false; // Missed slots retry normally; the base retains any consumer-owned payload.
+    {
+        if( synco::monotonicNs() >= request.cutoffNs )
+            ++m_dmLateReturns;
+        else
+            ++m_dmRejected;
+        return false;
+    }
+    ++m_dmPublished;
     m_dmPendingZero      = zero;
     m_dmAwaitingAck      = true;
     m_dmZeroAcknowledged = false;
