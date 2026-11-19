@@ -18,7 +18,8 @@ namespace xqt
 /// Polarimetry panel for `hwptrack`, `qwptrack`, the polarimetry stages, and `hwpsequence`.
 /**
  * Shows the HWP angles and the hwpSequencer status, and sends start, stop, last-cycle and
- * abort requests to `hwpsequence`. Sequence parameters other than `num_cycles` are locked
+ * abort requests to `hwpsequence`. While `qwptrack` is tracking, the QWP fast-axis angles are shown
+ * beside the QWP tracking slider. Sequence parameters other than `num_cycles` are locked
  * while sequencing, and `time_per_pos` is disabled in frames mode (`frames_per_pos` > 0).
  */
 class polarimetry : public xWidget
@@ -93,11 +94,24 @@ class polarimetry : public xWidget
     /// Whether `qwptrack` is READY or OPERATING.
     bool m_qwptrackFsmOk{ false };
 
+    /// Last `qwptrack.qwp1.current`, the QWP1 fast-axis angle [deg].
+    float m_qwp1Angle{ 0 };
+
+    /// Last `qwptrack.qwp2.current`, the QWP2 fast-axis angle [deg].
+    float m_qwp2Angle{ 0 };
+
     ///@}
 
     /// Set or clear the bold font on a label.
     void setBold( QLabel *label, /**< [in] the label to change */
                   bool    onoff  /**< [in] true for bold */
+    );
+
+    /// Lock or unlock a toggle slider against user input.
+    /** The slider is not disabled, since a disabled toggleSlider appears "off" even when the toggle is On.
+     */
+    void lockSlider( toggleSlider *slider, /**< [in] the slider to change */
+                     bool          locked  /**< [in] true to ignore mouse and keyboard input */
     );
 
     /// Set or clear the `isWarning` style property on a label and re-polish it.
@@ -184,6 +198,7 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
     setXwFont( ui.hwpSetAngle );
     setXwFont( ui.hwpTrackingOffset );
     setXwFont( ui.labelHwpTracking );
+    setXwFont( ui.labelQwpTracking );
     setXwFont( ui.hwpActualAngle );
     setXwFont( ui.hwpAngleName );
 
@@ -225,7 +240,7 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
     ui.stagePolLinFsm->device( "stagepollin" );
 
     ui.labelQwpTracking->setVisible( false );
-    ui.labelQwpTracking->setText( QString( "COMP_IMR" ) );
+    ui.labelQwpTracking->setText( QString( "---" ) );
 
     ui.labelQwpTrack->setText( QString( "qwptrack" ) );
     ui.qwpTrackFsm->device( "qwptrack" );
@@ -302,7 +317,10 @@ void polarimetry::subscribe()
     m_parent->addSubscriberProperty( this, "hwpsequence", "status" );
     m_parent->addSubscriberProperty( this, "hwpsequence", "positions" );
 
-    // m_parent->addSubscriberProperty(this, "qwptrack", "tracking");
+    m_parent->addSubscriberProperty( this, "qwptrack", "fsm" );
+    m_parent->addSubscriberProperty( this, "qwptrack", "tracking" );
+    m_parent->addSubscriberProperty( this, "qwptrack", "qwp1" );
+    m_parent->addSubscriberProperty( this, "qwptrack", "qwp2" );
 
     m_parent->addSubscriber( ui.hwptrackFsm );
     m_parent->addSubscriber( ui.hwpseqFsm );
@@ -332,7 +350,6 @@ void polarimetry::onConnect()
     ui.stagePolLinFsm->onConnect();
     ui.qwpTrackFsm->onConnect();
     ui.stageQwpLinFsm->onConnect();
-    ui.labelQwpTrack->setEnabled( false );
 
     setBold( ui.hwpSetAngle, true );
     setBold( ui.hwpTrackingOffset, true );
@@ -351,7 +368,7 @@ void polarimetry::onConnect()
     ui.entryHwpAngle->setEnabled( true );
     ui.sliderHwpTracking->setEnabled( true );
     ui.comboHwpLin->setEnabled( true );
-    ui.sliderQwpTracking->setEnabled( false );
+    ui.sliderQwpTracking->setEnabled( true );
     ui.comboQwpLin->setEnabled( true );
     ui.entryNumCycles->setEnabled( true );
     ui.labelNumCyclesHint->setEnabled( true );
@@ -385,6 +402,8 @@ void polarimetry::onDisconnect()
     setBold( ui.hwpTrackingOffset, false );
     setBold( ui.hwpActualAngle, false );
     setBold( ui.hwpAngleName, false );
+
+    ui.labelQwpTracking->setText( QString( "---" ) );
 
     ui.hwpPosIndex->setText( QString( "---" ) );
     ui.cycleNumStatus->setText( QString( "---" ) );
@@ -564,6 +583,20 @@ void polarimetry::handleSetProperty( const pcf::IndiProperty &ipRecv )
                 m_qwpTracking = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
             }
         }
+        else if( ipRecv.getName() == "qwp1" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_qwp1Angle = ipRecv["current"].get<float>();
+            }
+        }
+        else if( ipRecv.getName() == "qwp2" )
+        {
+            if( ipRecv.find( "current" ) )
+            {
+                m_qwp2Angle = ipRecv["current"].get<float>();
+            }
+        }
     }
     else
     {
@@ -597,23 +630,8 @@ void polarimetry::updateGUI()
 
     // disable things that we shouldn't change while sequencing
     ui.entryHwpAngle->setEnabled( !m_sequencing && m_hwptrackFsmOk );
-    // we actually don't want to disable the toggleSlider because it will appear "off" even if tracking is on
-    if( m_sequencing || !m_hwptrackFsmOk )
-    {
-        ui.sliderHwpTracking->setAttribute( Qt::WA_TransparentForMouseEvents, true );
-        ui.sliderHwpTracking->setFocusPolicy( Qt::NoFocus );
-
-        ui.sliderQwpTracking->setAttribute( Qt::WA_TransparentForMouseEvents, true );
-        ui.sliderQwpTracking->setFocusPolicy( Qt::NoFocus );
-    }
-    else
-    {
-        ui.sliderHwpTracking->setAttribute( Qt::WA_TransparentForMouseEvents, false );
-        ui.sliderHwpTracking->setFocusPolicy( Qt::StrongFocus );
-
-        ui.sliderQwpTracking->setAttribute( Qt::WA_TransparentForMouseEvents, false );
-        ui.sliderQwpTracking->setFocusPolicy( Qt::StrongFocus );
-    }
+    lockSlider( ui.sliderHwpTracking, m_sequencing || !m_hwptrackFsmOk );
+    lockSlider( ui.sliderQwpTracking, m_sequencing || !m_qwptrackFsmOk );
 
     ui.sliderHwpTracking->setLabelEnabled( !m_sequencing && m_hwptrackFsmOk );
     ui.labelHwpTracking->setVisible( m_hwpTracking );
@@ -622,6 +640,18 @@ void polarimetry::updateGUI()
     ui.comboHwpLin->setEnabled( !m_sequencing );
 
     ui.sliderQwpTracking->setLabelEnabled( !m_sequencing && m_qwptrackFsmOk );
+    if( m_qwptrackFsmOk )
+    {
+        // pad with figure spaces (digit width) so the label width is constant for angles in [0, 180)
+        ui.labelQwpTracking->setText( QString( "QWP1 %1°  QWP2 %2°" )
+                                          .arg( m_qwp1Angle, 3, 'f', 0, QChar( 0x2007 ) )
+                                          .arg( m_qwp2Angle, 3, 'f', 0, QChar( 0x2007 ) ) );
+    }
+    else
+    {
+        ui.labelQwpTracking->setText( QString( "---" ) );
+    }
+
     ui.labelQwpTracking->setVisible( m_qwpTracking );
     ui.labelQwpTracking->setEnabled( !m_sequencing && m_qwptrackFsmOk );
 
@@ -760,6 +790,12 @@ void polarimetry::setBold( QLabel *label, bool onoff )
     QFont font = label->font();
     font.setBold( onoff );
     label->setFont( font );
+}
+
+void polarimetry::lockSlider( toggleSlider *slider, bool locked )
+{
+    slider->setAttribute( Qt::WA_TransparentForMouseEvents, locked );
+    slider->setFocusPolicy( locked ? Qt::NoFocus : Qt::StrongFocus );
 }
 
 void polarimetry::setWarning( QLabel *label, bool onoff )
