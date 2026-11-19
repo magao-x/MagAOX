@@ -409,10 +409,12 @@ TEST_CASE( "Polarimetry QWP tracking", "[polarimetryGUI]" )
     CHECK( label->isEnabled() );
 
     // current, not target, padded to three digits with a figure space
-    CHECK( label->text() == QString::fromUtf8( "QWP1 \u2007" "12°  QWP2 135°" ) );
+    CHECK( label->text() == QString::fromUtf8( "QWP1 \u2007"
+                                               "12°  QWP2 135°" ) );
 
     widget.number( "qwptrack", "qwp1", { { "current", 5.0 } } );
-    CHECK( label->text() == QString::fromUtf8( "QWP1 \u2007\u2007" "5°  QWP2 135°" ) );
+    CHECK( label->text() == QString::fromUtf8( "QWP1 \u2007\u2007"
+                                               "5°  QWP2 135°" ) );
 
     widget.toggle( "hwpsequence", "sequence", true );
 
