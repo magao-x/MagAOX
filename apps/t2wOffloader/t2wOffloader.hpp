@@ -72,8 +72,6 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
 
     std::string m_fpsSource{ "camwfs" };         ///< INDI device providing the loop fps.
     std::string m_navgSource{ "dmtweeter-avg" }; ///< INDI device providing the tweeter averager's navg.
-
-    std::string m_syncoSource{ "dmtweeter-synco" }; ///< INDI device of dmSyncopation, which changes the DM rate.
     float       m_gain{ 0.1 };                   ///< Offload integrator gain.
     float       m_leak{ 0.0 };                   ///< Offload integrator leak.
 
@@ -130,6 +128,11 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
 
     float    m_fps{ 0 };  ///< Current FPS from the FPS source.
     uint32_t m_navg{ 0 }; ///< Current navg from the averager
+
+    /// INDI device of dmSyncopation, which changes the DM command rate.
+    /** Fixed in code rather than configured, so the config stays compatible with versions without this feature.
+     */
+    const std::string m_syncoSource{ "dmtweeter-synco" };
 
     float m_syncoMainHz{ 0 }; ///< dmSyncopation's fitted main rate, from its timing.mainHz.
 
@@ -350,17 +353,6 @@ inline void t2wOffloader::setupConfig()
                 "Device name for getting navg of tweeter-ave.  This device should have *.fps.current. Default is "
                 "dmtweeter-avg." );
 
-    config.add( "integrator.syncoSource",
-                "",
-                "integrator.syncoSource",
-                argType::Required,
-                "integrator",
-                "syncoSource",
-                false,
-                "string",
-                "Device name of dmSyncopation, whose timing.active and timing.mainHz set the DM command rate. "
-                "Default is dmtweeter-synco." );
-
     config.add( "offload.respMPath",
                 "",
                 "offload.respMPath",
@@ -491,7 +483,6 @@ inline int t2wOffloader::loadConfigImpl( mx::app::appConfigurator &_config )
 
     _config( m_fpsSource, "integrator.fpsSource" );
     _config( m_navgSource, "integrator.navgSource" );
-    _config( m_syncoSource, "integrator.syncoSource" );
 
     _config( m_twRespMPath, "offload.respMPath" );
     _config( m_dmChannel, "offload.channel" );

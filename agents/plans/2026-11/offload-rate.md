@@ -116,7 +116,7 @@ Per A1 (Q1 = a):
 
 **`apps/t2wOffloader/t2wOffloader.hpp`.**
 - **New config:**
-  - `integrator.syncoSource` (default `dmtweeter-synco`);
+  - `integrator.syncoSource` (default `dmtweeter-synco`). Later removed; the name is fixed in code (see below).
   - `offload.rate` (Hz, default 250; 0 leaves `nAverage` unmanaged). Later removed; see the "no config setting" entry below.
 - **New INDI properties:**
   - the number `offloadRate` (0 to 10000 Hz);
@@ -142,7 +142,7 @@ Per A1 (Q1 = a):
 
 **2026-11-19: documentation.** Doxygen pass over `gui/widgets/offloadCtrl/offloadCtrl.hpp` (AGENTS.md §16): added a `\file`/`\brief` block, a class brief, member docs, and briefs on every declaration. There are no functional changes.
 
-**2026-11-19: no config setting for the rate.** The user asked that switching between this branch and `dev` should need no config changes. The `offload.rate` setting was therefore removed: the 250 Hz default is now built into the INDI `offloadRate` property, and the rate can only be changed over INDI (0 = unmanaged). This supersedes the A4 implementation note above. The existing optional `integrator.syncoSource` setting (default `dmtweeter-synco`) is not needed in any config file.
+**2026-11-19: no config setting for the rate.** The user asked that switching between this branch and `dev` should need no config changes. The `offload.rate` setting was therefore removed: the 250 Hz default is now built into the INDI `offloadRate` property, and the rate can only be changed over INDI (0 = unmanaged). This supersedes the A4 implementation note above. The `integrator.syncoSource` setting was also removed: the dmSyncopation device name is fixed in code as `dmtweeter-synco`. This feature now needs no config changes at all.
 
 **Checks for the first build:**
 - `sendNewProperty` with a `uint32_t` value;
