@@ -55,11 +55,15 @@ stage instrumentation; the cause of the earlier larger penalty remains
 unresolved. Final qualification should also use the intended operating
 instrumentation setting, fixed throughout each matched comparison.
 
-The later 2,000-FPS optimized/parallel capture averages 33.760 versus
+The later 2,000-FPS capture labeled optimized/parallel averages 33.760 versus
 37.423 us acquisition-to-write, with reported standard deviations 1.067 versus
-1.119 us. The operator confirmed parallel was running on CPU32 with the
-framegrabber on CPU33. Together with the earlier SDK comparisons, this supports
-selecting optimized as the default; the worker remains an explicit experiment.
+1.119 us. The operator corrected the worker status to `parked`; follow-up
+readbacks identified SDK fallback caused by an empty power target despite
+observed power On. The active-parallel attribution is withdrawn, so this
+capture does not establish worker performance. Repeat it after the power-target
+fix, verifying `applied=parallel` and `parallel=running` before and after the
+interval. Earlier SDK comparisons support the optimized default; the worker
+remains an explicit experiment.
 
 After finishing that experiment, remove or empty `descramble.cpuset` at the
 next operator restart to disable worker creation and restore its reserved core
@@ -86,6 +90,11 @@ serial commands or restarts acquisition.
 
 `applied` describes completion of conversion and optional digital sampling;
 the existing frameGrabber staging copy and stream publication follow it.
+Observed power On permits conversion even when the outlet target is empty
+(unknown); an explicit Off target still parks the worker and suppresses the
+active applied-method readback. Older builds incorrectly used SDK fallback for
+parallel requests with an empty target and showed `applied=none`. Upgrade the
+app to correct that condition; no outlet command is needed to populate target.
 Wait out a full timing window after acknowledgment before collecting data.
 
 ## Operator-run RTC comparison
