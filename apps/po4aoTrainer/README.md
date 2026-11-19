@@ -45,10 +45,15 @@ modulation state 4 as "Modulating" and state 3 as "Not modulating".
 
 - Start/Resume and Pause retain the same worker, models, Adam state, normalization
   and policy references. Pause settles issued publications before acknowledging.
+  The GUI follows worker state and the supervisor operation phase for these
+  desired-state actions; a missed switch acknowledgement does not latch the
+  controls. Conflicting requests are rejected by the supervisor, not retried.
 - Enable selects the latest eligible learned policy. Disable pauses learning and
   selects fallback; Enable does not automatically resume learning.
 - Reset invalidates the managed session and runtime policy, stops its worker and
-  waits for completion. A timed-out Reset remains pending across restart.
+  waits for completion. A timed-out Reset remains pending across restart. Reset
+  does not require fresh warmup: a new worker may use complete ready replay and
+  warmup published before Reset. Recollection is an explicit operator decision.
 - Recollect pauses learning, obtains fresh exploration data and resumes only a
   previously running session after collection completes. Partial data is rejected.
 - Save policy copies one acknowledged engine and matching policy/dynamics snapshot
@@ -89,6 +94,12 @@ result = session.step(recent_snapshot, warmup_snapshot,
                       active_model_id=observed_loaded_model_id)
 ```
 
+The worker keeps training on its complete private replay pair if refreshing the
+rolling buffer times out while warmup remains unchanged and coherent. It adopts
+refreshed replay/warmup together, discards the cache on recollection, and propagates
+stream errors. The shared snapshot helpers retain their strict copy checks.
+The GUI label "Waiting" also covers publication acknowledgements, not just data.
+
 Snapshots contain float32 `[stream modes, samples, 2]` data in newest-first order,
 with observation/command planes and coherent counter, valid-length, episode and
 model identities. `session.invalidate_replay()` marks a recollection boundary.
@@ -99,6 +110,12 @@ for explicitly operator-managed export; it does not confer managed eligibility.
 snapshots; loaded snapshots expose `plot()`. Direct plotting functions remain in
 `po4ao_diagnostics`. Matplotlib is optional. Metrics JSONL can contain revised
 publication outcomes: the last record for each session/iteration is authoritative.
+Timing fields include `training_seconds`, `replay_seconds`, `diagnostics_seconds`,
+`export_seconds` and `activation_seconds`. Training/replay timings describe the
+sampled diagnostic iteration, not the interval since the previous record; initial
+dynamics pretraining may therefore be absent. Diagnostic file writing is not
+included in `diagnostics_seconds`. Export and activation remain synchronous.
+Measure their overhead before changing `model_publish_interval` or export scheduling.
 
 ## Local tests
 
