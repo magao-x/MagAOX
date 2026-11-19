@@ -78,14 +78,23 @@ with **0.775 us reported standard deviation**. Acquisition-interval spread
 returns to 0.541 us, and publication-interval spread is 1.270 us. Relative to
 the earlier optimized capture, WMA improves by **4.757 us (14.1%)** and its
 reported spread by **27.4%**, while the large interval-jitter penalty is absent.
-This supports the worker option at 2 kHz. A matched 3.6 kHz crossover and
-longer-run frame-delivery, tail and complete-loop checks remain. The generic
-method default stays optimized. These are averages of supplied rolling-window
-summaries; the numerical optimized reference comes from an earlier capture.
+This supports the worker option at 2 kHz. These are averages of supplied
+rolling-window summaries; the numerical optimized reference comes from an
+earlier capture.
+
+A subsequent 3.6 kHz sleep trial averages **28.861 us WMA** with **0.975 us
+reported standard deviation**. Acquisition/publication interval spread is
+0.591/1.367 us, with no return of the large continuous-spin penalty. WMA spread
+is about 0.200 us higher than in the 2 kHz sleep trial, while mean latency
+remains near 29 us. This establishes short-run behavior at the stated maximum
+rate, but no matched 3.6 kHz optimized reference is supplied. Longer matched
+comparisons, frame-delivery/tail checks and complete-loop measurements remain;
+the generic method default stays optimized.
 
 If the worker is not retained after qualification, remove or empty
 `descramble.cpuset` at the next operator restart to disable worker creation
-and restore its reserved core to the previous workload. Do not mix that workload change into an A/B interval.
+and restore its reserved core to the previous workload. Do not mix that
+workload change into an A/B interval.
 
 | INDI property / element | Meaning |
 | --- | --- |

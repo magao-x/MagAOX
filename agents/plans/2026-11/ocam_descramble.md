@@ -49,15 +49,19 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 Investigation date: 2026-11-16. Source baseline: `dev`, `cbc1d5cf`.
 Host verified as `mx11`. This pass inspects local source and configuration
 only; no instrument commands, benchmarks, or implementation were run.
-Status as of 2026-11-18: **the operator's 2 kHz sleep-then-spin parallel
-trial retains the latency gain and removes the large interval-jitter penalty**.
-With the configured 100 us post-job sleep, ten WMA window means average
+Status as of 2026-11-18: **the operator's sleep-then-spin parallel trials
+retain approximately 29 us acquisition-to-write time at both 2 and 3.6 kHz,
+without the large interval-jitter penalty seen during continuous spinning**.
+With the configured 100 us post-job sleep, the 2 kHz WMA means average
 29.003 us versus the earlier optimized 33.760 us; reported WMA standard
-deviation averages 0.775 us versus 1.067 us. Acquisition-interval standard
-deviation is back near its earlier level (0.541 us versus 0.560 us), and
-publication-interval standard deviation averages 1.270 us versus 1.703 us.
-This supports the worker option on the reserved same-CCD core at 2 kHz.
-A 3.6 kHz crossover, longer-run tails/frame delivery and complete-loop checks
+deviation averages 0.775 us versus 1.067 us. At 3.6 kHz, eight WMA window
+means average 28.861 us with 0.975 us reported standard deviation, and
+acquisition/publication interval standard deviations average 0.591/1.367 us.
+The higher-rate capture therefore retains low latency and ordinary interval
+spread, although its WMA spread is 0.200 us above the 2 kHz sleep trial.
+
+Short captures now cover the stated maximum rate. A matched optimized
+reference at 3.6 kHz, longer-run tails/frame delivery and complete-loop checks
 remain before broader qualification. The generic requested-method default
 remains optimized; no new default or resource assignment follows automatically
 from these short captures.
@@ -80,9 +84,10 @@ operator comparisons, default to the validated optimized single-thread path,
 retain SDK as the explicit reference and unsupported-mode/table fallback, and
 keep live INDI comparison methods. The corrected worker with 100 us post-job
 sleep improves processing mean/spread without the large interval regression
-seen during continuous spinning at 2 kHz. Complete the 3.6 kHz and sustained
-loop comparisons before deciding whether to dedicate the second core for
-normal operation.
+seen during continuous spinning at 2 kHz. A short 3.6 kHz trial also retains
+low latency without that cadence penalty. Complete matched-rate reference and
+sustained loop comparisons before deciding whether to dedicate the second
+core for normal operation.
 
 ### Findings from the current code
 
@@ -1814,3 +1819,53 @@ Parsed data and calculations are in `/tmp/ocam-sleep100-rtc-20261118.json`.
 The engineering plan and operator comparison guide are the only changed
 files. Their numerical checks and `git diff --check` passed; no code tests or
 instrument commands were run for this documentation-only update.
+
+
+## Sleep then spin RTC result at 3.6 kHz — 2026-11-18
+
+The operator supplied eight further `fgtimes` reports labeled "3600" as the
+continuation of the 100 us sleep-then-spin parallel trial. Log timestamps span
+2026-11-19T02:27:52.326837714–02:27:59.334074920; this entry uses the
+client-local date 2026-11-18. Average acquisition/publication intervals are
+277.832054/277.831924 us; reciprocal mean acquisition interval is about
+3,599.3 FPS, consistent with the requested approximately **3.6 kHz** rate.
+No new numeric optimized reference at this rate accompanies the excerpt.
+
+Arithmetic averages of every supplied window summary, in microseconds:
+
+| Metric | Earlier 2 kHz parallel, 100 us sleep | 3.6 kHz parallel, 100 us sleep |
+| --- | ---: | ---: |
+| Acquisition-to-write mean | 29.003462 | 28.861054 |
+| Acquisition-to-write reported standard deviation | 0.774912 | 0.975306 |
+| Acquisition-interval reported standard deviation | 0.541290 | 0.591119 |
+| Publication-interval reported standard deviation | 1.269744 | 1.367250 |
+
+Mean WMA changes by only **-0.142408 us (-0.49%)** relative to the 2 kHz
+sleep trial. Its average reported standard deviation increases
+**0.200394 us (25.86%)**, so the higher-rate result is not described as
+identical jitter. Acquisition/publication standard deviations increase by
+0.049829/0.097506 us, respectively; neither approaches the 20–37 us spreads
+observed during continuous spinning.
+
+All eight WMA means are 28.737783–28.938933 us; their reported standard
+deviations are 0.921077–1.099750 us. Acquisition standard deviations range
+0.528989–0.686916 us and publication standard deviations range
+1.21748–1.48706 us. All windows are included. These short summaries support
+approximately 29 us writer latency with the large cadence regression still
+absent at the camera's stated maximum rate. They do not establish the WMA
+advantage over optimized at 3.6 kHz: the earlier optimized 33.760 us reference
+was collected at 2 kHz and must not be reused as a matched-rate control.
+
+The remaining useful qualification is a longer fixed-condition
+optimized/parallel/optimized comparison at the intended operating rate,
+checking frame delivery, latency tails and complete-loop behavior. There is
+no need to change the 100 us setting based on these summaries alone. The
+reported mean/standard-deviation values do not bound rare wake overshoots,
+prove absence of frame loss, or provide scheduler-throttling evidence.
+
+Parsed data and calculations are in
+`/tmp/ocam-sleep100-3600-rtc-20261118.json`. As with the earlier results, these
+are arithmetic averages of rolling-window summaries rather than pooled
+frame distributions or independent trials. Only this plan and the operator
+comparison guide changed; numerical/whitespace checks passed, and no code
+tests or instrument commands were run for this documentation update.
