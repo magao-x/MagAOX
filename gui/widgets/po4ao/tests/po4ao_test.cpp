@@ -383,6 +383,86 @@ TEST_CASE( "Learning and PO4AO labels follow acknowledgements", "[po4ao]" )
     REQUIRE( f.m_publisher.m_commands.back()["run"].getSwitchState() == pcf::IndiElement::On );
 }
 
+/** \brief Lost learning acknowledgements cannot latch desired-state controls or imply completion. */
+TEST_CASE( "Learning controls recover without Busy", "[po4ao][learning]" )
+{
+    Fixture f;
+    f.status( { { "learning", "paused" }, { "training_phase", "idle" } } );
+    auto *button = f.control<QPushButton>( "buttonLearning" );
+    f.m_widget.on_buttonLearning_clicked();
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    REQUIRE( button->text() == "Resume learning" );
+    f.acknowledge( "learning", pcf::IndiProperty::Ok );
+    REQUIRE( button->text() == "Resume learning" ); // Ok alone is not proof of worker state.
+    f.status( { { "learning", "running" }, { "training_phase", "idle" } } );
+    REQUIRE( button->isEnabled() );
+    REQUIRE( button->text() == "Pause learning" );
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    REQUIRE_FALSE( f.control<QLabel>( "labelStatus" )->text().contains( "acknowledgement" ) );
+
+    f.acknowledge( "learning", pcf::IndiProperty::Busy );
+    f.status( { { "training_phase", "learning" } } );
+    REQUIRE_FALSE( button->isEnabled() );
+    // A lost terminal switch update must not override current operation/worker status.
+    f.status( { { "learning", "paused" }, { "training_phase", "idle" } } );
+    REQUIRE( button->isEnabled() );
+    REQUIRE( button->text() == "Resume learning" );
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    // clang-format off
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
+    xqt::po4ao::on_buttonLearning_clicked;
+    xqt::po4ao::updateGUI;
+#endif
+    // clang-format on
+}
+
+/** \brief Confirmed managed Reset releases an unacknowledged Resume without clearing unrelated requests. */
+TEST_CASE( "Reset after unacknowledged Resume restores Start", "[po4ao][learning]" )
+{
+    Fixture f;
+    f.status( { { "learning", "paused" } } );
+    f.m_widget.on_buttonLearning_clicked();
+    f.m_widget.on_buttonReconstructor_clicked();
+    f.m_widget.on_buttonReset_clicked();
+    f.status( { { "learning", "idle" },
+                { "training_phase", "idle" },
+                { "collection", "ready" },
+                { "message", "reset complete" } } );
+    f.complete( "reset" );
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->text() == "Start learning" );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
+    REQUIRE( f.m_publisher.m_commands.size() == 3 );
+    f.complete( "reconstructor" );
+    REQUIRE_FALSE( f.control<QLabel>( "labelStatus" )->text().contains( "acknowledgement" ) );
+    f.m_widget.on_buttonLearning_clicked();
+    REQUIRE( f.m_publisher.m_commands.size() == 4 );
+    // clang-format off
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
+    xqt::po4ao::on_buttonReset_clicked;
+    xqt::po4ao::on_buttonLearning_clicked;
+#endif
+    // clang-format on
+}
+
+/** \brief Waiting for collection does not prevent Pause when the supervisor domain is free. */
+TEST_CASE( "Waiting learning can be paused during collection", "[po4ao][learning]" )
+{
+    Fixture f;
+    f.status( { { "learning", "waiting" }, { "collection", "collecting" }, { "training_phase", "idle" } } );
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    REQUIRE( f.control<QLabel>( "labelLearning" )->text() == "Waiting" );
+    f.m_widget.on_buttonLearning_clicked();
+    REQUIRE( f.m_publisher.m_commands.back()["pause"].getSwitchState() == pcf::IndiElement::On );
+    f.status( { { "training_phase", "recollecting" } } );
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    // clang-format off
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
+    xqt::po4ao::updateGUI;
+#endif
+    // clang-format on
+}
+
 /** \brief Each domain sends requests only to its own backend. */
 TEST_CASE( "Modulation and PO4AO requests use independent backends", "[po4ao]" )
 {

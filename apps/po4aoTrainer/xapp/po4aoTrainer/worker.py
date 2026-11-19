@@ -252,13 +252,25 @@ def run(directory):
                 continue
             before = generation
             replay_start = time.monotonic()
+            next_warmup = None
             try:
-                replay = cached_replay_snapshot(*streams[:2], replay)
-                warmup = cached_replay_snapshot(*streams[2:], warmup)
+                next_warmup = cached_replay_snapshot(*streams[2:], warmup)
+                next_replay = cached_replay_snapshot(*streams[:2], replay)
             except TimeoutError:
-                state("waiting")
-                time.sleep(0.1)
-                continue
+                # Only rolling replay contention may reuse an already validated pair.
+                # A changed/busy warmup or a discarded cache must wait for a complete pair.
+                if (
+                    replay is None
+                    or warmup is None
+                    or next_warmup is not warmup
+                    or session.buffer_snapshot is not replay
+                    or session.warmup_snapshot is not warmup
+                ):
+                    state("waiting")
+                    time.sleep(0.1)
+                    continue
+            else:
+                replay, warmup = next_replay, next_warmup
             replay_seconds = time.monotonic() - replay_start
             pump()
             if before != control["generation"] or control["collection"] != "ready":

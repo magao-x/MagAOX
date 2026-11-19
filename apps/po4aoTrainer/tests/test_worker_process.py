@@ -29,11 +29,18 @@ class Image:
     @property
     def md(self):
         counter = int(Path(sys.argv[1]).parent.joinpath("warmup-counter").read_text()) if "warm" in self.name else 1
-        return types.SimpleNamespace(cnt0=counter, write=False)
+        busy = Path(sys.argv[1]).parent.joinpath("busy")
+        mode = busy.read_text() if busy.exists() else ""
+        return types.SimpleNamespace(cnt0=counter, write=self.name == mode or (self.name == "replay" and mode == "error"))
 sys.modules["ImageStreamIOWrap"]=types.SimpleNamespace(Image=Image)
 rng=np.random.default_rng(42)
 data=rng.normal(size=(6,96,2)).astype(np.float32)
 def snapshot(image,metadata,**kwargs):
+    if image.md.write:
+        mode = Path(sys.argv[1]).parent.joinpath("busy").read_text()
+        if mode == "error":
+            raise RuntimeError("broken replay stream")
+        raise TimeoutError("rolling writer busy")
     with Path(sys.argv[1]).joinpath("copies.log").open("a") as output:
         output.write(image.name + "\n")
     return runtime.ReplaySnapshot(data, image.md.cnt0,96,3,"0000000000000000")
@@ -43,8 +50,11 @@ run(sys.argv[1])
 """
 
 
-def test_owned_worker_pauses_resumes_recollects_and_exits_on_eof(tmp_path, monkeypatch):
-    """Pause preserves PID/session, hot config is acknowledged, and EOF stops the owned worker."""
+@pytest.mark.parametrize("stream_failure", [False, True])
+def test_owned_worker_pauses_resumes_recollects_and_exits_on_eof(
+    tmp_path, monkeypatch, stream_failure
+):
+    """Keep cached training live, invalidate on recollection, and stop on stream/pipe failure."""
     config = json.loads(
         (Path(__file__).parent / "fixtures/session_config.json").read_text()
     )
@@ -80,12 +90,12 @@ def test_owned_worker_pauses_resumes_recollects_and_exits_on_eof(tmp_path, monke
         end = time.monotonic() + 20
         while not predicate():
             worker.send(
-                dict(
-                    active_id="0" * 16,
-                    collection="ready",
-                    generation="1",
-                    **(message or {})
-                )
+                {
+                    "active_id": "0" * 16,
+                    "collection": "ready",
+                    "generation": "1",
+                    **(message or {}),
+                }
             )
             worker.events()
             assert worker.process.poll() is None, worker.run.joinpath(
@@ -103,10 +113,41 @@ def test_owned_worker_pauses_resumes_recollects_and_exits_on_eof(tmp_path, monke
         worker.events()
         assert worker.iteration == iteration
         assert worker.process.pid == pid
-        assert (worker.run / "copies.log").read_text().splitlines() == [
+        assert sorted((worker.run / "copies.log").read_text().splitlines()) == [
             "replay",
             "warmup",
         ]
+        # A busy rolling writer cannot stop optimization on the complete private pair.
+        (tmp_path / "busy").write_text("replay")
+        worker.send({"run": True})
+        wait(lambda: worker.iteration > iteration + 1)
+        worker.send({"run": False})
+        wait(lambda: worker.state == "paused")
+        iteration = worker.iteration
+        # A warmup refresh with a failed replay refresh must not mix or replace the pair.
+        (tmp_path / "warmup-counter").write_text("2")
+        worker.send({"run": True})
+        wait(lambda: worker.state == "waiting")
+        # Cooperative Pause can suspend an iteration which finishes before the next refresh.
+        assert worker.iteration <= iteration + 1
+        iteration = worker.iteration
+        for _ in range(5):
+            worker.send({"collection": "ready", "generation": "1"})
+            time.sleep(0.03)
+            worker.events()
+        assert worker.iteration == iteration
+        # Explicit recollection discards the old pair even while the writer remains busy.
+        worker.send({"generation": "2"})
+        for _ in range(5):
+            worker.send({"collection": "ready", "generation": "2"})
+            time.sleep(0.03)
+            worker.events()
+        assert worker.iteration == iteration
+        (tmp_path / "busy").write_text("")
+        wait(lambda: worker.iteration > iteration, {"generation": "2"})
+        worker.send({"run": False})
+        wait(lambda: worker.state == "paused", {"generation": "2"})
+        iteration = worker.iteration
         config["training"]["policy_learning_rate"] *= 2
         changed = tmp_path / "hot.json"
         changed.write_text(json.dumps(config))
@@ -118,26 +159,37 @@ def test_owned_worker_pauses_resumes_recollects_and_exits_on_eof(tmp_path, monke
         wait(
             lambda: worker.revision == revision(config)
             and worker.config_ticket == 1
-            and worker.iteration > iteration
+            and worker.iteration > iteration,
+            {"generation": "2"},
         )
         worker.send({"run": False})
-        wait(lambda: worker.state == "paused")
+        wait(lambda: worker.state == "paused", {"generation": "2"})
         iteration = worker.iteration
         # Resume after recollection unwinds stale replay without losing Adam/session state.
-        (tmp_path / "warmup-counter").write_text("2")
-        worker.send({"generation": "2", "run": True})
+        (tmp_path / "warmup-counter").write_text("3")
+        worker.send({"generation": "3", "run": True})
         end = time.monotonic() + 10
         while worker.iteration <= iteration:
             worker.send(
-                {"active_id": "0" * 16, "collection": "ready", "generation": "2"}
+                {"active_id": "0" * 16, "collection": "ready", "generation": "3"}
             )
             worker.events()
             assert time.monotonic() < end, worker.run.joinpath("worker.log").read_text()
             time.sleep(0.03)
         assert worker.process.pid == pid
-        worker.process.stdin.close()
+        if stream_failure:
+            (tmp_path / "busy").write_text("error")
+            end = time.monotonic() + 10
+            while worker.state != "error":
+                worker.events()
+                assert time.monotonic() < end
+                time.sleep(0.03)
+            assert "broken replay stream" in worker.error
+        else:
+            worker.process.stdin.close()
         worker.process.wait(timeout=10)
-        assert worker.process.returncode == 1  # SystemExit on control-channel loss.
+        # Stream errors and control-channel loss both stop the worker.
+        assert worker.process.returncode == 1
     finally:
         worker.stop()
 

@@ -240,6 +240,8 @@ def test_reset_cancels_collection(config):
     runtime.hold = True
     supervisor = Supervisor(runtime, config)
     supervisor.submit("recollect", {"request": True})
+    with pytest.raises(RuntimeError, match="operation is already in progress"):
+        supervisor.submit("learning", {"run": False})
     supervisor.submit("reset", {"request": True})
     events = finish(supervisor)
     assert any(name == "reset" and status == "Ok" for name, status, _ in events)
@@ -497,6 +499,13 @@ def test_disable_recollect_and_reset_preserve_the_expected_worker_lifecycle(conf
         operation("reset", {"request": True})
         assert runtime.calls[-3:] == [("control", False), ("reset",), ("stop",)]
         assert supervisor.worker is None and workers[0].closed
+        # Reset leaves operator-owned ready collection usable without another recollect.
+        calls = list(runtime.calls)
+        operation("learning", {"run": True})
+        operation("learning", {"run": True})  # Repeated desired-state requests retain one new worker.
+        assert len(workers) == 2 and supervisor.worker is workers[1]
+        assert ("recollect",) not in runtime.calls[len(calls):]
+        assert supervisor.record.get("warmup_required") is None
     finally:
         supervisor.close()
 

@@ -138,7 +138,7 @@ class po4ao : public xWidget
     /// Request noisy warmup recollection under the current controller.
     void on_buttonWarmup_clicked();
 
-    /// Request start/resume or cooperative pause according to observed learning state.
+    /// Send a learning target without latching transient command acknowledgements; follow worker/operation status.
     void on_buttonLearning_clicked();
 
     /// Report missing acknowledgement without retrying or pretending the operation failed remotely.
@@ -385,7 +385,7 @@ inline QString po4ao::stateLabel( const std::string &state )
     }
     if( state == "waiting" )
     {
-        return "Waiting for data";
+        return "Waiting";
     }
     auto label = QString::fromStdString( state );
     label[0]   = label[0].toUpper();
@@ -496,7 +496,7 @@ inline void po4ao::updateTrainingControls( bool ready )
 {
     const auto phase = status( "training_phase" );
     const bool idle  = ready && m_routePending.empty() && ( phase == "idle" || phase == "error" ) &&
-                      !busy( { "po4ao_enable", "reset", "recollect", "learning", "set_policy" } );
+                      !busy( { "po4ao_enable", "reset", "recollect", "set_policy" } );
     m_ui.comboPolicy->setEnabled( ready && m_ui.comboPolicy->count() > 0 );
     m_ui.comboPolicy->setToolTip( m_ui.comboPolicy->currentText() );
     m_ui.buttonSetPolicy->setEnabled( idle && m_ui.comboPolicy->currentIndex() >= 0 &&
@@ -655,7 +655,6 @@ inline void po4ao::updateRoute( bool managed )
         for( const auto *name : { "po4ao_enable",
                                   "reset",
                                   "recollect",
-                                  "learning",
                                   "set_policy",
                                   "control_enable",
                                   "reset_model",
@@ -1001,7 +1000,7 @@ inline void po4ao::updateGUI()
     const auto learning        = ready ? status( "learning" ) : std::string( "unknown" );
     const auto phase           = status( "training_phase" );
     const bool trainingReady   = ready && !runtimePending && ( phase == "idle" || phase == "error" ) &&
-                               !busy( { "po4ao_enable", "reset", "recollect", "learning", "set_policy" } );
+                               !busy( { "po4ao_enable", "reset", "recollect", "set_policy" } );
     m_ui.buttonPO4AO->setText( enabled ? "Disable policy" : "Enable policy" );
     const bool disableReady = ready && !runtimePending && enabled && phase != "resetting" && phase != "reset_pending" &&
                               !busy( { "reset", "po4ao_enable" } );
@@ -1028,9 +1027,9 @@ inline void po4ao::updateGUI()
     const bool paused  = learning == "paused" || learning == "completed";
     m_ui.buttonLearning->setText( running ? "Pause learning" : paused ? "Resume learning" : "Start learning" );
     m_ui.buttonLearning->setEnabled(
-        trainingReady && collection != "collecting" && ( running || paused || learning == "idle" ) &&
+        trainingReady && ( running || collection != "collecting" ) && ( running || paused || learning == "idle" ) &&
         ( running || ( status( "warmup_required" ) != "yes" && status( "initialization_required" ) != "yes" ) ) &&
-        commandAvailable( "learning", pcf::IndiProperty::Switch, { "run", "pause" } ) );
+        commandAvailable( "learning", pcf::IndiProperty::Switch, { "run", "pause" }, m_device, true ) );
     m_ui.labelLearning->setText( status( "initialization_required" ) == "yes" ? "Set policy or Reset required"
                                                                               : stateLabel( learning ) );
     const auto active   = ready ? status( "active_policy" ) : std::string{};
@@ -1268,7 +1267,8 @@ inline void po4ao::on_buttonLearning_clicked()
     pcf::IndiProperty property( pcf::IndiProperty::Switch, m_device, "learning" );
     property.add( pcf::IndiElement( "run", run ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
     property.add( pcf::IndiElement( "pause", run ? pcf::IndiElement::Off : pcf::IndiElement::On ) );
-    submit( property );
+    // Desired-state actions follow worker/operation readback; the supervisor rejects concurrent requests.
+    sendNewProperty( property );
 }
 
 inline void po4ao::acknowledgementTimeout()

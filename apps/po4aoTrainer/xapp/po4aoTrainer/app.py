@@ -165,6 +165,7 @@ class po4aoTrainer(XDevice):
 
     def handle_request(self, prop, message):
         """Acknowledge admission immediately and leave bounded operations to the supervisor."""
+        self.log.info("Received %s request: %s", prop.name, dict(message))
         with self._property_lock:
             try:
                 values = {key: message[key] for key in message}
@@ -208,12 +209,13 @@ class po4aoTrainer(XDevice):
                         raise ValueError("Select exactly one learning action")
                     self.supervisor.submit(prop.name, values)
                 prop.state = constants.PropertyState.BUSY
+                self.log.info("Admitted %s request", prop.name)
             except Exception as error:
                 prop.state = constants.PropertyState.ALERT
                 if prop.name in PARAMETERS:
                     self.supervisor.parameter_errors[prop.name] = str(error)
                 self.supervisor.status["error"] = str(error)
-                self.log.error(str(error))
+                self.log.error("Rejected %s request: %s", prop.name, error)
             self.update_property(prop)
 
     def publish_parameters(self):
@@ -271,6 +273,9 @@ class po4aoTrainer(XDevice):
             self.properties["progress"]["iteration"] = worker.iteration if worker else 0
             self.update_property(self.properties["progress"])
             for command, state, error in events:
+                self.log.info(
+                    "Completed %s: %s%s", command, state, ": " + error if error else ""
+                )
                 prop = self.properties[command]
                 prop.state = constants.PropertyState(state)
                 self.update_property(prop)

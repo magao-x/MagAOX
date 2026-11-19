@@ -148,6 +148,19 @@ def test_cached_replay_keeps_training_without_recopies_or_reinitialization(
     )
 
 
+def test_new_session_accepts_ready_pre_reset_warmup(inputs):
+    """Reset replaces managed optimization, not operator-owned complete replay publications."""
+    config, recent, warmup = inputs
+    previous = make_session(config)
+    previous.step(recent, warmup, active_model_id="0")
+    current = make_session(config)
+    assert current.session_id != previous.session_id
+    assert current.step(recent, warmup, active_model_id="0") is not None
+    assert current.iteration == 1
+    assert current.warmup_generation == warmup.counter
+    assert current.policy_optimizer is not previous.policy_optimizer
+
+
 def test_recollection_preserves_normalization_and_policy(inputs):
     """Invalidate history and anchors immediately, then rebuild on complete fresh warmup."""
     config, recent, warmup = inputs
