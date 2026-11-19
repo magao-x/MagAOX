@@ -269,7 +269,8 @@ all_rtimv_plugins = \
 	pwfsAlignment \
 	dmStatus \
 	warnings \
-	acquisition
+	acquisition \
+	valueDisplay
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =

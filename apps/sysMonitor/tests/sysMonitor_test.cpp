@@ -1,8 +1,7 @@
 /** \file sysMonitor_test.cpp
  * \brief Catch2 tests for the sysMonitor app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
- * \ingroup sysMonitor_files
+ * \ingroup sysMonitor_unit_test
  */
 
 #include "../../../tests/testXWC.hpp"
@@ -15,19 +14,13 @@ using namespace MagAOX::app;
 namespace libXWCTest
 {
 
-/** \defgroup sysMonitor_unit_test sysMonitor Unit Tests
- * \brief Unit tests for the sysMonitor application.
- *
- * \ingroup application_unit_test
- */
-
 /// Namespace for `sysMonitor` unit tests.
 /** \ingroup sysMonitor_unit_test
  */
 namespace sysMonitorTest
 {
 
-/// Verify the sysMonitor parser helpers accept valid system-monitor lines and reject malformed input.
+/// Verify CPU-temperature parsing accepts Intel sensor lines and rejects malformed input.
 /**
  * \ingroup sysMonitor_unit_test
  */
@@ -36,10 +29,7 @@ SCENARIO( "System monitor is constructed and CPU temperature results are passed 
     // clang-format off
    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
    sysMonitor::parseCPUTemperatures( *(float *)nullptr, "" );
-   sysMonitor::parseCPULoads( *(float *)nullptr, "" );
-   sysMonitor::parseDiskTemperature( *(float *)nullptr, "" );
-   sysMonitor::parseDiskUsage( "", *(float *)nullptr );
-   sysMonitor::parseRamUsage( "", *(float *)nullptr );
+   sysMonitor::parseCPUTemperaturesIntel( *(float *)nullptr, "" );
    #endif
     // clang-format on
 
@@ -102,8 +92,16 @@ SCENARIO( "System monitor is constructed and CPU temperature results are passed 
     }
 }
 
+/// Verify CPU-load parsing converts idle percentages to fractions and rejects malformed lines.
+/** \ingroup sysMonitor_unit_test */
 SCENARIO( "System monitor is constructed and CPU load results are passed in", "[sysMonitor]" )
 {
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::parseCPULoads( *(float *)nullptr, "" );
+    #endif
+    // clang-format on
+
     GIVEN( "A default constructed system monitor object and an empty vector for loads" )
     {
         MagAOX::app::sysMonitor sm;
@@ -166,8 +164,16 @@ SCENARIO( "System monitor is constructed and CPU load results are passed in", "[
     }
 }
 
+/// Verify drive-temperature parsing preserves drive identity and rejects malformed readings.
+/** \ingroup sysMonitor_unit_test */
 SCENARIO( "System monitor is constructed and disk temperature result is passed in", "[sysMonitor]" )
 {
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::parseDiskTemperature( *(std::string *)nullptr, *(float *)nullptr, "" );
+    #endif
+    // clang-format on
+
     GIVEN( "A default constructed system monitor object and an empty float for temperature" )
     {
         MagAOX::app::sysMonitor sm;
@@ -227,8 +233,16 @@ SCENARIO( "System monitor is constructed and disk temperature result is passed i
     }
 }
 
+/// Verify filesystem-usage parsing updates the matching path and rejects malformed rows.
+/** \ingroup sysMonitor_unit_test */
 SCENARIO( "System monitor is constructed and disk usage result is passed in", "[sysMonitor]" )
 {
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::parseDiskUsage( "", *(float *)nullptr, *(float *)nullptr, *(float *)nullptr );
+    #endif
+    // clang-format on
+
     GIVEN( "A default constructed system monitor object and an empty float for usage" )
     {
         MagAOX::app::sysMonitor sm;
@@ -294,8 +308,16 @@ SCENARIO( "System monitor is constructed and disk usage result is passed in", "[
     }
 }
 
+/// Verify RAM-usage parsing accepts valid memory summaries and rejects invalid rows.
+/** \ingroup sysMonitor_unit_test */
 SCENARIO( "System monitor is constructed and ram usage result is passed in", "[sysMonitor]" )
 {
+    // clang-format off
+    #ifdef SYSMONITOR_TEST_DOXYGEN_REF
+    sysMonitor::parseRamUsage( "", *(float *)nullptr );
+    #endif
+    // clang-format on
+
     GIVEN( "A default constructed system monitor object and an float for usage" )
     {
         MagAOX::app::sysMonitor sm;
@@ -345,17 +367,21 @@ SCENARIO( "System monitor is constructed and ram usage result is passed in", "[s
 }
 
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
+/// Construct only the local property state needed by the callback validator tests.
 class sysMonitor_test : public sysMonitor
 {
 
   public:
-    sysMonitor_test( const std::string device )
-    {
-        m_configName = device;
-
-        XWCTEST_SETUP_INDI_NEW_PROP( setlat );
-    }
+    /// Initialize the test device identity and its low-latency toggle property.
+    sysMonitor_test( const std::string device /**< [in] device name used by the local callback fixture */ );
 };
+
+sysMonitor_test::sysMonitor_test( const std::string device )
+{
+    m_configName = device;
+
+    XWCTEST_SETUP_INDI_NEW_PROP( setlat );
+}
 /// \endcond
 
 /// Verify the sysMonitor INDI callback validator accepts only the expected property.

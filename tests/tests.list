@@ -135,6 +135,15 @@
 ../apps/streamWriter/tests/streamWriter_entrypoint_test
 ../apps/strehlEstimator/tests/strehlEstimator_test
 ../apps/sysMonitor/tests/sysMonitor_test
+../apps/sysMonitor/tests/sysMonitorDiagnostics_test
+../apps/sysMonitor/tests/gpuMonitor_test
+../apps/sysMonitor/tests/irqMonitor_test
+../libMagAOX/sys/tests/boundedCommand_test
+../libMagAOX/sys/tests/cpuList_test
+../libMagAOX/logger/tests/gpuTelemetry_test
+../libMagAOX/logger/tests/irqTelemetry_test
+../libMagAOX/logger/tests/raidTelemetry_test
+../apps/sysMonitor/tests/raidMonitor_test
 ../apps/t2wOffloader/tests/t2wOffloader_test
 ../apps/tcsInterface/tests/tcsInterface_test
 ../apps/timeSeriesSimulator/tests/timeSeriesSimulator_test

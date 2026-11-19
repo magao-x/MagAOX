@@ -51,6 +51,7 @@ class dmSpeckleHarness : public dmSpeckle
     using dmSpeckle::m_typeSize;
     using dmSpeckle::m_width;
     using dmSpeckle::m_writeLeadUs;
+    using dmSpeckle::opModeName;
     using dmSpeckle::prepareSyncopationCommand;
     using dmSpeckle::validateSyncopationConfig;
 };
@@ -297,6 +298,20 @@ TEST_CASE( "dmSpeckle preserves legacy zero and isolates managed triggers", "[dm
     request["toggle"] = pcf::IndiElement::On;
     REQUIRE( app.newCallBack_m_indiP_trigger( request ) < 0 );
     REQUIRE_FALSE( app.m_trigger );
+}
+
+/// Verify that mode INDI element names match the modulator.opMode configuration values.
+/** \ingroup dmSpeckle_unit_test */
+TEST_CASE( "dmSpeckle mode names match configuration values", "[dmSpeckle]" )
+{
+    // clang-format off
+    #ifdef DMSPECKLE_TEST_DOXYGEN_REF
+    dmSpeckle::opModeName(0);
+    #endif
+    // clang-format on
+    REQUIRE( dmSpeckleHarness::opModeName( SPARKLE ) == "sparkle" );
+    REQUIRE( dmSpeckleHarness::opModeName( ARBCUBE ) == "arbcube" );
+    REQUIRE( dmSpeckleHarness::opModeName( TIPTILT ) == "tiptilt" );
 }
 
 } // namespace dmSpeckleTest
