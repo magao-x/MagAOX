@@ -161,6 +161,13 @@ class fakeEll21
         m_inject += raw;
     }
 
+    /// Offset in pulses between a move's target and where the stage actually stops.
+    void landingErrorPulses( int32_t err /**< [in] landing error in pulses */ )
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        m_landingError = err;
+    }
+
     /// Whether motion completion is reported with an unsolicited `PO` frame.
     void completionFrame( bool send /**< [in] true to send `PO` when motion completes */ )
     {
@@ -236,6 +243,7 @@ class fakeEll21
     int                m_dropQueries{ 0 };
     bool               m_silentWhileBusy{ false };
     bool               m_completionFrame{ true };
+    int32_t            m_landingError{ 0 };
     std::string        m_inject;
 
     /// Format an 8-digit two's complement hex position.
@@ -278,7 +286,7 @@ class fakeEll21
                 off += static_cast<size_t>( w );
                 continue;
             }
-            if( w < 0 && ( errno == EAGAIN || errno == EWOULDBLOCK ) )
+            if( w < 0 && ( errno == EAGAIN || errno == EWOULDBLOCK ) && !m_stop )
             {
                 std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
                 continue;
@@ -318,7 +326,7 @@ class fakeEll21
             return gs( m_errorCode );
         }
 
-        m_pos = m_target;
+        m_pos = m_target + m_landingError;
         return m_completionFrame ? po( m_pos ) : "";
     }
 
@@ -502,6 +510,8 @@ class ell21App : public MagAOX::app::elliptecCtrl
         m_indiP_stop.setName( "stop" );
         m_indiP_preset.setDevice( m_configName );
         m_indiP_preset.setName( "preset" );
+        m_ipOptimize.setDevice( m_configName );
+        m_ipOptimize.setName( "optimize" );
     }
 
     /// Shut down telemetry and the serial port.
@@ -567,6 +577,66 @@ class ell21App : public MagAOX::app::elliptecCtrl
     void homeOffset( double deg /**< [in] offset in degrees */ )
     {
         m_homeOffsetDeg = deg;
+    }
+
+    /// Configure `stage.powerOnHome`.
+    void powerOnHome( bool enable /**< [in] home after power-on */ )
+    {
+        m_powerOnHome = enable;
+    }
+
+    /// Configure `stage.enableMaintenance`.
+    void enableMaintenance( bool enable /**< [in] enable optimize and save */ )
+    {
+        m_enableMaintenance = enable;
+    }
+
+    /// Press the standard `stop` request through the stdMotionStage callback.
+    int pressStop()
+    {
+        pcf::IndiProperty ip = m_indiP_stop;
+        ip["request"].setSwitchState( pcf::IndiElement::On );
+        return newCallBack_m_indiP_stop( ip );
+    }
+
+    /// Press the `optimize` request.
+    int pressOptimize()
+    {
+        pcf::IndiProperty ip = m_ipOptimize;
+        ip["request"].setSwitchState( pcf::IndiElement::On );
+        return newCallBack_m_ipOptimize( ip );
+    }
+
+    /// Simulate the framework's power-off then power-on sequence.
+    int powerCycle()
+    {
+        m_powerState       = 0;
+        m_powerTargetState = 0;
+        state( MagAOX::app::stateCodes::POWEROFF );
+        int rv             = onPowerOff();
+        m_powerState       = 1;
+        m_powerTargetState = 1;
+        state( MagAOX::app::stateCodes::POWERON );
+        return rv;
+    }
+
+    /// Operator-facing status text.
+    std::string statusText()
+    {
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+        return m_ipStatus["current"].getValue();
+    }
+
+    /// Preset name recorded in stage telemetry.
+    std::string presetName()
+    {
+        return telemetryPresetName();
+    }
+
+    /// Current 1-based preset, or 0 when not at a preset.
+    float preset() const
+    {
+        return m_preset;
     }
 
     /// FSM states visited, with consecutive duplicates collapsed.
@@ -788,6 +858,268 @@ TEST_CASE( "ELL21 stray PO frame during a move is handled", "[elliptecCtrl][ell2
         2000 ) );
 
     REQUIRE( app.positionDeg() == Approx( 90.0 ).margin( 0.01 ) );
+    REQUIRE_FALSE( app.visited( MagAOX::app::stateCodes::NOTCONNECTED ) );
+}
+
+/// A mechanical timeout during a home leaves the stage NOTHOMED with the port open and the error shown.
+/** \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "ELL21 mechanical timeout during home is reported without reconnecting", "[elliptecCtrl][ell21]" )
+{
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecCtrl::failPending_( "" );
+    // clang-format on
+#endif
+
+    fakeEll21 dev;
+    dev.motionMs( 200 );
+    dev.failNextMotion( 2 );
+
+    ell21App app( "ell21-home-error", dev.slavePath() );
+    connectApp( app );
+
+    REQUIRE( app.pressHome() == 0 );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.state() == MagAOX::app::stateCodes::HOMING;
+        },
+        1000 ) );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.state() == MagAOX::app::stateCodes::NOTHOMED;
+        },
+        3000 ) );
+
+    REQUIRE_FALSE( app.homed() );
+    REQUIRE( app.connected() );
+    REQUIRE_FALSE( app.visited( MagAOX::app::stateCodes::NOTCONNECTED ) );
+    REQUIRE( app.statusText() == "Error: home failed (mechanical time out)" );
+
+    // The next home succeeds and clears the error.
+    REQUIRE( app.pressHome() == 0 );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.state() == MagAOX::app::stateCodes::READY;
+        },
+        3000 ) );
+    REQUIRE( app.statusText() == "OK" );
+}
+
+/// `stage.powerOnHome` homes once after power-on, but not after a communication reconnect.
+/** \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "ELL21 power-on home runs after power-on but not after a reconnect", "[elliptecCtrl][ell21]" )
+{
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecCtrl::connect_();
+    MagAOX::app::elliptecCtrl::disconnect_();
+    MagAOX::app::elliptecCtrl::onPowerOff();
+    // clang-format on
+#endif
+
+    fakeEll21 dev;
+    dev.motionMs( 150 );
+    dev.positionPulses( 5000 );
+
+    ell21App app( "ell21-power-on-home", dev.slavePath() );
+    app.powerOnHome( true );
+    REQUIRE( app.startup() == 0 );
+
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.state() == MagAOX::app::stateCodes::READY;
+        },
+        3000 ) );
+    REQUIRE( dev.count( "ho" ) == 1 );
+    REQUIRE( app.homed() );
+
+    // Communication loss: the device stops answering long enough to exhaust the miss budget.
+    app.clearStates();
+    dev.dropQueries( 10 );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.visited( MagAOX::app::stateCodes::NOTCONNECTED );
+        },
+        5000 ) );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.state() == MagAOX::app::stateCodes::READY;
+        },
+        5000 ) );
+    REQUIRE( dev.count( "ho" ) == 1 );
+    REQUIRE( app.homed() );
+
+    // A power cycle requires a new home.
+    REQUIRE( app.powerCycle() == 0 );
+    REQUIRE_FALSE( app.homed() );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.state() == MagAOX::app::stateCodes::READY;
+        },
+        3000 ) );
+    REQUIRE( dev.count( "ho" ) == 2 );
+}
+
+/// Presets are recognized within the 0.5 degree tolerance, including across the 0/360 degree wrap.
+/** \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "ELL21 preset arrival tolerates landing error across the wrap", "[elliptecCtrl][ell21]" )
+{
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecCtrl::presetNumber();
+    MagAOX::app::elliptecCtrl::presetIndexForPosition_( 0 );
+    // clang-format on
+#endif
+
+    fakeEll21 dev;
+    dev.motionMs( 100 );
+
+    ell21App app( "ell21-preset-tolerance", dev.slavePath() );
+    connectApp( app );
+
+    // 50 pulses is about 0.27 degrees.
+    dev.landingErrorPulses( 50 );
+    REQUIRE( app.requestPreset( 2 ) == 0 );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return !dev.busy() && app.moving() <= 0;
+        },
+        2000 ) );
+    REQUIRE( app.positionDeg() == Approx( 90.27 ).margin( 0.01 ) );
+    REQUIRE( app.preset() == Approx( 2.0F ) );
+    REQUIRE( app.presetName() == "ninety" );
+
+    // Landing just below 0 reports 359.7 degrees, still at the "zero" preset.
+    dev.landingErrorPulses( -50 );
+    REQUIRE( app.requestPreset( 1 ) == 0 );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return !dev.busy() && app.moving() <= 0;
+        },
+        2000 ) );
+    REQUIRE( app.positionDeg() == Approx( 359.73 ).margin( 0.01 ) );
+    REQUIRE( app.preset() == Approx( 1.0F ) );
+    REQUIRE( app.presetName() == "zero" );
+
+    // Beyond the tolerance no preset is reported (200 pulses is about 1.1 degrees).
+    dev.landingErrorPulses( 200 );
+    REQUIRE( app.requestPreset( 3 ) == 0 );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return !dev.busy() && app.moving() <= 0;
+        },
+        2000 ) );
+    REQUIRE( app.preset() == Approx( 0.0F ) );
+}
+
+/// A long, silent optimize does not trigger a reconnect, rejects motion, and requires a re-home.
+/** \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "ELL21 optimize outlasts the miss budget without reconnecting", "[elliptecCtrl][ell21]" )
+{
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecCtrl::newCallBack_m_ipOptimize( pcf::IndiProperty() );
+    MagAOX::app::elliptecCtrl::motionAllowed_( "" );
+    // clang-format on
+#endif
+
+    fakeEll21 dev;
+    dev.motionMs( 100 );
+    dev.optimizeMs( 1500 );
+    dev.silentWhileBusy( true );
+
+    ell21App app( "ell21-optimize", dev.slavePath() );
+    app.enableMaintenance( true );
+    connectApp( app );
+
+    REQUIRE( app.pressHome() == 0 );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.state() == MagAOX::app::stateCodes::READY;
+        },
+        3000 ) );
+    app.clearStates();
+
+    REQUIRE( app.pressOptimize() == 0 );
+
+    // Motion is rejected while optimizing.
+    REQUIRE( app.requestPreset( 2 ) == 0 );
+
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.moving() == 1;
+        },
+        1000 ) );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return !dev.busy() && app.moving() <= 0;
+        },
+        5000 ) );
+
+    REQUIRE( dev.count( "om" ) == 1 );
+    REQUIRE( dev.count( "ma" ) == 0 );
+    REQUIRE_FALSE( app.visited( MagAOX::app::stateCodes::NOTCONNECTED ) );
+    REQUIRE( app.visited( MagAOX::app::stateCodes::OPERATING ) );
+    REQUIRE_FALSE( app.homed() );
+    REQUIRE( app.state() == MagAOX::app::stateCodes::NOTHOMED );
+}
+
+/// A stop the device does not support leaves the move to complete and says so.
+/** \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "ELL21 unsupported stop lets the move complete and reports it", "[elliptecCtrl][ell21]" )
+{
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecCtrl::stop();
+    // clang-format on
+#endif
+
+    fakeEll21 dev;
+    dev.motionMs( 800 );
+    dev.stopReply( 3 );
+
+    ell21App app( "ell21-stop", dev.slavePath() );
+    connectApp( app );
+
+    REQUIRE( app.requestPreset( 3 ) == 0 );
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.state() == MagAOX::app::stateCodes::OPERATING;
+        },
+        1000 ) );
+
+    REQUIRE( app.pressStop() == 0 );
+    REQUIRE( dev.count( "st" ) == 1 );
+    REQUIRE( app.moving() == 1 );
+    REQUIRE( app.statusText() == "Stop not supported; move will complete" );
+
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return !dev.busy() && app.moving() <= 0;
+        },
+        3000 ) );
+    REQUIRE( app.positionDeg() == Approx( 180.0 ).margin( 0.01 ) );
+    REQUIRE( app.preset() == Approx( 3.0F ) );
     REQUIRE_FALSE( app.visited( MagAOX::app::stateCodes::NOTCONNECTED ) );
 }
 
