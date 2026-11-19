@@ -18,12 +18,15 @@
 
 namespace MagAOX::app
 {
-/// Explicit commissioning authorization; zero physical limits never permit actuation.
+/// Explicit commissioning authorization; DDSPC keeps mandatory bounds unless the application selects producer defaults.
 struct SyncoOutputConfig
 {
     bool         m_authorized{ false }, m_routingVerified{ false }; ///< Both are startup-only operator assertions.
     double       m_maxAbs{ 0 }, m_maxStep{ 0 }; ///< Approved full-image surface-micron limits; no guessed defaults.
-    std::int64_t m_ackTimeoutNs{ 0 };           ///< Approved transport receipt timeout, not optical response time.
+    std::int64_t m_ackTimeoutNs{
+        0 }; ///< DDSPC requires a positive timeout; producer defaults permit zero/base-only ack wait.
+    bool m_producerDefaults{
+        false }; ///< App-only finite-value/base-ack policy, used by accelSim; never an INDI/config switch.
 };
 
 /// Copyable requested/transport-acknowledged state; never a physical application certificate.
@@ -66,7 +69,7 @@ class SyncoOutputState
     void acknowledge( bool copied /**< [in] Consumer copied rather than discarded the pending payload. */ );
     /// Check the pending receipt timeout and current qualification without inventing a new write opportunity.
     void check( std::int64_t now /**< [in] Same-host monotonic time. */, bool qualified /**< [in] Current gate. */ );
-    /// Validate an own-channel candidate; zero removal bypasses the active slew limit.
+    /// Validate finite values and any strict DDSPC bounds; zero removal bypasses the active slew limit.
     bool validate( std::span<const float> pixels /**< [in] Prepared complete image. */,
                    bool                   zero /**< [in] Removal command. */ );
     /// Mark a successfully committed command, awaiting its exact matching receipt.
@@ -95,10 +98,13 @@ inline bool SyncoOutputState::request( bool enabled, bool qualified )
         return true;
     }
     if( !m_permitted || !m_config.m_authorized || !m_config.m_routingVerified || !qualified ||
-        !std::isfinite( m_config.m_maxAbs ) || !std::isfinite( m_config.m_maxStep ) || m_config.m_maxAbs <= 0 ||
-        m_config.m_maxStep <= 0 || m_config.m_ackTimeoutNs <= 0 || ( m_status.m_fault && !m_status.m_zeroConfirmed ) )
+        ( !m_config.m_producerDefaults &&
+          ( !std::isfinite( m_config.m_maxAbs ) || !std::isfinite( m_config.m_maxStep ) || m_config.m_maxAbs <= 0 ||
+            m_config.m_maxStep <= 0 || m_config.m_ackTimeoutNs <= 0 ) ) ||
+        ( m_status.m_fault && !m_status.m_zeroConfirmed ) )
     {
-        m_status.m_reason = "authorization_limits_route_or_qualification_missing";
+        m_status.m_reason = m_config.m_producerDefaults ? "authorization_route_or_qualification_missing"
+                                                        : "authorization_limits_route_or_qualification_missing";
         return false;
     }
     m_status.m_fault     = false;
@@ -115,9 +121,10 @@ inline void SyncoOutputState::fault( const char *reason )
 }
 inline bool SyncoOutputState::initialize()
 {
-    if( !m_permitted || !m_config.m_authorized || !m_config.m_routingVerified || !std::isfinite( m_config.m_maxAbs ) ||
-        !std::isfinite( m_config.m_maxStep ) || m_config.m_maxAbs <= 0 || m_config.m_maxStep <= 0 ||
-        m_config.m_ackTimeoutNs <= 0 )
+    if( !m_permitted || !m_config.m_authorized || !m_config.m_routingVerified ||
+        ( !m_config.m_producerDefaults &&
+          ( !std::isfinite( m_config.m_maxAbs ) || !std::isfinite( m_config.m_maxStep ) || m_config.m_maxAbs <= 0 ||
+            m_config.m_maxStep <= 0 || m_config.m_ackTimeoutNs <= 0 ) ) )
         return false;
     if( !m_status.m_requested && m_status.m_zeroConfirmed )
         attached();
@@ -166,7 +173,7 @@ inline void SyncoOutputState::check( std::int64_t now, bool qualified )
 {
     if( m_status.m_requested && !qualified )
         fault( "input_or_model_qualification_lost" );
-    if( m_pending && now - m_sent > m_config.m_ackTimeoutNs )
+    if( m_pending && m_config.m_ackTimeoutNs > 0 && now - m_sent > m_config.m_ackTimeoutNs )
         fault( "ack_timeout_zero_unconfirmed" );
 }
 inline bool SyncoOutputState::validate( std::span<const float> pixels, bool zero )
@@ -174,9 +181,10 @@ inline bool SyncoOutputState::validate( std::span<const float> pixels, bool zero
     if( m_pending || pixels.size() != m_last.size() || ( !zero && !m_status.m_requested ) )
         return false;
     for( std::size_t p = 0; p < pixels.size(); ++p )
-        if( !std::isfinite( pixels[p] ) || ( zero ? pixels[p] != 0
-                                                  : ( std::abs( pixels[p] ) > m_config.m_maxAbs ||
-                                                      std::abs( pixels[p] - m_last[p] ) > m_config.m_maxStep ) ) )
+        if( !std::isfinite( pixels[p] ) ||
+            ( zero ? pixels[p] != 0
+                   : ( !m_config.m_producerDefaults && ( std::abs( pixels[p] ) > m_config.m_maxAbs ||
+                                                         std::abs( pixels[p] - m_last[p] ) > m_config.m_maxStep ) ) ) )
         {
             ++m_status.m_rejected;
             fault( "nonfinite_or_command_limit" );

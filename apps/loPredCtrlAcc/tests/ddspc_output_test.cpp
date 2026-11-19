@@ -123,4 +123,56 @@ TEST_CASE( "Output startup remains inert under concurrent early control requests
     REQUIRE_FALSE( output.status().m_requested );
     REQUIRE( output.stop() );
 }
+/** \brief Only the explicit simulator policy accepts absent bounds/watchdog; DDSPC remains strict by default. */
+TEST_CASE( "Simulator producer defaults preserve finite values and acknowledgement ownership", "[multirate][output]" )
+{
+    MagAOX::app::SyncoOutputConfig config;
+    config.m_authorized = config.m_routingVerified = true;
+    MagAOX::app::SyncoOutputState standard( config, 2, true );
+    REQUIRE_FALSE( standard.request( true, true ) );
+    REQUIRE_FALSE( standard.initialize() );
+    for( unsigned missing = 0; missing < 3; ++missing )
+    {
+        MagAOX::app::SyncoOutputConfig strict{ true, true, 1, 1, 1000 };
+        if( missing == 0 )
+            strict.m_maxAbs = 0;
+        if( missing == 1 )
+            strict.m_maxStep = 0;
+        if( missing == 2 )
+            strict.m_ackTimeoutNs = 0;
+        MagAOX::app::SyncoOutputState controller( strict, 2, true );
+        REQUIRE_FALSE( controller.request( true, true ) );
+        REQUIRE_FALSE( controller.initialize() );
+    }
+    config.m_producerDefaults = true;
+    MagAOX::app::SyncoOutputState simulator( config, 2, true ), shadow( config, 2, false );
+    REQUIRE_FALSE( shadow.request( true, true ) );
+    REQUIRE_FALSE( shadow.initialize() );
+    REQUIRE_FALSE( simulator.request( true, false ) );
+    REQUIRE( simulator.initialize() );
+    REQUIRE( simulator.request( true, true ) );
+    const std::array<float, 2> zero{}, value{ .2f, -.1f };
+    REQUIRE( simulator.validate( zero, true ) );
+    simulator.submitted( zero, true, 100 );
+    simulator.acknowledge( true );
+    REQUIRE( simulator.validate( value, false ) );
+    simulator.submitted( value, false, 200 );
+    simulator.check( 1000000000, true ); // No extra simulator watchdog; the base still owns the unacknowledged buffer.
+    REQUIRE_FALSE( simulator.status().m_fault );
+    REQUIRE( simulator.pending() );
+    REQUIRE_FALSE( simulator.validate( value, false ) );
+    simulator.request( false, false );
+    REQUIRE_FALSE( simulator.validate( zero, true ) ); // Disable cannot overwrite a consumer-owned payload.
+    simulator.acknowledge( true );
+    REQUIRE( simulator.zero_needed() );
+    REQUIRE( simulator.validate( zero, true ) );
+    simulator.submitted( zero, true, 1000000001 );
+    simulator.acknowledge( true );
+    REQUIRE( simulator.status().m_zeroConfirmed );
+    REQUIRE( simulator.request( true, true ) );
+    const std::array<float, 2> invalid{ 0, std::numeric_limits<float>::quiet_NaN() };
+    REQUIRE_FALSE( simulator.validate( invalid, false ) );
+    REQUIRE( simulator.status().m_fault );
+    REQUIRE_FALSE( simulator.status().m_requested );
+}
 } // namespace libXWCTest::loPredCtrlAccTest

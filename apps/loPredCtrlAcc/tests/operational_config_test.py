@@ -47,11 +47,11 @@ class OperationalConfigTest(unittest.TestCase):
         self.assertEqual(ctrl.getint('online_shadow', 'training_stride'), 1)
         self.assertEqual((APP / 'examples/operational/acc000.conf').read_bytes(),
                          (ROOT / 'apps/accelSim/acc000.conf').read_bytes())
-        for config, section in ((sim, 'dm'), (ctrl, 'output')):
-            for key in ('max_abs_um', 'max_step_um', 'ack_timeout_us'):
-                self.assertEqual(config.getfloat(section, key), 0)
-        for config in (sim, ctrl):
-            self.assertEqual(config['syncopation']['timingStream'], '')
+        for key in ('max_abs_um', 'max_step_um', 'ack_timeout_us'):
+            self.assertNotIn(key, sim['dm'])
+            self.assertEqual(ctrl.getfloat('output', key), 0)
+        # A configured scheduler name is not output authorization or a qualified slot association.
+        self.assertFalse(ctrl.getboolean('native_inputs', 'synco_association'))
         self.assertEqual(ctrl['native_inputs']['calibration'], '')
         self.assertEqual(ctrl.getint('native_inputs', 'sync_epoch'), 0)
 

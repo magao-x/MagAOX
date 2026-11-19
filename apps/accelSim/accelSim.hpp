@@ -114,13 +114,13 @@ class accelSim : public MagAOXApp<true>,
                                                                                  "mode_code" };
 
     using diagnostics = accelSimDetail::diagnostics;
-    diagnostics       m_diagnostics, m_snapshot;        ///< Worker state and synchronized app-loop snapshot.
-    std::mutex        m_snapshotMutex;                  ///< Protects only snapshot copies, never acquisition work.
-    std::mutex        m_controlMutex;                   ///< Serializes app-owned INDI properties and their callbacks.
-    std::string       m_dmChannel, m_dmModes, m_dmMask; ///< Explicit owned channel and approved calibration paths.
-    SyncoOutput       m_output;                ///< Existing tagged producer; never directly updates a DM image.
-    SyncoOutputConfig m_outputConfig;          ///< Explicit route authorization and approved full-image limits.
-    double            m_outputAckUs{ 0 };      ///< Reviewed acknowledgement timeout.
+    diagnostics m_diagnostics, m_snapshot;        ///< Worker state and synchronized app-loop snapshot.
+    std::mutex  m_snapshotMutex;                  ///< Protects only snapshot copies, never acquisition work.
+    std::mutex  m_controlMutex;                   ///< Serializes app-owned INDI properties and their callbacks.
+    std::string m_dmChannel, m_dmModes, m_dmMask; ///< Explicit owned channel and approved calibration paths.
+    SyncoOutput m_output;                         ///< Existing tagged producer; never directly updates a DM image.
+    SyncoOutputConfig
+        m_outputConfig; ///< Explicit route authorization; existing producer policy, no extra caps/watchdog.
     std::array<float, 2500>   m_dmPixels{};    ///< Latest same-sample prepared physical disturbance, private only.
     std::mutex                m_dmPixelsMutex; ///< Acquisition try-lock; no consumer wait is added to ADC acquisition.
     std::atomic<std::int64_t> m_dmSampleNs{ -1 };   ///< Actual availability of the private same-sample command.
@@ -240,6 +240,8 @@ class accelSim : public MagAOXApp<true>,
 inline accelSim::accelSim() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
     m_shmimName = "acc000";
+    m_outputConfig.m_producerDefaults =
+        true; // Follow dmSpeckle finite-value/base-ack semantics, without changing DDSPC.
 }
 
 inline accelSim::~accelSim() noexcept
@@ -305,8 +307,13 @@ inline void accelSim::setupConfig()
     add( "dm", "mask", "string", "Deployed dmmask FITS fitting support, not the offloader actuator mask." );
     add( "dm", "enabled", "bool", "Must be false; enable only through controlled runtime INDI handover." );
     add( "dm", "scale", "double", "Independent DM-only scale [0,1], default 0." );
-    for( const char *key : { "output_authorized", "routing_verified", "max_abs_um", "max_step_um", "ack_timeout_us" } )
-        add( "dm", key, "string", "Explicit tagged auxiliary output authorization; zero limits inhibit." );
+    for( const char *key : { "output_authorized", "routing_verified" } )
+        add( "dm", key, "bool", "Explicit tagged auxiliary output authorization." );
+    for( const char *key : { "max_abs_um", "max_step_um", "ack_timeout_us" } )
+        add( "dm",
+             key,
+             "string",
+             "Deprecated and ignored: accelSim uses the existing finite-value/base-ack producer policy." );
     add( "dm", "maxRelativeResidual", "double", "Maximum calibrated physical fit residual, default 1e-6." );
 }
 
@@ -359,14 +366,12 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_dmChannel, "dm.channelName" );
     config( m_outputConfig.m_authorized, "dm.output_authorized" );
     config( m_outputConfig.m_routingVerified, "dm.routing_verified" );
-    config( m_outputConfig.m_maxAbs, "dm.max_abs_um" );
-    config( m_outputConfig.m_maxStep, "dm.max_step_um" );
-    config( m_outputAckUs, "dm.ack_timeout_us" );
-    if( !std::isfinite( m_outputConfig.m_maxAbs ) || !std::isfinite( m_outputConfig.m_maxStep ) ||
-        m_outputConfig.m_maxAbs < 0 || m_outputConfig.m_maxStep < 0 || !std::isfinite( m_outputAckUs ) ||
-        m_outputAckUs < 0 || m_outputAckUs > 1000000 || ( !m_dmChannel.empty() && m_dmChannel != "dm01disp10_aux" ) )
+    // Consume obsolete keys without requiring values or changing the standard producer policy.
+    std::string ignored;
+    for( const char *key : { "dm.max_abs_um", "dm.max_step_um", "dm.ack_timeout_us" } )
+        config( ignored, key );
+    if( !m_dmChannel.empty() && m_dmChannel != "dm01disp10_aux" )
         return -1;
-    m_outputConfig.m_ackTimeoutNs = std::llround( m_outputAckUs * 1000 );
 
     config( m_dmModes, "dm.modeCube" );
     config( m_dmMask, "dm.mask" );
@@ -1156,8 +1161,7 @@ inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_dmEnable )( const pcf::IndiPrope
     if( enable )
         return propertyState( m_indiP_dmEnable, false );
 #endif
-    if( enable && ( !m_outputConfig.m_authorized || !m_outputConfig.m_routingVerified || m_outputConfig.m_maxAbs <= 0 ||
-                    m_outputConfig.m_maxStep <= 0 || m_outputConfig.m_ackTimeoutNs <= 0 ) )
+    if( enable && ( !m_outputConfig.m_authorized || !m_outputConfig.m_routingVerified ) )
         return propertyState( m_indiP_dmEnable, false );
     m_dmArmPending.store( enable );
     if( !enable )

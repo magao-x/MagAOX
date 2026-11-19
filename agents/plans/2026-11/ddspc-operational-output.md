@@ -175,3 +175,47 @@ Actual Linux application compilation (especially the accelSim native lifecycle),
 DM routing/additivity, optical response and controlled enable/removal remain
 unverified. The local Linux build helper correctly refuses this macOS host.
 No further optimization or development cycle is part of this handoff.
+
+## Simulator producer-default simplification
+
+Follow-up to checkpoint f05f10d4: the user explicitly requested removing accelSim's
+mandatory max_abs_um, max_step_um and ack_timeout_us settings. This supersedes the
+simulator-specific limit requirements above; loPredCtrlAcc remains unchanged.
+
+Reviewed local bmcCtrl and the locally available syncopation branch bb5a5d89:
+BMC conversion clamps the combined normalized squared voltage to [0,1], but no
+per-source step limit was established. dmSpeckle uses finite commands and matching
+producer acknowledgements, without these three mandatory settings. No local
+executable/config mapping establishes the identity of tweeterMod; ttmModulator
+controls a different function generator and was not substituted for it. Detailed
+source references are in OPERATIONAL_DDSPC.md's simulator policy section.
+
+Minimal change: an application-only producer-default selection in SyncoOutputConfig
+(default false) is enabled only by the accelSim constructor. It skips extra
+per-source bounds and permits base-only acknowledgement waiting (no guessed timer).
+The source buffer cannot be reused before a matching copy/discard receipt. Finite
+checks, compile/output authorization, qualification, ownership, exact deadlines,
+fault latching and own-channel zero removal are preserved. DDSPC still requires
+all three configured positive values, including independently tested missing-field
+cases. No INDI/config switch exposes the simulator policy to DDSPC.
+
+Retired simulator keys are consumed as ignored optional strings for existing-file
+compatibility. Removed them from both acc000.conf copies and the ADC-only example.
+The operational config test's prior requirement that every timingStream be blank
+was stale (the controller example now names dmtweeter_synco_timing). It now checks
+that a name does not grant output/association authority, without changing the
+configured timing stream or the controller's limits.
+
+Focused normal and ASan/UBSan runs both pass the real-producer mock (4 cases,
+10,152 assertions; zero/nonzero initial scales) and native controls/output policy
+suite (16 cases, 250 assertions), plus 2 Python configuration tests. The mock
+publishes a nonzero scaled simulator surface with all three settings zero, removes
+it with a matching zero receipt, and preserves the independent DDSPC source.
+No native Linux application or instrument was run. Shutdown remains bounded;
+missing consumer receipts cannot be reclassified as successful physical removal.
+The portable simulator model/disturbance/synthesis regression also passes 36 cases
+and 308,607 assertions after this change. Simulator numerical headers, both
+acquisition applications, original loPredCtrl, loPredCtrlAcc's production source
+and configuration, and the existing producer/timing headers are unchanged.
+Only the shared helper's explicit simulator-policy branch changes output policy;
+there is no change to the slot protocol or DM channel assignments.

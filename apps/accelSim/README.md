@@ -57,13 +57,23 @@ No new scheduler or physical vibration model was introduced.
 
 Default builds are strict shadow-only. `make operational` explicitly builds a
 capable binary, but output additionally needs reviewed `[dm] output_authorized`,
-`routing_verified`, positive approved `max_abs_um`, `max_step_um`,
-`ack_timeout_us`, existing `[syncopation] timingStream`, calibration and valid
+`routing_verified`, existing `[syncopation] timingStream`, calibration and valid
 8000-Hz synchronized input. The source must already exist, with exclusive
 handover including any direct writers. The base obtains the cooperative producer
 lock; it does not stop unrelated apps or protect against non-cooperating writers.
 No output source is created or touched at startup. Startup `enabled=true` or
 `scale!=0` is rejected. The default ADC-only config still needs no DM access.
+
+There are no mandatory `max_abs_um`, `max_step_um` or `ack_timeout_us` settings.
+Like dmSpeckle, the simulator accepts finite prepared surfaces and uses the base's
+matching acknowledgement before reusing a payload. It adds no independent receipt
+watchdog or per-source amplitude/step limiter. Old copies of those three keys are
+accepted and ignored. The commissioned BMC path retains its existing saturation
+clipping of the combined request; that is not a per-source slew bound. The scale
+control remains [0,1], startup scale remains zero, and no hardware displacement or
+slew limit is inferred from those facts. DDSPC retains its separate mandatory
+bounds/timeout policy; this simulator choice is not exposed as a configuration
+switch in loPredCtrlAcc.
 
 The existing `[dm] modeCube`, `mask`, `maxRelativeResidual`, `enabled=false`,
 `scale=0` and INDI `dm_enable.toggle`, `dm_scale.current/target` remain.
