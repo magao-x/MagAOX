@@ -141,6 +141,13 @@ class fakeEll21
         m_failNextCode = code;
     }
 
+    /// Ignore the next `n` commands of any kind, as a device does while it boots after power-on.
+    void bootSilentCommands( int n /**< [in] number of commands to ignore */ )
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        m_bootSilent = n;
+    }
+
     /// Ignore the next `n` query commands (`gs`/`gp`) without replying.
     void dropQueries( int n /**< [in] number of queries to ignore */ )
     {
@@ -274,6 +281,9 @@ class fakeEll21
     /// Error code the next motion ends with, or 0.
     int m_failNextCode{ 0 };
 
+    /// Number of upcoming commands of any kind to ignore.
+    int m_bootSilent{ 0 };
+
     /// Number of upcoming `gs`/`gp` queries to ignore.
     int m_dropQueries{ 0 };
 
@@ -405,6 +415,12 @@ class fakeEll21
         const std::string mn  = cmd.substr( 1, 2 );
         const std::string arg = cmd.substr( 3 );
         m_commands.push_back( cmd.substr( 1 ) );
+
+        if( m_bootSilent > 0 )
+        {
+            --m_bootSilent;
+            return "";
+        }
 
         if( mn == "gs" || mn == "gp" )
         {
@@ -721,6 +737,12 @@ class ell21App : public MagAOX::app::elliptecCtrl
     bool connected() const
     {
         return m_connected;
+    }
+
+    /// Pulses per revolution learned from the device.
+    uint32_t pulsesPerRev() const
+    {
+        return m_pulsesPerRev;
     }
 
     /// Current position in degrees.
@@ -1169,6 +1191,43 @@ TEST_CASE( "ELL21 unsupported stop lets the move complete and reports it", "[ell
     REQUIRE( app.positionDeg() == Approx( 180.0 ).margin( 0.01 ) );
     REQUIRE( app.preset() == Approx( 3.0F ) );
     REQUIRE_FALSE( app.visited( MagAOX::app::stateCodes::NOTCONNECTED ) );
+}
+
+/// A device that does not answer while booting is retried until it identifies itself, then power-on homes.
+/** Regression for hardware where the first connection after power-on got no `in` reply, left the angle scale
+ * unknown for the whole connection, and rejected every move and home.
+ *
+ * \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "ELL21 slow to answer after power-on is retried before connecting", "[elliptecCtrl][ell21]" )
+{
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecCtrl::connect_();
+    // clang-format on
+#endif
+
+    fakeEll21 dev;
+    dev.motionMs( 150 );
+    dev.positionPulses( 5000 );
+    dev.bootSilentCommands( 3 );
+
+    ell21App app( "ell21-slow-boot", dev.slavePath() );
+    app.powerOnHome( true );
+    REQUIRE( app.startup() == 0 );
+
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            return app.state() == MagAOX::app::stateCodes::READY;
+        },
+        5000 ) );
+
+    REQUIRE( app.pulsesPerRev() == 65536 );
+    REQUIRE( dev.count( "in" ) >= 4 );
+    REQUIRE( dev.count( "ho" ) == 1 );
+    REQUIRE( app.homed() );
+    REQUIRE_FALSE( app.visited( MagAOX::app::stateCodes::NOTHOMED ) );
 }
 
 } // namespace elliptecCtrlTest

@@ -279,6 +279,9 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Count of consecutive missed replies.
     int m_commMisses{ 0 };
 
+    /// Whether a failed connection attempt has been logged since the last successful connection.
+    bool m_connectRetryLogged{ false };
+
     /// Whether position telemetry has been recorded since startup.
     bool m_positionRecorded{ false };
 
@@ -507,6 +510,12 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     void failPending_( const std::string &reason /**< [in] operator-facing reason */ );
 
     /// Connect to the device and query its initial state.
+    /** The connection only succeeds once the device answers the info query and the pulses per revolution are known;
+     * otherwise the port is closed and the caller retries on the next loop.
+     *
+     * \returns 0 on success
+     * \returns -1 if the port could not be opened or the device did not identify itself
+     */
     int connect_();
 
     /// Drop the connection after communication failure.
@@ -1028,21 +1037,30 @@ inline int elliptecCtrl::connect_()
         return -1;
     }
 
-    m_connected  = true;
-    m_commMisses = 0;
+    // The device does not answer for a few seconds after power-on. Without the info reply the angle scale is
+    // unknown, so treat that as a failed connection and retry on the next loop.
+    int irc = q_info_();
+    if( irc != 0 || m_pulsesPerRev == 0 )
+    {
+        closePort_();
+
+        if( !m_connectRetryLogged )
+        {
+            log<text_log>( ( irc != 0 ) ? "device on " + m_port + " is not answering yet; retrying"
+                                        : "device did not report pulses per revolution; retrying",
+                           logPrio::LOG_WARNING );
+            m_connectRetryLogged = true;
+        }
+
+        return -1;
+    }
+
+    m_connectRetryLogged = false;
+    m_connected          = true;
+    m_commMisses         = 0;
     state( stateCodes::CONNECTED );
-    log<text_log>( "elliptecCtrl connected on " + m_port );
-
-    if( q_info_() != 0 )
-    {
-        log<text_log>( "no reply to info query", logPrio::LOG_WARNING );
-    }
-
-    if( m_pulsesPerRev == 0 )
-    {
-        log<text_log>( "pulses per revolution unknown; moves are disabled until the device reports it",
-                       logPrio::LOG_ERROR );
-    }
+    log<text_log>( "elliptecCtrl connected on " + m_port + " to an ELL" + std::to_string( (int)m_model ) + " with " +
+                   std::to_string( m_pulsesPerRev ) + " pulses/rev" );
 
     m_velPercent = applyVelocityFloor_( m_velPercent );
     if( cmd_setvel_( m_velPercent ) != 0 )
@@ -1850,11 +1868,7 @@ inline void elliptecCtrl::parseInfo_( const std::string &payload )
         std::isxdigit( (unsigned char)payload[1] ) )
     {
         uint8_t model = static_cast<uint8_t>( std::stoul( payload.substr( 0, 2 ), nullptr, 16 ) );
-        if( model != m_model )
-        {
-            m_model = model;
-            log<text_log>( "device is an ELL" + std::to_string( (int)m_model ) );
-        }
+        m_model       = model;
     }
 
     if( m_pulsesPerRevConfigured || payload.size() < 8 )
