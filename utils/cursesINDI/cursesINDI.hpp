@@ -1,3 +1,6 @@
+/** \file cursesINDI.hpp
+ * \brief A curses-based terminal client for browsing and editing INDI properties.
+ */
 
 #include <filesystem>
 #include <format>
@@ -45,8 +48,8 @@ std::string displayProperty( pcf::IndiProperty & ip /**< [in] the INDI property 
   * \returns the properly formatted element value
   * \returns empty string if element is not in property
   */
-std::string displayValue( pcf::IndiProperty & ip, ///< [in] the INDI property
-                          std::string & el ///< [in] the name of the element
+std::string displayValue( pcf::IndiProperty & ip, /**< [in] the INDI property */
+                          std::string & el /**< [in] the name of the element */
                         )
 {
    if(!ip.find(el)) return "";
@@ -63,113 +66,184 @@ std::string displayValue( pcf::IndiProperty & ip, ///< [in] the INDI property
    }
 }
 
+/// Terminal INDI client which displays every known element in a curses table.
+/** Connects to the INDI server on localhost:7624, tracks all defined properties,
+  * and lets the user navigate, search by device, and edit writable elements.
+  * INDI messages are written to a log file which can be followed in another terminal.
+  */
 class cursesINDI : public pcf::IndiClient, public cursesTableGrid
 {
 
 public:
 
+   /// Count of pending full-table redraws, incremented by INDI callbacks and consumed by the draw thread.
    int m_redraw {0};
 
+   /// Count of pending in-place value updates, incremented by INDI callbacks and consumed by the draw thread.
    int m_update {0};
 
+   /// Current curses cursor visibility, as passed to curs_set.
    int m_cursStat {1};
 
+   /// Window for user prompts and input (search, edit, confirm).  Owned by this class.
    WINDOW * w_interactWin {nullptr};
+
+   /// Window showing the full key and value of the currently selected element.  Owned by this class.
    WINDOW * w_curvalWin {nullptr};
+
+   /// Window showing FSM alert notices.  Owned by this class.
    WINDOW * w_attentionWin {nullptr};
 
+   /// Window below the table showing the count of displayed elements.  Owned by this class.
    WINDOW * w_countWin {nullptr};
 
+   /// Set to request the draw thread to exit.
    bool m_shutdown {false};
+
+   /// Set when the INDI connection is lost rather than closed by the user.
    bool m_connectionLost{false};
 
+   /// The thread which redraws and updates the table.
    std::thread m_drawThread;
+
+   /// Protects the property and element maps and all curses drawing.
    std::mutex m_drawMutex;
 
+   /// Path of the file to which INDI messages are written.
    std::string m_msgFile {"/tmp/cursesINDI_logs.txt"};
+
+   /// Output stream for INDI messages, opened on m_msgFile.
    std::ofstream m_msgout;
+
+   /// Number of messages written since m_msgFile was last truncated.
    int m_msgsPrinted {0};
+
+   /// Maximum number of messages written before m_msgFile is truncated.
    int m_msgsMax {10000};
 
-   cursesINDI( const std::string &szName,
-               const std::string &szVersion,
-               const std::string &szProtocolVersion
+   /// Constructor, which connects to the INDI server on localhost and opens the message file.
+   /** \throws std::filesystem::filesystem_error if the message file cannot be opened
+     */
+   cursesINDI( const std::string &szName,           /**< [in] the client name */
+               const std::string &szVersion,        /**< [in] the client version */
+               const std::string &szProtocolVersion /**< [in] the INDI protocol version */
              );
 
+   /// Destructor, which deletes the curses windows.
    ~cursesINDI();
 
+   /// Map of INDI properties keyed by their unique device.name key.
    typedef std::map< std::string, pcf::IndiProperty> propMapT;
+
+   /// Value type of propMapT.
    typedef propMapT::value_type propMapValueT;
+
+   /// Iterator type of propMapT.
    typedef propMapT::iterator propMapIteratorT;
 
+   /// All properties received from the server.
    propMapT knownProps;
 
+   /// Identifies a single INDI element and its row in the table.
    struct elementSpec
    {
-      std::string propKey;
-      std::string device;
-      std::string propertyName;
-      std::string name;
-      int tableRow {-1};
+      std::string propKey;      ///< The unique key of the parent property in knownProps
+      std::string device;       ///< The device name
+      std::string propertyName; ///< The property name
+      std::string name;         ///< The element name
+      int tableRow {-1};        ///< The row of this element in the table, -1 if not displayed
    };
 
+   /// Map of elements keyed by their device.property.element key.
    typedef std::map< std::string, elementSpec> elementMapT;
+
+   /// Value type of elementMapT.
    typedef elementMapT::value_type elementMapValueT;
+
+   /// Iterator type of elementMapT.
    typedef elementMapT::iterator elementMapIteratorT;
 
+   /// All elements of the properties in knownProps, in table order.
    elementMapT knownElements;
 
-
+   /// True while the user is typing a device search in the device column.
    bool m_deviceSearching {false};
+
+   /// The device search string typed so far.
    std::string m_deviceTarget;
 
-   virtual void handleDefProperty( const pcf::IndiProperty &ipRecv );
+   /// Store a newly defined or updated property and its elements, and schedule a redraw or update.
+   virtual void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the received property */);
 
-   virtual void handleDelProperty( const pcf::IndiProperty &ipRecv );
+   /// Remove a deleted property, or all properties of a deleted device, and schedule a redraw.
+   virtual void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property or device to delete */);
 
-   virtual void handleMessage( const pcf::IndiProperty &ipRecv );
+   /// Write an INDI message, color coded by priority, to the message file.
+   virtual void handleMessage( const pcf::IndiProperty &ipRecv /**< [in] the property containing the message */);
 
-   virtual void handleSetProperty( const pcf::IndiProperty &ipRecv );
+   /// Handle a property update the same as a definition.
+   virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received property */);
 
+   /// Process incoming INDI requests.
    virtual void execute();
 
-   void cursStat(int cs);
+   /// Set the curses cursor visibility.
+   void cursStat(int cs /**< [in] the new visibility, as passed to curs_set */);
 
+   /// Get the curses cursor visibility.
+   /**
+     * \returns the current cursor visibility
+     */
    int cursStat();
 
+   /// Create the auxiliary windows and start the draw thread.
    void startUp();
 
+   /// Stop the INDI client and the draw thread, and delete the windows.
    void shutDown();
 
-   static void _drawThreadStart( cursesINDI * c /**< [in]  */);
+   /// Thread entry point which calls drawThreadExec.
+   static void _drawThreadStart( cursesINDI * c /**< [in] the cursesINDI instance to run */);
 
    /// Start the draw thread.
+   /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
    int drawThreadStart();
 
-   /// Execute the draw thread.
+   /// Execute the draw thread, servicing pending redraws and updates until shutdown or disconnect.
    void drawThreadExec();
 
-
+   /// Rebuild the table contents from knownElements and redraw it.
    void redrawTable();
 
+   /// Update changed property states and element values in place.
    void updateTable();
 
    /// Update the current-value window.
    void updateCurVal();
 
-   void moveCurrent( int nextY,
-                     int nextX
+   /// Move the selected cell, locking the draw mutex.
+   void moveCurrent( int nextY, /**< [in] the new row */
+                     int nextX  /**< [in] the new column */
                    );
 
-   void _moveCurrent( int nextY,
-                      int nextX
+   /// Move the selected cell and update the prompt windows.  The caller must hold m_drawMutex.
+   void _moveCurrent( int nextY, /**< [in] the new row */
+                      int nextX  /**< [in] the new column */
                     );
 
-   void keyPressed( int ch );
+   /// Handle a key press from the user.
+   void keyPressed( int ch /**< [in] the key code */);
 
    /// If a key is pressed in column 1 (the device column), this function searchs for devices alphabetically.
-   void deviceSearch( int ch );
+   void deviceSearch( int ch /**< [in] the key code */);
 
+   /// Recreate the element count window after the table is drawn.
+   /**
+     * \returns the result of postPrint
+     */
    virtual int postDraw()
    {
       //if(fpout) *fpout << "post draw" << std::endl;
@@ -184,6 +258,10 @@ public:
       return postPrint();
    }
 
+   /// Print the count of displayed elements in the count window.
+   /**
+     * \returns 0
+     */
    virtual int postPrint()
    {
       if(! w_countWin) return 0;
