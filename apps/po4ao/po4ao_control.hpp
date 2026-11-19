@@ -244,14 +244,32 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
             m_deadlineMisses.fetch_add( 1, std::memory_order_relaxed );
         }
     };
-    if( curr_src == nullptr || !m_inputState || !m_output || !m_outputOpened )
+    if( !m_replayOpened )
+    {
+        if( started >= m_retryOutputsAt )
+        {
+            // This runs only while collection is unavailable. Keep large replay allocations off healthy frames.
+            std::lock_guard<std::mutex> publicationLock( m_publicationMutex );
+            openOutputStreams();
+            m_retryOutputsAt = std::chrono::steady_clock::now() + std::chrono::seconds( 1 );
+        }
+        recordLatency();
+        return 0;
+    }
+    if( !m_outputOpened )
+    {
+        recordLatency();
+        return 0;
+    }
+    if( curr_src == nullptr || !m_inputState || !m_output )
     {
         return -1;
     }
 
     const uint64_t sourceCounter = shmimMonitorT::m_imageStream.md[0].cnt0;
     // Queued notifications can refer to the same latest image after a processing stall.
-    if( sourceCounterIsDuplicate( sourceCounter, m_lastInputCounter, m_haveInputCounter ) )
+    const bool duplicate = sourceCounterIsDuplicate( sourceCounter, m_lastInputCounter, m_haveInputCounter );
+    if( duplicate && !m_retryConsecutive.has_value() )
     {
         recordLatency();
         return 0;
@@ -268,25 +286,48 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
     const bool     enabled         = ( control & 1 ) != 0;
     const uint64_t modelGeneration = m_modelGeneration.load( std::memory_order_acquire );
     const auto    *observation     = static_cast<const float *>( curr_src );
-    const bool     consecutive = sourceCounterIsConsecutive( sourceCounter, m_lastInputCounter, m_haveInputCounter );
+    const bool     consecutive     = duplicate
+                                         ? *m_retryConsecutive
+                                         : sourceCounterIsConsecutive( sourceCounter, m_lastInputCounter, m_haveInputCounter );
     if( m_haveInputCounter && sourceCounter > m_lastInputCounter + 1 )
     {
         m_missedFrames.fetch_add( sourceCounter - m_lastInputCounter - 1, std::memory_order_relaxed );
     }
     m_lastInputCounter = sourceCounter;
     m_haveInputCounter = true;
+    m_retryConsecutive.reset();
 
-    if( !consecutive )
+    const volatile auto &md = shmimMonitorT::m_imageStream.md[0];
+    bool                 stable = !md.write;
+    if( stable )
+    {
+        if( consecutive )
+        {
+            m_observationHistory->add( observation );
+            observation = m_observationHistory->getItem( 0 );
+        }
+        else
+        {
+            memcpy( m_inputState.get(), observation, m_nModes * sizeof( float ) );
+            observation = m_inputState.get();
+        }
+        std::atomic_thread_fence( std::memory_order_seq_cst );
+        stable = !md.write && md.cnt0 == sourceCounter;
+    }
+
+    if( !consecutive || !stable )
     {
         m_observationHistory->reset();
         m_commandHistory->reset();
         EpisodeBuffer &episode = m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )];
         m_collection.discard( episode.count );
         episode.reset();
-    }
-    else
-    {
-        m_observationHistory->add( observation );
+        if( !stable )
+        {
+            m_retryConsecutive = consecutive;
+            recordLatency();
+            return 0;
+        }
     }
 
     const bool policySelected = enabled && m_activeEngine != nullptr && m_activeEngine->generation == modelGeneration &&

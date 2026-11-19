@@ -22,8 +22,10 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <sys/stat.h>
 #include <thread>
 #include <vector>
 
@@ -252,6 +254,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     IMAGE m_replayMetadataStream{};        ///< Rolling replay publication metadata stream.
     IMAGE m_warmupStream{};                ///< Frozen warm-up replay-buffer stream.
     IMAGE m_warmupMetadataStream{};        ///< Frozen warm-up publication metadata stream.
+    std::chrono::steady_clock::time_point m_retryOutputsAt{}; ///< Earliest retry after failed replay setup.
     bool  m_outputOpened{ false };         ///< Whether the command stream is open and validated.
     bool  m_replayOpened{ false };         ///< Whether the replay stream is open and validated.
     bool  m_replayMetadataOpened{ false }; ///< Whether rolling replay metadata is open and validated.
@@ -266,6 +269,10 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
 
     uint64_t m_statusSequence{ 0 }; ///< App-logic heartbeat independent of unchanged control values.
 
+    uint64_t m_checkedSequence{ 0 };                     ///< Last callback sequence seen by the statistics update.
+    uint64_t m_checkedInode{ 0 }, m_checkedCounter{ 0 }; ///< Previous idle probe of the named input.
+    bool     m_inputStallReported{ false }; ///< Report once until callbacks resume or the input is replaced.
+
     Po4aoSamples m_runtimeSamples;         ///< Coherent fixed-size callback telemetry window.
     uint64_t     m_lastTelemSequence{ 0 }; ///< Last sequence actually written to telemetry.
 
@@ -277,6 +284,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     std::atomic<bool>     m_activeCpuInference{ false };           ///< Whether the active policy runs on CPU.
     uint64_t              m_lastInputCounter{ 0 };                 ///< Previous source cnt0 used for gap detection.
     bool                  m_haveInputCounter{ false };             ///< Whether the previous source counter is valid.
+    std::optional<bool>   m_retryConsecutive; ///< Original continuity of a torn WFS frame, valid until it is consumed.
     std::chrono::steady_clock::time_point m_lastStatsUpdate;       ///< Previous telemetry publication time.
     pcf::IndiProperty                     m_indiP_reloadToggle;    ///< Asynchronous model-reload request.
     pcf::IndiProperty                     m_indiP_resetModel;      ///< Active-model reset request.
@@ -413,6 +421,9 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
 
     /// Open and validate command and replay streams.
     int openOutputStreams();
+
+    /// Check the named producer and request reattachment once if an owned reader stalls.
+    void checkInputNotifications( uint64_t sequence /**< [in] Completed callback sequence. */ );
 
     /// Close command and replay streams.
     void closeOutputStreams();

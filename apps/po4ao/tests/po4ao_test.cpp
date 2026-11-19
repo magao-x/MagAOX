@@ -12,6 +12,7 @@
 #include <condition_variable>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <thread>
 #include "../../nnReconstructor/tests/nnTestSupport.hpp"
 #include <future>
@@ -543,6 +544,17 @@ class po4ao : public MagAOXApp<true>
     size_t             m_explorationNoiseRows{ 1 }, m_explorationNoiseCols{ 2 }; ///< Exploration table dimensions.
     EngineBundle       m_model;                                                  ///< Retained model identity fixture.
     EngineBundle      *m_activeEngine{ &m_model }; ///< Policy selected by the frame callback.
+    std::optional<bool> m_retryConsecutive; ///< Original continuity of a torn WFS frame, valid until it is consumed.
+    std::chrono::steady_clock::time_point m_retryOutputsAt{}; ///< Earliest retry after failed replay setup.
+    unsigned m_openAttempts{ 0 }; ///< Attempts to reattach the fixture output and replay streams.
+    /// Simulate recovery of all required output mappings.
+    int openOutputStreams()
+    {
+        ++m_openAttempts;
+        m_outputOpened = m_replayOpened = true;
+        return 0;
+    }
+
     std::mutex         m_callbackMutex;            ///< App callback and allocation ownership boundary.
     std::atomic<bool>  m_useNeuralNetwork{ true },
         m_replayShutdown{ false }; ///< Policy eligibility and publisher shutdown flags.
@@ -776,6 +788,48 @@ namespace libXWCTest
 {
 namespace po4aoTest
 {
+/** \brief A transient replay setup failure holds publication and resumes on the next valid attachment. */
+TEST_CASE( "PO4AO retries replay setup without ending the input thread", "[po4ao]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::processImage;
+    MagAOX::app::po4ao::openOutputStreams;
+#endif
+    // clang-format on
+    po4aoControlHarness::po4ao app;
+    app.m_outputOpened = app.m_replayOpened = false;
+    app.m_retryOutputsAt                    = std::chrono::steady_clock::time_point::max();
+    REQUIRE( app.frame( 98 ) == 0 );
+    REQUIRE( app.m_openAttempts == 0 );
+    app.m_retryOutputsAt = {};
+    REQUIRE( app.frame( 99 ) == 0 );
+    REQUIRE( app.m_openAttempts == 1 );
+    REQUIRE( app.m_emitted.empty() );
+    REQUIRE( app.frame( 100 ) == 0 );
+    REQUIRE( app.m_emitted.size() == 1 );
+}
+
+/** \brief A queued wake during a write cannot consume the subsequent complete residual. */
+TEST_CASE( "accept a completed residual once after an early wake", "[po4ao]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::processImage;
+#endif
+    // clang-format on
+    po4aoControlHarness::po4ao app;
+    auto                      &md     = po4aoControlHarness::po4ao::shmimMonitorT::m_imageStream.md[0];
+    const auto                 before = app.m_emitted.size();
+    md.write                          = 1;
+    REQUIRE( app.frame( 100 ) == 0 );
+    REQUIRE( app.m_emitted.size() == before );
+    md.write = 0;
+    REQUIRE( app.frame( 100 ) == 0 );
+    REQUIRE( app.frame( 100 ) == 0 );
+    REQUIRE( app.m_emitted.size() == before + 1 );
+}
+
 /// Verify a loaded policy cannot start prediction or initial exploration before an explicit Enable request.
 /** \ingroup po4ao_unit_test */
 TEST_CASE( "PO4AO starts with prediction disabled until explicit Enable", "[po4ao][control]" )

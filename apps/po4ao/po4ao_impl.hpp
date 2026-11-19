@@ -1152,6 +1152,69 @@ inline int po4ao::appStartup()
     return 0;
 }
 
+inline void po4ao::checkInputNotifications( uint64_t sequence )
+{
+    if( sequence != m_checkedSequence )
+    {
+        m_checkedSequence    = sequence;
+        m_checkedInode       = 0;
+        m_inputStallReported = false;
+        return;
+    }
+
+    // The monitor owns its mapping and may unmap it concurrently. Inspect the named
+    // stream without claiming a reader semaphore or touching the real-time callback.
+    char        filename[1024];
+    struct stat info;
+    IMAGE       probe{};
+    if( ImageStreamIO_filename( filename, sizeof( filename ), shmimMonitorT::m_shmimName.c_str() ) !=
+            IMAGESTREAMIO_SUCCESS ||
+        stat( filename, &info ) != 0 ||
+        ImageStreamIO_openIm( &probe, shmimMonitorT::m_shmimName.c_str() ) != IMAGESTREAMIO_SUCCESS )
+    {
+        m_checkedInode       = 0;
+        m_inputStallReported = false;
+        return;
+    }
+
+    const auto inode   = static_cast<uint64_t>( probe.md->inode );
+    const auto counter = __atomic_load_n( &probe.md->cnt0, __ATOMIC_ACQUIRE );
+    if( inode != m_checkedInode || inode != static_cast<uint64_t>( info.st_ino ) )
+    {
+        m_inputStallReported = false;
+    }
+    else if( counter != m_checkedCounter && !m_inputStallReported )
+    {
+        int slot = -1;
+        for( int index = 0; probe.semReadPID && index < probe.md->sem; ++index )
+        {
+            if( probe.semReadPID[index] == getpid() )
+            {
+                slot = index;
+                break;
+            }
+        }
+        // An interrupted semaphore wait follows the monitor's normal detach/reattach path.
+        // Leave a busy callback and a slot claimed by another process alone.
+        std::unique_lock<std::mutex> idle( m_callbackMutex, std::try_to_lock );
+        if( !idle || m_runtimeSamples.sequence() != sequence )
+        {
+            ImageStreamIO_closeIm( &probe );
+            return;
+        }
+        const bool requested = slot >= 0 && shmimMonitorT::m_smThread.joinable() &&
+                               pthread_kill( shmimMonitorT::m_smThread.native_handle(), SIGUSR1 ) == 0;
+        log<text_log>( shmimMonitorT::m_shmimName + " is advancing without completed PO4AO callbacks; reader slot " +
+                           std::to_string( slot ) +
+                           ( requested ? ", requested reattachment" : ", no reattachment requested" ),
+                       logPrio::LOG_WARNING );
+        m_inputStallReported = true;
+    }
+    m_checkedCounter = counter;
+    m_checkedInode   = inode;
+    ImageStreamIO_closeIm( &probe );
+}
+
 inline void po4ao::updateRuntimeStatistics()
 {
     const auto now = std::chrono::steady_clock::now();
@@ -1162,6 +1225,7 @@ inline void po4ao::updateRuntimeStatistics()
     m_lastStatsUpdate = now;
 
     const auto   statistics = m_runtimeSamples.snapshot( m_lastTelemSequence );
+    checkInputNotifications( statistics.sequence );
     const double p50 = statistics.p50, p95 = statistics.p95, p99 = statistics.p99, maximum = statistics.maximum;
     updateIfChanged( m_indiP_runtimeStats, "p50_us", p50 );
     updateIfChanged( m_indiP_runtimeStats, "p95_us", p95 );
@@ -1332,10 +1396,15 @@ inline int po4ao::allocate( const dev::shmimT &dummy )
     m_episodeCounter.store( 0, std::memory_order_relaxed );
     m_lastInputCounter = 0;
     m_haveInputCounter = false;
+    m_retryConsecutive.reset();
     m_effectiveController.store( 0, std::memory_order_release );
     m_effectiveModelId.store( 0, std::memory_order_release );
     m_appliedControl.store( 0, std::memory_order_release );
-    return openOutputStreams();
+    if( openOutputStreams() < 0 )
+    {
+        m_retryOutputsAt = std::chrono::steady_clock::now() + std::chrono::seconds( 1 );
+    }
+    return 0;
 }
 
 #endif // po4ao_impl_hpp

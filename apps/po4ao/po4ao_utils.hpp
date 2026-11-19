@@ -531,6 +531,9 @@ class Po4aoSamples
     std::atomic<uint64_t>    m_sequence{ 0 }; ///< Last completely published sample.
 
   public:
+    /// Return the latest completed callback sequence without copying the timing window.
+    uint64_t sequence() const;
+
     /// Append one callback sample without allocation or locking.
     void record( uint32_t duration /**< [in] Callback duration in microseconds. */,
                  uint64_t model /**< [in] Effective model ID. */,
@@ -540,6 +543,11 @@ class Po4aoSamples
     /// Read a consistent subset of the rolling window, flagging mixed controller identities.
     Po4aoStatistics snapshot( uint64_t previous /**< [in] Sequence in the preceding telemetry record. */ ) const;
 };
+
+inline uint64_t Po4aoSamples::sequence() const
+{
+    return m_sequence.load();
+}
 
 inline void Po4aoSamples::record( uint32_t duration, uint64_t model, uint32_t backend, uint64_t timeNs )
 {
