@@ -140,6 +140,8 @@ Per A1 (Q1 = a):
 - `navgForRate`: 250 Hz gives 8 at 2 kHz and 32 at 8 kHz; rounding; minimum of 1; unmanaged and invalid inputs.
 - `dmRate()`: synco inactive, active at 4 steps, and unknown main rate.
 
+**2026-11-19: documentation.** Doxygen pass over `gui/widgets/offloadCtrl/offloadCtrl.hpp` (AGENTS.md §16): added a `\file`/`\brief` block, a class brief, member docs, and briefs on every declaration. There are no functional changes.
+
 **Checks for the first build:**
 - `sendNewProperty` with a `uint32_t` value;
 - `ipRecv["active"].get<float>()` on synco's `timing` property.

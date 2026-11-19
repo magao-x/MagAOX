@@ -1,3 +1,7 @@
+/** \file offloadCtrl.hpp
+ * \brief GUI widget controlling tweeter-to-woofer and woofer-to-telescope offloading.
+ */
+
 #ifndef offloadCtrl_hpp
 #define offloadCtrl_hpp
 
@@ -14,56 +18,72 @@
 namespace xqt
 {
 
+/// GUI widget controlling t2wOffloader (loop, offload rate, modes, gain, leak, zero) and tcsi telescope offloading.
 class offloadCtrl : public xWidget
 {
      Q_OBJECT
 
 protected:
 
-    std::string m_t2wFsmState;
-    bool m_offlState {false};
+    std::string m_t2wFsmState; ///< FSM state of t2wOffloader, enabling its controls.
 
-    std::string m_tweeterAvgFsmState;
-    std::string m_tcsiFsmState;
+    bool m_offlState {false}; ///< Whether t2wOffloader is offloading.
 
-    QTimer * m_updateTimer {nullptr};
+    std::string m_tweeterAvgFsmState; ///< FSM state of dmtweeter-avg, enabling the offload rate entry.
+
+    std::string m_tcsiFsmState; ///< FSM state of tcsi, enabling the telescope offload controls.
+
+    QTimer * m_updateTimer {nullptr}; ///< Timer refreshing the GUI.
 
 public:
-    offloadCtrl( QWidget * Parent = 0,
-                 Qt::WindowFlags f = Qt::WindowFlags()
+    /// Construct the widget and set up its controls.
+    offloadCtrl( QWidget * Parent = 0,            /**< [in] the parent widget */
+                 Qt::WindowFlags f = Qt::WindowFlags() /**< [in] Qt window flags */
                );
 
+    /// Destructor.
     ~offloadCtrl();
 
+    /// Subscribe to the INDI properties shown by this widget.
     void subscribe();
 
+    /// Handle connection to the INDI server.
     void onConnect();
 
+    /// Handle disconnection from the INDI server, clearing the tracked states.
     void onDisconnect();
 
+    /// Handle a property definition, treated as a set.
     void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
+    /// Handle a property deletion, disconnecting if a tracked device goes away.
     void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
 
+    /// Handle a property update, tracking device states.
     void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
 
 public slots:
 
+    /// Enable or disable controls according to the tracked device states.
     void updateGUI();
 
+    /// Request t2wOffloader to zero the offload.
     void on_button_zero_pressed();
 
+    /// Request tcsi to dump the telescope tip/tilt offload.
     void on_button_TelTTDump_pressed();
 
+    /// Request tcsi to dump the telescope focus offload.
     void on_button_TelFocusDump_pressed();
 
 signals:
 
+    /// Request a GUI update from another thread.
     void doUpdateGUI();
 
 private:
 
-    Ui::offloadCtrl ui;
+    Ui::offloadCtrl ui; ///< The Qt Designer UI.
 };
 
 
