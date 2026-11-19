@@ -65,6 +65,16 @@ fix, verifying `applied=parallel` and `parallel=running` before and after the
 interval. Earlier SDK comparisons support the optimized default; the worker
 remains an explicit experiment.
 
+After the power-target fix, a confirmed continuous-spin parallel capture
+averaged 28.826 us acquisition-to-write with 0.799 us reported standard
+deviation, versus the earlier optimized 33.760 us and 1.067 us. However,
+acquisition/publication interval spread rose to roughly 28 us and the operator
+confirmed it disappeared on returning to optimized. Parallel therefore remains
+experimental. The RTC reported a 950 ms/s RT budget; the new 100 us post-job
+sleep tests whether reducing continuous worker CPU occupancy resolves that
+regression while retaining the WMA gain. Instrument results for this sleep
+setting are pending.
+
 After finishing that experiment, remove or empty `descramble.cpuset` at the
 next operator restart to disable worker creation and restore its reserved core
 to the previous workload. Do not mix that workload change into an A/B interval.
@@ -76,6 +86,7 @@ to the previous workload. Do not mix that workload change into an A/B interval.
 | `descramble_status.availability` | `ready`, `unsupported mode`, `unavailable table`, or `unconfigured`. |
 | `descramble_status.parallel` | `disabled`, `requires staging`, `unverified worker`, `unavailable table`, `parking`, `parked`, or `running`. |
 | `descramble_status.caller_cpu` / `.worker_cpu` | Verified logical CPUs, or `-1` before verification. |
+| `descramble_status.sleep_us` | Configured worker sleep after job completion, in microseconds; not measured sleep duration. |
 | `th-descramble.pid` / `.prio` | Worker thread ID and requested RT priority; actual scheduling is verified before use. |
 
 The request is latched once for an entire frame. `applied` changes after the
@@ -220,6 +231,7 @@ staged=true
 cpuset=camwfs_sw
 threadPrio=-1
 partition=paired30
+sleepUs=100
 ```
 
 `threadPrio=-1` inherits `framegrabber.threadPrio`; an explicit priority must
@@ -229,6 +241,19 @@ configuration requires an app restart. Keep the current `stagedCopyNT`, FPS,
 gain, synchronization, readers and stage-timing setting fixed during each
 comparison. Restart through the normal operator deployment procedure and
 verify the actual FPS afterward.
+
+`sleepUs` defaults to **100 us**, accepts integer values from **0 through
+200 us**, and requires a restart to change. After publishing completion, the
+worker sleeps once, then spins for the next frame. The first job is not
+delayed. Zero restores the continuous-spin control. `parallel=running` includes
+these short sleeps; `parked` means the worker is inactive between experiments.
+
+At 2 kHz and 3.6 kHz, 100 us is nominally 20% and 36% of a frame period. The
+OS can sleep longer than requested, which can delay the next frame; the 200 us
+configuration cap does not guarantee an on-time wake. At low FPS or during
+acquisition stalls, one fixed sleep followed by spinning can still exhaust
+a finite RT budget. This option requires instrument qualification at the
+intended cadence. Keep optimized selected if interval jitter persists.
 
 An empty `descramble.cpuset` disables the worker. A configured worker starts
 parked, then verifies both threads' actual priorities/policy, exact single-CPU
@@ -245,7 +270,7 @@ With SDK selected, check:
 getINDI camwfs.descramble_status camwfs.th-descramble
 ```
 
-Require `availability=ready`, `parallel=parked`, and the intended
+Require `availability=ready`, `parallel=parked`, `sleep_us=100`, and the intended
 `caller_cpu`/`worker_cpu`. Capture a settled SDK interval. Then test
 **optimized → parallel → optimized**, with the same settling and capture
 intervals used above:
@@ -263,8 +288,10 @@ setINDI -s camwfs.descramble_method.optimized=On
 getINDI camwfs.descramble_status
 ```
 
-Require `applied=parallel`, `parallel=running`, and an Ok selection state for
-the worker capture. Require `parallel=parked` in SDK/optimized captures.
+Require `applied=parallel`, `parallel=running`, `sleep_us=100`, and an Ok
+selection state before and after the worker capture. Require `parallel=parked`
+in SDK/optimized captures. For an explicit continuous-spin control, configure
+`sleepUs=0`, restart, and require `sleep_us=0` instead.
 Discard at least one full timing window after each acknowledged transition;
 parking/resuming costs can affect the first frame. Finish with a return-to-SDK
 capture. The worker completes both image portions before digital sampling,
