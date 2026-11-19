@@ -33,9 +33,10 @@ struct PhaseShadow::Impl
 {
     struct Frame
     {
-        std::uint64_t m_counter{ 0 }, m_epoch{ 0 }, m_adcEpoch{ 0 }; ///< Real WFS identity and continuity segments.
-        std::int64_t  m_available{ -1 };             ///< Actual modal availability, never exposure time.
-        std::int64_t  m_closedNs{ -1 };              ///< Actual next WFS availability, distinct from request cutoffs.
+        std::uint64_t m_counter{ 0 }, m_epoch{ 0 }, m_adcEpoch{ 0 },
+            m_revision{ 0 };                         ///< Real WFS identity and continuity segments.
+        std::int64_t         m_available{ -1 };      ///< Actual modal availability, never exposure time.
+        std::int64_t         m_closedNs{ -1 };       ///< Actual next WFS availability, distinct from request cutoffs.
         std::array<float, 2> m_y{}, m_single{};      ///< Observed WFS and single-rate requested-input sample.
         std::array<float, 8> m_u{};                  ///< Newest-slot-first original requests at advertised cutoffs.
         std::array<std::array<float, 128>, 4> m_a{}; ///< Distinct rolling raw ADC histories at each phase.
@@ -49,8 +50,9 @@ struct PhaseShadow::Impl
     };
     struct Forecast
     {
-        std::uint64_t         m_origin{ 0 }, m_adc{ 0 }, m_version{ 0 };           ///< Frozen causal identities.
-        unsigned              m_phase{ 0 }, m_mode{ 0 };                           ///< Independent prediction context.
+        std::uint64_t         m_origin{ 0 }, m_adc{ 0 }, m_version{ 0 }; ///< Frozen causal identities.
+        std::uint64_t         m_revision{ 0 };           ///< Model-reset incarnation of this frozen forecast.
+        unsigned              m_phase{ 0 }, m_mode{ 0 }; ///< Independent prediction context.
         std::int64_t          m_decision{ -1 }, m_completed{ -1 }, m_target{ -1 }; ///< Distinct local events.
         std::array<float, 16> m_prediction{}; ///< F actual future WFS targets, newest first.
         std::array<float, 2>  m_candidate{};  ///< Private next-slot candidate, never a training input.
@@ -80,7 +82,11 @@ struct PhaseShadow::Impl
     std::vector<Forecast>    m_forecasts; ///< Bounded F-plus-one phase origins, scored only against actual WFS frames.
     std::uint64_t m_epoch{ 1 }, m_adcEpoch{ 1 }, m_learningEpoch{ 0 }, m_learningAdcEpoch{ 0 }; ///< Segment identities.
     bool          m_sourceLost{ false }, m_adcSourceLost{ false }, m_wfsSilent{ false }; ///< Fail-closed restart gates.
-    std::atomic<bool> m_fault{ false }, m_adcAllowed{ false }; ///< Cross-owner numerical/assisted inhibition.
+    std::atomic<bool>          m_learning{ false }; ///< Explicit learning intent; ADC inference never changes weights.
+    std::atomic<std::uint64_t> m_reset{ 0 };        ///< Model incarnation visible immediately to the fast owner.
+    std::atomic<std::uint64_t> m_resetPublished{ 0 };                   ///< Fast-owner reset barrier.
+    std::uint64_t              m_resetApplied{ 0 };                     ///< Numerical-owner reset high water.
+    std::atomic<bool>          m_fault{ false }, m_adcAllowed{ false }; ///< Cross-owner numerical/assisted inhibition.
     std::atomic<bool> m_fastValid{ false }; ///< Latest opportunity remains valid only until input loss/staleness.
     std::atomic<std::uint64_t> m_commonEpoch{ 1 }; ///< Acquisition continuity visible to numerical readback.
     std::atomic<bool> m_bindingValid{ true };      ///< Source replacement cannot silently inherit old counter anchors.
@@ -88,7 +94,8 @@ struct PhaseShadow::Impl
     std::atomic<std::int64_t> m_wfsAvailableNs{ -1 },
         m_adcAvailableNs{ -1 }; ///< Current source freshness for numerical readback.
     std::int64_t m_scheduleEpoch{ 0 },
-        m_scheduleGeneration{ 0 };     ///< Actual schedule replacement invalidates private plans.
+        m_scheduleGeneration{ 0 };                    ///< Actual schedule replacement invalidates private plans.
+    std::atomic<std::int64_t> m_scheduleExpiry{ -1 }; ///< Latest coherent scheduler expiry, without phase estimation.
     synco::Record m_currentSchedule{}; ///< Latest coherent read-only schedule, revalidated after private preparation.
     int m_firstStep{ -1 }; ///< Bound WFS-to-command phase identity; a changed phase requires a reviewed contract.
     std::atomic<unsigned>                m_requested{ 0 }, m_effective{ 0 }; ///< Selection does not change learning.
@@ -146,6 +153,7 @@ PhaseShadow::Impl::Impl( const NativePipelineConfig &inputs, const OnlineShadowC
     m_model.m_assistedCommandSlots = 4;
     m_model.m_externalOrigins      = true;
     m_model.m_scaledPenalty        = inputs.m_scaledPenalty;
+    m_model.m_freezeQualification  = true;
     if( !inputs.m_enabled || m_model.m_accelChannels < 8 || m_model.m_accelChannels > 128 ||
         !std::isfinite( inputs.m_feedback ) || std::abs( inputs.m_feedback ) > 10 || config.m_pendingCapacity < 2 ||
         config.m_pendingCapacity > 128 || m_model.m_modes < 1 || m_model.m_modes > 2 || m_model.m_history < 1 ||
@@ -158,8 +166,8 @@ PhaseShadow::Impl::Impl( const NativePipelineConfig &inputs, const OnlineShadowC
     for( unsigned p = 0; p < 4; ++p )
     {
         m_learners[p] = std::make_unique<ShadowController>( m_model );
-        m_learners[p]->training( ShadowMode::Standard, p == 0 );
-        m_learners[p]->training( ShadowMode::AccelAssisted, true );
+        m_learners[p]->training( ShadowMode::Standard, false );
+        m_learners[p]->training( ShadowMode::AccelAssisted, false );
         for( unsigned m = 0; m < 2; ++m )
         {
             m_snapshots[p][m] = std::make_unique<ShadowSnapshot>();
@@ -249,7 +257,7 @@ void PhaseShadow::Impl::score( const NativeObservation &w )
 {
     for( auto &f : m_forecasts )
     {
-        if( !f.m_valid || w.m_counter <= f.m_origin )
+        if( !f.m_valid || f.m_revision != m_reset.load() || w.m_counter <= f.m_origin )
             continue;
         const auto horizon = w.m_counter - f.m_origin;
         if( horizon > unsigned( m_model.m_future ) )
@@ -270,6 +278,7 @@ void PhaseShadow::Impl::score( const NativeObservation &w )
             out.m_measurement      = w.m_values[m];
             out.m_originValid      = true;
             out.m_late             = f.m_late;
+            out.m_modelEpoch       = f.m_revision;
             out.m_phase            = f.m_phase;
             out.m_adcCounter       = f.m_adc;
             out.m_version          = f.m_version;
@@ -368,6 +377,8 @@ void PhaseShadow::Impl::predict( Frame                                *f,
                                  bool                                  allowAssisted,
                                  std::chrono::steady_clock::time_point started )
 {
+    if( f->m_revision != m_reset.load() || m_resetPublished.load() != m_reset.load() )
+        return;
     const auto *latest = request_at( now );
     if( !latest )
         return;
@@ -478,6 +489,7 @@ void PhaseShadow::Impl::predict( Frame                                *f,
                 }
         if( !predicted.allFinite() )
             continue;
+        forecast.m_revision  = f->m_revision;
         forecast.m_origin    = m_current;
         forecast.m_adc       = adcCounter;
         forecast.m_phase     = phase;
@@ -654,6 +666,7 @@ void PhaseShadow::observe( const NativeObservation &r, std::int64_t now )
     }
     f             = {};
     f.m_counter   = r.m_counter;
+    f.m_revision  = p.m_reset.load();
     f.m_available = r.m_availableNs;
     f.m_valid     = true;
     f.m_epoch     = p.m_epoch;
@@ -740,6 +753,7 @@ void PhaseShadow::schedule( const synco::Record &s, std::int64_t receipt )
         s[synco::cycle] >= std::numeric_limits<std::int64_t>::max() - 1 )
     {
         p.m_currentSchedule = {};
+        p.m_scheduleExpiry.store( -1 );
         if( p.m_producer )
             p.m_producer->inhibit( false, receipt );
         for( auto &f : p.m_frames )
@@ -756,6 +770,7 @@ void PhaseShadow::schedule( const synco::Record &s, std::int64_t receipt )
     p.m_scheduleEpoch      = s[synco::epoch];
     p.m_scheduleGeneration = s[synco::generation];
     p.m_currentSchedule    = s;
+    p.m_scheduleExpiry.store( s[synco::expires] );
     for( auto &f : p.m_frames )
         if( f.m_valid )
             p.bind_schedule( f, s, receipt );
@@ -801,12 +816,38 @@ void PhaseShadow::sync( const NativeSyncStatus &s )
 }
 bool PhaseShadow::learn()
 {
-    auto      &p    = *m_impl;
+    auto      &p        = *m_impl;
+    const auto revision = p.m_reset.load();
+    if( revision != p.m_resetApplied )
+    {
+        for( auto &bank : p.m_learners )
+            for( auto mode : { ShadowMode::Standard, ShadowMode::AccelAssisted } )
+                bank->reset( mode );
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( p.m_snapshotMutex );
+            for( auto &phase : p.m_snapshots )
+                for( auto &snapshot : phase )
+                {
+                    snapshot->m_status = {};
+                    snapshot->m_theta.setZero();
+                    for( auto &gain : snapshot->m_gain )
+                        gain.resize( 0, 0 );
+                }
+        }
+        p.m_status.m_standard = p.m_status.m_assisted = {};
+        p.m_squared.fill( 0 );
+        p.m_scored.fill( 0 );
+        p.m_assistedReadyMask.store( 0 );
+        p.m_resetApplied = revision;
+        p.m_resetPublished.store( revision );
+    }
     const auto tail = p.m_tail.load( std::memory_order_relaxed );
     if( tail == p.m_head.load( std::memory_order_acquire ) || p.m_fault.load() || !p.m_bindingValid.load() )
         return false;
     const auto f = p.m_queue[tail];
     p.m_tail.store( ( tail + 1 ) % p.m_queue.size(), std::memory_order_release );
+    if( f.m_revision != revision )
+        return true;
     if( f.m_epoch != p.m_learningEpoch )
     {
         for( auto &model : p.m_learners )
@@ -834,11 +875,14 @@ bool PhaseShadow::learn()
     row.m_wfsValid = row.m_timingValid = true;
     row.m_appliedValid                 = p.m_model.m_standardCommandSlots == 4 ? f.m_sampled == 4 : f.m_singleValid;
     row.m_assistedAppliedValid         = f.m_sampled == 4;
+    const bool training                = p.m_learning.load();
     for( unsigned phase = 0; phase < 4; ++phase )
     {
         for( int j = 0; j < p.m_model.m_accelChannels; ++j )
             row.m_acceleration( j ) = f.m_a[phase][j];
         row.m_accelValid = f.m_adcValid[phase];
+        p.m_learners[phase]->training( ShadowMode::Standard, phase == 0 && training );
+        p.m_learners[phase]->training( ShadowMode::AccelAssisted, training );
         p.m_learners[phase]->process( row );
         for( unsigned mode = 0; mode < 2; ++mode )
         {
@@ -892,8 +936,11 @@ std::size_t PhaseShadow::queued() const
 bool PhaseShadow::read_prediction( ShadowPrediction &r )
 {
     auto &p = *m_impl;
-    if( !p.m_scores.pop( r ) )
-        return false;
+    do
+    {
+        if( !p.m_scores.pop( r ) )
+            return false;
+    } while( r.m_modelEpoch != p.m_reset.load() );
     const unsigned m     = r.m_mode == ShadowMode::AccelAssisted;
     const double   error = r.m_originPrediction - r.m_measurement;
     p.m_squared[m] += error * error;
@@ -902,16 +949,20 @@ bool PhaseShadow::read_prediction( ShadowPrediction &r )
 }
 OnlineShadowStatus PhaseShadow::status( std::int64_t now ) const
 {
-    const auto &p         = *m_impl;
-    auto        s         = p.m_status;
-    s.m_running           = true;
-    s.m_upstream          = true;
-    s.m_inputEvidence     = InputEvidence::Requested;
-    s.m_qualified         = s.m_qualified && p.m_inputs.m_calibration.m_layout && s.m_records && !p.m_fault.load() &&
-                            p.m_bindingValid.load() && p.m_learningEpoch == p.m_commonEpoch.load();
-    s.m_requested         = p.m_requested.load() ? ShadowMode::AccelAssisted : ShadowMode::Standard;
-    s.m_effective         = p.m_effective.load() ? ShadowMode::AccelAssisted : ShadowMode::Standard;
-    s.m_syncValid         = p.m_adcAllowed.load();
+    const auto &p     = *m_impl;
+    auto        s     = p.m_status;
+    s.m_modelEpoch    = p.m_resetApplied;
+    s.m_schedule      = p.m_inputs.m_syncoAssociation && p.m_scheduleExpiry.load() >= 0 &&
+                        ( now < 0 || now < p.m_scheduleExpiry.load() );
+    s.m_running       = true;
+    s.m_upstream      = true;
+    s.m_inputEvidence = InputEvidence::Requested;
+    s.m_qualified     = s.m_qualified && p.m_resetApplied == p.m_reset.load() && p.m_inputs.m_calibration.m_layout &&
+                        s.m_records && !p.m_fault.load() && p.m_bindingValid.load() &&
+                        p.m_learningEpoch == p.m_commonEpoch.load();
+    s.m_requested     = p.m_requested.load() ? ShadowMode::AccelAssisted : ShadowMode::Standard;
+    s.m_effective     = p.m_effective.load() ? ShadowMode::AccelAssisted : ShadowMode::Standard;
+    s.m_syncValid     = p.m_adcAllowed.load();
     s.m_fastOpportunities = p.m_opportunities.load();
     s.m_fastPredictions   = p.m_predictions.load();
     s.m_wfsReceived       = p.m_wfs.load();
@@ -965,6 +1016,17 @@ OnlineShadowStatus PhaseShadow::status( std::int64_t now ) const
 void PhaseShadow::request( ShadowMode mode )
 {
     m_impl->m_requested.store( mode == ShadowMode::AccelAssisted );
+}
+void PhaseShadow::learning( bool enabled )
+{
+    m_impl->m_learning.store( enabled );
+}
+void PhaseShadow::reset_models()
+{
+    ++m_impl->m_reset;
+    m_impl->m_fastValid.store( false );
+    if( m_impl->m_producer )
+        m_impl->m_producer->inhibit( false );
 }
 void PhaseShadow::inhibit()
 {

@@ -50,6 +50,10 @@ class PhaseShadow
     status( std::int64_t nowNs = -1 /**< [in] Actual local readback time; replay may use explicit ticks. */ ) const;
     /// Select diagnostics atomically, without changing training or granting output authority.
     void request( ShadowMode mode /**< [in] Standard or assisted. */ );
+    /// Enable both independent native fits on the numerical owner; histories continue while coefficients are frozen.
+    void learning( bool enabled /**< [in] Explicit operator intent. */ );
+    /// Inhibit old candidates immediately and reset both fits on their numerical owner.
+    void reset_models();
     /// Revoke private payloads and numerical eligibility after worker faults; no operational channel is changed.
     void inhibit();
     /// Inspect an owned coefficient snapshot for offline validation; the returned copy is never a training input.

@@ -66,6 +66,16 @@ class OnlineShadowWorker : public NativeObservationSink
 
     /// Record requested selection atomically; readiness/fallback is resolved on the numerical worker.
     void request( ShadowMode mode /**< [in] Standard or assisted. */ );
+    /// Enable both native fits independently of selection or output; defaults off at each start.
+    void learning( bool enabled /**< [in] Explicit operator intent. */ );
+    /// Reset native fits asynchronously; caller must first disable and confirm removal of its output.
+    bool reset_models();
+    /// Copy only an exact prepared slot through the existing private cache; never publishes or fabricates commands.
+    bool slot( ShadowMode                         mode /**< [in] Explicit active model. */,
+               const MagAOX::app::synco::Request &request /**< [in] Existing producer Request. */,
+               const MagAOX::app::synco::Record  &schedule /**< [in] Current coherent schedule. */,
+               std::int64_t                       nowNs /**< [in] Same-host actual time. */,
+               std::span<float>                   pixels /**< [out] Existing full-image preparation. */ );
 
     /// Copy the latest bounded status without waiting for RLS/QR work.
     OnlineShadowStatus status() const;

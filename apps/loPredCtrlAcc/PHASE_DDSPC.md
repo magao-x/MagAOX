@@ -1,3 +1,5 @@
+Current output/control milestone: [OPERATIONAL_DDSPC.md](OPERATIONAL_DDSPC.md). The report below describes the prior shadow-only profile; default builds remain strict shadow-only.
+
 # Native 2-kHz learning and ADC-driven 8-kHz shadow prediction
 
 2026-11-15, following checkpoint `70990414`. This supersedes the WFS-origin-only
