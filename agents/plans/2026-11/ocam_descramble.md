@@ -49,10 +49,13 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 Investigation date: 2026-11-16. Source baseline: `dev`, `cbc1d5cf`.
 Host verified as `mx11`. This pass inspects local source and configuration
 only; no instrument commands, benchmarks, or implementation were run.
-Status as of 2026-11-18: **the operator comparison favors single-thread
-optimized, which is now the default requested method**. The latest
-confirmed parallel RTC capture is about 3.66 us slower acquisition-to-write,
-with the worker on CPU32 and framegrabber on CPU33 sharing L3.
+Status as of 2026-11-18: **earlier SDK comparisons favor single-thread
+optimized, which is now the default requested method locally**. The latest
+capture labeled parallel did not establish active worker performance: the
+operator corrected the worker readback to `parked`. Follow-up diagnostics
+identified an empty power target incorrectly forcing SDK fallback despite
+observed power On and ongoing acquisition. The corrected worker path needs a
+new RTC comparison on CPU32 with framegrabber CPU33 sharing L3.
 SDK remains explicitly selectable and is the fallback for unsupported modes or
 unvalidated mappings. The earlier small spread penalty versus SDK remains part
 of the default tradeoff; long-run tails and complete-loop qualification are
@@ -65,8 +68,9 @@ Reduce camwfs's acquisition-to-publication cost without degrading image
 correctness, jitter, frame delivery, or end-to-end AO latency. Following the
 operator comparisons, default to the validated optimized single-thread path,
 retain SDK as the explicit reference and unsupported-mode/table fallback, and
-keep live INDI comparison methods. The worker experiment has not justified
-dedicating another core in the latest confirmed RTC capture.
+keep live INDI comparison methods. The worker experiment remains unresolved;
+repeat it after correcting the unknown-power-target gate before deciding
+whether dedicating another core is worthwhile.
 
 ### Findings from the current code
 
@@ -1417,42 +1421,48 @@ has `33` and `32-39`. Thus CPU32/33 share L3 and have no other online SMT
 siblings in that readback. CPU31 is not on their CCD. The comparison was
 prepared with `camwfs_sw`/CPU32 for the worker and `camwfs`/CPU33 for acquisition.
 
-The operator subsequently confirmed `applied=parallel`, `parallel=running`,
-`caller_cpu=33`, and `worker_cpu=32` for the parallel capture. This establishes
-that the measured run used the active worker on the intended shared-L3 core,
-rather than SDK fallback. The default decision also relies on the earlier
-SDK/optimized/SDK comparisons. No return-to-optimized segment, stage-timing
-setting, conversion-stage samples, frame-quality counters or end-to-end loop
-measurements are supplied in this excerpt.
+The operator initially confirmed an active worker, then corrected that answer:
+`parallel=parked`. A fresh readback while parallel was requested showed
+`applied=none`, `availability=ready`, `caller_cpu=33`, `worker_cpu=32`, and
+`parallel=parked`. Subsequent diagnostics confirmed FSM `OPERATING`, fresh
+`fgtimes`, observed outlet state `On`, and an empty outlet target. The code
+incorrectly treats that unknown target as a reason to use SDK fallback, park
+the worker, and hide the applied method. The active-parallel attribution
+previously recorded here is withdrawn. These windows do not establish parallel
+performance; their historical method was not captured reliably.
+
+The default decision relies on the earlier SDK/optimized/SDK comparisons.
+No return-to-optimized segment, stage-timing setting, conversion-stage samples,
+frame-quality counters or end-to-end loop measurements are supplied in this
+excerpt.
 
 Arithmetic averages of every supplied window summary, in microseconds:
 
-| Metric | Optimized | Parallel |
+| Metric | Optimized | Labeled parallel; active worker unconfirmed |
 | --- | ---: | ---: |
 | Acquisition-to-write mean | 33.760375 | 37.422939 |
 | Acquisition-to-write reported standard deviation | 1.067152 | 1.118703 |
 | Acquisition-interval reported standard deviation | 0.559981 | 0.587159 |
 | Publication-interval reported standard deviation | 1.703262 | 1.770800 |
 
-The parallel mean is **3.662563 us (10.85%) slower** than optimized,
+The second segment mean is **3.662563 us (10.85%) slower** than optimized,
 with **0.051551 us (4.83%) greater reported standard deviation**. Publication-
 interval standard deviation increases 0.067538 us (3.97%). These are arithmetic
 averages of rolling-window summaries, not pooled frame distributions,
 independent experiments, standard errors or percentile estimates.
 
-All parallel means, 37.400656–37.439290 us, exceed all optimized means,
+All second-segment means, 37.400656–37.439290 us, exceed all optimized means,
 33.714670–33.790704 us. Reported WMA standard deviations likewise do not overlap:
-1.08049–1.18351 us versus 1.04968–1.07959 us. The first two parallel reports have
-larger spread, but excluding both as a sensitivity check gives 37.426396 us
+1.08049–1.18351 us versus 1.04968–1.07959 us. The first two second-segment
+reports have larger spread, but excluding both as a sensitivity check gives 37.426396 us
 mean and 1.097645 us average standard deviation; the slower-mean conclusion
 persists. No samples are excluded from the main comparison.
 
-With worker activity and placement confirmed, this result supports retiring
-parallel as the preferred performance direction: it spends another core and
-regresses the complete acquisition-to-write time. It is consistent with the local warning
-that kernel speedup can disappear after staging, but these aggregate timings
-do not isolate handoff, cache ownership, frequency or copy costs. They do not
-establish which component caused the regression.
+The numerical difference remains valid for the supplied summaries, but it
+cannot be attributed to parallel execution. The known power-target bug explains
+how selecting parallel can instead measure SDK fallback. Repeat the comparison
+after the fix, with `applied=parallel` and `parallel=running` verified before and
+after the capture; placement alone does not demonstrate worker participation.
 
 ### Default decision and implementation
 
@@ -1483,9 +1493,10 @@ semantics is included in this default-only patch.
 
 The operator should remove any explicit `camera.descrambleMethod=sdk` override
 or set it to `optimized` when adopting the new default. Removing/emptying the
-experimental `descramble.cpuset` setting at the next restart avoids creating
-the unused worker and allows the reserved core's previous workload to be
-restored. Keep any workload restoration outside a matched timing crossover.
+experimental `descramble.cpuset` setting at the next restart after completing
+the corrected parallel experiment avoids creating an unused worker and allows
+the reserved core's previous workload to be restored. Keep any workload
+restoration outside a matched timing crossover.
 The assistant does not alter instrument configuration or run these steps.
 
 Parsed supplied values and arithmetic are retained in
@@ -1508,3 +1519,51 @@ Build/test logs are `/tmp/ocam-default-app-build.log` and
 `/tmp/ocam-default-20261118/`. The changed C++ files were formatted, their
 full-file documentation remains consistent, the original plan prefix is
 unchanged, and `git diff --check` passes.
+
+
+## Unknown outlet target blocked parallel — 2026-11-18
+
+During follow-up to the corrected `parallel=parked` report, the operator
+confirmed that camwfs continued acquiring and publishing fresh `fgtimes` with
+FSM `OPERATING`. The worker was present in `camwfs_sw/tasks`; placement readbacks
+were caller CPU33 and worker CPU32. The power source reported
+`pdu1.camwfs.state=On` with `pdu1.camwfs.target` empty.
+
+An empty target is represented by `powerStateTarget() == -1`. This is a normal
+reachable state: the outlet controller initially creates an empty target and
+ordinary state polling does not populate it. The framework can acquire while
+observed power is On, without a known target. Three descramble checks were
+inconsistent with that behavior:
+
+- Parallel admission rejected targets `<= 0`, so valid frames used SDK fallback.
+- Post-publication handling requested worker parking for targets `<= 0`.
+- Applied-method status required target `== 1`, masking completed conversions
+  as `none` even while frames continued.
+
+The fix treats only explicit target Off (`0`) as a blocking target in those
+three checks. Observed power must still be On. Shutdown, reconfiguration,
+staging, validated-map, and verified-placement gates are preserved. No power
+commands, subscription behavior, serial housekeeping policy, or framegrabber
+publication ordering change.
+
+The offline regression holds actual power On and changes the target between
+On, unknown, and Off, and separately checks actual Off with an unknown target.
+It verifies post-publication worker state, next-frame pixel output against a
+distinct SDK sentinel, selected/applied method, and worker status. Before the fix, only the unknown-target case failed: five
+failed assertions reproduced SDK output, `applied=none`, and a parked worker.
+The On and explicit-Off cases passed. This reproduces the operator's symptoms
+without running the camera or changing any instrument state.
+
+Validation passed: the production app compiled and linked against the local
+real EDT SDK. Forced rebuilds of the descramble-selection suite passed
+**29,595 assertions in nine cases** and the main controller suite passed
+**902 assertions in 36 cases**, totaling **30,497 assertions in 45 cases**.
+The new regression passed all four state/target combinations. Build/test logs
+are in `/tmp/ocam-parked-diagnosis/`. Changed C++ files were formatted and their
+full-file documentation reviewed; the original plan prefix is preserved and
+`git diff --check` passes. The hardware app was not executed.
+
+The operator must deploy/restart and repeat the matched optimized/parallel/
+optimized comparison, checking `applied=parallel`, `parallel=running`,
+`availability=ready`, and CPUs 33/32 before and after the parallel interval.
+No new parallel performance claim is made from the earlier capture.

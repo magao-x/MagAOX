@@ -557,6 +557,63 @@ TEST_CASE( "ocam2KCtrl invalidates a stopped parallel worker", "[ocam2KCtrl][des
     REQUIRE( app.m_indiP_descrambleMethod.getState() == INDI_ALERT );
 }
 
+/// An absent target permits valid powered-on frames; observed Off or an explicit Off target parks the worker.
+/** \ingroup ocam2KCtrl_descramble_unit_test */
+TEST_CASE( "ocam2KCtrl distinguishes unknown and off power targets during acquisition",
+           "[ocam2KCtrl][descramble][power-target]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ocam2KCtrl::loadImageIntoStream;
+    MagAOX::app::ocam2KCtrl::frameGrabberPostPublish;
+    MagAOX::app::ocam2KCtrl::updateDescramble;
+    #endif
+    // clang-format on
+    for( const auto &[power, target] :
+         { std::pair{ 1, 1 }, std::pair{ 1, -1 }, std::pair{ 1, 0 }, std::pair{ 0, -1 } } )
+    {
+        CAPTURE( power, target );
+        resetStubState();
+        outletHarness::Controller<ocam2KCtrl_test> app;
+        tempStream                                 sourceStream( uniqueShmimName( "power_target" ) );
+        app.driver();
+        setPoweredOn( app );
+        app.state( stateCodes::OPERATING );
+        app.m_reconfig = false;
+        REQUIRE( app.initDescramble() == 0 );
+        REQUIRE( app.ensureSyncStream() == 0 );
+        prepareBin2Map( app );
+        startLocalParallel( app );
+        std::vector<short> raw( OCAM2_PIXELS_RAW_BINNING2x2, 123 );
+        std::vector<short> output( OCAM2_PIXELS_IMAGE_BINNING2x2 );
+        app.m_image_p = reinterpret_cast<u_char *>( raw.data() );
+        g_ocam2StubState.outputImage.assign( output.size(), -777 );
+        REQUIRE( app.newCallBack_m_indiP_descrambleMethod( methodRequest( app, "parallel" ) ) == 0 );
+        REQUIRE( app.loadImageIntoStream( output.data() ) == 0 );
+        REQUIRE( app.m_descrambleParallel.running() );
+
+        static_cast<MagAOXAppT &>( app ).m_powerState = power;
+        app.m_powerTargetState                        = target;
+        const bool acquisitionAllowed                 = power == 1 && target != 0;
+        REQUIRE( app.frameGrabberPostPublish( sourceStream.image() ) == 0 );
+        CHECK( app.m_descrambleParallel.running() == acquisitionAllowed );
+        REQUIRE( app.loadImageIntoStream( output.data() ) == 0 );
+        CHECK( app.m_descrambleApplied.load() ==
+               ( acquisitionAllowed ? ocam2KCtrl::DescrambleMethod::parallel : ocam2KCtrl::DescrambleMethod::sdk ) );
+        CHECK( std::all_of( output.begin(),
+                            output.end(),
+                            [acquisitionAllowed]( short value )
+                            {
+                                return value == ( acquisitionAllowed ? 123 : -777 );
+                            } ) );
+        app.updateDescramble();
+        CHECK( app.m_indiP_descrambleStatus["availability"].get() == "ready" );
+        CHECK( app.m_indiP_descrambleMethod["parallel"].getSwitchState() == pcf::IndiElement::On );
+        CHECK( app.m_indiP_descrambleStatus["applied"].get() == ( acquisitionAllowed ? "parallel" : "none" ) );
+        CHECK( app.m_indiP_descrambleStatus["parallel"].get() == ( acquisitionAllowed ? "running" : "parked" ) );
+    }
+}
+
 /// Digital binning retains the historical last-X-sample behavior for nonuniform input.
 /** \ingroup ocam2KCtrl_descramble_unit_test */
 TEST_CASE( "ocam2KCtrl descramble selection preserves digital binning", "[ocam2KCtrl][descramble]" )

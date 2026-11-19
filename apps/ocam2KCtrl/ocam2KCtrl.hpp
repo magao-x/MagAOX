@@ -951,8 +951,9 @@ inline void ocam2KCtrl::updateDescramble()
 
     const auto requested    = m_descrambleRequested.load( std::memory_order_relaxed );
     const auto availability = m_descrambleAvailability.load( std::memory_order_relaxed );
+    // An empty outlet target is unknown, not Off; observed On still permits acquisition.
     const bool operating =
-        !shutdown() && powerState() == 1 && powerStateTarget() == 1 && !m_reconfig && state() == stateCodes::OPERATING;
+        !shutdown() && powerState() == 1 && powerStateTarget() != 0 && !m_reconfig && state() == stateCodes::OPERATING;
     const auto  applied = operating ? m_descrambleApplied.load( std::memory_order_relaxed ) : DescrambleMethod::none;
     const char *availabilityName  = availability == DescrambleAvailability::ready         ? "ready"
                                     : availability == DescrambleAvailability::unsupported ? "unsupported mode"
@@ -2859,7 +2860,7 @@ inline int ocam2KCtrl::loadImageIntoStream( void *dest )
     if( applied == DescrambleMethod::parallel )
     {
         if( !m_staged || !m_descrambleParallelAvailable.load( std::memory_order_relaxed ) || shutdown() ||
-            powerState() <= 0 || powerStateTarget() <= 0 || m_reconfig || m_descrambleParallel.resume() < 0 ||
+            powerState() <= 0 || powerStateTarget() == 0 || m_reconfig || m_descrambleParallel.resume() < 0 ||
             m_descrambleParallel.run( output, reinterpret_cast<int16_t *>( m_image_p ), m_descramblePartition ) < 0 )
         {
             // A rejected/cancelled job has relinquished both buffers before SDK fallback can overwrite output.
@@ -2999,7 +3000,7 @@ inline int ocam2KCtrl::frameGrabberPostPublish( IMAGE *imageStream )
 
     ImageStreamIO_sempost( m_syncImageStream, -1 );
 
-    if( m_reconfig || shutdown() || powerState() <= 0 || powerStateTarget() <= 0 )
+    if( m_reconfig || shutdown() || powerState() <= 0 || powerStateTarget() == 0 )
     {
         m_descrambleParallel.requestPark();
     }
