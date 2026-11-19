@@ -85,6 +85,8 @@ TEST_CASE( "ocam2KCtrl validates descramble method configuration", "[ocam2KCtrl]
         CAPTURE( method );
         resetStubState();
         ocam2KCtrl_test app;
+        REQUIRE( app.m_descrambleRequested.load() == ocam2KCtrl::DescrambleMethod::parallel );
+        REQUIRE( app.m_descrambleCpuset == "camwfs_descramble" );
         app.setupConfig();
         const std::string path = uniqueConfigPath( "descramble" );
 
@@ -108,20 +110,19 @@ TEST_CASE( "ocam2KCtrl validates descramble method configuration", "[ocam2KCtrl]
         else
         {
             REQUIRE( result == 0 );
-            const auto expected = method == "compact"  ? ocam2KCtrl::DescrambleMethod::compact
-                                  : method == "mapped" ? ocam2KCtrl::DescrambleMethod::mapped
-                                  : ( method.empty() || method == "optimized" )
-                                      ? ocam2KCtrl::DescrambleMethod::optimized
-                                  : method == "parallel" ? ocam2KCtrl::DescrambleMethod::parallel
-                                                         : ocam2KCtrl::DescrambleMethod::sdk;
+            const auto expected = method == "compact"                          ? ocam2KCtrl::DescrambleMethod::compact
+                                  : method == "mapped"                         ? ocam2KCtrl::DescrambleMethod::mapped
+                                  : method == "optimized"                      ? ocam2KCtrl::DescrambleMethod::optimized
+                                  : ( method.empty() || method == "parallel" ) ? ocam2KCtrl::DescrambleMethod::parallel
+                                                                               : ocam2KCtrl::DescrambleMethod::sdk;
             REQUIRE( app.m_descrambleRequested.load() == expected );
             REQUIRE( app.initDescramble() == 0 );
 
             for( const std::string choice : descrambleChoices )
             {
                 REQUIRE( app.m_indiP_descrambleMethod[choice].getSwitchState() ==
-                         ( choice == ( method.empty() ? "optimized" : method ) ? pcf::IndiElement::On
-                                                                               : pcf::IndiElement::Off ) );
+                         ( choice == ( method.empty() ? "parallel" : method ) ? pcf::IndiElement::On
+                                                                              : pcf::IndiElement::Off ) );
             }
         }
     }
@@ -167,6 +168,43 @@ TEST_CASE( "ocam2KCtrl validates parallel worker configuration", "[ocam2KCtrl][d
                                                      : MagAOX::app::ocamDescrambleParallel::Partition::paired30 ) );
             }
         }
+    }
+}
+
+/// The canonical worker cpuset is the default; explicit empty or custom settings override it without launching work.
+/** \ingroup ocam2KCtrl_descramble_unit_test */
+TEST_CASE( "ocam2KCtrl defaults and overrides the descramble worker cpuset", "[ocam2KCtrl][descramble]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ocam2KCtrl::setupConfig;
+    MagAOX::app::ocam2KCtrl::loadConfigImpl;
+    #endif
+    // clang-format on
+    for( const std::string cpuset : { "omitted", "", "operator-assigned" } )
+    {
+        CAPTURE( cpuset );
+        resetStubState();
+        ocam2KCtrl_test app;
+        app.setupConfig();
+        const auto path = uniqueConfigPath( "descramble_cpuset" );
+
+        if( cpuset == "omitted" )
+        {
+            mx::app::writeConfigFile( path, { "unused" }, { "value" }, { "0" } );
+        }
+        else
+        {
+            mx::app::writeConfigFile( path, { "descramble" }, { "cpuset" }, { cpuset } );
+        }
+
+        app.config.readConfig( path );
+        const int result = app.loadConfigImpl();
+        std::remove( path.c_str() );
+        REQUIRE( result == 0 );
+        REQUIRE( app.m_descrambleCpuset == ( cpuset == "omitted" ? "camwfs_descramble" : cpuset ) );
+        REQUIRE( app.m_descrambleRequested.load() == ocam2KCtrl::DescrambleMethod::parallel );
+        REQUIRE_FALSE( app.m_descrambleThread.joinable() );
     }
 }
 
@@ -264,9 +302,9 @@ TEST_CASE( "ocam2KCtrl switches descramblers between complete frames", "[ocam2KC
     REQUIRE( app.loadImageIntoStream( output.data() ) == 0 );
     REQUIRE( output == expected );
     app.updateDescramble();
-    REQUIRE( app.m_indiP_descrambleStatus["applied"].get<std::string>() == "optimized" );
+    REQUIRE( app.m_indiP_descrambleStatus["applied"].get<std::string>() == "parallel" );
 
-    for( const std::string method : { "parallel",
+    for( const std::string method : { "optimized",
                                       "sdk",
                                       "parallel",
                                       "compact",
@@ -496,17 +534,27 @@ TEST_CASE( "ocam2KCtrl parks parallel work and reports unavailable workers", "[o
     app.state( stateCodes::OPERATING );
     app.m_reconfig = false;
     REQUIRE( app.initDescramble() == 0 );
-    REQUIRE( app.startDescrambleWorker() == 0 );
+    REQUIRE( app.m_descrambleRequested.load() == ocam2KCtrl::DescrambleMethod::parallel );
+    REQUIRE( app.m_descrambleCpuset == "camwfs_descramble" );
     REQUIRE_FALSE( app.m_descrambleThread.joinable() );
+    app.m_staged = true;
     prepareBin2Map( app );
     const auto         map = g_ocam2StubState.outputImage;
     std::vector<short> raw( OCAM2_PIXELS_RAW_BINNING2x2, 123 );
     std::vector<short> output( map.size() );
     app.m_image_p = reinterpret_cast<u_char *>( raw.data() );
     g_ocam2StubState.outputImage.assign( map.size(), -777 );
-    REQUIRE( app.newCallBack_m_indiP_descrambleMethod( methodRequest( app, "parallel" ) ) == 0 );
     REQUIRE( app.loadImageIntoStream( output.data() ) == 0 );
     REQUIRE( output == g_ocam2StubState.outputImage );
+    app.updateDescramble();
+    REQUIRE( app.m_descrambleRequested.load() == ocam2KCtrl::DescrambleMethod::parallel );
+    REQUIRE( app.m_indiP_descrambleStatus["applied"].get() == "sdk" );
+    REQUIRE( app.m_indiP_descrambleStatus["parallel"].get() == "unverified worker" );
+    REQUIRE( app.m_indiP_descrambleMethod.getState() == INDI_ALERT );
+
+    app.m_descrambleCpuset.clear();
+    REQUIRE( app.startDescrambleWorker() == 0 );
+    REQUIRE_FALSE( app.m_descrambleThread.joinable() );
     app.updateDescramble();
     REQUIRE( app.m_indiP_descrambleStatus["parallel"].get() == "disabled" );
     REQUIRE( app.m_indiP_descrambleMethod.getState() == INDI_ALERT );

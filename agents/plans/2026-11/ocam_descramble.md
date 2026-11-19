@@ -49,22 +49,21 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 Investigation date: 2026-11-16. Source baseline: `dev`, `cbc1d5cf`.
 Host verified as `mx11`. This pass inspects local source and configuration
 only; no instrument commands, benchmarks, or implementation were run.
-Status as of 2026-11-18: **the operator's sleep-then-spin parallel trials
-retain approximately 29 us acquisition-to-write time at both 2 and 3.6 kHz,
-without the large interval-jitter penalty seen during continuous spinning**.
-With the configured 100 us post-job sleep, the 2 kHz WMA means average
-29.003 us versus the earlier optimized 33.760 us; reported WMA standard
-deviation averages 0.775 us versus 1.067 us. At 3.6 kHz, eight WMA window
-means average 28.861 us with 0.975 us reported standard deviation, and
-acquisition/publication interval standard deviations average 0.591/1.367 us.
-The higher-rate capture therefore retains low latency and ordinary interval
-spread, although its WMA spread is 0.200 us above the 2 kHz sleep trial.
+Status as of 2026-11-18: **the operator selected parallel as the default
+with a 100 us post-job sleep and a dedicated `camwfs_descramble` cpuset on
+CPU32**. The operator tested `camwfs-sw` on CPU31 without timing impact and
+requested the persistent names `camwfs_sw` for CPU31 and `camwfs_descramble`
+for CPU32. The app defaults now request parallel and that worker cpuset;
+explicit overrides and SDK fallback remain available.
 
-Short captures now cover the stated maximum rate. A matched optimized
-reference at 3.6 kHz, longer-run tails/frame delivery and complete-loop checks
-remain before broader qualification. The generic requested-method default
-remains optimized; no new default or resource assignment follows automatically
-from these short captures.
+The sleep-then-spin captures retain approximately 29 us acquisition-to-write
+time at both 2 and 3.6 kHz without the large interval-jitter penalty seen
+during continuous spinning. At 2 kHz, mean WMA is 29.003 us versus the earlier
+optimized 33.760 us; reported WMA standard deviation averages 0.775 us versus
+1.067 us. At 3.6 kHz, mean WMA is 28.861 us with 0.975 us reported standard
+deviation and acquisition/publication standard deviations of 0.591/1.367 us.
+Longer-run frame delivery, tails and full-loop behavior remain useful
+follow-up measurements, not a blocker to the operator's explicit adoption.
 
 The RTC reports a 950 ms/s RT runtime budget. Continuous-spin parallel had
 about 28 us acquisition/publication interval spread, which disappeared when
@@ -80,14 +79,12 @@ hardware execution remain operator steps.
 
 Reduce camwfs's acquisition-to-publication cost without degrading image
 correctness, jitter, frame delivery, or end-to-end AO latency. Following the
-operator comparisons, default to the validated optimized single-thread path,
-retain SDK as the explicit reference and unsupported-mode/table fallback, and
-keep live INDI comparison methods. The corrected worker with 100 us post-job
-sleep improves processing mean/spread without the large interval regression
-seen during continuous spinning at 2 kHz. A short 3.6 kHz trial also retains
-low latency without that cadence penalty. Complete matched-rate reference and
-sustained loop comparisons before deciding whether to dedicate the second
-core for normal operation.
+operator comparisons and final adoption request, default to parallel with
+100 us post-job sleep on the dedicated CPU32 worker. Move the software camera
+reader to CPU31 under its existing `camwfs_sw` name. Retain single-thread
+optimized and SDK as explicit alternatives, SDK as unsupported/unavailable
+fallback, and live INDI comparison methods. Keep cleanup compatible with the
+old and new cpuset layouts so the operator can migrate after stopping apps.
 
 ### Findings from the current code
 
@@ -1869,3 +1866,93 @@ are arithmetic averages of rolling-window summaries rather than pooled
 frame distributions or independent trials. Only this plan and the operator
 comparison guide changed; numerical/whitespace checks passed, and no code
 tests or instrument commands were run for this documentation update.
+
+
+## Final default and persistent cpuset allocation — 2026-11-18
+
+The operator reported testing `camwfs-sw` on `spare31` with no timing impact
+and explicitly requested: make parallel the default; rename CPU32's
+`camwfs_sw` to `camwfs_descramble` and CPU31's `spare31` to `camwfs_sw`; verify
+that `remove_cpusets` handles the current configuration. This supersedes the
+prior provisional decision to retain optimized as the generic default.
+
+### Application default
+
+The constructor's requested method, omitted `camera.descrambleMethod` value
+and configuration help now select `parallel`. The worker cpuset default is
+`camwfs_descramble`, so the new method default can engage on the newly
+reserved core rather than defaulting to a disabled worker and SDK fallback.
+The existing 100 us sleep and paired30 partition stay unchanged. Explicit
+method/cpuset overrides still take precedence; an explicitly empty cpuset
+still disables worker creation. Removing that setting now restores the named
+worker default. All actual affinity/scheduling, same-L3, distinct-core,
+staging, map-validation and power-state checks remain in place. Unsupported
+or unavailable requests still use SDK and report the unmet request as Alert.
+The runtime request does not move any existing task or modify a cpuset.
+
+Application tests cover constructor/omitted configuration, prepared default
+frames with and without an eligible worker, explicit method overrides,
+cpuset omission/empty/custom values, plus the existing lifecycle/power/sleep
+regressions. The operator's old `[descramble] cpuset=camwfs_sw` override must
+be changed to `camwfs_descramble` or removed; otherwise CPU31 fails the
+worker's same-L3 verification. The `camwfs-sw` app should use its existing
+`[framegrabber] cpuset=camwfs_sw` name, restored from `spare31` if the temporary
+trial changed it. No tracked camera configuration template exists here;
+installed configuration changes remain an operator deployment step.
+
+### Setup and cleanup
+
+| CPU | Previous name | New name | Role |
+| --- | --- | --- | --- |
+| 31 | `spare31` | `camwfs_sw` | `camwfs-sw` software framegrabber. |
+| 32 | `camwfs_sw` | `camwfs_descramble` | Parallel OCAM worker. |
+| 33 | `camwfs` | unchanged | Camera framegrabber. |
+| 34 | `camwfs_irq` | unchanged | EDT IRQ. |
+
+Only the two cpuset names change in `make_cpusets`; CPU masks, exclusive
+flags, memory node, system allocation and SMT policy remain unchanged. The
+updated cleanup helper derives all current names from the sibling setup
+script, so it recognizes `camwfs_descramble` automatically. Add `spare31` to
+the RTC retired-name set to retain compatibility with the currently deployed
+layout. `camwfs_sw` remains recognized whether it previously held CPU32 or
+now holds CPU31. ICC role handling is unchanged.
+
+Cleanup continues to default to dry run, preserve root/system, check all owned
+groups and descendants for occupied task lists before removal, and refuse
+unknown groups, unsafe links or nested mounts. It never stops or migrates
+tasks. Mock tests verify the complete old/new RTC layouts and mixed legacy
+names, the new CPU assignments, retired `spare31`, and refusal while renamed
+or retired groups contain tasks. No actual cgroup removal or setup script is
+run by the assistant. The operator must stop dedicated workloads, install the
+updated setup/cleanup together, preview with `remove_cpusets`, apply cleanup
+with `--apply`, rebuild the sets, and restart with migrated app configuration.
+
+The RTC topology record and two older dmSyncopation procedures are updated so
+current instructions no longer send a post worker into retired `spare31`;
+current post-worker placement remains `dmtweeter-post`/CPU44. Historical
+measurement statements retain their original placements.
+
+### Validation
+
+- Production `ocam2KCtrl` compiled and linked against the local real EDT SDK;
+  the application executable was not run.
+- Forced rebuilds passed **29,762 assertions in 11 descramble cases**,
+  **902 assertions in 36 controller cases**, and **seven assertions in one
+  lifecycle case**: **30,671 assertions in 48 cases** total. Coverage includes
+  the operational defaults, explicit empty/custom cpusets, eligible-worker
+  conversion, no-worker SDK fallback, and safe startup fallback.
+- **20 mocked cleanup tests passed**, including old/new/accumulated RTC
+  layouts, occupied migrated names, unknown groups, root/system preservation,
+  and ICC role behavior. The static setup audit covers all 41 declarations
+  (system plus every CPU24–63 exactly once), confirms CPU31/32/33/34 placement,
+  and verifies every current dedicated name is accepted by cleanup.
+- `bash -n rtSetup/RTC/make_cpusets` and `git diff --check` passed. Changed C++
+  files were formatted and the changed-file documentation reviewed. The
+  original user-owned OCAM plan prefix is unchanged.
+
+Application build/test logs are in `/tmp/ocam-final-default-20261118/`.
+The cleanup verification uses temporary directories and mocked mount/removal
+operations; it verifies compatibility with the declared current layout, not
+an inspection or removal of the live instrument's cgroups. No instrument
+commands, live cleanup/setup script, installed configuration edit, or cpuset
+assignment was performed by an agent.

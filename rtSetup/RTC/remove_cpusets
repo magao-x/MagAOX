@@ -15,9 +15,10 @@ import sys
 
 
 # Keep retired names separate by role so cleanup never claims another host's sets.
+# RTC spare31 became camwfs_sw; the former camwfs_sw became camwfs_descramble.
 LEGACY_NAMES = {
     "RTC": {
-        "camwfs_sw", "camwfs", "camwfs2", "spare35", "spare36", "dm00comb",
+        "camwfs_sw", "camwfs", "camwfs2", "spare31", "spare35", "spare36", "dm00comb",
         "woofer", "dm01comb", "tweeter", "t2w", "spare42", "spare43", "spare44",
         "acqu_mvm", "mfilt", "tweeterSpeck", "mlat", "RTmon", "spare50", "spare51",
         "spare52", "spare53", "camtip", "camtip_sw", "camacq", "camacq_sw",

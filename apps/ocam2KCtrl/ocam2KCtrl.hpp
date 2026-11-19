@@ -160,7 +160,8 @@ class ocam2KCtrl : public MagAOXApp<>,
     ocamDescrambleParallel
         m_descrambleParallel; ///< Mandatory half-frame jobs; map lifetime belongs to the frame worker.
 
-    std::string m_descrambleCpuset; ///< Operator-reserved worker cpuset; empty disables the parallel experiment.
+    /// Dedicated descramble worker cpuset; an explicit empty configuration disables worker creation.
+    std::string m_descrambleCpuset{ "camwfs_descramble" };
 
     int m_descrambleThreadPrio{ -1 }; ///< Requested worker priority; -1 inherits the framegrabber priority at load.
 
@@ -187,7 +188,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     std::atomic<int> m_descrambleWorkerCpu{ -1 }; ///< Verified descramble logical CPU, or -1 before verification.
 
     /// Latched once per frame; isolate ordinary-thread snapshots from the worker's changing frame counters.
-    alignas( 64 ) std::atomic<DescrambleMethod> m_descrambleRequested{ DescrambleMethod::optimized };
+    alignas( 64 ) std::atomic<DescrambleMethod> m_descrambleRequested{ DescrambleMethod::parallel };
 
     std::atomic<DescrambleMethod> m_descrambleApplied{ DescrambleMethod::none }; ///< Last completed load's method.
 
@@ -716,7 +717,7 @@ inline void ocam2KCtrl::setupConfig()
         "descrambleMethod",
         false,
         "string",
-        "Descramble implementation: sdk, compact, mapped, optimized (default), or parallel (validated bin2 only)." );
+        "Descramble implementation: sdk, compact, mapped, optimized, or parallel (default; validated bin2 only)." );
 
     config.add( "descramble.cpuset",
                 "",
@@ -726,7 +727,8 @@ inline void ocam2KCtrl::setupConfig()
                 "cpuset",
                 false,
                 "string",
-                "Dedicated single-CPU worker cpuset on the framegrabber L3; empty disables parallel." );
+                "Dedicated single-CPU worker cpuset on the framegrabber L3; default camwfs_descramble, empty disables "
+                "worker creation." );
     config.add( "descramble.threadPrio",
                 "",
                 "descramble.threadPrio",
@@ -806,7 +808,7 @@ inline int ocam2KCtrl::loadConfigImpl()
 
     config( m_ocamDescrambleFile, "camera.ocamDescrambleFile" );
 
-    std::string descrambleMethod = "optimized";
+    std::string descrambleMethod = "parallel";
     config( descrambleMethod, "camera.descrambleMethod" );
 
     if( descrambleMethod != "sdk" && descrambleMethod != "compact" && descrambleMethod != "mapped" &&
