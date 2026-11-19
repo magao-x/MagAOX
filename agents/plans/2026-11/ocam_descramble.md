@@ -51,13 +51,15 @@ Host verified as `mx11`. This pass inspects local source and configuration
 only; no instrument commands, benchmarks, or implementation were run.
 Status as of 2026-11-18: **optimized is the default requested method; the
 first confirmed parallel capture after the power-target fix lowers
-acquisition-to-write time but worsens frame-interval jitter**. Its seven window means average
-28.826 us versus the earlier optimized 33.760 us, and reported WMA standard
+acquisition-to-write time but worsens frame-interval jitter**. Its seven
+window means average 28.826 us versus the earlier optimized 33.760 us, and reported WMA standard
 deviation averages 0.799 us versus 1.067 us. Acquisition/publication interval
 spread is much larger in this new capture. The operator confirmed active
 parallel on CPUs 33/32 and that this interval jitter disappears on returning
-to optimized. Keep optimized selected while investigating the worker's
-continuous interframe spinning; parallel is not qualified for normal use.
+to optimized. The RTC has a 950 ms/s RT runtime budget and only the worker
+in its reserved cpuset. A configurable 100 us post-job sleep has passed local
+correctness and concurrency checks; keep optimized selected until its instrument crossover
+resolves the interval regression.
 The earlier 37.423 us capture labeled parallel is not valid worker evidence:
 the operator corrected its status to `parked`, and follow-up diagnostics
 identified SDK fallback caused by an empty power target despite observed On.
@@ -1659,3 +1661,96 @@ Parsed values and arithmetic are retained in
 `/tmp/ocam-parallel-fixed-rtc-20261118.json`. Only this engineering record is
 changed; no runtime settings or implementation changed, and no instrument
 commands were run by the assistant.
+
+
+## Sleep then spin worker experiment — 2026-11-18
+
+The operator reported RTC `kernel.sched_rt_runtime_us=950000` and
+`kernel.sched_rt_period_us=1000000`, with only the descramble task in
+`camwfs_sw/tasks`. The operator proposed sleeping for 100 us between frames,
+then spinning, and specified a maximum camera rate of 3.6 kHz. This finite
+95% RT budget makes continuous FIFO spinning a plausible contributor to the
+observed cadence regression; it does not by itself prove that throttling
+caused the supplied timing distributions.
+
+At 2 kHz, a 100 us block per 500 us frame gives a nominal runnable fraction
+near 80%; at 3.6 kHz, a 100 us block per 277.8 us frame gives about 64%.
+Those estimates assume steady frames and timely wakeups. Sleep scheduling can
+overshoot, and a worker that receives no new frames resumes spinning after
+its one sleep. Thus this is a targeted 2–3.6 kHz experiment, not a general
+RT-budget guarantee at low FPS or during acquisition stalls. No kernel RT
+budget, scheduling priority, cpuset, or instrument configuration is modified.
+
+### Implementation
+
+- Add startup configuration `descramble.sleepUs`, default **100**, accepting
+  integral values **0–200 us**. Zero preserves the continuous-spin control.
+  The upper bound is conservative for this experiment: 200 us leaves only
+  77.8 us of a nominal 3.6 kHz period, before accounting for job phase and
+  scheduler oversleep. It is not a guaranteed wake deadline.
+- Pass the immutable delay to the shared `workerMain(unsigned idleSleepUs=0)`
+  entry point. The core's default remains zero so existing standalone wrapper
+  and benchmark callers retain their previous behavior.
+- After releasing `m_done`, the worker sleeps once, then returns to polling.
+  There is no sleep before the first job. The completed frame's owner can
+  proceed to staging/publication without waiting for the sleep. The worker
+  does not access the completed frame's buffers after publishing completion.
+- Use standard C++ `sleep_for`, already available in the project, with a
+  microsecond duration. Skip the sleep if park/stop is already requested.
+  A request arriving during sleep waits for that sleep and scheduler delay;
+  a new admitted frame waits for wake and still drains before buffer reuse.
+  No per-frame park/resume handshake or new owner wait is introduced.
+- Expose the configured value as `descramble_status.sleep_us` and in the
+  startup worker-verification log. This reports requested delay, not measured
+  sleep duration. `parallel=running` continues to mean an active worker and
+  includes its short post-job sleeps; it is distinct from administrative
+  `parked` state.
+- Preserve the optimized default, explicit worker cpuset requirement,
+  mandatory job completion, map validation, digital sampling, staging,
+  publication ordering, and acquisition/rearm behavior.
+
+The application tests exercise default 100 us through the local worker
+launcher, plus omitted/zero/100/200 configuration, readback and rejection of
+negative, fractional, nonfinite and out-of-range values. Shared core tests
+exercise zero and 100 us for full image correctness, guard preservation,
+immediate buffer reuse, map replacement, park/resume, stop and admitted-job
+control races. Functional assertions avoid hard scheduler-latency thresholds.
+Validation passed:
+
+- The real EDT application compiled and linked with the local SDK; it was not
+  executed.
+- Forced application rebuilds passed **29,730 assertions in ten descramble
+  cases** and **902 assertions in 36 controller cases**: **30,632 assertions
+  in 46 cases** total, including configured 100 us worker launches.
+- Standalone checks passed **1,162 wrapper checks** with the original default
+  and **3,116 shared-core checks** covering zero and 100 us. Each core run
+  observed 48 admitted-job control races at each delay.
+- The same 3,116 core checks passed under AddressSanitizer/UndefinedBehaviorSanitizer
+  and ThreadSanitizer. Leak checking was disabled for the known tracing
+  environment limitation; address/undefined-behavior checking remained enabled.
+- Changed C++ files were formatted and their full-file documentation reviewed;
+  the original user-owned plan prefix is preserved and `git diff --check`
+  passes.
+
+App logs are in `/tmp/ocam-idle-sleep-20261118/`; standalone logs are
+`/tmp/ocam-runtime-checks/parallel-sleep-{check,asan,tsan}.log`. These checks
+establish local functionality and protocol safety, not an RTC timing result.
+
+### Operator comparison
+
+After the normal operator deployment/restart, preserve CPU32/33 placement,
+partition, FPS, synchronization, staged copy, reader workload and timing
+settings. Confirm `sleep_us=100`, `applied=parallel`, `parallel=running`, and
+intended CPUs during the parallel capture. Run settled optimized/parallel/
+optimized windows at 2 kHz, then separately at 3.6 kHz if the 2 kHz result is
+sound. Compare acquisition/publication interval distributions and frame
+delivery as well as WMA; a lower WMA alone does not qualify the worker.
+
+To reproduce continuous spin, set `descramble.sleepUs=0` and restart before
+another matched crossover. The setting is startup-only; method changes remain
+live. Keep the same scheduling budget for the comparison. A timer oversleep
+can move a later frame's wake delay into WMA; no instrument result is yet
+available for the new sleep setting.
+
+Affected files: the controller and shared worker headers, their application
+and standalone protocol tests, this plan, and the operator comparison guide.

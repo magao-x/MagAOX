@@ -164,6 +164,8 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     int m_descrambleThreadPrio{ -1 }; ///< Requested worker priority; -1 inherits the framegrabber priority at load.
 
+    unsigned m_descrambleSleepUs{ 100 }; ///< Startup-configured sleep after each worker job; zero spins continuously.
+
     /// Startup-configured split of disjoint output regions between the frame thread and worker.
     ocamDescrambleParallel::Partition m_descramblePartition{ ocamDescrambleParallel::Partition::paired30 };
 
@@ -743,6 +745,15 @@ inline void ocam2KCtrl::setupConfig()
                 false,
                 "string",
                 "Parallel split: halves, paired28, or paired30 (default)." );
+    config.add( "descramble.sleepUs",
+                "",
+                "descramble.sleepUs",
+                argType::Required,
+                "descramble",
+                "sleepUs",
+                false,
+                "unsigned",
+                "Worker sleep after completion, then spin: 0-200 microseconds, default 100; 0 spins continuously." );
 
     dev::frameGrabber<ocam2KCtrl>::setupConfig( config );
 
@@ -829,6 +840,15 @@ inline int ocam2KCtrl::loadConfigImpl()
     config( m_descrambleThreadPrio, "descramble.threadPrio" );
     std::string partition = "paired30";
     config( partition, "descramble.partition" );
+    double sleepUs = m_descrambleSleepUs;
+    config( sleepUs, "descramble.sleepUs" );
+
+    if( !mx::math::isFinite( sleepUs ) || sleepUs < 0 || sleepUs > 200 || std::floor( sleepUs ) != sleepUs )
+    {
+        return log<software_error, -1>( { "descramble.sleepUs must be an integer from 0 to 200 microseconds" } );
+    }
+
+    m_descrambleSleepUs = static_cast<unsigned>( sleepUs );
 
     if( m_descrambleThreadPrio == -1 )
     {
@@ -891,7 +911,7 @@ inline int ocam2KCtrl::initDescramble()
 
     REG_INDI_NEWPROP_NOCB( m_indiP_descrambleStatus, "descramble_status", pcf::IndiProperty::Text );
 
-    for( const auto &name : { "applied", "availability", "parallel", "caller_cpu", "worker_cpu" } )
+    for( const auto &name : { "applied", "availability", "parallel", "caller_cpu", "worker_cpu", "sleep_us" } )
     {
         m_indiP_descrambleStatus.add( pcf::IndiElement( name ) );
     }
@@ -901,6 +921,7 @@ inline int ocam2KCtrl::initDescramble()
     m_indiP_descrambleStatus["parallel"].set( "unavailable" );
     m_indiP_descrambleStatus["caller_cpu"].set( "-1" );
     m_indiP_descrambleStatus["worker_cpu"].set( "-1" );
+    m_indiP_descrambleStatus["sleep_us"].set( std::to_string( m_descrambleSleepUs ) );
     const auto requested = m_descrambleRequested.load( std::memory_order_relaxed );
     m_indiP_descrambleMethod[requested == DescrambleMethod::parallel    ? "parallel"
                              : requested == DescrambleMethod::optimized ? "optimized"
@@ -1029,7 +1050,8 @@ inline int ocam2KCtrl::startDescrambleWorker()
     }
 
     log<text_log>( "Descramble worker verified on CPU " + std::to_string( m_descrambleWorkerCpu.load() ) +
-                   ", sharing L3 with framegrabber CPU " + std::to_string( m_descrambleCallerCpu.load() ) );
+                   ", sharing L3 with framegrabber CPU " + std::to_string( m_descrambleCallerCpu.load() ) +
+                   ", post-job sleep " + std::to_string( m_descrambleSleepUs ) + " us" );
     return 0;
 }
 
@@ -1081,7 +1103,7 @@ inline void ocam2KCtrl::stopDescrambleWorker() noexcept
 inline void ocam2KCtrl::descrambleThreadStart( ocam2KCtrl *app )
 {
     app->m_descrambleThreadID = syscall( SYS_gettid );
-    app->m_descrambleParallel.workerMain();
+    app->m_descrambleParallel.workerMain( app->m_descrambleSleepUs );
 }
 
 inline int ocam2KCtrl::ensureSyncStream()

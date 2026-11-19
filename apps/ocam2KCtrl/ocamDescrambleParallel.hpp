@@ -10,6 +10,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
+#include <thread>
 
 #include "ocamDescrambler.hpp"
 
@@ -113,7 +114,12 @@ class ocamDescrambleParallel
     void clear();
 
     /// Enter the externally managed worker once, initially blocked until verified placement permits resume().
-    void workerMain() noexcept;
+    /** After publishing completion, an optional sleep yields the CPU before polling for the next job. There is no
+     * sleep before the first job. OS scheduling may extend the requested delay, including park/stop response time;
+     * a frame admitted while sleeping still completes before its owner may reuse buffers.
+     */
+    void workerMain(
+        unsigned idleSleepUs = 0 /**< [in] Fixed post-job sleep in microseconds; zero keeps spinning. */ ) noexcept;
 
     /// Wait for worker entry without hanging when thread creation or its entry point fails.
     /** \returns true after workerMain() has entered, including when that worker subsequently stopped.
@@ -462,7 +468,7 @@ inline void ocamDescrambleParallel::relax()
 #endif
 }
 
-inline void ocamDescrambleParallel::workerMain() noexcept
+inline void ocamDescrambleParallel::workerMain( unsigned idleSleepUs ) noexcept
 {
     try
     {
@@ -513,6 +519,13 @@ inline void ocamDescrambleParallel::workerMain() noexcept
 
                 previous = job;
                 m_done.store( job, std::memory_order_release );
+
+                if( idleSleepUs > 0 &&
+                    !( m_control.load( std::memory_order_acquire ) & ( parkRequested | stopRequested ) ) )
+                {
+                    std::this_thread::sleep_for( std::chrono::microseconds( idleSleepUs ) );
+                }
+
                 continue;
             }
 

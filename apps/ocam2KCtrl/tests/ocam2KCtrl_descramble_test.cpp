@@ -41,7 +41,7 @@ void prepareBin2Map( ocam2KCtrl_test &app /**< [in,out] Controller receiving the
     app.prepareDescramble();
 }
 
-/// Launch a local normal-priority worker without exercising instrument placement or RT configuration.
+/// Launch a local normal-priority worker with the configured idle sleep, without instrument placement or RT setup.
 void startLocalParallel( ocam2KCtrl_test &app /**< [in,out] Controller owning the worker and prepared map. */ )
 {
     app.m_staged           = true;
@@ -50,7 +50,7 @@ void startLocalParallel( ocam2KCtrl_test &app /**< [in,out] Controller owning th
     app.m_descrambleThread = std::thread(
         [&app]()
         {
-            app.m_descrambleParallel.workerMain();
+            app.m_descrambleParallel.workerMain( app.m_descrambleSleepUs );
         } );
     REQUIRE( app.m_descrambleParallel.waitUntilStarted() );
     app.m_descrambleWorkerVerified.store( true );
@@ -166,6 +166,56 @@ TEST_CASE( "ocam2KCtrl validates parallel worker configuration", "[ocam2KCtrl][d
                            : partition == "paired28" ? MagAOX::app::ocamDescrambleParallel::Partition::paired28
                                                      : MagAOX::app::ocamDescrambleParallel::Partition::paired30 ) );
             }
+        }
+    }
+}
+
+/// Idle sleep is a bounded integer configuration value, exposed as read-only status without starting the worker.
+/** \ingroup ocam2KCtrl_descramble_unit_test */
+TEST_CASE( "ocam2KCtrl validates and reports parallel worker idle sleep", "[ocam2KCtrl][descramble][idle-sleep]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::ocam2KCtrl::setupConfig;
+    MagAOX::app::ocam2KCtrl::loadConfigImpl;
+    MagAOX::app::ocam2KCtrl::initDescramble;
+    MagAOX::app::ocam2KCtrl::updateDescramble;
+    #endif
+    // clang-format on
+    for( const std::string sleep : { "", "0", "100", "100.0", "200", "-1", "201", "100.5", "nan", "inf", "-inf" } )
+    {
+        CAPTURE( sleep );
+        resetStubState();
+        outletHarness::Controller<ocam2KCtrl_test> app;
+        app.driver();
+        app.setupConfig();
+        const auto path = uniqueConfigPath( "idle_sleep" );
+
+        if( sleep.empty() )
+        {
+            mx::app::writeConfigFile( path, { "unused" }, { "value" }, { "0" } );
+        }
+        else
+        {
+            mx::app::writeConfigFile( path, { "descramble" }, { "sleepUs" }, { sleep } );
+        }
+
+        app.config.readConfig( path );
+        const int result = app.loadConfigImpl();
+        std::remove( path.c_str() );
+        const bool valid = sleep.empty() || sleep == "0" || sleep == "100" || sleep == "100.0" || sleep == "200";
+        REQUIRE( result == ( valid ? 0 : -1 ) );
+        REQUIRE_FALSE( app.m_descrambleThread.joinable() );
+
+        if( valid )
+        {
+            const unsigned expected = sleep == "0" ? 0 : sleep == "200" ? 200 : 100;
+            REQUIRE( app.m_descrambleSleepUs == expected );
+            REQUIRE( app.initDescramble() == 0 );
+            REQUIRE( app.m_indiP_descrambleStatus.getPerm() == pcf::IndiProperty::ReadOnly );
+            REQUIRE( app.m_indiP_descrambleStatus["sleep_us"].get() == std::to_string( expected ) );
+            app.updateDescramble();
+            REQUIRE( app.m_indiP_descrambleStatus["sleep_us"].get() == std::to_string( expected ) );
         }
     }
 }

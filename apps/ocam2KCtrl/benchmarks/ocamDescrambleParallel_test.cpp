@@ -110,17 +110,18 @@ class workerOwner
 
   public:
     /// Launch the worker without RT scheduling or instrument CPU placement.
-    explicit workerOwner( ocamDescrambleParallel &worker /**< [in,out] Core started in its parked state. */ );
+    explicit workerOwner( ocamDescrambleParallel &worker /**< [in,out] Core started in its parked state. */,
+                          unsigned                idleSleepUs = 0 /**< [in] Worker post-job sleep in microseconds. */ );
 
     /// Stop and join before core or pixel allocations can be destroyed.
     ~workerOwner();
 };
 
-workerOwner::workerOwner( ocamDescrambleParallel &worker )
+workerOwner::workerOwner( ocamDescrambleParallel &worker, unsigned idleSleepUs )
     : m_worker( worker ), m_thread(
-                              [&worker]()
+                              [&worker, idleSleepUs]()
                               {
-                                  worker.workerMain();
+                                  worker.workerMain( idleSleepUs );
                               } )
 {
 }
@@ -180,7 +181,8 @@ void verifyOutput( const std::vector<short> &storage /**< [in] Guarded destinati
  * \see MagAOX::app::ocamDescrambleParallel::serial
  * \see MagAOX::app::ocamDescrambleParallel::clear
  */
-void checkFrames( sdkFixture &fixture /**< [in,out] Real SDK reference and map owner. */ )
+void checkFrames( sdkFixture &fixture /**< [in,out] Real SDK reference and map owner. */,
+                  unsigned    idleSleepUs /**< [in] Fixed post-job delay for this worker lifetime. */ )
 {
     ocamDescrambler        helper;
     ocamDescrambleParallel worker;
@@ -199,7 +201,7 @@ void checkFrames( sdkFixture &fixture /**< [in,out] Real SDK reference and map o
     check( !worker.waitUntilStarted( std::chrono::milliseconds( 1 ) ), "absent worker reported startup" );
     check( worker.resume() < 0, "absent worker resumed" );
     check( worker.run( base, raw.data(), Partition::paired30 ) < 0, "absent worker accepted buffers" );
-    workerOwner owner( worker );
+    workerOwner owner( worker, idleSleepUs );
     check( worker.waitUntilStarted(), "worker failed startup acknowledgement" );
     check( !worker.running() && worker.isParked(), "worker did not start parked" );
     check( worker.run( base, raw.data(), Partition::paired30 ) < 0, "parked worker accepted buffers" );
@@ -272,7 +274,8 @@ void checkFrames( sdkFixture &fixture /**< [in,out] Real SDK reference and map o
  * \see MagAOX::app::ocamDescrambleParallel::requestStop
  * \see MagAOX::app::ocamDescrambleParallel::inFlight
  */
-void checkControlRaces( sdkFixture &fixture /**< [in,out] Real SDK reference owner. */ )
+void checkControlRaces( sdkFixture &fixture /**< [in,out] Real SDK reference owner. */,
+                        unsigned    idleSleepUs /**< [in] Fixed post-job delay for every tested worker. */ )
 {
     ocamDescrambler helper;
     const auto      id = fixture.open( OCAM2_BINNING2x2 );
@@ -291,8 +294,10 @@ void checkControlRaces( sdkFixture &fixture /**< [in,out] Real SDK reference own
         {
             ocamDescrambleParallel worker;
             check( worker.prepare( helper ) == 0, "race worker preparation failed" );
-            workerOwner owner( worker );
+            workerOwner owner( worker, idleSleepUs );
             check( worker.waitUntilStarted() && worker.resume() == 0, "race worker startup failed" );
+            check( worker.run( output.data(), raw.data(), Partition::paired30 ) == 0 && output == expected,
+                   "pre-race completed frame differs" );
             std::atomic<bool> begin{ false };
             std::atomic<bool> finish{ false };
             std::atomic<bool> observed{ false };
@@ -383,7 +388,75 @@ void checkControlRaces( sdkFixture &fixture /**< [in,out] Real SDK reference own
     }
 
     check( observedJobs > 0, "control tests never observed an admitted job" );
-    std::cout << "Observed " << observedJobs << " admitted-job control races.\n";
+    std::cout << "Observed " << observedJobs << " admitted-job control races with " << idleSleepUs
+              << " us post-job sleep.\n";
+}
+
+/// Request park or stop after completion, allowing the worker to be entering or awaiting its optional sleep.
+/** Buffer reuse is checked before parking acknowledges, without assumptions about the scheduler's actual delay.
+ * \see MagAOX::app::ocamDescrambleParallel::workerMain
+ * \see MagAOX::app::ocamDescrambleParallel::requestPark
+ * \see MagAOX::app::ocamDescrambleParallel::requestStop
+ */
+void checkCompletedControl( sdkFixture &fixture /**< [in,out] Real SDK reference owner. */,
+                            unsigned    idleSleepUs /**< [in] Fixed delay following completed work. */ )
+{
+    ocamDescrambler helper;
+    check( helper.prepare( fixture.open( OCAM2_BINNING2x2 ) ) == 0, "completed-control map preparation failed" );
+    std::vector<short> raw( helper.rawPixels(), short( 321 ) );
+    std::vector<short> output( helper.imagePixels() );
+
+    for( bool stop : { false, true } )
+    {
+        ocamDescrambleParallel worker;
+        check( worker.prepare( helper ) == 0, "completed-control worker preparation failed" );
+        workerOwner owner( worker, idleSleepUs );
+        check( worker.waitUntilStarted() && worker.resume() == 0, "completed-control startup failed" );
+        check( worker.run( output.data(), raw.data(), Partition::paired28 ) == 0, "completed-control frame rejected" );
+        std::fill( raw.begin(), raw.end(), short( -321 ) );
+        std::fill( output.begin(), output.end(), short( -777 ) );
+
+        if( stop )
+        {
+            worker.requestStop();
+        }
+        else
+        {
+            worker.requestPark();
+        }
+
+        check( worker.run( output.data(), raw.data(), Partition::paired30 ) < 0,
+               "control request admitted another job" );
+        worker.park();
+        check( worker.isParked() && !worker.inFlight(), "completed-control park failed" );
+        check( std::all_of( output.begin(),
+                            output.end(),
+                            []( short value )
+                            {
+                                return value == -777;
+                            } ),
+               "sleep or control transition replayed completed writes" );
+
+        if( stop )
+        {
+            check( worker.stopped() && worker.resume() < 0, "completed-control stop was not terminal" );
+        }
+        else
+        {
+            check( worker.resume() == 0, "completed-control resume failed" );
+            check( worker.run( output.data(), raw.data(), Partition::paired30 ) == 0,
+                   "completed-control resumed frame rejected" );
+            check( std::all_of( output.begin(),
+                                output.end(),
+                                []( short value )
+                                {
+                                    return value == -321;
+                                } ),
+                   "completed-control resume used stale buffers" );
+        }
+
+        std::fill( raw.begin(), raw.end(), short( 321 ) );
+    }
 }
 
 } // namespace
@@ -394,8 +467,14 @@ int main()
     try
     {
         sdkFixture fixture;
-        checkFrames( fixture );
-        checkControlRaces( fixture );
+
+        for( unsigned idleSleepUs : { 0u, 100u } )
+        {
+            checkFrames( fixture, idleSleepUs );
+            checkControlRaces( fixture, idleSleepUs );
+            checkCompletedControl( fixture, idleSleepUs );
+        }
+
         std::cout << "Passed " << checks << " parallel worker checks.\n";
         return 0;
     }
