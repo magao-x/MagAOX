@@ -143,3 +143,139 @@ production.enabled selects the implementation. Runtime enable controls
 scheduling, and a disabled scheduler still updates invalid timing records.
 The operator has been asked for these readbacks. No instrument access, commit,
 push, install or deployment was performed.
+
+## Confirmed primary outage from operator readbacks
+
+The supplied primary stream rate is zero and scheduler health reports
+production main timeout; reacquiring. Producer requests, commits and failures
+are all zero while poll_waits grows. This establishes schedule ineligibility
+as the cause of the current absent output. Ownership succeeds before eligibility
+is evaluated. dmSpeckle uses the identical base and would also wait.
+The scheduler timeout code increments generation and publishes an invalid record.
+A primary cadence is required for sustained production. A finite outstanding
+schedule can remain usable briefly after the last primary update until expiry.
+
+The scheduler does not inspect AO feedback gain or optical loop closure.
+It requires actual primary publications and its existing reader-release and
+combined-stream prerequisites. cacaoInterface exposes mfilt.loopON and loopgain,
+but the available source does not establish a deployed open-loop primary writer.
+Do not infer that camera acquisition alone supplies the primary cadence.
+
+The implementation comparison finds identical producer configuration macros,
+source ownership, poll eligibility, tagged publish and exact transport receipts.
+accelSim uses a lifetime-only CRTP holder for its bounded post-shutdown removal.
+It prepares calibration at startup and attaches on demand. dmSpeckle attaches
+through its application lifecycle. accelSim automatically queues zero on disable,
+where dmSpeckle requires modulation off followed by its separate zero request.
+The cached-surface mutex is independent of the acquisition stepping and acquisition
+uses try_lock. There is no separate DM clock or cadence estimator.
+(Superseded below: the cache and its mutex were removed by the target-time timeline.)
+Thread scheduling differs: accelSim uses std::thread and 50-us poll sleeps,
+dmSpeckle uses framework threadStart and 10-us poll sleeps. This is not the cause
+of zero eligible requests with an invalid timing record.
+
+A remaining substantive difference is target-time synthesis. dmSpeckle evaluates
+a deterministic waveform at targetNs. accelSim holds the latest acquired
+stochastic sample. Future random innovations cannot be recovered from that
+sample. The operator has been asked whether to use a conditional forecast or
+buffer a shared future realization. Neither change is silently substituted for
+preserving the existing simulation/ADC relationship.
+
+Added outage/reacquisition regression and exercised four slots with the required
+50-us lead. The 125-us configuration suggestion is withdrawn for this failure.
+The config template now uses the supplied scheduler name. The matching mask
+path and deployed WFS phase-reference stream still require deployment values.
+
+Operator build/install commands, to be executed by the operator on the RTC:
+
+```sh
+cd apps/accelSim
+make clean
+make -j4
+sudo make install
+```
+
+Installation preserves an existing acc000.conf. Merge the supplied template with
+the deployed mask and WFS reference. Keep dm.enabled=false and scale=0 initially.
+With the normal primary publisher running at 2 kHz, scheduler runtime enable On,
+steps=4 and active timing, the operator can use:
+
+```sh
+setINDI -n 'acc000.dm_scale.target=0.1'
+setINDI -s 'acc000.dm_enable.toggle=On'
+getINDI 'acc000.dm_status.*'
+```
+
+Expected acc000 publication is 8 kHz throughout. Primary is approximately 2 kHz,
+timing records normally follow the primary cadence, and eligible auxiliary
+payload/ready/ack rates approach 8 kHz when deadlines and receipts are serviced.
+requests/published/copied should grow; active becomes 1 after a copied receipt.
+On disable, the operator uses:
+
+```sh
+setINDI -s 'acc000.dm_enable.toggle=Off'
+getINDI 'acc000.dm_status.*'
+```
+
+Keep the scheduler running until zero_acknowledged=1 and active=0. Then auxiliary
+publication stops while ADC continues. If the scheduler is inactive, removal
+remains pending until it recovers. Native RTC rates are operator verification.
+
+## November 19 target-time timeline (completes the interrupted implementation)
+
+Decision (operator): buffer one shared future realization rather than forecast.
+The interrupted checkpoint compiled, but 10 of 13 DM tests failed: none advanced
+the timeline, so `physical(targetNs)` found no data. Review found these defects:
+linear interpolation (6.2% amplitude and 0.33 deg error at 900 Hz, varying with
+sub-sample position, so acc000 and the DM saw different gains); sensor noise taken
+from the floor node, which reuses or skips draws when synchronized acquisition
+precedes its node; noise split by recomputing the 214-mode sum; a synthesis fault
+publishing zeros booked as an active contribution; dropped catch-up discontinuity
+counts; shutdown clamps read from unused model counters; a dead pixel cache and mutex;
+unbounded catch-up after a stall; an O(n) ring scan under the lock; and a 2-ms
+horizon short of the scheduler's 4-ms bound at its 500-Hz minimum main rate.
+
+Implementation:
+
+- `model::step()` stores its existing noise draw in `sample::m_noise`. RNG order
+  and arithmetic are unchanged; the 18 model tests and 226432 assertions match.
+- `accelSimTimeline.hpp` is an index-addressed 128-node ring on the acquisition
+  grid: node k at epoch + k/fps, the nominal time of tick k. After each acquisition
+  it generates 5 ms ahead, one model step per acquisition in steady state.
+  A gap of more than maxCatchUp ungenerated nodes redraws stationary histories once,
+  as before; shorter gaps now need no restart.
+- Evaluation uses 4-point cubic Lagrange weights shared by pointing, WFS pointing and
+  noise-free acceleration. This preserves a = -(2 pi f)^2 L theta for every mode
+  at every time. The error is <1e-4 to 300 Hz and 0.56% at 900 Hz.
+- acc000 is the physics at the acquisition time plus the consumed tick's own noise.
+  The DM uses noise-free pointing at `request.targetNs`. All clocks are same-host
+  CLOCK_MONOTONIC, the clock of the scheduler, producer and acquisition.
+- serviceDM skips and counts uncovered targets. A synthesis fault publishes a
+  removal zero. New `dm_status.attached` and `timeline_misses` elements are reported.
+- Clamp diagnostics count published measurements, not nodes generated ahead.
+
+Measured on this Mac: steady advance 4.36 us per acquisition, the legacy step cost.
+The one-time anchor after start or rate change is about 190 us. physical() takes 16 ns.
+Cubic look-ahead uses nodes up to two intervals after a measurement. Its worst-case
+later innovation is 9.5e-5 m/s^2 rms, 1/86 ADC count and 1/67 sensor-noise rms.
+
+Verification on ASTR-LT-428.local (personal workstation), without hardware:
+
+- Offline app/producer/timeline suite: 22 cases, about 4.7M assertions passed.
+  This includes 11 DM output and 7 timeline cases.
+- Same suite under ASan+UBSan and under TSan: no findings. Removing the reader lock
+  makes TSan report a race in timeline::advance, so concurrency is exercised.
+- Mutations killed: evaluation at cutoff, evaluation at poll time (latest-sample hold),
+  linear weights, floor-node noise, fault zero booked active, unbounded catch-up.
+- Standalone: model 18/226432, sync-regression 8/145840, disturbance 14/12023,
+  DM runtime 3/80016, timeline 7 cases.
+- Read-only syntax check of loPredCtrlAcc sim_bridge/confirmed_replay passed.
+- Native build stops in the framework PCH (generated/logTypes.hpp missing).
+  The Linux-only full accelSim_test fixture was updated for m_acquiredSample but
+  could not be compiled here.
+
+Not changed: producer base, timing protocol, scheduler, dmSpeckle, loPredCtrlAcc,
+configuration keys, the std::thread DM worker and its 50-us retry sleep.
+dmSpeckle uses threadStart with priority/cpuset and 10-us waits. Revisit only if RTC
+`late_returns` rises once the scheduler is active. No instrument access, commit,
+push, installation or deployment was performed.

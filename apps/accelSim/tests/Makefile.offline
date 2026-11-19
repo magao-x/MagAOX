@@ -13,7 +13,7 @@ MXLIB_DIR := $(shell pkg-config --variable=libdir mxlib)
 LDFLAGS += -L$(MXLIB_DIR) -Wl,-rpath,$(MXLIB_DIR)
 LDLIBS += -lmxlib -lcfitsio -pthread
 SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(TEST_DIR)/accelSimDM_test.cpp \
-           $(TEST_DIR)/accelSimDMOutput_test.cpp $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp \
+           $(TEST_DIR)/accelSimDMOutput_test.cpp $(TEST_DIR)/accelSimTimeline_test.cpp $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp \
            $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp
 OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
 VPATH := $(sort $(dir $(SOURCES)))
@@ -23,7 +23,7 @@ TARGET := $(BUILD_DIR)/accelSim_dm_test
 all: $(TARGET)
 
 check: $(TARGET)
-	$(TARGET) '[dm-runtime],[dm-controls],[dm-output]'
+	$(TARGET) '[dm-runtime],[dm-controls],[dm-output],[timeline]'
 
 $(TARGET): $(OBJECTS)
 	$(CXX) $(LDFLAGS) -o $@ $(OBJECTS) $(LDLIBS)

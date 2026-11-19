@@ -100,12 +100,14 @@ struct dmOutputApp : MagAOX::app::accelSim
 {
     using accelSim::config;
     using accelSim::dmThreadExec;
+    using accelSim::m_acquiredSample;
     using accelSim::m_dmActive;
     using accelSim::m_dmChannel;
+    using accelSim::m_dmCommandValid;
     using accelSim::m_dmEnabled;
     using accelSim::m_dmInjection;
-    using accelSim::m_dmPixels;
     using accelSim::m_dmReady;
+    using accelSim::m_dmScale;
     using accelSim::m_dmTransportFault;
     using accelSim::m_dmZeroAcknowledged;
     using accelSim::m_dmZeroPending;
@@ -115,6 +117,8 @@ struct dmOutputApp : MagAOX::app::accelSim
     using accelSim::m_model;
     using accelSim::m_shutdown;
     using accelSim::m_syncopationTiming;
+    using accelSim::m_timeline;
+    using accelSim::measure;
     using accelSim::serviceDM;
     using accelSim::setupProperties;
     using accelSim::updateDMINDI;
@@ -125,18 +129,38 @@ struct dmOutputFixture
 {
     dmOutputApp m_app; ///< Actual implementation, with only framework lifecycle and stream APIs doubled.
 
-    /// Create ordinary files and calibrated ramps, without native streams or hardware.
+    int64_t m_epoch{ 0 }; ///< Virtual monotonic time of timeline node zero and accelerometer tick zero.
+
+    uint64_t m_acquisitions{ 0 }; ///< Accelerometer measurements taken through the app's acquisition seam.
+
+    /// Create ordinary files, calibrated ramps and an 8-kHz timeline, without native streams or hardware.
     explicit dmOutputFixture( int writeLeadUs = 50 /**< [in] Configured producer lead before cutoff in us. */ );
 
     /// Release producer ownership before deleting this test's private files.
     ~dmOutputFixture();
 
-    /// Move to another scheduler slot, independently of ADC sample staging.
+    /// Move to the next 125-us boundary, refresh the 2-kHz schedule there, and acquire that tick.
     void advance();
+
+    /// Measure acc000 at the current virtual monotonic time, as the acquisition thread does.
+    void acquire();
 
     /// Set scale and toggle using the real INDI callbacks.
     void enable( double scale /**< [in] requested scale */ );
 };
+
+/// Return the scaled calibrated surface of the shared realization at one monotonic time and pixel.
+double expected( dmOutputApp &app /**< [in] app owning the timeline */,
+                 int64_t      time /**< [in] same-host monotonic time */,
+                 double       scale /**< [in] DM scale */,
+                 size_t       pixel /**< [in] native pixel index */ )
+{
+    MagAOX::app::accelSimDetail::sample physical;
+    REQUIRE( app.m_timeline.physical( time, physical ) );
+    const MagAOX::app::accelSimDetail::pointingDisturbance pointing( physical );
+    return scale *
+           pointing.surface( ( double( pixel % 50 ) - 24.5 ) * 6.5 / 48, ( double( pixel / 50 ) - 24.5 ) * 6.5 / 48 );
+}
 
 dmOutputFixture::dmOutputFixture( int writeLeadUs )
 {
@@ -167,6 +191,10 @@ dmOutputFixture::dmOutputFixture( int writeLeadUs )
     m_app.m_dmReady           = true;
     m_app.m_dmChannel         = "dm01disp10_aux";
     m_app.m_syncopationTiming = "private_timing";
+    m_app.m_model.setRate( 8000 );
+    m_epoch = g_tick - 125000; // The scheduler and accelerometer share the virtual monotonic clock.
+    m_app.m_timeline.reset( m_epoch, m_app.m_model );
+    acquire();
 }
 
 dmOutputFixture::~dmOutputFixture()
@@ -181,6 +209,13 @@ void dmOutputFixture::advance()
     g_tick += 125000 - g_tick % 125000;
     if( g_tick % 500000 == 0 )
         schedule();
+    acquire();
+}
+
+void dmOutputFixture::acquire()
+{
+    m_app.measure( g_tick, uint64_t( ( g_tick - m_epoch ) / 125000 ) );
+    ++m_acquisitions;
 }
 
 void dmOutputFixture::enable( double scale )
@@ -273,7 +308,7 @@ namespace libXWCTest
 {
 namespace accelSimTest
 {
-/** \brief Scale/on/off uses exact acknowledgements and a tagged zero without rate, lock or age qualification.
+/** \brief Scale/on/off uses target-time surfaces, exact acknowledgements and a tagged zero without output gates.
  * \ingroup accelSim_unit_test
  */
 TEST_CASE( "accelSim direct producer scaled output and acknowledged removal", "[accelSim][dm-output]" )
@@ -284,17 +319,16 @@ TEST_CASE( "accelSim direct producer scaled output and acknowledged removal", "[
     REQUIRE_FALSE( app.serviceDM() );
     REQUIRE_FALSE( g_images.count( "dm01disp10_aux_ready" ) );
     fixture.enable( .25 );
-    app.m_model.step();
+    fixture.advance();
+    fixture.advance();
+    fixture.advance();
     const auto ticks = app.m_model.m_ticks;
-    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
-    fixture.advance(); // The latest physical sample is already older than the deleted 250-us gate.
-    fixture.advance();
-    fixture.advance();
     REQUIRE( app.serviceDM() );
-    REQUIRE( app.m_model.m_ticks == ticks );
-    const MagAOX::app::accelSimDetail::pointingDisturbance pointing( app.m_model.m_sample );
-    REQUIRE( source.m_pixels[0] ==
-             Approx( .25 * pointing.surface( -24.5 * 6.5 / 48, -24.5 * 6.5 / 48 ) ).margin( 1e-8 ) );
+    REQUIRE( app.m_model.m_ticks == ticks ); // DM evaluation reads the realization and draws nothing.
+    const auto &ready = g_images.at( "dm01disp10_aux_ready" ).m_words;
+    REQUIRE( source.m_pixels[0] == Approx( expected( app, ready[synco::cmdTarget], .25, 0 ) ).margin( 1e-8 ) );
+    REQUIRE( std::abs( expected( app, ready[synco::cmdTarget], .25, 0 ) -
+                       expected( app, ready[synco::cmdCutoff], .25, 0 ) ) > 1e-7 ); // Time choice is observable.
     const auto counter = source.m_metadata.cnt0;
     fixture.advance();
     REQUIRE_FALSE( app.serviceDM() ); // The base owns the single buffer until the exact receipt.
@@ -325,14 +359,14 @@ TEST_CASE( "accelSim direct producer scaled output and acknowledged removal", "[
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::serviceDM;
-    MagAOX::app::accelSim::frameGrabberPostPublish;
+    MagAOX::app::accelSim::measure;
     MagAOX::app::accelSim::newCallBack_m_indiP_dmEnable;
     MagAOX::app::accelSim::newCallBack_m_indiP_dmScale;
 #endif
     // clang-format on
 }
 
-/** \brief Eight thousand virtual slots preserve physical scaling and finite checks without advancing the model twice.
+/** \brief Eight thousand slots carry the target-time surface; rejection and numerical faults recover without latches.
  * \ingroup accelSim_unit_test
  */
 TEST_CASE( "accelSim 8000 scaled producer samples and numerical recovery", "[accelSim][dm-output]" )
@@ -341,45 +375,49 @@ TEST_CASE( "accelSim 8000 scaled producer samples and numerical recovery", "[acc
     auto           &app    = fixture.m_app;
     auto           &source = g_images.at( "dm01disp10_aux" );
     fixture.enable( .25 );
-    app.m_model.setRate( 8000 );
+    REQUIRE( app.serviceDM() ); // Attachment creates the ready sidecar.
+    const auto &ready = g_images.at( "dm01disp10_aux_ready" ).m_words;
+    acknowledge();
     for( size_t n = 0; n < 8000; ++n )
     {
-        app.m_model.step();
-        const auto ticks = app.m_model.m_ticks;
-        REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
         fixture.advance();
+        const auto ticks = app.m_model.m_ticks;
         REQUIRE( app.serviceDM() );
-        const MagAOX::app::accelSimDetail::pointingDisturbance pointing( app.m_model.m_sample );
         for( size_t p : { size_t( 0 ), size_t( 1249 ), size_t( 2499 ) } )
-            REQUIRE( source.m_pixels[p] == Approx( .25 * pointing.surface( ( double( p % 50 ) - 24.5 ) * 6.5 / 48,
-                                                                           ( double( p / 50 ) - 24.5 ) * 6.5 / 48 ) )
-                                               .margin( 1e-8 ) );
+            REQUIRE( source.m_pixels[p] == Approx( expected( app, ready[synco::cmdTarget], .25, p ) ).margin( 1e-8 ) );
         REQUIRE( app.m_model.m_ticks == ticks );
         acknowledge();
     }
     fixture.advance();
-    app.m_dmPixels[0]  = NAN; // Verify the unchanged producer's last finite-command check.
-    const auto counter = source.m_metadata.cnt0;
+    source.m_metadata.write = 1; // A busy source fails the unchanged producer's final check before cutoff.
+    auto counter            = source.m_metadata.cnt0;
     REQUIRE_FALSE( app.serviceDM() );
     REQUIRE( source.m_metadata.cnt0 == counter );
+    source.m_metadata.write = 0;
     app.updateDMINDI();
     REQUIRE( app.m_indiP_dmStatus["rejected"].get<int>() == 1 );
     REQUIRE( app.m_indiP_dmStatus["late_returns"].get<int>() == 0 );
-    app.m_model.m_sample.m_pointing[0] = NAN;
-    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
     fixture.advance();
+    app.m_dmScale = NAN; // Bypass the INDI range check to exercise synthesis rejection.
     REQUIRE( app.serviceDM() );
     REQUIRE( std::all_of( source.m_pixels.begin(), source.m_pixels.end(), []( float v ) { return v == 0; } ) );
+    app.updateDMINDI();
+    REQUIRE( app.m_indiP_dmStatus["fault"].get<int>() == 1 );
     acknowledge();
-    app.m_model.step();
-    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
     fixture.advance();
-    REQUIRE( app.serviceDM() ); // The next finite sample resumes; no off/on or fault reset is required.
-    REQUIRE( source.m_pixels[0] != 0 );
+    app.m_dmScale = .25;
+    REQUIRE( app.serviceDM() );      // The next valid synthesis resumes; no off/on or fault reset is required.
+    REQUIRE_FALSE( app.m_dmActive ); // The copied fault command was a removal, not an active contribution.
+    REQUIRE( app.m_dmCommandValid );
+    REQUIRE( source.m_pixels[0] == Approx( expected( app, ready[synco::cmdTarget], .25, 0 ) ).margin( 1e-8 ) );
+    acknowledge();
+    fixture.advance();
+    REQUIRE( app.serviceDM() );
+    REQUIRE( app.m_dmActive );
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::serviceDM;
-    MagAOX::app::accelSim::frameGrabberPostPublish;
+    MagAOX::app::accelSim::updateDMINDI;
 #endif
     // clang-format on
 }
@@ -391,8 +429,6 @@ TEST_CASE( "accelSim removal after scheduler reset", "[accelSim][dm-output]" )
 {
     dmOutputFixture fixture;
     fixture.enable( 1 );
-    fixture.m_app.m_model.step();
-    REQUIRE( fixture.m_app.frameGrabberPostPublish( nullptr ) == 0 );
     REQUIRE( fixture.m_app.serviceDM() );
     auto enable      = fixture.m_app.m_indiP_dmEnable;
     enable["toggle"] = pcf::IndiElement::Off;
@@ -424,19 +460,24 @@ TEST_CASE( "accelSim producer ownership and automatic transport retry", "[accelS
     fixture.enable( 1 );
     REQUIRE_FALSE( fixture.m_app.serviceDM() );
     REQUIRE( fixture.m_app.m_dmTransportFault );
+    fixture.m_app.updateDMINDI();
+    REQUIRE( fixture.m_app.m_indiP_dmStatus["attached"].get<int>() == 0 );
     REQUIRE( g_images.at( "dm01disp10_aux" ).m_metadata.cnt0 == 0 );
     REQUIRE_FALSE( g_images.count( "dm01disp10_aux_ready" ) );
     close( owner );
     REQUIRE( fixture.m_app.serviceDM() );
     REQUIRE_FALSE( fixture.m_app.m_dmTransportFault );
+    fixture.m_app.updateDMINDI();
+    REQUIRE( fixture.m_app.m_indiP_dmStatus["attached"].get<int>() == 1 );
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::serviceDM;
+    MagAOX::app::accelSim::updateDMINDI;
 #endif
     // clang-format on
 }
 
-/** \brief Repeated disabled records and late absolute wakes both reproduce silent output with a held producer lock.
+/** \brief Invalid records leave an attached producer waiting; late wakes and timely slots are counted separately.
  * \ingroup accelSim_unit_test
  */
 TEST_CASE( "accelSim distinguishes timing activity from publishable slots", "[accelSim][dm-output]" )
@@ -446,18 +487,18 @@ TEST_CASE( "accelSim distinguishes timing activity from publishable slots", "[ac
     auto           &timing = g_images.at( "private_timing" );
     auto           &source = g_images.at( "dm01disp10_aux" );
     fixture.enable( .1 );
-    app.m_model.step();
-    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
 
     for( int frame = 0; frame < 2; ++frame )
     {
         g_tick += 500000;
+        fixture.acquire();
         schedule();
         timing.m_words[synco::state] = synco::invalid;
         std::fill( timing.m_words.begin() + synco::reference, timing.m_words.end(), 0 );
         REQUIRE_FALSE( app.serviceDM() );
     }
     app.updateDMINDI();
+    REQUIRE( app.m_indiP_dmStatus["attached"].get<int>() == 1 );
     REQUIRE( app.m_indiP_dmStatus["poll_waits"].get<int>() == 2 );
     REQUIRE( app.m_indiP_dmStatus["requests"].get<int>() == 0 );
     REQUIRE( timing.m_metadata.cnt0 == 3 );
@@ -466,6 +507,7 @@ TEST_CASE( "accelSim distinguishes timing activity from publishable slots", "[ac
     REQUIRE( ready.m_metadata.cnt0 == 0 );
 
     g_tick += 500000;
+    fixture.acquire();
     schedule();
     g_wakeDelayNs = 51000; // A wake 51 us late exhausts writeLeadUs=50, even for a valid request.
     for( int slot = 0; slot < 4; ++slot )
@@ -480,12 +522,14 @@ TEST_CASE( "accelSim distinguishes timing activity from publishable slots", "[ac
     REQUIRE( app.m_indiP_dmStatus["requests"].get<int>() == 4 );
     REQUIRE( app.m_indiP_dmStatus["late_returns"].get<int>() == 4 );
     REQUIRE( app.m_indiP_dmStatus["rejected"].get<int>() == 0 );
+    REQUIRE( app.m_indiP_dmStatus["timeline_misses"].get<int>() == 0 );
     REQUIRE( app.m_indiP_dmStatus["published"].get<int>() == 0 );
 
     g_wakeDelayNs    = 3000;
     const auto cycle = timing.m_words[synco::cycle];
     for( const int step : { 1, 2, 3, 0 } )
     {
+        fixture.acquire();
         REQUIRE( app.serviceDM() );
         REQUIRE( ready.m_words[synco::cmdStep] == step );
         REQUIRE( ready.m_words[synco::cmdCycle] == cycle + ( step == 0 ) );
@@ -503,48 +547,192 @@ TEST_CASE( "accelSim distinguishes timing activity from publishable slots", "[ac
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::serviceDM;
+    MagAOX::app::accelSim::updateDMINDI;
 #endif
     // clang-format on
 }
 
-/** \brief The 8 kHz preset can submit on discovery despite late timer wakes, including first and next-frame slots.
+/** \brief The deployed 50-us write lead commits all four 8-kHz slots of a 2-kHz grid, each at its own target time.
  * \ingroup accelSim_unit_test
  */
-TEST_CASE( "accelSim commits all four scheduler steps with one subframe of write lead", "[accelSim][dm-output]" )
+TEST_CASE( "accelSim commits all four scheduler steps with the deployed write lead", "[accelSim][dm-output]" )
 {
-    dmOutputFixture fixture( 125 );
+    dmOutputFixture fixture( 50 );
     fixture.enable( .1 );
     auto &app     = fixture.m_app;
     auto &source  = g_images.at( "dm01disp10_aux" );
-    g_wakeDelayNs = 51000;
+    g_wakeDelayNs = 3000;
     for( int frame = 0; frame < 2; ++frame )
     {
         schedule();
         const auto origin = g_tick;
         for( int slot = 1; slot <= 4; ++slot )
         {
-            app.m_model.step();
-            REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+            fixture.acquire();
             REQUIRE( app.serviceDM() );
-            const auto &ready = g_images.at( "dm01disp10_aux_ready" ).m_words;
+            const auto &ready  = g_images.at( "dm01disp10_aux_ready" ).m_words;
+            const auto  target = ready[synco::cmdTarget];
             REQUIRE( ready[synco::cmdStep] == slot % 4 );
-            REQUIRE( ready[synco::cmdTarget] == origin + slot * 125000 );
+            REQUIRE( target == origin + slot * 125000 );
             REQUIRE( ready[synco::cmdReadyNs] < ready[synco::cmdCutoff] );
-            const MagAOX::app::accelSimDetail::pointingDisturbance pointing( app.m_model.m_sample );
-            REQUIRE( source.m_pixels[0] ==
-                     Approx( .1 * pointing.surface( -24.5 * 6.5 / 48, -24.5 * 6.5 / 48 ) ).margin( 1e-8 ) );
+            REQUIRE( source.m_pixels[0] == Approx( expected( app, target, .1, 0 ) ).margin( 1e-8 ) );
+            // One subframe of timing error would be detected at this tolerance.
+            REQUIRE( std::abs( expected( app, target, .1, 0 ) - expected( app, target - 125000, .1, 0 ) ) > 1e-7 );
             // The actual scheduler snapshots at the cutoff; its exact receipt is visible on the next poll.
             g_tick = ready[synco::cmdCutoff] + 3000;
             acknowledge();
         }
         g_tick = origin + 500000;
+        fixture.acquire();
     }
     REQUIRE( source.m_metadata.cnt0 == 8 );
     REQUIRE( app.m_dmActive );
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::serviceDM;
-    MagAOX::app::accelSim::frameGrabberPostPublish;
+#endif
+    // clang-format on
+}
+
+/** \brief Acquisition continues through disabled output and a scheduler outage; output and removal then recover.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim resumes after a primary timeout", "[accelSim][dm-output]" )
+{
+    dmOutputFixture fixture;
+    auto           &app    = fixture.m_app;
+    auto           &words  = g_images.at( "private_timing" ).m_words;
+    auto           &source = g_images.at( "dm01disp10_aux" );
+    for( int tick = 0; tick < 8000; ++tick )
+    {
+        fixture.advance();
+        REQUIRE_FALSE( app.serviceDM() );
+    }
+    fixture.enable( .1 );
+    fixture.advance();
+    REQUIRE( app.serviceDM() );
+    acknowledge();
+    words[synco::state] = synco::invalid; // Production main timeout invalidates the record.
+    const auto counter  = source.m_metadata.cnt0;
+    for( int tick = 0; tick < 80; ++tick )
+    {
+        g_tick += 125000;
+        fixture.acquire();
+        REQUIRE_FALSE( app.serviceDM() );
+    }
+    REQUIRE( source.m_metadata.cnt0 == counter );
+    REQUIRE( fixture.m_acquisitions == 1 + 8000 + 1 + 80 );
+    schedule();
+    ++words[synco::generation];
+    REQUIRE( app.serviceDM() );
+    const auto target = g_images.at( "dm01disp10_aux_ready" ).m_words[synco::cmdTarget];
+    REQUIRE( source.m_pixels[0] == Approx( expected( app, target, .1, 0 ) ).margin( 1e-8 ) );
+    acknowledge();
+    auto enable      = app.m_indiP_dmEnable;
+    enable["toggle"] = pcf::IndiElement::Off;
+    REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) == 0 );
+    fixture.advance();
+    REQUIRE( app.serviceDM() );
+    acknowledge();
+    REQUIRE_FALSE( app.serviceDM() );
+    REQUIRE( app.m_dmZeroAcknowledged );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::serviceDM;
+    MagAOX::app::accelSim::measure;
+#endif
+    // clang-format on
+}
+
+/** \brief A request whose target lies beyond the generated horizon is skipped and counted, never approximated.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim skips requests outside the simulation timeline", "[accelSim][dm-output]" )
+{
+    dmOutputFixture fixture;
+    auto           &app    = fixture.m_app;
+    auto           &source = g_images.at( "dm01disp10_aux" );
+    fixture.enable( .1 );
+    g_tick += MagAOX::app::accelSimDetail::timeline::c_lookahead; // Acquisition stalled for the whole horizon.
+    schedule();
+    REQUIRE_FALSE( app.serviceDM() );
+    REQUIRE( source.m_metadata.cnt0 == 0 );
+    app.updateDMINDI();
+    REQUIRE( app.m_indiP_dmStatus["requests"].get<int>() == 1 );
+    REQUIRE( app.m_indiP_dmStatus["timeline_misses"].get<int>() == 1 );
+    REQUIRE( app.m_indiP_dmStatus["published"].get<int>() == 0 );
+    fixture.acquire();
+    fixture.advance();
+    REQUIRE( app.serviceDM() );
+    const auto target = g_images.at( "dm01disp10_aux_ready" ).m_words[synco::cmdTarget];
+    REQUIRE( source.m_pixels[0] == Approx( expected( app, target, .1, 0 ) ).margin( 1e-8 ) );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::serviceDM;
+#endif
+    // clang-format on
+}
+
+/** \brief acc000 values are bitwise identical with DM output disabled, active through outage/removal, or polled faster.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim accelerometer realization is independent of DM output", "[accelSim][dm-output]" )
+{
+    using MagAOX::app::accelSimDetail::sample;
+    const auto run = []( int mode ) // 0 disabled, 1 enabled, 2 enabled with extra polls and reads.
+    {
+        std::vector<sample> measured;
+        dmOutputFixture     fixture;
+        auto               &app   = fixture.m_app;
+        auto               &words = g_images.at( "private_timing" ).m_words;
+        if( mode > 0 )
+            fixture.enable( 1 );
+        for( int n = 0; n < 4000; ++n )
+        {
+            fixture.advance();
+            measured.push_back( app.m_acquiredSample );
+            if( mode == 0 )
+                continue;
+            if( n >= 1000 && n < 1200 )
+                words[synco::state] = synco::invalid; // Primary outage while acquisition continues.
+            if( n == 1200 )
+                ++words[synco::generation];
+            if( n == 3000 )
+            {
+                auto enable      = app.m_indiP_dmEnable;
+                enable["toggle"] = pcf::IndiElement::Off;
+                REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) == 0 );
+            }
+            for( int poll = 0; poll < ( mode == 2 ? 3 : 1 ); ++poll )
+                if( app.serviceDM() )
+                    acknowledge();
+            sample probe;
+            for( int read = 0; mode == 2 && read < 10; ++read )
+                app.m_timeline.physical( g_tick + read * 37000, probe );
+        }
+        app.updateDMINDI();
+        if( mode > 0 )
+        {
+            REQUIRE( app.m_indiP_dmStatus["published"].get<int>() > 2000 );
+            REQUIRE( app.m_dmZeroAcknowledged );
+        }
+        return measured;
+    };
+    const auto disabled = run( 0 ), enabled = run( 1 ), polled = run( 2 );
+    REQUIRE( enabled.size() == disabled.size() );
+    REQUIRE( polled.size() == disabled.size() );
+    for( size_t n = 0; n < disabled.size(); ++n )
+    {
+        REQUIRE( enabled[n].m_adc == disabled[n].m_adc );
+        REQUIRE( enabled[n].m_acceleration == disabled[n].m_acceleration );
+        REQUIRE( enabled[n].m_pointing == disabled[n].m_pointing );
+        REQUIRE( polled[n].m_adc == disabled[n].m_adc );
+        REQUIRE( polled[n].m_acceleration == disabled[n].m_acceleration );
+    }
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::measure;
+    MagAOX::app::accelSim::serviceDM;
 #endif
     // clang-format on
 }
@@ -557,8 +745,6 @@ TEST_CASE( "accelSim recognizes a receipt arriving inside syncopationPoll", "[ac
     dmOutputFixture fixture;
     fixture.enable( .1 );
     auto &app = fixture.m_app;
-    app.m_model.step();
-    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
     REQUIRE( app.serviceDM() );
     REQUIRE_FALSE( app.m_dmActive );
     fixture.advance();
@@ -579,8 +765,6 @@ TEST_CASE( "accelSim shutdown preserves tagged zero removal", "[accelSim][dm-out
 {
     dmOutputFixture fixture;
     fixture.enable( 1 );
-    fixture.m_app.m_model.step();
-    REQUIRE( fixture.m_app.frameGrabberPostPublish( nullptr ) == 0 );
     REQUIRE( fixture.m_app.serviceDM() );
     acknowledge();
     fixture.advance();

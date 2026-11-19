@@ -1,5 +1,5 @@
 /** \file accelSimDM_test.cpp
- * \brief Same-sample calibrated DM synthesis and simple operator-control regressions.
+ * \brief Calibrated physical DM synthesis and simple operator-control regressions.
  * \ingroup accelSim_unit_test
  */
 #include "../../../tests/testXWC.hpp"
@@ -130,22 +130,19 @@ TEST_CASE( "accelSim DM same sample and timing budget", "[accelSim][dm-runtime]"
 
 #ifndef ACCELSIM_MODEL_ONLY
 /// \cond ACCELSIM_DM_APP_FIXTURE
-/// Expose actual app callbacks and sample staging without starting framework threads.
+/// Expose actual app callbacks without starting framework threads.
 struct dmAppTest : MagAOX::app::accelSim
 {
     using accelSim::config;
     using accelSim::m_configName;
-    using accelSim::m_dmCommandValid;
     using accelSim::m_dmEnabled;
     using accelSim::m_dmInjection;
-    using accelSim::m_dmPixels;
     using accelSim::m_dmReady;
     using accelSim::m_dmScale;
     using accelSim::m_dmZeroPending;
     using accelSim::m_indiP_dmEnable;
     using accelSim::m_indiP_dmScale;
     using accelSim::m_indiP_dmStatus;
-    using accelSim::m_model;
     using accelSim::setupProperties;
     using accelSim::updateDMINDI;
 };
@@ -172,27 +169,17 @@ TEST_CASE( "accelSim DM simple operator controls", "[accelSim][dm-controls]" )
     REQUIRE( app.newCallBack_m_indiP_dmScale( scale ) == 0 );
     REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) == 0 );
     REQUIRE( app.m_dmEnabled );
-    app.m_model.step();
-    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
-    const pointingDisturbance pointing( app.m_model.m_sample );
-    REQUIRE( app.m_dmPixels[0] ==
-             Approx( .25 * pointing.surface( -24.5 * 6.5 / 48, -24.5 * 6.5 / 48 ) ).margin( 1e-8 ) );
     app.updateDMINDI();
     REQUIRE( app.m_indiP_dmStatus["ready"].get<int>() == 1 );
     REQUIRE( app.m_indiP_dmStatus["ready"].getValue() == "1" );
     REQUIRE( app.m_indiP_dmStatus["fault"].get<int>() == 0 );
+    REQUIRE( app.m_indiP_dmStatus["attached"].get<int>() == 0 ); // Controls alone open no shared memory.
     for( double bad : { -1., 1.1, double( NAN ), double( INFINITY ) } )
     {
         scale["target"] = bad;
         REQUIRE( app.newCallBack_m_indiP_dmScale( scale ) < 0 );
         REQUIRE( app.m_dmScale == .25 );
     }
-    app.m_model.m_sample.m_pointing[0] = NAN;
-    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
-    REQUIRE_FALSE( app.m_dmCommandValid );
-    app.m_model.step();
-    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
-    REQUIRE( app.m_dmCommandValid );
     REQUIRE( app.m_dmEnabled );
     enable["toggle"] = pcf::IndiElement::Off;
     REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) == 0 );
@@ -201,7 +188,6 @@ TEST_CASE( "accelSim DM simple operator controls", "[accelSim][dm-controls]" )
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::setupProperties;
-    MagAOX::app::accelSim::frameGrabberPostPublish;
     MagAOX::app::accelSim::updateDMINDI;
     MagAOX::app::accelSim::newCallBack_m_indiP_dmEnable;
     MagAOX::app::accelSim::newCallBack_m_indiP_dmScale;

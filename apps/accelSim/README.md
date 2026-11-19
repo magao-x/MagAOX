@@ -8,8 +8,9 @@ identity: supply the real instance with `-n` when its configuration is available
 
 The approved specification and engineering record are in
 [`acc-sim-app-creation.md`](../../agents/plans/2026-10/acc-sim-app-creation.md).
-Optional same-sample tweeter disturbance injection is implemented separately from
-the model and remains disabled by default. The default configuration has no DM
+Optional tweeter disturbance injection of the same simulated realization, evaluated at
+the scheduler's target times, is implemented separately from the model and remains
+disabled by default. The default configuration has no DM
 channel and performs no DM access. No instrument startup configuration is supplied.
 
 ## Zero-acceleration ADC test output
@@ -46,8 +47,8 @@ are not run by the portable model-only build; they remain unverified on this Mac
 
 ## Optional runtime DM injection through syncopation
 
-The source is **`dm01disp10_aux`**, independently owned from DDSPC's
-**`dm10disp10_aux`**. The existing `dmSyncopationProducer` base owns scheduling,
+The source is **`dm01disp10_aux`**. This workflow assumes accelSim is its sole producer.
+The existing `dmSyncopationProducer` base owns scheduling,
 exclusive cooperative producer ownership, finite-payload validation, tagged
 `_ready` commits and exact copy/discard `_ack` handling. The implementation follows
 the direct poll/publish pattern in the historical syncopation-enabled `dmSpeckle`
@@ -61,6 +62,13 @@ The operator workflow is:
 3. Toggle `dm_enable.toggle` off to submit a tagged zero. Wait for
    `dm_status.zero_acknowledged=1` and `active=0` before transferring ownership.
 
+Toggling off alone removes the contribution; a following `dm_scale.target=0` only
+sets the scale for the next enable. With the toggle on, `scale=0` publishes zero
+surfaces that are still counted as an active (enabled) contribution. This differs
+from `dmSpeckle`, whose modulation-off retains its last contribution until a separate
+`zero` request: the scheduler retains the last copied contribution of any stopped
+producer, so accelSim queues the zero automatically and retries it until copied.
+
 A normal build supports this workflow. There is no simulator operational/shadow
 build profile, output authorization flag, routing assertion, exact-rate gate,
 WFS-lock gate, 250-us freshness watchdog or fault latch. Remove the obsolete
@@ -68,16 +76,50 @@ WFS-lock gate, 250-us freshness watchdog or fault latch. Remove the obsolete
 and `dm.ack_timeout_us` keys from older simulator configurations. loPredCtrlAcc
 keeps its own existing configuration and output policy unchanged.
 
-`frameGrabberPostPublish` prepares the calibrated surface from the same physical
-pointing sample already published as ADC counts, including the independent DM
-scale. A separate output thread copies this private surface and calls the existing
-producer's poll/publish functions. Producer waits never run on the acquisition
-thread, which skips a contended cache copy without waiting. Both timer and WFS
+### One realization at acquisition and target times
+
+[`accelSimTimeline.hpp`](accelSimTimeline.hpp) holds a single realization of the
+unchanged model on a fixed `CLOCK_MONOTONIC` grid. Node *k* is at `epoch + k/fps`,
+the nominal time of accelerometer tick *k*; the epoch is the acquisition schedule's.
+The acquisition thread alone steps the model (and its RNG). After each acquisition
+it generates nodes 5 ms ahead, normally one `model::step()` per acquisition, as before.
+
+- **acc000** is evaluated at the actual acquisition time (the instant stamped on the
+  frame) plus the sensor-noise draw belonging to the consumed tick, then quantized by
+  the unchanged ADC encoder. A node-aligned acquisition reproduces the legacy sample.
+- **The DM** thread evaluates noise-free physical pointing at each request's
+  `targetNs`, exactly as `dmSpeckle` evaluates its waveform at `targetNs`. The
+  scheduler, producer and accelSim all use the same-host `CLOCK_MONOTONIC`;
+  wall-clock (`CLOCK_REALTIME` frame timestamps) and shared-memory times are not used.
+
+Between nodes, 4-point cubic Lagrange weights are applied identically to pointing,
+WFS pointing and noise-free acceleration. Because the weights are linear, every
+evaluated time keeps each mode's `a = -(2*pi*f)^2 * leverArm * theta_rad` relation
+exactly. At 8 kHz the amplitude error is <1e-4 up to 300 Hz and 0.56% at 900 Hz
+(linear interpolation: 6.2% at 900 Hz, varying with sub-sample position). Over the
+continuous trajectory, the regression of `leverArm * theta''` on `a` is 1.0002 at 28 Hz
+and 0.998 at 120 Hz.
+
+Measurements never leave the acquisition thread before their acquisition time.
+The cubic evaluation of a measurement uses nodes up to two grid intervals after it
+(weight at most 0.064). Summed over all 214 modes, the worst-case later innovation
+reaching it that way is 9.5e-5 m/s^2 rms. That is 1/86 of one ADC count, 1/67 of the
+sensor-noise rms and 0.24% of the physical acceleration rms; no node is ever published.
+The DM does see the future relative to acc000: it is the disturbance itself.
+Controllers must therefore not read `dm01disp10_aux` or `dm01disp10` as inputs.
+
+DM enable state and DM polling only read the timeline, so they cannot change the
+realization. The ring holds 128 nodes (about 9 KB). Its mutex covers only short
+copies; DM reads take about 16 ns. If a target lies outside the generated horizon,
+the slot is skipped and counted (`timeline_misses`); the scheduler keeps the last
+copied contribution. The production scheduler publishes targets at most two primary
+periods ahead (<= 4 ms at its default 500-Hz minimum main rate), within the horizon.
+
+Producer waits never run on the acquisition thread. Both timer and WFS
 phase-reference acquisition work with DM output; neither sample age nor phase
-lock qualifies it. No model prediction, RNG draw or new sample is introduced by
-output publication. A numerically invalid command requests a zero surface until
-the next valid sample; ordinary missed slots, unavailable transport and discarded
-receipts are retried without requiring a fault reset.
+lock qualifies it. A numerically invalid command publishes a zero, counted as a
+removal (not active), until the next valid synthesis. Ordinary missed slots,
+unavailable transport and discarded receipts are retried without a fault reset.
 
 Calibration still requires a finite 50-by-50 TT pair, matching fitting mask,
 full-rank physical projection and the configured residual tolerance. File identity
@@ -94,13 +136,15 @@ The read-only `dm_status` elements describe the producer handshake. Counters acc
 | Element | Meaning |
 | --- | --- |
 | `ready` | Calibration was prepared; this is informational and does not depend on acquisition timing. |
+| `attached` | The producer currently holds the source lock and scheduler/receipt sidecars. |
 | `requested` | Current `dm_enable` operator request. |
-| `active` | Last acknowledged payload was an enabled command. |
+| `active` | Last copied payload was an enabled command. This is the scheduler's copy receipt, not confirmation that the DM applied it. |
 | `zero_acknowledged` | An exact copied-zero receipt was observed, with no later payload submitted. |
 | `fault` | Calibration unavailable or the current sample cannot produce a finite command; no latched code 5. |
 | `transport_fault` | Current attachment/transport error; clears on recovery. |
 | `poll_waits` | Attached polls returning zero. These include ineligible schedules, repeated slots and waits for a receipt. |
 | `requests` | New eligible slots returned by the base. |
+| `timeline_misses` | Eligible slots skipped because their target was outside the generated timeline. |
 | `published` | Successful payload and ready-record commits by this instance. |
 | `late_returns` / `rejected` | Failed publish calls observed at or after the cutoff / before the cutoff. The base returns a boolean. A late return alone cannot identify the internal check that failed. |
 | `outstanding` | The base is holding the payload for the scheduler, including a pending commit adopted on startup. |
@@ -110,11 +154,7 @@ The scheduler sets the step count for all mapped destinations. On the 2 kHz
 production grid, steps 1, 2, 3 and 0 target 125, 250, 375 and 500 µs. Step 0
 belongs to the next primary cycle. With `readyLeadUs=70`, the input cutoffs
 are 55, 180, 305 and 430 µs. `step0LeadUs` and `copyBudgetUs` govern later
-scheduler work. A candidate for measured wake lateness is `syncopation.writeLeadUs=125`, so a
-producer that discovers a slot within one subframe of cutoff can submit the
-cached surface immediately. The base still checks the exact slot and cutoff.
-This setting passed a virtual-time regression. Its effect on exao2 requires
-live request and deadline counters before choosing a deployment change.
+scheduler work. Retain `syncopation.writeLeadUs=50` for the supplied configuration.
 
 For quiet auxiliary streams, compare counter deltas over the same interval.
 If `poll_waits` rises with `requests=0`, check `outstanding` and the current
@@ -126,6 +166,24 @@ selection. Once `published` rises, compare `copied` and `discarded` with
 scheduler `production.accepted3`, `missing3` and `rejected3` for the supplied
 destination ordering.
 
+The states are distinguished as follows. `attached=1` with rising `poll_waits` and
+constant `requests` means the producer is waiting for eligible scheduler requests.
+Rising `published` means payloads were committed. Rising `copied` means the scheduler
+copied them, while `active=1` shows the last copy was an enabled command.
+`zero_acknowledged=1` with `active=0` means removal was copied. Only
+`transport_fault=1` (or `attached=0` while enabled) indicates a transport failure.
+
+**Primary cadence requirement.** Production syncopation needs the main publisher
+(`dm01disp03`) to update at or above the scheduler's `tracking.minMainRateHz`
+(default 500 Hz). The main publisher controls step 0. Without updates, the scheduler
+reports `production main timeout; reacquiring` and publishes invalid records.
+The producer then attaches and waits, with `requests=0` and rising `poll_waits`;
+`dmSpeckle` would do the same. Output resumes automatically when valid records
+return. A running WFS camera alone does not update the primary. The scheduler
+checks primary publications, not optical loop closure or gain. The repository
+documents no supported open-loop primary writer, so how to keep `dm01disp03`
+publishing without closing the loop remains an operational question.
+
 An acknowledgement records the scheduler's private snapshot or discard. Disable
 removal does not require another accelerometer sample. Normal shutdown retains
 the existing bounded 100-ms tagged-zero attempt and reports an unacknowledged
@@ -134,8 +192,9 @@ its shutdown flag; it adds no scheduling, ownership or qualification policy.
 
 The current implementation decisions and test limits are recorded in
 [accelSim-simple-dm-output.md](../../agents/plans/2026-11/accelSim-simple-dm-output.md).
-The complete configuration template is [acc000.conf](acc000.conf). Fill in the
-matching absolute `dm.mask` path and existing `syncopation.timingStream` name.
+The complete configuration template is [acc000.conf](acc000.conf). It names the
+deployed scheduler stream `dmtweeter_synco_timing`; fill in the matching absolute
+`dm.modeCube`/`dm.mask` paths. The timeline adds no configuration keys.
 Retain the deployed `synchro.shmimName` if WFS phase-reference acquisition is
 wanted; leaving it empty selects timer acquisition. The template preserves the
 8-kHz rate, seeds, ADC calibration, two-channel format and source depth 128.
@@ -360,11 +419,13 @@ and redraws stationary histories without reseeding. This introduces an explicit
 counted discontinuity. The high-frequency parameter list is retained.
 
 Timer acquisition uses an absolute monotonic schedule with fractional-period
-accumulation and interruptible sleeps. Up to **eight skipped ticks** are advanced
-before generating the current pair; only the newest pair is published. A larger
-gap redraws stationary histories instead of performing unbounded catch-up.
-Eight ticks represent 1.333 ms at 6 kHz. OS wake-up lateness is counted separately
-from skipped publication opportunities. There is no catch-up publication burst.
+accumulation and interruptible sleeps. The realization advances on its fixed time
+grid, so skipped ticks need no separate catch-up while the gap stays within the
+5-ms generated horizon. Only the newest pair is published. If a stall leaves more
+than **eight** ungenerated nodes before the current time, the model redraws
+stationary histories once (a counted discontinuity) instead of performing
+unbounded catch-up. OS wake-up lateness is counted separately from skipped
+publication opportunities. There is no catch-up publication burst.
 
 Setting `synchro.shmimName` enables a **WFS phase reference for a continuous
 accelerometer clock**. The worker waits for either the next accelerometer deadline
@@ -410,8 +471,8 @@ Three synchronization options control this behavior:
   needs fresh timing before relocking.
 
 Source-counter gaps count missed **WFS references** only. Actual missed
-accelerometer deadlines count `skipped_publications` and advance numerical ticks
-using the existing eight-skipped-tick bound; larger gaps restart stationarity once.
+accelerometer deadlines count `skipped_publications`; the realization continues on
+its time grid, with the bounded-catch-up restart described above.
 Counter receipt is accounted immediately, even if a subsequent wait is canceled.
 Duplicates cannot create extra samples. The code never retunes AR coefficients
 from WFS jitter. Keep `fps.device` empty unless that subscription supplies the
@@ -422,8 +483,8 @@ For the 8-kHz / 2-kHz example, set `sim.fps=8000`,
 `synchro.shmimName=camwfs_sync`, `synchro.referenceFps=2000`, and leave
 `fps.device` empty. The free-running 6000-Hz defaults and timer path are unchanged.
 
-Acquisition timestamps use `CLOCK_REALTIME` immediately before sample generation,
-including recovery computation. They represent the current acquisition event,
+Acquisition timestamps use `CLOCK_REALTIME` immediately after the monotonic
+acquisition time at which the sample is evaluated. They represent the current acquisition event,
 not reconstructed timestamps for missed frames. `frameGrabber` owns write time,
 `cnt0`, `cnt1`, per-plane metadata, circular buffering, and all output semaphore
 posts. The image has three axes `[2,1,depth]` even at depth one. Wall-clock
@@ -476,7 +537,7 @@ reflect a phase-referenced sampling clock rather than one ADC read per semaphore
 The additional read-only `sim_diag` contains `skipped_publications`,
 `discontinuities`, `late_samples`, `max_lateness_us`, `source_period_ratio`, and
 `clip_x_low`, `clip_x_high`, `clip_y_low`, `clip_y_high`. Clipping counts actual
-clamps after rounding, including numerical samples advanced during catch-up;
+clamps after rounding in published measurements, not nodes generated ahead;
 values rounding naturally onto a rail are not clamp events. Counters are retained
 over FPS changes. A shutdown log summarizes timing and clipping totals. A
 nonblocking snapshot transfers normal acquisition diagnostics to the ordinary app
@@ -532,10 +593,16 @@ make -f apps/accelSim/tests/Makefile.offline -j4 check
 
 This executable includes the real accelSim header, real INDI properties and the
 unchanged producer base. Its source/sidecar registry uses ordinary private files
-under a fresh temporary directory, with a virtual producer clock. It checks
-8000 scaled samples, finite-command rejection/recovery, exact and mismatched
-receipts, discarded-zero retry, source ownership, scheduler reset and removal
-after the app shutdown flag is set. It never connects to a native INDI service or
+under a fresh temporary directory, with a virtual monotonic clock shared by the
+producer and the app's acquisition seam. It checks 8000 scaled target-time slots,
+four-slot 2-kHz publication with `writeLeadUs=50`, finite-command rejection and
+recovery, and exact, mismatched and discarded receipts with zero retry. It also
+checks source ownership and attachment status, scheduler outage and reset, targets
+outside the timeline, and removal after the app shutdown flag is set. acc000 values
+are shown bitwise identical with DM output disabled, active or polled faster.
+The `[timeline]` cases check legacy equivalence, reproducibility under acquisition
+jitter, noise separation, the pointing/acceleration relation, spectral accuracy,
+buffer edges, bounded catch-up and concurrent reads. It never connects to a native INDI service or
 ImageStreamIO runtime. It requires Eigen, mxlib and CFITSIO development libraries;
 unchanged INDI implementation files are built as C++14 for their legacy standard
 library calls. This is protocol coverage, not a native Linux throughput test.
@@ -557,6 +624,14 @@ c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DACCELSIM_MODEL_ONLY \
   -DCATCH_CONFIG_MAIN $(pkg-config --cflags eigen3) \
   apps/accelSim/tests/accelSimDM_test.cpp -o /tmp/accelSim_dm_test
 /tmp/accelSim_dm_test '[dm-runtime]'
+```
+
+The shared-timeline tests need only the standard library:
+
+```sh
+c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DCATCH_CONFIG_MAIN \
+  apps/accelSim/tests/accelSimTimeline_test.cpp -o /tmp/accelSim_timeline_test
+/tmp/accelSim_timeline_test '[timeline]'
 ```
 
 The standalone tests include the production synchronization accounting and
@@ -731,10 +806,11 @@ Optional offline checks:
 ## Current verification limits
 
 The macOS numerical tests (also with address/undefined-behavior sanitizers) and
-offline export/PSD comparison have passed. The
-normal app and full test builds are blocked before app compilation by existing
-mxlib/platform dependencies (`mx/math/floatUtils.hpp` missing and `timegm`
-undeclared). No Linux stream, INDI runtime, or ten-minute performance result is
+offline export/PSD comparison have passed. The offline app/producer/timeline suite
+also passes under address/undefined-behavior and thread sanitizers. The normal app
+build on macOS stops before app compilation in the framework precompiled header
+(`generated/logTypes.hpp` missing). Native 8-kHz DM publication has not yet been
+observed on the RTC, whose scheduler had no primary cadence at last report. No Linux stream, INDI runtime, or ten-minute performance result is
 claimed. The real deployment configuration and raw-ADC DDSPC consumer are absent
 from this checkout, so final downstream substitution still requires those inputs.
 See the planning document for exact results and remaining coverage.

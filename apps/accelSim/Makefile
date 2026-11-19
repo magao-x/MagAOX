@@ -4,7 +4,7 @@ CXXSTD ?= -std=c++20
 export CXXSTD
 NEED_CUDA=no
 TARGET=accelSim
-OTHER_HEADERS=../../libMagAOX/app/dev/dmSyncopationProducer.hpp accelSimModel.hpp accelSimOutput.hpp accelSimDisturbance.hpp accelSimDM.hpp
+OTHER_HEADERS=../../libMagAOX/app/dev/dmSyncopationProducer.hpp accelSimModel.hpp accelSimTimeline.hpp accelSimOutput.hpp accelSimDisturbance.hpp accelSimDM.hpp
 override OPTIMIZE = -O3 -fno-fast-math
 export OPTIMIZE
 include ../../Make/magAOXApp.mk

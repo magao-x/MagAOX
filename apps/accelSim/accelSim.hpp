@@ -18,6 +18,7 @@
 #include "../../libMagAOX/libMagAOX.hpp"
 #include "../../magaox_git_version.h"
 #include "accelSimModel.hpp"
+#include "accelSimTimeline.hpp"
 #include "accelSimOutput.hpp"
 #include "accelSimDM.hpp"
 #include "../../libMagAOX/app/dev/dmSyncopationProducer.hpp"
@@ -48,7 +49,10 @@ class dmProducer : public dev::dmSyncopationProducer<dmProducer>
 };
 } // namespace accelSimDetail
 
-/// Simulated accelerometer acquisition with optional same-sample additive DM injection.
+/// Simulated accelerometer acquisition with optional DM injection of the same realization at scheduler targets.
+/** Acquisition generates one timestamped realization ahead of time. acc000 measures it at each acquisition time;
+ * the DM thread evaluates its noise-free pointing at each syncopation request's targetNs.
+ */
 class accelSim : public MagAOXApp<true>,
                  public dev::frameGrabber<accelSim>,
                  public dev::telemeter<accelSim>,
@@ -67,9 +71,11 @@ class accelSim : public MagAOXApp<true>,
 
     bool m_zeroOutput{ false }; ///< Startup-only override of published ADC counts, not physics or DM injection.
 
-    accelSimDetail::parameters m_parameters;                      ///< Startup-only physics/calibration configuration.
-    accelSimDetail::model      m_model;                           ///< Acquisition-thread-owned physical state and RNG.
-    accelSimDetail::schedule   m_schedule;                        ///< Absolute monotonic timer schedule.
+    accelSimDetail::parameters m_parameters;     ///< Startup-only physics/calibration configuration.
+    accelSimDetail::model      m_model;          ///< Acquisition-thread-owned physical state and RNG.
+    accelSimDetail::timeline   m_timeline;       ///< Shared realization: acquisition generates, the DM thread reads.
+    accelSimDetail::sample     m_acquiredSample; ///< Latest measurement, owned by the acquisition thread.
+    accelSimDetail::schedule   m_schedule;       ///< Absolute monotonic timer schedule.
     std::atomic<double>        m_requestedFps{ 6000 };            ///< Validated callback-to-worker rate request.
     std::atomic<double>        m_activeFps{ 6000 };               ///< Rate currently used by the acquisition worker.
     std::atomic<uint64_t> m_rateRequest{ 0 }, m_rateApplied{ 0 }; ///< Requested and worker-acknowledged FPS revisions.
@@ -126,17 +132,15 @@ class accelSim : public MagAOXApp<true>,
                                                                                  "mode_code" };
 
     using diagnostics = accelSimDetail::diagnostics;
-    diagnostics       m_diagnostics, m_snapshot;        ///< Worker state and synchronized app-loop snapshot.
-    std::mutex        m_snapshotMutex;                  ///< Protects only snapshot copies, never acquisition work.
-    std::mutex        m_controlMutex;                   ///< Serializes app-owned INDI properties and their callbacks.
-    std::string       m_dmChannel, m_dmModes, m_dmMask; ///< Explicit owned channel and approved calibration paths.
-    IMAGE             m_dmImage{};        ///< Existing auxiliary source, written only through dmSyncopationProducer.
-    std::thread       m_dmThread;         ///< Sole owner of producer poll/publish and acknowledgement observations.
-    std::atomic<bool> m_dmStop{ false };  ///< Request final tagged removal and join independently of acquisition.
-    std::array<float, 2500> m_dmPixels{}; ///< Latest calibrated same-sample disturbance, private to this app.
-    std::mutex          m_dmPixelsMutex; ///< Protects cache copies; acquisition skips a contended copy without waiting.
-    std::atomic<bool>   m_dmCommandValid{ true };    ///< Current numerical validity; a valid sample clears the error.
-    double              m_dmResidual{ 1e-6 };        ///< Accepted relative physical projection residual.
+    diagnostics         m_diagnostics, m_snapshot;        ///< Worker state and synchronized app-loop snapshot.
+    std::mutex          m_snapshotMutex;                  ///< Protects only snapshot copies, never acquisition work.
+    std::mutex          m_controlMutex;                   ///< Serializes app-owned INDI properties and their callbacks.
+    std::string         m_dmChannel, m_dmModes, m_dmMask; ///< Explicit owned channel and approved calibration paths.
+    IMAGE               m_dmImage{};       ///< Existing auxiliary source, written only through dmSyncopationProducer.
+    std::thread         m_dmThread;        ///< Sole owner of producer poll/publish and acknowledgement observations.
+    std::atomic<bool>   m_dmStop{ false }; ///< Request final tagged removal and join independently of acquisition.
+    std::atomic<bool>   m_dmCommandValid{ true }; ///< Current numerical validity; a valid synthesis clears the error.
+    double              m_dmResidual{ 1e-6 };     ///< Accepted relative physical projection residual.
     bool                m_dmStartupEnabled{ false }; ///< Startup enable remains unsupported; operators use dm_enable.
     bool                m_dmReady{ false }; ///< Immutable calibration preparation result until acquisition has joined.
     std::atomic<double> m_dmScale{ 0 };     ///< DM-only amplitude scale, independent of model amplitudes.
@@ -149,10 +153,11 @@ class accelSim : public MagAOXApp<true>,
     uint64_t m_dmRequests{ 0 };  ///< Eligible requests returned by the producer.
     uint64_t m_dmLateReturns{ 0 };                ///< Failed publish attempts returning at or after their cutoff.
     uint64_t m_dmRejected{ 0 };                   ///< Failed publish attempts returning before their cutoff.
+    uint64_t m_dmTimelineMisses{ 0 };             ///< Requests skipped because the target was outside the timeline.
     uint64_t m_dmPublished{ 0 };                  ///< Successful tagged ready commits by this instance.
     uint64_t m_dmCopied{ 0 }, m_dmDiscarded{ 0 }; ///< Exact transport dispositions for this instance's commits.
     struct stat                 m_dmModesStat{}, m_dmMaskStat{}; ///< Calibration identities checked while loading.
-    accelSimDetail::dmInjection m_dmInjection;                   ///< Acquisition-owned precomputed physical synthesis.
+    accelSimDetail::dmInjection m_dmInjection;                   ///< DM-thread-owned precomputed physical synthesis.
     pcf::IndiProperty m_indiP_dmEnable, m_indiP_dmScale, m_indiP_dmStatus; ///< Minimal low-rate DM controls/status.
     /// Compatible accelerometer controls, serialized by m_controlMutex.
     pcf::IndiProperty m_indiP_fps, m_indiP_numChannels, m_indiP_alpha, m_indiP_synchroDelay;
@@ -184,6 +189,9 @@ class accelSim : public MagAOXApp<true>,
     int waitUntil( int64_t deadline /**< [in] monotonic deadline in ns */ );
     /// Get monotonic nanoseconds without conversion of epoch time to double.
     static int64_t monotonicNow();
+    /// Extend the shared timeline and measure one accelerometer tick at its acquisition time.
+    void measure( int64_t  acquired /**< [in] monotonic acquisition time, the scheduler's clock domain [ns] */,
+                  uint64_t tick /**< [in] consumed accelerometer tick selecting its sensor-noise draw */ );
     /// Send a property state, leaving its last accepted values intact on error.
     int propertyState( pcf::IndiProperty &property /**< [in,out] property to acknowledge */,
                        bool               valid /**< [in] whether the update was accepted */ );
@@ -233,7 +241,7 @@ class accelSim : public MagAOXApp<true>,
     int acquireAndCheckValid();
     /// Copy one X/Y pair, optionally calibrated zero; framework owns metadata and semaphore posts.
     int loadImageIntoStream( void *destination /**< [out] frameGrabber destination plane */ );
-    /// Publish optional DM injection from the acquired physical sample, then transfer diagnostics.
+    /// Transfer diagnostics after publication; DM output is independent of this hook.
     int frameGrabberPostPublish( IMAGE *stream /**< [in] framework-owned output, not modified here */ );
     /// Release synchronization input during an explicit framework reconfiguration.
     int reconfig();
@@ -440,6 +448,7 @@ inline int accelSim::setupProperties()
     m_indiP_dmScale["target"]  = m_dmScale.load();
     CREATE_REG_INDI_RO_NUMBER( m_indiP_dmStatus, "dm_status", "DM readiness", "DM" );
     for( const char *name : { "ready",
+                              "attached",
                               "active",
                               "fault",
                               "requested",
@@ -447,6 +456,7 @@ inline int accelSim::setupProperties()
                               "transport_fault",
                               "poll_waits",
                               "requests",
+                              "timeline_misses",
                               "late_returns",
                               "rejected",
                               "published",
@@ -545,6 +555,7 @@ inline void accelSim::updateDMINDI()
     std::lock_guard<std::mutex> guard( m_controlMutex );
     const bool                  fault     = ( !m_dmChannel.empty() && !m_dmReady ) || !m_dmCommandValid.load();
     m_indiP_dmStatus["ready"]             = static_cast<int>( m_dmReady );
+    m_indiP_dmStatus["attached"]          = static_cast<int>( m_syncopationSchedule.md != nullptr );
     m_indiP_dmStatus["active"]            = static_cast<int>( m_dmActive );
     m_indiP_dmStatus["requested"]         = static_cast<int>( m_dmEnabled );
     m_indiP_dmStatus["zero_acknowledged"] = static_cast<int>( m_dmZeroAcknowledged );
@@ -552,6 +563,7 @@ inline void accelSim::updateDMINDI()
     m_indiP_dmStatus["fault"]             = static_cast<int>( fault );
     m_indiP_dmStatus["poll_waits"]        = m_dmPollWaits;
     m_indiP_dmStatus["requests"]          = m_dmRequests;
+    m_indiP_dmStatus["timeline_misses"]   = m_dmTimelineMisses;
     m_indiP_dmStatus["late_returns"]      = m_dmLateReturns;
     m_indiP_dmStatus["rejected"]          = m_dmRejected;
     m_indiP_dmStatus["published"]         = m_dmPublished;
@@ -628,14 +640,30 @@ inline bool accelSim::serviceDM()
     }
     if( polled <= 0 || ( !m_dmEnabled && !m_dmZeroPending ) )
         return false;
-    std::array<float, 2500> pixels{};
-    const bool              zero = m_dmZeroPending || !m_dmCommandValid.load();
+    static const std::array<float, 2500> zeros{};
+    const float                         *pixels = zeros.data();
+    bool                                 zero   = m_dmZeroPending;
     if( !zero )
-    { //mutex scope
-        std::lock_guard<std::mutex> lock( m_dmPixelsMutex );
-        pixels = m_dmPixels;
+    {
+        // Same realization as acc000, evaluated at the scheduler's CLOCK_MONOTONIC target, as dmSpeckle does.
+        accelSimDetail::sample physical;
+        if( !m_timeline.physical( request.targetNs, physical ) )
+        {
+            ++m_dmTimelineMisses; // Skip this slot; the scheduler retains the last copied contribution.
+            return false;
+        }
+        try
+        {
+            pixels           = m_dmInjection.synthesize( physical, m_dmScale.load() ).data();
+            m_dmCommandValid = true;
+        }
+        catch( const std::exception & )
+        {
+            m_dmCommandValid = false;
+            zero             = true; // Remove the contribution until a valid command can be synthesized.
+        }
     }
-    if( !syncopationPublish( pixels.data(), request, m_dmImage ) )
+    if( !syncopationPublish( pixels, request, m_dmImage ) )
     {
         if( synco::monotonicNs() >= request.cutoffNs )
             ++m_dmLateReturns;
@@ -768,10 +796,11 @@ inline int accelSim::appShutdown()
     log<text_log>( "accelSim skipped=" + std::to_string( m_diagnostics.m_skipped ) +
                    " discontinuities=" + std::to_string( m_diagnostics.m_discontinuities ) +
                    " late_samples=" + std::to_string( m_diagnostics.m_late ) +
-                   " max_lateness_us=" + std::to_string( m_diagnostics.m_maxLateUs ) + " clip_x_low=" +
-                   std::to_string( m_model.m_clipLow[0] ) + " clip_x_high=" + std::to_string( m_model.m_clipHigh[0] ) +
-                   " clip_y_low=" + std::to_string( m_model.m_clipLow[1] ) +
-                   " clip_y_high=" + std::to_string( m_model.m_clipHigh[1] ) );
+                   " max_lateness_us=" + std::to_string( m_diagnostics.m_maxLateUs ) +
+                   " clip_x_low=" + std::to_string( m_diagnostics.m_low[0] ) +
+                   " clip_x_high=" + std::to_string( m_diagnostics.m_high[0] ) +
+                   " clip_y_low=" + std::to_string( m_diagnostics.m_low[1] ) +
+                   " clip_y_high=" + std::to_string( m_diagnostics.m_high[1] ) );
     TELEMETER_APP_SHUTDOWN;
     return 0;
 }
@@ -820,6 +849,7 @@ inline float accelSim::fps()
 inline int accelSim::startAcquisition()
 {
     m_schedule.reset( monotonicNow(), m_activeFps.load() );
+    m_timeline.reset( m_schedule.m_epoch, m_model ); // Node k is the nominal time of accelerometer tick k.
     m_lastAcquisition = m_triggerPrediction = 0;
     if( !m_syncName.empty() )
         m_phaseClock.reset( m_schedule.m_epoch, m_activeFps.load() );
@@ -1040,6 +1070,7 @@ inline int accelSim::acquireAndCheckValid()
                 m_activeFps = requested;
                 ++m_diagnostics.m_discontinuities;
                 m_schedule.reset( monotonicNow(), requested );
+                m_timeline.reset( m_schedule.m_epoch, m_model );
                 m_lastAcquisition = m_triggerPrediction = 0;
                 if( !m_syncName.empty() )
                 {
@@ -1089,8 +1120,7 @@ inline int accelSim::acquireAndCheckValid()
             skipped = m_phaseClock.consume(
                 acquired, m_maxSlew, m_phaseClock.m_period - m_diagnostics.m_timing[service] * 1000 - m_guard );
         m_diagnostics.m_skipped += skipped;
-        if( m_model.advance( skipped ) )
-            ++m_diagnostics.m_discontinuities;
+        measure( acquired, ( m_syncName.empty() ? m_schedule.m_next : m_phaseClock.m_next ) - 1 );
         const int64_t completed = monotonicNow();
         auto         &t         = m_diagnostics.m_timing;
         t[channelReadout]       = ( completed - acquired ) / 1000.0;
@@ -1134,7 +1164,7 @@ inline int accelSim::loadImageIntoStream( void *destination )
         return -1;
     }
 
-    const auto counts = accelSimDetail::adcOutput( m_model.m_sample, m_parameters, m_zeroOutput );
+    const auto counts = accelSimDetail::adcOutput( m_acquiredSample, m_parameters, m_zeroOutput );
     std::memcpy( destination, counts.data(), 2 * sizeof( uint16_t ) );
     m_fresh = false;
     ++m_diagnostics.m_timing[frameSequence];
@@ -1146,10 +1176,18 @@ inline int accelSim::loadImageIntoStream( void *destination )
     return 0;
 }
 
+inline void accelSim::measure( int64_t acquired, uint64_t tick )
+{
+    if( m_timeline.advance( m_model, acquired ) )
+        ++m_diagnostics.m_discontinuities;
+    // Clamps count published measurements only, not generated-ahead nodes.
+    if( !m_timeline.measurement(
+            acquired, tick, m_parameters, m_acquiredSample, m_diagnostics.m_low, m_diagnostics.m_high ) )
+        throw std::runtime_error( "acquisition time outside the simulation timeline" );
+}
+
 inline void accelSim::snapshotDiagnostics( bool force )
 {
-    m_diagnostics.m_low  = m_model.m_clipLow;
-    m_diagnostics.m_high = m_model.m_clipHigh;
     { //mutex scope
         std::unique_lock<std::mutex> guard( m_snapshotMutex, std::defer_lock );
         if( force )
@@ -1163,23 +1201,6 @@ inline void accelSim::snapshotDiagnostics( bool force )
 inline int accelSim::frameGrabberPostPublish( IMAGE *stream )
 {
     static_cast<void>( stream );
-    if( m_dmReady )
-    {
-        try
-        {
-            const auto                  &pixels = m_dmInjection.synthesize( m_model.m_sample, m_dmScale.load() );
-            std::unique_lock<std::mutex> lock( m_dmPixelsMutex, std::try_to_lock );
-            if( lock.owns_lock() )
-            {
-                std::copy( pixels.begin(), pixels.end(), m_dmPixels.begin() );
-                m_dmCommandValid = true;
-            }
-        }
-        catch( const std::exception & )
-        {
-            m_dmCommandValid = false; // The producer sends zero until a valid physical command is prepared.
-        }
-    }
     snapshotDiagnostics( false );
     return 0;
 }
