@@ -1,9 +1,11 @@
 # OCAM descramble comparison
 
 The bin2 methods produce the same pixels as the SDK using a mapping prepared
-and validated during camera configuration. `optimized` is the default requested
-method. Other camera modes and tables that do not match the validated
-structure use the SDK fallback. SDK remains explicitly selectable.
+and validated during camera configuration. `parallel` is the default requested
+method, using the `camwfs_descramble` worker cpuset and a 100 us post-job sleep.
+Other camera modes, unvalidated tables, or unavailable worker/staging setup
+use the SDK fallback. SDK and single-thread optimized remain explicitly
+selectable.
 
 The development workstation measurements and validation record are in the
 [engineering plan](../../../agents/plans/2026-11/ocam_descramble.md).
@@ -11,20 +13,25 @@ They do not establish performance on the RTC.
 
 ## Configuration and status
 
-Omitting the method setting now selects `optimized`. Explicit existing settings
-still take precedence, including `sdk`; remove that override or select optimized
-to adopt the new default:
+Omitting the method setting selects `parallel`; omitting the worker cpuset
+selects `camwfs_descramble`. Explicit settings still take precedence, including
+an old `sdk`/`optimized` method or `camwfs_sw` worker override. To adopt the
+current defaults, remove those overrides or use:
 
 ```ini
 [camera]
-descrambleMethod=optimized
+descrambleMethod=parallel
+
+[descramble]
+cpuset=camwfs_descramble
+sleepUs=100
 ```
 
 The accepted values are `sdk`, `compact`, `mapped`, `optimized`, and `parallel`;
-the default is `optimized`. An unknown value fails configuration. All candidates
-require the same validated structured bin2 mapping in the app. `parallel`
-also requires the explicit worker setup below. The offline helper can compare
-other modes.
+the default is `parallel`. An unknown value fails configuration. All candidates
+require the same validated structured bin2 mapping in the app. Parallel also
+requires staged output and verified worker placement as described below. The
+offline helper can compare other modes.
 
 `compact` and `mapped` use the same prepared 16-bit index table. `compact`
 follows the SDK's alternating-half pixel traversal; `mapped` writes output
@@ -62,16 +69,16 @@ readbacks identified SDK fallback caused by an empty power target despite
 observed power On. The active-parallel attribution is withdrawn, so this
 capture does not establish worker performance. Repeat it after the power-target
 fix, verifying `applied=parallel` and `parallel=running` before and after the
-interval. Earlier SDK comparisons support the optimized default; the worker
-remains an explicit experiment.
+interval. Earlier SDK comparisons motivated the initial optimized default;
+that historical decision preceded the corrected worker measurements below.
 
 After the power-target fix, a confirmed continuous-spin parallel capture
 averaged 28.826 us acquisition-to-write with 0.799 us reported standard
 deviation, versus the earlier optimized 33.760 us and 1.067 us. However,
 acquisition/publication interval spread rose to roughly 28 us and the operator
-confirmed it disappeared on returning to optimized. Parallel therefore remains
-experimental. The RTC reported a 950 ms/s RT budget, motivating the 100 us
-post-job sleep to reduce continuous worker CPU occupancy.
+confirmed it disappeared on returning to optimized. Continuous-spin parallel
+was therefore not adopted. The RTC reported a 950 ms/s RT budget, motivating
+the 100 us post-job sleep to reduce continuous worker CPU occupancy.
 
 The subsequent operator-reported 2 kHz sleep trial averages **29.003 us WMA**
 with **0.775 us reported standard deviation**. Acquisition-interval spread
@@ -88,13 +95,15 @@ reported standard deviation**. Acquisition/publication interval spread is
 is about 0.200 us higher than in the 2 kHz sleep trial, while mean latency
 remains near 29 us. This establishes short-run behavior at the stated maximum
 rate, but no matched 3.6 kHz optimized reference is supplied. Longer matched
-comparisons, frame-delivery/tail checks and complete-loop measurements remain;
-the generic method default stays optimized.
+comparisons, frame-delivery/tail checks and complete-loop measurements remain
+useful follow-up checks. After these trials, the operator confirmed that
+moving `camwfs-sw` to CPU31 had no timing impact and selected parallel as the
+default with the dedicated CPU32 worker.
 
-If the worker is not retained after qualification, remove or empty
-`descramble.cpuset` at the next operator restart to disable worker creation
-and restore its reserved core to the previous workload. Do not mix that
-workload change into an A/B interval.
+For single-thread operation, explicitly select `optimized` (or `sdk`) and set
+`descramble.cpuset` to an empty value before restart to disable worker creation.
+Removing the cpuset setting restores its `camwfs_descramble` default. Do not
+mix workload or placement changes into an A/B interval.
 
 | INDI property / element | Meaning |
 | --- | --- |
@@ -110,9 +119,10 @@ The request is latched once for an entire frame. `applied` changes after the
 load completes and is published by the ordinary app thread. A changed request
 is Busy until acknowledged. An unavailable candidate request is Alert and
 uses SDK conversion; the request is retained for a later compatible camera
-configuration. This also applies to the default optimized request outside
-validated bin2: SDK fallback succeeds, while the unavailable optimized request
-reports Alert. Configure `sdk` explicitly when that is the intended mode.
+configuration. This also applies to the default parallel request outside
+validated bin2 or without an eligible worker: SDK fallback succeeds, while the
+unavailable parallel request reports Alert. Configure `sdk` explicitly when
+that is the intended mode.
 Selecting `sdk` restores the reference path. No method change issues camera
 serial commands or restarts acquisition.
 
@@ -226,16 +236,38 @@ inconclusive.
 
 ## Operator-run parallel comparison
 
-Reserve a separate physical core on the framegrabber's L3/CCD before starting
-this test. The [operator-confirmed RTC topology](../../../agents/plans/2026-10/rtc-cpuset-restructuring.md#operator-confirmed-topology)
-places CPU 31 in L3 domain 24–31, while CPUs 32 and 33 share L3 domain 32–39.
-Use `camwfs_sw` (CPU 32) after freeing its previous occupant; `spare31` is on
-a different CCD from `camwfs` (CPU 33). The application verifies the actual
-placement at startup. Preserve the EDT IRQ core. Keep the freed-core workload
-change identical through all reference and parallel intervals. Do not change
-these cpusets while the worker is active.
+The [RTC cpuset setup](../../../rtSetup/RTC/make_cpusets) now assigns:
 
-Merge these settings into the existing configuration after reserving CPU 32:
+| CPU | Cpuset | Use |
+| --- | --- | --- |
+| 31 | `camwfs_sw` | `camwfs-sw` software framegrabber; formerly `spare31`. |
+| 32 | `camwfs_descramble` | OCAM descramble worker; formerly `camwfs_sw`. |
+| 33 | `camwfs` | Camera framegrabber, unchanged. |
+| 34 | `camwfs_irq` | EDT IRQ, unchanged. |
+
+CPUs32/33 share L3; CPU31 is in the neighboring domain. The operator tested
+`camwfs-sw` on CPU31 and reported no timing impact. The application still
+verifies worker placement before using it. Keep software-reader placement
+and other workloads fixed across reference/parallel intervals.
+
+Before migrating, the operator stops workloads using the dedicated cpusets,
+then runs the updated `remove_cpusets` in dry-run mode. It recognizes both
+the current and renamed layouts, including retired `spare31`; it preserves
+root/system, refuses occupied or unknown groups, and does not move tasks.
+Run `remove_cpusets --apply` only after its empty-tree preflight succeeds,
+then rebuild using the sibling updated `make_cpusets`. These are operator
+steps, not commands for an agent to run on the instrument.
+
+Update any existing camera `[descramble] cpuset=camwfs_sw` to
+`camwfs_descramble`, or remove it to use the new default. Restore the
+`camwfs-sw` app's `[framegrabber] cpuset=camwfs_sw` if the temporary trial used
+`spare31`. The software app now resolves that name to CPU31. The scripts do
+not rewrite application configuration. Install the updated cleanup/setup
+scripts together before restarting workloads.
+
+For a controlled comparison, merge these settings after the migration; the
+explicit SDK selection below establishes a reference instead of using the
+parallel method default:
 
 ```ini
 [camera]
@@ -245,7 +277,7 @@ descrambleMethod=sdk
 staged=true
 
 [descramble]
-cpuset=camwfs_sw
+cpuset=camwfs_descramble
 threadPrio=-1
 partition=paired30
 sleepUs=100
@@ -272,10 +304,11 @@ acquisition stalls, one fixed sleep followed by spinning can still exhaust
 a finite RT budget. This option requires instrument qualification at the
 intended cadence. Keep optimized selected if interval jitter persists.
 
-An empty `descramble.cpuset` disables the worker. A configured worker starts
+An explicit empty `descramble.cpuset` disables the worker; otherwise its
+default is `camwfs_descramble`. A configured worker starts
 parked, then verifies both threads' actual priorities/policy, exact single-CPU
 cpuset membership, different physical cores, and shared L3. Both framegrabber
-and worker need explicit single-CPU cpusets. Failure leaves `parallel`
+and worker need dedicated single-CPU cpusets. Failure leaves `parallel`
 unavailable and the existing single-thread methods usable. Placement is
 checked again during acquisition configuration. Startup verification does not
 detect another task later being assigned to the same core; the operator owns

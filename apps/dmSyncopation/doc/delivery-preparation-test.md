@@ -173,15 +173,18 @@ choice of bounds.
 
 The `171940Z` baseline measured a 2.698 ms post/finish tail and three new full-
 credit overloads while the post worker used ordinary priority and a broad CPU
-mask. The operator confirmed **spare31 is free** for this comparison. The RTC
-cpuset script assigns it to CPU31 with SMT sibling CPU95 offline.
+mask. For that historical comparison, the operator confirmed **spare31 was
+free** on CPU31 with SMT sibling CPU95 offline. The
+[2026-11-18 RTC migration](../../../agents/plans/2026-10/rtc-cpuset-restructuring.md#2026-11-18-camwfs-descramble-migration)
+assigns CPU31 to `camwfs_sw` and retires `spare31`. Current comparisons use
+`dmtweeter-post` / CPU44 and require a new matched reference capture.
 
 Add these two keys to the existing `[sdk]` section of **dmtweeter.conf**:
 
 ```ini
 [sdk]
 pipelineThreadPrio=30
-pipelineCpuset=spare31
+pipelineCpuset=dmtweeter-post
 ```
 
 These keys configure the ordered **post worker**, named `pipeline`; they do not
@@ -210,10 +213,10 @@ repeat the same simultaneous capture. Compare capture-local changes in
 model release/miss coverage. Preserve the before/after snapshots: restart changes
 counter baselines, so historical totals from `171940Z` are not new losses.
 
-This changes post-worker policy and placement together. Improvement would support
-using that configuration; it would not separately identify the contribution of
-CPU placement versus FIFO scheduling. It also does not by itself qualify a shorter
-post bound or physical 6 kHz operation.
+The historical comparison changed post-worker policy and placement together.
+Any improvement therefore cannot separately identify the contribution of CPU
+placement versus FIFO scheduling. It also does not by itself qualify a shorter
+post bound or physical 6 kHz operation, or establish behavior on CPU44.
 
 The next experiment is the [coordinated zero-auxiliary test](zero-aux-rate-test.md):
 retain the running 2 kHz main loop and add one or two scheduled zero auxiliary
