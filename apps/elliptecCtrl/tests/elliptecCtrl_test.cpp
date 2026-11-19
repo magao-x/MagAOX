@@ -1,6 +1,6 @@
 /** \file elliptecCtrl_test.cpp
- * \brief Catch2 tests for the elliptecCtrl app.
- * \author Jared R. Males (jaredmales@gmail.com)
+ * \brief Catch2 tests for the elliptecCtrl client of elliptecLowLevel.
+ * \author Miles Lucas
  *
  * \ingroup elliptecCtrl_files
  */
@@ -14,24 +14,9 @@
 #include "../../../tests/catch2/catch.hpp"
 #include "../../../tests/testXWC.hpp"
 
-#include <atomic>
-#include <chrono>
 #include <filesystem>
-#include <functional>
-#include <mutex>
-#include <stdexcept>
-#include <string>
-#include <thread>
-#include <type_traits>
-#include <vector>
 
-#include <errno.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-
+#define ELLIPTECCTRL_TEST_NOSEND
 #include "../elliptecCtrl.hpp"
 
 namespace libXWCTest
@@ -39,3163 +24,585 @@ namespace libXWCTest
 namespace elliptecCtrlTest
 {
 
+/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
 namespace
 {
 
-/// Build a per-test scratch directory under `/tmp`.
-std::string testRoot( const std::string &name )
-{
-    std::string root = "/tmp/elliptecCtrl_test/" + name;
-    std::filesystem::remove_all( root );
-    std::filesystem::create_directories( root + "/telem" );
-    std::filesystem::create_directories( root + "/calib" );
-    return root;
-}
-
-/// Minimal fake Elliptec controller backed by a PTY master.
-class fakeElliptecDevice
-{
-  public:
-    /// Response handler type keyed on the raw command bytes written by the app.
-    typedef std::function<std::string( const std::string & )> handlerT;
-
-    /// Construct the fake device and start its responder thread.
-    explicit fakeElliptecDevice( handlerT handler = handlerT{} ) : m_handler( handler )
-    {
-        m_masterFd = ::posix_openpt( O_RDWR | O_NOCTTY | O_NONBLOCK );
-        if( m_masterFd < 0 )
-        {
-            throw std::runtime_error( "posix_openpt failed" );
-        }
-
-        if( ::grantpt( m_masterFd ) != 0 )
-        {
-            throw std::runtime_error( "grantpt failed" );
-        }
-
-        if( ::unlockpt( m_masterFd ) != 0 )
-        {
-            throw std::runtime_error( "unlockpt failed" );
-        }
-
-        char slaveName[256];
-        if( ::ptsname_r( m_masterFd, slaveName, sizeof( slaveName ) ) != 0 )
-        {
-            throw std::runtime_error( "ptsname_r failed" );
-        }
-
-        m_slavePath = slaveName;
-        m_thread    = std::thread(
-            [this]()
-            {
-                run();
-            } );
-    }
-
-    /// Stop the responder thread and close the PTY master.
-    ~fakeElliptecDevice()
-    {
-        m_stop = true;
-
-        if( m_thread.joinable() )
-        {
-            m_thread.join();
-        }
-
-        if( m_masterFd >= 0 )
-        {
-            ::close( m_masterFd );
-        }
-    }
-
-    /// Return the PTY slave path the app should open.
-    const std::string &slavePath() const
-    {
-        return m_slavePath;
-    }
-
-    /// Replace the current response handler.
-    void handler( handlerT newHandler /**< [in] replacement command handler */ )
-    {
-        std::lock_guard<std::mutex> lock( m_mutex );
-        m_handler = newHandler;
-    }
-
-    /// Return the commands observed so far, after the responder has caught up.
-    /** Commands that are sent without waiting for a reply may still be in flight, so wait until the
-     * recorded command list stops changing before returning it.
-     */
-    std::vector<std::string> commands() const
-    {
-        size_t last = static_cast<size_t>( -1 );
-        for( int n = 0; n < 50; ++n )
-        {
-            std::this_thread::sleep_for( std::chrono::milliseconds( 25 ) );
-
-            std::lock_guard<std::mutex> lock( m_mutex );
-            if( m_commands.size() == last )
-            {
-                return m_commands;
-            }
-            last = m_commands.size();
-        }
-
-        std::lock_guard<std::mutex> lock( m_mutex );
-        return m_commands;
-    }
-
-    /// Clear the recorded command history.
-    void clearCommands()
-    {
-        std::lock_guard<std::mutex> lock( m_mutex );
-        m_commands.clear();
-    }
-
-  private:
-    int                      m_masterFd{ -1 }; ///< PTY master file descriptor.
-    std::string              m_slavePath;      ///< PTY slave path to open from the app.
-    std::thread              m_thread;         ///< Responder thread.
-    mutable std::mutex       m_mutex;          ///< Guards handler and command history.
-    std::atomic<bool>        m_stop{ false };  ///< Signals responder shutdown.
-    handlerT                 m_handler;        ///< Current command-response handler.
-    std::vector<std::string> m_commands;       ///< Raw commands observed from the app.
-
-    /// Write the full reply back to the PTY master.
-    void writeReply( const std::string &reply )
-    {
-        size_t off = 0;
-
-        while( off < reply.size() )
-        {
-            ssize_t written = ::write( m_masterFd, reply.data() + off, reply.size() - off );
-            if( written > 0 )
-            {
-                off += static_cast<size_t>( written );
-                continue;
-            }
-
-            if( written < 0 && ( errno == EAGAIN || errno == EWOULDBLOCK ) )
-            {
-                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
-                continue;
-            }
-
-            break;
-        }
-    }
-
-    /// Responder loop servicing one raw Elliptec frame at a time.
-    void run()
-    {
-        while( !m_stop )
-        {
-            struct pollfd pfd{ m_masterFd, POLLIN, 0 };
-
-            int pr = ::poll( &pfd, 1, 20 );
-            if( pr <= 0 )
-            {
-                continue;
-            }
-
-            char        buf[256];
-            std::string cmd;
-
-            while( true )
-            {
-                ssize_t readCount = ::read( m_masterFd, buf, sizeof( buf ) );
-                if( readCount > 0 )
-                {
-                    cmd.append( buf, buf + readCount );
-                    continue;
-                }
-
-                if( readCount < 0 && ( errno == EAGAIN || errno == EWOULDBLOCK ) )
-                {
-                    break;
-                }
-
-                break;
-            }
-
-            if( cmd.empty() )
-            {
-                continue;
-            }
-
-            handlerT handler;
-            {
-                std::lock_guard<std::mutex> lock( m_mutex );
-                m_commands.push_back( cmd );
-                handler = m_handler;
-            }
-
-            if( handler )
-            {
-                std::string reply = handler( cmd );
-                if( !reply.empty() )
-                {
-                    writeReply( reply );
-                }
-            }
-        }
-    }
-};
-
-/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
-/// Test harness exposing the protected helpers needed for `elliptecCtrl` unit tests.
+/// Test harness that feeds low-level property updates and inspects the commands sent back.
 class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
 {
   public:
-    /// Re-export the protected pending-command enum for assertions.
-    using pendingT = Pending;
-
-    /// Re-export the protected parsed-frame type.
-    using frameT = MagAOX::app::elliptecCtrl::frameT;
-
-    /// Construct a testable controller instance.
-    explicit elliptecCtrl_test( const std::string &device ) : elliptecCtrl_test( device, testRoot( device ) )
+    /// Construct a client of the low-level app `ellbus` for stage `qwp1`.
+    explicit elliptecCtrl_test( const std::string &name /**< [in] app name and scratch directory */ )
     {
-    }
+        const std::string root = "/tmp/elliptecCtrl_test/" + name;
+        std::filesystem::remove_all( root );
+        std::filesystem::create_directories( root + "/telem" );
 
-    /// Construct a testable controller instance in a caller-supplied scratch root.
-    elliptecCtrl_test( const std::string &device, const std::string &root )
-    {
-        m_configName = device;
+        m_configName = name;
         m_basePath   = root;
-        m_calibDir   = root + "/calib";
         m_sysPath    = root + "/sys";
-
         m_tel.logPath( root + "/telem" );
         m_tel.logExt( "bintel" );
         m_tel.logName( m_configName );
         m_tel.m_logLevel = logPrio::LOG_TELEM;
         m_maxInterval    = 3600.0;
 
-        m_startupDelayMs   = 0;
-        m_readTimeoutMs    = 25;
-        m_powerState       = 1;
-        m_powerTargetState = 1;
-
-        m_ipAbsDeg.setDevice( m_configName );
-        m_ipAbsDeg.setName( "absDeg" );
-
-        m_ipRelDeg.setDevice( m_configName );
-        m_ipRelDeg.setName( "relDeg" );
-
-        m_ipRelMove.setDevice( m_configName );
-        m_ipRelMove.setName( "relMove" );
-
-        m_ipVelPct.setDevice( m_configName );
-        m_ipVelPct.setName( "velocity" );
-
-        m_ipOptimize.setDevice( m_configName );
-        m_ipOptimize.setName( "optimize" );
-
-        m_ipSave.setDevice( m_configName );
-        m_ipSave.setName( "save" );
+        m_lowLevelName    = "ellbus";
+        m_stageName       = "qwp1";
+        m_presetPositions = { 115.0F, 300.0F };
+        m_presetNames     = { "lab", "sky" };
 
         m_indiP_preset.setDevice( m_configName );
         m_indiP_preset.setName( "preset" );
-
         m_indiP_presetName.setDevice( m_configName );
         m_indiP_presetName.setName( "presetName" );
-
         m_indiP_home.setDevice( m_configName );
         m_indiP_home.setName( "home" );
-
         m_indiP_stop.setDevice( m_configName );
         m_indiP_stop.setName( "stop" );
     }
 
-    /// Shut down any open serial or telemetry resources.
+    /// Shut down telemetry.
     ~elliptecCtrl_test()
     {
         m_tel.logShutdown( true );
-        closePort_();
     }
 
-    /// Set up the local INDI FIFO transport and driver.
-    int setupINDITransport()
-    {
-        std::filesystem::create_directories( std::filesystem::path( m_basePath ) / MAGAOX_driverFIFORelPath );
-        std::filesystem::create_directories( std::filesystem::path( m_sysPath ) / m_configName );
-
-        if( createINDIFIFOS() < 0 )
-        {
-            return -1;
-        }
-
-        using indiDriverT = std::remove_pointer_t<decltype( m_indiDriver )>;
-
-        m_indiDriver = new indiDriverT( this, m_configName, "0", "0" );
-        if( !m_indiDriver || !m_indiDriver->good() )
-        {
-            return -1;
-        }
-
-        return 0;
-    }
-
-    /// Prepare preset names and positions for a test.
-    void setPresets( const std::vector<float> &positions, const std::vector<std::string> &names )
-    {
-        m_presetPositions = positions;
-        m_presetNames     = names;
-    }
-
-    /// Force the app FSM state before calling lifecycle helpers.
-    void setFsmState( MagAOX::app::stateCodes::stateCodeT newState /**< [in] new FSM state */ )
-    {
-        state( newState );
-    }
-
-    /// Force the power-management state seen by the app.
-    void setPower( int current /**< [in] current power state */, int target /**< [in] target power state */ )
-    {
-        m_powerState       = current;
-        m_powerTargetState = target;
-    }
-
-    /// Force the current connected flag.
-    void setConnected( bool connected /**< [in] new connected state */ )
-    {
-        m_connected = connected;
-    }
-
-    /// Force the current homed flag.
-    void setHomed( bool homed /**< [in] new homed state */ )
-    {
-        m_homed = homed;
-    }
-
-    /// Force the current stage angle in degrees.
-    void setPositionDeg( double posDeg /**< [in] stage angle */ )
-    {
-        m_posDeg = posDeg;
-    }
-
-    /// Force the current pulse count.
-    void setPositionPulses( int32_t pulses /**< [in] stage pulse count */ )
-    {
-        m_posPulses = pulses;
-    }
-
-    /// Force the device geometry used for degree conversions.
-    void setPulsesPerRev( uint32_t pulsesPerRev /**< [in] pulses per revolution */ )
-    {
-        m_pulsesPerRev = pulsesPerRev;
-    }
-
-    /// Force the current pending command.
-    void setPending( pendingT pending /**< [in] pending command */ )
-    {
-        m_pending = pending;
-    }
-
-    /// Force the current moving-state code.
-    void setMoving( int8_t moving /**< [in] moving code */ )
-    {
-        m_moving = moving;
-    }
-
-    /// Force the current stdMotionStage command classification.
-    void setMovingState( int8_t movingState /**< [in] command classification */ )
-    {
-        m_movingState = movingState;
-    }
-
-    /// Force the current preset telemetry fields.
-    void setPresetTelemetry( float preset /**< [in] current preset */, float presetTarget /**< [in] target preset */ )
-    {
-        m_preset        = preset;
-        m_preset_target = presetTarget;
-    }
-
-    /// Force the configured home-offset move.
-    void setHomeOffset( double offsetDeg /**< [in] home offset in degrees */ )
-    {
-        m_homeOffsetDeg = offsetDeg;
-    }
-
-    /// Force the configured relative step size.
-    void setRelStepDeg( double relStepDeg /**< [in] relative step in degrees */ )
-    {
-        m_relStepDeg = relStepDeg;
-    }
-
-    /// Force the connection retry counter.
-    void setCommMisses( int commMisses /**< [in] number of misses */ )
-    {
-        m_commMisses = commMisses;
-    }
-
-    /// Force the communication miss threshold.
-    void setCommMaxMisses( int commMaxMisses /**< [in] miss threshold */ )
-    {
-        m_commMaxMisses = commMaxMisses;
-    }
-
-    /// Force the controller status byte.
-    void setGs( uint8_t gs /**< [in] new status byte */ )
-    {
-        m_gs = gs;
-    }
-
-    /// Force the cached status hint.
-    void setStatusHint( const std::string &hint /**< [in] new status hint */ )
-    {
-        m_statusHint = hint;
-    }
-
-    /// Force the serial post-write sleep.
-    void setPostWriteSleepMs( int postWriteSleepMs /**< [in] post-write delay in milliseconds */ )
-    {
-        m_postWriteSleepMs = postWriteSleepMs;
-    }
-
-    /// Force the startup delay used before the first connection attempt.
-    void setStartupDelayMs( unsigned startupDelayMs /**< [in] startup delay in milliseconds */ )
-    {
-        m_startupDelayMs = startupDelayMs;
-    }
-
-    /// Force whether stdMotionStage should use fractional presets.
-    void setFractionalPresets( bool fractionalPresets /**< [in] new fractional-preset flag */ )
-    {
-        m_fractionalPresets = fractionalPresets;
-    }
-
-    /// Force whether stdMotionStage should synthesize default preset positions.
-    void setDefaultPositions( bool defaultPositions /**< [in] new default-position flag */ )
-    {
-        m_defaultPositions = defaultPositions;
-    }
-
-    /// Set the serial-port path that `openPort_()` should open.
-    void setPortPath( const std::string &port /**< [in] PTY slave path */ )
-    {
-        m_port = port;
-    }
-
-    /// Set the query reply timeout used by protocol helpers.
-    void setTimeouts( int readTimeoutMs /**< [in] query reply timeout in milliseconds */ )
-    {
-        m_readTimeoutMs = readTimeoutMs;
-    }
-
-    /// Start the app from the normal `INITIALIZED` state.
+    /// Run appStartup from INITIALIZED.
     int startup()
     {
         state( MagAOX::app::stateCodes::INITIALIZED );
         return appStartup();
     }
 
-    /// Run one app logic iteration.
+    /// Run one loop.
     int logic()
     {
         return appLogic();
     }
 
-    /// Expose `moveTo()` for direct test use.
-    int moveToDirect( float target /**< [in] preset target */ )
+    /// A low-level property update for one stage.
+    static pcf::IndiProperty llProp( const std::string      &name,  /**< [in] property name */
+                                     const std::string      &stage, /**< [in] element name */
+                                     pcf::IndiProperty::Type type )
     {
-        return moveTo( target );
-    }
-
-    /// Run app shutdown.
-    int shutdown()
-    {
-        return appShutdown();
-    }
-
-    /// Expose `openPort_()` for test use.
-    int openPortDirect()
-    {
-        return openPort_();
-    }
-
-    /// Expose `closePort_()` for test use.
-    void closePortDirect()
-    {
-        closePort_();
-    }
-
-    /// Expose `drainFrames_()` for test use.
-    int drainFramesDirect()
-    {
-        return drainFrames_();
-    }
-
-    /// Expose `writeAll_()` for test use.
-    int writeAllDirect( const std::string &payload /**< [in] raw payload to write */ )
-    {
-        return writeAll_( payload );
-    }
-
-    /// Expose `readFrame_()` for test use.
-    int readFrameDirect( frameT &frame, /**< [out] parsed frame */
-                         int     timeoutMs /**< [in] timeout in milliseconds */ )
-    {
-        return readFrame_( frame, timeoutMs );
-    }
-
-    /// Expose `frame_()` for test use.
-    std::string frameDirect( const std::string &cmd /**< [in] payload */ ) const
-    {
-        return frame_( cmd );
-    }
-
-    /// Expose `send_()` for test use.
-    int sendDirect( const std::string &cmd /**< [in] command payload without address */ )
-    {
-        return send_( cmd );
-    }
-
-    /// Expose `query_()` for test use.
-    int queryDirect( const std::string &cmd,    /**< [in] command payload without address */
-                     const std::string &header, /**< [in] expected reply header */
-                     frameT            &reply,  /**< [out] the expected reply */
-                     int                timeoutMs /**< [in] timeout in milliseconds */ )
-    {
-        return query_( cmd, header, reply, timeoutMs );
-    }
-
-    /// Expose `q_info_()` for test use.
-    int qInfoDirect()
-    {
-        return q_info_();
-    }
-
-    /// Expose `q_status_()` for test use.
-    int qStatusDirect()
-    {
-        return q_status_();
-    }
-
-    /// Expose `q_position_()` for test use.
-    int qPositionDirect()
-    {
-        return q_position_();
-    }
-
-    /// Expose `cmd_home_()` for test use.
-    int cmdHomeDirect( uint8_t dir /**< [in] Elliptec home direction nibble */ )
-    {
-        return cmd_home_( dir );
-    }
-
-    /// Expose `cmd_stop_()` for test use.
-    int cmdStopDirect()
-    {
-        return cmd_stop_();
-    }
-
-    /// Expose `cmd_optimize_()` for test use.
-    int cmdOptimizeDirect()
-    {
-        return cmd_optimize_();
-    }
-
-    /// Expose `cmd_save_()` for test use.
-    int cmdSaveDirect()
-    {
-        return cmd_save_();
-    }
-
-    /// Expose `cmd_setvel_()` for test use.
-    int cmdSetVelDirect( int pct /**< [in] velocity percentage */ )
-    {
-        return cmd_setvel_( pct );
-    }
-
-    /// Expose `moveAbsDeg_()` for test use.
-    int moveAbsDegDirect( double deg /**< [in] absolute angle */ )
-    {
-        return moveAbsDeg_( deg );
-    }
-
-    /// Expose `moveRelDeg_()` for test use.
-    int moveRelDegDirect( double ddeg /**< [in] relative angle */ )
-    {
-        return moveRelDeg_( ddeg );
-    }
-
-    /// Expose `moveRelDegCmdFromRelMove_()` for test use.
-    int moveRelDegCmdDirect()
-    {
-        return moveRelDegCmdFromRelMove_();
-    }
-
-    /// Expose `startMoveToDeg_()` for test use.
-    int startMoveToDegDirect( double deg /**< [in] absolute angle */ )
-    {
-        return startMoveToDeg_( deg );
-    }
-
-    /// Expose `to_termios_baud_()` for test use.
-    speed_t toTermiosBaudDirect( int baud /**< [in] requested baud */ )
-    {
-        return to_termios_baud_( baud );
-    }
-
-    /// Expose `degToPulses_()` for test use.
-    int32_t degToPulsesDirect( double deg /**< [in] angle */ ) const
-    {
-        return degToPulses_( deg );
-    }
-
-    /// Expose `pulsesToDeg_()` for test use.
-    double pulsesToDegDirect( int32_t pulses /**< [in] native pulses */ ) const
-    {
-        return pulsesToDeg_( pulses );
-    }
-
-    /// Expose `presetIndexForPosition_()` for test use.
-    int presetIndexDirect( double deg /**< [in] angle to match */ ) const
-    {
-        return presetIndexForPosition_( deg );
-    }
-
-    /// Expose `presetToleranceDeg_()` for test use.
-    double presetToleranceDirect() const
-    {
-        return presetToleranceDeg_();
-    }
-
-    /// Expose `syncPresetState_()` for test use.
-    void syncPresetStateDirect()
-    {
-        syncPresetState_();
-    }
-
-    /// Expose `syncControllerState_()` for test use.
-    void syncControllerStateDirect()
-    {
-        syncControllerState_();
-    }
-
-    /// Expose `stdMotionStage::updateINDI()` for test use.
-    int updateStageINDIDirect()
-    {
-        return MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::updateINDI();
-    }
-
-    /// Expose `pollDevice_()` for test use.
-    int pollDeviceDirect()
-    {
-        return pollDevice_();
-    }
-
-    /// Expose `updateStatus_()` for test use.
-    void updateStatusDirect()
-    {
-        updateStatus_();
-    }
-
-    /// Expose `buildStageNamePosText_()` for test use.
-    std::string stageNamePosText() const
-    {
-        return buildStageNamePosText_();
-    }
-
-    /// Expose base-class preset-name alias tracking.
-    int setPresetAliasIndex( int presetNameIndex /**< [in] alias index */ )
-    {
-        return setPresetNameTracking( presetNameIndex );
-    }
-
-    /// Expose base-class preset-name alias tracking reset.
-    void clearPresetAliasIndex()
-    {
-        clearPresetNameTracking();
-    }
-
-    /// Expose the preset name recorded by stage telemetry.
-    std::string telemetryPresetNameDirect()
-    {
-        return telemetryPresetName();
-    }
-
-    /// Create an absolute-angle INDI request.
-    pcf::IndiProperty absDegRequest( double target /**< [in] target angle */ ) const
-    {
-        pcf::IndiProperty ip = m_ipAbsDeg;
-        ip["target"].set( target );
+        pcf::IndiProperty ip( type );
+        ip.setDevice( "ellbus" );
+        ip.setName( name );
+        ip.add( pcf::IndiElement( stage ) );
         return ip;
     }
 
-    /// Create an absolute-angle request with the correct key but no value elements.
-    pcf::IndiProperty absDegNoValueRequest() const
+    /// Report a low-level state.
+    int llState( const std::string &st, const std::string &stage = "qwp1" )
     {
-        return emptyMatchingProperty_( m_ipAbsDeg );
+        pcf::IndiProperty ip = llProp( "curr_state", stage, pcf::IndiProperty::Text );
+        ip[stage].set( st );
+        return setCallBack_m_indiP_llState( ip );
     }
 
-    /// Create a relative-step INDI request.
-    pcf::IndiProperty relDegRequest( double target /**< [in] relative step */ ) const
+    /// Report a low-level position.
+    int llPos( double deg, const std::string &stage = "qwp1" )
     {
-        pcf::IndiProperty ip = m_ipRelDeg;
-        ip["target"].set( target );
-        return ip;
+        pcf::IndiProperty ip = llProp( "curr_pos", stage, pcf::IndiProperty::Number );
+        ip[stage].set( deg );
+        return setCallBack_m_indiP_llPos( ip );
     }
 
-    /// Create a relative-step request with the correct key but no value elements.
-    pcf::IndiProperty relDegNoValueRequest() const
+    /// Report a low-level error.
+    int llError( const std::string &err )
     {
-        return emptyMatchingProperty_( m_ipRelDeg );
+        pcf::IndiProperty ip = llProp( "last_error", "qwp1", pcf::IndiProperty::Text );
+        ip["qwp1"].set( err );
+        return setCallBack_m_indiP_llError( ip );
     }
 
-    /// Create a velocity INDI request.
-    pcf::IndiProperty velPctRequest( int target /**< [in] target velocity percentage */ ) const
-    {
-        pcf::IndiProperty ip = m_ipVelPct;
-        ip["target"].set( target );
-        return ip;
-    }
-
-    /// Create a velocity request with the correct key but no value elements.
-    pcf::IndiProperty velPctNoValueRequest() const
-    {
-        return emptyMatchingProperty_( m_ipVelPct );
-    }
-
-    /// Create a stdMotionStage preset request.
-    pcf::IndiProperty presetRequest( float target /**< [in] preset target */ ) const
+    /// Request a preset by number.
+    int requestPreset( float n )
     {
         pcf::IndiProperty ip = m_indiP_preset;
-        ip["target"].set( target );
-        return ip;
+        ip["target"].set( n );
+        return newCallBack_m_indiP_preset( ip );
     }
 
-    /// Create a one-shot request property with `request=On`.
-    pcf::IndiProperty requestOn( const pcf::IndiProperty &tmpl /**< [in] template property */ ) const
-    {
-        pcf::IndiProperty ip = tmpl;
-        ip["request"].setSwitchState( pcf::IndiElement::On );
-        return ip;
-    }
-
-    /// Create a preset-name selection request with exactly one element on.
-    pcf::IndiProperty presetNameRequest( const std::string &name /**< [in] selected alias */ ) const
+    /// Request a preset by name.
+    int requestPresetName( const std::string &name )
     {
         pcf::IndiProperty ip = m_indiP_presetName;
-
-        for( const auto &presetName : m_presetNames )
+        for( auto &n : m_presetNames )
         {
-            ip[presetName].setSwitchState( pcf::IndiElement::Off );
+            ip[n].setSwitchState( n == name ? pcf::IndiElement::On : pcf::IndiElement::Off );
         }
-
-        ip[name].setSwitchState( pcf::IndiElement::On );
-        return ip;
+        return newCallBack_m_indiP_presetName( ip );
     }
 
-    /// Create a `relMove` request with `request=On`.
-    pcf::IndiProperty relMoveRequest() const
+    /// Press `home`.
+    int pressHome()
     {
-        return requestOn( m_ipRelMove );
+        pcf::IndiProperty ip = m_indiP_home;
+        ip["request"].setSwitchState( pcf::IndiElement::On );
+        return newCallBack_m_indiP_home( ip );
     }
 
-    /// Create a `relMove` property with the correct key but no request element.
-    pcf::IndiProperty relMoveNoRequest() const
+    /// Press `stop`.
+    int pressStop()
     {
-        return emptyMatchingProperty_( m_ipRelMove );
+        pcf::IndiProperty ip = m_indiP_stop;
+        ip["request"].setSwitchState( pcf::IndiElement::On );
+        return newCallBack_m_indiP_stop( ip );
     }
 
-    /// Create an `optimize` request with `request=On`.
-    pcf::IndiProperty optimizeRequest() const
+    /// Request an absolute angle.
+    int absDeg( double deg )
     {
-        return requestOn( m_ipOptimize );
+        pcf::IndiProperty ip = m_ipAbsDeg;
+        ip["target"].set( deg );
+        return newCallBack_m_ipAbsDeg( ip );
     }
 
-    /// Create an `optimize` property with the correct key but no request element.
-    pcf::IndiProperty optimizeNoRequest() const
+    /// Set the relative step.
+    int relDeg( double deg )
     {
-        return emptyMatchingProperty_( m_ipOptimize );
+        pcf::IndiProperty ip = m_ipRelDeg;
+        ip["target"].set( deg );
+        return newCallBack_m_ipRelDeg( ip );
     }
 
-    /// Create a `save` request with `request=On`.
-    pcf::IndiProperty saveRequest() const
+    /// Press `relMove`.
+    int relMove()
     {
-        return requestOn( m_ipSave );
+        pcf::IndiProperty ip = m_ipRelMove;
+        ip["request"].setSwitchState( pcf::IndiElement::On );
+        return newCallBack_m_ipRelMove( ip );
     }
 
-    /// Create a `save` property with the correct key but no request element.
-    pcf::IndiProperty saveNoRequest() const
+    /// Name of the last property sent to the low level, and clear it.
+    std::string lastCommandName()
     {
-        return emptyMatchingProperty_( m_ipSave );
+        std::string n = m_lastCommand.getName();
+        m_lastCommand = pcf::IndiProperty();
+        return n;
     }
 
-    /// Create a `home` request with `request=On`.
-    pcf::IndiProperty homeRequest() const
+    /// Numeric value of the last command for this stage.
+    double lastCommandValue() const
     {
-        return requestOn( m_indiP_home );
+        return m_lastCommand[m_stageName].get<double>();
     }
 
-    /// Create a `stop` request with `request=On`.
-    pcf::IndiProperty stopRequest() const
+    /// Device the last command was sent to.
+    std::string lastCommandDevice() const
     {
-        return requestOn( m_indiP_stop );
+        return m_lastCommand.getDevice();
     }
 
-    /// Return the configured serial port path.
-    const std::string &port() const
+    /// Operator status text.
+    std::string status()
     {
-        return m_port;
+        return m_ipStatus["current"].getValue();
     }
 
-    /// Read a configuration file into the inherited application configurator.
-    void readConfigFile( const std::string &path /**< [in] configuration file path */ )
+    /// Set the post-home offset.
+    void homeOffset( double deg )
     {
-        config.readConfig( path );
+        m_homeOffsetDeg = deg;
     }
 
-    /// Return the configured baud rate.
-    int baud() const
+    /// Set `stage.powerOnHome`.
+    void powerOnHome( bool on )
     {
-        return m_baud;
+        m_powerOnHome = on;
     }
 
-    /// Return the configured pulses-per-revolution value.
-    uint32_t pulsesPerRev() const
-    {
-        return m_pulsesPerRev;
-    }
-
-    /// Return the configured Elliptec address nibble.
-    char addr() const
-    {
-        return m_addr;
-    }
-
-    /// Return the configured default read timeout.
-    int readTimeoutMs() const
-    {
-        return m_readTimeoutMs;
-    }
-
-    /// Return the configured velocity percentage.
-    int velPercent() const
-    {
-        return m_velPercent;
-    }
-
-    /// Return the configured optimize command.
-    const std::string &optimizeCmd() const
-    {
-        return m_cmdOptimize;
-    }
-
-    /// Return the configured save command.
-    const std::string &saveCmd() const
-    {
-        return m_cmdSave;
-    }
-
-    /// Return the configured communication miss threshold.
-    int commMaxMisses() const
-    {
-        return m_commMaxMisses;
-    }
-
-    /// Return the configured preset tolerance in degrees.
-    double presetToleranceDeg() const
-    {
-        return m_presetToleranceDeg;
-    }
-
-    /// Return whether maintenance commands are enabled.
-    bool enableMaintenance() const
-    {
-        return m_enableMaintenance;
-    }
-
-    /// Return whether serial frame tracing is enabled.
-    bool serialTrace() const
-    {
-        return m_serialTrace;
-    }
-
-    /// Return the configured optimize timeout in seconds.
-    double optimizeTimeoutSec() const
-    {
-        return m_optimizeTimeoutSec;
-    }
-
-    /// Force the motion timeout in seconds.
-    void setMoveTimeout( double sec /**< [in] timeout in seconds */ )
-    {
-        m_moveTimeoutSec = sec;
-    }
-
-    /// Force whether a stop was requested during the pending operation.
-    void setStopRequested( bool requested /**< [in] new flag */ )
-    {
-        m_stopRequested = requested;
-    }
-
-    /// Return the configured motion timeout in seconds.
-    double moveTimeoutSec() const
-    {
-        return m_moveTimeoutSec;
-    }
-
-    /// Force the optimize timeout in seconds.
-    void setOptimizeTimeout( double sec /**< [in] timeout in seconds */ )
-    {
-        m_optimizeTimeoutSec = sec;
-    }
-
-    /// Return the configured post-home offset in degrees.
-    double homeOffsetDeg() const
-    {
-        return m_homeOffsetDeg;
-    }
-
-    /// Return the model number reported by the device.
-    uint8_t model() const
-    {
-        return m_model;
-    }
-
-    /// Force the model number reported by the device.
-    void setModel( uint8_t model /**< [in] model number, e.g. 21 */ )
-    {
-        m_model = model;
-    }
-
-    /// Force whether maintenance commands are enabled.
-    void setEnableMaintenance( bool enable /**< [in] new flag */ )
-    {
-        m_enableMaintenance = enable;
-    }
-
-    /// Force the preset tolerance in degrees.
-    void setPresetTolerance( double tol /**< [in] tolerance in degrees */ )
-    {
-        m_presetToleranceDeg = tol;
-    }
-
-    /// Return the operator-facing error text.
-    const std::string &errorText() const
-    {
-        return m_errorText;
-    }
-
-    /// Return the latched error code for the pending operation.
-    uint8_t latchedError() const
-    {
-        return m_latchedError;
-    }
-
-    /// Return whether a stop was requested during the pending operation.
-    bool stopRequested() const
-    {
-        return m_stopRequested;
-    }
-
-    /// Force whether the pending operation has seen a busy status.
-    void setSawBusy( bool saw /**< [in] new flag */ )
-    {
-        m_sawBusy = saw;
-    }
-
-    /// Force the latched error code.
-    void setLatchedError( uint8_t code /**< [in] error code */ )
-    {
-        m_latchedError = code;
-    }
-
-    /// Force whether the next connection performs the power-on home.
-    void setPowerOnHome( bool enable /**< [in] stage.powerOnHome */, bool pending /**< [in] home pending */ )
-    {
-        m_powerOnHome        = enable;
-        m_powerOnHomePending = pending;
-    }
-
-    /// Return whether the power-on home is still pending.
-    bool powerOnHomePending() const
-    {
-        return m_powerOnHomePending;
-    }
-
-    /// Return the current shutdown flag.
-    int shutdownRequested() const
-    {
-        return m_shutdown;
-    }
-
-    /// Return the current open file descriptor.
-    int fd() const
-    {
-        return m_fd;
-    }
-
-    /// Return the current connected state.
-    bool connected() const
-    {
-        return m_connected;
-    }
-
-    /// Return the current homed state.
-    bool homed() const
-    {
-        return m_homed;
-    }
-
-    /// Return the current pulse count.
-    int32_t positionPulses() const
-    {
-        return m_posPulses;
-    }
-
-    /// Return the current position in degrees.
-    double positionDeg() const
-    {
-        return m_posDeg;
-    }
-
-    /// Return the current status byte.
-    uint8_t gs() const
-    {
-        return m_gs;
-    }
-
-    /// Return the current pending command.
-    pendingT pending() const
-    {
-        return m_pending;
-    }
-
-    /// Return the current moving code.
+    /// Current stdMotionStage moving code.
     int8_t moving() const
     {
         return m_moving;
     }
 
-    /// Return the current moving-state classification.
-    int8_t movingState() const
-    {
-        return m_movingState;
-    }
-
-    /// Return the cached status hint.
-    const std::string &statusHint() const
-    {
-        return m_statusHint;
-    }
-
-    /// Return the current status text property value.
-    std::string statusText() const
-    {
-        return m_ipStatus["current"].getValue();
-    }
-
-    /// Return the current status property state.
-    pcf::IndiProperty::PropertyStateType statusState() const
-    {
-        return m_ipStatus.getState();
-    }
-
-    /// Return the current preset telemetry value.
-    float presetValue() const
+    /// Current preset (1-based, 0 for none).
+    float preset() const
     {
         return m_preset;
     }
 
-    /// Return the current preset target telemetry value.
-    float presetTargetValue() const
-    {
-        return m_preset_target;
-    }
-
-    /// Return the current communication miss counter.
-    int commMisses() const
-    {
-        return m_commMisses;
-    }
-
-    /// Return the currently configured relative move step.
-    double relStepDeg() const
-    {
-        return m_relStepDeg;
-    }
-
-    /// Return the numeric preset current element value.
-    double presetCurrentElement() const
-    {
-        return std::stod( m_indiP_preset["current"].getValue() );
-    }
-
-    /// Return the numeric preset target element value.
-    double presetTargetElement() const
-    {
-        return std::stod( m_indiP_preset["target"].getValue() );
-    }
-
-    /// Return the preset-name property state.
-    pcf::IndiProperty::PropertyStateType presetNameState() const
-    {
-        return m_indiP_presetName.getState();
-    }
-
-    /// Return whether a preset-name switch is on.
-    bool presetNameOn( const std::string &name /**< [in] preset alias to inspect */ ) const
-    {
-        return m_indiP_presetName[name].getSwitchState() == pcf::IndiElement::On;
-    }
-
-  private:
-    /// Create a property with the same unique key as a template but no elements.
-    pcf::IndiProperty emptyMatchingProperty_( const pcf::IndiProperty &tmpl /**< [in] template property */ ) const
-    {
-        pcf::IndiProperty ip( tmpl.getType() );
-        ip.setDevice( m_configName );
-        ip.setName( tmpl.getName() );
-        return ip;
-    }
-};
-
-/// \endcond
-
-/// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
-/// Test-only CRTP probe used to exercise `stdMotionStage` branches that are difficult to reach through `elliptecCtrl`.
-class stdMotionStage_probe : public MagAOX::app::dev::stdMotionStage<stdMotionStage_probe>
-{
-    friend class MagAOX::app::dev::stdMotionStage<stdMotionStage_probe>;
-
-  public:
-    /// Local configurator used by the probe harness.
-    mx::app::appConfigurator config;
-
-    /// Null test INDI driver pointer matching the type expected by `stdMotionStage`.
-    MagAOX::app::indiDriver<stdMotionStage_probe> *m_indiDriver{ nullptr };
-
-    /// Mutex matching the INDI interface expected by `stdMotionStage`.
-    std::mutex m_indiMutex;
-
-    /// Construct a probe instance with a deterministic device name.
-    explicit stdMotionStage_probe( const std::string &device ) : m_configName( device )
-    {
-    }
-
-    /// Return the configured device name.
-    const std::string &configName() const
-    {
-        return m_configName;
-    }
-
-    /// Minimal logging shim matching the interface used by `stdMotionStage`.
-    template <typename logT, int retval = 0>
-    static int log( const typename logT::messageT & )
-    {
-        return retval;
-    }
-
-    /// Minimal logging shim matching the interface used by `stdMotionStage`.
-    template <typename logT, int retval = 0, typename... argTs>
-    static int log( argTs &&...args )
-    {
-        static_cast<void>( sizeof...( args ) );
-        return retval;
-    }
-
-    /// Force the default-position synthesis flag.
-    void setDefaultPositions( bool defaultPositions /**< [in] new default-position flag */ )
-    {
-        m_defaultPositions = defaultPositions;
-    }
-
-    /// Force whether preset requests should be integer-valued.
-    void setFractionalPresets( bool fractionalPresets /**< [in] new fractional-preset flag */ )
-    {
-        m_fractionalPresets = fractionalPresets;
-    }
-
-    /// Force the configured preset table.
-    void setPresets( const std::vector<float> &positions, const std::vector<std::string> &names )
-    {
-        m_presetPositions = positions;
-        m_presetNames     = names;
-    }
-
-    /// Force the reported preset index returned to `stdMotionStage`.
-    void setReportedPresetNumber( int presetNumber /**< [in] reported preset index */ )
-    {
-        m_reportedPresetNumber = presetNumber;
-    }
-
-    /// Force the current motion bookkeeping fields.
-    void setStageTelemetry( int8_t moving /**< [in] moving state */,
-                            int8_t movingState /**< [in] command class */,
-                            float  preset /**< [in] current preset */ )
-    {
-        m_moving      = moving;
-        m_movingState = movingState;
-        m_preset      = preset;
-    }
-
-    /// Force the preset-name alias tracking index.
-    int setPresetAliasIndex( int presetNameIndex /**< [in] alias index */ )
-    {
-        return setPresetNameTracking( presetNameIndex );
-    }
-
-    /// Read a configuration file into the probe configurator.
-    void readConfigFile( const std::string &path /**< [in] configuration file path */ )
+    /// Read a configuration file and load it.
+    int loadConfigFile( const std::string &path )
     {
         config.readConfig( path );
+        return loadConfigImpl( config );
     }
 
-    /// Run the `stdMotionStage` configuration registration.
-    int setupStageConfig()
+    /// Configured low-level name.
+    const std::string &lowLevelName() const
     {
-        return MagAOX::app::dev::stdMotionStage<stdMotionStage_probe>::setupConfig( config );
+        return m_lowLevelName;
     }
 
-    /// Run the `stdMotionStage` configuration loader.
-    int loadStageConfig()
+    /// Configured stage name.
+    const std::string &stageName() const
     {
-        return MagAOX::app::dev::stdMotionStage<stdMotionStage_probe>::loadConfig( config );
+        return m_stageName;
     }
 
-    /// Run the `stdMotionStage` startup helper.
-    int startupStage()
+    /// Configured home offset.
+    double homeOffsetDeg() const
     {
-        return MagAOX::app::dev::stdMotionStage<stdMotionStage_probe>::appStartup();
-    }
-
-    /// Force the nth property registration to fail.
-    void failRegisterOnCall( int callIndex /**< [in] registration call index to fail */ )
-    {
-        m_failRegisterCall = callIndex;
-        m_registerCalls    = 0;
-    }
-
-    /// Return the preset positions after loading configuration.
-    const std::vector<float> &presetPositions() const
-    {
-        return m_presetPositions;
-    }
-
-    /// Return the captured step size passed to `createStandardIndiNumber`.
-    double capturedNumberStep() const
-    {
-        return m_capturedNumberStep;
-    }
-
-    /// Return the captured format passed to `createStandardIndiNumber`.
-    const std::string &capturedNumberFormat() const
-    {
-        return m_capturedNumberFormat;
-    }
-
-    /// Return how many times `moveTo()` has been called.
-    int moveToCalls() const
-    {
-        return m_moveToCalls;
-    }
-
-    /// Return the most recent `moveTo()` target.
-    float lastMoveTarget() const
-    {
-        return m_lastMoveTarget;
-    }
-
-    /// Return how many times `startHoming()` has been called.
-    int homeCalls() const
-    {
-        return m_homeCalls;
-    }
-
-    /// Return how many times `stop()` has been called.
-    int stopCalls() const
-    {
-        return m_stopCalls;
-    }
-
-    /// Expose the currently tracked preset target.
-    float presetTargetValue() const
-    {
-        return m_preset_target;
-    }
-
-    /// Expose the captured active preset name.
-    std::string activePresetNameDirect( int presetIndex /**< [in] preset index */ ) const
-    {
-        return activePresetName( presetIndex );
-    }
-
-    /// Expose the preset name used for stage telemetry.
-    std::string telemetryPresetNameDirect()
-    {
-        return telemetryPresetName();
-    }
-
-    /// Create a valid numeric preset request.
-    pcf::IndiProperty presetRequest( float target /**< [in] preset target */ ) const
-    {
-        pcf::IndiProperty ip = m_indiP_preset;
-        ip["target"].set( target );
-        return ip;
-    }
-
-    /// Create a preset request with the correct key but no target/current element.
-    pcf::IndiProperty presetNoValueRequest() const
-    {
-        return emptyMatchingProperty_( m_indiP_preset );
-    }
-
-    /// Create a partial preset-name request to exercise missing-element handling.
-    pcf::IndiProperty presetNamePartialRequest( const std::vector<std::string> &presentNames,
-                                                const std::string              &onName ) const
-    {
-        pcf::IndiProperty ip = emptyMatchingProperty_( m_indiP_presetName );
-        ip.setRule( pcf::IndiProperty::OneOfMany );
-
-        for( const auto &name : presentNames )
-        {
-            ip.add( pcf::IndiElement( name, name == onName ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
-        }
-
-        return ip;
-    }
-
-    /// Create a home request property with the correct key but no request element.
-    pcf::IndiProperty homeNoRequest() const
-    {
-        return emptyMatchingProperty_( m_indiP_home );
-    }
-
-    /// Create a home request property with `request=Off`.
-    pcf::IndiProperty homeOffRequest() const
-    {
-        pcf::IndiProperty ip = m_indiP_home;
-        ip["request"].setSwitchState( pcf::IndiElement::Off );
-        return ip;
-    }
-
-    /// Create a stop request property with the correct key but no request element.
-    pcf::IndiProperty stopNoRequest() const
-    {
-        return emptyMatchingProperty_( m_indiP_stop );
-    }
-
-    /// Create a stop request property with `request=Off`.
-    pcf::IndiProperty stopOffRequest() const
-    {
-        pcf::IndiProperty ip = m_indiP_stop;
-        ip["request"].setSwitchState( pcf::IndiElement::Off );
-        return ip;
-    }
-
-    /// Implement the required stop interface.
-    int stop()
-    {
-        ++m_stopCalls;
-        return 0;
-    }
-
-    /// Implement the required homing interface.
-    int startHoming()
-    {
-        ++m_homeCalls;
-        return 0;
-    }
-
-    /// Implement the required preset-number interface.
-    float presetNumber()
-    {
-        return static_cast<float>( m_reportedPresetNumber );
-    }
-
-    /// Implement the required move interface.
-    int moveTo( float target /**< [in] requested preset target */ )
-    {
-        ++m_moveToCalls;
-        m_lastMoveTarget = target;
-        return 0;
-    }
-
-    /// Minimal numeric-property helper matching the MagAOXApp interface.
-    template <typename T>
-    int createStandardIndiNumber( pcf::IndiProperty &prop,
-                                  const std::string &name,
-                                  const T           &min,
-                                  const T           &max,
-                                  const T           &step,
-                                  const std::string &format,
-                                  const std::string &label = "",
-                                  const std::string &group = "" )
-    {
-        m_capturedNumberStep   = static_cast<double>( step );
-        m_capturedNumberFormat = format;
-
-        prop = pcf::IndiProperty( pcf::IndiProperty::Number );
-        prop.setDevice( m_configName );
-        prop.setName( name );
-        prop.setPerm( pcf::IndiProperty::ReadWrite );
-        prop.setState( pcf::IndiProperty::Idle );
-
-        prop.add( pcf::IndiElement( "current" ) );
-        prop["current"].setMin( min );
-        prop["current"].setMax( max );
-        prop["current"].setStep( step );
-        if( !format.empty() )
-        {
-            prop["current"].setFormat( format );
-        }
-
-        prop.add( pcf::IndiElement( "target" ) );
-        prop["target"].setMin( min );
-        prop["target"].setMax( max );
-        prop["target"].setStep( step );
-        if( !format.empty() )
-        {
-            prop["target"].setFormat( format );
-        }
-
-        if( !label.empty() )
-        {
-            prop.setLabel( label );
-        }
-
-        if( !group.empty() )
-        {
-            prop.setGroup( group );
-        }
-
-        return 0;
-    }
-
-    /// Minimal request-switch helper matching the MagAOXApp interface.
-    int createStandardIndiRequestSw( pcf::IndiProperty &prop,
-                                     const std::string &name,
-                                     const std::string &label = "",
-                                     const std::string &group = "" )
-    {
-        prop = pcf::IndiProperty( pcf::IndiProperty::Switch );
-        prop.setDevice( m_configName );
-        prop.setName( name );
-        prop.setPerm( pcf::IndiProperty::ReadWrite );
-        prop.setState( pcf::IndiProperty::Idle );
-        prop.setRule( pcf::IndiProperty::AtMostOne );
-        prop.add( pcf::IndiElement( "request", pcf::IndiElement::Off ) );
-
-        if( !label.empty() )
-        {
-            prop.setLabel( label );
-        }
-
-        if( !group.empty() )
-        {
-            prop.setGroup( group );
-        }
-
-        return 0;
-    }
-
-    /// Minimal selection-switch helper matching the MagAOXApp interface.
-    int createStandardIndiSelectionSw( pcf::IndiProperty              &prop,
-                                       const std::string              &name,
-                                       const std::vector<std::string> &elements,
-                                       const std::string              &label = "",
-                                       const std::string              &group = "" )
-    {
-        if( elements.empty() )
-        {
-            return -1;
-        }
-
-        prop = pcf::IndiProperty( pcf::IndiProperty::Switch );
-        prop.setDevice( m_configName );
-        prop.setName( name );
-        prop.setPerm( pcf::IndiProperty::ReadWrite );
-        prop.setState( pcf::IndiProperty::Idle );
-        prop.setRule( pcf::IndiProperty::OneOfMany );
-
-        for( const auto &element : elements )
-        {
-            prop.add( pcf::IndiElement( element, pcf::IndiElement::Off ) );
-        }
-
-        if( !label.empty() )
-        {
-            prop.setLabel( label );
-        }
-
-        if( !group.empty() )
-        {
-            prop.setGroup( group );
-        }
-
-        return 0;
-    }
-
-    /// Allow tests to inject registration failures without setting up a real INDI driver.
-    int registerIndiPropertyNew( pcf::IndiProperty &prop, int ( *callBack )( void *, const pcf::IndiProperty &ipRecv ) )
-    {
-        static_cast<void>( prop );
-        static_cast<void>( callBack );
-
-        ++m_registerCalls;
-        if( m_failRegisterCall > 0 && m_registerCalls == m_failRegisterCall )
-        {
-            return -1;
-        }
-
-        return 0;
-    }
-
-    /// Minimal `updateIfChanged` shim used by `stdMotionStage`.
-    template <typename T>
-    int updateIfChanged( pcf::IndiProperty                          &prop,
-                         const std::string                          &element,
-                         const T                                    &value,
-                         const pcf::IndiProperty::PropertyStateType &state = pcf::IndiProperty::Idle )
-    {
-        if( !prop.find( element ) )
-        {
-            prop.add( pcf::IndiElement( element ) );
-        }
-
-        prop[element].set( value );
-        prop.setState( state );
-        return 0;
-    }
-
-    /// Minimal `indiTargetUpdate` shim used by the numeric preset callback.
-    template <typename T>
-    int indiTargetUpdate( pcf::IndiProperty       &localProperty,
-                          T                       &localTarget,
-                          const pcf::IndiProperty &remoteProperty,
-                          bool                     setBusy )
-    {
-        if( remoteProperty.createUniqueKey() != localProperty.createUniqueKey() )
-        {
-            return -1;
-        }
-
-        if( !( remoteProperty.find( "target" ) || remoteProperty.find( "current" ) ) )
-        {
-            return -1;
-        }
-
-        if( remoteProperty.find( "target" ) )
-        {
-            localTarget = remoteProperty["target"].get<T>();
-        }
-        else if( remoteProperty.find( "current" ) )
-        {
-            localTarget = remoteProperty["current"].get<T>();
-        }
-        else
-        {
-            return -1;
-        }
-
-        return updateIfChanged( localProperty, "target", localTarget, setBusy ? INDI_BUSY : INDI_IDLE );
-    }
-
-    /// Minimal telemetry shim used by `recordStage`.
-    template <typename telT>
-    int telem( const telT & )
-    {
-        return 0;
-    }
-
-  private:
-    std::string m_configName; ///< Probe device name used in generated INDI properties.
-
-    int         m_reportedPresetNumber{ 0 }; ///< Preset index reported back to `stdMotionStage`.
-    int         m_moveToCalls{ 0 };          ///< Number of times `moveTo()` was called.
-    float       m_lastMoveTarget{ 0.0F };    ///< Most recent move target.
-    int         m_homeCalls{ 0 };            ///< Number of times `startHoming()` was called.
-    int         m_stopCalls{ 0 };            ///< Number of times `stop()` was called.
-    int         m_failRegisterCall{ 0 };     ///< Registration call index that should fail.
-    int         m_registerCalls{ 0 };        ///< Count of registration calls observed during startup.
-    double      m_capturedNumberStep{ 0.0 }; ///< Step size captured from `createStandardIndiNumber`.
-    std::string m_capturedNumberFormat;      ///< Format captured from `createStandardIndiNumber`.
-
-    /// Create a property with the same unique key as a template but no elements.
-    pcf::IndiProperty emptyMatchingProperty_( const pcf::IndiProperty &tmpl /**< [in] template property */ ) const
-    {
-        pcf::IndiProperty ip( tmpl.getType() );
-        ip.setDevice( m_configName );
-        ip.setName( tmpl.getName() );
-        return ip;
+        return m_homeOffsetDeg;
     }
 };
-/// \endcond
 
-/// Build a reply frame for the configured Elliptec address.
-std::string elliptecReply( char addr, const std::string &payload )
+/// Start a client and bring its stage to READY at the given position.
+void readyAt( elliptecCtrl_test &app, double deg )
 {
-    return std::string( 1, addr ) + payload + "\r\n";
+    REQUIRE( app.startup() == 0 );
+    app.llPos( deg );
+    app.llState( "READY" );
+    REQUIRE( app.state() == MagAOX::app::stateCodes::READY );
 }
 
 } // namespace
+/// \endcond
 
-/// Verify `elliptecCtrl` configuration loading and helper formatting behavior.
-/**
- * \ingroup elliptecCtrl_unit_test
+/// Low-level states map onto the client FSM and status text.
+/** \ingroup elliptecCtrl_unit_test
  */
-TEST_CASE( "elliptecCtrl loads configuration and formats helper state correctly", "[elliptecCtrl]" )
+TEST_CASE( "elliptecCtrl follows the low-level state of its stage", "[elliptecCtrl]" )
 {
-    SECTION( "loadConfig clamps values and helper formatting covers integer and fractional text" )
-    {
-        elliptecCtrl_test app( "elliptec-config", testRoot( "config" ) );
-
-        app.setupConfig();
-
-        mx::app::writeConfigFile(
-            "/tmp/elliptecCtrl_test.conf",
-            { "stage",
-              "stage",
-              "stage",
-              "serial",
-              "stage",
-              "motion",
-              "device",
-              "device",
-              "comm",
-              "serial",
-              "stage",
-              "stage",
-              "motion" },
-            { "port",
-              "baud",
-              "address",
-              "readTimeoutMs",
-              "homeOffset",
-              "velPercent",
-              "optimizeCmd",
-              "saveCmd",
-              "maxPollMisses",
-              "trace",
-              "presetTolerance",
-              "enableMaintenance",
-              "optimizeTimeoutSec" },
-            { "/tmp/elliptec", "115200", "f", "25", "372.5", "140", "xy", "zz", "0", "true", "0.25", "true", "30" } );
-
-        app.readConfigFile( "/tmp/elliptecCtrl_test.conf" );
-        app.loadConfig();
-
-        // clang-format off
 #ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
-        MagAOX::app::elliptecCtrl::setupConfig();
-        MagAOX::app::elliptecCtrl::loadConfig();
-        MagAOX::app::elliptecCtrl::loadConfigImpl( app.config );
-        MagAOX::app::elliptecCtrl::frame_( "gs" );
-        MagAOX::app::elliptecCtrl::degToPulses_( 90.0 );
-        MagAOX::app::elliptecCtrl::pulsesToDeg_( 1024 );
-        MagAOX::app::elliptecCtrl::presetToleranceDeg_();
-        MagAOX::app::elliptecCtrl::presetIndexForPosition_( 20.0 );
-        MagAOX::app::elliptecCtrl::buildStageNamePosText_();
+    // clang-format off
+    MagAOX::app::elliptecCtrl::setCallBack_m_indiP_llState( ip );
+    MagAOX::app::elliptecCtrl::setCallBack_m_indiP_llPos( ip );
+    MagAOX::app::elliptecCtrl::setCallBack_m_indiP_llError( ip );
+    MagAOX::app::elliptecCtrl::applyState_( "" );
+    MagAOX::app::elliptecCtrl::updateStatus_();
+    // clang-format on
 #endif
-        // clang-format on
 
-        REQUIRE( app.shutdownRequested() == 0 );
-        REQUIRE( app.port() == "/tmp/elliptec" );
-        REQUIRE( app.baud() == 115200 );
-        REQUIRE( app.addr() == 'F' );
-        REQUIRE( app.readTimeoutMs() == 25 );
-        REQUIRE( app.velPercent() == 100 );
-        REQUIRE( app.homeOffsetDeg() == Approx( 12.5 ) );
-        REQUIRE( app.serialTrace() == true );
-        REQUIRE( app.presetToleranceDeg() == Approx( 0.25 ) );
-        REQUIRE( app.enableMaintenance() == true );
-        REQUIRE( app.optimizeTimeoutSec() == Approx( 30 ) );
-        REQUIRE( app.optimizeCmd() == "xy" );
-        REQUIRE( app.saveCmd() == "zz" );
-        REQUIRE( app.commMaxMisses() == 1 );
-        REQUIRE( app.frameDirect( "gs" ) == "Fgs" );
+    using MagAOX::app::stateCodes;
 
-        app.setPulsesPerRev( 4096 );
-        app.setPresets( { 10.0F, 20.0F, 20.0F }, { "open", "science", "focus" } );
+    elliptecCtrl_test app( "ellctrl-states" );
+    REQUIRE( app.startup() == 0 );
+    REQUIRE( app.state() == stateCodes::NOTCONNECTED );
+    REQUIRE( app.status() == "Not Connected" );
 
-        REQUIRE( app.degToPulsesDirect( 180.0 ) == 2048 );
-        REQUIRE( app.pulsesToDegDirect( 1024 ) == Approx( 90.0 ) );
-        REQUIRE( app.presetToleranceDirect() == Approx( 0.25 ) );
-        REQUIRE( app.presetIndexDirect( 20.0 ) == 1 );
-        REQUIRE( app.stageNamePosText() == "open:10, science:20, focus:20" );
-    }
+    REQUIRE( app.llState( "POWEROFF" ) == 0 );
+    REQUIRE( app.state() == stateCodes::POWEROFF );
+    REQUIRE( app.status() == "Powered Off" );
 
-    SECTION( "loadConfig accepts configured pulses per revolution and negative velocity clamps to zero" )
-    {
-        elliptecCtrl_test appClamp( "elliptec-config-clamp", testRoot( "config_clamp" ) );
+    app.llState( "POWERON" );
+    REQUIRE( app.state() == stateCodes::POWERON );
 
-        appClamp.setupConfig();
+    app.llState( "NODEVICE" );
+    REQUIRE( app.state() == stateCodes::NODEVICE );
+    REQUIRE( app.status() == "Wrong or missing device" );
 
-        mx::app::writeConfigFile( "/tmp/elliptecCtrl_test_clamp.conf",
-                                  { "stage", "stage", "serial", "motion", "comm" },
-                                  { "port", "pulsesPerRev", "readTimeoutMs", "velPercent", "maxPollMisses" },
-                                  { "/tmp/elliptec-clamp", "8192", "25", "-10", "4" } );
+    app.llState( "NOTHOMED" );
+    REQUIRE( app.state() == stateCodes::NOTHOMED );
+    REQUIRE( app.moving() == -1 );
+    REQUIRE( app.status() == "Not Homed" );
 
-        appClamp.readConfigFile( "/tmp/elliptecCtrl_test_clamp.conf" );
-        appClamp.loadConfig();
+    app.llState( "OPERATING" );
+    REQUIRE( app.state() == stateCodes::OPERATING );
+    REQUIRE( app.status() == "Moving" );
 
-        REQUIRE( appClamp.pulsesPerRev() == 8192 );
-        REQUIRE( appClamp.velPercent() == 0 );
-        REQUIRE( appClamp.presetToleranceDeg() == Approx( 0.5 ) );
-        REQUIRE( appClamp.moveTimeoutSec() == Approx( 30 ) );
-        REQUIRE( appClamp.enableMaintenance() == false );
-        REQUIRE( appClamp.serialTrace() == false );
-    }
+    app.llState( "HOMING" );
+    REQUIRE( app.state() == stateCodes::HOMING );
+    REQUIRE( app.status() == "Homing" );
 
-    SECTION( "loadConfig rejects presets closer than twice the tolerance and a non-positive tolerance" )
-    {
-        // clang-format off
-#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
-        MagAOX::app::elliptecCtrl::validatePresets_();
-#endif
-        // clang-format on
+    app.llState( "READY" );
+    REQUIRE( app.state() == stateCodes::READY );
+    REQUIRE( app.status() == "OK" );
 
-        { // app scope
-            elliptecCtrl_test appClose( "elliptec-config-close", testRoot( "config_close" ) );
-            appClose.setupConfig();
-            mx::app::writeConfigFile( "/tmp/elliptecCtrl_test_close.conf",
-                                      { "stage", "presets", "presets" },
-                                      { "port", "names", "positions" },
-                                      { "/tmp/elliptec-close", "a, b, c", "10, 359.8, 0.5" } );
-            appClose.readConfigFile( "/tmp/elliptecCtrl_test_close.conf" );
-            appClose.loadConfig();
-            REQUIRE( appClose.shutdownRequested() != 0 );
-        }
+    app.llError( "move failed (stopped away from target)" );
+    REQUIRE( app.status() == "Error: move failed (stopped away from target)" );
+    app.llError( "" );
+    REQUIRE( app.status() == "OK" );
 
-        { // app scope
-            elliptecCtrl_test appAlias( "elliptec-config-alias", testRoot( "config_alias" ) );
-            appAlias.setupConfig();
-            mx::app::writeConfigFile( "/tmp/elliptecCtrl_test_alias.conf",
-                                      { "stage", "presets", "presets" },
-                                      { "port", "names", "positions" },
-                                      { "/tmp/elliptec-alias", "a, b, c", "10, 20, 20" } );
-            appAlias.readConfigFile( "/tmp/elliptecCtrl_test_alias.conf" );
-            appAlias.loadConfig();
-            REQUIRE( appAlias.shutdownRequested() == 0 );
-        }
+    app.llState( "SOMETHING" );
+    REQUIRE( app.state() == stateCodes::NOTCONNECTED );
 
-        { // app scope
-            elliptecCtrl_test appTol( "elliptec-config-tol", testRoot( "config_tol" ) );
-            appTol.setupConfig();
-            mx::app::writeConfigFile( "/tmp/elliptecCtrl_test_tol.conf",
-                                      { "stage", "stage" },
-                                      { "port", "presetTolerance" },
-                                      { "/tmp/elliptec-tol", "0" } );
-            appTol.readConfigFile( "/tmp/elliptecCtrl_test_tol.conf" );
-            appTol.loadConfig();
-            REQUIRE( appTol.shutdownRequested() != 0 );
-        }
-    }
-
-    SECTION( "stageNamePos text reports empty and fractional preset tables cleanly" )
-    {
-        elliptecCtrl_test appStageText( "elliptec-stage-text", testRoot( "stage_text" ) );
-        appStageText.setPresets( {}, {} );
-        REQUIRE( appStageText.stageNamePosText() == "(none)" );
-
-        appStageText.setPresets( { 12.25F, 20.5F }, { "science", "offset" } );
-        REQUIRE( appStageText.stageNamePosText() == "science:12.25, offset:20.5" );
-    }
+    // Updates for other stages on the bus are ignored.
+    app.llState( "READY" );
+    REQUIRE( app.llState( "POWEROFF", "qwp2" ) == 0 );
+    REQUIRE( app.llPos( 42.0, "qwp2" ) == 0 );
+    REQUIRE( app.state() == stateCodes::READY );
 }
 
-/// Verify the shared `stdMotionStage` helper covers its default-position, callback, and startup-failure branches.
-/**
- * \ingroup elliptecCtrl_unit_test
+/// Presets, absolute and relative moves are sent as absolute targets in degrees.
+/** \ingroup elliptecCtrl_unit_test
  */
-TEST_CASE( "stdMotionStage helper probe covers default positions and callback edge cases", "[elliptecCtrl]" )
+TEST_CASE( "elliptecCtrl sends absolute targets to the low level", "[elliptecCtrl]" )
 {
-    SECTION( "default preset positions are synthesized and zero entries fall back to their order" )
-    {
-        stdMotionStage_probe app( "stdmotion-config" );
-        app.setDefaultPositions( true );
-        REQUIRE( app.setupStageConfig() == 0 );
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecCtrl::moveTo( 0 );
+    MagAOX::app::elliptecCtrl::newCallBack_m_ipAbsDeg( ip );
+    MagAOX::app::elliptecCtrl::newCallBack_m_ipRelDeg( ip );
+    MagAOX::app::elliptecCtrl::newCallBack_m_ipRelMove( ip );
+    MagAOX::app::elliptecCtrl::sendNumber_( "", 0 );
+    // clang-format on
+#endif
 
-        mx::app::writeConfigFile( "/tmp/stdMotionStage_probe.conf",
-                                  { "stage", "presets", "presets" },
-                                  { "powerOnHome", "names", "positions" },
-                                  { "true", "open, science, focus", "0, 5, 0" } );
+    elliptecCtrl_test app( "ellctrl-targets" );
+    readyAt( app, 0.0 );
 
-        app.readConfigFile( "/tmp/stdMotionStage_probe.conf" );
-        REQUIRE( app.loadStageConfig() == 0 );
-        REQUIRE( app.presetPositions().size() == 3 );
-        REQUIRE( app.presetPositions()[0] == Approx( 1.0F ) );
-        REQUIRE( app.presetPositions()[1] == Approx( 5.0F ) );
-        REQUIRE( app.presetPositions()[2] == Approx( 3.0F ) );
-    }
+    REQUIRE( app.requestPreset( 1 ) == 0 );
+    REQUIRE( app.lastCommandDevice() == "ellbus" );
+    REQUIRE( app.lastCommandValue() == Approx( 115.0 ) );
+    REQUIRE( app.lastCommandName() == "tgt_pos" );
+    REQUIRE( app.state() == MagAOX::app::stateCodes::OPERATING );
 
-    SECTION( "non-fractional preset startup uses integer formatting" )
-    {
-        stdMotionStage_probe app( "stdmotion-format" );
-        app.setFractionalPresets( false );
-        app.setPresets( { 1.0F, 2.0F }, { "open", "science" } );
+    app.llPos( 115.2 );
+    app.llState( "READY" );
+    REQUIRE( app.preset() == Approx( 1.0F ) );
 
-        REQUIRE( app.startupStage() == 0 );
-        REQUIRE( app.capturedNumberStep() == Approx( 1.0 ) );
-        REQUIRE( app.capturedNumberFormat() == "%d" );
-    }
+    REQUIRE( app.requestPresetName( "sky" ) == 0 );
+    REQUIRE( app.lastCommandValue() == Approx( 300.0 ) );
+    REQUIRE( app.lastCommandName() == "tgt_pos" );
 
-    SECTION( "startup failure branches return errors at each registration point" )
-    {
-        for( int callIndex = 1; callIndex <= 4; ++callIndex )
-        {
-            stdMotionStage_probe app( "stdmotion-register-fail-" + std::to_string( callIndex ) );
-            app.setPresets( { 1.0F, 2.0F }, { "open", "science" } );
-            app.failRegisterOnCall( callIndex );
+    REQUIRE( app.absDeg( 400.0 ) == 0 );
+    REQUIRE( app.lastCommandValue() == Approx( 40.0 ) );
+    REQUIRE( app.lastCommandName() == "tgt_pos" );
 
-            REQUIRE( app.startupStage() == -1 );
-        }
+    // Relative moves become absolute targets: current position + step, wrapped.
+    app.llPos( 350.0 );
+    REQUIRE( app.relDeg( 900.0 ) == 0 ); // clamped to 360
+    REQUIRE( app.relDeg( 20.0 ) == 0 );
+    REQUIRE( app.relMove() == 0 );
+    REQUIRE( app.lastCommandValue() == Approx( 10.0 ) );
+    REQUIRE( app.lastCommandName() == "tgt_pos" );
 
-        stdMotionStage_probe appEmpty( "stdmotion-empty-names" );
-        REQUIRE( appEmpty.startupStage() == -1 );
-    }
-
-    SECTION( "callbacks handle missing elements, missing values, and alias fallbacks" )
-    {
-        stdMotionStage_probe app( "stdmotion-callbacks" );
-        app.setPresets( { 10.0F, 20.0F, 20.0F }, { "open", "science", "focus" } );
-        REQUIRE( app.startupStage() == 0 );
-
-        REQUIRE( app.newCallBack_m_indiP_preset( app.presetNoValueRequest() ) == -1 );
-        REQUIRE( app.moveToCalls() == 0 );
-
-        REQUIRE( app.newCallBack_m_indiP_presetName(
-                     app.presetNamePartialRequest( { "science", "focus" }, "focus" ) ) == 0 );
-        REQUIRE( app.moveToCalls() == 1 );
-        REQUIRE( app.lastMoveTarget() == Approx( 20.0F ) );
-        REQUIRE( app.presetTargetValue() == Approx( 20.0F ) );
-
-        REQUIRE( app.newCallBack_m_indiP_home( app.homeNoRequest() ) == 0 );
-        REQUIRE( app.homeCalls() == 0 );
-        REQUIRE( app.newCallBack_m_indiP_home( app.homeOffRequest() ) == 0 );
-        REQUIRE( app.homeCalls() == 0 );
-
-        REQUIRE( app.newCallBack_m_indiP_stop( app.stopNoRequest() ) == 0 );
-        REQUIRE( app.stopCalls() == 0 );
-        REQUIRE( app.newCallBack_m_indiP_stop( app.stopOffRequest() ) == 0 );
-        REQUIRE( app.stopCalls() == 0 );
-
-        app.setStageTelemetry( 0, 0, 0.0F );
-        REQUIRE( app.telemetryPresetNameDirect().empty() == true );
-
-        app.setStageTelemetry( 1, 0, 1.0F );
-        app.setReportedPresetNumber( 9 );
-        REQUIRE( app.activePresetNameDirect( 9 ).empty() == true );
-        REQUIRE( app.telemetryPresetNameDirect().empty() == true );
-
-        REQUIRE( app.setPresetAliasIndex( 2 ) == 0 );
-        app.setReportedPresetNumber( 1 );
-        REQUIRE( app.activePresetNameDirect( 1 ) == "focus" );
-    }
+    // Presets near 0/360 match across the wrap.
+    app.llPos( 299.7 );
+    app.llState( "READY" );
+    REQUIRE( app.preset() == Approx( 2.0F ) );
+    app.llPos( 301.0 );
+    REQUIRE( app.preset() == Approx( 0.0F ) );
 }
 
-/// Verify the lifecycle helpers integrate with power-off handling and forced telemetry hooks.
-/**
- * \ingroup elliptecCtrl_unit_test
+/// Motion is refused unless the stage is connected and not homing.
+/** \ingroup elliptecCtrl_unit_test
  */
-TEST_CASE( "elliptecCtrl lifecycle helpers handle startup, power off, and shutdown", "[elliptecCtrl]" )
+TEST_CASE( "elliptecCtrl refuses motion when the stage cannot move", "[elliptecCtrl]" )
 {
-    elliptecCtrl_test app( "elliptec-lifecycle", testRoot( "lifecycle" ) );
-    app.setPresets( { 10.0F, 20.0F }, { "open", "science" } );
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecCtrl::motionAllowed_( "" );
+    // clang-format on
+#endif
 
+    elliptecCtrl_test app( "ellctrl-refuse" );
     REQUIRE( app.startup() == 0 );
 
-    // clang-format off
+    REQUIRE( app.requestPreset( 1 ) == 0 );
+    REQUIRE( app.absDeg( 10.0 ) == 0 );
+    REQUIRE( app.relMove() == 0 );
+    REQUIRE( app.pressHome() == 0 );
+    REQUIRE( app.lastCommandName().empty() );
+
+    app.llState( "POWEROFF" );
+    REQUIRE( app.requestPreset( 1 ) == 0 );
+    REQUIRE( app.lastCommandName().empty() );
+
+    // Homing blocks motion until it finishes.
+    app.llState( "NOTHOMED" );
+    REQUIRE( app.pressHome() == 0 );
+    REQUIRE( app.lastCommandName() == "req_home" );
+    REQUIRE( app.requestPreset( 1 ) == 0 );
+    REQUIRE( app.lastCommandName().empty() );
+}
+
+/// Home, the post-home offset, and stop.
+/** \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "elliptecCtrl home sequence and stop", "[elliptecCtrl]" )
+{
 #ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
-    MagAOX::app::elliptecCtrl::appStartup();
+    // clang-format off
+    MagAOX::app::elliptecCtrl::startHoming();
+    MagAOX::app::elliptecCtrl::stop();
+    MagAOX::app::elliptecCtrl::sendRequest_( "" );
+    // clang-format on
+#endif
+
+    using MagAOX::app::stateCodes;
+
+    SECTION( "without an offset the home ends when the low level reports READY" )
+    {
+        elliptecCtrl_test app( "ellctrl-home" );
+        REQUIRE( app.startup() == 0 );
+        app.llState( "NOTHOMED" );
+
+        REQUIRE( app.pressHome() == 0 );
+        REQUIRE( app.lastCommandName() == "req_home" );
+        REQUIRE( app.state() == stateCodes::HOMING );
+
+        app.llState( "HOMING" );
+        app.llPos( 0.0 );
+        app.llState( "READY" );
+        REQUIRE( app.state() == stateCodes::READY );
+        REQUIRE( app.lastCommandName().empty() );
+    }
+
+    SECTION( "with an offset the home continues to the offset angle" )
+    {
+        elliptecCtrl_test app( "ellctrl-home-offset" );
+        app.homeOffset( 45.0 );
+        REQUIRE( app.startup() == 0 );
+        app.llState( "NOTHOMED" );
+
+        REQUIRE( app.pressHome() == 0 );
+        app.lastCommandName();
+        app.llState( "HOMING" );
+        app.llPos( 0.0 );
+        app.llState( "READY" );
+
+        REQUIRE( app.lastCommandValue() == Approx( 45.0 ) );
+        REQUIRE( app.lastCommandName() == "tgt_pos" );
+        REQUIRE( app.state() == stateCodes::HOMING );
+        REQUIRE( app.status() == "Homed. Applying offset" );
+
+        // A READY report from before the offset move does not end the home.
+        app.llState( "READY" );
+        REQUIRE( app.state() == stateCodes::HOMING );
+
+        app.llState( "OPERATING" );
+        REQUIRE( app.state() == stateCodes::HOMING );
+
+        app.llPos( 45.1 );
+        app.llState( "READY" );
+        REQUIRE( app.state() == stateCodes::READY );
+    }
+
+    SECTION( "the offset completes on a position update after READY" )
+    {
+        elliptecCtrl_test app( "ellctrl-home-offset-pos" );
+        app.homeOffset( 45.0 );
+        REQUIRE( app.startup() == 0 );
+        app.llState( "NOTHOMED" );
+        REQUIRE( app.pressHome() == 0 );
+        app.llState( "HOMING" );
+        app.llPos( 0.0 );
+        app.llState( "READY" ); // sends the offset
+        app.llState( "READY" ); // stale
+        app.llPos( 45.0 );      // arrives
+        REQUIRE( app.state() == stateCodes::READY );
+    }
+
+    SECTION( "a failed home returns to NOTHOMED" )
+    {
+        elliptecCtrl_test app( "ellctrl-home-fail" );
+        REQUIRE( app.startup() == 0 );
+        app.llState( "NOTHOMED" );
+        REQUIRE( app.pressHome() == 0 );
+        app.llState( "HOMING" );
+        app.llState( "NOTHOMED" );
+        REQUIRE( app.state() == stateCodes::NOTHOMED );
+
+        // A new home can be requested.
+        app.lastCommandName();
+        REQUIRE( app.pressHome() == 0 );
+        REQUIRE( app.lastCommandName() == "req_home" );
+    }
+
+    SECTION( "stop sends a halt request" )
+    {
+        elliptecCtrl_test app( "ellctrl-stop" );
+        readyAt( app, 0.0 );
+        REQUIRE( app.pressStop() == 0 );
+        REQUIRE( app.lastCommandName() == "req_halt" );
+    }
+}
+
+/// The power-on home runs once after power-on, not after a reconnect.
+/** \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "elliptecCtrl power-on home", "[elliptecCtrl]" )
+{
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
     MagAOX::app::elliptecCtrl::appLogic();
-    MagAOX::app::elliptecCtrl::onPowerOff();
-    MagAOX::app::elliptecCtrl::whilePowerOff();
-    MagAOX::app::elliptecCtrl::checkRecordTimes();
-    MagAOX::app::elliptecCtrl::recordTelem( static_cast<const telem_stage *>( nullptr ) );
-    MagAOX::app::elliptecCtrl::recordTelem( static_cast<const telem_position *>( nullptr ) );
-    MagAOX::app::elliptecCtrl::recordStage( true );
-    MagAOX::app::elliptecCtrl::recordPosition( true );
-    MagAOX::app::elliptecCtrl::appShutdown();
-#endif
     // clang-format on
+#endif
 
-    REQUIRE( app.checkRecordTimes() == 0 );
-    REQUIRE( app.recordTelem( static_cast<const telem_stage *>( nullptr ) ) == 0 );
-    REQUIRE( app.recordTelem( static_cast<const telem_position *>( nullptr ) ) == 0 );
-    REQUIRE( app.recordStage( true ) == 0 );
-    REQUIRE( app.recordPosition( true ) == 0 );
+    elliptecCtrl_test app( "ellctrl-power-home" );
+    app.powerOnHome( true );
+    REQUIRE( app.startup() == 0 );
 
-    app.setConnected( true );
-    app.setHomed( true );
-    app.setPending( elliptecCtrl_test::pendingT::Move );
-    app.setMoving( 1 );
-    app.setPowerOnHome( true, false );
-    app.setPower( 0, 0 );
-
-    // The framework sets POWEROFF and calls onPowerOff(); appLogic leaves the device alone while powered off.
-    app.setFsmState( MagAOX::app::stateCodes::POWEROFF );
-    REQUIRE( app.onPowerOff() == 0 );
-    REQUIRE( app.connected() == false );
-    REQUIRE( app.homed() == false );
-    REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-    REQUIRE( app.moving() == -2 );
-    REQUIRE( app.powerOnHomePending() == true );
-    REQUIRE( app.statusText() == "Powered Off" );
-
-    REQUIRE( app.whilePowerOff() == 0 );
+    app.llState( "POWEROFF" );
+    app.llState( "POWERON" );
+    app.llState( "NOTCONNECTED" );
     REQUIRE( app.logic() == 0 );
-    REQUIRE( app.state() == MagAOX::app::stateCodes::POWEROFF );
+    REQUIRE( app.lastCommandName().empty() );
 
-    REQUIRE( app.shutdown() == 0 );
-    REQUIRE( app.fd() == -1 );
+    app.llState( "NOTHOMED" );
+    REQUIRE( app.logic() == 0 );
+    REQUIRE( app.lastCommandName() == "req_home" );
+
+    app.llState( "HOMING" );
+    app.llState( "READY" );
+    REQUIRE( app.logic() == 0 );
+
+    // A communication loss and reconnect does not home again.
+    app.llState( "NOTCONNECTED" );
+    app.llState( "READY" );
+    REQUIRE( app.logic() == 0 );
+    REQUIRE( app.lastCommandName().empty() );
+
+    // A failed home leaves NOTHOMED, but does not trigger another automatic home.
+    app.llState( "NOTHOMED" );
+    REQUIRE( app.logic() == 0 );
+    REQUIRE( app.lastCommandName().empty() );
+
+    // The next power cycle homes again.
+    app.llState( "POWEROFF" );
+    app.llState( "NOTHOMED" );
+    REQUIRE( app.logic() == 0 );
+    REQUIRE( app.lastCommandName() == "req_home" );
 }
 
-/// Verify the serial/protocol helpers talk the Elliptec wire format and cover success and timeout branches.
-/**
- * \ingroup elliptecCtrl_unit_test
+/// Configuration: names, home offset wrapping, and preset validation.
+/** \ingroup elliptecCtrl_unit_test
  */
-TEST_CASE( "elliptecCtrl serial helpers and appLogic connection path speak Elliptec frames", "[elliptecCtrl]" )
+TEST_CASE( "elliptecCtrl configuration", "[elliptecCtrl]" )
 {
-    SECTION( "invalid serial ports fail cleanly" )
-    {
-        elliptecCtrl_test app( "elliptec-open-fail", testRoot( "open_fail" ) );
-        app.setPortPath( "/tmp/does-not-exist" );
-
-        REQUIRE( app.openPortDirect() == -1 );
-    }
-
-    SECTION( "the connection path queries the device and records the latest state" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                if( cmd == "0in" )
-                {
-                    return elliptecReply( '0', "IN00001000" );
-                }
-                if( cmd == "0gp" )
-                {
-                    return elliptecReply( '0', "PO00000800" );
-                }
-                if( cmd == "0gs" )
-                {
-                    return elliptecReply( '0', "GS00" );
-                }
-                if( cmd == "0sv50" )
-                {
-                    return elliptecReply( '0', "GS00" );
-                }
-
-                return elliptecReply( '0', "GS00" );
-            } );
-
-        elliptecCtrl_test app( "elliptec-connect", testRoot( "connect" ) );
-        app.setPresets( { 180.0F, 270.0F }, { "half", "threeQuarter" } );
-        app.setPortPath( dev.slavePath() );
-
-        REQUIRE( app.startup() == 0 );
-        REQUIRE( app.logic() == 0 );
-
-        REQUIRE( app.connected() == true );
-        REQUIRE( app.positionPulses() == 0x800 );
-        REQUIRE( app.positionDeg() == Approx( 180.0 ) );
-        REQUIRE( app.gs() == 0x00 );
-        REQUIRE( app.state() == MagAOX::app::stateCodes::NOTHOMED );
-
-        const auto commands = dev.commands();
-        REQUIRE( commands.size() >= 4 );
-        REQUIRE( commands[0] == "0in" );
-        REQUIRE( commands[1] == "0sv50" );
-        REQUIRE( commands[2] == "0gp" );
-        REQUIRE( commands[3] == "0gs" );
-    }
-
-    SECTION( "protocol helpers return soft timeouts when no frame arrives" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                static_cast<void>( cmd );
-                return "";
-            } );
-
-        elliptecCtrl_test app( "elliptec-timeout", testRoot( "timeout" ) );
-        app.setPortPath( dev.slavePath() );
-        app.setTimeouts( 5 );
-
-        REQUIRE( app.openPortDirect() == 0 );
-        REQUIRE( app.qInfoDirect() == 1 );
-        REQUIRE( app.qStatusDirect() == 1 );
-        REQUIRE( app.qPositionDirect() == 1 );
-    }
-
-    SECTION( "serial helpers cover empty-drain, delayed writes, null replies, and hard query errors" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                return elliptecReply( cmd[0], "GS00" );
-            } );
-        elliptecCtrl_test app( "elliptec-serial-cold-paths", testRoot( "serial_cold_paths" ) );
-
-        app.setPortPath( dev.slavePath() );
-        app.setPostWriteSleepMs( 1 );
-
-        REQUIRE( app.openPortDirect() == 0 );
-        REQUIRE( app.drainFramesDirect() == 0 );
-        REQUIRE( app.writeAllDirect( "0gs" ) == 0 );
-        REQUIRE( app.sendDirect( "gs" ) == 0 );
-
-        app.closePortDirect();
-        REQUIRE( app.qInfoDirect() == -1 );
-    }
-}
-
-/// Verify the INDI-facing status and callback glue covers the remaining dispatch paths.
-/**
- * \ingroup elliptecCtrl_unit_test
- */
-TEST_CASE( "elliptecCtrl status publishing and callback shims cover the INDI glue paths", "[elliptecCtrl]" )
-{
-    auto prepareMotionApp = []( elliptecCtrl_test &app, fakeElliptecDevice &dev )
-    {
-        app.setPresets( { 10.0F, 20.0F, 20.0F }, { "open", "science", "focus" } );
-        app.setPulsesPerRev( 4096 );
-        app.setPortPath( dev.slavePath() );
-        REQUIRE( app.startup() == 0 );
-        REQUIRE( app.openPortDirect() == 0 );
-        app.setConnected( true );
-        app.setPower( 1, 1 );
-    };
-
-    SECTION( "status publishing and stdMotionStage INDI updates reflect the current state" )
-    {
-        elliptecCtrl_test app( "elliptec-indi-status", testRoot( "indi_status" ) );
-        app.setPresets( { 10.0F, 20.0F, 20.0F }, { "open", "science", "focus" } );
-
-        REQUIRE( app.startup() == 0 );
-        REQUIRE( app.setupINDITransport() == 0 );
-
-        app.setFsmState( MagAOX::app::stateCodes::POWEROFF );
-        app.setConnected( false );
-        app.setMoving( -2 );
-        app.updateStatusDirect();
-        REQUIRE( app.statusText() == "Powered Off" );
-        REQUIRE( app.statusState() == pcf::IndiProperty::Idle );
-
-        app.setFsmState( MagAOX::app::stateCodes::NOTCONNECTED );
-        app.updateStatusDirect();
-        REQUIRE( app.statusText() == "Not Connected" );
-
-        app.setConnected( true );
-        app.setMoving( 2 );
-        app.updateStatusDirect();
-        REQUIRE( app.statusText() == "Homing" );
-        REQUIRE( app.statusState() == pcf::IndiProperty::Busy );
-
-        app.setMoving( 1 );
-        app.setStatusHint( "" );
-        app.updateStatusDirect();
-        REQUIRE( app.statusText() == "Busy" );
-
-        app.setStatusHint( "Applying Custom Move" );
-        app.updateStatusDirect();
-        REQUIRE( app.statusText() == "Applying Custom Move" );
-
-        app.setMoving( 0 );
-        app.setHomed( false );
-        app.updateStatusDirect();
-        REQUIRE( app.statusText() == "Not Homed" );
-
-        app.setHomed( true );
-        app.setPositionDeg( 20.0 );
-        app.setMovingState( 1 );
-        app.setMoving( 1 );
-        app.setPresetTelemetry( 2.0F, 2.0F );
-        REQUIRE( app.setPresetAliasIndex( 2 ) == 0 );
-        REQUIRE( app.updateStageINDIDirect() == 0 );
-        REQUIRE( app.presetNameOn( "focus" ) == true );
-        REQUIRE( app.presetNameState() == pcf::IndiProperty::Busy );
-        REQUIRE( app.presetCurrentElement() == Approx( 2.0 ) );
-        REQUIRE( app.presetTargetElement() == Approx( 2.0 ) );
-
-        app.setMoving( 0 );
-        REQUIRE( app.updateStageINDIDirect() == 0 );
-        REQUIRE( app.presetNameOn( "focus" ) == true );
-
-        app.clearPresetAliasIndex();
-        REQUIRE( app.updateStageINDIDirect() == 0 );
-        REQUIRE( app.presetNameOn( "science" ) == true );
-
-        app.setFsmState( MagAOX::app::stateCodes::READY );
-        app.updateStatusDirect();
-        REQUIRE( app.statusText() == "OK" );
-        REQUIRE( app.statusState() == pcf::IndiProperty::Idle );
-
-        app.updateStatusDirect();
-        REQUIRE( app.statusText() == "OK" );
-    }
-
-    SECTION( "static callback shims forward to the app and stdMotionStage handlers" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                return elliptecReply( cmd[0], "GS00" );
-            } );
-        elliptecCtrl_test app( "elliptec-static-shims", testRoot( "static_shims" ) );
-        prepareMotionApp( app, dev );
-
-        // clang-format off
 #ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
-        MagAOX::app::elliptecCtrl::st_newCallBack_m_ipAbsDeg( &app, app.absDegRequest( 45.0 ) );
-        MagAOX::app::elliptecCtrl::st_newCallBack_m_ipRelDeg( &app, app.relDegRequest( -720.0 ) );
-        MagAOX::app::elliptecCtrl::st_newCallBack_m_ipRelMove( &app, app.relMoveRequest() );
-        MagAOX::app::elliptecCtrl::st_newCallBack_m_ipVelPct( &app, app.velPctRequest( 10 ) );
-        MagAOX::app::elliptecCtrl::st_newCallBack_m_ipOptimize( &app, app.optimizeRequest() );
-        MagAOX::app::elliptecCtrl::st_newCallBack_m_ipSave( &app, app.saveRequest() );
-        MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::st_newCallBack_stdMotionStage(
-            &app, app.presetRequest( 1.0F ) );
-#endif
-        // clang-format on
-
-        dev.clearCommands();
-        REQUIRE( MagAOX::app::elliptecCtrl::st_newCallBack_m_ipAbsDeg( &app, app.absDegRequest( 45.0 ) ) == 0 );
-        REQUIRE( dev.commands().size() == 1 );
-        REQUIRE( dev.commands()[0] == "0ma00000200" );
-
-        REQUIRE( MagAOX::app::elliptecCtrl::st_newCallBack_m_ipRelDeg( &app, app.relDegRequest( -900.0 ) ) == 0 );
-        REQUIRE( app.relStepDeg() == Approx( -360.0 ) );
-
-        dev.clearCommands();
-        REQUIRE( MagAOX::app::elliptecCtrl::st_newCallBack_m_ipRelMove( &app, app.relMoveRequest() ) == 0 );
-        REQUIRE( dev.commands().size() == 1 );
-        REQUIRE( dev.commands()[0] == "0mrFFFFF000" );
-
-        dev.clearCommands();
-        REQUIRE( MagAOX::app::elliptecCtrl::st_newCallBack_m_ipVelPct( &app, app.velPctRequest( 10 ) ) == 0 );
-        REQUIRE( dev.commands().back() == "0sv0A" );
-
-        app.setEnableMaintenance( true );
-        dev.clearCommands();
-        REQUIRE( MagAOX::app::elliptecCtrl::st_newCallBack_m_ipOptimize( &app, app.optimizeRequest() ) == 0 );
-        REQUIRE( dev.commands().back() == "0om" );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Optimize );
-
-        app.setPending( elliptecCtrl_test::pendingT::None );
-        dev.clearCommands();
-        REQUIRE( MagAOX::app::elliptecCtrl::st_newCallBack_m_ipSave( &app, app.saveRequest() ) == 0 );
-        REQUIRE( dev.commands().back() == "0us" );
-
-        dev.clearCommands();
-        REQUIRE( MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::st_newCallBack_stdMotionStage(
-                     &app, app.presetRequest( 1.0F ) ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma00000072" );
-
-        dev.clearCommands();
-        REQUIRE( MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::st_newCallBack_stdMotionStage(
-                     &app, app.presetNameRequest( "focus" ) ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma000000E4" );
-
-        dev.clearCommands();
-        REQUIRE( MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::st_newCallBack_stdMotionStage(
-                     &app, app.homeRequest() ) == 0 );
-        REQUIRE( dev.commands().size() == 1 );
-        REQUIRE( dev.commands()[0] == "0ho0" );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Home );
-
-        dev.clearCommands();
-        REQUIRE( MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::st_newCallBack_stdMotionStage(
-                     &app, app.stopRequest() ) == 0 );
-        REQUIRE( dev.commands().back() == "0st" );
-
-        pcf::IndiProperty bogus( pcf::IndiProperty::Number );
-        bogus.setDevice( app.port() );
-        bogus.setName( "bogus" );
-        bogus.add( pcf::IndiElement( "target" ) );
-        bogus["target"].set( 1.0 );
-        REQUIRE( MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::st_newCallBack_stdMotionStage(
-                     &app, bogus ) == -1 );
-    }
-}
-
-/// Verify motion helpers and both standard and Elliptec-specific callbacks command the expected frames.
-/**
- * \ingroup elliptecCtrl_unit_test
- */
-TEST_CASE( "elliptecCtrl motion callbacks and helpers issue the expected controller commands", "[elliptecCtrl]" )
-{
-    auto prepareMotionApp = []( elliptecCtrl_test &app, fakeElliptecDevice &dev )
-    {
-        app.setPresets( { 10.0F, 20.0F, 20.0F }, { "open", "science", "focus" } );
-        app.setPulsesPerRev( 4096 );
-        app.setPortPath( dev.slavePath() );
-        REQUIRE( app.startup() == 0 );
-        REQUIRE( app.openPortDirect() == 0 );
-        app.setConnected( true );
-        app.setPower( 1, 1 );
-    };
-
-    SECTION( "absolute and relative move helpers encode pulse commands correctly" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                return elliptecReply( cmd[0], "GS00" );
-            } );
-        elliptecCtrl_test app( "elliptec-helpers", testRoot( "helpers" ) );
-        prepareMotionApp( app, dev );
-
-        // clang-format off
-#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
-        MagAOX::app::elliptecCtrl::moveAbsDeg_( 810.0 );
-        MagAOX::app::elliptecCtrl::moveRelDeg_( 45.0 );
-        MagAOX::app::elliptecCtrl::moveRelDegCmdFromRelMove_();
-        MagAOX::app::elliptecCtrl::startMoveToDeg_( 90.0 );
-        MagAOX::app::elliptecCtrl::cmd_setvel_( 140 );
-        MagAOX::app::elliptecCtrl::cmd_optimize_();
-        MagAOX::app::elliptecCtrl::cmd_save_();
-#endif
-        // clang-format on
-
-        dev.clearCommands();
-        REQUIRE( app.moveAbsDegDirect( 810.0 ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma00000400" );
-
-        dev.clearCommands();
-        REQUIRE( app.moveRelDegDirect( 45.0 ) == 0 );
-        REQUIRE( dev.commands().back() == "0mr00000200" );
-
-        app.setRelStepDeg( -45.0 );
-        dev.clearCommands();
-        REQUIRE( app.moveRelDegCmdDirect() == 0 );
-        REQUIRE( dev.commands().back() == "0mrFFFFFE00" );
-
-        dev.clearCommands();
-        REQUIRE( app.startMoveToDegDirect( 90.0 ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma00000400" );
-
-        dev.clearCommands();
-        REQUIRE( app.cmdSetVelDirect( 140 ) == 0 );
-        REQUIRE( dev.commands().back() == "0sv64" );
-
-        dev.clearCommands();
-        app.setMovingState( 0 );
-        REQUIRE( app.moveToDirect( 0.0F ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma00000072" );
-
-        dev.clearCommands();
-        REQUIRE( app.moveToDirect( 99.0F ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma000000E4" );
-    }
-
-    SECTION( "Elliptec-specific callbacks update state and send the expected commands" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                return elliptecReply( cmd[0], "GS00" );
-            } );
-        elliptecCtrl_test app( "elliptec-callbacks", testRoot( "callbacks" ) );
-        prepareMotionApp( app, dev );
-
-        // clang-format off
-#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
-        MagAOX::app::elliptecCtrl::newCallBack_m_ipAbsDeg( app.absDegRequest( 45.0 ) );
-        MagAOX::app::elliptecCtrl::newCallBack_m_ipRelDeg( app.relDegRequest( 90.0 ) );
-        MagAOX::app::elliptecCtrl::newCallBack_m_ipRelMove( app.relMoveRequest() );
-        MagAOX::app::elliptecCtrl::newCallBack_m_ipVelPct( app.velPctRequest( 100 ) );
-        MagAOX::app::elliptecCtrl::newCallBack_m_ipOptimize( app.optimizeRequest() );
-        MagAOX::app::elliptecCtrl::newCallBack_m_ipSave( app.saveRequest() );
-#endif
-        // clang-format on
-
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_ipAbsDeg( app.absDegRequest( 45.0 ) ) == 0 );
-        REQUIRE( dev.commands().size() == 1 );
-        REQUIRE( dev.commands()[0] == "0ma00000200" );
-
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_ipAbsDeg( app.absDegRequest( 405.0 ) ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma00000200" );
-
-        REQUIRE( app.newCallBack_m_ipRelDeg( app.relDegRequest( 900.0 ) ) == 0 );
-        REQUIRE( app.relStepDeg() == Approx( 360.0 ) );
-
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_ipRelMove( app.relMoveRequest() ) == 0 );
-        REQUIRE( dev.commands().size() == 1 );
-        REQUIRE( dev.commands()[0] == "0mr00001000" );
-
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_ipVelPct( app.velPctRequest( 140 ) ) == 0 );
-        REQUIRE( app.velPercent() == 100 );
-        REQUIRE( dev.commands().back() == "0sv64" );
-
-        // Maintenance commands are rejected unless enabled.
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_ipOptimize( app.optimizeRequest() ) == 0 );
-        REQUIRE( app.newCallBack_m_ipSave( app.saveRequest() ) == 0 );
-        REQUIRE( dev.commands().empty() );
-
-        app.setEnableMaintenance( true );
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_ipOptimize( app.optimizeRequest() ) == 0 );
-        REQUIRE( dev.commands().back() == "0om" );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Optimize );
-        REQUIRE( app.moving() == 1 );
-
-        // Save and motion are rejected while optimizing.
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_ipSave( app.saveRequest() ) == 0 );
-        REQUIRE( app.newCallBack_m_ipAbsDeg( app.absDegRequest( 45.0 ) ) == 0 );
-        REQUIRE( app.newCallBack_m_ipRelMove( app.relMoveRequest() ) == 0 );
-        REQUIRE( app.newCallBack_m_indiP_preset( app.presetRequest( 1.0F ) ) == 0 );
-        REQUIRE( app.newCallBack_m_indiP_home( app.homeRequest() ) == 0 );
-        REQUIRE( dev.commands().empty() );
-
-        app.setPending( elliptecCtrl_test::pendingT::None );
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_ipSave( app.saveRequest() ) == 0 );
-        REQUIRE( dev.commands().back() == "0us" );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-    }
-
-    SECTION( "stdMotionStage callbacks preserve preset tracking and command the expected moves" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                return elliptecReply( cmd[0], "GS00" );
-            } );
-        elliptecCtrl_test app( "elliptec-stdmotion", testRoot( "stdmotion" ) );
-        prepareMotionApp( app, dev );
-
-        // clang-format off
-#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
-        MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::newCallBack_m_indiP_preset( app.presetRequest( 2.0F ) );
-        MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::newCallBack_m_indiP_presetName( app.presetNameRequest( "focus" ) );
-        MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::newCallBack_m_indiP_home( app.homeRequest() );
-        MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::newCallBack_m_indiP_stop( app.stopRequest() );
-#endif
-        // clang-format on
-
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_indiP_preset( app.presetRequest( 2.0F ) ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma000000E4" );
-        REQUIRE( app.presetTargetValue() == Approx( 2.0F ) );
-
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_indiP_presetName( app.presetNameRequest( "focus" ) ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma000000E4" );
-        app.setPositionDeg( 20.0 );
-        app.syncPresetStateDirect();
-        REQUIRE( app.telemetryPresetNameDirect() == "focus" );
-
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_indiP_home( app.homeRequest() ) == 0 );
-        REQUIRE( dev.commands().size() == 1 );
-        REQUIRE( dev.commands()[0] == "0ho0" );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Home );
-        REQUIRE( app.moving() == 2 );
-
-        // A preset move during homing is rejected.
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_indiP_preset( app.presetRequest( 1.0F ) ) == 0 );
-        REQUIRE( dev.commands().empty() );
-
-        // Stop is sent but does not assume success: the pending home is left for the poll to resolve.
-        dev.clearCommands();
-        REQUIRE( app.newCallBack_m_indiP_stop( app.stopRequest() ) == 0 );
-        REQUIRE( dev.commands().back() == "0st" );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Home );
-        REQUIRE( app.stopRequested() == true );
-    }
-}
-
-/// Verify helper edge cases cover the remaining serial, parser, and appLogic branches.
-/**
- * \ingroup elliptecCtrl_unit_test
- */
-TEST_CASE( "elliptecCtrl helper edge cases cover the remaining serial and FSM branches", "[elliptecCtrl]" )
-{
-    SECTION( "serial helpers cover closed-port errors and the baud-rate mapper" )
-    {
-        elliptecCtrl_test         app( "elliptec-helper-edges", testRoot( "helper_edges" ) );
-        elliptecCtrl_test::frameT frame;
-
-        REQUIRE( app.toTermiosBaudDirect( 9600 ) == B9600 );
-        REQUIRE( app.toTermiosBaudDirect( 19200 ) == B19200 );
-        REQUIRE( app.toTermiosBaudDirect( 38400 ) == B38400 );
-        REQUIRE( app.toTermiosBaudDirect( 57600 ) == B57600 );
-        REQUIRE( app.toTermiosBaudDirect( 115200 ) == B115200 );
-        REQUIRE( app.toTermiosBaudDirect( 230400 ) == B9600 );
-
-        REQUIRE( app.drainFramesDirect() == -1 );
-        REQUIRE( app.writeAllDirect( "0gs" ) == -1 );
-        REQUIRE( app.readFrameDirect( frame, 5 ) == -1 );
-        REQUIRE( app.queryDirect( "gs", "GS", frame, 5 ) == -1 );
-
-        app.setPulsesPerRev( 0 );
-        REQUIRE( app.degToPulsesDirect( 90.0 ) == 0 );
-        REQUIRE( app.pulsesToDegDirect( 256 ) == Approx( 0.0 ) );
-    }
-
-    SECTION( "direct motion helpers return hard errors when the port is unavailable" )
-    {
-        elliptecCtrl_test app( "elliptec-command-errors", testRoot( "command_errors" ) );
-        app.setPresets( { 10.0F, 20.0F }, { "open", "science" } );
-        app.setPulsesPerRev( 4096 );
-        app.setPower( 1, 1 );
-
-        // Not connected: motion requests are rejected without error.
-        REQUIRE( app.stop() == 0 );
-        REQUIRE( app.startHoming() == 0 );
-
-        // Connected but the port is gone: sends fail.
-        app.setConnected( true );
-        REQUIRE( app.stop() == 0 );
-        REQUIRE( app.startHoming() == -1 );
-        REQUIRE( app.startMoveToDegDirect( 45.0 ) == -1 );
-        REQUIRE( app.moveAbsDegDirect( 45.0 ) == -1 );
-        REQUIRE( app.moveRelDegDirect( 45.0 ) == -1 );
-        REQUIRE( app.cmdHomeDirect( 0 ) == -1 );
-        REQUIRE( app.cmdStopDirect() == -1 );
-        REQUIRE( app.cmdOptimizeDirect() == -1 );
-        REQUIRE( app.cmdSaveDirect() == -1 );
-    }
-
-    SECTION( "callbacks no-op while powered off and stdMotionStage guards invalid preset-name requests" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                return elliptecReply( cmd[0], "GS00" );
-            } );
-        elliptecCtrl_test app( "elliptec-callback-guards", testRoot( "callback_guards" ) );
-
-        app.setPresets( { 10.0F, 20.0F, 20.0F }, { "open", "science", "focus" } );
-        app.setPulsesPerRev( 4096 );
-        app.setPortPath( dev.slavePath() );
-        REQUIRE( app.startup() == 0 );
-        REQUIRE( app.openPortDirect() == 0 );
-        app.setConnected( true );
-        app.setPower( 0, 0 );
-
-        pcf::IndiProperty relMoveOff = app.relMoveRequest();
-        relMoveOff["request"].setSwitchState( pcf::IndiElement::Off );
-
-        pcf::IndiProperty optimizeOff = app.optimizeRequest();
-        optimizeOff["request"].setSwitchState( pcf::IndiElement::Off );
-
-        pcf::IndiProperty saveOff = app.saveRequest();
-        saveOff["request"].setSwitchState( pcf::IndiElement::Off );
-
-        REQUIRE( app.newCallBack_m_ipAbsDeg( app.absDegRequest( 45.0 ) ) == 0 );
-        REQUIRE( app.newCallBack_m_ipRelMove( relMoveOff ) == 0 );
-        REQUIRE( app.newCallBack_m_ipVelPct( app.velPctRequest( 33 ) ) == 0 );
-        REQUIRE( app.newCallBack_m_ipOptimize( optimizeOff ) == 0 );
-        REQUIRE( app.newCallBack_m_ipSave( saveOff ) == 0 );
-        REQUIRE( MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::st_newCallBack_stdMotionStage(
-                     &app, app.homeRequest() ) == 0 );
-        REQUIRE( MagAOX::app::dev::stdMotionStage<MagAOX::app::elliptecCtrl>::st_newCallBack_stdMotionStage(
-                     &app, app.stopRequest() ) == 0 );
-        REQUIRE( dev.commands().empty() == true );
-
-        app.setPower( 1, 1 );
-        REQUIRE( app.setPresetAliasIndex( -1 ) == -1 );
-
-        pcf::IndiProperty noPresetName = app.presetNameRequest( "open" );
-        noPresetName["open"].setSwitchState( pcf::IndiElement::Off );
-
-        pcf::IndiProperty twoPresetNames = app.presetNameRequest( "open" );
-        twoPresetNames["science"].setSwitchState( pcf::IndiElement::On );
-
-        REQUIRE( app.newCallBack_m_indiP_presetName( noPresetName ) == 0 );
-        REQUIRE( app.newCallBack_m_indiP_presetName( twoPresetNames ) == -1 );
-    }
-
-    SECTION( "parser helpers preserve prior state on malformed replies and command helpers clamp edge cases" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                if( cmd == "0in" )
-                {
-                    return elliptecReply( '0', "INBADHEX!!" );
-                }
-                if( cmd == "0gs" )
-                {
-                    return elliptecReply( '0', "GSZZ" );
-                }
-                if( cmd == "0gp" )
-                {
-                    return elliptecReply( '0', "PO00000Z00" );
-                }
-
-                return elliptecReply( '0', "GS00" );
-            } );
-
-        elliptecCtrl_test app( "elliptec-parser-edges", testRoot( "parser_edges" ) );
-        app.setPresets( { 10.0F, 20.0F }, { "open", "science" } );
-        app.setPulsesPerRev( 4096 );
-        app.setPortPath( dev.slavePath() );
-        REQUIRE( app.startup() == 0 );
-        REQUIRE( app.openPortDirect() == 0 );
-
-        app.setGs( 0xAA );
-        app.setPositionPulses( 123 );
-
-        REQUIRE( app.qInfoDirect() == 0 );
-        REQUIRE( app.degToPulsesDirect( 180.0 ) == 2048 );
-
-        REQUIRE( app.qStatusDirect() == 0 );
-        REQUIRE( app.gs() == 0xAA );
-
-        REQUIRE( app.qPositionDirect() == 0 );
-        REQUIRE( app.positionPulses() == 123 );
-
-        dev.clearCommands();
-        REQUIRE( app.cmdSetVelDirect( -10 ) == 0 );
-        REQUIRE( dev.commands().back() == "0sv00" );
-
-        dev.clearCommands();
-        REQUIRE( app.moveAbsDegDirect( -45.0 ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma00000E00" );
-
-        dev.clearCommands();
-        REQUIRE( app.cmdHomeDirect( 0x0F ) == 0 );
-        REQUIRE( dev.commands().back() == "0hoF" );
-
-        dev.clearCommands();
-        REQUIRE( app.cmdStopDirect() == 0 );
-        REQUIRE( dev.commands().back() == "0st" );
-
-        dev.clearCommands();
-        REQUIRE( app.cmdOptimizeDirect() == 0 );
-        REQUIRE( dev.commands().back() == "0om" );
-
-        dev.clearCommands();
-        REQUIRE( app.cmdSaveDirect() == 0 );
-        REQUIRE( dev.commands().back() == "0us" );
-    }
-
-    SECTION( "callbacks and direct helpers cover the remaining no-value, no-request, clamp, and power-off paths" )
-    {
-        elliptecCtrl_test app( "elliptec-callback-cold-paths", testRoot( "callback_cold_paths" ) );
-        app.setPresets( { 10.0F, 20.0F }, { "open", "science" } );
-        app.setPulsesPerRev( 4096 );
-        app.setPower( 1, 1 );
-
-        REQUIRE( app.startup() == 0 );
-
-        REQUIRE( app.newCallBack_m_ipAbsDeg( app.absDegNoValueRequest() ) == -1 );
-        REQUIRE( app.newCallBack_m_ipRelDeg( app.relDegNoValueRequest() ) == -1 );
-        REQUIRE( app.newCallBack_m_ipRelMove( app.relMoveNoRequest() ) == 0 );
-        REQUIRE( app.newCallBack_m_ipRelMove( app.relMoveRequest() ) == 0 ); // rejected: not connected
-        REQUIRE( app.newCallBack_m_ipVelPct( app.velPctNoValueRequest() ) == -1 );
-        REQUIRE( app.newCallBack_m_ipOptimize( app.optimizeNoRequest() ) == 0 );
-        REQUIRE( app.newCallBack_m_ipSave( app.saveNoRequest() ) == 0 );
-
-        app.setPower( 0, 0 );
-        REQUIRE( app.startMoveToDegDirect( 15.0 ) == 0 );
-
-        app.setPower( 1, 1 );
-        REQUIRE( app.newCallBack_m_ipVelPct( app.velPctRequest( -5 ) ) == 0 );
-        REQUIRE( app.velPercent() == 0 );
-
-        // ELL21 velocity floor applies to INDI requests.
-        app.setModel( 21 );
-        REQUIRE( app.newCallBack_m_ipVelPct( app.velPctRequest( 10 ) ) == 0 );
-        REQUIRE( app.velPercent() == 50 );
-    }
-
-    SECTION( "startup without presets fails cleanly and moveTo rejects an empty preset table" )
-    {
-        elliptecCtrl_test noPresetApp( "elliptec-no-presets", testRoot( "no_presets" ) );
-        noPresetApp.setPower( 1, 1 );
-        REQUIRE( noPresetApp.startup() == -1 );
-        REQUIRE( noPresetApp.moveToDirect( 1.0F ) == -1 );
-    }
-
-    SECTION( "appLogic exercises the powered-off and reconnect path with INDI transport enabled" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                if( cmd == "0in" )
-                {
-                    return elliptecReply( '0', "IN00001000" );
-                }
-                if( cmd == "0gp" )
-                {
-                    return elliptecReply( '0', "PO00000800" );
-                }
-                if( cmd == "0gs" )
-                {
-                    return elliptecReply( '0', "GS00" );
-                }
-                if( cmd == "0sv28" )
-                {
-                    return elliptecReply( '0', "GS00" );
-                }
-
-                return elliptecReply( '0', "GS00" );
-            } );
-
-        elliptecCtrl_test app( "elliptec-applogic-indi", testRoot( "applogic_indi" ) );
-        app.setPresets( { 180.0F, 270.0F }, { "half", "threeQuarter" } );
-
-        REQUIRE( app.startup() == 0 );
-        REQUIRE( app.setupINDITransport() == 0 );
-
-        // Power is being switched off: appLogic leaves the device alone.
-        app.setPortPath( dev.slavePath() );
-        app.setPower( 1, 0 );
-        REQUIRE( app.logic() == 0 );
-        REQUIRE( app.connected() == false );
-        REQUIRE( dev.commands().empty() );
-
-        app.setPower( 1, 1 );
-        REQUIRE( app.logic() == 0 );
-        REQUIRE( app.connected() == true );
-        REQUIRE( app.positionDeg() == Approx( 180.0 ) );
-        REQUIRE( app.state() == MagAOX::app::stateCodes::NOTHOMED );
-    }
-
-    SECTION( "appStartup and appLogic cover the remaining connection and reconnect branches" )
-    {
-        {
-            elliptecCtrl_test uninitialized( "elliptec-uninitialized", testRoot( "uninitialized" ) );
-            REQUIRE( uninitialized.appStartup() == -1 );
-        }
-
-        {
-            elliptecCtrl_test connectFail( "elliptec-connect-fail", testRoot( "connect_fail_logic" ) );
-            connectFail.setPortPath( "/tmp/does-not-exist" );
-            connectFail.setPresets( { 10.0F, 20.0F }, { "open", "science" } );
-            REQUIRE( connectFail.startup() == 0 );
-            connectFail.setFsmState( MagAOX::app::stateCodes::POWERON );
-            REQUIRE( connectFail.logic() == 0 );
-            REQUIRE( connectFail.connected() == false );
-            REQUIRE( connectFail.state() == MagAOX::app::stateCodes::NOTCONNECTED );
-            REQUIRE( connectFail.moving() == -2 );
-        }
-
-        {
-            fakeElliptecDevice dev(
-                []( const std::string &cmd ) -> std::string
-                {
-                    if( cmd == "0in" )
-                    {
-                        return elliptecReply( '0', "IN00001000" );
-                    }
-                    if( cmd == "0gp" )
-                    {
-                        return elliptecReply( '0', "PO00000000" );
-                    }
-                    if( cmd == "0gs" )
-                    {
-                        return elliptecReply( '0', "GS00" );
-                    }
-                    if( cmd == "0sv28" )
-                    {
-                        return elliptecReply( '0', "GS00" );
-                    }
-
-                    return elliptecReply( '0', "GS00" );
-                } );
-
-            elliptecCtrl_test app( "elliptec-applogic-edges", testRoot( "applogic_edges" ) );
-            app.setPresets( { 10.0F, 20.0F }, { "open", "science" } );
-            app.setPortPath( dev.slavePath() );
-            app.setStartupDelayMs( 1 );
-            REQUIRE( app.startup() == 0 );
-            REQUIRE( app.logic() == 0 );
-            REQUIRE( app.connected() == true );
-
-            dev.handler(
-                []( const std::string &cmd ) -> std::string
-                {
-                    static_cast<void>( cmd );
-                    return "";
-                } );
-            app.setTimeouts( 5 );
-            app.setCommMaxMisses( 2 );
-            REQUIRE( app.logic() == 0 );
-            REQUIRE( app.connected() == true );
-            REQUIRE( app.commMisses() == 1 );
-
-            app.closePortDirect();
-            REQUIRE( app.logic() == 0 );
-            REQUIRE( app.connected() == false );
-            REQUIRE( app.state() == MagAOX::app::stateCodes::NOTCONNECTED );
-            REQUIRE( app.moving() == -2 );
-            REQUIRE( app.commMisses() == 0 );
-        }
-    }
-}
-
-/// Verify `pollDevice_()` resolves the motion state machine and alias bookkeeping correctly.
-/**
- * \ingroup elliptecCtrl_unit_test
- */
-TEST_CASE( "elliptecCtrl poll resolution updates stage state across busy, idle, timeout, and offset paths",
-           "[elliptecCtrl]" )
-{
-    auto preparePollingApp = []( elliptecCtrl_test &app, fakeElliptecDevice &dev )
-    {
-        app.setPresets( { 10.0F, 20.0F, 20.0F }, { "open", "science", "focus" } );
-        app.setPulsesPerRev( 4096 );
-        app.setPortPath( dev.slavePath() );
-        REQUIRE( app.startup() == 0 );
-        REQUIRE( app.openPortDirect() == 0 );
-        app.setConnected( true );
-        app.setPower( 1, 1 );
-    };
-
-    SECTION( "soft timeouts are tolerated until the miss budget is exceeded" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                static_cast<void>( cmd );
-                return "";
-            } );
-        elliptecCtrl_test app( "elliptec-soft-timeout", testRoot( "soft_timeout" ) );
-        preparePollingApp( app, dev );
-        app.setTimeouts( 5 );
-        app.setCommMaxMisses( 1 );
-
-        REQUIRE( app.pollDeviceDirect() == 1 );
-        REQUIRE( app.commMisses() == 1 );
-
-        REQUIRE( app.pollDeviceDirect() == -1 );
-        REQUIRE( app.commMisses() == 0 );
-    }
-
-    SECTION( "busy and idle status frames update the motion bookkeeping" )
-    {
-        fakeElliptecDevice dev;
-        elliptecCtrl_test  app( "elliptec-polling", testRoot( "polling" ) );
-        preparePollingApp( app, dev );
-
-        dev.handler(
-            []( const std::string &cmd ) -> std::string
-            {
-                if( cmd == "0gp" )
-                {
-                    return elliptecReply( '0', "PO000000E4" );
-                }
-                if( cmd == "0gs" )
-                {
-                    return elliptecReply( '0', "GS09" );
-                }
-
-                return elliptecReply( '0', "GS00" );
-            } );
-
-        app.setPending( elliptecCtrl_test::pendingT::None );
-        app.setMoving( -1 );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.moving() == 1 );
-        REQUIRE( app.positionPulses() == 0xE4 );
-
-        dev.handler(
-            []( const std::string &cmd ) -> std::string
-            {
-                if( cmd == "0gp" )
-                {
-                    return elliptecReply( '0', "PO000000E4" );
-                }
-                if( cmd == "0gs" )
-                {
-                    return elliptecReply( '0', "GS00" );
-                }
-
-                return elliptecReply( '0', "GS00" );
-            } );
-
-        app.setPending( elliptecCtrl_test::pendingT::Home );
-        app.setHomeOffset( 0.0 );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.homed() == true );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-        REQUIRE( app.moving() == 0 );
-        REQUIRE( app.state() == MagAOX::app::stateCodes::READY );
-        REQUIRE( app.presetValue() == Approx( 2.0F ) );
-
-        dev.handler(
-            []( const std::string &cmd ) -> std::string
-            {
-                if( cmd == "0gp" )
-                {
-                    return elliptecReply( '0', "PO000000E4" );
-                }
-                if( cmd == "0gs" )
-                {
-                    return elliptecReply( '0', "GS09" );
-                }
-
-                return elliptecReply( '0', "GS00" );
-            } );
-
-        app.setPending( elliptecCtrl_test::pendingT::Home );
-        app.setMoving( 0 );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.moving() == 2 );
-
-        app.setPending( elliptecCtrl_test::pendingT::Move );
-        app.setMoving( 0 );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.moving() == 1 );
-
-        dev.handler(
-            []( const std::string &cmd ) -> std::string
-            {
-                if( cmd == "0gp" )
-                {
-                    return elliptecReply( '0', "PO000000E4" );
-                }
-                if( cmd == "0gs" )
-                {
-                    return elliptecReply( '0', "GS00" );
-                }
-
-                return elliptecReply( '0', "GS00" );
-            } );
-
-        app.setPending( elliptecCtrl_test::pendingT::None );
-        app.setHomed( false );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.moving() == -1 );
-
-        app.setHomed( true );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.moving() == 0 );
-    }
-
-    SECTION( "home completion can trigger the configured post-home offset move" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                if( cmd == "0gp" )
-                {
-                    return elliptecReply( '0', "PO00000000" );
-                }
-                if( cmd == "0gs" )
-                {
-                    return elliptecReply( '0', "GS00" );
-                }
-                return elliptecReply( '0', "GS00" );
-            } );
-
-        elliptecCtrl_test app( "elliptec-home-offset", testRoot( "home_offset" ) );
-        preparePollingApp( app, dev );
-        app.setPending( elliptecCtrl_test::pendingT::Home );
-        app.setHomeOffset( 45.0 );
-
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::HomeOffset );
-        REQUIRE( app.moving() == 2 );
-        REQUIRE( app.homed() == false );
-        REQUIRE( app.state() == MagAOX::app::stateCodes::HOMING );
-        REQUIRE( app.statusHint() == "Homed. Applying offset" );
-        REQUIRE( dev.commands().back() == "0ma00000200" );
-
-        // The offset move completes the home once the stage holds still at the offset angle.
-        dev.handler(
-            []( const std::string &cmd ) -> std::string
-            {
-                return elliptecReply( '0', cmd == "0gp" ? "PO00000200" : "GS00" );
-            } );
-        std::this_thread::sleep_for( std::chrono::milliseconds( 550 ) );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::HomeOffset );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-        REQUIRE( app.homed() == true );
-        REQUIRE( app.state() == MagAOX::app::stateCodes::READY );
-    }
-
-    SECTION( "a move completes only when the stage holds still at its target" )
-    {
-        // clang-format off
-#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
-        MagAOX::app::elliptecCtrl::resolvePending_();
-        MagAOX::app::elliptecCtrl::completePending_();
-#endif
-        // clang-format on
-
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                return elliptecReply( cmd[0], cmd.substr( 1, 2 ) == "gp" ? "PO00000000" : "GS00" );
-            } );
-        elliptecCtrl_test app( "elliptec-fresh-idle", testRoot( "fresh_idle" ) );
-        preparePollingApp( app, dev );
-
-        app.setTimeouts( 100 );
-        app.setHomed( true );
-
-        // Idle status right after the command, still at the start position: not complete.
-        REQUIRE( app.moveAbsDegDirect( 90.0 ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma00000400" ); // let the stateless fake consume the move alone
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Move );
-        REQUIRE( app.moving() == 1 );
-
-        // Idle and holding still away from the target after the start guard: the move failed.
-        std::this_thread::sleep_for( std::chrono::milliseconds( 550 ) );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-        REQUIRE( app.errorText() == "Error: move failed (stopped away from target)" );
-        REQUIRE( app.homed() == true );
-
-        // Idle at the target, but moving between polls: wait until it holds still.
-        int32_t pos = 0x3F0;
-        dev.handler(
-            [&pos]( const std::string &cmd ) -> std::string
-            {
-                if( cmd == "0gp" )
-                {
-                    char buf[16];
-                    std::snprintf( buf, sizeof( buf ), "PO%08X", static_cast<unsigned>( pos ) );
-                    return elliptecReply( '0', buf );
-                }
-                return elliptecReply( '0', "GS00" );
-            } );
-        REQUIRE( app.moveAbsDegDirect( 90.0 ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma00000400" );
-        std::this_thread::sleep_for( std::chrono::milliseconds( 550 ) );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        pos = 0x400;
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Move );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-        REQUIRE( app.errorText().empty() );
-
-        // Holding still away from the target after a stop request ends the move normally.
-        pos = 0x100;
-        REQUIRE( app.moveAbsDegDirect( 90.0 ) == 0 );
-        REQUIRE( dev.commands().back() == "0ma00000400" );
-        REQUIRE( app.cmdStopDirect() == 0 );
-        app.setStopRequested( true );
-        std::this_thread::sleep_for( std::chrono::milliseconds( 550 ) );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-        REQUIRE( app.errorText().empty() );
-    }
-
-    SECTION( "silence during a move is tolerated until the motion timeout" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                static_cast<void>( cmd );
-                return "";
-            } );
-        elliptecCtrl_test app( "elliptec-move-quiet", testRoot( "move_quiet" ) );
-        preparePollingApp( app, dev );
-        app.setTimeouts( 5 );
-        app.setCommMaxMisses( 1 );
-
-        REQUIRE( app.moveAbsDegDirect( 90.0 ) == 0 );
-        for( int n = 0; n < 4; ++n )
-        {
-            REQUIRE( app.pollDeviceDirect() == 1 );
-        }
-        REQUIRE( app.commMisses() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Move );
-
-        app.setMoveTimeout( 0.0 );
-        REQUIRE( app.pollDeviceDirect() == 1 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-        REQUIRE( app.errorText() == "Error: move failed (no response from the device during motion)" );
-        REQUIRE( app.commMisses() == 1 );
-    }
-
-    SECTION( "device errors fail the pending operation without dropping the connection" )
-    {
-        // clang-format off
-#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
-        MagAOX::app::elliptecCtrl::failPending_( "" );
-        MagAOX::app::elliptecCtrl::handleStatusCode_( 2 );
-#endif
-        // clang-format on
-
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                return elliptecReply( cmd[0], cmd.substr( 1, 2 ) == "gp" ? "PO00000000" : "GS02" );
-            } );
-        elliptecCtrl_test app( "elliptec-device-error", testRoot( "device_error" ) );
-        preparePollingApp( app, dev );
-
-        app.setHomed( true );
-        app.setPending( elliptecCtrl_test::pendingT::Home );
-        app.setMoving( 2 );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-        REQUIRE( app.homed() == false );
-        REQUIRE( app.moving() == -1 );
-        REQUIRE( app.errorText() == "Error: home failed (mechanical time out)" );
-        REQUIRE( app.state() == MagAOX::app::stateCodes::NOTHOMED );
-        REQUIRE( app.fd() >= 0 );
-
-        // With nothing pending an error is surfaced but changes no motion state.
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-        REQUIRE( app.errorText() == "Error: mechanical time out" );
-
-        // A failed move keeps the homed flag.
-        app.setHomed( true );
-        app.setPending( elliptecCtrl_test::pendingT::Move );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.homed() == true );
-        REQUIRE( app.moving() == 0 );
-        REQUIRE( app.errorText() == "Error: move failed (mechanical time out)" );
-    }
-
-    SECTION( "optimize suppresses the miss budget until its timeout, then fails" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                static_cast<void>( cmd );
-                return "";
-            } );
-        elliptecCtrl_test app( "elliptec-optimize-quiet", testRoot( "optimize_quiet" ) );
-        preparePollingApp( app, dev );
-        app.setTimeouts( 5 );
-        app.setCommMaxMisses( 1 );
-        app.setHomed( true );
-
-        REQUIRE( app.cmdOptimizeDirect() == 0 );
-        for( int n = 0; n < 4; ++n )
-        {
-            REQUIRE( app.pollDeviceDirect() == 1 );
-        }
-        REQUIRE( app.commMisses() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::Optimize );
-
-        app.setOptimizeTimeout( 0.0 );
-        REQUIRE( app.pollDeviceDirect() == 1 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-        REQUIRE( app.homed() == false );
-        REQUIRE( app.commMisses() == 1 );
-    }
-
-    SECTION( "optimize completion requires a re-home" )
-    {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                return elliptecReply( cmd[0], cmd.substr( 1, 2 ) == "gp" ? "PO00000000" : "GS00" );
-            } );
-        elliptecCtrl_test app( "elliptec-optimize-done", testRoot( "optimize_done" ) );
-        preparePollingApp( app, dev );
-        app.setHomed( true );
-
-        app.setPending( elliptecCtrl_test::pendingT::Optimize );
-        app.setSawBusy( true );
-        REQUIRE( app.pollDeviceDirect() == 0 );
-        REQUIRE( app.pending() == elliptecCtrl_test::pendingT::None );
-        REQUIRE( app.homed() == false );
-        REQUIRE( app.state() == MagAOX::app::stateCodes::NOTHOMED );
-    }
-}
-
-/// Verify the static protocol tables, angle geometry, and frame parsing helpers.
-/**
- * \ingroup elliptecCtrl_unit_test
- */
-TEST_CASE( "elliptecCtrl status tables, angle geometry, and frame parsing", "[elliptecCtrl]" )
-{
     // clang-format off
-#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
-    MagAOX::app::elliptecCtrl::statusMeaning( 0 );
-    MagAOX::app::elliptecCtrl::minVelocityForModel( 21 );
-    MagAOX::app::elliptecCtrl::wrapDeg( 0 );
-    MagAOX::app::elliptecCtrl::circularDistanceDeg( 0, 0 );
-    MagAOX::app::elliptecCtrl::readFrame_( frame, 0 );
-    MagAOX::app::elliptecCtrl::handleFrame_( frame );
-    MagAOX::app::elliptecCtrl::parseInfo_( "" );
-    MagAOX::app::elliptecCtrl::applyVelocityFloor_( 0 );
-#endif
+    MagAOX::app::elliptecCtrl::setupConfig();
+    MagAOX::app::elliptecCtrl::loadConfigImpl( config );
+    MagAOX::app::elliptecCtrl::validatePresets_();
     // clang-format on
+#endif
 
-    SECTION( "status codes, model velocity floors, and angle helpers" )
     {
-        for( int code = 0; code <= 14; ++code )
-        {
-            REQUIRE( MagAOX::app::elliptecCtrl::statusMeaning( static_cast<uint8_t>( code ) ).empty() == false );
-        }
-        REQUIRE( MagAOX::app::elliptecCtrl::statusMeaning( 2 ) == "mechanical time out" );
-        REQUIRE( MagAOX::app::elliptecCtrl::statusMeaning( 200 ) == "reserved status 200" );
-
-        REQUIRE( MagAOX::app::elliptecCtrl::minVelocityForModel( 21 ) == 50 );
-        REQUIRE( MagAOX::app::elliptecCtrl::minVelocityForModel( 16 ) == 50 );
-        REQUIRE( MagAOX::app::elliptecCtrl::minVelocityForModel( 22 ) == 50 );
-        REQUIRE( MagAOX::app::elliptecCtrl::minVelocityForModel( 14 ) == 0 );
-
-        REQUIRE( MagAOX::app::elliptecCtrl::wrapDeg( -45.0 ) == Approx( 315.0 ) );
-        REQUIRE( MagAOX::app::elliptecCtrl::wrapDeg( 720.0 ) == Approx( 0.0 ) );
-        REQUIRE( MagAOX::app::elliptecCtrl::wrapDeg( 359.5 ) == Approx( 359.5 ) );
-        REQUIRE( MagAOX::app::elliptecCtrl::wrapDeg( -1e-14 ) < 360.0 );
-
-        REQUIRE( MagAOX::app::elliptecCtrl::circularDistanceDeg( 359.9, 0.05 ) == Approx( 0.15 ) );
-        REQUIRE( MagAOX::app::elliptecCtrl::circularDistanceDeg( 10.0, 190.0 ) == Approx( 180.0 ) );
-        REQUIRE( MagAOX::app::elliptecCtrl::circularDistanceDeg( 90.0, 80.0 ) == Approx( 10.0 ) );
-
-        elliptecCtrl_test app( "elliptec-geometry", testRoot( "geometry" ) );
-        app.setPulsesPerRev( 65536 );
-        app.setPresets( { 0.0F, 90.0F }, { "zero", "ninety" } );
-        REQUIRE( app.presetIndexDirect( 359.7 ) == 0 );
-        REQUIRE( app.presetIndexDirect( 0.4 ) == 0 );
-        REQUIRE( app.presetIndexDirect( 0.6 ) == -1 );
-        REQUIRE( app.presetIndexDirect( 89.6 ) == 1 );
-
-        // A multi-turn pulse count reports a wrapped angle.
-        app.setPositionPulses( 0 );
-        REQUIRE( app.moveAbsDegDirect( 359.9999999 ) == -1 ); // no port; target wraps to 0 pulses
+        elliptecCtrl_test app( "ellctrl-config" );
+        app.setupConfig();
+        mx::app::writeConfigFile( "/tmp/elliptecCtrl_test.conf",
+                                  { "stage", "stage", "presets", "presets" },
+                                  { "lowLevelName", "homeOffset", "names", "positions" },
+                                  { "elliptecqwp", "-15", "lab, sky", "115, 300" } );
+        REQUIRE( app.loadConfigFile( "/tmp/elliptecCtrl_test.conf" ) == 0 );
+        REQUIRE( app.lowLevelName() == "elliptecqwp" );
+        REQUIRE( app.stageName() == "ellctrl-config" );
+        REQUIRE( app.homeOffsetDeg() == Approx( 345.0 ) );
     }
-
-    SECTION( "frame reader skips malformed lines and frames for other addresses" )
     {
-        fakeElliptecDevice dev(
-            []( const std::string &cmd ) -> std::string
-            {
-                if( cmd == "0gp" )
-                {
-                    return "garbage\r\n1PO00000400\r\n0PO00010400\r\n";
-                }
-                if( cmd == "0in" )
-                {
-                    return elliptecReply( '0', "IN151234567820241701016800010000" );
-                }
-                if( cmd == "0sv32" )
-                {
-                    return elliptecReply( '0', "GS04" );
-                }
-                return elliptecReply( '0', "GS0C" );
-            } );
-
-        elliptecCtrl_test app( "elliptec-frames", testRoot( "frames" ) );
-        app.setPortPath( dev.slavePath() );
-        REQUIRE( app.openPortDirect() == 0 );
-
-        REQUIRE( app.qInfoDirect() == 0 );
-        REQUIRE( app.model() == 21 );
-        REQUIRE( app.pulsesPerRev() == 65536 );
-
-        // The frame from address 1 is ignored and the multi-turn position wraps.
-        REQUIRE( app.qPositionDirect() == 0 );
-        REQUIRE( app.positionPulses() == 0x10400 );
-        REQUIRE( app.positionDeg() == Approx( 5.625 ) );
-
-        // Non-OK replies to set-velocity and save are reported.
-        REQUIRE( app.cmdSetVelDirect( 50 ) == 1 );
-        REQUIRE( app.cmdSaveDirect() == -1 );
-        REQUIRE( app.cmdStopDirect() == 0x0C );
+        elliptecCtrl_test app( "ellctrl-config-close" );
+        app.setupConfig();
+        mx::app::writeConfigFile( "/tmp/elliptecCtrl_test_close.conf",
+                                  { "stage", "presets", "presets" },
+                                  { "stageName", "names", "positions" },
+                                  { "qwpX", "a, b", "359.8, 0.5" } );
+        REQUIRE( app.loadConfigFile( "/tmp/elliptecCtrl_test_close.conf" ) == -1 );
+        REQUIRE( app.stageName() == "qwpX" );
+    }
+    {
+        elliptecCtrl_test app( "ellctrl-config-tol" );
+        app.setupConfig();
+        mx::app::writeConfigFile( "/tmp/elliptecCtrl_test_tol.conf", { "stage" }, { "presetTolerance" }, { "0" } );
+        REQUIRE( app.loadConfigFile( "/tmp/elliptecCtrl_test_tol.conf" ) == -1 );
     }
 }
 
