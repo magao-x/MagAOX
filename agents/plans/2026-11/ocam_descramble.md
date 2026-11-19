@@ -49,13 +49,19 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 Investigation date: 2026-11-16. Source baseline: `dev`, `cbc1d5cf`.
 Host verified as `mx11`. This pass inspects local source and configuration
 only; no instrument commands, benchmarks, or implementation were run.
-Status as of 2026-11-18: **earlier SDK comparisons favor single-thread
-optimized, which is now the default requested method locally**. The latest
-capture labeled parallel did not establish active worker performance: the
-operator corrected the worker readback to `parked`. Follow-up diagnostics
-identified an empty power target incorrectly forcing SDK fallback despite
-observed power On and ongoing acquisition. The corrected worker path needs a
-new RTC comparison on CPU32 with framegrabber CPU33 sharing L3.
+Status as of 2026-11-18: **optimized is the default requested method; the
+first confirmed parallel capture after the power-target fix lowers
+acquisition-to-write time but worsens frame-interval jitter**. Its seven window means average
+28.826 us versus the earlier optimized 33.760 us, and reported WMA standard
+deviation averages 0.799 us versus 1.067 us. Acquisition/publication interval
+spread is much larger in this new capture. The operator confirmed active
+parallel on CPUs 33/32 and that this interval jitter disappears on returning
+to optimized. Keep optimized selected while investigating the worker's
+continuous interframe spinning; parallel is not qualified for normal use.
+The earlier 37.423 us capture labeled parallel is not valid worker evidence:
+the operator corrected its status to `parked`, and follow-up diagnostics
+identified SDK fallback caused by an empty power target despite observed On.
+The fix and optimized default were pushed by the operator through `b11297d0`.
 SDK remains explicitly selectable and is the fallback for unsupported modes or
 unvalidated mappings. The earlier small spread penalty versus SDK remains part
 of the default tradeoff; long-run tails and complete-loop qualification are
@@ -68,9 +74,10 @@ Reduce camwfs's acquisition-to-publication cost without degrading image
 correctness, jitter, frame delivery, or end-to-end AO latency. Following the
 operator comparisons, default to the validated optimized single-thread path,
 retain SDK as the explicit reference and unsupported-mode/table fallback, and
-keep live INDI comparison methods. The worker experiment remains unresolved;
-repeat it after correcting the unknown-power-target gate before deciding
-whether dedicating another core is worthwhile.
+keep live INDI comparison methods. The corrected worker improves processing
+mean and spread, but the operator's crossover ties much larger acquisition/
+publication interval jitter to parallel mode. Resolve that regression before
+considering a production worker or dedicating another core.
 
 ### Findings from the current code
 
@@ -1549,8 +1556,9 @@ publication ordering change.
 The offline regression holds actual power On and changes the target between
 On, unknown, and Off, and separately checks actual Off with an unknown target.
 It verifies post-publication worker state, next-frame pixel output against a
-distinct SDK sentinel, selected/applied method, and worker status. Before the fix, only the unknown-target case failed: five
-failed assertions reproduced SDK output, `applied=none`, and a parked worker.
+distinct SDK sentinel, selected/applied method, and worker status. Before the
+fix, only the unknown-target case failed: five failed assertions reproduced
+SDK output, `applied=none`, and a parked worker.
 The On and explicit-Off cases passed. This reproduces the operator's symptoms
 without running the camera or changing any instrument state.
 
@@ -1567,3 +1575,87 @@ The operator must deploy/restart and repeat the matched optimized/parallel/
 optimized comparison, checking `applied=parallel`, `parallel=running`,
 `availability=ready`, and CPUs 33/32 before and after the parallel interval.
 No new parallel performance claim is made from the earlier capture.
+
+
+## First confirmed parallel capture after the power-target fix — 2026-11-18
+
+The operator reported pushing through `b11297d0`, then supplied seven
+`fgtimes` reports as the follow-up to the parallel retest. Log timestamps run
+from 2026-11-19T01:12:31.589383628 through 01:12:49.710186671; this entry uses
+the client-local date 2026-11-18. The operator described a "big win". The
+excerpt itself contains no method/worker readback, stage-timing setting,
+adjacent optimized segment, or frame-delivery diagnostics. In follow-up, the
+operator explicitly confirmed `applied=parallel`, `parallel=running`, caller
+CPU33 and worker CPU32, and reported that the large acquisition jitter goes
+away when switching back to optimized. This establishes an operator-observed
+association with parallel mode; no numeric return-to-optimized excerpt was
+provided, so the numerical comparison below still uses the earlier reference.
+
+Arithmetic averages of the supplied window summaries, in microseconds:
+
+| Metric | Earlier optimized capture | New reported parallel capture |
+| --- | ---: | ---: |
+| Acquisition-to-write mean | 33.760375 | 28.825956 |
+| Acquisition-to-write reported standard deviation | 1.067152 | 0.799171 |
+| Acquisition-interval reported standard deviation | 0.559981 | 27.797043 |
+| Publication-interval reported standard deviation | 1.703262 | 27.827214 |
+
+Relative to that earlier, unmatched optimized reference, acquisition-to-write
+mean is **4.934419 us (14.62%) lower**, and reported WMA standard deviation is
+**0.267981 us (25.11%) lower**. All seven WMA means are 28.532445–29.126591 us;
+all reported WMA standard deviations are 0.758751–0.849137 us. These support a
+substantial processing-path gain with the active method confirmed.
+They remain averages of rolling-window summaries, not pooled frame statistics,
+independent trials, tail measurements, or complete-loop latency.
+
+Acquisition means are 500.369932–501.407725 us and publication means are
+500.366743–501.399863 us, near 2,000 FPS. Their reported standard deviations
+are respectively 20.7002–37.2242 us and 20.7779–37.2580 us, much larger than
+the earlier reference and closely tracking one another. The added interval
+variation is already present in the acquisition timestamps of published
+frames; the WMA data do not show more variable acquisition-to-write processing.
+These aggregate values do not distinguish camera/trigger cadence, acquisition
+scheduling, or gaps between accepted/published frames. The operator's return
+to optimized ties the effect to parallel mode, but does not isolate its cause.
+The relation between successive published frames is
+`writeInterval = acquisitionInterval + currentWMA - previousWMA`; similar
+acquisition/publication spread is therefore compatible with nearly constant
+per-frame write-minus-acquisition latency. It does not rule out an effect of
+the worker on later acquisition or rearm.
+
+Retain the optimized default and select optimized during diagnosis. Inspect
+ordinary `fg_timing` acquisition/publication interval extrema and the camera's
+skipped-frame, acquisition-failure, and frame-number-corruption logs if needed.
+Optional `fg_timing_quality` counters are only exposed with stage timing enabled; do
+not change instrumentation midway through a crossover.
+
+### Targeted follow-up
+
+Source review confirms the active worker continuously polls its control word
+with a processor pause instruction between frames. That instruction does not
+block the thread. Switching to optimized parks the worker, so the crossover
+changes both pixel processing and continuous FIFO CPU occupancy. Idle polling
+reads a separate control cache line; it does not repeatedly write the stream
+or traverse the image while idle. This identifies a testable difference,
+not proof of the mechanism behind the acquisition jitter.
+
+First ask the operator for live `sched_rt_runtime_us`/`sched_rt_period_us` and
+whether `camwfs_sw/tasks` contains only the descramble thread. These checks
+can identify an RT-runtime limit or shared-core workload before changing the
+protocol. No scheduling limits or instrument assignments are changed by the
+assistant.
+
+If those checks do not explain the effect, the next focused experiment is an
+optional worker wait between jobs, waking when the owner publishes the next
+job, while retaining the existing short completion wait and mandatory job
+drain. Keep partition, core placement, staging, and timing settings fixed.
+Do not implement this as per-frame park/resume in the post-publication hook:
+that would add another acknowledgment before EDT rearm and confound the test.
+Blocking idle would trade interframe CPU occupancy for wake-up latency; both
+WMA and frame-interval distributions must be remeasured. This experiment has
+not yet been implemented or tested.
+
+Parsed values and arithmetic are retained in
+`/tmp/ocam-parallel-fixed-rtc-20261118.json`. Only this engineering record is
+changed; no runtime settings or implementation changed, and no instrument
+commands were run by the assistant.
