@@ -530,9 +530,11 @@ class xCtrl
     /// The apps of a role on this host: registered with xctrl, and running under systemd
     struct roleApps
     {
-        std::string              name;       ///< the role as set, e.g. ICC, from its template, else in lower case
-        std::vector<std::string> registered; ///< apps in its registry, /etc/magaox-<role>/apps
-        std::vector<std::string> running;    ///< apps whose magaox-<role>-app@NAME.service is active or starting
+        std::string              name;          ///< the role as set, e.g. ICC, from its template, else in lower case
+        std::vector<std::string> registered;    ///< apps in its registry, /etc/magaox-<role>/apps
+        std::vector<std::string> running;       ///< apps whose magaox-<role>-app@NAME.service is active or starting
+        std::vector<std::string> autostart;     ///< apps enabled to start with the role's target
+        bool                     boot{ false }; ///< the role's target starts at boot (xctrl boot on)
     };
 
     /// Every role with apps registered or running on this host, this one included, by lower-case role
@@ -540,6 +542,9 @@ class xCtrl
 
     /// Warn, once, about apps of other roles still running on this host
     void warnOtherRoles();
+
+    /// Warn about other roles that start apps at boot, which could conflict with this role's after a reboot
+    void warnOtherRolesBoot();
 
     /// Start apps: ssh tunnels, then the INDI server, then the others
     /**
@@ -2144,9 +2149,22 @@ inline std::map<std::string, xCtrl::roleApps> xCtrl::hostRoles()
         }
     }
 
-    // the role as set, e.g. ICC: units and directories use it in lower case, its template keeps it as it was
+    // the role as set, e.g. ICC: units and directories use it in lower case, its template keeps it as it was.  Its
+    // apps start at boot if its target is enabled (a link in multi-user.target.wants, which boot on makes) and they
+    // are enabled with the target (links in its own .wants)
     for( auto &kv : roles )
     {
+        unitNames   u( kv.first );
+        std::string target = unitDir() + "/" + u.target();
+        kv.second.boot     = std::filesystem::is_symlink( unitDir() + "/multi-user.target.wants/" + u.target(), ec );
+        for( const auto &w : std::filesystem::directory_iterator( target + ".wants", ec ) )
+        {
+            std::string a = u.appName( w.path().filename().string() );
+            if( !a.empty() )
+            {
+                kv.second.autostart.push_back( a );
+            }
+        }
         kv.second.name = kv.first;
         std::ifstream t( unitDir() + "/" + unitNames( kv.first ).templ() );
         for( std::string l; std::getline( t, l ); )
@@ -2158,6 +2176,21 @@ inline std::map<std::string, xCtrl::roleApps> xCtrl::hostRoles()
         }
     }
     return roles;
+}
+
+inline void xCtrl::warnOtherRolesBoot()
+{
+    for( const auto &kv : hostRoles() )
+    {
+        const roleApps &r = kv.second;
+        if( kv.first == lower( m_role ) || !r.boot || r.autostart.empty() )
+        {
+            continue;
+        }
+        say( msgLevel::warning ) << "role " << r.name << " starts " << r.autostart.size()
+                                 << " app(s) at boot, which may conflict with role " << m_role
+                                 << " after a reboot; sudo " << m_prog << " -r " << r.name << " boot off stops that";
+    }
 }
 
 inline void xCtrl::warnOtherRoles()
@@ -3114,6 +3147,7 @@ inline int xCtrl::cmdStatus()
 {
     warnIfProclistChanged();
     warnOtherRoles();
+    warnOtherRolesBoot();
     std::vector<std::string> names = m_names;
     std::set<std::string>    regs;
     for( const auto &n : registered() )

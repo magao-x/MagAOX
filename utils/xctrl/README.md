@@ -213,6 +213,13 @@ a time, but finds the others from their registries (`/etc/magaox-<role>/apps`) a
 warning: 4 app(s) of role TST still running: isTST longer_app_name_x maths_a maths_b; xctrl -r TST shutdown --all stops them
 ```
 
+`status` also warns about another role whose target starts at boot (`xctrl -r ROLE boot on`) with apps enabled, as
+they would start after a reboot alongside, and perhaps in conflict with, the current role's:
+
+```
+warning: role TST starts 2 app(s) at boot, which may conflict with role OTH after a reboot; sudo xctrl -r TST boot off stops that
+```
+
 `register` first lists every other role, as a warning if any of its apps are running, then the current one:
 
 ```
