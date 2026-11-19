@@ -529,6 +529,9 @@ utils_clean:
 # INDI-client-only machines: INDI tools (getINDI, setINDI, etc.), cursesINDI,
 # rtimv plugins, and GUIs.  None of these link libMagAOX, so no apps, libs,
 # or log utilities are built.
+# If mxlib and rtimv have successfully been installed the only additional
+# dependencies will be qwt and maybe svg:
+#  On Ubuntu 24/26: sudo apt install -y libqt5svg5-dev libqwtmathml-qt5-dev
 
 client_utils = cursesINDI
 
