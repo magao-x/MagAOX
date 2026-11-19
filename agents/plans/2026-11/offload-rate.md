@@ -144,6 +144,8 @@ Per A1 (Q1 = a):
 
 **2026-11-19: no config setting for the rate.** The user asked that switching between this branch and `dev` should need no config changes. The `offload.rate` setting was therefore removed: the 250 Hz default is now built into the INDI `offloadRate` property, and the rate can only be changed over INDI (0 = unmanaged). This supersedes the A4 implementation note above. The `integrator.syncoSource` setting was also removed: the dmSyncopation device name is fixed in code as `dmtweeter-synco`. This feature now needs no config changes at all.
 
+**2026-11-19: NaN check under fast-math.** The first RTC unit-test run failed `navgForRate( 2000, NaN ) == 0` (it returned 1). MagAOX builds with fast-math flags, which let the compiler remove `std::isfinite` and NaN-sensitive comparisons. The fix uses mxlib's bitwise `mx::math::isFinite`, as the dmSyncopation producer helper and counterOffload already do, both in `navgForRate` and in the `offloadRate` INDI callback.
+
 **Checks for the first build:**
 - `sendNewProperty` with a `uint32_t` value;
 - `ipRecv["active"].get<float>()` on synco's `timing` property.

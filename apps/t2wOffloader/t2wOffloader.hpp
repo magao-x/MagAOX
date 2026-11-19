@@ -15,6 +15,7 @@
 #include <mx/improc/eigenImage.hpp>
 #include <mx/improc/milkImage.hpp>
 #include <mx/sigproc/gramSchmidt.hpp>
+#include <mx/math/floatUtils.hpp>
 #include <mx/math/templateBLAS.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
@@ -692,7 +693,8 @@ inline float t2wOffloader::dmRate() const
 
 inline uint32_t t2wOffloader::navgForRate( float dmRateHz, float rateHz )
 {
-    if( !( rateHz > 0 ) || !( dmRateHz > 0 ) || !std::isfinite( rateHz ) || !std::isfinite( dmRateHz ) )
+    // mx::math::isFinite is bitwise, so it still rejects NaN/inf under the fast-math build flags.
+    if( !mx::math::isFinite( rateHz ) || !mx::math::isFinite( dmRateHz ) || rateHz <= 0 || dmRateHz <= 0 )
     {
         return 0;
     }
@@ -1292,7 +1294,7 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_offloadRate )( const pcf::IndiPrope
 
     float target;
 
-    if( indiTargetUpdate( m_indiP_offloadRate, target, ipRecv, true ) < 0 || !std::isfinite( target ) || target < 0 )
+    if( indiTargetUpdate( m_indiP_offloadRate, target, ipRecv, true ) < 0 || !mx::math::isFinite( target ) || target < 0 )
     {
         log<software_error>( { __FILE__, __LINE__, "invalid offloadRate" } );
         return -1;
