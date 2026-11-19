@@ -8,7 +8,7 @@
 /** \defgroup elliptecCtrl_unit_test elliptecCtrl Unit Tests
  * \brief Unit tests for the elliptecCtrl application.
  *
- * \ingroup app_unit_test
+ * \ingroup application_unit_test
  */
 
 #include "../../../tests/catch2/catch.hpp"

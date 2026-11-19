@@ -109,6 +109,7 @@ class fakeEll21
     /// PTY slave path the app should open.
     const std::string &slavePath() const
     {
+        /// PTY slave path the app opens.
         return m_slavePath;
     }
 
@@ -200,6 +201,7 @@ class fakeEll21
     std::vector<std::string> commands() const
     {
         std::lock_guard<std::mutex> lock( m_mutex );
+        /// Commands received, without the address character.
         return m_commands;
     }
 
@@ -221,30 +223,71 @@ class fakeEll21
   private:
     typedef std::chrono::steady_clock clockT;
 
-    int               m_masterFd{ -1 };
-    std::string       m_slavePath;
-    std::thread       m_thread;
+    /// PTY master file descriptor.
+    int m_masterFd{ -1 };
+
+    /// PTY slave path the app opens.
+    std::string m_slavePath;
+
+    /// Responder thread.
+    std::thread m_thread;
+
+    /// Signals the responder thread to exit.
     std::atomic<bool> m_stop{ false };
 
-    mutable std::mutex       m_mutex;
-    std::vector<std::string> m_commands;
-    std::string              m_rx;
+    /// Guards all simulated device state below.
+    mutable std::mutex m_mutex;
 
-    int32_t            m_pos{ 0 };
-    int32_t            m_target{ 0 };
-    bool               m_busy{ false };
-    bool               m_optimizing{ false };
+    /// Commands received, without the address character.
+    std::vector<std::string> m_commands;
+
+    /// Received bytes not yet parsed into a command.
+    std::string m_rx;
+
+    /// Current position in pulses.
+    int32_t m_pos{ 0 };
+
+    /// Target position of the motion in progress.
+    int32_t m_target{ 0 };
+
+    /// Whether a motion or optimize is in progress.
+    bool m_busy{ false };
+
+    /// Whether the operation in progress is an optimize.
+    bool m_optimizing{ false };
+
+    /// Time the operation in progress completes.
     clockT::time_point m_doneAt;
-    int                m_errorCode{ 0 };
-    int                m_motionMs{ 150 };
-    int                m_optimizeMs{ 400 };
-    int                m_stopReply{ 3 };
-    int                m_failNextCode{ 0 };
-    int                m_dropQueries{ 0 };
-    bool               m_silentWhileBusy{ false };
-    bool               m_completionFrame{ true };
-    int32_t            m_landingError{ 0 };
-    std::string        m_inject;
+
+    /// Error status reported to the next `gs`, then cleared.
+    int m_errorCode{ 0 };
+
+    /// Duration of each move or home.
+    int m_motionMs{ 150 };
+
+    /// Duration of an optimize.
+    int m_optimizeMs{ 400 };
+
+    /// Status code replied to `st`.
+    int m_stopReply{ 3 };
+
+    /// Error code the next motion ends with, or 0.
+    int m_failNextCode{ 0 };
+
+    /// Number of upcoming `gs`/`gp` queries to ignore.
+    int m_dropQueries{ 0 };
+
+    /// Whether queries are ignored while busy.
+    bool m_silentWhileBusy{ false };
+
+    /// Whether completion is reported with an unsolicited `PO`.
+    bool m_completionFrame{ true };
+
+    /// Offset between a move target and the final position, in pulses.
+    int32_t m_landingError{ 0 };
+
+    /// Raw bytes queued to send unprompted.
+    std::string m_inject;
 
     /// Format an 8-digit two's complement hex position.
     static std::string hex8( int32_t v )
@@ -462,6 +505,7 @@ class fakeEll21
                 }
 
                 out += service();
+                /// Raw bytes queued to send unprompted.
                 out += m_inject;
                 m_inject.clear();
             }
@@ -643,6 +687,7 @@ class ell21App : public MagAOX::app::elliptecCtrl
     std::vector<MagAOX::app::stateCodes::stateCodeT> states()
     {
         std::lock_guard<std::mutex> lock( m_statesMutex );
+        /// FSM states visited, with consecutive duplicates collapsed.
         return m_states;
     }
 
@@ -691,7 +736,10 @@ class ell21App : public MagAOX::app::elliptecCtrl
     }
 
   private:
-    std::mutex                                       m_statesMutex;
+    /// Guards the recorded state history.
+    std::mutex m_statesMutex;
+
+    /// FSM states visited, with consecutive duplicates collapsed.
     std::vector<MagAOX::app::stateCodes::stateCodeT> m_states;
 };
 

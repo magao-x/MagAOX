@@ -170,3 +170,17 @@ Hardware bring-up (ELL21) — design review, 2026-11-18:
   9. Optimize (maintenance enabled): record `om` duration, no reconnect, ends NOTHOMED.
   10. Logdump `telem_stage` / `telem_position` covering the above.
 - Note: the earlier "Implementation status" sections describe the first refactor and test passes; the ELL21 design review above supersedes them where they conflict (notably the fake device, timeouts, `stop()` semantics, and the 720 deg range).
+
+Implementation status after the ELL21 design review (2026-11-18):
+- Bug-first: `apps/elliptecCtrl/tests/elliptecCtrl_ell21_test.cpp` adds a stateful simulated ELL21 (`fakeEll21`) on a PTY. Scenarios 1-3 (home + offset, concurrent INDI-thread home, stray `PO` during a move) were confirmed to fail on the pre-fix code before any app change. Scenario 3 initially passed on the old code because the simulator's completion `PO` re-aligned the old one-frame-behind reader; it was tightened so the simulator reports completion only via `gs`, which reproduces the stuck state.
+- `elliptecCtrl.hpp` was rewritten around the decisions above in one commit (the serial/threading and behavior changes share the new frame reader and pending-operation tracking, so splitting them was not practical):
+  - `m_indiMutex` serializes all serial I/O; `stop()` takes it itself because `stdMotionStage` calls it unlocked.
+  - `readFrame_()` assembles CRLF frames into `frameT {addr, header, payload}`; `query_()` drains buffered frames, sends, and dispatches non-matching frames via `handleFrame_()` until the expected header arrives.
+  - Motion (`ho`, `ma`, `mr`, `om`) is fire-and-forget; `Pending {None, Move, Home, HomeOffset, Optimize}` is resolved in `resolvePending_()` from `GS` status, with error latching (`m_latchedError`) and the 200 ms not-yet-started guard.
+  - `appLogic()` no longer duplicates the framework's power-off handling; it leaves the device alone when power is off or being switched off.
+  - Removed config: `serial.busyReadTimeoutMs`, `stage.allowMultiturn`. Added: `serial.trace`, `stage.presetTolerance`, `stage.enableMaintenance`, `motion.optimizeTimeoutSec`. Changed defaults: `serial.readTimeoutMs` 1000, `motion.velPercent` 80. `stage.homeOffset` is now an absolute angle (wrapped into [0, 360)).
+  - Additional guard not discussed in the review: motion requests are also rejected while a home is in progress (not only during optimize), so a preset press cannot abandon a home midway.
+- Tests: the existing unit suite was updated for the new internals (443 assertions) and the device-model suite covers scenarios 1-8.
+- Open hardware questions (resolve with the acceptance checklist and `serial.trace=true`):
+  - Whether the ELL21 answers `gs`/`gp` while moving. If it is silent during a home or move, the miss budget will still force a reconnect mid-motion (only optimize suspends the budget). If the trace shows silence, extend the optimize-style suspension to Move/Home with a motion timeout.
+  - Whether a motion command produces both an immediate `GS09` and a completion `PO`, or a single reply; the app handles either.
