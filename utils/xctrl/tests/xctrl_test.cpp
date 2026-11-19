@@ -184,6 +184,47 @@ TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
         REQUIRE( errors.size() == 4 );
     }
 
+    SECTION( "any directive systemd accepts, except denied ones" )
+    {
+        // a few lines of systemd --dump-configuration-items
+        directiveSections sections = parseDirectiveDump( "[Unit]\nOnFailure=UNIT [...]\nStartLimitBurst=UNSIGNED\n"
+                                                         "[Service]\nRuntimeMaxSec=SECONDS\nStartLimitBurst=UNSIGNED\n"
+                                                         "ExecStartPre=PATH [ARGUMENT [...]]\nUser=STRING\n"
+                                                         "[Socket]\nListenStream=SOCKET [...]\n" );
+        REQUIRE( sections.size() == 5 );
+        REQUIRE( sections["OnFailure"] );
+        REQUIRE( sections["StartLimitBurst"] ); // [Unit], listed first
+        REQUIRE( !sections["RuntimeMaxSec"] );
+        REQUIRE( !sections.count( "ListenStream" ) );
+
+        directiveMap d;
+        systemdSettings( d,
+                         errors,
+                         { { "systemd.runtimeMaxSec", "20" },
+                           { "systemd.OnFailure", "notify@%n.service" },
+                           { "systemd.WatchdogSec", "30" },
+                           { "systemd.runtimemaxsec", "20" },
+                           { "systemd.execStartPre", "+/bin/sh" },
+                           { "systemd.user", "root" },
+                           { "systemd.listenStream", "7624" },
+                           { "systemd.watchdogSec", "x" } },
+                         "cam.conf",
+                         sections );
+        REQUIRE( d["RuntimeMaxSec"] == "20" );
+        REQUIRE( d["OnFailure"] == "notify@%n.service" );
+        REQUIRE( d["WatchdogSec"] == "30" );
+        REQUIRE( d.size() == 3 );
+        REQUIRE( errors.size() == 5 ); // a typo, two denied, a socket directive, WatchdogSec spelled twice
+
+        // written in their sections, after the checked settings
+        std::ostringstream unit, service;
+        appendDirectives( unit, d, true, sections );
+        appendDirectives(
+            service, directiveMap{ { "WatchdogSec", "30" }, { "RuntimeMaxSec", "20" } }, false, sections );
+        REQUIRE( unit.str() == "OnFailure=notify@%n.service\n" );
+        REQUIRE( service.str() == "WatchdogSec=30\nRuntimeMaxSec=20\n" );
+    }
+
     SECTION( "apps that do not notify are simple services without a watchdog" )
     {
         app.prefix     = "-";

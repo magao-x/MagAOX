@@ -74,7 +74,9 @@ before it, and their last messages get through; it is ordered after the `sshDigg
 # Settings
 
 The template holds the default settings. `magaox.conf` changes them for every app of the role, and an app's `.conf`
-changes them for that app, both under `[systemd]`, with the same keys:
+changes them for that app, both under `[systemd]`. A key is a systemd directive, its first letter in either case, so
+`runtimeMaxSec = 20` and `RuntimeMaxSec = 20` both set `RuntimeMaxSec=20`. The template sets these, and `xctrl` checks
+their values:
 
 | Key                     | systemd directive        | Default  | Meaning                                                  |
 |-------------------------|--------------------------|----------|----------------------------------------------------------|
@@ -87,9 +89,23 @@ changes them for that app, both under `[systemd]`, with the same keys:
 | `timeoutStopSec`        | `TimeoutStopSec=`        | 30       | time allowed to stop before SIGKILL                      |
 | `killSignal`            | `KillSignal=`            | SIGTERM  | signal that asks the app to stop                         |
 
-Times are seconds, or `infinity`. The apps ignore the `[systemd]` section; only `xctrl` reads it. `register` reports an
-unknown or misspelled key, or a bad value, as an error on the console and does not (re)register that app; `start`,
-`startup` and `restart` warn and start it with its last good settings.
+Times are seconds, or `infinity`. Any other directive that systemd accepts in a service's `[Unit]` or `[Service]`
+section may be set too, e.g. `runtimeMaxSec`, `nice`, `cpuAffinity`, `memoryMax` or `onFailure`; `xctrl` writes it in
+the right section and passes its value to systemd as it is (`man systemd.unit`, `systemd.service`, `systemd.exec`,
+`systemd.kill`, `systemd.resource-control`). `xctrl` learns which directives exist, and in which section, from the
+host's systemd itself (`systemd --dump-configuration-items`), so a misspelled key is still an error.
+
+Some directives can not be set: those `xctrl` sets itself (`Type`, use the `-` proclist prefix instead; `NotifyAccess`,
+`User`, `Group`, `DynamicUser` and every `Exec...` command), those that could give an app more privileges than `xsup`
+has (`SupplementaryGroups`, `AmbientCapabilities`, `CapabilityBoundingSet`, `SecureBits`, `NoNewPrivileges`,
+`PAMName`, `PermissionsStartOnly`, `RootDirectoryStartOnly`), and those that act on the whole host, e.g. reboot it
+(`FailureAction`, `SuccessAction`, `StartLimitAction`, `JobTimeoutAction`). `xctrl` writes the units as root, while
+any member of `magaox-dev` may edit the configuration.
+
+The apps ignore the `[systemd]` section; only `xctrl` reads it. `register` reports an unknown or misspelled key, a
+key that may not be set, the same directive spelled twice, or a bad value, as an error on the console and does not
+(re)register that app; `start`, `startup` and `restart` warn and start it with its last good settings. systemd itself
+checks the values `xctrl` does not, and logs any it rejects when it loads the unit.
 
 Example, in `camsci1.conf`:
 

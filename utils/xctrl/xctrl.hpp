@@ -127,8 +127,9 @@ struct settingDef
     valueKind   kind;        ///< how its value is validated
 };
 
-/// The `[systemd]` configuration keys xctrl understands
-/**
+/// The `[systemd]` configuration keys whose values xctrl checks, in the order they are written to units
+/** Any other `[Unit]` or `[Service]` directive may be set too; see systemdSettings().
+ *
  * \ingroup xctrl
  */
 inline const std::vector<settingDef> &settingDefs()
@@ -160,6 +161,30 @@ inline directiveMap defaultDirectives()
              { "TimeoutStopSec", "30" },
              { "KillSignal", "SIGTERM" } };
 }
+
+/// The section of each systemd directive a service can set: true for [Unit], false for [Service]
+typedef std::map<std::string, bool> directiveSections;
+
+/// Read the directives of [Unit] and [Service] from `systemd --dump-configuration-items` output
+/** The output lists `[Section]` headers, each followed by `Directive=VALUE-TYPE` lines.  A directive listed in
+ * both, e.g. StartLimitBurst, which [Service] still accepts for compatibility, is taken as [Unit], listed first.
+ *
+ * \returns the directives and their sections
+ */
+directiveSections parseDirectiveDump( const std::string &dump /**< [in] the output */ );
+
+/// The directives this host's systemd accepts in [Unit] and [Service], read once from systemd itself
+/**
+ * \returns the directives and their sections, empty if systemd could not be asked
+ */
+const directiveSections &systemdDirectives();
+
+/// Directives a `[systemd]` section may not set: xctrl sets them, or they could give an app more than xsup's
+/// privileges or act on the whole host, while any member of magaox-dev may edit the configuration
+/**
+ * \returns true if the directive may not be set
+ */
+bool deniedDirective( const std::string &directive /**< [in] the directive name */ );
 
 /// Return s in lower case
 std::string lower( const std::string &s /**< [in] the string */ );
@@ -225,12 +250,17 @@ std::string editProclist( const std::string &text,    /**< [in] the proclist con
 double timespanSeconds( const std::string &span /**< [in] the time span */ );
 
 /// Collect systemd directives from the `[systemd]` section of a configuration
-/** Invalid values and unknown keys are reported in errors and skipped.
+/** Each key is a systemd directive of [Unit] or [Service], its first letter in either case: `runtimeMaxSec = 20`
+ * sets `RuntimeMaxSec=20`.  The values of settingDefs() keys are checked; others are passed to systemd as they are.
+ * Keys systemd does not know, denied directives (deniedDirective()), and invalid values are reported in errors and
+ * skipped.
  */
 void systemdSettings( directiveMap             &dirs,   /**< [in.out] directives, updated with the settings found */
                       std::vector<std::string> &errors, /**< [in.out] problems found, appended to */
                       const confMap            &conf,   /**< [in] the configuration */
-                      const std::string        &source /**< [in] the configuration's name, for messages */ );
+                      const std::string        &source, /**< [in] the configuration's name, for messages */
+                      const directiveSections  &sections = systemdDirectives() /**< [in] [optional] the directives
+                                                                                  systemd accepts, for tests */ );
 
 /// Collect the systemd directives of one app from the `[systemd]` section of its configuration
 /** Apps that do not notify get Type=simple and no watchdog.
@@ -267,9 +297,11 @@ struct unitNames
 };
 
 /// Append "Directive=value" lines to os for the directives of one section, Type first
-void appendDirectives( std::ostringstream &os,   /**< [in.out] the unit being generated */
-                       const directiveMap &dirs, /**< [in] the directives */
-                       bool                unitSection /**< [in] true for [Unit], false for [Service] */ );
+void appendDirectives( std::ostringstream      &os,          /**< [in.out] the unit being generated */
+                       const directiveMap      &dirs,        /**< [in] the directives */
+                       bool                     unitSection, /**< [in] true for [Unit], false for [Service] */
+                       const directiveSections &sections = systemdDirectives() /**< [in] [optional] the directives'
+                                                                                  sections, for tests */ );
 
 /// Generate the service template of a role
 /**
@@ -1013,35 +1045,120 @@ inline bool readConf( confMap &conf, const std::string &path )
     return true;
 }
 
-inline void
-systemdSettings( directiveMap &dirs, std::vector<std::string> &errors, const confMap &conf, const std::string &source )
+inline directiveSections parseDirectiveDump( const std::string &dump )
 {
-    std::set<std::string> known;
-    for( const auto &d : settingDefs() )
+    directiveSections  dirs;
+    std::istringstream ss( dump );
+    std::string        section;
+    for( std::string l; std::getline( ss, l ); )
     {
-        known.insert( std::string( "systemd." ) + d.key );
-
-        auto it = conf.find( std::string( "systemd." ) + d.key );
-        if( it == conf.end() )
+        if( !l.empty() && l[0] == '[' )
         {
-            continue;
+            section = l;
         }
-        if( !validValue( d.kind, it->second ) )
+        else if( ( section == "[Unit]" || section == "[Service]" ) && l.find( '=' ) != std::string::npos )
         {
-            errors.push_back( source + ": invalid [systemd] " + d.key + " = " + it->second );
-        }
-        else
-        {
-            dirs[d.directive] = it->second;
+            dirs.insert( { l.substr( 0, l.find( '=' ) ), section == "[Unit]" } ); // insert keeps the first
         }
     }
+    return dirs;
+}
 
+inline const directiveSections &systemdDirectives()
+{
+    static const directiveSections dirs = []()
+    {
+        for( const char *bin : { "/usr/lib/systemd/systemd", "/lib/systemd/systemd" } )
+        {
+            std::string out;
+            if( access( bin, X_OK ) == 0 && runCommand( { bin, "--dump-configuration-items" }, &out, true ) == 0 )
+            {
+                return parseDirectiveDump( out );
+            }
+        }
+        return directiveSections();
+    }();
+    return dirs;
+}
+
+inline bool deniedDirective( const std::string &d )
+{
+    static const std::set<std::string> denied = {
+        // set by xctrl: the command, how the app reports, and the user it runs as
+        "Type",
+        "NotifyAccess",
+        "User",
+        "Group",
+        "DynamicUser",
+        // more privileges than xsup's
+        "SupplementaryGroups",
+        "AmbientCapabilities",
+        "CapabilityBoundingSet",
+        "SecureBits",
+        "NoNewPrivileges",
+        "PAMName",
+        "PermissionsStartOnly",
+        "RootDirectoryStartOnly",
+        // actions on the whole host, e.g. a reboot
+        "FailureAction",
+        "SuccessAction",
+        "StartLimitAction",
+        "JobTimeoutAction" };
+
+    // ExecStart, ExecStartPre, ExecStop, ...: commands, which a + prefix would run as root
+    return denied.count( d ) > 0 || d.compare( 0, 4, "Exec" ) == 0;
+}
+
+inline void systemdSettings( directiveMap             &dirs,
+                             std::vector<std::string> &errors,
+                             const confMap            &conf,
+                             const std::string        &source,
+                             const directiveSections  &sections )
+{
+    std::map<std::string, std::string> seen; // directive: the key that set it, to catch two spellings of one
     for( const auto &kv : conf )
     {
         // keys of the [systemd] section start with the 8 characters "systemd."
-        if( kv.first.compare( 0, 8, "systemd." ) == 0 && known.count( kv.first ) == 0 )
+        if( kv.first.compare( 0, 8, "systemd." ) != 0 || kv.first.size() == 8 )
         {
-            errors.push_back( source + ": unknown setting [systemd] " + kv.first.substr( 8 ) );
+            continue;
+        }
+        std::string key = kv.first.substr( 8 ), d = key;
+        d[0] = static_cast<char>( toupper( static_cast<unsigned char>( d[0] ) ) ); // watchdogSec: WatchdogSec
+
+        const settingDef *def = nullptr;
+        for( const auto &sd : settingDefs() )
+        {
+            def = d == sd.directive ? &sd : def;
+        }
+
+        if( seen.count( d ) )
+        {
+            errors.push_back( source + ": [systemd] " + key + " and " + seen[d] + " both set " + d );
+        }
+        else if( deniedDirective( d ) )
+        {
+            errors.push_back( source + ": [systemd] " + key + " can not be set here: xctrl sets it, or it could " +
+                              "give the app more privileges than xsup has or act on the whole host" );
+        }
+        else if( !def && !sections.count( d ) )
+        {
+            errors.push_back( source + ": unknown setting [systemd] " + key +
+                              ( sections.empty() ? " (systemd's directives could not be read to check it)"
+                                                 : ": not a systemd [Unit] or [Service] directive" ) );
+        }
+        else if( def ? !validValue( def->kind, kv.second )
+                     : std::any_of( kv.second.begin(),
+                                    kv.second.end(),
+                                    []( char c ) { return iscntrl( static_cast<unsigned char>( c ) ); } ) )
+        {
+            // a control character, e.g. a newline, could start another directive in the unit file
+            errors.push_back( source + ": invalid [systemd] " + key + " = " + kv.second );
+        }
+        else
+        {
+            dirs[d] = kv.second;
+            seen[d] = key;
         }
     }
 }
@@ -1092,18 +1209,35 @@ inline std::string unitNames::appName( const std::string &unit ) const
     return unit.substr( pre.size(), unit.size() - pre.size() - suf.size() );
 }
 
-inline void appendDirectives( std::ostringstream &os, const directiveMap &dirs, bool unitSection )
+inline void appendDirectives( std::ostringstream      &os,
+                              const directiveMap      &dirs,
+                              bool                     unitSection,
+                              const directiveSections &sections )
 {
     // Type first, it reads best there
     if( !unitSection && dirs.count( "Type" ) )
     {
         os << "Type=" << dirs.at( "Type" ) << "\n";
     }
+
+    // the checked settings in their usual order, so units do not change as other directives come and go
+    std::set<std::string> done{ "Type" };
     for( const auto &d : settingDefs() )
     {
         if( d.unitSection == unitSection && dirs.count( d.directive ) )
         {
             os << d.directive << "=" << dirs.at( d.directive ) << "\n";
+        }
+        done.insert( d.directive );
+    }
+
+    // then any other, in its section; [Service] if systemd's list is not known
+    for( const auto &kv : dirs )
+    {
+        auto it = sections.find( kv.first );
+        if( !done.count( kv.first ) && ( it != sections.end() && it->second ) == unitSection )
+        {
+            os << kv.first << "=" << kv.second << "\n";
         }
     }
 }
