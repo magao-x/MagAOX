@@ -34,22 +34,13 @@ class NativeDeploymentTest(unittest.TestCase):
         # MagAO-X supports unsectioned application keys; ConfigParser needs a synthetic section for those keys.
         config.read_string("[application]\n" + (APP / "loPredCtrlAcc.conf").read_text())
         original.read(APP / "examples/loPredCtrlAcc-adc-shadow.conf.example")
-        self.assertEqual(dict(config["adc"]), dict(original["adc"]))
-        self.assertTrue(config.getboolean("parameters", "shadow"))
-        self.assertTrue(config.getboolean("native_shadow", "enabled"))
-        self.assertFalse(config.getboolean("native_shadow", "record"))
-        self.assertEqual(config.getfloat("native_shadow", "duration_sec"), 0)
-        self.assertGreaterEqual(config.getfloat("diagnostics", "period_ms"), 50)
-        self.assertFalse(config.getboolean("diagnostics", "debug_indi"))
-        self.assertFalse(config.getboolean("online_shadow", "enabled"))
-        self.assertTrue(config.getboolean("online_shadow", "upstream_sync"))
-        self.assertEqual(config.getint("online_shadow", "prediction_capacity"), 0)
-        self.assertEqual(config.getint("online_shadow", "standard_slots"), 1)
-        self.assertEqual(config.getint("online_shadow", "training_stride"), 4)
-        for flag in ("own_shmim", "accel_enabled", "shadow_pipeline", "is_integrating"):
-            self.assertFalse(config.getboolean("parameters", flag))
-        self.assertEqual(config["native_shadow"]["dm_stream"], "dm01disp")
-        self.assertNotIn("directory", config["native_shadow"])
+        for key in ("profile", "zero0", "zero1", "volts_per_count0", "volts_per_count1",
+                    "sensitivity0", "sensitivity1", "polarity0", "polarity1"):
+            self.assertEqual(config["adc"][key], original["adc"][key])
+        self.assertTrue(config.getboolean("adc", "enabled"))
+        self.assertEqual(config["shmimMonitor"]["shmimName"], "aol1_modevalWFS")
+        self.assertEqual(config["dm"]["channelName"], "dm10disp10_aux")
+        self.assertNotIn("predict", config["parameters"])
         self.assertNotIn("framegrabber", [s.lower() for s in config.sections()])
 
     def test_online_worker_example_adds_no_trust_or_output_override(self):
@@ -81,7 +72,7 @@ class NativeDeploymentTest(unittest.TestCase):
             command = ["make", "-n", "-f", "Makefile", "DDSPC_SHADOW_ONLY=no",
                        "OPTIMIZE=-ffast-math", "CXXFLAGS=-ffast-math"]
             output = subprocess.check_output(command + ["all"], cwd=app, text=True)
-            self.assertIn("-DDDSPC_SHADOW_ONLY", output)
+            self.assertIn("-DDDSPC_OPERATIONAL_BUILD", output)
             self.assertIn("-DEIGEN_DONT_PARALLELIZE", output)
             self.assertIn("-std=c++20", output)
             self.assertGreater(output.rfind("-fno-fast-math"), output.rfind("-ffast-math"))

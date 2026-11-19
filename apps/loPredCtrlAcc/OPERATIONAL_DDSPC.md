@@ -1,3 +1,5 @@
+> **Current RTC procedure:** Use [RTC_TESTING.md](RTC_TESTING.md) for the operational controller, configuration, install commands and INDI sequence. The report below describes the earlier commissioning build.
+
 # Operational-capable DDSPC experiment
 
 This milestone adds operator enable/freeze/reset and an opt-in real syncopation

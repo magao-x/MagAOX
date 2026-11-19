@@ -345,9 +345,10 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
         if( mature )
         {
             state.m_reason = ShadowReason::Untrained;
-            if( item.m_segmentUpdates >= std::max<std::uint64_t>( state.m_features, m_config.m_minUpdates ) )
+            if( ( m_config.m_requireFullRank ? item.m_segmentUpdates : state.m_updates ) >=
+                std::max<std::uint64_t>( m_config.m_requireFullRank ? state.m_features : 1, m_config.m_minUpdates ) )
             {
-                if( item.m_rankDirty && index % m_config.m_updateStride == 0 &&
+                if( m_config.m_requireFullRank && item.m_rankDirty && index % m_config.m_updateStride == 0 &&
                     ( state.m_trainingEnabled || !m_config.m_freezeQualification ) )
                 {
                     DDSPC_PROFILE_SCOPE( Rank );
@@ -364,7 +365,7 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
                     item.m_rankDirty = false;
                 }
                 state.m_reason = ShadowReason::Unexcited;
-                if( state.m_rank == state.m_features )
+                if( !m_config.m_requireFullRank || state.m_rank == state.m_features )
                 {
                     if( !item.m_gainCurrent )
                     {
@@ -375,7 +376,11 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
                             const auto  &weights = item.m_controller->prediction_matrix_view();
                             const int    inputs  = m_config.m_future * item.m_proposal.rows();
                             const Matrix c       = weights.leftCols( inputs );
-                            penalty *= ( c.transpose() * c ).maxCoeff();
+                            const realT  scale   = ( c.transpose() * c ).maxCoeff();
+                            // With zero command response, keep fitting until exploration identifies the plant.
+                            if( !m_config.m_requireFullRank && scale == 0 )
+                                return;
+                            penalty *= scale;
                         }
                         item.m_controller->get_reference_controller( workspace, penalty );
                         item.m_gainCurrent = true;
@@ -416,6 +421,16 @@ void ShadowController::training( ShadowMode mode, bool enabled )
 {
     model( mode ).m_status.m_trainingEnabled = enabled;
     model( mode ).m_status.m_training        = false;
+}
+
+void ShadowController::regularization( realT value )
+{
+    if( !std::isfinite( value ) || value <= 0 )
+        throw std::invalid_argument( "Invalid DDSPC command penalty" );
+    if( m_config.m_lambda == value )
+        return;
+    m_config.m_lambda        = value;
+    m_standard.m_gainCurrent = m_assisted.m_gainCurrent = false;
 }
 
 void ShadowController::reset( ShadowMode mode )

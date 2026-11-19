@@ -40,13 +40,10 @@ class NativeProducerTests(unittest.TestCase):
         import configparser
         config = configparser.ConfigParser()
         config.read_string("[application]\n" + (APP / "loPredCtrlAcc.conf").read_text())
-        self.assertFalse(config.getboolean("online_shadow", "enabled"))
-        self.assertTrue(config.getboolean("parameters", "shadow"))
-        self.assertFalse(config.getboolean("parameters", "own_shmim"))
+        self.assertNotIn("learn", config["parameters"])
+        self.assertNotIn("predict", config["parameters"])
         self.assertEqual(config["dm"]["channelName"], "dm10disp10_aux")
-        self.assertEqual(config["native_inputs"]["calibration"], "")
-        self.assertEqual(config.getint("native_inputs", "adc_anchor"), 0)
-        self.assertFalse(config.getboolean("native_inputs", "synco_association"))
+        self.assertNotIn("native_inputs", config)
 
 
 if __name__ == "__main__":
