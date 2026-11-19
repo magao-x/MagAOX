@@ -84,7 +84,7 @@ offloadCtrl::offloadCtrl( QWidget * Parent,
 
     setXwFont(ui.label_avgInt);
     setXwFont(ui.avgInt);
-    ui.avgInt->setup("dmtweeter-avg", "nAverage", statusEntry::INT , "", "");
+    ui.avgInt->setup("t2wOffloader", "offloadRate", statusEntry::FLOAT , "", "");
     ui.avgInt->setStretch(0,0,1);
 
 

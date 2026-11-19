@@ -12,7 +12,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 <!-- This section will be filled out by the agent -->
 
-*Status (2026-11-18): plan complete; Q1–Q4 answered. No code written; implementation waits for an explicit "implement".*
+*Status (2026-11-19): implemented on `ktwitchell/counter-offload` (see Implementation Log). Not yet built or tested; the user builds and tests on the RTC and on a GUI machine.*
 
 ## Task Summary
 <!-- The agent should summarize the task as they understand it -->
@@ -109,6 +109,40 @@ Per A1 (Q1 = a):
   - Nothing else in the GUI changes (A1).
 - **Tests:** add the helper test case to `apps/t2wOffloader/tests/t2wOffloader_test.cpp`.
 - **Scope:** files outside `apps/t2wOffloader` and `gui/widgets/offloadCtrl` are not touched. The instance configs on the RTC (`t2wOffloader.conf`, possibly `offload.rate`) are the user's to update.
+
+### Implementation Log
+
+**2026-11-19: first implementation (not yet compiled).**
+
+**`apps/t2wOffloader/t2wOffloader.hpp`.**
+- **New config:**
+  - `integrator.syncoSource` (default `dmtweeter-synco`);
+  - `offload.rate` (Hz, default 250; 0 leaves `nAverage` unmanaged).
+- **New INDI properties:**
+  - the number `offloadRate` (0 to 10000 Hz);
+  - a SET subscription to `<syncoSource>.timing`;
+  - an outbound `<navgSource>.nAverage` property with a `target` element, used to send the request. This follows kTracker's `m_indiP_kpos`: the property watched with `REG_INDI_SETPROP` has no type or elements, so it cannot be used to send.
+- **DM command rate.** `dmRate()` is `timing.active × timing.mainHz` while synco is active (`active` is the number of steps actually running, and 0 when synco is not primed). Otherwise it is the camera fps.
+  - `plannedHz` is not used, because it reports requested steps × main rate even while synco is inactive.
+- **`updateFPS()`.**
+  - It now reports `fps = dmRate() / navg`, so `t2wOffloader.fps` is correct with synco on (R4).
+  - When the rate is managed, it sends `nAverage.target = navgForRate(dmRate(), offloadRate)` if that differs from the current value and from the last request.
+  - It runs on any change to the camera fps, `nAverage`, synco `timing` or `offloadRate`.
+- **Re-sending.** `m_navgRequested` stops the request being re-sent before the averager reports back. It is cleared when `nAverage` changes or `offloadRate` is set, so a hand edit of `nAverage` is overridden on the next update.
+- **`navgForRate()`** is a static helper: it rounds to the nearest whole number, is at least 1, and returns 0 if the rate is unmanaged or the DM rate is unknown.
+
+**`gui/widgets/offloadCtrl/`** (as answered in A1):
+- `ui.avgInt` is rebound to `t2wOffloader.offloadRate` (FLOAT).
+- The label reads "Offload Rate (Hz)".
+- The box is still enabled or disabled by `dmtweeter-avg`'s state, as before.
+
+**`apps/t2wOffloader/tests/t2wOffloader_test.cpp`.** Two new test cases:
+- `navgForRate`: 250 Hz gives 8 at 2 kHz and 32 at 8 kHz; rounding; minimum of 1; unmanaged and invalid inputs.
+- `dmRate()`: synco inactive, active at 4 steps, and unknown main rate.
+
+**Checks for the first build:**
+- `sendNewProperty` with a `uint32_t` value;
+- `ipRecv["active"].get<float>()` on synco's `timing` property.
 
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->

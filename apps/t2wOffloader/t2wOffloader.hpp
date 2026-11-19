@@ -7,6 +7,8 @@
 #ifndef t2wOffloader_hpp
 #define t2wOffloader_hpp
 
+#include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include <mx/improc/eigenCube.hpp>
@@ -70,6 +72,10 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
 
     std::string m_fpsSource{ "camwfs" };         ///< INDI device providing the loop fps.
     std::string m_navgSource{ "dmtweeter-avg" }; ///< INDI device providing the tweeter averager's navg.
+
+    std::string m_syncoSource{ "dmtweeter-synco" }; ///< INDI device of dmSyncopation, which changes the DM rate.
+
+    float m_offloadRate{ 250 }; ///< Requested offload rate in Hz, kept by setting the averager's navg.  0 = unmanaged.
     float       m_gain{ 0.1 };                   ///< Offload integrator gain.
     float       m_leak{ 0.0 };                   ///< Offload integrator leak.
 
@@ -127,7 +133,13 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     float    m_fps{ 0 };  ///< Current FPS from the FPS source.
     uint32_t m_navg{ 0 }; ///< Current navg from the averager
 
-    float m_effFPS{ 0 }; ///< Effective offload rate, m_fps / m_navg.
+    float m_syncoMainHz{ 0 }; ///< dmSyncopation's fitted main rate, from its timing.mainHz.
+
+    uint32_t m_syncoSteps{ 0 }; ///< dmSyncopation steps actually running, from its timing.active.  0 when inactive.
+
+    uint32_t m_navgRequested{ 0 }; ///< navg last sent to the averager and not yet reported back.  0 if none.
+
+    float m_effFPS{ 0 }; ///< Effective offload rate, the DM command rate / m_navg.
 
     IMAGE    m_dmStream;      ///< The woofer DM channel stream, opened in allocate().
     uint32_t m_dmWidth{ 0 };  ///< The width of the image
@@ -186,8 +198,22 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
      */
     virtual int appShutdown();
 
-    /// Update the effective FPS after an navg or fps change
+    /// Update the effective FPS, and the averager's navg if the offload rate is managed, after any rate input changes.
+    /** The DM command rate feeding the averager is the camera fps, multiplied by dmSyncopation's active step
+     * count while it is running.
+     */
     int updateFPS();
+
+    /// The DM command rate feeding the tweeter averager, in Hz.
+    float dmRate() const;
+
+    /// Calculate the averager navg that gives a requested offload rate.
+    /**
+     * \returns the nearest navg, at least 1
+     * \returns 0 if the offload rate is unmanaged or the DM rate is unknown
+     */
+    static uint32_t navgForRate( float dmRateHz /**< [in] DM command rate feeding the averager, in Hz */,
+                                 float rateHz /**< [in] requested offload rate in Hz, 0 for unmanaged */ );
 
     /// Allocate working memory and open or create the woofer and modal streams for the input shmim.
     /**
@@ -254,7 +280,15 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     pcf::IndiProperty m_indiP_navgSource; ///< Property monitoring the navg of m_navgSource.
     INDI_SETCALLBACK_DECL( t2wOffloader, m_indiP_navgSource );
 
+    pcf::IndiProperty m_indiP_navgTarget; ///< Outbound property to request m_navgSource's nAverage.
+
+    pcf::IndiProperty m_indiP_syncoSource; ///< Property monitoring the timing of m_syncoSource.
+    INDI_SETCALLBACK_DECL( t2wOffloader, m_indiP_syncoSource );
+
     pcf::IndiProperty m_indiP_fps; ///< Read-only property reporting the effective offload rate.
+
+    pcf::IndiProperty m_indiP_offloadRate; ///< Property to set the requested offload rate, Hz.
+    INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_offloadRate );
 
     ///@}
 
@@ -312,6 +346,27 @@ inline void t2wOffloader::setupConfig()
                 "string",
                 "Device name for getting navg of tweeter-ave.  This device should have *.fps.current. Default is "
                 "dmtweeter-avg." );
+
+    config.add( "integrator.syncoSource",
+                "",
+                "integrator.syncoSource",
+                argType::Required,
+                "integrator",
+                "syncoSource",
+                false,
+                "string",
+                "Device name of dmSyncopation, whose timing.active and timing.mainHz set the DM command rate. "
+                "Default is dmtweeter-synco." );
+
+    config.add( "offload.rate",
+                "",
+                "offload.rate",
+                argType::Required,
+                "offload",
+                "rate",
+                false,
+                "float",
+                "Offload rate in Hz, kept by setting the averager's navg.  0 leaves navg unmanaged.  Default is 250." );
 
     config.add( "offload.respMPath",
                 "",
@@ -443,6 +498,8 @@ inline int t2wOffloader::loadConfigImpl( mx::app::appConfigurator &_config )
 
     _config( m_fpsSource, "integrator.fpsSource" );
     _config( m_navgSource, "integrator.navgSource" );
+    _config( m_syncoSource, "integrator.syncoSource" );
+    _config( m_offloadRate, "offload.rate" );
 
     _config( m_twRespMPath, "offload.respMPath" );
     _config( m_dmChannel, "offload.channel" );
@@ -538,10 +595,26 @@ inline int t2wOffloader::appStartup()
 
     REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsSource, std::string( "fps" ) );
     REG_INDI_SETPROP( m_indiP_navgSource, m_navgSource, std::string( "nAverage" ) );
+    REG_INDI_SETPROP( m_indiP_syncoSource, m_syncoSource, std::string( "timing" ) );
+
+    m_indiP_navgTarget = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_navgTarget.setDevice( m_navgSource );
+    m_indiP_navgTarget.setName( "nAverage" );
+    m_indiP_navgTarget.add( pcf::IndiElement( "target" ) );
 
     createROIndiNumber( m_indiP_fps, "fps" );
     m_indiP_fps.add( pcf::IndiElement( "current" ) );
     if( registerIndiPropertyReadOnly( m_indiP_fps ) < 0 )
+    {
+        log<software_error>( { "" } );
+        return -1;
+    }
+
+    createStandardIndiNumber<float>( m_indiP_offloadRate, "offloadRate", 0, 10000, 0, "%0.1f" );
+    m_indiP_offloadRate["current"] = m_offloadRate;
+    m_indiP_offloadRate["target"]  = m_offloadRate;
+
+    if( registerIndiPropertyNew( m_indiP_offloadRate, INDI_NEWCALLBACK( m_indiP_offloadRate ) ) < 0 )
     {
         log<software_error>( { "" } );
         return -1;
@@ -593,7 +666,7 @@ inline int t2wOffloader::updateFPS()
         effFPS = 0;
     }
     else
-        effFPS = m_fps / m_navg;
+        effFPS = dmRate() / m_navg;
 
     if( effFPS != m_effFPS )
     {
@@ -604,7 +677,44 @@ inline int t2wOffloader::updateFPS()
 
     updateIfChanged( m_indiP_fps, "current", m_effFPS );
 
+    // Keep the offload rate constant by requesting the matching navg from the averager.
+    uint32_t navg = navgForRate( dmRate(), m_offloadRate );
+
+    if( navg > 0 && navg != m_navg && navg != m_navgRequested )
+    {
+        if( sendNewProperty( m_indiP_navgTarget, "target", navg ) == 0 )
+        {
+            m_navgRequested = navg;
+            log<text_log>( std::format( "requested {}.nAverage = {} for {} Hz offloading at a {} Hz DM rate",
+                                        m_navgSource,
+                                        navg,
+                                        m_offloadRate,
+                                        dmRate() ),
+                           logPrio::LOG_NOTICE );
+        }
+    }
+
     return 0;
+}
+
+inline float t2wOffloader::dmRate() const
+{
+    if( m_syncoSteps > 0 && m_syncoMainHz > 0 )
+    {
+        return m_syncoSteps * m_syncoMainHz;
+    }
+
+    return m_fps;
+}
+
+inline uint32_t t2wOffloader::navgForRate( float dmRateHz, float rateHz )
+{
+    if( !( rateHz > 0 ) || !( dmRateHz > 0 ) || !std::isfinite( rateHz ) || !std::isfinite( dmRateHz ) )
+    {
+        return 0;
+    }
+
+    return std::max<uint32_t>( 1, static_cast<uint32_t>( std::lround( dmRateHz / rateHz ) ) );
 }
 
 inline int t2wOffloader::allocate( const dev::shmimT &dummy )
@@ -1161,9 +1271,61 @@ INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_navgSource )( const pcf::IndiProper
 
     if( navg != m_navg )
     {
-        m_navg = navg;
+        m_navg          = navg;
+        m_navgRequested = 0; // the averager has reported back, so a different value is re-requested
         updateFPS();
     }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_syncoSource )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_syncoSource, ipRecv );
+
+    if( !ipRecv.find( "active" ) || !ipRecv.find( "mainHz" ) )
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    float    mainHz = ipRecv["mainHz"].get<float>();
+    uint32_t steps  = static_cast<uint32_t>( std::max( 0.0f, ipRecv["active"].get<float>() ) );
+
+    if( steps != m_syncoSteps || ( steps > 0 && mainHz != m_syncoMainHz ) )
+    {
+        m_syncoSteps  = steps;
+        m_syncoMainHz = mainHz;
+        updateFPS();
+    }
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_offloadRate )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadRate, ipRecv );
+
+    float target;
+
+    if( indiTargetUpdate( m_indiP_offloadRate, target, ipRecv, true ) < 0 || !std::isfinite( target ) || target < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "invalid offloadRate" } );
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    m_offloadRate   = target;
+    m_navgRequested = 0;
+
+    updateIfChanged( m_indiP_offloadRate, "current", m_offloadRate );
+    updateIfChanged( m_indiP_offloadRate, "target", m_offloadRate );
+
+    log<text_log>( "set offload rate to " + std::to_string( m_offloadRate ) + " Hz", logPrio::LOG_NOTICE );
+
+    updateFPS();
 
     return 0;
 }
