@@ -153,28 +153,12 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
         return newCallBack_m_indiP_stop( ip );
     }
 
-    /// Request an absolute angle.
-    int absDeg( double deg )
+    /// Request a position in degrees.
+    int position( double deg )
     {
-        pcf::IndiProperty ip = m_ipAbsDeg;
+        pcf::IndiProperty ip = m_indiP_position;
         ip["target"].set( deg );
-        return newCallBack_m_ipAbsDeg( ip );
-    }
-
-    /// Set the relative step.
-    int relDeg( double deg )
-    {
-        pcf::IndiProperty ip = m_ipRelDeg;
-        ip["target"].set( deg );
-        return newCallBack_m_ipRelDeg( ip );
-    }
-
-    /// Press `relMove`.
-    int relMove()
-    {
-        pcf::IndiProperty ip = m_ipRelMove;
-        ip["request"].setSwitchState( pcf::IndiElement::On );
-        return newCallBack_m_ipRelMove( ip );
+        return newCallBack_m_indiP_position( ip );
     }
 
     /// Name of the last property sent to the low level, and clear it.
@@ -197,16 +181,10 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
         return m_lastCommand.getDevice();
     }
 
-    /// Operator status text.
-    std::string status()
+    /// Set `stage.homePreset` (0-based).
+    void homePreset( int n )
     {
-        return m_ipStatus["current"].getValue();
-    }
-
-    /// Set the post-home offset.
-    void homeOffset( double deg )
-    {
-        m_homeOffsetDeg = deg;
+        m_homePreset = n;
     }
 
     /// Set `stage.powerOnHome`.
@@ -246,10 +224,10 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
         return m_stageName;
     }
 
-    /// Configured home offset.
-    double homeOffsetDeg() const
+    /// Configured home preset.
+    int homePresetIndex() const
     {
-        return m_homeOffsetDeg;
+        return m_homePreset;
     }
 };
 
@@ -265,7 +243,7 @@ void readyAt( elliptecCtrl_test &app, double deg )
 } // namespace
 /// \endcond
 
-/// Low-level states map onto the client FSM and status text.
+/// Low-level states map onto the client FSM.
 /** \ingroup elliptecCtrl_unit_test
  */
 TEST_CASE( "elliptecCtrl follows the low-level state of its stage", "[elliptecCtrl]" )
@@ -276,7 +254,6 @@ TEST_CASE( "elliptecCtrl follows the low-level state of its stage", "[elliptecCt
     MagAOX::app::elliptecCtrl::setCallBack_m_indiP_llPos( ip );
     MagAOX::app::elliptecCtrl::setCallBack_m_indiP_llError( ip );
     MagAOX::app::elliptecCtrl::applyState_( "" );
-    MagAOX::app::elliptecCtrl::updateStatus_();
     // clang-format on
 #endif
 
@@ -285,40 +262,33 @@ TEST_CASE( "elliptecCtrl follows the low-level state of its stage", "[elliptecCt
     elliptecCtrl_test app( "ellctrl-states" );
     REQUIRE( app.startup() == 0 );
     REQUIRE( app.state() == stateCodes::NOTCONNECTED );
-    REQUIRE( app.status() == "Not Connected" );
 
     REQUIRE( app.llState( "POWEROFF" ) == 0 );
     REQUIRE( app.state() == stateCodes::POWEROFF );
-    REQUIRE( app.status() == "Powered Off" );
 
     app.llState( "POWERON" );
     REQUIRE( app.state() == stateCodes::POWERON );
 
     app.llState( "NODEVICE" );
     REQUIRE( app.state() == stateCodes::NODEVICE );
-    REQUIRE( app.status() == "Wrong or missing device" );
 
     app.llState( "NOTHOMED" );
     REQUIRE( app.state() == stateCodes::NOTHOMED );
     REQUIRE( app.moving() == -1 );
-    REQUIRE( app.status() == "Not Homed" );
 
     app.llState( "OPERATING" );
     REQUIRE( app.state() == stateCodes::OPERATING );
-    REQUIRE( app.status() == "Moving" );
 
     app.llState( "HOMING" );
     REQUIRE( app.state() == stateCodes::HOMING );
-    REQUIRE( app.status() == "Homing" );
 
     app.llState( "READY" );
     REQUIRE( app.state() == stateCodes::READY );
-    REQUIRE( app.status() == "OK" );
 
-    app.llError( "move failed (stopped away from target)" );
-    REQUIRE( app.status() == "Error: move failed (stopped away from target)" );
-    app.llError( "" );
-    REQUIRE( app.status() == "OK" );
+    // Errors are logged but do not change the state.
+    REQUIRE( app.llError( "move failed (stopped away from target)" ) == 0 );
+    REQUIRE( app.llError( "" ) == 0 );
+    REQUIRE( app.state() == stateCodes::READY );
 
     app.llState( "SOMETHING" );
     REQUIRE( app.state() == stateCodes::NOTCONNECTED );
@@ -330,7 +300,7 @@ TEST_CASE( "elliptecCtrl follows the low-level state of its stage", "[elliptecCt
     REQUIRE( app.state() == stateCodes::READY );
 }
 
-/// Presets, absolute and relative moves are sent as absolute targets in degrees.
+/// Presets and position requests are sent as absolute targets in degrees.
 /** \ingroup elliptecCtrl_unit_test
  */
 TEST_CASE( "elliptecCtrl sends absolute targets to the low level", "[elliptecCtrl]" )
@@ -338,9 +308,7 @@ TEST_CASE( "elliptecCtrl sends absolute targets to the low level", "[elliptecCtr
 #ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
     // clang-format off
     MagAOX::app::elliptecCtrl::moveTo( 0 );
-    MagAOX::app::elliptecCtrl::newCallBack_m_ipAbsDeg( ip );
-    MagAOX::app::elliptecCtrl::newCallBack_m_ipRelDeg( ip );
-    MagAOX::app::elliptecCtrl::newCallBack_m_ipRelMove( ip );
+    MagAOX::app::elliptecCtrl::newCallBack_m_indiP_position( ip );
     MagAOX::app::elliptecCtrl::sendNumber_( "", 0 );
     // clang-format on
 #endif
@@ -362,16 +330,13 @@ TEST_CASE( "elliptecCtrl sends absolute targets to the low level", "[elliptecCtr
     REQUIRE( app.lastCommandValue() == Approx( 300.0 ) );
     REQUIRE( app.lastCommandName() == "tgt_pos" );
 
-    REQUIRE( app.absDeg( 400.0 ) == 0 );
+    // Position targets outside [0, 360) wrap.
+    REQUIRE( app.position( 400.0 ) == 0 );
     REQUIRE( app.lastCommandValue() == Approx( 40.0 ) );
     REQUIRE( app.lastCommandName() == "tgt_pos" );
 
-    // Relative moves become absolute targets: current position + step, wrapped.
-    app.llPos( 350.0 );
-    REQUIRE( app.relDeg( 900.0 ) == 0 ); // clamped to 360
-    REQUIRE( app.relDeg( 20.0 ) == 0 );
-    REQUIRE( app.relMove() == 0 );
-    REQUIRE( app.lastCommandValue() == Approx( 10.0 ) );
+    REQUIRE( app.position( -10.0 ) == 0 );
+    REQUIRE( app.lastCommandValue() == Approx( 350.0 ) );
     REQUIRE( app.lastCommandName() == "tgt_pos" );
 
     // Presets near 0/360 match across the wrap.
@@ -397,8 +362,7 @@ TEST_CASE( "elliptecCtrl refuses motion when the stage cannot move", "[elliptecC
     REQUIRE( app.startup() == 0 );
 
     REQUIRE( app.requestPreset( 1 ) == 0 );
-    REQUIRE( app.absDeg( 10.0 ) == 0 );
-    REQUIRE( app.relMove() == 0 );
+    REQUIRE( app.position( 10.0 ) == 0 );
     REQUIRE( app.pressHome() == 0 );
     REQUIRE( app.lastCommandName().empty() );
 
@@ -414,7 +378,7 @@ TEST_CASE( "elliptecCtrl refuses motion when the stage cannot move", "[elliptecC
     REQUIRE( app.lastCommandName().empty() );
 }
 
-/// Home, the post-home offset, and stop.
+/// Home, the post-home preset, and stop.
 /** \ingroup elliptecCtrl_unit_test
  */
 TEST_CASE( "elliptecCtrl home sequence and stop", "[elliptecCtrl]" )
@@ -429,7 +393,7 @@ TEST_CASE( "elliptecCtrl home sequence and stop", "[elliptecCtrl]" )
 
     using MagAOX::app::stateCodes;
 
-    SECTION( "without an offset the home ends when the low level reports READY" )
+    SECTION( "without a home preset the home ends when the low level reports READY" )
     {
         elliptecCtrl_test app( "ellctrl-home" );
         REQUIRE( app.startup() == 0 );
@@ -446,10 +410,10 @@ TEST_CASE( "elliptecCtrl home sequence and stop", "[elliptecCtrl]" )
         REQUIRE( app.lastCommandName().empty() );
     }
 
-    SECTION( "with an offset the home continues to the offset angle" )
+    SECTION( "with a home preset the home is followed by a preset move" )
     {
-        elliptecCtrl_test app( "ellctrl-home-offset" );
-        app.homeOffset( 45.0 );
+        elliptecCtrl_test app( "ellctrl-home-preset" );
+        app.homePreset( 1 );
         REQUIRE( app.startup() == 0 );
         app.llState( "NOTHOMED" );
 
@@ -459,36 +423,16 @@ TEST_CASE( "elliptecCtrl home sequence and stop", "[elliptecCtrl]" )
         app.llPos( 0.0 );
         app.llState( "READY" );
 
-        REQUIRE( app.lastCommandValue() == Approx( 45.0 ) );
+        REQUIRE( app.lastCommandValue() == Approx( 300.0 ) );
         REQUIRE( app.lastCommandName() == "tgt_pos" );
-        REQUIRE( app.state() == stateCodes::HOMING );
-        REQUIRE( app.status() == "Homed. Applying offset" );
+        REQUIRE( app.state() == stateCodes::OPERATING );
 
-        // A READY report from before the offset move does not end the home.
-        app.llState( "READY" );
-        REQUIRE( app.state() == stateCodes::HOMING );
-
-        app.llState( "OPERATING" );
-        REQUIRE( app.state() == stateCodes::HOMING );
-
-        app.llPos( 45.1 );
+        // A later READY does not move again.
+        app.llPos( 300.0 );
         app.llState( "READY" );
         REQUIRE( app.state() == stateCodes::READY );
-    }
-
-    SECTION( "the offset completes on a position update after READY" )
-    {
-        elliptecCtrl_test app( "ellctrl-home-offset-pos" );
-        app.homeOffset( 45.0 );
-        REQUIRE( app.startup() == 0 );
-        app.llState( "NOTHOMED" );
-        REQUIRE( app.pressHome() == 0 );
-        app.llState( "HOMING" );
-        app.llPos( 0.0 );
-        app.llState( "READY" ); // sends the offset
-        app.llState( "READY" ); // stale
-        app.llPos( 45.0 );      // arrives
-        REQUIRE( app.state() == stateCodes::READY );
+        REQUIRE( app.preset() == Approx( 2.0F ) );
+        REQUIRE( app.lastCommandName().empty() );
     }
 
     SECTION( "a failed home returns to NOTHOMED" )
@@ -563,7 +507,7 @@ TEST_CASE( "elliptecCtrl power-on home", "[elliptecCtrl]" )
     REQUIRE( app.lastCommandName() == "req_home" );
 }
 
-/// Configuration: names, home offset wrapping, and preset validation.
+/// Configuration: names, home preset, and preset validation.
 /** \ingroup elliptecCtrl_unit_test
  */
 TEST_CASE( "elliptecCtrl configuration", "[elliptecCtrl]" )
@@ -581,12 +525,21 @@ TEST_CASE( "elliptecCtrl configuration", "[elliptecCtrl]" )
         app.setupConfig();
         mx::app::writeConfigFile( "/tmp/elliptecCtrl_test.conf",
                                   { "stage", "stage", "presets", "presets" },
-                                  { "lowLevelName", "homeOffset", "names", "positions" },
-                                  { "elliptecqwp", "-15", "lab, sky", "115, 300" } );
+                                  { "lowLevelName", "homePreset", "names", "positions" },
+                                  { "elliptecqwp", "1", "lab, sky", "115, 300" } );
         REQUIRE( app.loadConfigFile( "/tmp/elliptecCtrl_test.conf" ) == 0 );
         REQUIRE( app.lowLevelName() == "elliptecqwp" );
         REQUIRE( app.stageName() == "ellctrl-config" );
-        REQUIRE( app.homeOffsetDeg() == Approx( 345.0 ) );
+        REQUIRE( app.homePresetIndex() == 1 );
+    }
+    {
+        elliptecCtrl_test app( "ellctrl-config-homepreset" );
+        app.setupConfig();
+        mx::app::writeConfigFile( "/tmp/elliptecCtrl_test_homepreset.conf",
+                                  { "stage", "presets", "presets" },
+                                  { "homePreset", "names", "positions" },
+                                  { "2", "lab, sky", "115, 300" } );
+        REQUIRE( app.loadConfigFile( "/tmp/elliptecCtrl_test_homepreset.conf" ) == -1 );
     }
     {
         elliptecCtrl_test app( "ellctrl-config-close" );

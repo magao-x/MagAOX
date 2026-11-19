@@ -106,14 +106,8 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Record the position telemetry.
     int recordPosition( bool force = false /**< [in] force the record */ );
 
-    /// Handle a new absolute-angle request.
-    INDI_NEWCALLBACK_DECL( elliptecCtrl, m_ipAbsDeg );
-
-    /// Handle a new relative-step size.
-    INDI_NEWCALLBACK_DECL( elliptecCtrl, m_ipRelDeg );
-
-    /// Handle a relative-move request.
-    INDI_NEWCALLBACK_DECL( elliptecCtrl, m_ipRelMove );
+    /// Handle a new position target in degrees.
+    INDI_NEWCALLBACK_DECL( elliptecCtrl, m_indiP_position );
 
     /// Follow the low-level state of this stage.
     INDI_SETCALLBACK_DECL( elliptecCtrl, m_indiP_llState );
@@ -135,9 +129,6 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Name of this stage's elements in the low-level properties; defaults to this app's name.
     std::string m_stageName;
 
-    /// Angle in degrees to move to after a home completes; 0 leaves the stage at home.
-    double m_homeOffsetDeg{ 0.0 };
-
     /// Angular tolerance in degrees for being at a preset.
     double m_presetToleranceDeg{ 0.5 };
 
@@ -156,14 +147,11 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Last error text reported by the low-level app, empty when OK.
     std::string m_lastError;
 
-    /// Homing sequence: 0 none, 1 home requested, 2 moving to the post-home offset.
-    int m_homingState{ 0 };
+    /// Whether a home has been requested and the low level has not yet reported its end.
+    bool m_homing{ false };
 
     /// Whether the next NOTHOMED report should trigger the power-on home (when `stage.powerOnHome` is set).
     bool m_powerOnHomePending{ true };
-
-    /// Relative step size in degrees used by `relMove`.
-    double m_relStepDeg{ 1.0 };
 
     /// The last command sent to the low-level app, for diagnostics and tests.
     /** Unit tests define `ELLIPTECCTRL_TEST_NOSEND` so commands are recorded here but not sent. */
@@ -181,20 +169,8 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
      * @{
      */
 
-    /// Absolute-angle property in degrees.
-    pcf::IndiProperty m_ipAbsDeg;
-
-    /// Relative-step property in degrees.
-    pcf::IndiProperty m_ipRelDeg;
-
-    /// Momentary request property that applies `m_ipRelDeg`.
-    pcf::IndiProperty m_ipRelMove;
-
-    /// Read-only operator status text.
-    pcf::IndiProperty m_ipStatus;
-
-    /// Read-only text listing configured preset names and angles.
-    pcf::IndiProperty m_ipStageNamePos;
+    /// Position property in degrees on [0, 360), with `current` and `target` elements.
+    pcf::IndiProperty m_indiP_position;
 
     /// Subscription to the low-level `curr_state`.
     pcf::IndiProperty m_indiP_llState;
@@ -248,11 +224,8 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Apply a low-level state string to this app's FSM and the homing sequence.
     void applyState_( const std::string &st /**< [in] low-level state string */ );
 
-    /// Push the operator status text and absolute-angle readback.
-    void updateStatus_();
-
-    /// Build the read-only preset-name mapping text.
-    std::string buildStageNamePosText_() const;
+    /// Publish `position.current`, BUSY while moving or homing.
+    void updatePosition_();
 
     ///@}
 };
@@ -291,16 +264,6 @@ inline void elliptecCtrl::setupConfig()
                 "string",
                 "Name of this stage in the low-level app; defaults to this app's name" );
 
-    config.add( "stage.homeOffset",
-                "0.0",
-                "stage.homeOffset",
-                argType::Optional,
-                "stage",
-                "homeOffset",
-                false,
-                "double",
-                "Angle (deg) to move to after homing; 0 leaves the stage at home" );
-
     config.add( "stage.presetTolerance",
                 "0.5",
                 "stage.presetTolerance",
@@ -327,13 +290,6 @@ inline int elliptecCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     m_stageName = m_configName;
     _config( m_stageName, "stage.stageName" );
 
-    _config( m_homeOffsetDeg, "stage.homeOffset" );
-    m_homeOffsetDeg = std::fmod( m_homeOffsetDeg, 360.0 );
-    if( m_homeOffsetDeg < 0 )
-    {
-        m_homeOffsetDeg += 360.0;
-    }
-
     _config( m_presetToleranceDeg, "stage.presetTolerance" );
     if( m_presetToleranceDeg <= 0 )
     {
@@ -348,6 +304,11 @@ inline int elliptecCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     if( validatePresets_() < 0 )
     {
         return -1;
+    }
+
+    if( m_homePreset >= static_cast<int>( std::min( m_presetPositions.size(), m_presetNames.size() ) ) )
+    {
+        return log<text_log, -1>( "stage.homePreset is not a configured preset", logPrio::LOG_CRITICAL );
     }
 
     TELEMETER_LOAD_CONFIG( _config );
@@ -372,27 +333,18 @@ inline int elliptecCtrl::appStartup()
         return log<text_log, -1>( "UNINITIALIZED in appStartup", logPrio::LOG_CRITICAL );
     }
 
-    CREATE_REG_INDI_NEW_NUMBERD( m_ipAbsDeg, "absDeg", 0.0, 360.0, 0.001, "", "Absolute (deg)", "rotation" );
-    CREATE_REG_INDI_NEW_NUMBERD( m_ipRelDeg, "relDeg", -360.0, 360.0, 0.001, "", "Relative step (deg)", "rotation" );
-    indi::updateIfChanged( m_ipRelDeg, "current", m_relStepDeg, m_indiDriver, INDI_IDLE );
-    indi::updateIfChanged( m_ipRelDeg, "target", m_relStepDeg, m_indiDriver, INDI_IDLE );
-    CREATE_REG_INDI_NEW_REQUESTSWITCH( m_ipRelMove, "relMove" );
+    createStandardIndiNumber<float>( m_indiP_position, "position", 0.0, 360.0, 0.0, "%.3f" );
+    m_indiP_position["current"].set( 0 );
+    m_indiP_position["target"].set( 0 );
+    if( registerIndiPropertyNew( m_indiP_position, INDI_NEWCALLBACK( m_indiP_position ) ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
 
     if( dev::stdMotionStage<elliptecCtrl>::appStartup() < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
-
-    // Registration recreates the property, so add labels and elements afterwards.
-    REG_INDI_NEWPROP_NOCB( m_ipStatus, "status", pcf::IndiProperty::Text );
-    m_ipStatus.setLabel( "Status" );
-    m_ipStatus.setGroup( "rotation" );
-    m_ipStatus.add( pcf::IndiElement( "current", "Not Connected" ) );
-
-    REG_INDI_NEWPROP_NOCB( m_ipStageNamePos, "stageNamePos", pcf::IndiProperty::Text );
-    m_ipStageNamePos.setLabel( "Stage Name Pos (deg)" );
-    m_ipStageNamePos.setGroup( "rotation" );
-    m_ipStageNamePos.add( pcf::IndiElement( "current", buildStageNamePosText_() ) );
 
     REG_INDI_SETPROP( m_indiP_llState, m_lowLevelName, std::string( "curr_state" ) );
     REG_INDI_SETPROP( m_indiP_llPos, m_lowLevelName, std::string( "curr_pos" ) );
@@ -401,7 +353,6 @@ inline int elliptecCtrl::appStartup()
     TELEMETER_APP_STARTUP;
 
     state( stateCodes::NOTCONNECTED );
-    updateStatus_();
     return 0;
 }
 
@@ -432,7 +383,7 @@ inline int elliptecCtrl::appLogic()
         {
             log<software_error>( { __FILE__, __LINE__ } );
         }
-        updateStatus_();
+        updatePosition_();
     }
 
     TELEMETER_APP_LOGIC;
@@ -477,7 +428,7 @@ inline int elliptecCtrl::startHoming()
 
     clearPresetNameTracking();
     m_preset_target = 0;
-    m_homingState   = 1;
+    m_homing        = true;
     m_moving        = 2;
     state( stateCodes::HOMING );
     recordStage( true );
@@ -559,19 +510,19 @@ inline int elliptecCtrl::recordPosition( bool force )
 
 /* ---------- INDI callbacks ---------- */
 
-INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipAbsDeg )( const pcf::IndiProperty &ipRecv )
+INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_indiP_position )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS( m_ipAbsDeg, ipRecv );
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_position, ipRecv );
 
     double tgt = 0.0;
-    if( indiTargetUpdate( m_ipAbsDeg, tgt, ipRecv, true ) < 0 )
+    if( indiTargetUpdate( m_indiP_position, tgt, ipRecv, true ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    if( !motionAllowed_( "absolute move" ) )
+    if( !motionAllowed_( "position move" ) )
     {
         return 0;
     }
@@ -580,48 +531,6 @@ INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipAbsDeg )( const pcf::IndiProperty &ipRe
     m_movingState   = 0;
     m_preset_target = 0;
     return moveToDeg_( tgt );
-}
-
-INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipRelDeg )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_ipRelDeg, ipRecv );
-
-    std::lock_guard<std::mutex> guard( m_indiMutex );
-
-    double step = m_relStepDeg;
-    if( indiTargetUpdate( m_ipRelDeg, step, ipRecv, true ) < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
-
-    m_relStepDeg = std::max( -360.0, std::min( 360.0, step ) );
-    indi::updateIfChanged( m_ipRelDeg, "current", m_relStepDeg, m_indiDriver, INDI_IDLE );
-    indi::updateIfChanged( m_ipRelDeg, "target", m_relStepDeg, m_indiDriver, INDI_IDLE );
-    return 0;
-}
-
-INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipRelMove )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_ipRelMove, ipRecv );
-
-    if( !ipRecv.find( "request" ) || ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
-    {
-        return 0;
-    }
-
-    std::lock_guard<std::mutex> guard( m_indiMutex );
-
-    indi::updateSwitchIfChanged( m_ipRelMove, "request", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
-
-    if( !motionAllowed_( "relative move" ) )
-    {
-        return 0;
-    }
-
-    clearPresetNameTracking();
-    m_movingState   = 0;
-    m_preset_target = 0;
-    return moveToDeg_( m_posDeg + m_relStepDeg );
 }
 
 INDI_SETCALLBACK_DEFN( elliptecCtrl, m_indiP_llState )( const pcf::IndiProperty &ipRecv )
@@ -651,12 +560,7 @@ INDI_SETCALLBACK_DEFN( elliptecCtrl, m_indiP_llPos )( const pcf::IndiProperty &i
     m_posDeg = ipRecv[m_stageName].get<double>();
     syncPresetState_();
     recordPosition();
-
-    // A READY report can arrive before the position reaches the home offset; re-check on each position update.
-    if( m_homingState == 2 && m_llState == "READY" )
-    {
-        applyState_( m_llState );
-    }
+    updatePosition_();
     return 0;
 }
 
@@ -674,12 +578,16 @@ INDI_SETCALLBACK_DEFN( elliptecCtrl, m_indiP_llError )( const pcf::IndiProperty 
     std::string err = ipRecv[m_stageName].getValue(); // get<std::string>() would stop at the first space
     if( err != m_lastError )
     {
-        m_lastError = err;
         if( !err.empty() )
         {
             log<text_log>( "stage error: " + err, logPrio::LOG_WARNING );
         }
-        updateStatus_();
+        else
+        {
+            log<text_log>( "stage error cleared" );
+        }
+
+        m_lastError = err;
     }
     return 0;
 }
@@ -732,7 +640,7 @@ inline int elliptecCtrl::moveToDeg_( double deg )
         deg += 360.0;
     }
 
-    indi::updateIfChanged( m_ipAbsDeg, "target", deg, m_indiDriver, INDI_BUSY );
+    updateIfChanged( m_indiP_position, "target", deg, INDI_BUSY );
 
     if( sendNumber_( "tgt_pos", deg ) < 0 )
     {
@@ -755,7 +663,7 @@ inline bool elliptecCtrl::motionAllowed_( const std::string &what )
         return false;
     }
 
-    if( m_homingState != 0 )
+    if( m_homing )
     {
         log<text_log>( what + " rejected: homing in progress", logPrio::LOG_WARNING );
         return false;
@@ -825,7 +733,7 @@ inline void elliptecCtrl::applyState_( const std::string &st )
     {
         state( stateCodes::POWEROFF );
         m_moving             = -2;
-        m_homingState        = 0;
+        m_homing             = false;
         m_powerOnHomePending = true;
     }
     else if( st == "POWERON" )
@@ -836,74 +744,50 @@ inline void elliptecCtrl::applyState_( const std::string &st )
     else if( st == "NODEVICE" )
     {
         state( stateCodes::NODEVICE );
-        m_moving      = -2;
-        m_homingState = 0;
+        m_moving = -2;
+        m_homing = false;
     }
     else if( st == "NOTCONNECTED" )
     {
         state( stateCodes::NOTCONNECTED );
-        m_moving      = -2;
-        m_homingState = 0;
+        m_moving = -2;
+        m_homing = false;
     }
     else if( st == "NOTHOMED" )
     {
-        if( m_homingState != 0 && prev != "NOTHOMED" )
+        if( m_homing && prev != "NOTHOMED" )
         {
             log<text_log>( "homing did not complete", logPrio::LOG_WARNING );
         }
-        m_homingState = 0;
+        m_homing = false;
         state( stateCodes::NOTHOMED );
         m_moving = -1;
     }
     else if( st == "HOMING" )
     {
-        m_homingState = std::max( m_homingState, 1 );
+        m_homing = true;
         state( stateCodes::HOMING );
         m_moving = 2;
     }
     else if( st == "OPERATING" )
     {
-        if( m_homingState == 2 )
-        {
-            state( stateCodes::HOMING );
-            m_moving = 2;
-        }
-        else
-        {
-            state( stateCodes::OPERATING );
-            m_moving = 1;
-        }
+        state( stateCodes::OPERATING );
+        m_moving = 1;
     }
     else if( st == "READY" )
     {
-        if( m_homingState == 1 && m_homeOffsetDeg != 0.0 )
+        const bool homed = m_homing;
+
+        m_homing = false;
+        state( stateCodes::READY );
+        m_moving = 0;
+
+        if( homed && m_homePreset >= 0 )
         {
-            // The home finished: continue to the post-home offset as part of the home.
-            m_homingState = 2;
-            log<text_log>( "homed; moving to the home offset" );
-            if( sendNumber_( "tgt_pos", m_homeOffsetDeg ) < 0 )
-            {
-                log<software_error>( { __FILE__, __LINE__, "could not send home offset" } );
-                m_homingState = 0;
-            }
-            state( stateCodes::HOMING );
-            m_moving = 2;
-        }
-        else if( m_homingState == 2 )
-        {
-            // Only finish once the stage is at the offset; a READY report may predate the offset move.
-            if( circularDistanceDeg_( m_posDeg, m_homeOffsetDeg ) <= m_presetToleranceDeg )
-            {
-                m_homingState = 0;
-                state( stateCodes::READY );
-                m_moving = 0;
-            }
-        }
-        else
-        {
-            m_homingState = 0;
-            state( stateCodes::READY );
-            m_moving = 0;
+            // The home finished: move to the configured preset (stdMotionStage presets are 1-based).
+            log<text_log>( "homed; moving to preset " + m_presetNames[static_cast<size_t>( m_homePreset )] );
+            m_movingState = 0;
+            moveTo( m_homePreset + 1 );
         }
     }
     else
@@ -914,77 +798,12 @@ inline void elliptecCtrl::applyState_( const std::string &st )
 
     syncPresetState_();
     recordStage();
-    updateStatus_();
+    updatePosition_();
 }
 
-inline void elliptecCtrl::updateStatus_()
+inline void elliptecCtrl::updatePosition_()
 {
-    std::string s;
-    if( m_llState == "POWEROFF" )
-    {
-        s = "Powered Off";
-    }
-    else if( m_llState.empty() || m_llState == "NOTCONNECTED" || m_llState == "POWERON" )
-    {
-        s = "Not Connected";
-    }
-    else if( m_llState == "NODEVICE" )
-    {
-        s = "Wrong or missing device";
-    }
-    else if( m_moving == 2 )
-    {
-        s = ( m_homingState == 2 ) ? "Homed. Applying offset" : "Homing";
-    }
-    else if( m_moving == 1 )
-    {
-        s = "Moving";
-    }
-    else if( !m_lastError.empty() )
-    {
-        s = "Error: " + m_lastError;
-    }
-    else if( m_llState == "NOTHOMED" )
-    {
-        s = "Not Homed";
-    }
-    else
-    {
-        s = "OK";
-    }
-
-    if( !m_indiDriver )
-    {
-        // Keep local copies for status queries without an INDI driver (e.g. tests).
-        m_ipStatus.addIfNoExist( pcf::IndiElement( "current" ) );
-        m_ipStatus["current"].set( s );
-        m_ipAbsDeg.addIfNoExist( pcf::IndiElement( "current" ) );
-        m_ipAbsDeg["current"].set( m_posDeg );
-        return;
-    }
-
-    indi::updateIfChanged( m_ipStatus, "current", s, m_indiDriver, ( m_moving > 0 ) ? INDI_BUSY : INDI_IDLE );
-    indi::updateIfChanged( m_ipAbsDeg, "current", m_posDeg, m_indiDriver, ( m_moving > 0 ) ? INDI_BUSY : INDI_IDLE );
-}
-
-inline std::string elliptecCtrl::buildStageNamePosText_() const
-{
-    if( m_presetNames.empty() || m_presetPositions.empty() )
-    {
-        return "(none)";
-    }
-
-    std::ostringstream out;
-    const size_t       n = std::min( m_presetNames.size(), m_presetPositions.size() );
-    for( size_t i = 0; i < n; ++i )
-    {
-        if( i )
-        {
-            out << ", ";
-        }
-        out << m_presetNames[i] << ":" << m_presetPositions[i];
-    }
-    return out.str();
+    updateIfChanged( m_indiP_position, "current", m_posDeg, ( m_moving > 0 ) ? INDI_BUSY : INDI_IDLE );
 }
 
 } // namespace app
