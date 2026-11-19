@@ -1,6 +1,5 @@
 /** \file elliptecCtrl_test.cpp
  * \brief Catch2 tests for the elliptecCtrl client of elliptecLowLevel.
- * \author Miles Lucas
  *
  * \ingroup elliptecCtrl_files
  */
@@ -85,7 +84,7 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     /// A low-level property update for one stage.
     static pcf::IndiProperty llProp( const std::string      &name,  /**< [in] property name */
                                      const std::string      &stage, /**< [in] element name */
-                                     pcf::IndiProperty::Type type )
+                                     pcf::IndiProperty::Type type /**< [in] property type */ )
     {
         pcf::IndiProperty ip( type );
         ip.setDevice( "ellbus" );
@@ -95,7 +94,8 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     }
 
     /// Report a low-level state.
-    int llState( const std::string &st, const std::string &stage = "qwp1" )
+    int llState( const std::string &st, /**< [in] low-level state string */
+                 const std::string &stage = "qwp1" /**< [in] stage element to report for */ )
     {
         pcf::IndiProperty ip = llProp( "curr_state", stage, pcf::IndiProperty::Text );
         ip[stage].set( st );
@@ -103,7 +103,8 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     }
 
     /// Report a low-level position.
-    int llPos( double deg, const std::string &stage = "qwp1" )
+    int llPos( double             deg, /**< [in] position in degrees */
+               const std::string &stage = "qwp1" /**< [in] stage element to report for */ )
     {
         pcf::IndiProperty ip = llProp( "curr_pos", stage, pcf::IndiProperty::Number );
         ip[stage].set( deg );
@@ -111,7 +112,7 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     }
 
     /// Report a low-level error.
-    int llError( const std::string &err )
+    int llError( const std::string &err /**< [in] error text, empty when OK */ )
     {
         pcf::IndiProperty ip = llProp( "last_error", "qwp1", pcf::IndiProperty::Text );
         ip["qwp1"].set( err );
@@ -119,7 +120,7 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     }
 
     /// Request a preset by number.
-    int requestPreset( float n )
+    int requestPreset( float n /**< [in] 1-based preset number */ )
     {
         pcf::IndiProperty ip = m_indiP_preset;
         ip["target"].set( n );
@@ -127,7 +128,7 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     }
 
     /// Request a preset by name.
-    int requestPresetName( const std::string &name )
+    int requestPresetName( const std::string &name /**< [in] preset name to select */ )
     {
         pcf::IndiProperty ip = m_indiP_presetName;
         for( auto &n : m_presetNames )
@@ -154,7 +155,7 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     }
 
     /// Request a position in degrees.
-    int position( double deg )
+    int position( double deg /**< [in] target in degrees */ )
     {
         pcf::IndiProperty ip = m_indiP_position;
         ip["target"].set( deg );
@@ -182,13 +183,13 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     }
 
     /// Set `stage.homePreset` (0-based).
-    void homePreset( int n )
+    void homePreset( int n /**< [in] 0-based preset index, negative to disable */ )
     {
         m_homePreset = n;
     }
 
     /// Set `stage.powerOnHome`.
-    void powerOnHome( bool on )
+    void powerOnHome( bool on /**< [in] whether to home after power-on */ )
     {
         m_powerOnHome = on;
     }
@@ -206,7 +207,7 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     }
 
     /// Read a configuration file and load it.
-    int loadConfigFile( const std::string &path )
+    int loadConfigFile( const std::string &path /**< [in] configuration file path */ )
     {
         config.readConfig( path );
         return loadConfigImpl( config );
@@ -232,7 +233,8 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
 };
 
 /// Start a client and bring its stage to READY at the given position.
-void readyAt( elliptecCtrl_test &app, double deg )
+void readyAt( elliptecCtrl_test &app, /**< [in,out] the client under test */
+              double             deg /**< [in] position in degrees */ )
 {
     REQUIRE( app.startup() == 0 );
     app.llPos( deg );

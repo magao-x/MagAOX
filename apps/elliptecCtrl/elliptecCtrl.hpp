@@ -1,6 +1,5 @@
 /** \file elliptecCtrl.hpp
  * \brief The MagAO-X Elliptec stage controller header.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup elliptecCtrl_files
  */
@@ -32,8 +31,9 @@ namespace app
  * and commands the stage by sending `tgt_pos`, `req_home` and `req_halt`. Power management also belongs to the
  * low-level app, which reports POWEROFF for every stage while the bus is off.
  *
- * This app owns the standard `stdMotionStage` interface (presets, preset names, home, stop), the absolute and
- * relative angle controls, the post-home offset, the power-on home, and telemetry.
+ * This app owns the standard `stdMotionStage` interface (presets, preset names, home, stop, the power-on home and
+ * the post-home preset), the `position` property in degrees, and telemetry. Errors reported by the low-level app
+ * are logged; the live error text remains in the low-level `last_error`.
  *
  * The stage is modeled as a single 360 degree circle: positions are wrapped into [0, 360).
  *
@@ -358,7 +358,7 @@ inline int elliptecCtrl::appStartup()
 
 inline int elliptecCtrl::appLogic()
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
         if( state() == stateCodes::INITIALIZED )
