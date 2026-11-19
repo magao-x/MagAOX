@@ -1,5 +1,5 @@
 /** \file qwpTracker.hpp
- * \brief The MagAO-X QWP rotation tracker header file
+ * \brief The MagAO-X dual QWP rotation tracker header file
  *
  * \ingroup qwpTracker_files
  */
@@ -10,8 +10,7 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-#include <mx/math/gslInterpolation.hpp>
-#include <mx/ioutils/readColumns.hpp>
+#include <cmath>
 
 /** \defgroup qwpTracker
  * \brief The MagAO-X application to track pupil rotation with the dual rotating QWP compensator.
@@ -31,8 +30,17 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X ADC Tracker
-/**
+/// The MagAO-X dual QWP rotation tracker.
+/** Reads the K-mirror angle from `stagek` and commands the fast-axis angles of the two quarter-wave plates on
+ * `stageqwprot1` and `stageqwprot2`. This app owns the mapping between fast-axis (polarization) angle and mechanical
+ * stage angle, `stage = zero + sign * fastAxis`, so that the stage apps deal only in mechanical angles.
+ *
+ * A QWP is 180 degree periodic, so each fast-axis target is sent as whichever of the two equivalent stage angles is
+ * nearest the stage's current position.  Fast-axis angles are reported in [0, 180).
+ *
+ * While tracking, targets follow `computeTargets()` on every K-mirror update.  When not tracking, targets are set
+ * manually through the `qwp1` and `qwp2` properties.
+ *
  * \ingroup qwpTracker
  */
 class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
@@ -45,33 +53,61 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
 
     typedef dev::telemeter<qwpTracker> telemeterT;
 
+  public:
+    /// The state of one QWP and its rotation stage.
+    struct qwpStage
+    {
+        std::string devName; ///< The INDI device name of the rotation stage.
+
+        float zero{ 0 }; ///< The stage angle, in degrees, at which the fast axis is at 0.
+
+        int sign{ 1 }; ///< The sign relating fast-axis rotation to stage rotation, +1 or -1.
+
+        stateCodes::stateCodeT stageState{ stateCodes::NOTCONNECTED }; ///< The last state reported by the stage.
+
+        bool havePos{ false }; ///< True once the stage has reported a position.
+
+        float stagePos{ 0 }; ///< The last stage position reported by the stage, in degrees.
+
+        float fastCur{ 0 }; ///< The current fast-axis angle, in degrees in [0, 180).
+
+        float fastTgt{ 0 }; ///< The target fast-axis angle, in degrees in [0, 180).
+
+        bool pending{ false }; ///< True when `fastTgt` still has to be sent to the stage.
+
+        bool haveSent{ false }; ///< True when `lastSent` holds a command that need not be repeated.
+
+        float lastSent{ 0 }; ///< The last stage angle commanded, in degrees.
+
+        int nSent{ 0 }; ///< The number of stage commands issued, for diagnostics and tests.
+
+        pcf::IndiProperty cmd; ///< The outbound `absDeg.target` command property for the stage.
+    };
+
   protected:
     /** \name Configurable Parameters
      *@{
-        */
-    // basics: orientation within mount
-    float m_qwp1_zero{ 0 };
-    int m_qwp1_sign{ 1 };
-    float m_qwp2_zero{ 0 };
-    int m_qwp2_sign{ -1 };
+     */
 
-    // positions
-    float m_qwp1_tgtPos{ 0 };
-    float m_qwp1_curPos{ 0 };
-    float m_qwp2_tgtPos{ 0 };
-    float m_qwp2_curPos{ 0 };
-    float m_kmirror{ 0 };
+    qwpStage m_qwp[2]; ///< QWP1 and QWP2: calibration from config, plus stage and target state.
 
-    // indi
-    std::string m_qwp1_devName{ "stageqwp1rot" }; ///< The device name of the QWP stage.
-    std::string m_qwp2_devName{ "stageqwp2rot" }; ///< The device name of the QWP stage.
+    std::string m_kDevName{ "stagek" }; ///< The device name of the K-mirror stage providing `position.current`.
 
-    std::string m_imrDevName{"stagek" }; ///< The device name of the TCS Interface providing 'teldata.altitude'.  Default is 'tcsi'
+    ///@}
 
-    // tracking
-    float m_updateInterval{ 10 }; ///< The interval at which to update positions, in seconds.  Default is 10 secs.
+    bool m_tracking{ false }; ///< True when the QWPs follow the tracking law.
 
-    bool m_tracking{ true }; ///< Are the QWPs tracking?. Default is true.
+    float m_k{ 0 }; ///< The most recent K-mirror angle, in degrees.
+
+    bool m_haveK{ false }; ///< True once at least one K-mirror angle has been received.
+
+    bool m_kUpdated{ false }; ///< True when a K-mirror angle has arrived that the tracking law has not yet used.
+
+    float m_telemQwp1{ 0 }; ///< The QWP1 fast-axis angle in the last telemetry record.
+
+    float m_telemQwp2{ 0 }; ///< The QWP2 fast-axis angle in the last telemetry record.
+
+    bool m_telemTracking{ false }; ///< The tracking flag in the last telemetry record.
 
   public:
     /// Default c'tor.
@@ -82,20 +118,22 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
     {
     }
 
+    /// Set up configuration entries.
     virtual void setupConfig();
 
     /// Implementation of loadConfig logic, separated for testing.
     /** This is called by loadConfig().
+     *
+     * \returns 0 on success
+     * \returns -1 if a sign is not +1 or -1
      */
     int loadConfigImpl(
         mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
 
+    /// Load configuration values, shutting down on an invalid configuration.
     virtual void loadConfig();
 
-    /// Startup function
-    /**
-     *
-     */
+    /// Register the INDI properties and telemetry.
     virtual int appStartup();
 
     /// Implementation of the FSM for qwpTracker.
@@ -106,47 +144,154 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
     virtual int appLogic();
 
     /// Shutdown the app.
-    /**
-     *
-     */
     virtual int appShutdown();
 
+    /** \name Tracking Law and Angle Mapping
+     *@{
+     */
+
+    /// The tracking law: compute the QWP fast-axis targets from the K-mirror angle.
+    /** This is a placeholder law, `qwp1 = 2k` and `qwp2 = -2k`, to be replaced by the real law.
+     */
+    static void computeTargets( float  k,    /**< [in] the K-mirror angle, in degrees */
+                                float &qwp1, /**< [out] the QWP1 fast-axis target, in degrees */
+                                float &qwp2 /**< [out] the QWP2 fast-axis target, in degrees */ );
+
+    /// Wrap an angle to [0, 360).
+    /**
+     * \returns the wrapped angle in degrees
+     */
+    static float wrap360( float deg /**< [in] the angle, in degrees */ );
+
+    /// Fold an angle to [0, 180), the period of a QWP fast axis.
+    /**
+     * \returns the folded angle in degrees
+     */
+    static float fold180( float deg /**< [in] the angle, in degrees */ );
+
+    /// Convert a stage angle to a fast-axis angle.
+    /**
+     * \returns `sign * (stage - zero)` folded to [0, 180)
+     */
+    static float stageToFast( float stage, /**< [in] the stage angle, in degrees */
+                              float zero,  /**< [in] the stage angle at which the fast axis is at 0 */
+                              int   sign /**< [in] the sign relating fast-axis to stage rotation */ );
+
+    /// Convert a fast-axis angle to the nearest equivalent stage angle.
+    /** The candidates are `wrap360(zero + sign * fast)` and that angle + 180.
+     *
+     * \returns the candidate, in [0, 360), with the smaller circular distance from `stageCur`
+     */
+    static float fastToStage( float fast, /**< [in] the fast-axis angle, in degrees */
+                              float zero, /**< [in] the stage angle at which the fast axis is at 0 */
+                              int   sign, /**< [in] the sign relating fast-axis to stage rotation */
+                              float stageCur /**< [in] the current stage angle, in degrees */ );
+
+    /// Derive the tracker FSM state from the tracking flag and the two stage states.
+    /**
+     * \returns OPERATING if tracking or either stage is OPERATING
+     * \returns READY if both stages are READY
+     * \returns otherwise the worse stage state, with anything other than HOMING or NOTHOMED reported as NOTCONNECTED
+     */
+    static stateCodes::stateCodeT trackerState( bool                   tracking, /**< [in] whether tracking is on */
+                                                stateCodes::stateCodeT stage1,   /**< [in] the QWP1 stage state */
+                                                stateCodes::stateCodeT stage2 /**< [in] the QWP2 stage state */ );
+
+    ///@}
+
   protected:
-    void getQwp1Angle();
+    /// Compute tracking targets if needed, send pending targets to ready stages, and update FSM and telemetry.
+    /** Takes `m_indiMutex`; the caller must not hold it.  Commands are sent after the mutex is released.
+     *
+     * \returns 0 on success
+     * \returns -1 if a stage command could not be sent
+     */
+    int updateStages();
 
-    void getQwp2Angle();
+    /// Send a stage target to one QWP stage.
+    /**
+     * \returns 0 on success
+     * \returns -1 on an error from sendNewProperty
+     */
+    int sendStageTarget( int   n, /**< [in] the QWP index, 0 or 1 */
+                         float deg /**< [in] the stage angle to command, in degrees */ );
 
-    void updateQwpStages();
+    /// The app's `qwp1` or `qwp2` property.
+    /**
+     * \returns `m_indiP_qwp1` for n == 0, otherwise `m_indiP_qwp2`
+     */
+    pcf::IndiProperty &qwpProp( int n /**< [in] the QWP index, 0 or 1 */ );
+
+    /// Handle a stage `absDeg` update.
+    /**
+     * \returns 0 always
+     */
+    int stagePosUpdate( int                      n, /**< [in] the QWP index, 0 or 1 */
+                        const pcf::IndiProperty &ipRecv /**< [in] the received property */ );
+
+    /// Handle a stage `fsm` update.
+    /**
+     * \returns 0 always
+     */
+    int stageStateUpdate( int                      n, /**< [in] the QWP index, 0 or 1 */
+                          const pcf::IndiProperty &ipRecv /**< [in] the received property */ );
+
+    /// Handle a manual fast-axis target request.
+    /** Rejected while tracking.
+     *
+     * \returns 0 on success or rejection
+     * \returns -1 if the target could not be sent
+     */
+    int manualTarget( int                      n, /**< [in] the QWP index, 0 or 1 */
+                      const pcf::IndiProperty &ipRecv /**< [in] the received property */ );
 
     /** @name INDI
      *
      * @{
      */
   protected:
-    pcf::IndiProperty m_indiP_stagek;
+    pcf::IndiProperty m_indiP_stagek; ///< The subscribed K-mirror stage `position` property.
 
-    pcf::IndiProperty m_indiP_stageqwp1rot;
-    pcf::IndiProperty m_indiP_stagewp1rotFsm;
-    pcf::IndiProperty m_indiP_stageqwp2rot;
-    pcf::IndiProperty m_indiP_stageqwp2rotFsm;
+    pcf::IndiProperty m_indiP_qwp1AbsDeg; ///< The subscribed QWP1 stage `absDeg` property.
 
-    pcf::IndiProperty m_indiP_tracking;
-    pcf::IndiProperty m_indiP_qwp1Pos;
-    pcf::IndiProperty m_indiP_qwp2Pos;
+    pcf::IndiProperty m_indiP_qwp1Fsm; ///< The subscribed QWP1 stage `fsm` property.
 
+    pcf::IndiProperty m_indiP_qwp2AbsDeg; ///< The subscribed QWP2 stage `absDeg` property.
+
+    pcf::IndiProperty m_indiP_qwp2Fsm; ///< The subscribed QWP2 stage `fsm` property.
+
+    pcf::IndiProperty m_indiP_tracking; ///< The INDI toggle used to enable or disable tracking.
+
+    pcf::IndiProperty m_indiP_qwp1; ///< The QWP1 fast-axis angle, `current` and `target`, in degrees.
+
+    pcf::IndiProperty m_indiP_qwp2; ///< The QWP2 fast-axis angle, `current` and `target`, in degrees.
+
+    pcf::IndiProperty m_indiP_zero; ///< The read-only configured stage zeros, elements `qwp1` and `qwp2`.
 
   public:
-
+    /// Handle K-mirror position updates.
     INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stagek );
 
-    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stageqwp1rot );
-    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stagewp1rotFsm );
-    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stageqwp2rot );
-    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stageqwp2rotFsm );
+    /// Handle QWP1 stage position updates.
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp1AbsDeg );
 
+    /// Handle QWP1 stage state updates.
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp1Fsm );
+
+    /// Handle QWP2 stage position updates.
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp2AbsDeg );
+
+    /// Handle QWP2 stage state updates.
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp2Fsm );
+
+    /// Handle tracking toggle requests.
     INDI_NEWCALLBACK_DECL( qwpTracker, m_indiP_tracking );
-    INDI_NEWCALLBACK_DECL( qwpTracker, m_indiP_qwp1Pos );
-    INDI_NEWCALLBACK_DECL( qwpTracker, m_indiP_qwp2Pos );
+
+    /// Handle manual QWP1 fast-axis target requests.
+    INDI_NEWCALLBACK_DECL( qwpTracker, m_indiP_qwp1 );
+
+    /// Handle manual QWP2 fast-axis target requests.
+    INDI_NEWCALLBACK_DECL( qwpTracker, m_indiP_qwp2 );
 
     ///@}
 
@@ -154,114 +299,105 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
      *
      * @{
      */
+
+    /// Check whether telemetry records are due.
+    /**
+     * \returns the result of telemeter::checkRecordTimes
+     */
     int checkRecordTimes();
 
-    int recordTelem( const telem_qwptrack * );
+    /// Record the qwptrack telemetry unconditionally.
+    /**
+     * \returns 0 always
+     */
+    int recordTelem( const telem_qwptrack * /**< [in] tag selecting the telemetry type */ );
 
-    int recordQwpTrack( bool force = false );
+    /// Record the qwptrack telemetry if it changed.
+    /**
+     * \returns 0 always
+     */
+    int recordQwpTrack( bool force = false /**< [in] record even if nothing changed */ );
 
     ///@}
 };
 
 qwpTracker::qwpTracker() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
+    m_qwp[0].devName = "stageqwprot1";
+    m_qwp[1].devName = "stageqwprot2";
+    m_qwp[1].sign    = -1;
+
     return;
 }
 
 void qwpTracker::setupConfig()
 {
-    config.add( "qwp1.zero",
-                "",
-                "qwp1.zero",
-                argType::Required,
-                "qwp1",
-                "zero",
-                false,
-                "float",
-                "The QWP1 zero position.  Default is 0." );
+    for( int n = 0; n < 2; ++n )
+    {
+        std::string sec = "qwp" + std::to_string( n + 1 );
 
-    config.add( "qwp1.sign",
-                "",
-                "qwp1.sign",
-                argType::Required,
-                "qwp1",
-                "sign",
-                false,
-                "int",
-                "The QWP1 rotation sign. Default is 1." );
+        config.add( sec + ".zero",
+                    "",
+                    sec + ".zero",
+                    argType::Required,
+                    sec,
+                    "zero",
+                    false,
+                    "float",
+                    "The stage angle at which the " + sec + " fast axis is at 0.  Default is 0." );
 
-    config.add( "qwp1.devName",
+        config.add( sec + ".sign",
+                    "",
+                    sec + ".sign",
+                    argType::Required,
+                    sec,
+                    "sign",
+                    false,
+                    "int",
+                    "The " + sec + " stage rotation sign, +1 or -1. Default is " + std::to_string( m_qwp[n].sign ) +
+                        "." );
+
+        config.add( sec + ".devName",
+                    "",
+                    sec + ".devName",
+                    argType::Required,
+                    sec,
+                    "devName",
+                    false,
+                    "string",
+                    "The device name of the " + sec + " stage.  Default is '" + m_qwp[n].devName + "'" );
+    }
+
+    config.add( "k.devName",
                 "",
-                "qwp1.devName",
+                "k.devName",
                 argType::Required,
-                "qwp1",
+                "k",
                 "devName",
                 false,
                 "string",
-                "The device name of the QWP1 stage.  Default is 'stageqwp1rot'" );
-    config.add( "qwp2.zero",
-                "",
-                "qwp2.zero",
-                argType::Required,
-                "qwp2",
-                "zero",
-                false,
-                "float",
-                "The QWP2 zero position.  Default is 0." );
-
-    config.add( "qwp2.sign",
-                "",
-                "qwp2.sign",
-                argType::Required,
-                "qwp2",
-                "sign",
-                false,
-                "int",
-                "The QWP2 rotation sign. Default is -1." );
-
-    config.add( "qwp2.devName",
-                "",
-                "qwp2.devName",
-                argType::Required,
-                "qwp2",
-                "devName",
-                false,
-                "string",
-                "The device name of the QWP2 stage.  Default is 'stageqwp2rot'" );
-
-    config.add( "imr.devName",
-                "",
-                "imr.devName",
-                argType::Required,
-                "imr",
-                "devName",
-                false,
-                "string",
-                "The device name of the k-mirror image rotator tracker" );
-
-    config.add( "tracking.updateInterval",
-                "",
-                "tracking.updateInterval",
-                argType::Required,
-                "tracking",
-                "updateInterval",
-                false,
-                "float",
-                "The interval at which to update positions, in seconds.  Default is 1 sec." );
+                "The device name of the K-mirror stage.  Default is 'stagek'" );
 
     TELEMETER_SETUP_CONFIG( config );
 }
 
 int qwpTracker::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    _config( m_qwp1_zero, "qwp1.zero" );
-    _config( m_qwp1_sign, "qwp1.sign" );
-    _config( m_qwp1_devName, "qwp1.devName" );
-    _config( m_qwp2_zero, "qwp2.zero" );
-    _config( m_qwp2_sign, "qwp2.sign" );
-    _config( m_qwp2_devName, "qwp2.devName" );
-    _config( m_imrDevName, "imr.devName" );
-    _config( m_updateInterval, "tracking.updateInterval" );
+    for( int n = 0; n < 2; ++n )
+    {
+        std::string sec = "qwp" + std::to_string( n + 1 );
+
+        _config( m_qwp[n].zero, sec + ".zero" );
+        _config( m_qwp[n].sign, sec + ".sign" );
+        _config( m_qwp[n].devName, sec + ".devName" );
+
+        if( m_qwp[n].sign != 1 && m_qwp[n].sign != -1 )
+        {
+            return log<text_log, -1>( sec + ".sign must be +1 or -1", logPrio::LOG_CRITICAL );
+        }
+    }
+
+    _config( m_kDevName, "k.devName" );
 
     TELEMETER_LOAD_CONFIG( _config );
 
@@ -270,59 +406,54 @@ int qwpTracker::loadConfigImpl( mx::app::appConfigurator &_config )
 
 void qwpTracker::loadConfig()
 {
-    loadConfigImpl( config );
+    if( loadConfigImpl( config ) < 0 )
+    {
+        m_shutdown = true;
+    }
 }
 
 int qwpTracker::appStartup()
 {
+    REG_INDI_SETPROP( m_indiP_stagek, m_kDevName, "position" );
 
-    REG_INDI_SETPROP( m_indiP_stagek, m_imrDevName, "position" );
+    REG_INDI_SETPROP( m_indiP_qwp1AbsDeg, m_qwp[0].devName, "absDeg" );
 
-    REG_INDI_SETPROP( m_indiP_stageqwp1rot, m_qwp1_devName, "position" );
+    REG_INDI_SETPROP( m_indiP_qwp1Fsm, m_qwp[0].devName, "fsm" );
 
-    REG_INDI_SETPROP( m_indiP_stagewp1rotFsm, m_qwp1_devName, "fsm" );
+    REG_INDI_SETPROP( m_indiP_qwp2AbsDeg, m_qwp[1].devName, "absDeg" );
 
-    REG_INDI_SETPROP( m_indiP_stageqwp2rot, m_qwp2_devName, "position" );
+    REG_INDI_SETPROP( m_indiP_qwp2Fsm, m_qwp[1].devName, "fsm" );
 
-    REG_INDI_SETPROP( m_indiP_stageqwp2rotFsm, m_qwp2_devName, "fsm" );
+    for( auto &q : m_qwp )
+    {
+        q.cmd = pcf::IndiProperty( pcf::IndiProperty::Number );
+        q.cmd.setDevice( q.devName );
+        q.cmd.setName( "absDeg" );
+        q.cmd.add( pcf::IndiElement( "target" ) );
+    }
 
-    CREATE_REG_INDI_NEW_TOGGLESWITCH(m_indiP_tracking, "tracking");
+    CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_tracking, "tracking" );
 
-    CREATE_REG_INDI_NEW_NUMBERF(m_indiP_qwp1Pos, "qwp1", -360, 360, 1e-3, "%g", "", "");
-    m_indiP_qwp1Pos["current"].setValue(m_qwp1_curPos);
-    m_indiP_qwp1Pos["target"].setValue(m_qwp1_tgtPos);
-    
-    CREATE_REG_INDI_NEW_NUMBERF(m_indiP_qwp2Pos, "qwp2", -360, 360, 1e-3, "%g", "", "");
-    m_indiP_qwp2Pos["current"].setValue(m_qwp2_curPos);
-    m_indiP_qwp2Pos["target"].setValue(m_qwp2_tgtPos);
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_qwp1, "qwp1", -360, 360, 1e-3, "%g", "QWP1 fast axis", "" );
+
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_qwp2, "qwp2", -360, 360, 1e-3, "%g", "QWP2 fast axis", "" );
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_zero, "zero", pcf::IndiProperty::Number );
+    m_indiP_zero.add( pcf::IndiElement( "qwp1" ) );
+    m_indiP_zero["qwp1"].set( m_qwp[0].zero );
+    m_indiP_zero.add( pcf::IndiElement( "qwp2" ) );
+    m_indiP_zero["qwp2"].set( m_qwp[1].zero );
 
     TELEMETER_APP_STARTUP;
 
-    state( stateCodes::READY );
+    state( stateCodes::NOTCONNECTED );
 
     return 0;
 }
 
 int qwpTracker::appLogic()
 {
-
-    static double lastupdate = 0;
-
-    if( m_tracking && mx::sys::get_curr_time() - lastupdate > m_updateInterval )
-    {
-
-        getQwp1Angle();
-        getQwp2Angle();
-
-        updateQwpStages();
-
-        lastupdate = mx::sys::get_curr_time();
-    }
-    else
-    {
-        if( !m_tracking )
-            lastupdate = 0;
-    }
+    updateStages();
 
     TELEMETER_APP_LOGIC;
 
@@ -336,104 +467,360 @@ int qwpTracker::appShutdown()
     return 0;
 }
 
-void qwpTracker::getQwp1Angle()
+void qwpTracker::computeTargets( float k, float &qwp1, float &qwp2 )
 {
-    m_qwp1_tgtPos = 0.0 * m_kmirror;
+    qwp1 = 2 * k;
+    qwp2 = -2 * k;
 }
 
-void qwpTracker::getQwp2Angle()
+float qwpTracker::wrap360( float deg )
 {
-    m_qwp2_tgtPos = 0.0 * m_kmirror;
-}
+    float w = std::fmod( deg, 360.0f );
 
-void qwpTracker::updateQwpStages()
-{
-    /* QWP 2 */
-
-    updateIfChanged<float>(m_indiP_qwp1Pos, "target", m_qwp1_tgtPos);
-    float qwp1_stage_angle = m_qwp1_sign * (m_qwp1_tgtPos - m_qwp1_zero);
-
-    std::cerr << "QWP1 set to: " << m_qwp1_tgtPos << "\n";
-    std::cerr << "Sending QWP1 stage to: " << qwp1_stage_angle << "\n";
-    log<text_log>( "QWP1 set to: " + std::to_string( m_qwp1_tgtPos ) );
-
-    m_indiP_qwp1Pos["target"] = qwp1_stage_angle;
-    sendNewProperty( m_indiP_qwp1Pos );
-
-
-    /* QWP 2 */
-
-    updateIfChanged<float>(m_indiP_qwp2Pos, "target", m_qwp2_tgtPos);
-    float qwp2_stage_angle = m_qwp2_sign * (m_qwp2_tgtPos - m_qwp2_zero);
-
-    std::cerr << "QWP2 set to: " << m_qwp2_tgtPos << "\n";
-    std::cerr << "Sending QWP2 stage to: " << qwp2_stage_angle << "\n";
-    log<text_log>( "QWP2 set to: " + std::to_string( m_qwp2_tgtPos ) );
-
-    m_indiP_qwp2Pos["target"] = qwp2_stage_angle;
-    sendNewProperty( m_indiP_qwp2Pos );
-
-    //
-
-    recordQwpTrack();
-}
-
-INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_qwp1Pos )( const pcf::IndiProperty &ipRecv )
-{
-
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp1Pos, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_qwp1Pos.getName() )
+    if( w < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
-        return -1;
+        w += 360;
     }
 
-    if( !ipRecv.find( "target" ) )
+    // fmod of a tiny negative number can round up to exactly 360
+    if( w >= 360 )
+    {
+        w -= 360;
+    }
+
+    return w;
+}
+
+float qwpTracker::fold180( float deg )
+{
+    float f = std::fmod( deg, 180.0f );
+
+    if( f < 0 )
+    {
+        f += 180;
+    }
+
+    if( f >= 180 )
+    {
+        f -= 180;
+    }
+
+    return f;
+}
+
+float qwpTracker::stageToFast( float stage, float zero, int sign )
+{
+    return fold180( sign * ( stage - zero ) );
+}
+
+float qwpTracker::fastToStage( float fast, float zero, int sign, float stageCur )
+{
+    float s0 = wrap360( zero + sign * fast );
+    float s1 = wrap360( s0 + 180 );
+
+    auto dist = []( float a, float b )
+    {
+        float d = wrap360( a - b );
+        return std::min( d, 360 - d );
+    };
+
+    return ( dist( s0, stageCur ) <= dist( s1, stageCur ) ) ? s0 : s1;
+}
+
+stateCodes::stateCodeT
+qwpTracker::trackerState( bool tracking, stateCodes::stateCodeT stage1, stateCodes::stateCodeT stage2 )
+{
+    if( tracking || stage1 == stateCodes::OPERATING || stage2 == stateCodes::OPERATING )
+    {
+        return stateCodes::OPERATING;
+    }
+
+    if( stage1 == stateCodes::READY && stage2 == stateCodes::READY )
+    {
+        return stateCodes::READY;
+    }
+
+    auto rank = []( stateCodes::stateCodeT s )
+    {
+        if( s == stateCodes::READY )
+        {
+            return 3;
+        }
+        else if( s == stateCodes::HOMING )
+        {
+            return 2;
+        }
+        else if( s == stateCodes::NOTHOMED )
+        {
+            return 1;
+        }
+
         return 0;
+    };
 
-    if (m_tracking) return 0;
+    stateCodes::stateCodeT worst = ( rank( stage1 ) <= rank( stage2 ) ) ? stage1 : stage2;
 
-    m_qwp1_tgtPos = ipRecv["target"].get<float>();
+    if( rank( worst ) == 0 )
+    {
+        return stateCodes::NOTCONNECTED;
+    }
 
-    updateQwpStages();
+    return worst;
+}
+
+int qwpTracker::updateStages()
+{
+    float tgt[2]  = { 0, 0 };
+    bool  send[2] = { false, false };
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        if( m_tracking && m_kUpdated )
+        {
+            float law[2];
+            computeTargets( m_k, law[0], law[1] );
+            m_kUpdated = false;
+
+            for( int n = 0; n < 2; ++n )
+            {
+                m_qwp[n].fastTgt = fold180( law[n] );
+                m_qwp[n].pending = true;
+                updateIfChanged( qwpProp( n ), "target", m_qwp[n].fastTgt );
+            }
+        }
+
+        for( int n = 0; n < 2; ++n )
+        {
+            qwpStage &q = m_qwp[n];
+
+            bool ready = ( q.stageState == stateCodes::READY || q.stageState == stateCodes::OPERATING );
+
+            if( !q.pending || !q.havePos || !ready )
+            {
+                continue;
+            }
+
+            q.pending = false;
+
+            float s = fastToStage( q.fastTgt, q.zero, q.sign, q.stagePos );
+
+            if( q.haveSent && s == q.lastSent )
+            {
+                continue;
+            }
+
+            q.lastSent = s;
+            q.haveSent = true;
+            tgt[n]     = s;
+            send[n]    = true;
+        }
+
+        state( trackerState( m_tracking, m_qwp[0].stageState, m_qwp[1].stageState ) );
+
+        recordQwpTrack();
+    } // mutex scope
+
+    int rv = 0;
+
+    for( int n = 0; n < 2; ++n )
+    {
+        if( send[n] && sendStageTarget( n, tgt[n] ) < 0 )
+        {
+            rv = -1;
+        }
+    }
+
+    return rv;
+}
+
+int qwpTracker::sendStageTarget( int n, float deg )
+{
+    ++m_qwp[n].nSent;
+
+#ifdef QWPTRACKER_TEST_NOSEND
+    static_cast<void>( deg );
+    return 0; // unit tests inspect m_qwp[n].lastSent and nSent instead of contacting an indiserver
+#else
+    if( sendNewProperty( m_qwp[n].cmd, "target", deg ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "failed to send target to " + m_qwp[n].devName } );
+    }
+
+    return 0;
+#endif
+}
+
+pcf::IndiProperty &qwpTracker::qwpProp( int n )
+{
+    return ( n == 0 ) ? m_indiP_qwp1 : m_indiP_qwp2;
+}
+
+int qwpTracker::stagePosUpdate( int n, const pcf::IndiProperty &ipRecv )
+{
+    if( !ipRecv.find( "current" ) )
+    {
+        return 0;
+    }
+
+    float pos = ipRecv["current"].get<float>();
+
+    if( !std::isfinite( pos ) )
+    {
+        return log<software_error, 0>(
+            { __FILE__, __LINE__, "received non-finite position from " + ipRecv.getDevice() } );
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    qwpStage &q = m_qwp[n];
+
+    q.stagePos = pos;
+
+    // round to two decimal points before folding, so 179.999 reports as 0
+    q.fastCur = fold180( std::round( stageToFast( pos, q.zero, q.sign ) * 100 ) / 100 );
+
+    updateIfChanged( qwpProp( n ), "current", q.fastCur );
+
+    if( !q.havePos )
+    {
+        q.havePos = true;
+        q.fastTgt = q.fastCur;
+        updateIfChanged( qwpProp( n ), "target", q.fastTgt );
+    }
 
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_qwp2Pos )( const pcf::IndiProperty &ipRecv )
+int qwpTracker::stageStateUpdate( int n, const pcf::IndiProperty &ipRecv )
 {
-
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp2Pos, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_qwp2Pos.getName() )
+    if( !ipRecv.find( "state" ) )
     {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
-        return -1;
+        return 0;
     }
 
-    if( !ipRecv.find( "target" ) )
+    std::string st = ipRecv["state"].getValue();
+
+    if( st.empty() )
+    {
         return 0;
+    }
 
-    if (m_tracking) return 0;
+    std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    m_qwp2_tgtPos = ipRecv["target"].get<float>();
-
-    updateQwpStages();
+    m_qwp[n].stageState = stateCodes::str2CodeFast( st );
 
     return 0;
+}
+
+int qwpTracker::manualTarget( int n, const pcf::IndiProperty &ipRecv )
+{
+    if( !ipRecv.find( "target" ) )
+    {
+        return 0;
+    }
+
+    float tgt = ipRecv["target"].get<float>();
+
+    std::string name = "qwp" + std::to_string( n + 1 );
+
+    if( !std::isfinite( tgt ) )
+    {
+        return log<software_error, 0>( { __FILE__, __LINE__, "non-finite " + name + " target" } );
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        if( m_tracking )
+        {
+            return log<text_log, 0>( "rejected manual " + name + " target while tracking", logPrio::LOG_WARNING );
+        }
+
+        qwpStage &q = m_qwp[n];
+
+        q.fastTgt  = fold180( tgt );
+        q.pending  = true;
+        q.haveSent = false; // an explicit request is always sent
+
+        updateIfChanged( qwpProp( n ), "target", q.fastTgt );
+    } // mutex scope
+
+    log<text_log>( name + " fast axis set to " + std::to_string( fold180( tgt ) ) );
+
+    return updateStages();
+}
+
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stagek )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stagek, ipRecv );
+
+    if( !ipRecv.find( "current" ) )
+    {
+        return 0;
+    }
+
+    float k = ipRecv["current"].get<float>();
+
+    if( !std::isfinite( k ) )
+    {
+        return log<software_error, 0>( { __FILE__, __LINE__, "received non-finite K-mirror position" } );
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    m_k        = k;
+    m_haveK    = true;
+    m_kUpdated = true;
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_qwp1AbsDeg )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp1AbsDeg, ipRecv );
+
+    return stagePosUpdate( 0, ipRecv );
+}
+
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_qwp1Fsm )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp1Fsm, ipRecv );
+
+    return stageStateUpdate( 0, ipRecv );
+}
+
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_qwp2AbsDeg )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp2AbsDeg, ipRecv );
+
+    return stagePosUpdate( 1, ipRecv );
+}
+
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_qwp2Fsm )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp2Fsm, ipRecv );
+
+    return stageStateUpdate( 1, ipRecv );
+}
+
+INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_qwp1 )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp1, ipRecv );
+
+    return manualTarget( 0, ipRecv );
+}
+
+INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_qwp2 )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp2, ipRecv );
+
+    return manualTarget( 1, ipRecv );
 }
 
 INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_tracking )( const pcf::IndiProperty &ipRecv )
 {
-
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_tracking, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_tracking.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
-        return -1;
-    }
 
     if( !ipRecv.find( "toggle" ) )
     {
@@ -442,147 +829,42 @@ INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_tracking )( const pcf::IndiProperty &
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
     {
-        updateSwitchIfChanged( m_indiP_tracking, "toggle", pcf::IndiElement::On, INDI_IDLE );
+        { //mutex scope
+            std::lock_guard<std::mutex> guard( m_indiMutex );
 
-        m_tracking = true;
+            updateSwitchIfChanged( m_indiP_tracking, "toggle", pcf::IndiElement::On, INDI_IDLE );
 
-        getQwp1Angle();
-        getQwp2Angle();
+            m_tracking = true;
+            m_kUpdated = m_haveK;
 
-        updateQwpStages();
+            for( auto &q : m_qwp )
+            {
+                q.haveSent = false; // re-apply the law even if it matches the last command
+            }
+        } // mutex scope
 
         log<text_log>( "started QWP rotation tracking" );
+
+        return updateStages();
     }
-    else
-    {
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
         updateSwitchIfChanged( m_indiP_tracking, "toggle", pcf::IndiElement::Off, INDI_IDLE );
 
         m_tracking = false;
+        m_kUpdated = false;
 
-        updateQwpStages();
+        for( int n = 0; n < 2; ++n )
+        {
+            m_qwp[n].pending = false;
+            m_qwp[n].fastTgt = m_qwp[n].fastCur;
+            updateIfChanged( qwpProp( n ), "target", m_qwp[n].fastTgt );
+        }
+    } // mutex scope
 
-        log<text_log>( "stopped QWP rotation tracking" );
-    }
-
-    return 0;
-}
-
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stagek )( const pcf::IndiProperty &ipRecv )
-{
-
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stagek, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_stagek.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
-        return -1;
-    }
-
-    if( !ipRecv.find( "current" ) )
-        return 0;
-
-    m_kmirror = ipRecv["current"].get<float>();
-
-    return 0;
-}
-
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageqwp1rot )( const pcf::IndiProperty &ipRecv )
-{
-
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageqwp1rot, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_stageqwp1rot.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
-        return -1;
-    }
-
-    if( !ipRecv.find( "current" ) )
-        return 0;
-
-    float qwp1StagePos = ipRecv["current"].get<float>();
-    m_qwp1_curPos = m_qwp1_sign * qwp1StagePos + m_qwp1_zero;
-
-    // round to two decimal points
-    m_qwp1_curPos = std::round(m_qwp1_curPos * 100) / 100;
-
-    updateIfChanged<float>(m_indiP_qwp1Pos, "current", m_qwp1_curPos);
-
-    recordQwpTrack();
-
-    return 0;
-}
-
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stagewp1rotFsm )( const pcf::IndiProperty &ipRecv )
-{
-
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stagewp1rotFsm, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_stagewp1rotFsm.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
-        return -1;
-    }
-
-    if( !ipRecv.find( "state" ) )
-        return 0;
-
-    std::string stageqwp1rot_state = ipRecv["state"].get<std::string>();
-
-    state(stateCodes::str2CodeFast(stageqwp1rot_state));
-
-    return 0;
-}
-
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageqwp2rot )( const pcf::IndiProperty &ipRecv )
-{
-
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageqwp2rot, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_stageqwp2rot.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
-        return -1;
-    }
-
-    if( !ipRecv.find( "current" ) )
-        return 0;
-
-    float qwp2StagePos = ipRecv["current"].get<float>();
-    m_qwp2_curPos = m_qwp2_sign * qwp2StagePos + m_qwp2_zero;
-
-    // round to two decimal points
-    m_qwp2_curPos = std::round(m_qwp2_curPos * 100) / 100;
-
-    updateIfChanged<float>(m_indiP_qwp2Pos, "current", m_qwp2_curPos);
-
-    recordQwpTrack();
-
-    return 0;
-}
-
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stageqwp2rotFsm )( const pcf::IndiProperty &ipRecv )
-{
-
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageqwp2rotFsm, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_stageqwp2rotFsm.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
-        return -1;
-    }
-
-    if( !ipRecv.find( "state" ) )
-        return 0;
-
-    std::string stageqwp2rot_state = ipRecv["state"].get<std::string>();
-
-    state(stateCodes::str2CodeFast(stageqwp2rot_state));
+    log<text_log>( "stopped QWP rotation tracking" );
 
     return 0;
 }
@@ -599,19 +881,13 @@ int qwpTracker::recordTelem( const telem_qwptrack * )
 
 int qwpTracker::recordQwpTrack( bool force )
 {
-    static float qwp1_angle = 0;
-
-    static float qwp2_angle = 0;
-
-    static bool tracking = false;
-
-    if( m_qwp1_curPos != qwp1_angle || m_qwp2_curPos != qwp2_angle || m_tracking != tracking || force )
+    if( force || m_qwp[0].fastCur != m_telemQwp1 || m_qwp[1].fastCur != m_telemQwp2 || m_tracking != m_telemTracking )
     {
-        telem<telem_qwptrack>( { m_qwp1_curPos, m_qwp2_curPos, m_tracking } );
+        telem<telem_qwptrack>( { m_qwp[0].fastCur, m_qwp[1].fastCur, m_tracking } );
 
-        qwp1_angle = m_qwp1_curPos;
-        qwp2_angle = m_qwp2_curPos;
-        tracking   = m_tracking;
+        m_telemQwp1     = m_qwp[0].fastCur;
+        m_telemQwp2     = m_qwp[1].fastCur;
+        m_telemTracking = m_tracking;
     }
 
     return 0;

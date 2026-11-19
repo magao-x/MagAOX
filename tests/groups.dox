@@ -117,6 +117,11 @@ $ less tests/results/latest/run.log
  * \ingroup application_unit_test
  */
 
+/** \defgroup qwpTracker_unit_test qwpTracker Unit Tests
+ * \brief Angle mapping, tracking law, tracking/manual modes, stage gating and FSM tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup loopTimingMonitor_unit_test Loop Timing Monitor Unit Tests
  * \brief Offline timestamp association, polling, operating gates and persistent fgtimes telemetry.
  * \ingroup application_unit_test

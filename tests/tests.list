@@ -121,6 +121,8 @@
 ../apps/pvcamCtrl/tests/pvcamCtrl_test
 ../apps/pvcamCtrl/tests/pvcamCtrl_hotplug_test
 ../apps/pwfsSlopeCalc/tests/pwfsSlopeCalc_test
+../apps/qwpTracker/tests/qwpTracker_test
+../apps/qwpTracker/tests/qwpTracker_indi_test
 ../apps/refRMS/tests/refRMS_test
 ../apps/rhusbMon/tests/rhusbMon_test
 ../apps/rhusbMon/tests/rhusbMonParsers_test
