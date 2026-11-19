@@ -1,0 +1,81 @@
+#!/bin/bash
+
+#####################################################
+## \file
+## \brief Configure ACC system and real-time cpusets.
+##
+## Raspberry Pi 5: 4 CPU cores (0-3)
+##
+## CPU allocation:
+##   root     : 0-3
+##   system   : 0-1
+##   acqu     : 2
+##   shmimTCP : 3
+##
+## Run as sudo at system startup.
+## Stop instrument processes before reconfiguring cpusets.
+#####################################################
+
+# cpuset-role: ACC
+
+set -xeuo pipefail
+
+source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
+cpusetMount="${CGROUPS1_CPUSET_MOUNTPOINT}"
+
+# Verify that the cgroups v1 cpuset filesystem exists
+if [[ ! -f "$cpusetMount/tasks" ]]; then
+    echo "ERROR: cgroups v1 cpuset tasks file not found."
+    echo "Expected: $cpusetMount/tasks"
+    exit 1
+fi
+
+cd "$cpusetMount"
+
+#############################
+# System cpuset: CPUs 0-1
+#############################
+
+mkdir -p "$cpusetMount/system"
+
+/bin/echo 0-1 > "$cpusetMount/system/cpuset.cpus"
+/bin/echo 0 > "$cpusetMount/system/cpuset.mems"
+
+# Disable load balancing across the root cpuset.
+# Enable load balancing within the system cpuset.
+
+/bin/echo 0 > "$cpusetMount/cpuset.sched_load_balance"
+/bin/echo 1 > "$cpusetMount/system/cpuset.sched_load_balance"
+
+#############################
+# Acquisition cpuset: CPU 2
+#############################
+
+mkdir -p "$cpusetMount/acqu"
+
+/bin/echo 2 > "$cpusetMount/acqu/cpuset.cpus"
+/bin/echo 0 > "$cpusetMount/acqu/cpuset.mems"
+/bin/echo 1 > "$cpusetMount/acqu/cpuset.cpu_exclusive"
+
+#############################
+# shmimTCP cpuset: CPU 3
+#############################
+
+mkdir -p "$cpusetMount/shmimTCP"
+
+/bin/echo 3 > "$cpusetMount/shmimTCP/cpuset.cpus"
+/bin/echo 0 > "$cpusetMount/shmimTCP/cpuset.mems"
+/bin/echo 1 > "$cpusetMount/shmimTCP/cpuset.cpu_exclusive"
+
+#############################
+# Move existing system tasks
+#############################
+
+# Move tasks currently in the root cpuset into system.
+# Ignore stale task IDs and unmovable kernel threads.
+
+while read -r tid; do
+    /bin/echo "$tid" 2>/dev/null || true
+done < "$cpusetMount/tasks" > "$cpusetMount/system/tasks"
+
+echo "ACC cpusets configured successfully"

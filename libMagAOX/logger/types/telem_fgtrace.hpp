@@ -7,6 +7,7 @@
 
 #include <array>
 #include <sstream>
+#include <tuple> /// ADDED THIS!
 
 #include "../../common/frameGrabberTiming.hpp"
 #include "generated/telem_fgtrace_generated.h"
@@ -144,7 +145,8 @@ inline telem_fgtrace::messageT::messageT( const fgTiming::TraceRecord &record,
     static_assert( size_t( fgTiming::Marker::timeoutEnter ) == 10 );
     static_assert( size_t( fgTiming::Marker::timeoutReturn ) == 11 );
     static_assert( markerCount == 12 );
-    static_assert( record.events.size() == neighborCount );
+    static_assert( std::tuple_size_v<decltype(record.events)> == neighborCount );
+    /// static_assert( record.events.size() == neighborCount ); ///This is the original!
     builder.ForceDefaults( true );
     std::array<flatbuffers::Offset<FgTraceEvent>, neighborCount> neighbors;
 
