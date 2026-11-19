@@ -426,6 +426,7 @@ class xCtrl
     bool        m_color{ false };       ///< color the output, when it is a terminal and NO_COLOR is not set
     bool m_privileged{ false }; ///< may change the systemd configuration: root, or a user who can write the proclist
     bool m_proclistChecked{ false };    ///< warnIfProclistChanged() has run
+    bool m_rolesChecked{ false };       ///< warnOtherRoles() has run
     std::string              m_cmdLine; ///< the command line, for the log
     std::string              m_verb;    ///< the command
     std::vector<std::string> m_names;   ///< the app names given
@@ -525,6 +526,20 @@ class xCtrl
 
     /// The service instances of the role that are active or activating
     std::vector<std::string> activeApps();
+
+    /// The apps of a role on this host: registered with xctrl, and running under systemd
+    struct roleApps
+    {
+        std::string              name;       ///< the role as set, e.g. ICC, from its template, else in lower case
+        std::vector<std::string> registered; ///< apps in its registry, /etc/magaox-<role>/apps
+        std::vector<std::string> running;    ///< apps whose magaox-<role>-app@NAME.service is active or starting
+    };
+
+    /// Every role with apps registered or running on this host, this one included, by lower-case role
+    std::map<std::string, roleApps> hostRoles();
+
+    /// Warn, once, about apps of other roles still running on this host
+    void warnOtherRoles();
 
     /// Start apps: ssh tunnels, then the INDI server, then the others
     /**
@@ -1558,7 +1573,7 @@ inline void xCtrl::usage( std::ostream &os ) const
           "  -r, --role ROLE      the MagAO-X role, else MAGAOX_ROLE or /etc/profile.d/magaox_role.sh\n"
           "  --all                all apps\n"
           "  -v, --verbose        status shows a table with more details\n"
-          "  -q, --quiet          show no warnings or errors, only the normal output; they are still logged\n"
+          "  -q, --quiet          show no warnings, only the normal output and errors; they are still logged\n"
           "  --                   end of options, so a name may start with -\n"
           "  --keep-running       register leaves apps that became disabled running\n"
           "  -n, --lines N        log lines for peek and inspect\n"
@@ -2083,6 +2098,93 @@ xCtrl::serverAndTunnels( const std::vector<appEntry> &apps, std::string &server,
     }
 }
 
+inline std::map<std::string, xCtrl::roleApps> xCtrl::hostRoles()
+{
+    std::map<std::string, roleApps> roles;
+    std::error_code                 ec;
+
+    // registered: each /etc/magaox-<role>/apps/NAME.conf
+    for( const auto &e : std::filesystem::directory_iterator( m_sysroot + "/etc", ec ) )
+    {
+        std::string dir = e.path().filename().string();
+        if( dir.compare( 0, 7, "magaox-" ) != 0 ) // 7 is the length of "magaox-"
+        {
+            continue;
+        }
+        std::error_code ec2;
+        for( const auto &a : std::filesystem::directory_iterator( e.path() / "apps", ec2 ) )
+        {
+            if( a.path().extension() == ".conf" )
+            {
+                roles[dir.substr( 7 )].registered.push_back( a.path().stem().string() );
+            }
+        }
+    }
+
+    // running: magaox-<role>-app@NAME.service units active or on their way, whether registered or not
+    if( !m_dryRun && m_sysroot.empty() )
+    {
+        std::string out;
+        runCommand(
+            { "systemctl", "list-units", "--all", "--plain", "--no-legend", "--no-pager", "magaox-*-app@*.service" },
+            &out );
+        std::istringstream ss( out );
+        for( std::string line; std::getline( ss, line ); )
+        {
+            std::istringstream ls( line );
+            std::string        unit, load, active;
+            ls >> unit >> load >> active;
+            size_t at = unit.find( "-app@" );
+            if( unit.compare( 0, 7, "magaox-" ) == 0 && at != std::string::npos &&
+                ( active == "active" || active == "activating" || active == "reloading" ) )
+            {
+                std::string role = unit.substr( 7, at - 7 );
+                roles[role].running.push_back( unitNames( role ).appName( unit ) );
+            }
+        }
+    }
+
+    // the role as set, e.g. ICC: units and directories use it in lower case, its template keeps it as it was
+    for( auto &kv : roles )
+    {
+        kv.second.name = kv.first;
+        std::ifstream t( unitDir() + "/" + unitNames( kv.first ).templ() );
+        for( std::string l; std::getline( t, l ); )
+        {
+            if( l.compare( 0, 23, "Environment=MAGAOX_ROLE" ) == 0 ) // Environment=MAGAOX_ROLE=ICC
+            {
+                kv.second.name = l.substr( 24 );
+            }
+        }
+    }
+    return roles;
+}
+
+inline void xCtrl::warnOtherRoles()
+{
+    if( m_rolesChecked )
+    {
+        return;
+    }
+    m_rolesChecked = true;
+
+    for( const auto &kv : hostRoles() )
+    {
+        const roleApps &r = kv.second;
+        if( kv.first == lower( m_role ) || r.running.empty() )
+        {
+            continue;
+        }
+        std::string names;
+        for( const auto &n : r.running )
+        {
+            names += " " + n;
+        }
+        say( msgLevel::warning ) << r.running.size() << " app(s) of role " << r.name << " still running:" << names
+                                 << "; " << m_prog << " -r " << r.name << " shutdown --all stops them";
+    }
+}
+
 inline void xCtrl::warnIfProclistChanged()
 {
     if( m_proclistChecked )
@@ -2587,6 +2689,21 @@ inline int xCtrl::cmdRegister()
     errors      = pl.errors;
     warnings    = pl.warnings;
 
+    // every role on this host first, warning about other roles' running apps, then this one
+    auto roles = hostRoles();
+    for( const auto &kv : roles )
+    {
+        if( kv.first != u.lrole )
+        {
+            const roleApps &r = kv.second;
+            say( r.running.empty() ? msgLevel::info : msgLevel::warning )
+                << "role " << r.name << ": " << r.registered.size() << " app(s) registered, " << r.running.size()
+                << " running";
+        }
+    }
+    say( msgLevel::info ) << "Current role: " << m_role << ": " << roles[u.lrole].registered.size()
+                          << " app(s) registered, " << roles[u.lrole].running.size() << " running";
+
     // role-wide defaults, from magaox.conf [systemd]
     std::string  cfgDir = m_top + "/" + MAGAOX_configRelPath;
     directiveMap gdirs  = roleDirectives( errors );
@@ -2832,6 +2949,7 @@ inline int xCtrl::cmdStartup()
         return cmdStart();
     }
     warnIfProclistChanged();
+    warnOtherRoles();
 
     unitNames             u( m_role );
     std::vector<appEntry> apps;
@@ -2879,6 +2997,7 @@ inline int xCtrl::cmdShutdown()
 inline int xCtrl::cmdStart()
 {
     warnIfProclistChanged();
+    warnOtherRoles();
     std::vector<appEntry> apps = namedApps();
     return apps.empty() ? 1 : startApps( apps );
 }
@@ -2994,6 +3113,7 @@ xCtrl::showProps( const std::vector<std::string> &names )
 inline int xCtrl::cmdStatus()
 {
     warnIfProclistChanged();
+    warnOtherRoles();
     std::vector<std::string> names = m_names;
     std::set<std::string>    regs;
     for( const auto &n : registered() )

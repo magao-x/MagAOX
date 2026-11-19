@@ -203,6 +203,23 @@ The first is a `.conf` edited since the app was registered; the second an app re
 The generated files under `/etc/systemd/system` and `/etc/magaox-<role>` are readable by everyone (files 0644,
 directories 0755, whatever the caller's umask), so any user can compare them.
 
+## Other roles on the same host
+
+A host can have the apps of several roles registered, e.g. after switching `MAGAOX_ROLE`. `xctrl` works on one role at
+a time, but finds the others from their registries (`/etc/magaox-<role>/apps`) and from systemd's
+`magaox-<role>-app@NAME.service` units. `startup`, `start` and `status` warn about apps of another role still running:
+
+```
+warning: 4 app(s) of role TST still running: isTST longer_app_name_x maths_a maths_b; xctrl -r TST shutdown --all stops them
+```
+
+`register` first lists every other role, as a warning if any of its apps are running, then the current one:
+
+```
+warning: role TST: 5 app(s) registered, 4 running
+Current role: OTH: 0 app(s) registered, 0 running
+```
+
 Stopping and disabling are separate: `stop`/`shutdown` never change what starts automatically, and
 `enable`/`disable` never start or stop anything. The proclist always says what starts automatically: `enable`,
 `disable`, `add` and `delete` edit the app's lines in it, leaving the rest of the file as it is, so the next `register`
@@ -231,9 +248,9 @@ systemd, so completion is instant.
 
 Messages are colored on a terminal (unless `NO_COLOR` is set): errors red, as `error: ...`, warnings yellow, as
 `warning: ...`, the `systemctl` commands xctrl runs blue, as `+ systemctl ...`, and completed changes green.
-Errors and warnings go to stderr, the rest to stdout. `-q` (`--quiet`) leaves warnings and errors off the console,
-showing only the normal output, e.g. `xctrl status -vq`; they are still logged, and the exit status still reports a
-failure. Single-letter flags combine: `-vq` is `-v -q`.
+Errors and warnings go to stderr, the rest to stdout. `-q` (`--quiet`) leaves warnings off the console, showing the
+normal output and errors only, e.g. `xctrl status -vq`; warnings are still logged. Single-letter flags combine: `-vq`
+is `-v -q`.
 
 The journal lines that `peek` and `inspect` show are colored as `journalctl` colors them, warnings yellow and errors
 red, on a terminal and unless `NO_COLOR` is set.

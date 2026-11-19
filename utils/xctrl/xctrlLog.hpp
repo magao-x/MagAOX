@@ -92,7 +92,7 @@ class xctrlLog
     int  m_fd{ -1 };          ///< the log file, opened for appending, -1 if not logging
     bool m_colorOut{ false }; ///< color stdout
     bool m_colorErr{ false }; ///< color stderr
-    bool m_quiet{ false };    ///< leave warnings and errors off the console; they are still logged
+    bool m_quiet{ false };    ///< leave warnings off the console; they are still logged
 
     ///@}
 
@@ -101,7 +101,7 @@ class xctrlLog
     void colors( bool out, /**< [in] color stdout */
                  bool err /**< [in] color stderr */ );
 
-    /// Leave warnings and errors off the console, for -q; they are still logged
+    /// Leave warnings off the console, for -q; they are still logged, and errors are still shown
     void quiet( bool q /**< [in] true for quiet */ );
 
     /// Open today's log file under logsDir/xctrl/YYYY_MM_DD/, appending to the newest unless it is full
@@ -301,7 +301,7 @@ inline void xctrlLog::message( msgLevel level, const std::string &msg, bool cons
     int                l        = static_cast<int>( level );
 
     bool err = level == msgLevel::warning || level == msgLevel::error;
-    if( console && !( err && m_quiet ) )
+    if( console && !( level == msgLevel::warning && m_quiet ) )
     {
         bool          color = ( err ? m_colorErr : m_colorOut ) && colors[l][0]; // [0]: this level has a color
         std::ostream &os    = err ? std::cerr : std::cout;
