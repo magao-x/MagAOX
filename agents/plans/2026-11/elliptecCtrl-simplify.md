@@ -12,4 +12,4 @@ Design decisions (agreed 2026-11-19):
 
 Resulting properties: `position`, `preset`, `presetName`, `home`, `stop`, `fsm`.
 
-Verification: not compiled in this session (macOS host without the Linux build environment). Build and run `apps/elliptecCtrl/tests/elliptecCtrl_test.cpp` with `tests/Makefile.one` before merging; delete the test `.o` first since Makefile.one does not track header dependencies.
+Verification (2026-11-19): `elliptecCtrl_test` builds cleanly with `-Wall -Wextra` and all tests pass. Run from the repo root, since Makefile.one links `testMain.o` by relative path: `make -C tests -f Makefile.one t=$PWD/apps/elliptecCtrl/tests/elliptecCtrl_test.cpp`. Delete the test `.o` first after header changes; Makefile.one does not track header dependencies. Not yet exercised on hardware.
