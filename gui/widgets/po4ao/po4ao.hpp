@@ -54,8 +54,6 @@ class po4ao : public xWidget
 
     std::set<std::string> m_defined; ///< Properties with observed definitions, including command permissions.
 
-    QElapsedTimer m_definitionQueryAge; ///< Bounds retries when value updates arrived without definitions.
-
     std::map<std::string, bool>
         m_pending; ///< Requests keyed by device.property; value records an observed Busy acknowledgement.
 
@@ -90,9 +88,6 @@ class po4ao : public xWidget
 
     /// Attach named property subscriptions through the existing publisher.
     void subscribe() override;
-
-    /// Request missing property definitions without issuing control commands; retry at most every five seconds.
-    void requestMissingDefinitions();
 
     /// Mark transport connection without inferring device readiness.
     void onConnect() override;
@@ -228,14 +223,7 @@ inline po4ao::po4ao( const std::string &device,
         label->setMinimumHeight( 2 * label->fontMetrics().height() );
     }
     m_statusTimer.setInterval( 500 );
-    connect( &m_statusTimer,
-             &QTimer::timeout,
-             this,
-             [this]()
-             {
-                 requestMissingDefinitions();
-                 updateGUI();
-             } );
+    connect( &m_statusTimer, &QTimer::timeout, this, &po4ao::updateGUI );
     m_statusTimer.start();
     m_ackTimer.setSingleShot( true );
     m_ackTimer.setInterval( 10000 );
@@ -343,7 +331,6 @@ inline void po4ao::onDisconnect()
     m_runtimeSequence.clear();
     m_properties.clear();
     m_defined.clear();
-    m_definitionQueryAge.invalidate();
     m_pending.clear();
     m_routePending.clear();
     m_managed            = false;
@@ -765,26 +752,6 @@ inline void po4ao::observeHeartbeat( const pcf::IndiProperty &property )
     m_haveHeartbeat = true;
 }
 
-inline void po4ao::requestMissingDefinitions()
-{
-    if( !m_connected || ( m_definitionQueryAge.isValid() && m_definitionQueryAge.elapsed() < 5000 ) )
-    {
-        return;
-    }
-    // Shared discovery accepts setProperty, but commands also need their definition and permissions.
-    for( const auto &entry : m_properties )
-    {
-        if( !m_defined.count( entry.first ) )
-        {
-            pcf::IndiProperty query;
-            query.setDevice( entry.second.getDevice() );
-            query.setName( entry.second.getName() );
-            sendGetProperties( query );
-            m_definitionQueryAge.start();
-        }
-    }
-}
-
 inline void po4ao::handleDefProperty( const pcf::IndiProperty &property )
 {
     if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
@@ -817,6 +784,11 @@ inline void po4ao::handleSetProperty( const pcf::IndiProperty &property )
     if( found == m_properties.end() )
     {
         m_properties.emplace( key, property );
+        // Shared discovery accepts a set vector, but a command also needs its definition and permissions.
+        pcf::IndiProperty query;
+        query.setDevice( property.getDevice() );
+        query.setName( property.getName() );
+        sendGetProperties( query );
     }
     else
     {

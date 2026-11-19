@@ -42,7 +42,7 @@ class nnReconstructor_test : public nnReconstructor
     void linkModulation();
 
     /// Supply current modulation readbacks through the production subscription callbacks.
-    void modulationReadback();
+    void modulationReadback( double state /**< [in] Observed modulator state. */ );
 
     /// Expire the current phase without sleeping.
     void expireSwitch();
@@ -226,12 +226,12 @@ inline void nnReconstructor_test::linkModulation()
     newCallBack_m_indiP_linkModulation( request );
 }
 
-inline void nnReconstructor_test::modulationReadback()
+inline void nnReconstructor_test::modulationReadback( double state )
 {
     pcf::IndiProperty request( pcf::IndiProperty::Number );
     request.add( pcf::IndiElement( "current" ) );
     request.setName( "modState" );
-    request["current"] = m_switchTarget == "nn" ? 3.0 : 4.0;
+    request["current"] = state;
     setCallBack_m_indiP_modState( request );
     request.setName( "modFrequency" );
     request["current"] = 2000.0;
@@ -1465,10 +1465,20 @@ TEST_CASE( "Native handover failures leave NN disabled", "[nnReconstructor][inde
 /** \brief Linked comparison presets are acknowledged before the destination writer starts. */
 TEST_CASE( "Native linked handover uses current modulation readbacks", "[nnReconstructor][independentNN]" )
 {
+    nnReconstructor_test::Driver driver;
     nnReconstructor_test app;
     app.prepare( false );
+    app.m_indiDriver = &driver;
+    app.switchStep();
+    REQUIRE( driver.m_queries.empty() );
     app.linkModulation();
-    const bool toNN      = GENERATE( true, false );
+    const bool   toNN     = GENERATE( true, false );
+    const bool   observed = GENERATE( true, false );
+    const double target   = toNN ? 3.0 : 4.0;
+    if( observed )
+    {
+        app.modulationReadback( 1.0 ); // Only the state must change. Frequency and radius already match.
+    }
     nnTest::cacaoRunning = toNN;
     REQUIRE( app.switchTo( toNN ? "nn" : "cacao", toNN ? "cacao" : "stopped" ) == 0 );
     for( int i = 0; i < ( toNN ? 6 : 4 ); ++i )
@@ -1482,6 +1492,12 @@ TEST_CASE( "Native linked handover uses current modulation readbacks", "[nnRecon
     REQUIRE( app.switchPhase() == "modulation" );
     REQUIRE_FALSE( app.acknowledged() );
     REQUIRE( app.m_sent.size() == ( toNN ? 1 : 3 ) );
+    const auto queries = app.m_sent.size() - ( observed ? 1 : 0 );
+    REQUIRE( driver.m_queries.size() == queries );
+    for( size_t i = 0; i < queries; ++i )
+    {
+        REQUIRE( driver.m_queries[i].getName() == app.m_sent[i].getName() );
+    }
     REQUIRE( app.m_sent.back().getName() == "modState" );
     REQUIRE( app.m_sent.back()["target"].get<double>() == ( toNN ? 3.0 : 4.0 ) );
     if( !toNN )
@@ -1493,7 +1509,8 @@ TEST_CASE( "Native linked handover uses current modulation readbacks", "[nnRecon
     }
     app.switchStep();
     REQUIRE( app.switchPhase() == "modulation" );
-    app.modulationReadback();
+    REQUIRE( driver.m_queries.size() == queries );
+    app.modulationReadback( target );
     app.switchStep();
     REQUIRE( app.switchPhase() == ( toNN ? "starting_nn" : "starting_cacao" ) );
     // clang-format off

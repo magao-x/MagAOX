@@ -580,10 +580,12 @@ struct MagAOXApp
             m_published.push_back( property );
         }
 
-        /// Ignore read-only discovery requests in the CPU fixture.
+        std::vector<pcf::IndiProperty> m_queries; ///< Readback requests sent by the application.
+
+        /// Capture readback requests without a live INDI connection.
         void sendGetProperties( const pcf::IndiProperty &property /**< [in] Requested vector. */ )
         {
-            (void)property;
+            m_queries.push_back( property );
         }
     };
     Driver                        *m_indiDriver{ nullptr }; ///< No live driver is owned by tests.

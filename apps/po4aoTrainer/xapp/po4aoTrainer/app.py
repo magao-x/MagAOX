@@ -42,7 +42,7 @@ class TrainerConfig(BaseConfig):
         help="Installed engine builder",
     )
     freshness_timeout: float = xconf.field(
-        default=5.0, help="Maximum age of current-lifetime INDI observations"
+        default=5.0, help="Maximum time without an advancing PO4AO model_status heartbeat"
     )
     operation_timeout: float = xconf.field(
         default=30.0, help="PO4AO runtime acknowledgement deadline"
@@ -89,7 +89,6 @@ class po4aoTrainer(XDevice):
         self.supervisor = Supervisor(runtime, self.config)
         self._heartbeat = 0
         self.log.info("PO4AO trainer source revision: %s", self.config.source_revision)
-        self.client.get_properties(runtime.po4ao)
         self.text("fsm", {"state": "READY"})
         self.text("devices", {"po4ao": runtime.po4ao})
         self.text("status", self.supervisor.status)
@@ -243,7 +242,6 @@ class po4aoTrainer(XDevice):
 
     def loop(self):
         """Publish effective readback before terminal operation acknowledgements."""
-        self.supervisor.runtime.observations.refresh()
         events = self.supervisor.tick()
         self._heartbeat += 1
         self.supervisor.status["heartbeat"] = str(self._heartbeat)

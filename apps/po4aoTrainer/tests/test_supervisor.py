@@ -91,7 +91,6 @@ class FakeRuntime:
         self.calls = []
         self.hold = False
         self.reload_ticket = None
-        self.observations = SimpleNamespace(refresh=lambda: None)
         self.observed = dict(
             instance="test-runtime",
             reset_request="1",
@@ -307,9 +306,10 @@ class Client:
             remove_callback=lambda *a: None,
         )
 
-    def get_properties(self, *args):
-        """Send fresh simulated definitions through the observer callback boundary."""
-        for key, prop in self.props.items():
+    def get_properties(self, key):
+        """Return the requested definition if the simulated device exposes it."""
+        if key in self.props:
+            prop = self.props[key]
             prop.device = key.split(".")[0]
             self.receive(prop)
 
@@ -355,7 +355,7 @@ def test_real_xdevice_gui_contract_without_network(config):
     assert (
         not {"nn_activate", "reconstructor", "link_modulation"} & app.properties.keys()
     )
-    assert app.supervisor.runtime.observations.devices == ("po4ao",)
+    assert app.supervisor.runtime.observations.device == "po4ao"
     assert set(app.properties["devices"]) == {"po4ao"}
     for name in ("nn_activate", "reconstructor", "link_modulation"):
         with pytest.raises(ValueError, match="Unknown PO4AO"):
@@ -739,12 +739,13 @@ class Wire(IndiConnection):
     def send(self, message):
         """Respond to discovery or queue an explicit controller request."""
         if isinstance(message, M.GetProperties):
+            self.rig.queries.append((message.device, message.name))
             if self.rig.discovery:
                 for (device, name), prop in self.rig.props.items():
                     if (message.device is None or message.device == device) and (
                         message.name is None or message.name == name
                     ):
-                        self.rig.emit(prop, definition=True)
+                        self.rig.definitions.append(prop)
         else:
             self.rig.requests.append(
                 (message.device, message.name, {key: message[key] for key in message})
@@ -759,6 +760,7 @@ class Rig:
         """Define all remote capabilities before attaching the production observer."""
         self.discovery, self.frames, self.auto_load = True, True, True
         self.requests, self.props = [], {}
+        self.queries, self.definitions = [], []
         self.loading = None
         self.client = IndiClient()
         self.client.connection = Wire(self)
@@ -794,7 +796,17 @@ class Rig:
             frames="96",
             target_frames="96",
         )
+        self.client.connection.add_callback(
+            C.TransportEvent.connection, self.client.handle_connectionstatus_change
+        )
+        self.client.handle_connectionstatus_change(C.ConnectionStatus.CONNECTED)
         self.runtime = Runtime(self.client, "po4ao", timeout)
+        self.deliver_definitions()
+
+    def deliver_definitions(self):
+        """Deliver queued replies after the client releases its inbound callback lock."""
+        while self.definitions:
+            self.emit(self.definitions.pop(0), definition=True)
 
     def text(self, device, name, **values):
         """Create real text definitions with string-valued runtime fields."""
@@ -832,6 +844,7 @@ class Rig:
         for key, value in values.items():
             vector[key] = value
         self.emit(vector)
+        self.deliver_definitions()
 
     def command(self, message):
         """Simulate PO4AO request/after-frame semantics."""
@@ -1170,7 +1183,8 @@ def test_real_client_cache_is_not_current_after_reconnect_or_device_deletion():
     )  # The actual client retained its cache.
     with pytest.raises(ConnectionError):
         rig.runtime.get("po4ao", "control_enable", "toggle")
-    rig.runtime.observations.refresh()
+    assert len(rig.queries) == 2 * len(rig.runtime.observations.properties)
+    rig.deliver_definitions()
     assert rig.runtime.get("po4ao", "control_enable", "toggle") == C.SwitchState.OFF
     rig.client.handle_message(M.DelProperty(device="po4ao"))
     with pytest.raises(ConnectionError):
@@ -1178,19 +1192,34 @@ def test_real_client_cache_is_not_current_after_reconnect_or_device_deletion():
     rig.close()
 
 
-def test_silent_device_expires_but_unchanged_fresh_definitions_renew_it(monkeypatch):
-    """Unchanged values are allowed; only received current-lifetime evidence renews freshness."""
+def test_quiet_properties_remain_valid_while_runtime_advances(monkeypatch):
+    """A pushed heartbeat keeps unchanged vectors usable without any further discovery."""
     rig = Rig()
+    initial = list(rig.queries)
+    assert initial == [("po4ao", name) for name in rig.runtime.observations.properties]
     clock = [time.monotonic()]
-    monkeypatch.setattr(
-        "xapp.po4aoTrainer.switching.time.monotonic", lambda: clock[0]
-    )
-    clock[0] += 6
+    monkeypatch.setattr("xapp.po4aoTrainer.switching.time.monotonic", lambda: clock[0])
+    for sequence in range(2, 12):
+        clock[0] += 2
+        rig.update("po4ao", "model_status", sequence=str(sequence))
+        rig.runtime.wait(lambda: rig.runtime.control_complete(False), threading.Event(), "idle")
+    assert rig.queries == initial
+    rig.close()
+
+
+def test_update_before_definition_requests_it_only_once():
+    """Repeated value updates cannot restore a deleted command's type or permissions."""
+    rig = Rig()
+    prop = rig.props["po4ao", "control_enable"]
+    rig.client.handle_message(M.DelProperty(device="po4ao", name=prop.name))
+    initial = list(rig.queries)
+    rig.emit(prop)
+    rig.emit(prop)
+    assert rig.queries == initial + [("po4ao", prop.name)]
     with pytest.raises(ConnectionError):
-        rig.runtime.get("po4ao", "control_enable", "toggle")
-    rig.props["po4ao", "model_status"]["sequence"] = "2"
-    rig.runtime.observations.refresh()
-    assert rig.runtime.get("po4ao", "control_enable", "toggle") == C.SwitchState.OFF
+        rig.runtime.control_complete(False)
+    rig.deliver_definitions()
+    assert rig.runtime.control_complete(False)
     rig.close()
 
 
@@ -1204,7 +1233,7 @@ def test_runtime_heartbeat_detects_stalled_applogic_despite_fresh_definitions(
         "xapp.po4aoTrainer.switching.time.monotonic", lambda: clock[0]
     )
     clock[0] += 6
-    rig.runtime.observations.refresh()
+    rig.emit(rig.props["po4ao", "model_status"], definition=True)
     with pytest.raises(ConnectionError):
         rig.runtime.runtime_state()
     rig.update("po4ao", "model_status", sequence="2")
@@ -1599,12 +1628,14 @@ def test_reload_rejection_respects_runtime_lifetime(monkeypatch, boundary):
         ticket = rig.runtime.reload_ticket
         if boundary == "connection":
             rig.runtime.observations.connection_changed(None)
-            rig.client.get_properties("po4ao")
+            rig.runtime.observations.subscribe()
+            rig.deliver_definitions()
         elif boundary == "deletion":
             rig.client.handle_message(
                 M.DelProperty(device="po4ao", name="reload_engine")
             )
-            rig.client.get_properties("po4ao")
+            rig.runtime.observations.subscribe()
+            rig.deliver_definitions()
         elif boundary == "instance":
             rig.update("po4ao", "model_status", instance="runtime-2", sequence="2")
         else:

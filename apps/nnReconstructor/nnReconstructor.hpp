@@ -290,11 +290,12 @@ class nnReconstructor : public MagAOXApp<true>,
 
     std::string m_switchInstance; ///< Process-lifetime identity for invalidating cached GUI state.
 
-    std::chrono::steady_clock::time_point m_switchStarted{}, m_modQuery{}; ///< Phase deadline and query throttle.
+    std::chrono::steady_clock::time_point m_switchStarted{}; ///< Start of the current handover phase.
 
     std::array<double, 3> m_modCurrent{}; ///< Observed modulation state, frequency and radius.
 
-    std::array<std::chrono::steady_clock::time_point, 3> m_modObserved{}; ///< Readback age for each preset element.
+    std::array<std::chrono::steady_clock::time_point, 3>
+        m_modObserved{}; ///< Last valid readback for each preset element, or the default time if unknown.
 
   public:
     /// Default c'tor.

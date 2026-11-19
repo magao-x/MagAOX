@@ -104,6 +104,12 @@ inline void nnReconstructor::prepareModulation()
         {
             throw std::runtime_error( "Modulation request delivery failed" );
         }
+        // An unchanged preset need not generate a set vector. Confirm it once for this handover.
+        if( m_indiDriver && ( m_modObserved[i] == std::chrono::steady_clock::time_point{} ||
+                              std::abs( m_modCurrent[i] - target ) < 0.01 ) )
+        {
+            m_indiDriver->sendGetProperties( request );
+        }
     }
     reconstructorPhase( "modulation" );
 }
@@ -250,9 +256,7 @@ inline void nnReconstructor::updateReconstructorControls()
             for( size_t i = 0; i < ( m_switchTarget == "nn" ? 1U : 3U ); ++i )
             {
                 const double target = i == 0 ? ( m_switchTarget == "nn" ? 3.0 : 4.0 ) : i == 1 ? 2000.0 : 3.0;
-                applied &= m_modObserved[i] > m_switchStarted &&
-                           std::chrono::duration<double>( now - m_modObserved[i] ).count() < 5 &&
-                           std::abs( m_modCurrent[i] - target ) < 0.01;
+                applied &= m_modObserved[i] > m_switchStarted && std::abs( m_modCurrent[i] - target ) < 0.01;
             }
             if( applied )
             {
@@ -280,32 +284,13 @@ inline void nnReconstructor::updateReconstructorControls()
         }
         reconstructorPhase( m_cacaoStartPending ? "awaiting_cacao" : "error" );
     }
-    if( std::chrono::duration<double>( now - m_modQuery ).count() >= 1 )
-    {
-        m_modQuery = now;
-        try
-        {
-            if( m_indiDriver )
-            {
-                for( const auto *property : { &m_indiP_modState, &m_indiP_modFrequency, &m_indiP_modRadius } )
-                {
-                    m_indiDriver->sendGetProperties( *property );
-                }
-            }
-        }
-        catch( const std::exception & )
-        {
-            m_modObserved = {}; // Lost discovery cannot complete a linked handover.
-        }
-    }
     const bool busy       = m_switchPhase != "idle" && m_switchPhase != "error";
     const auto state      = m_switchPhase == "awaiting_cacao" ? INDI_ALERT
                             : busy                            ? INDI_BUSY
                             : m_switchPhase == "error"        ? INDI_ALERT
                                                               : INDI_OK;
-    const auto modulation = std::chrono::duration<double>( now - m_modObserved[0] ).count() < 5
-                                ? std::to_string( m_modCurrent[0] )
-                                : "Unknown";
+    const auto modulation =
+        m_modObserved[0] != std::chrono::steady_clock::time_point{} ? std::to_string( m_modCurrent[0] ) : "Unknown";
     updateIfChanged( m_indiP_reconstructionStatus, "reconstructor", m_reconstructor, state );
     updateIfChanged( m_indiP_reconstructionStatus, "phase", m_switchPhase, state );
     updateIfChanged( m_indiP_reconstructionStatus, "error", m_switchError, state );
@@ -384,11 +369,15 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_linkModulation )( const pcf::Ind
 
 inline void nnReconstructor::observeModulation( const pcf::IndiProperty &property, size_t index )
 {
-    if( property.find( "current" ) )
+    if( property.getState() == INDI_ALERT )
+    {
+        m_modObserved[index] = {};
+    }
+    else if( property.find( "current" ) )
     {
         const double value   = property["current"].get<double>();
         m_modObserved[index] = {};
-        if( isFinite( value ) && property.getState() != INDI_ALERT )
+        if( isFinite( value ) )
         {
             m_modCurrent[index]  = value;
             m_modObserved[index] = std::chrono::steady_clock::now();

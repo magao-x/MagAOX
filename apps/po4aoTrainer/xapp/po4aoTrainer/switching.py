@@ -14,112 +14,101 @@ from purepyindi2.constants import PropertyState, SwitchState
 class Observations:
     """Track fresh definitions independently of PurePyINDI2's retained value cache."""
 
-    def __init__(self, client, devices, timeout=5.0, heartbeat_device=None):
-        """Subscribe before discovery and expire silent devices even while TCP stays connected."""
-        self.client, self.devices, self.timeout = client, tuple(devices), timeout
+    properties = (
+        "model_status",
+        "collection_status",
+        "control_enable",
+        "reset_model",
+        "recollect_warmup",
+        "reload_engine",
+    )
+
+    def __init__(self, client, device, timeout):
+        """Subscribe once. PurePyINDI2 reissues registered interests on reconnect."""
+        self.client, self.device, self.timeout = client, device, timeout
         self.lock = threading.RLock()
-        self.defined = {}
         self.values = {}
-        self.heartbeat_device = heartbeat_device
         self.heartbeat = None
         self.heartbeat_at = -float("inf")
         self.epoch = 0
-        self.last_request = -float("inf")
         client.register_callback(self.observe)
         for event in (
             constants.TransportEvent.connection,
             constants.TransportEvent.disconnection,
         ):
             client.connection.add_callback(event, self.connection_changed)
+        self.subscribe()
+
+    def subscribe(self):
+        """Request definitions for the six runtime vectors used by the trainer."""
+        for name in self.properties:
+            self.client.get_properties(f"{self.device}.{name}")
 
     def connection_changed(self, status):
-        """Invalidate all observations for every transport lifetime boundary."""
+        """Discard snapshots and pending definitions at transport lifetime boundaries."""
         with self.lock:
             self.epoch += 1
-            self.defined.clear()
             self.values.clear()
             self.heartbeat = None
             self.heartbeat_at = -float("inf")
-            self.last_request = -float("inf")
 
     def observe(self, message):
-        """Only definitions establish capability; updates refresh already defined properties."""
+        """Retain defined values until a change, deletion, or lifetime boundary."""
+        if message.device not in (None, self.device):
+            return
+        name = message.name
         with self.lock:
             if isinstance(message, messages.DelProperty):
-                if message.device in (None, self.heartbeat_device) and message.name in (
-                    None,
-                    "model_status",
-                    "reload_engine",
-                ):
+                if name in (None, "model_status", "reload_engine"):
                     self.epoch += 1
-                for key in list(self.defined):
-                    if (message.device is None or key[0] == message.device) and (
-                        message.name is None or key[1] == message.name
-                    ):
-                        del self.defined[key]
-                        self.values.pop(key, None)
-                if (self.heartbeat_device, "model_status") not in self.defined:
-                    self.heartbeat = None
+                if name in (None, "model_status"):
                     self.heartbeat_at = -float("inf")
+                if name is None:
+                    self.heartbeat = None
+                    self.values.clear()
+                else:
+                    self.values.pop(name, None)
                 return
-            if (
-                message.device not in self.devices
-                or self.client.status != constants.ConnectionStatus.CONNECTED
-            ):
-                return
-            key = (message.device, message.name)
-            if isinstance(message, typing.get_args(messages.IndiDefMessage)):
-                self.defined[key] = time.monotonic()
-            elif key in self.defined and isinstance(
-                message, typing.get_args(messages.IndiSetMessage)
-            ):
-                self.defined[key] = time.monotonic()
-            if key in self.defined:
-                # Publish a completed message snapshot, never the client's next in-place mutation.
-                self.values[key] = deepcopy(
-                    self.client[f"{message.device}.{message.name}"]
-                )
-            if key == (self.heartbeat_device, "model_status") and key in self.defined:
-                # Repeated definitions prove transport liveness, but cannot hide a stalled appLogic.
-                prop = self.values[key]
-                if (
-                    "instance" in prop
-                    and "sequence" in prop
-                    and prop["instance"]
-                    and prop["sequence"]
-                ):
-                    beat = (prop["instance"], prop["sequence"])
-                    if beat != self.heartbeat:
-                        self.heartbeat, self.heartbeat_at = beat, time.monotonic()
-
-    def refresh(self):
-        """Request definitions periodically so unchanged live devices remain distinguishable from silence."""
-        if self.client.status != constants.ConnectionStatus.CONNECTED:
-            return
-        with self.lock:
-            now = time.monotonic()
-            if now - self.last_request < min(1.0, self.timeout / 2):
-                return
-            self.last_request = now
-        for device in self.devices:
-            self.client.get_properties(device)
-
-    def vector(self, device, prop):
-        """Reject undefined, expired or prior-connection observations before returning values."""
-        with self.lock:
             if (
                 self.client.status != constants.ConnectionStatus.CONNECTED
-                or time.monotonic() - self.defined.get((device, prop), -float("inf"))
-                > self.timeout
-                or (
-                    device == self.heartbeat_device
-                    and time.monotonic() - self.heartbeat_at > self.timeout
-                )
+                or name not in self.properties
+            ):
+                return
+            if isinstance(message, typing.get_args(messages.IndiSetMessage)):
+                if name not in self.values:
+                    # A late device may push a value before its typed definition.
+                    self.values[name] = None
+                    self.client.get_properties(f"{self.device}.{name}")
+                    return
+                if self.values[name] is None:
+                    return
+            elif not isinstance(message, typing.get_args(messages.IndiDefMessage)):
+                return
+            prop = deepcopy(self.client[f"{self.device}.{name}"])
+            if name == "model_status" and "instance" in prop and "sequence" in prop:
+                beat = (prop["instance"], prop["sequence"])
+                if self.heartbeat and beat[0] and beat[0] != self.heartbeat[0]:
+                    # A restarted driver can share our still-open server connection.
+                    self.connection_changed(self.client.status)
+                    self.subscribe()
+                    return
+                if all(beat) and beat != self.heartbeat:
+                    self.heartbeat, self.heartbeat_at = beat, time.monotonic()
+            self.values[name] = prop
+
+    def vector(self, device, prop):
+        """Read a defined snapshot while the runtime heartbeat is advancing."""
+        with self.lock:
+            if (
+                device != self.device
+                or self.client.status != constants.ConnectionStatus.CONNECTED
+                or self.values.get(prop) is None
+                or time.monotonic() - self.heartbeat_at > self.timeout
             ):
                 raise ConnectionError(
                     f"Fresh definition/readback unavailable: {device}.{prop}"
                 )
-            return self.values[device, prop]
+            return self.values[prop]
 
     def close(self):
         """Detach callbacks when the owning app/CLI finishes."""
@@ -137,11 +126,8 @@ class Runtime:
     def __init__(self, client, po4ao, timeout=30, *, freshness_timeout=5.0):
         """Observe only the PO4AO runtime; reconstruction has its own C++ owner."""
         self.client, self.po4ao, self.timeout = client, po4ao, timeout
-        self.observations = Observations(
-            client, (po4ao,), freshness_timeout, heartbeat_device=po4ao
-        )
+        self.observations = Observations(client, po4ao, freshness_timeout)
         self.reload_ticket = None
-        self.observations.refresh()
 
     def get(self, device, prop, element):
         """Read a current-lifetime, non-expired INDI observation."""
@@ -164,7 +150,6 @@ class Runtime:
         """Wait boundedly for observed completion, with cooperative cancellation."""
         deadline = time.monotonic() + (self.timeout if timeout is None else timeout)
         while True:
-            self.observations.refresh()
             if predicate():
                 break
             if cancel.wait(0.05):

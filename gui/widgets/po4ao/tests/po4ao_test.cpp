@@ -1159,7 +1159,6 @@ TEST_CASE( "PO4AO recovers missing command definitions", "[po4ao][definitionReco
 #ifdef PO4AOGUI_TEST_DOXYGEN_REF
     xqt::po4ao::handleSetProperty;
     xqt::po4ao::handleDefProperty;
-    xqt::po4ao::requestMissingDefinitions;
     xqt::po4ao::updateGUI;
 #endif
     // clang-format on
@@ -1188,9 +1187,6 @@ TEST_CASE( "PO4AO recovers missing command definitions", "[po4ao][definitionReco
     f.erase( device, name );
     auto property = runtimeSwitch( name, false );
     property.setDevice( device );
-    f.m_publisher.handleSetProperty( property ); // A value update is not a command definition.
-    drain();
-    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
     const auto queryCount = [&]()
     {
         return std::count_if( f.m_publisher.m_queries.begin(),
@@ -1201,16 +1197,14 @@ TEST_CASE( "PO4AO recovers missing command definitions", "[po4ao][definitionReco
                               } );
     };
     const auto queries = queryCount();
-    f.m_publisher.tick( std::chrono::seconds( 1 ) );
-    REQUIRE( queryCount() == queries ); // Shared discovery considers this property received.
-    QThread::msleep( 550 );
+    f.m_publisher.handleSetProperty( property ); // A value update is not a command definition.
+    drain();
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    REQUIRE( queryCount() == queries + 1 );
+    f.m_publisher.handleSetProperty( property );
+    f.m_publisher.tick( std::chrono::seconds( 6 ) );
     drain();
     REQUIRE( queryCount() == queries + 1 );
-    REQUIRE( f.m_publisher.m_queries.back().getDevice() == device );
-    REQUIRE( f.m_publisher.m_queries.back().getName() == name );
-    QThread::msleep( 550 );
-    drain();
-    REQUIRE( queryCount() == queries + 1 ); // Definition retries are bounded.
     REQUIRE( f.m_publisher.m_commands.empty() );
     f.define( property );
     REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
