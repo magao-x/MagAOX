@@ -84,7 +84,7 @@ namespace t2wOffloaderTest
  */
 TEST_CASE( "t2wOffloader placeholder harness instantiates the app", "[t2wOffloader]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
     t2wOffloader();
     #endif
@@ -105,7 +105,7 @@ TEST_CASE( "t2wOffloader placeholder harness instantiates the app", "[t2wOffload
  */
 TEST_CASE( "t2wOffloader back-projects the offload change onto the tweeter", "[t2wOffloader]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
     t2wOffloader::calcTweeterOffload;
     #endif
@@ -169,7 +169,7 @@ TEST_CASE( "t2wOffloader back-projects the offload change onto the tweeter", "[t
  */
 TEST_CASE( "t2wOffloader chooses navg for a requested offload rate", "[t2wOffloader]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
     t2wOffloader::navgForRate(0,0);
     #endif
@@ -206,7 +206,7 @@ TEST_CASE( "t2wOffloader chooses navg for a requested offload rate", "[t2wOffloa
  */
 TEST_CASE( "t2wOffloader DM rate follows dmSyncopation", "[t2wOffloader]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
     t2wOffloader::dmRate();
     #endif

@@ -650,7 +650,9 @@ inline int t2wOffloader::updateFPS()
         effFPS = 0;
     }
     else
+    {
         effFPS = dmRate() / m_navg;
+    }
 
     if( effFPS != m_effFPS )
     {
@@ -1294,7 +1296,8 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_offloadRate )( const pcf::IndiPrope
 
     float target;
 
-    if( indiTargetUpdate( m_indiP_offloadRate, target, ipRecv, true ) < 0 || !mx::math::isFinite( target ) || target < 0 )
+    if( indiTargetUpdate( m_indiP_offloadRate, target, ipRecv, true ) < 0 || !mx::math::isFinite( target ) ||
+        target < 0 )
     {
         log<software_error>( { __FILE__, __LINE__, "invalid offloadRate" } );
         return -1;
