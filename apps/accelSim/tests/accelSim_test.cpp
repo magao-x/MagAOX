@@ -794,6 +794,7 @@ class appTest : public MagAOX::app::accelSim
   public:
     using accelSim::config;
     using accelSim::invalidateSync;
+    using accelSim::m_acquiredSample;
     using accelSim::m_activeFps;
     using accelSim::m_alpha;
     using accelSim::m_channelsDevice;
@@ -1237,10 +1238,10 @@ TEST_CASE( "accelSim acquisition produces fresh timestamped ADC pairs", "[accelS
     REQUIRE( app.startAcquisition() == 0 );
     REQUIRE( app.acquireAndCheckValid() == 0 );
     REQUIRE( app.m_currImageTimestamp.tv_sec > 0 );
-    app.m_model.m_sample.m_adc = { 123, 3456 }; // Deliberately asymmetric copy-order fixture.
+    app.m_acquiredSample.m_adc = { 123, 3456 }; // Deliberately asymmetric copy-order fixture.
     std::array<uint16_t, 2> values{};
     REQUIRE( app.loadImageIntoStream( values.data() ) == 0 );
-    REQUIRE( values == app.m_model.m_sample.m_adc );
+    REQUIRE( values == app.m_acquiredSample.m_adc );
     REQUIRE( app.loadImageIntoStream( values.data() ) < 0 );
     app.m_shutdown = true;
     REQUIRE( app.acquireAndCheckValid() > 0 );

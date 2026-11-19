@@ -79,6 +79,7 @@ struct sample
     std::array<double, 2>   m_pointing{};     ///< Physical pointing in arcsec.
     std::array<double, 2>   m_wfsPointing{};  ///< Coupled pointing in arcsec, without sensor noise.
     std::array<double, 2>   m_acceleration{}; ///< Acceleration including sensor noise in m/s^2.
+    std::array<double, 2>   m_noise{};        ///< Sensor noise already included in m_acceleration, in m/s^2.
     std::array<uint16_t, 2> m_adc{};          ///< Clipped raw X/Y ADC counts.
 };
 
@@ -238,7 +239,7 @@ struct diagnostics
     uint64_t                m_late{ 0 };            ///< Acquisitions later than their intended deadlines.
     double                  m_maxLateUs{ 0 };       ///< Largest measured monotonic lateness.
     double                  m_cadenceRatio{ 0 };    ///< Measured source period divided by the nominal model period.
-    std::array<uint64_t, 2> m_low{}, m_high{};      ///< ADC rail clamps in generated numerical samples.
+    std::array<uint64_t, 2> m_low{}, m_high{};      ///< ADC rail clamps in published accelerometer measurements.
 
     /// Wrap the signed applied/model phase difference to the hardware interval (-T/2,T/2].
     void updatePhaseError();
@@ -455,7 +456,8 @@ inline const sample &model::step()
     }
     for( size_t axis = 0; axis < 2; ++axis )
     {
-        m_sample.m_acceleration[axis] += m_noiseSigma * m_normal( m_rng );
+        m_sample.m_noise[axis] = m_noiseSigma * m_normal( m_rng );
+        m_sample.m_acceleration[axis] += m_sample.m_noise[axis];
         if( !std::isfinite( m_sample.m_pointing[axis] ) || !std::isfinite( m_sample.m_wfsPointing[axis] ) )
             throw std::runtime_error( "nonfinite simulated pointing" );
         m_sample.m_adc[axis] = adcCounts( m_sample.m_acceleration[axis], m_config, m_clipLow[axis], m_clipHigh[axis] );

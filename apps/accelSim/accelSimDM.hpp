@@ -1,5 +1,5 @@
 /** \file accelSimDM.hpp
- * \brief Precomputed same-sample DM synthesis independent of transport and operator state.
+ * \brief Precomputed physical DM synthesis independent of transport and operator state.
  * \ingroup accelSim_files
  */
 #ifndef accelSimDM_hpp
@@ -25,8 +25,8 @@ enum class dmState
     streamFault
 };
 
-/// Same-sample calibrated synthesis with an independent amplitude scale.
-/** Acquisition owns this helper; it never publishes or manages output state. */
+/// Calibrated physical-pointing synthesis with an independent amplitude scale.
+/** One thread (accelSim's DM output thread) owns this helper; it never publishes or manages output state. */
 class dmInjection
 {
     std::optional<tipTiltBasis> m_basis;   ///< Validated precomputed angular responses and reusable command.
@@ -46,8 +46,9 @@ class dmInjection
     bool ready() const;
 
     /// Return a complete finite scaled command; invalid input throws without publishing.
-    const std::vector<float> &synthesize( const sample &value /**< [in] exact sample already published to acc000 */,
-                                          double        scale /**< [in] independent DM amplitude scale in [0,1] */ );
+    const std::vector<float> &
+    synthesize( const sample &value /**< [in] physical sample; only noise-free pointing is used */,
+                double        scale /**< [in] independent DM amplitude scale in [0,1] */ );
 
     /// Preserve existing staging call sites without timing gates, revisions or latched state.
     template <typename publisherT>
