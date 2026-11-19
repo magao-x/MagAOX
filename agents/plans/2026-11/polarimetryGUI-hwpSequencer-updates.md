@@ -249,3 +249,46 @@ Builds and tests are run by the user (no MagAO-X build environment on this machi
 - 2026-11-18: user could not run `polarimetry_test` ("no Qt platform plugin could be
   initialized"); the test `main` now sets `QT_QPA_PLATFORM=offscreen`, as `camera_test`
   does. Branch rebased onto `ml/hwpSequencer` at `203cf5f4` (status.frames reset).
+
+## QWP tracking display (2026-11-19)
+
+`qwpTracker` (`qwptrack`) now works on `ml/qwpTracker`. The GUI had a placeholder QWP
+tracking slider (`sliderQwpTracking`, always disabled) and a `COMP_IMR` label beside it.
+Grilled with the user on 2026-11-19.
+
+### Findings
+
+- Q-F1. `qwptrack` publishes `tracking.toggle`, and `qwp1`/`qwp2` as current/target
+  numbers (degrees, fast axis). `current` comes from the elliptec stage readback, rounded
+  to 0.01 and folded to [0, 180); `target` is the tracking-law request.
+- Q-F2. The panel never subscribed to `qwptrack.fsm` or `qwptrack.tracking` (the latter
+  was commented out), so `m_qwptrackFsmOk`/`m_qwpTracking` never changed; `onConnect`
+  forced the slider disabled and greyed the `qwptrack` device label; the QWP slider lock
+  in `updateGUI` used `m_hwptrackFsmOk`.
+- Q-F3. The GUI depends on the app only through INDI names, so no rebase onto
+  `ml/qwpTracker` is needed.
+
+### Decisions
+
+- QD1. No rebase. `ml/hwpsequencerGUI` and `ml/qwpTracker` merge independently; the
+  coupling is the property names `qwptrack.{fsm, tracking, qwp1, qwp2}`.
+- QD2. Show `qwpN.current` (where the waveplates are), not `target`.
+- QD3. Format `QWP1 %3.0f°  QWP2 %3.0f°`, padded with figure spaces (U+2007, digit width)
+  since the GUI font is proportional and ordinary spaces would let the width change.
+- QD4. Label visible only while `tracking` is On (as `labelHwpTracking`); `---` when
+  `qwptrack` is not READY/OPERATING or on disconnect.
+- QD5. The QWP slider ignores input while sequencing or when `qwptrack` is not
+  READY/OPERATING (toggling QWP tracking mid-sequence would change the polarization
+  state within a dataset). The label is greyed while sequencing.
+- QD6. Tests extend `polarimetry_test`; this section records the plan.
+
+### Implementation
+
+1. Functional: subscribe to `qwptrack.{fsm, tracking, qwp1, qwp2}`; cache `qwp1`/`qwp2`
+   `current`; label text and visibility; enable the slider on connect; lock slider by
+   `m_qwptrackFsmOk`. Slider locking factored into `lockSlider()`.
+2. Tests: subscriptions; QWP label text/visibility/greying; slider lock.
+3. Documentation pass and `clang-format`, if needed.
+
+Manual check by the user (M5): with `qwptrack` running, toggle tracking from the GUI;
+angles appear and follow the stages; slider is locked during a sequence.
