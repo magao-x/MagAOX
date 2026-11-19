@@ -84,6 +84,16 @@ is advanced once per acquired sample, with unchanged ADC conversion and WFS
 coupling. Neither a producer wait nor DM transport runs on the ADC acquisition
 thread. Timer ADC mode remains available, but does not qualify disturbance output.
 
+Startup synchronization may be absent while DM output is disabled. Once calibration,
+authorization, the 8000-Hz acquisition rate and the WFS phase clock are valid,
+`dm_status.ready` becomes true automatically, with `active=0` and no output request.
+Set `dm_scale.target`, then turn `dm_enable.toggle` on. The next completed sample
+stages the scaled command before the existing producer can arm. Turning enable off
+requests removal; wait for `dm_status.zero_acknowledged=1` and `active=0`.
+Readiness alone does not acknowledge a zero. A timing fault after enable remains
+latched even when synchronization recovers; explicitly turn enable off and on to
+rearm after removal. Changing the scale does not clear a fault.
+
 Disable, fault and normal shutdown request a tagged zero of **this source only**;
 DDSPC's source is never altered. Missing receipts cannot guarantee removal and
 must leave an explicit fault; an operator must verify removal before stopping
@@ -461,6 +471,42 @@ real frameGrabber publication and a synthetic semaphore source. It does not
 connect to a live INDI server or instrument. Run it separately from the live
 benchmark because ImageStreamIO can cache its shared-memory directory.
 
+For the operational DM readiness fix, rebuild and install **with the same build
+profile**. These are operator commands for a provisioned Linux host; installation
+preserves an existing `/opt/MagAOX/config/acc000.conf`:
+
+```sh
+cd ~/source/MagAOX-DDSPC
+make -C apps/accelSim clean
+make -C apps/accelSim -j4 DDSPC_OPERATIONAL_BUILD=yes
+sudo make -C apps/accelSim DDSPC_OPERATIONAL_BUILD=yes install
+```
+
+No configuration migration or timing-threshold change is required for an already
+commissioned operational configuration. Keep `sim.fps=8000`, `[dm] enabled=false`,
+`scale=0`, `channelName=dm01disp10_aux`, the approved `modeCube` and matching `mask`,
+and the reviewed `output_authorized=true`, `routing_verified=true`. Retain the
+actual `[synchro] shmimName`, WFS `referenceFps` (2000 for a 500-us reference),
+and existing `[syncopation] timingStream` with its four 125-us slots per WFS frame.
+The three deprecated amplitude/step/ack-timeout keys are unnecessary. A default
+configuration still needs its site-specific reference, mask, timing source and
+authorization filled in as described above. Restart accelSim with the rebuilt
+binary, then wait for readiness before setting runtime scale and enable.
+
+Run the app-boundary regression in the operational profile on a configured
+non-instrument development host. It uses synthetic calibration and direct WFS
+reference observations, without starting acquisition or an output thread:
+
+```sh
+make -C tests -f Makefile.one t=../apps/accelSim/tests/accelSimDM_test.cpp \
+  -W ../apps/accelSim/tests/accelSimDM_test.cpp \
+  CXXSTD=-std=c++20 OPTIMIZE='-O3 -fno-fast-math' CPPFLAGS=-DDDSPC_OPERATIONAL_BUILD
+./apps/accelSim/tests/accelSimDM_test '[dm-runtime],[dm-controls]'
+make -C tests -f Makefile.one t=../apps/accelSim/tests/accelSimDMOutput_test.cpp \
+  CXXSTD=-std=c++20 OPTIMIZE='-O3 -fno-fast-math'
+./apps/accelSim/tests/accelSimDMOutput_test '[dm-output]'
+```
+
 The numerical portion can run without MagAO-X dependencies (including on macOS):
 
 ```sh
@@ -479,6 +525,22 @@ c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DACCELSIM_MODEL_ONLY \
   apps/accelSim/tests/accelSimDM_test.cpp -o /tmp/accelSim_dm_test
 /tmp/accelSim_dm_test '[dm-runtime]'
 ```
+
+The producer-interlock regression can also run without native shared memory on a
+host with Eigen and mxlib headers, using the existing ImageStreamIO API double:
+
+```sh
+c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DCATCH_CONFIG_MAIN \
+  -Iapps/loPredCtrlAcc/tests/native_stubs $(pkg-config --cflags-only-I eigen3 mxlib) \
+  apps/accelSim/tests/accelSimDMOutput_test.cpp -o /tmp/accelSim_dm_output_test
+/tmp/accelSim_dm_output_test '[dm-output]'
+```
+
+This checks 8000 scaled sample publications at virtual 125-us intervals, startup
+zero, copy receipts, disable/fault removal and explicit rearm. The existing
+`synco_transport_test.cpp` mock-consumer suite separately exercises the actual
+tagged producer, source identity and exact matching receipts; neither test is an
+RTC throughput measurement.
 
 On a configured non-instrument Linux development host, build the same test with
 `tests/Makefile.one`, then run `[dm-controls]` and, in a separate process,

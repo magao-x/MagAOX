@@ -1071,8 +1071,8 @@ inline int accelSim::frameGrabberPostPublish( IMAGE *stream )
         const bool healthy   = m_dmCalibrationValid.load() && m_activeFps.load() == 8000 &&
                                ( !m_syncName.empty() && m_phaseClock.m_valid );
         auto       publisher = stage;
-        m_dmState =
-            m_dmInjection.service( m_model.m_sample, request | uint64_t( 1 ), m_dmScale.load(), healthy, publisher );
+        // Disabled startup may acquire WFS validity; only an explicit on request can latch an injection fault.
+        m_dmState = m_dmInjection.service( m_model.m_sample, request, m_dmScale.load(), healthy, publisher );
         m_dmHealthy.store( healthy && ( m_dmState.load() == accelSimDetail::dmState::active ||
                                         m_dmState.load() == accelSimDetail::dmState::disabled ) );
         m_dmApplied = request;
