@@ -1,0 +1,38 @@
+# Exercise the real accelSim header/producer with private stream and framework doubles.
+# No native application, ImageStreamIO library, INDI connection or hardware is started.
+TEST_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+ROOT_DIR := $(abspath $(TEST_DIR)/../../..)
+BUILD_DIR ?= $(ROOT_DIR)/apps/accelSim/build/offline
+CXX = c++
+CPPFLAGS += -I$(ROOT_DIR)/apps/loPredCtrlAcc/tests/native_stubs \
+            $(shell pkg-config --cflags-only-I eigen3 mxlib) \
+            -DACCELSIM_APP_TEST -DEIGEN_DONT_PARALLELIZE -include cstdint -include ctime
+CXXFLAGS ?= -O2 -g
+CXXFLAGS += -std=c++20 -fno-fast-math
+MXLIB_DIR := $(shell pkg-config --variable=libdir mxlib)
+LDFLAGS += -L$(MXLIB_DIR) -Wl,-rpath,$(MXLIB_DIR)
+LDLIBS += -lmxlib -lcfitsio -pthread
+SOURCES := $(ROOT_DIR)/tests/testMain.cpp $(TEST_DIR)/accelSimDM_test.cpp \
+           $(TEST_DIR)/accelSimDMOutput_test.cpp $(ROOT_DIR)/INDI/libcommon/IndiProperty.cpp \
+           $(ROOT_DIR)/INDI/libcommon/IndiElement.cpp $(ROOT_DIR)/INDI/libcommon/TimeStamp.cpp
+OBJECTS := $(addprefix $(BUILD_DIR)/,$(notdir $(SOURCES:.cpp=.o)))
+VPATH := $(sort $(dir $(SOURCES)))
+TARGET := $(BUILD_DIR)/accelSim_dm_test
+
+.PHONY: all check
+all: $(TARGET)
+
+check: $(TARGET)
+	$(TARGET) '[dm-runtime],[dm-controls],[dm-output]'
+
+$(TARGET): $(OBJECTS)
+	$(CXX) $(LDFLAGS) -o $@ $(OBJECTS) $(LDLIBS)
+
+# The unchanged INDI sources still use std::ptr_fun/std::not1.
+$(BUILD_DIR)/IndiProperty.o $(BUILD_DIR)/IndiElement.o $(BUILD_DIR)/TimeStamp.o: override CXXFLAGS += -std=c++14
+
+$(BUILD_DIR)/%.o: %.cpp
+	@mkdir -p $(BUILD_DIR)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -MMD -MP -c $< -o $@
+
+-include $(OBJECTS:.o=.d)

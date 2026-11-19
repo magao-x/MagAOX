@@ -46,66 +46,76 @@ are not run by the portable model-only build; they remain unverified on this Mac
 
 ## Optional runtime DM injection through syncopation
 
-The required source is **`dm01disp10_aux`**, independently owned from DDSPC's
-**`dm10disp10_aux`**. Injection now uses the existing `dmSyncopationProducer`
-protocol from `dmSpeckle`; it no longer writes directly to `dm01disp10`.
-`frameGrabberPostPublish` prepares the same calibrated, same-sample pointing
-surface in private memory. The unchanged producer obtains the actual Request,
-publishes pixels and tagged `_ready`, and waits for the matching copy/discard
-`_ack` before buffer reuse. A transport receipt is not physical DM proof.
-No new scheduler or physical vibration model was introduced.
+The source is **`dm01disp10_aux`**, independently owned from DDSPC's
+**`dm10disp10_aux`**. The existing `dmSyncopationProducer` base owns scheduling,
+exclusive cooperative producer ownership, finite-payload validation, tagged
+`_ready` commits and exact copy/discard `_ack` handling. The implementation follows
+the direct poll/publish pattern in the historical syncopation-enabled `dmSpeckle`
+implementation (`7f59b4f7`); this checkout's `dmSpeckle` retains its legacy writer.
+Only the base writes the auxiliary source. accelSim never writes a DM destination.
 
-Default builds are strict shadow-only. `make operational` explicitly builds a
-capable binary, but output additionally needs reviewed `[dm] output_authorized`,
-`routing_verified`, existing `[syncopation] timingStream`, calibration and valid
-8000-Hz synchronized input. The source must already exist, with exclusive
-handover including any direct writers. The base obtains the cooperative producer
-lock; it does not stop unrelated apps or protect against non-cooperating writers.
-No output source is created or touched at startup. Startup `enabled=true` or
-`scale!=0` is rejected. The default ADC-only config still needs no DM access.
+The operator workflow is:
 
-There are no mandatory `max_abs_um`, `max_step_um` or `ack_timeout_us` settings.
-Like dmSpeckle, the simulator accepts finite prepared surfaces and uses the base's
-matching acknowledgement before reusing a payload. It adds no independent receipt
-watchdog or per-source amplitude/step limiter. Old copies of those three keys are
-accepted and ignored. The commissioned BMC path retains its existing saturation
-clipping of the combined request; that is not a per-source slew bound. The scale
-control remains [0,1], startup scale remains zero, and no hardware displacement or
-slew limit is inferred from those facts. DDSPC retains its separate mandatory
-bounds/timeout policy; this simulator choice is not exposed as a configuration
-switch in loPredCtrlAcc.
+1. Set `dm_scale.target` to a finite value in [0,1].
+2. Toggle `dm_enable.toggle` on to publish the scaled physical disturbance.
+3. Toggle `dm_enable.toggle` off to submit a tagged zero. Wait for
+   `dm_status.zero_acknowledged=1` and `active=0` before transferring ownership.
 
-The existing `[dm] modeCube`, `mask`, `maxRelativeResidual`, `enabled=false`,
-`scale=0` and INDI `dm_enable.toggle`, `dm_scale.current/target` remain.
-`dm_status` adds requested, zero_acknowledged and transport_fault. Active means a
-copied enabled payload, not measured mirror motion. A private cache contention
-retains its prior timestamp; freshness still expires after 250 us. The ADC model
-is advanced once per acquired sample, with unchanged ADC conversion and WFS
-coupling. Neither a producer wait nor DM transport runs on the ADC acquisition
-thread. Timer ADC mode remains available, but does not qualify disturbance output.
+A normal build supports this workflow. There is no simulator operational/shadow
+build profile, output authorization flag, routing assertion, exact-rate gate,
+WFS-lock gate, 250-us freshness watchdog or fault latch. Remove the obsolete
+`dm.output_authorized`, `dm.routing_verified`, `dm.max_abs_um`, `dm.max_step_um`
+and `dm.ack_timeout_us` keys from older simulator configurations. loPredCtrlAcc
+keeps its own existing configuration and output policy unchanged.
 
-Startup synchronization may be absent while DM output is disabled. Once calibration,
-authorization, the 8000-Hz acquisition rate and the WFS phase clock are valid,
-`dm_status.ready` becomes true automatically, with `active=0` and no output request.
-Set `dm_scale.target`, then turn `dm_enable.toggle` on. The next completed sample
-stages the scaled command before the existing producer can arm. Turning enable off
-requests removal; wait for `dm_status.zero_acknowledged=1` and `active=0`.
-Readiness alone does not acknowledge a zero. A timing fault after enable remains
-latched even when synchronization recovers; explicitly turn enable off and on to
-rearm after removal. Changing the scale does not clear a fault.
+`frameGrabberPostPublish` prepares the calibrated surface from the same physical
+pointing sample already published as ADC counts, including the independent DM
+scale. A separate output thread copies this private surface and calls the existing
+producer's poll/publish functions. Producer waits never run on the acquisition
+thread, which skips a contended cache copy without waiting. Both timer and WFS
+phase-reference acquisition work with DM output; neither sample age nor phase
+lock qualifies it. No model prediction, RNG draw or new sample is introduced by
+output publication. A numerically invalid command requests a zero surface until
+the next valid sample; ordinary missed slots, unavailable transport and discarded
+receipts are retried without requiring a fault reset.
 
-Disable, fault and normal shutdown request a tagged zero of **this source only**;
-DDSPC's source is never altered. Missing receipts cannot guarantee removal and
-must leave an explicit fault; an operator must verify removal before stopping
-synco or transferring ownership. No automatic restart of nonzero output occurs.
-The supplied [acc000.conf](acc000.conf) retains the existing physical seeds,
-8000-Hz paired ADC format, calibration and source depth 128, with mandatory
-instrument values intentionally unconfirmed and output inhibited.
+Calibration still requires a finite 50-by-50 TT pair, matching fitting mask,
+full-rank physical projection and the configured residual tolerance. File identity
+is checked while loading; acquisition uses the validated in-memory calibration.
+The source must already be a compatible CPU float32 50-by-50 auxiliary image,
+with its scheduler and acknowledgement stream available. The base's cooperative
+lock does not stop unrelated direct writers; exclusive source handover remains
+the operator's responsibility. No source access occurs while initially disabled.
+Startup `enabled=true` is rejected. `scale=0` is the supplied startup default;
+a configured finite scale in [0,1] is also accepted while output remains off.
 
-See [OPERATIONAL_DDSPC.md](../loPredCtrlAcc/OPERATIONAL_DDSPC.md) for the full pair,
-actual-source routing limitation, build/install commands, explicit operator
-sequence, mock tests and remaining Linux/instrument qualification. Historical
-model/native-stream timings below are not commissioning of this producer path.
+`dm_status` retains its existing element names:
+
+| Element | Meaning |
+| --- | --- |
+| `ready` | Calibration was prepared; this is informational and does not depend on acquisition timing. |
+| `requested` | Current `dm_enable` operator request. |
+| `active` | Last acknowledged payload was an enabled command. |
+| `zero_acknowledged` | An exact copied-zero receipt was observed, with no later payload submitted. |
+| `fault` | Calibration unavailable or the current sample cannot produce a finite command; no latched code 5. |
+| `transport_fault` | Current attachment/transport error; clears on recovery. |
+
+An acknowledgement proves transport copying, not physical mirror motion. Disable
+removal does not require another accelerometer sample. Normal shutdown retains
+the existing bounded 100-ms tagged-zero attempt and reports an unacknowledged
+removal. A tiny CRTP lifetime holder permits that final zero after MagAOXApp sets
+its shutdown flag; it adds no scheduling, ownership or qualification policy.
+
+The current implementation decisions and test limits are recorded in
+[accelSim-simple-dm-output.md](../../agents/plans/2026-11/accelSim-simple-dm-output.md).
+The complete configuration template is [acc000.conf](acc000.conf). Fill in the
+matching absolute `dm.mask` path and existing `syncopation.timingStream` name.
+Retain the deployed `synchro.shmimName` if WFS phase-reference acquisition is
+wanted; leaving it empty selects timer acquisition. The template preserves the
+8-kHz rate, seeds, ADC calibration, two-channel format and source depth 128.
+`config/example.conf` remains an ADC-only example with no DM channel configured.
+The older simulator configuration copied under `loPredCtrlAcc/examples` is
+unchanged; use the simulator's own template and instructions for this workflow.
 
 ## Independent DM disturbance calculations
 
@@ -471,41 +481,38 @@ real frameGrabber publication and a synthetic semaphore source. It does not
 connect to a live INDI server or instrument. Run it separately from the live
 benchmark because ImageStreamIO can cache its shared-memory directory.
 
-For the operational DM readiness fix, rebuild and install **with the same build
-profile**. These are operator commands for a provisioned Linux host; installation
-preserves an existing `/opt/MagAOX/config/acc000.conf`:
+Rebuild on a provisioned workstation or development host. These commands only
+build; they do not install, launch or deploy anything:
 
 ```sh
 cd ~/source/MagAOX-DDSPC
 make -C apps/accelSim clean
-make -C apps/accelSim -j4 DDSPC_OPERATIONAL_BUILD=yes
-sudo make -C apps/accelSim DDSPC_OPERATIONAL_BUILD=yes install
+make -C apps/accelSim -j4
 ```
 
-No configuration migration or timing-threshold change is required for an already
-commissioned operational configuration. Keep `sim.fps=8000`, `[dm] enabled=false`,
-`scale=0`, `channelName=dm01disp10_aux`, the approved `modeCube` and matching `mask`,
-and the reviewed `output_authorized=true`, `routing_verified=true`. Retain the
-actual `[synchro] shmimName`, WFS `referenceFps` (2000 for a 500-us reference),
-and existing `[syncopation] timingStream` with its four 125-us slots per WFS frame.
-The three deprecated amplitude/step/ack-timeout keys are unnecessary. A default
-configuration still needs its site-specific reference, mask, timing source and
-authorization filled in as described above. Restart accelSim with the rebuilt
-binary, then wait for readiness before setting runtime scale and enable.
+No `DDSPC_OPERATIONAL_BUILD` flag is needed for accelSim. Before a later operator
+launch, retain the actual WFS reference and scheduler names and matching mask in
+[acc000.conf](acc000.conf), with `dm.channelName=dm01disp10_aux`, `enabled=false`
+and the desired startup scale (the supplied value is zero). The existing
+scheduler advertises the slots; for the usual 2-kHz/four-slot setup these are
+125 us apart. accelSim does not create that schedule.
 
-Run the app-boundary regression in the operational profile on a configured
-non-instrument development host. It uses synthetic calibration and direct WFS
-reference observations, without starting acquisition or an output thread:
+Run the actual app's control and producer regressions without native streams or
+hardware using the shared framework/API doubles:
 
 ```sh
-make -C tests -f Makefile.one t=../apps/accelSim/tests/accelSimDM_test.cpp \
-  -W ../apps/accelSim/tests/accelSimDM_test.cpp \
-  CXXSTD=-std=c++20 OPTIMIZE='-O3 -fno-fast-math' CPPFLAGS=-DDDSPC_OPERATIONAL_BUILD
-./apps/accelSim/tests/accelSimDM_test '[dm-runtime],[dm-controls]'
-make -C tests -f Makefile.one t=../apps/accelSim/tests/accelSimDMOutput_test.cpp \
-  CXXSTD=-std=c++20 OPTIMIZE='-O3 -fno-fast-math'
-./apps/accelSim/tests/accelSimDMOutput_test '[dm-output]'
+make -f apps/accelSim/tests/Makefile.offline -j4 check
 ```
+
+This executable includes the real accelSim header, real INDI properties and the
+unchanged producer base. Its source/sidecar registry uses ordinary private files
+under a fresh temporary directory, with a virtual producer clock. It checks
+8000 scaled samples, finite-command rejection/recovery, exact and mismatched
+receipts, discarded-zero retry, source ownership, scheduler reset and removal
+after the app shutdown flag is set. It never connects to a native INDI service or
+ImageStreamIO runtime. It requires Eigen, mxlib and CFITSIO development libraries;
+unchanged INDI implementation files are built as C++14 for their legacy standard
+library calls. This is protocol coverage, not a native Linux throughput test.
 
 The numerical portion can run without MagAO-X dependencies (including on macOS):
 
@@ -525,30 +532,6 @@ c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DACCELSIM_MODEL_ONLY \
   apps/accelSim/tests/accelSimDM_test.cpp -o /tmp/accelSim_dm_test
 /tmp/accelSim_dm_test '[dm-runtime]'
 ```
-
-The producer-interlock regression can also run without native shared memory on a
-host with Eigen and mxlib headers, using the existing ImageStreamIO API double:
-
-```sh
-c++ -std=c++20 -O3 -fno-fast-math -Wall -Wextra -DCATCH_CONFIG_MAIN \
-  -Iapps/loPredCtrlAcc/tests/native_stubs $(pkg-config --cflags-only-I eigen3 mxlib) \
-  apps/accelSim/tests/accelSimDMOutput_test.cpp -o /tmp/accelSim_dm_output_test
-/tmp/accelSim_dm_output_test '[dm-output]'
-```
-
-This checks 8000 scaled sample publications at virtual 125-us intervals, startup
-zero, copy receipts, disable/fault removal and explicit rearm. The existing
-`synco_transport_test.cpp` mock-consumer suite separately exercises the actual
-tagged producer, source identity and exact matching receipts; neither test is an
-RTC throughput measurement.
-
-On a configured non-instrument Linux development host, build the same test with
-`tests/Makefile.one`, then run `[dm-controls]` and, in a separate process,
-`[accelSim-dm-streams]`. The latter creates synthetic images with private names
-under a fresh `/tmp` ImageStreamIO namespace and rejects a cached different path
-before creating anything. It tests native active counters/semaphores, geometry/type
-rejection, and the app's same-sample post-publication/zero path. It never names a
-deployed DM stream. Sanitizers should also cover the numerical/runtime suites.
 
 The standalone tests include the production synchronization accounting and
 status-invalidation logic, integer/fractional rate ratios, correction bounds,
