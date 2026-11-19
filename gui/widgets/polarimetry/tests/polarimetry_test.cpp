@@ -213,7 +213,11 @@ TEST_CASE( "Polarimetry subscribes to current property names", "[polarimetryGUI]
                              "hwpsequence.status",
                              "hwpsequence.positions",
                              "stagepollin.presetName",
-                             "stageqwplin.presetName" } )
+                             "stageqwplin.presetName",
+                             "qwptrack.fsm",
+                             "qwptrack.tracking",
+                             "qwptrack.qwp1",
+                             "qwptrack.qwp2" } )
     {
         INFO( key );
         CHECK( widget.m_publisher.count( key ) >= 1 );
@@ -370,6 +374,65 @@ TEST_CASE( "Polarimetry status text", "[polarimetryGUI]" )
         CHECK( widget.label( "framesStatus" )->text() == "4 / 4" );
         CHECK_FALSE( widget.label( "framesStatus" )->property( "isWarning" ).toBool() );
     }
+}
+
+/** \brief The QWP angles show beside the tracking slider only while tracking, and the slider locks while sequencing.
+ * \ingroup polarimetryGUI_unit_test
+ */
+TEST_CASE( "Polarimetry QWP tracking", "[polarimetryGUI]" )
+{
+    // clang-format off
+#ifdef POLARIMETRY_GUI_TEST_DOXYGEN_REF
+    xqt::polarimetry::handleSetProperty; xqt::polarimetry::updateGUI; xqt::polarimetry::lockSlider;
+#endif
+    // clang-format on
+    Widget widget;
+    widget.ready();
+
+    QLabel  *label  = widget.label( "labelQwpTracking" );
+    QWidget *slider = widget.control( "sliderQwpTracking" );
+
+    // qwptrack not yet READY
+    CHECK( slider->isEnabled() );
+    CHECK( slider->testAttribute( Qt::WA_TransparentForMouseEvents ) );
+
+    widget.state( "qwptrack", "READY" );
+    widget.number( "qwptrack", "qwp1", { { "current", 12.4 }, { "target", 12.6 } } );
+    widget.number( "qwptrack", "qwp2", { { "current", 135.0 }, { "target", 135.0 } } );
+
+    CHECK_FALSE( slider->testAttribute( Qt::WA_TransparentForMouseEvents ) );
+    CHECK( label->isHidden() );
+
+    widget.toggle( "qwptrack", "tracking", true );
+
+    CHECK_FALSE( label->isHidden() );
+    CHECK( label->isEnabled() );
+
+    // current, not target, padded to three digits with a figure space
+    CHECK( label->text() == QString::fromUtf8( "QWP1 \u2007" "12°  QWP2 135°" ) );
+
+    widget.number( "qwptrack", "qwp1", { { "current", 5.0 } } );
+    CHECK( label->text() == QString::fromUtf8( "QWP1 \u2007\u2007" "5°  QWP2 135°" ) );
+
+    widget.toggle( "hwpsequence", "sequence", true );
+
+    CHECK( slider->testAttribute( Qt::WA_TransparentForMouseEvents ) );
+    CHECK_FALSE( label->isHidden() );
+    CHECK_FALSE( label->isEnabled() );
+
+    widget.toggle( "hwpsequence", "sequence", false );
+
+    CHECK_FALSE( slider->testAttribute( Qt::WA_TransparentForMouseEvents ) );
+
+    widget.state( "qwptrack", "NOTCONNECTED" );
+
+    CHECK( label->text() == "---" );
+    CHECK( slider->testAttribute( Qt::WA_TransparentForMouseEvents ) );
+
+    widget.state( "qwptrack", "READY" );
+    widget.toggle( "qwptrack", "tracking", false );
+
+    CHECK( label->isHidden() );
 }
 
 /** \brief Buttons send the current hwpSequencer property names.
