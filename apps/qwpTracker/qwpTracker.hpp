@@ -266,8 +266,6 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
 
     pcf::IndiProperty m_indiP_qwp2; ///< The QWP2 fast-axis angle, `current` and `target`, in degrees.
 
-    pcf::IndiProperty m_indiP_zero; ///< The read-only configured stage zeros, elements `qwp1` and `qwp2`.
-
   public:
     /// Handle K-mirror position updates.
     INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stagek );
@@ -437,12 +435,6 @@ int qwpTracker::appStartup()
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_qwp1, "qwp1", -360, 360, 1e-3, "%g", "QWP1 fast axis", "" );
 
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_qwp2, "qwp2", -360, 360, 1e-3, "%g", "QWP2 fast axis", "" );
-
-    REG_INDI_NEWPROP_NOCB( m_indiP_zero, "zero", pcf::IndiProperty::Number );
-    m_indiP_zero.add( pcf::IndiElement( "qwp1" ) );
-    m_indiP_zero["qwp1"].set( m_qwp[0].zero );
-    m_indiP_zero.add( pcf::IndiElement( "qwp2" ) );
-    m_indiP_zero["qwp2"].set( m_qwp[1].zero );
 
     TELEMETER_APP_STARTUP;
 

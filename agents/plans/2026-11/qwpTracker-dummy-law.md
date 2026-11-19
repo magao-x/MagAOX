@@ -109,8 +109,9 @@ Defects that must be fixed for the app to function:
    `tracking`); record state moves from `recordQwpTrack` statics to members.
 8. **Startup (agreed 2026-11-19):** tracking starts off (as in kTracker, hwpTracker, adcTracker); nothing is sent at
    startup; `qwpN.target` is initialized to the current fast-axis angle on the first stage position.
-9. **Calibration config (agreed 2026-11-19):** `[qwp1]`/`[qwp2]` `zero`, `sign` are config-only, published read-only
-   over INDI for visibility. Naming: device defaults `stageqwprot1`/`stageqwprot2`; `[imr] devName` renamed
+9. **Calibration config (agreed 2026-11-19):** `[qwp1]`/`[qwp2]` `zero`, `sign` are config-only and not published
+   over INDI (initially planned read-only; dropped at the user's request 2026-11-19).
+   Naming: device defaults `stageqwprot1`/`stageqwprot2`; `[imr] devName` renamed
    `[k] devName` (default `stagek`); app properties `qwp1`/`qwp2` (`current`/`target`) and `tracking` kept.
 
 10. **External stage moves (agreed 2026-11-19):** not corrected; the next `stagek` change re-applies the law. The
@@ -144,7 +145,7 @@ Branch `ml/qwpTracker` (exists, follows `<username>/<feature>`). Header-only app
    `nearestEquivalent`. `computeTargets(k, t1, t2)` with the dummy law.
 3. `appStartup`: `REG_INDI_SETPROP` for `stagek.position`, `position`/`fsm` per stage; outbound `position` properties
    built like `kTracker::m_indiP_kpos` (`setDevice`, `setName("position")`, element `target`); app `tracking`,
-   `qwp1`/`qwp2`, read-only `qwp1_zero`/`qwp2_zero`; telemeter. Initial state from stage states (NOTCONNECTED).
+   `qwp1`/`qwp2`; telemeter. Initial state from stage states (NOTCONNECTED).
 4. `appLogic`: lock `m_indiMutex` (try_lock as kTracker); if tracking and `m_kUpdated`, compute targets, publish
    `qwpN.target`, mark sends pending; for each pending stage that is READY/OPERATING, choose the nearest equivalent
    stage angle, skip if equal to last sent; release lock; send; derive and set FSM; telemetry.
