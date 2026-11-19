@@ -57,7 +57,8 @@ Only the base writes the auxiliary source. accelSim never writes a DM destinatio
 
 The operator workflow is:
 
-1. Set `dm_scale.target` to a finite value in [0,1].
+1. Set `dm_scale.target` to a finite value in [0,100]. It linearly multiplies the
+   calibrated noise-free pointing surface; values above 1 amplify the physical disturbance.
 2. Toggle `dm_enable.toggle` on to publish the scaled physical disturbance.
 3. Toggle `dm_enable.toggle` off to submit a tagged zero. Wait for
    `dm_status.zero_acknowledged=1` and `active=0` before transferring ownership.
@@ -129,7 +130,7 @@ with its scheduler and acknowledgement stream available. The base's cooperative
 lock does not stop unrelated direct writers; exclusive source handover remains
 the operator's responsibility. No source access occurs while initially disabled.
 Startup `enabled=true` is rejected. `scale=0` is the supplied startup default;
-a configured finite scale in [0,1] is also accepted while output remains off.
+a configured finite scale in [0,100] is also accepted while output remains off.
 
 The read-only `dm_status` elements describe the producer handshake. Counters accumulate since process startup.
 

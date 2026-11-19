@@ -56,7 +56,7 @@ TEST_CASE( "accelSim DM physical mapping and amplitude scale", "[accelSim][dm-ru
         value.m_pointing    = angles;
         value.m_wfsPointing = { NAN, NAN };
         const pointingDisturbance pointing( value );
-        for( double scale : { 0., .125, .5, 1. } )
+        for( double scale : { 0., .125, .5, 1., 2.5, 100. } )
         {
             const auto &command = dm.synthesize( value, scale );
             for( size_t n = 0; n < command.size(); ++n )
@@ -89,7 +89,9 @@ TEST_CASE( "accelSim DM numerical validation has no fault latch", "[accelSim][dm
         value.m_pointing = { .0029, 0 };
         REQUIRE_NOTHROW( dm.synthesize( value, .25 ) );
     }
-    for( double bad : { -1., 1.1, double( NAN ), double( INFINITY ) } )
+    for( double good : { 1.1, 50., 100. } )
+        REQUIRE_NOTHROW( dm.synthesize( value, good ) );
+    for( double bad : { -1., 100.001, double( NAN ), double( INFINITY ) } )
         REQUIRE_THROWS( dm.synthesize( value, bad ) );
     calibration.m_x[0] = NAN;
     REQUIRE_THROWS( dm.prepare( calibration.m_x, calibration.m_y, calibration.m_weights, 1e-6 ) );
@@ -174,7 +176,15 @@ TEST_CASE( "accelSim DM simple operator controls", "[accelSim][dm-controls]" )
     REQUIRE( app.m_indiP_dmStatus["ready"].getValue() == "1" );
     REQUIRE( app.m_indiP_dmStatus["fault"].get<int>() == 0 );
     REQUIRE( app.m_indiP_dmStatus["attached"].get<int>() == 0 ); // Controls alone open no shared memory.
-    for( double bad : { -1., 1.1, double( NAN ), double( INFINITY ) } )
+    for( double good : { 1.5, 100. } )
+    {
+        scale["target"] = good;
+        REQUIRE( app.newCallBack_m_indiP_dmScale( scale ) == 0 );
+        REQUIRE( app.m_dmScale == good );
+    }
+    scale["target"] = .25;
+    REQUIRE( app.newCallBack_m_indiP_dmScale( scale ) == 0 );
+    for( double bad : { -1., 100.001, double( NAN ), double( INFINITY ) } )
     {
         scale["target"] = bad;
         REQUIRE( app.newCallBack_m_indiP_dmScale( scale ) < 0 );
@@ -185,6 +195,16 @@ TEST_CASE( "accelSim DM simple operator controls", "[accelSim][dm-controls]" )
     REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) == 0 );
     REQUIRE_FALSE( app.m_dmEnabled );
     REQUIRE( app.m_dmZeroPending ); // Removal is independent of a subsequent ADC sample.
+    for( const auto &[text, valid] :
+         { std::pair{ "100", true }, { "37.5", true }, { "100.001", false }, { "-1", false } } )
+    {
+        dmAppTest configured; // Startup dm.scale uses the same [0,100] range.
+        configured.setupConfig();
+        configured.config.m_values["dm.scale"] = text;
+        REQUIRE( ( configured.loadConfigImpl( configured.config ) == 0 ) == valid );
+        if( valid )
+            REQUIRE( configured.m_dmScale == std::stod( text ) );
+    }
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::setupProperties;

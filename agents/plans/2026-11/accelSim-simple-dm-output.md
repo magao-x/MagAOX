@@ -279,3 +279,13 @@ configuration keys, the std::thread DM worker and its 50-us retry sleep.
 dmSpeckle uses threadStart with priority/cpuset and 10-us waits. Revisit only if RTC
 `late_returns` rises once the scheduler is active. No instrument access, commit,
 push, installation or deployment was performed.
+
+## DM scale range [0,100]
+
+Operator request: allow `dm_scale` above 1. `accelSimDetail::maxDMScale = 100`
+(accelSimDM.hpp) now bounds the INDI property, the runtime callback, startup
+`dm.scale` validation and `dmInjection::synthesize`. The scale remains a linear
+multiplier of the noise-free pointing surface. Finite-value checks, enable/disable,
+the timeline, acc000 and the producer path are unchanged. The tests accept 1.1, 1.5,
+2.5, 37.5, 50 and 100, and reject -1, 100.001, NaN and Inf. A published four-slot
+surface at scale 2.5 matches the target-time expectation.
