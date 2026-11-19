@@ -1365,6 +1365,8 @@ inline void xCtrl::usage( std::ostream &os ) const
           "Options:\n"
           "  -r, --role ROLE      the MagAO-X role, else MAGAOX_ROLE or /etc/profile.d/magaox_role.sh\n"
           "  --all                all apps\n"
+          "  -v, --verbose        status shows a table with more details\n"
+          "  -q, --quiet          show no warnings or errors, only the normal output; they are still logged\n"
           "  --                   end of options, so a name may start with -\n"
           "  --keep-running       register leaves apps that became disabled running\n"
           "  -n, --lines N        log lines for peek and inspect\n"
@@ -1582,6 +1584,19 @@ inline int xCtrl::parseArgs( int argc, char **argv )
         else if( a == "-v" || a == "--verbose" )
         {
             m_verbose = true;
+        }
+        else if( a == "-q" || a == "--quiet" )
+        {
+            xlog().quiet( true );
+        }
+        else if( a.size() > 2 && a[1] != '-' && a.find_first_not_of( "vq", 1 ) == std::string::npos )
+        {
+            // single-letter flags together, e.g. -vq
+            m_verbose = m_verbose || a.find( 'v' ) != std::string::npos;
+            if( a.find( 'q' ) != std::string::npos )
+            {
+                xlog().quiet( true );
+            }
         }
         else if( a == "--keep-running" )
         {
@@ -2825,12 +2840,24 @@ inline int xCtrl::cmdStatus()
         }
     }
 
+    // NAME, STATE and PID are as wide as their longest entry, to fit small terminals
+    int wName = 4, wState = 5, wPid = 3;
+    for( const auto &r : rows )
+    {
+        wName  = std::max( wName, static_cast<int>( r.name.size() ) );
+        wState = std::max( wState, static_cast<int>( r.st.label.size() ) );
+        wPid   = std::max( wPid, static_cast<int>( pidOf( r.name ).size() ) );
+    }
+
     char buf[512];
     snprintf( buf,
               sizeof( buf ),
-              "%-24s %-22s %8s %-9s %8s %10s %9s %8s %7s %9s %9s\n",
+              "%-*s %-*s %*s %-9s %8s %10s %9s %8s %7s %9s %9s\n",
+              wName,
               "NAME",
+              wState,
               "STATE",
+              wPid,
               "PID",
               "AUTOSTART",
               "RESTARTS",
@@ -2884,9 +2911,12 @@ inline int xCtrl::cmdStatus()
         }
         snprintf( buf,
                   sizeof( buf ),
-                  "%-24s %-22s %8s %-9s %8s %10s %9s %8s %7s %9s %9s",
+                  "%-*s %-*s %*s %-9s %8s %10s %9s %8s %7s %9s %9s",
+                  wName,
                   r.name.c_str(),
+                  wState,
                   r.st.label.c_str(),
+                  wPid,
                   pid.empty() ? "-" : pid.c_str(),
                   !regs.count( r.name ) ? "-" : ( enabled( r.name ) ? "enabled" : "disabled" ),
                   p.count( "NRestarts" ) ? p["NRestarts"].c_str() : "-",

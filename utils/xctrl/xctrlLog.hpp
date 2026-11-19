@@ -92,6 +92,7 @@ class xctrlLog
     int  m_fd{ -1 };          ///< the log file, opened for appending, -1 if not logging
     bool m_colorOut{ false }; ///< color stdout
     bool m_colorErr{ false }; ///< color stderr
+    bool m_quiet{ false };    ///< leave warnings and errors off the console; they are still logged
 
     ///@}
 
@@ -99,6 +100,9 @@ class xctrlLog
     /// Choose whether to color the console output
     void colors( bool out, /**< [in] color stdout */
                  bool err /**< [in] color stderr */ );
+
+    /// Leave warnings and errors off the console, for -q; they are still logged
+    void quiet( bool q /**< [in] true for quiet */ );
 
     /// Open today's log file under logsDir/xctrl/YYYY_MM_DD/, appending to the newest unless it is full
     /** Directories and a new file are created as needed, owned by xsup and group magaox when we are root.  No path
@@ -173,6 +177,11 @@ inline void xctrlLog::colors( bool out, bool err )
 {
     m_colorOut = out;
     m_colorErr = err;
+}
+
+inline void xctrlLog::quiet( bool q )
+{
+    m_quiet = q;
 }
 
 inline int xctrlLog::open( const std::string &logsDir )
@@ -283,9 +292,9 @@ inline void xctrlLog::message( msgLevel level, const std::string &msg, bool cons
     static const char *labels[] = { "", "note: ", "", "", "warning: ", "error: " };
     int                l        = static_cast<int>( level );
 
-    if( console )
+    bool err = level == msgLevel::warning || level == msgLevel::error;
+    if( console && !( err && m_quiet ) )
     {
-        bool          err   = level == msgLevel::warning || level == msgLevel::error;
         bool          color = ( err ? m_colorErr : m_colorOut ) && colors[l][0];
         std::ostream &os    = err ? std::cerr : std::cout;
         if( err )

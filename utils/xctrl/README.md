@@ -205,7 +205,9 @@ systemd, so completion is instant.
 
 Messages are colored on a terminal (unless `NO_COLOR` is set): errors red, as `error: ...`, warnings yellow, as
 `warning: ...`, the `systemctl` commands xctrl runs blue, as `+ systemctl ...`, and completed changes green.
-Errors and warnings go to stderr, the rest to stdout.
+Errors and warnings go to stderr, the rest to stdout. `-q` (`--quiet`) leaves warnings and errors off the console,
+showing only the normal output, e.g. `xctrl status -vq`; they are still logged, and the exit status still reports a
+failure. Single-letter flags combine: `-vq` is `-v -q`.
 
 Every command except `status`, `peek` and `inspect` is also logged, with all its messages, timestamped, in the
 standard MagAO-X binary log format, so it reads like any app's log:
