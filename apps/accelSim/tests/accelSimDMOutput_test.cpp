@@ -4,9 +4,12 @@
  */
 #include "../../../tests/testXWC.hpp"
 #include <ImageStreamIO/ImageStreamIO.h>
+#include <chrono>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <random>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -101,6 +104,7 @@ struct dmOutputApp : MagAOX::app::accelSim
     using accelSim::config;
     using accelSim::dmThreadExec;
     using accelSim::m_acquiredSample;
+    using accelSim::m_controlMutex;
     using accelSim::m_dmActive;
     using accelSim::m_dmChannel;
     using accelSim::m_dmCommandValid;
@@ -108,17 +112,21 @@ struct dmOutputApp : MagAOX::app::accelSim
     using accelSim::m_dmInjection;
     using accelSim::m_dmReady;
     using accelSim::m_dmScale;
+    using accelSim::m_dmStage;
     using accelSim::m_dmTransportFault;
     using accelSim::m_dmZeroAcknowledged;
     using accelSim::m_dmZeroPending;
     using accelSim::m_indiP_dmEnable;
     using accelSim::m_indiP_dmScale;
     using accelSim::m_indiP_dmStatus;
+    using accelSim::m_indiP_dmSteps;
+    using accelSim::m_indiP_dmTiming;
     using accelSim::m_model;
     using accelSim::m_shutdown;
     using accelSim::m_syncopationTiming;
     using accelSim::m_timeline;
     using accelSim::measure;
+    using accelSim::observeSchedule;
     using accelSim::serviceDM;
     using accelSim::setupProperties;
     using accelSim::updateDMINDI;
@@ -216,6 +224,124 @@ void dmOutputFixture::acquire()
 {
     m_app.measure( g_tick, uint64_t( ( g_tick - m_epoch ) / 125000 ) );
     ++m_acquisitions;
+}
+
+/// Publish one production record as the scheduler does when it observes a primary (main) update.
+/** Mirrors dmSyncopation::publishProductionSchedule: steps 1..3 target main + k*125 us, step 0 the next main,
+ * cutoffs are 70 us (readyLeadUs) earlier, and the record expires two primary periods after publication.
+ */
+void publishRecord( int64_t main /**< [in] primary grid time [ns] */, int64_t at /**< [in] publication time [ns] */ )
+{
+    auto &words = g_images.at( "private_timing" ).m_words;
+    ++g_images.at( "private_timing" ).m_metadata.cnt0;
+    words[synco::version] = synco::productionVersion;
+    words[synco::epoch] = words[synco::generation] = 1;
+    words[synco::state]                            = synco::armed;
+    words[synco::steps]                            = 4;
+    words[synco::period]                           = 500000;
+    words[synco::reference]                        = at;
+    words[synco::cycle]                            = main / 500000;
+    words[synco::expires]                          = at + 1000000;
+    for( int step = 0; step < 4; ++step )
+    {
+        words[synco::targets + step] = main + 125000 * ( step ? step : 4 );
+        words[synco::cutoffs + step] = words[synco::targets + step] - 70000;
+    }
+}
+
+/// Copy a ready commit once the scheduler's snapshot at its cutoff has occurred.
+void serviceReceipt( int64_t delay /**< [in] receipt delay after the cutoff [ns] */ )
+{
+    const auto ready = g_images.find( "dm01disp10_aux_ready" );
+    if( ready == g_images.end() || !ready->second.m_words[synco::cmdSequence] )
+        return;
+    const auto &ack = g_images.at( "dm01disp10_aux_ack" ).m_words;
+    if( !std::equal( ready->second.m_words.begin(), ready->second.m_words.end(), ack.begin() ) &&
+        g_tick >= ready->second.m_words[synco::cmdCutoff] + delay )
+        acknowledge();
+}
+
+/// Results of a simulated scheduler run, read back through the app's INDI diagnostics.
+struct workerRun
+{
+    std::array<int, 4>    m_requests{}, m_published{}, m_copied{};                     ///< Per-step counts.
+    int                   m_late{ 0 }, m_rejected{ 0 }, m_skipped{ 0 }, m_misses{ 0 }; ///< Failure accounting.
+    uint64_t              m_acquisitions{ 0 };                                         ///< acc000 measurements taken.
+    double                m_minMargin{ 0 }, m_meanMargin{ 0 };                         ///< Cutoff-ready margin [us].
+    std::array<double, 4> m_stepMinMargin{ 1e9, 1e9, 1e9, 1e9 }; ///< Smallest margin per step [us].
+    int                   m_hits{ 0 }, m_preparedMisses{ 0 };    ///< Staged versus on-demand surfaces.
+};
+
+/// Drive the real serviceDM like dmThreadExec against a simulated 2-kHz production scheduler.
+/** The worker polls again at once after a commit; otherwise it sleeps pollNs plus a random wake latency in
+ * [0, jitterNs]. acc000 is acquired at every 125-us tick. This models scheduling latency; it is not an RTC test.
+ */
+workerRun simulateWorker( int64_t  pollNs /**< [in] sleep after an unsuccessful service [ns] */,
+                          int64_t  jitterNs /**< [in] maximum additional wake latency [ns] */,
+                          int      frames /**< [in] simulated primary frames */,
+                          uint64_t seed /**< [in] wake-latency seed */,
+                          int      writeLeadUs = 50 /**< [in] producer syncopation.writeLeadUs */ )
+{
+    dmOutputFixture fixture( writeLeadUs );
+    auto           &app = fixture.m_app;
+    fixture.enable( 1 );
+    std::mt19937_64                        rng( seed );
+    std::uniform_int_distribution<int64_t> jitter( 0, jitterNs );
+    const int64_t                          first           = g_tick + 500000 - g_tick % 500000;
+    int64_t                                nextAcquisition = g_tick + 125000;
+    g_wakeDelayNs                                          = 3000;
+    workerRun run;
+    app.updateDMINDI(); // Start the timing interval with the simulation.
+    while( g_tick < first + int64_t( frames ) * 500000 )
+    {
+        const int64_t latest = ( g_tick - first ) / 500000;
+        if( g_tick >= first + latest * 500000 + 10000 )
+            publishRecord( first + latest * 500000, first + latest * 500000 + 10000 ); // Observed 10 us after main.
+        serviceReceipt( 5000 );
+        for( ; nextAcquisition <= g_tick; nextAcquisition += 125000 )
+        {
+            app.measure( nextAcquisition, uint64_t( ( nextAcquisition - fixture.m_epoch ) / 125000 ) );
+            ++run.m_acquisitions;
+        }
+        int64_t previousCutoff = 0;
+        if( g_images.count( "dm01disp10_aux_ready" ) )
+            previousCutoff = g_images.at( "dm01disp10_aux_ready" ).m_words[synco::cmdCutoff];
+        if( !app.serviceDM() )
+        {
+            g_tick += pollNs + jitter( rng );
+            continue;
+        }
+        // Each commit is exactly its slot's target-time surface, legal, and never ahead of its eligibility.
+        const auto &ready  = g_images.at( "dm01disp10_aux_ready" ).m_words;
+        const auto  main   = ( ready[synco::cmdCycle] - ( ready[synco::cmdStep] == 0 ) ) * 500000;
+        const auto  margin = ( ready[synco::cmdCutoff] - ready[synco::cmdReadyNs] ) / 1e3;
+        REQUIRE( g_images.at( "dm01disp10_aux" ).m_pixels[0] ==
+                 Approx( expected( app, ready[synco::cmdTarget], 1, 0 ) ).margin( 1e-7 ) );
+        REQUIRE( ready[synco::cmdReadyNs] <= ready[synco::cmdCutoff] );
+        if( main >= first )
+            REQUIRE( ready[synco::cmdReadyNs] >= main + 10000 ); // Not before its record existed.
+        REQUIRE( ready[synco::cmdReadyNs] > previousCutoff );    // Not before the previous slot was consumed.
+        auto &stepMargin = run.m_stepMinMargin[ready[synco::cmdStep]];
+        stepMargin       = std::min( stepMargin, margin );
+    }
+    app.updateDMINDI();
+    for( int step = 0; step < 4; ++step )
+    {
+        run.m_requests[step]  = app.m_indiP_dmSteps["requests_" + std::to_string( step )].get<int>();
+        run.m_published[step] = app.m_indiP_dmSteps["published_" + std::to_string( step )].get<int>();
+        run.m_copied[step]    = app.m_indiP_dmSteps["copied_" + std::to_string( step )].get<int>();
+    }
+    run.m_late           = app.m_indiP_dmStatus["late_returns"].get<int>();
+    run.m_rejected       = app.m_indiP_dmStatus["rejected"].get<int>();
+    run.m_misses         = app.m_indiP_dmStatus["timeline_misses"].get<int>();
+    run.m_skipped        = app.m_indiP_dmSteps["skipped_slots"].get<int>();
+    run.m_minMargin      = app.m_indiP_dmTiming["margin_min_us"].get<double>();
+    run.m_meanMargin     = app.m_indiP_dmTiming["margin_mean_us"].get<double>();
+    run.m_hits           = app.m_indiP_dmSteps["prepared_hits"].get<int>();
+    run.m_preparedMisses = app.m_indiP_dmSteps["prepared_misses"].get<int>();
+    for( int step = 0; step < 4; ++step )
+        REQUIRE( app.m_indiP_dmSteps["advertised_" + std::to_string( step )].get<int>() >= frames - 1 );
+    return run;
 }
 
 void dmOutputFixture::enable( double scale )
@@ -733,6 +859,292 @@ TEST_CASE( "accelSim accelerometer realization is independent of DM output", "[a
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::measure;
     MagAOX::app::accelSim::serviceDM;
+#endif
+    // clang-format on
+}
+
+/** \brief A simulated 2-kHz production scheduler: with 10-us polling every subframe is published, copied and timely.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim sustains four subframes per primary frame with prompt polling", "[accelSim][dm-output]" )
+{
+    constexpr int frames = 2000; // One simulated second at 2 kHz: 8000 subframes.
+    const auto    run    = simulateWorker( 10000, 5000, frames, 3 );
+    for( int step = 0; step < 4; ++step )
+    {
+        INFO( "step " << step );
+        REQUIRE( run.m_published[step] >= frames - 1 ); // Edge frames only.
+        REQUIRE( run.m_requests[step] == run.m_published[step] );
+        REQUIRE( run.m_copied[step] >= run.m_published[step] - 1 ); // The final receipt is not yet polled.
+    }
+    REQUIRE( run.m_late == 0 );
+    REQUIRE( run.m_rejected == 0 );
+    REQUIRE( run.m_misses == 0 );
+    REQUIRE( run.m_skipped == 0 );
+    REQUIRE( run.m_minMargin > 0 ); // Every commit precedes its cutoff.
+    REQUIRE( run.m_acquisitions >= uint64_t( 4 * frames ) );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::serviceDM;
+    MagAOX::app::accelSim::updateDMINDI;
+#endif
+    // clang-format on
+}
+
+/** \brief With writeLeadUs covering the slot spacing, commits occur on eligibility with large positive margins.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim advance preparation and early commit keep a consistent readiness margin", "[accelSim][dm-output]" )
+{
+    constexpr int frames = 2000;
+    const auto    early  = simulateWorker( 10000, 20000, frames, 4, 125 );
+    const auto    late   = simulateWorker( 10000, 20000, frames, 4, 50 );
+    for( int step = 0; step < 4; ++step )
+    {
+        INFO( "step " << step );
+        REQUIRE( early.m_published[step] >= frames - 1 );
+        REQUIRE( early.m_stepMinMargin[step] > 0 );
+    }
+    // Steps 2, 3 and 0 become eligible on the previous receipt, about 120 us before their cutoffs.
+    for( int step : { 0, 2, 3 } )
+        REQUIRE( early.m_stepMinMargin[step] > 70 );
+    // Step 1 is limited by its record (cutoff 45 us after publication), not by preparation.
+    REQUIRE( early.m_stepMinMargin[1] > 10 );
+    REQUIRE( early.m_meanMargin > late.m_meanMargin + 25 );
+    for( int step : { 0, 2, 3 } ) // writeLeadUs=50 waits until cutoff-50 us whenever observed earlier.
+        REQUIRE( late.m_stepMinMargin[step] == Approx( 48 ).margin( 3 ) ); // Less the 3-us modeled late wake.
+    // Steps 2, 3 and 0 are staged while the previous receipt is awaited; step 1 is synthesized on observation.
+    REQUIRE( early.m_hits >= 3 * ( frames - 1 ) );
+    REQUIRE( early.m_hits + early.m_preparedMisses ==
+             early.m_published[0] + early.m_published[1] + early.m_published[2] + early.m_published[3] );
+    REQUIRE( early.m_late == 0 );
+    REQUIRE( early.m_skipped == 0 );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::serviceDM;
+    MagAOX::app::accelSim::observeSchedule;
+    MagAOX::app::accelSim::stageStep;
+#endif
+    // clang-format on
+}
+
+/** \brief A staged surface is never reused after its scale, timeline realization or slot identity changes.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim invalidates staged surfaces", "[accelSim][dm-output]" )
+{
+    dmOutputFixture fixture( 125 );
+    auto           &app    = fixture.m_app;
+    auto           &source = g_images.at( "dm01disp10_aux" );
+    fixture.enable( .1 );
+    REQUIRE( app.serviceDM() ); // Step 1, synthesized on observation.
+    const auto &ready = g_images.at( "dm01disp10_aux_ready" ).m_words;
+    // The scheduler consumes at the cutoff; the next step is eligible only after it.
+    const auto consume = [&]
+    {
+        g_tick = ready[synco::cmdCutoff] + 5000;
+        acknowledge();
+    };
+    REQUIRE_FALSE( app.serviceDM() ); // Awaiting the receipt: steps 2, 3 and 0 are staged now.
+    REQUIRE( app.m_dmStage[2].m_valid );
+    REQUIRE( app.m_dmStage[3].m_valid );
+    REQUIRE( app.m_dmStage[0].m_valid );
+
+    // Scale change: the staged step-2 surface at 0.1 must not be published at 0.2.
+    auto scale      = app.m_indiP_dmScale;
+    scale["target"] = .2;
+    REQUIRE( app.newCallBack_m_indiP_dmScale( scale ) == 0 );
+    consume();
+    REQUIRE( app.serviceDM() );
+    REQUIRE( ready[synco::cmdStep] == 2 );
+    REQUIRE( source.m_pixels[0] == Approx( expected( app, ready[synco::cmdTarget], .2, 0 ) ).margin( 1e-8 ) );
+
+    // Timeline reset (rate change or restart): the realization at a target may change, so restage.
+    REQUIRE_FALSE( app.serviceDM() ); // Restage steps 3 and 0 at 0.2.
+    const auto generation = app.m_timeline.generation();
+    app.m_model.restart();
+    app.m_timeline.reset( fixture.m_epoch, app.m_model );
+    REQUIRE( app.m_timeline.generation() == generation + 1 );
+    consume();
+    fixture.acquire();
+    REQUIRE( app.serviceDM() );
+    REQUIRE( ready[synco::cmdStep] == 3 );
+    REQUIRE( source.m_pixels[0] == Approx( expected( app, ready[synco::cmdTarget], .2, 0 ) ).margin( 1e-8 ) );
+
+    // Scheduler reacquisition changes the slot identity; disable clears staging and removes the contribution.
+    consume();
+    ++g_images.at( "private_timing" ).m_words[synco::generation];
+    REQUIRE( app.serviceDM() );
+    REQUIRE( source.m_pixels[0] == Approx( expected( app, ready[synco::cmdTarget], .2, 0 ) ).margin( 1e-8 ) );
+    auto enable      = app.m_indiP_dmEnable;
+    enable["toggle"] = pcf::IndiElement::Off;
+    REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) == 0 );
+    REQUIRE_FALSE( app.m_dmStage[0].m_valid );
+    consume();
+    fixture.advance();
+    REQUIRE( app.serviceDM() );
+    REQUIRE( std::all_of( source.m_pixels.begin(), source.m_pixels.end(), []( float v ) { return v == 0; } ) );
+    acknowledge();
+    REQUIRE_FALSE( app.serviceDM() );
+    REQUIRE( app.m_dmZeroAcknowledged );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::stageStep;
+    MagAOX::app::accelSimDetail::timeline::generation;
+#endif
+    // clang-format on
+}
+
+/** \brief Slow wakes (the former 50-us SCHED_OTHER sleep) lose subframes, and the per-step counters show which ones.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim per-subframe diagnostics expose wake-latency losses", "[accelSim][dm-output]" )
+{
+    constexpr int frames = 2000;
+    // 50-us sleep, 50-us default timer slack and up to 60 us of further scheduling delay.
+    const auto run   = simulateWorker( 100000, 60000, frames, 5 );
+    int        total = 0;
+    for( int step = 0; step < 4; ++step )
+    {
+        INFO( "step " << step << " published " << run.m_published[step] );
+        total += run.m_published[step];
+    }
+    // Step 1 exists only from the record's publication (main + 10 us) until its cutoff (main + 55 us).
+    for( int step : { 0, 2, 3 } )
+        REQUIRE( run.m_published[1] < run.m_published[step] );
+    REQUIRE( total < 4 * frames * 0.85 );
+    REQUIRE( run.m_skipped >= 4 * frames - total - 8 ); // Losses are never-observed slots, not late commits.
+    REQUIRE( run.m_late == 0 );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::serviceDM;
+#endif
+    // clang-format on
+}
+
+/** \brief Print per-subframe publication versus worker wake latency for the simulated scheduler.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim wake-latency sweep", "[.][dm-benchmark]" )
+{
+    for( const auto [poll, jitter] : { std::pair<int64_t, int64_t>{ 10000, 5000 },
+                                       { 20000, 20000 },
+                                       { 50000, 20000 },
+                                       { 60000, 60000 },
+                                       { 100000, 60000 },
+                                       { 100000, 200000 } } )
+    {
+        for( int lead : { 50, 125 } )
+        {
+            const auto run = simulateWorker( poll, jitter, 2000, 9, lead );
+            std::printf( "sleep %3lld us + wake [0,%3lld] us: published by step 0/1/2/3 = %4d %4d %4d %4d of 2000, "
+                         "skipped %5d, late %d, rate %.0f Hz, lead %3d: margin min %5.1f mean %5.1f us, hits %d\n",
+                         (long long)poll / 1000,
+                         (long long)jitter / 1000,
+                         run.m_published[0],
+                         run.m_published[1],
+                         run.m_published[2],
+                         run.m_published[3],
+                         run.m_skipped,
+                         run.m_late,
+                         ( run.m_published[0] + run.m_published[1] + run.m_published[2] + run.m_published[3] ) / 1.0,
+                         lead,
+                         run.m_minMargin,
+                         run.m_meanMargin,
+                         run.m_hits );
+        }
+    }
+}
+
+/** \brief Local benchmark of the request-to-commit path; not a native Linux real-time measurement.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim DM publication path benchmark", "[.][dm-benchmark]" )
+{
+    using clock   = std::chrono::steady_clock;
+    const auto us = []( clock::time_point a, clock::time_point b )
+    { return std::chrono::duration<double, std::micro>( b - a ).count(); };
+    dmOutputFixture fixture( 125 );
+    auto           &app = fixture.m_app;
+    fixture.enable( 1 );
+    REQUIRE( app.serviceDM() );
+    acknowledge();
+    std::vector<double> onDemand, staged, stage, evaluate, synthesize;
+    for( int n = 0; n < 40000; ++n )
+    {
+        fixture.advance();
+        const bool prepare = n % 2; // Alternate the staged and on-demand publication paths.
+        if( prepare )
+        {
+            const auto t0 = clock::now();
+            app.observeSchedule( true ); // What the worker does while awaiting a receipt.
+            stage.push_back( us( t0, clock::now() ) );
+        }
+        else
+            for( auto &entry : app.m_dmStage )
+                entry.m_valid = false; // Force synthesis on observation.
+        const auto start = clock::now();
+        REQUIRE( app.serviceDM() ); // Poll, receipt check, surface selection or synthesis, and producer commit.
+        ( prepare ? staged : onDemand ).push_back( us( start, clock::now() ) );
+        const auto                          target = g_images.at( "dm01disp10_aux_ready" ).m_words[synco::cmdTarget];
+        MagAOX::app::accelSimDetail::sample physical;
+        const auto                          t0 = clock::now();
+        REQUIRE( app.m_timeline.physical( target, physical ) );
+        const auto t1 = clock::now();
+        app.m_dmInjection.synthesize( physical, 1 );
+        evaluate.push_back( us( t0, t1 ) );
+        synthesize.push_back( us( t1, clock::now() ) );
+        acknowledge();
+    }
+    app.updateDMINDI();
+    REQUIRE( app.m_indiP_dmSteps["prepared_hits"].get<int>() == 20000 );
+    REQUIRE( app.m_indiP_dmSteps["prepared_misses"].get<int>() == 20001 );
+    for( auto &[name, values] : { std::pair{ "publish (on demand)", &onDemand },
+                                  std::pair{ "publish (staged)", &staged },
+                                  std::pair{ "stage record", &stage },
+                                  std::pair{ "timeline", &evaluate },
+                                  std::pair{ "synthesis", &synthesize } } )
+    {
+        std::sort( values->begin(), values->end() );
+        double sum = 0;
+        for( double v : *values )
+            sum += v;
+        const auto at = [&]( double q ) { return ( *values )[size_t( q * ( values->size() - 1 ) )]; };
+        std::printf( "%-20s mean %7.3f us  p99 %7.3f  p99.9 %7.3f  max %8.3f\n",
+                     name,
+                     sum / values->size(),
+                     at( .99 ),
+                     at( .999 ),
+                     values->back() );
+    }
+}
+
+/** \brief The DM worker never waits on the INDI control mutex, which the app loop holds during INDI I/O.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim DM service is independent of INDI property I/O", "[accelSim][dm-output]" )
+{
+    dmOutputFixture fixture;
+    auto           &app = fixture.m_app;
+    fixture.enable( .1 );
+    {                                                           // mutex scope
+        std::lock_guard<std::mutex> busy( app.m_controlMutex ); // As during updateINDI's sendSetProperty calls.
+        REQUIRE( app.serviceDM() );
+        acknowledge();
+        fixture.advance();
+        REQUIRE( app.serviceDM() );
+    }
+    app.updateDMINDI();
+    REQUIRE( app.m_indiP_dmStatus["published"].get<int>() == 2 );
+    REQUIRE( app.m_indiP_dmTiming["samples"].get<int>() == 2 );
+    app.updateDMINDI(); // Interval timing is drained by each report; cumulative counts are not.
+    REQUIRE( app.m_indiP_dmTiming["samples"].get<int>() == 0 );
+    REQUIRE( app.m_indiP_dmStatus["published"].get<int>() == 2 );
+    REQUIRE( app.m_indiP_dmSteps["published_1"].get<int>() + app.m_indiP_dmSteps["published_2"].get<int>() == 2 );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::serviceDM;
+    MagAOX::app::accelSim::updateDMINDI;
 #endif
     // clang-format on
 }

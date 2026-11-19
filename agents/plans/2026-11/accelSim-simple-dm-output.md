@@ -289,3 +289,72 @@ multiplier of the noise-free pointing surface. Finite-value checks, enable/disab
 the timeline, acc000 and the producer path are unchanged. The tests accept 1.1, 1.5,
 2.5, 37.5, 50 and 100, and reject -1, 100.001, NaN and Inf. A published four-slot
 surface at scale 2.5 matches the target-time expectation.
+
+## 8-kHz publication: worker architecture and diagnostics
+
+RTC report: dm01disp10_aux published at 5.5-6.5 kHz with the scheduler active.
+The scheduler publishes each production record when it observes the main
+(dmSyncopationProduction.hpp). Step 1 targets main+125 us with cutoff main+55 us,
+so its request exists for less than 55 us. Steps 2/3/0 exist for about 120 us after
+the previous receipt. accelSim used a plain std::thread (SCHED_OTHER, default 50-us
+timer slack) with a 50-us sleep after every unsuccessful poll. It also held the INDI
+control mutex for all of serviceDM, so updateINDI/updateDMINDI sendSetProperty calls
+could stall it. dmSpeckle uses threadStart with a configured priority and cpuset and
+10-us poll sleeps. The documented producer setting is threadPrio=20 on a dedicated
+cpuset (dmtweeter_vibration.conf).
+
+Computation is not the limit. On this Mac, serviceDM's request-to-commit path took
+3.0 us mean, p99 3.6 us before and after the change; synthesis took 1.7 us and the
+timeline 0.04 us. Synthesis already combines two precomputed planes; it was not changed.
+
+A simulated scheduler drove the real serviceDM with record publication 10 us after main and
+receipts at cutoff. Results, published per step 0/1/2/3 of 2000 frames:
+10 us + [0,5] -> 2001/2001/2001/2001 (8 kHz); 20+[0,20] -> all;
+50+[0,20] -> 2001/863/2001/2001 (6.9 kHz); 100+[0,60] -> 1771/1145/1707/1836 (6.5 kHz).
+The losses are never-observed slots, not late commits. This is a model consistent with
+the RTC symptom, not a confirmed runtime cause; the new per-step counters test it on the RTC.
+
+Changes: framework threadStart with dm.threadPrio/dm.cpuset (default 0/empty;
+acc000.conf 20/spare31). dmSpeckle poll intervals: 10 us active, 1 ms idle,
+100 ms after a transport failure. A separate m_dmMutex never spans INDI I/O; the lock
+order is control, then DM. New dm_steps (per-step requests/published/copied and
+skipped_slots) and dm_timing (interval poll gap, slack, prepare, publish, margin).
+writeLeadUs is unchanged: it cannot recover a request observed after cutoff-writeLeadUs.
+
+Tests: offline suite 25 cases pass, including under ASan/UBSan and TSan. New cases cover
+the four-step simulated scheduler, wake-latency losses with per-step attribution, and
+independence from INDI I/O. The hidden [dm-benchmark] tag prints the latency sweep
+and the computation benchmark. The native build remains blocked locally at
+generated/logTypes.hpp. The test double's threadStart omits priority and cpuset.
+
+### Advance preparation and readiness margin (follow-up request)
+
+Protocol facts, from dmSyncopationProducer.hpp, dmSyncopationTiming.hpp and the dev scheduler:
+- One record per observed main holds the targets of steps 1/2/3/0; cutoff = target - readyLeadUs.
+- poll returns the earliest step whose cutoff is ahead, only after the previous receipt or a reset.
+  A step is therefore eligible only after the previous slot's cutoff.
+- publish waits to cutoff - writeLeadUs and must complete by the cutoff.
+- Only one command may be outstanding; any number may be prepared privately.
+
+Implementation:
+- On poll==0 the worker reads new records and stages surfaces for their remaining steps.
+  Staging uses four preallocated buffers keyed by slot identity, scale and a new timeline
+  generation (incremented on reset and restart). Disable clears them.
+- Staged surfaces are bitwise those of on-demand synthesis.
+- Calibration was already precomputed into two planes and is unchanged.
+- acc000.conf uses writeLeadUs=125 so commits happen on eligibility.
+- Diagnostics added: advertised_N, prepared_hits/misses, margin RMS/p01/p001, lead to target,
+  receipt delay and slack RMS.
+
+Simulated scheduler results, with 10 us + [0,5] wake and all four steps published:
+- writeLeadUs 50: margin min 30.3 us, mean 44.9 us.
+- writeLeadUs 125: margin min 30.3 us, mean 94.9 us. Steps 2/3/0 stay above 70 us; step 1,
+  bounded by its record, stays at 30-45 us.
+- 3/4 of commits use staged surfaces.
+
+Benchmarks on the Mac: staged publish 1.3 us (p99 1.6 us), on-demand 3.0 us (p99 3.1-3.8 us).
+Staging a record takes 5.8 us off the critical path. Results: 27 offline cases pass, including
+under ASan/UBSan and TSan.
+
+Still needed from the RTC: per-step counts and dm_timing with an active scheduler.
+These confirm or refute the step-1 wake-latency cause and measure real margins and jitter.

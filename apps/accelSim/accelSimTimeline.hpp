@@ -56,6 +56,8 @@ class timeline
 
     uint64_t m_end{ 0 }; ///< One past the newest generated node; equal to m_first while empty.
 
+    uint64_t m_generation{ 0 }; ///< Incremented whenever earlier evaluations may no longer hold (reset or restart).
+
   public:
     /// Clear the ring and define the grid after acquisition (re)starts or changes rate.
     void reset( int64_t      epoch /**< [in] monotonic time of node zero and accelerometer tick zero [ns] */,
@@ -71,8 +73,12 @@ class timeline
     /// Evaluate noise-free physical pointing, WFS pointing and acceleration at a monotonic time.
     /** Returns false, without changing value, when the time is outside the generated ring. ADC counts are not set.
      */
-    bool physical( int64_t time /**< [in] same-host CLOCK_MONOTONIC time [ns] */,
-                   sample &value /**< [out] interpolated physical values */ ) const;
+    bool physical( int64_t   time /**< [in] same-host CLOCK_MONOTONIC time [ns] */,
+                   sample   &value /**< [out] interpolated physical values */,
+                   uint64_t *generation = nullptr /**< [out] optional realization generation of the value */ ) const;
+
+    /// Return the current realization generation; an evaluation remains valid while it is unchanged.
+    uint64_t generation() const;
 
     /// Evaluate one accelerometer measurement: physics at its acquisition time plus the tick's own sensor noise.
     bool measurement( int64_t                  time /**< [in] monotonic acquisition time [ns] */,
@@ -101,6 +107,13 @@ inline void timeline::reset( int64_t epoch, const model &generator )
     m_epoch  = epoch;
     m_period = 1e9 / generator.m_config.m_fps;
     m_first = m_end = 0;
+    ++m_generation;
+}
+
+inline uint64_t timeline::generation() const
+{
+    std::lock_guard<std::mutex> lock( m_mutex );
+    return m_generation;
 }
 
 inline double timeline::position( int64_t time ) const
@@ -122,6 +135,7 @@ inline bool timeline::advance( model &generator, int64_t now )
             generator.restart();
         std::lock_guard<std::mutex> lock( m_mutex );
         m_first = m_end = needed;
+        m_generation += restarted;
     }
     while( m_end <= last )
     {
@@ -134,7 +148,7 @@ inline bool timeline::advance( model &generator, int64_t now )
     return restarted;
 }
 
-inline bool timeline::physical( int64_t time, sample &value ) const
+inline bool timeline::physical( int64_t time, sample &value, uint64_t *generation ) const
 {
     std::array<sample, 4> nodes;
     double                mu;
@@ -149,6 +163,8 @@ inline bool timeline::physical( int64_t time, sample &value ) const
         for( size_t j = 0; j < 4; ++j )
             nodes[j] = m_nodes[( k - 1 + j ) % c_capacity];
         mu = x - double( k );
+        if( generation )
+            *generation = m_generation;
     }
     const auto w = cubicWeights( mu );
     value        = {};
