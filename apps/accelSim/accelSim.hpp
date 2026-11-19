@@ -1,0 +1,1266 @@
+/** \file accelSim.hpp
+ * \brief Continuous raw-ADC accelerometer simulator with the mcp3208Ctrl interface.
+ * \ingroup accelSim_files
+ */
+#ifndef accelSim_hpp
+#define accelSim_hpp
+
+#include <atomic>
+#include <chrono>
+#include <cstring>
+#include <mutex>
+#include <sys/stat.h>
+
+#include <mx/improc/eigenCube.hpp>
+#include <mx/ioutils/fits/fitsFile.hpp>
+
+#include "../../libMagAOX/libMagAOX.hpp"
+#include "../../magaox_git_version.h"
+#include "accelSimModel.hpp"
+#include "accelSimOutput.hpp"
+#include "accelSimDM.hpp"
+#include "../../libMagAOX/app/syncoOutput.hpp"
+
+/** \defgroup accelSim Accelerometer Simulator
+ * \brief Continuous physical vibrations published as raw X/Y ADC counts.
+ * \ingroup apps
+ */
+/** \defgroup accelSim_files Accelerometer Simulator Files
+ * \ingroup accelSim
+ */
+
+namespace MagAOX
+{
+namespace app
+{
+
+/// Simulated accelerometer acquisition with optional same-sample additive DM injection.
+class accelSim : public MagAOXApp<true>,
+                 public dev::frameGrabber<accelSim>,
+                 public dev::telemeter<accelSim>,
+                 public dev::dmSyncopationProducer<accelSim>
+{
+    friend class dev::frameGrabber<accelSim>;
+    friend class dev::telemeter<accelSim>;
+    typedef dev::frameGrabber<accelSim> frameGrabberT;
+    typedef dev::telemeter<accelSim>    telemeterT;
+    friend class dev::dmSyncopationProducer<accelSim>;
+    typedef dev::dmSyncopationProducer<accelSim> dmSyncopationProducerT;
+    static constexpr bool                        c_frameGrabber_flippable = false; ///< Preserve fixed X/Y ordering.
+    static_assert( std::atomic<double>::is_always_lock_free && std::atomic<uint64_t>::is_always_lock_free );
+
+  protected:
+    bool m_zeroOutput{ false }; ///< Startup-only override of published ADC counts, not physics or DM injection.
+
+    std::atomic<bool> m_dmArmPending{
+        false }; ///< Explicit on request awaiting a fresh private command and tagged zero receipt.
+
+    accelSimDetail::parameters m_parameters;                      ///< Startup-only physics/calibration configuration.
+    accelSimDetail::model      m_model;                           ///< Acquisition-thread-owned physical state and RNG.
+    accelSimDetail::schedule   m_schedule;                        ///< Absolute monotonic timer schedule.
+    std::atomic<double>        m_requestedFps{ 6000 };            ///< Validated callback-to-worker rate request.
+    std::atomic<double>        m_activeFps{ 6000 };               ///< Rate currently used by the acquisition worker.
+    std::atomic<uint64_t> m_rateRequest{ 0 }, m_rateApplied{ 0 }; ///< Requested and worker-acknowledged FPS revisions.
+    std::atomic<double>   m_alpha{ .01 };      ///< Timing EMA coefficient, independently updated by INDI.
+    std::atomic<int>      m_postDelay{ 0 };    ///< Signed synchronized phase offset in microseconds.
+    double                m_maxFrequency{ 0 }; ///< Immutable maximum mode frequency for callback validation.
+    std::string           m_fpsDevice, m_fpsProperty{ "fps" }, m_fpsElement{ "current" }; ///< External FPS source.
+    std::string           m_channelsDevice, m_channelsProperty{ "numChannels" },
+        m_channelsElement{ "current" };            ///< Channel source.
+    double      m_fpsTol{ 0 }, m_channelsTol{ 0 }; ///< Compatibility keys, unused by the hardware callbacks as well.
+    std::string m_syncName;                        ///< Optional semaphore trigger stream; empty selects timer mode.
+    double      m_dtTransfer{ 3000 }, m_wfsProcess{ 51500 }, m_dtF{ 10000 },
+        m_wfsRead{ 276100 };                                                ///< Delay-model terms in ns.
+    double m_lockAbsolute{ 50000 }, m_lockFraction{ .1 }, m_guard{ 20000 }; ///< Delay lock criteria and cadence margin.
+    IMAGE  m_syncImage{};                    ///< Synchronization input only; never the output image.
+    bool   m_syncOpen{ false };              ///< Whether the source mapping is owned by this app.
+    int    m_syncIndex{ 5 };                 ///< Claimed source semaphore index, initially preferring index five.
+    ino_t  m_syncInode{ 0 };                 ///< Backing-file inode used to detect source replacement.
+    accelSimDetail::phaseClock m_phaseClock; ///< Continuous synchronized sampling schedule and WFS reference.
+    double                     m_syncTimeout{ .01 }, m_maxSlew{ .05 },
+        m_referenceFps{ 0 };      ///< Silence seconds, slew fraction, optional WFS Hz.
+    int64_t m_nextSyncProbe{ 0 }; ///< Next nonblocking source-open/inode check [monotonic ns].
+    int64_t m_lastAcquisition{ 0 }, m_triggerPrediction{ 0 }; ///< Acquisition history and latest WFS phase prediction.
+    int64_t m_latencyArrival{ 0 },
+        m_latencyPrediction{ 0 }; ///< Pending reference retained across intervening WFS events.
+    bool m_measureReference{
+        false }; ///< Awaiting a sample at/after the retained WFS prediction, independently of newer references.
+    bool m_fresh{ false }; ///< True only for an acquired sample not yet copied.
+
+    using enum accelSimDetail::timingIndex;
+    /// Hardware-compatible element names in timingIndex order.
+    inline static constexpr std::array<const char *, timingCount> c_timingNames{ "avg_read_latency_us",
+                                                                                 "synchro_delay_us",
+                                                                                 "synchro_delay_target_us",
+                                                                                 "delay_applied_us",
+                                                                                 "delay_model_us",
+                                                                                 "delay_phase_error_us",
+                                                                                 "delay_lock",
+                                                                                 "delay_budget_us",
+                                                                                 "avg_non_delay_service_us",
+                                                                                 "delay_capped",
+                                                                                 "read_latency_error_us",
+                                                                                 "avg_semaphore_period_us",
+                                                                                 "channel_readout_us",
+                                                                                 "trigger_interval_us",
+                                                                                 "trigger_time_us",
+                                                                                 "local_frame_seq",
+                                                                                 "sync_frames_received",
+                                                                                 "sync_frames_written",
+                                                                                 "sync_frames_dropped",
+                                                                                 "sync_frame_id_gap_count",
+                                                                                 "sync_producer_frame_id",
+                                                                                 "sync_producer_frame_delta",
+                                                                                 "mode_code" };
+
+    using diagnostics = accelSimDetail::diagnostics;
+    diagnostics       m_diagnostics, m_snapshot;        ///< Worker state and synchronized app-loop snapshot.
+    std::mutex        m_snapshotMutex;                  ///< Protects only snapshot copies, never acquisition work.
+    std::mutex        m_controlMutex;                   ///< Serializes app-owned INDI properties and their callbacks.
+    std::string       m_dmChannel, m_dmModes, m_dmMask; ///< Explicit owned channel and approved calibration paths.
+    SyncoOutput       m_output;                ///< Existing tagged producer; never directly updates a DM image.
+    SyncoOutputConfig m_outputConfig;          ///< Explicit route authorization and approved full-image limits.
+    double            m_outputAckUs{ 0 };      ///< Reviewed acknowledgement timeout.
+    std::array<float, 2500>   m_dmPixels{};    ///< Latest same-sample prepared physical disturbance, private only.
+    std::mutex                m_dmPixelsMutex; ///< Acquisition try-lock; no consumer wait is added to ADC acquisition.
+    std::atomic<std::int64_t> m_dmSampleNs{ -1 };   ///< Actual availability of the private same-sample command.
+    std::atomic<bool>         m_dmHealthy{ false }; ///< Acquisition-owned validity for the output provider.
+
+    double m_dmResidual{ 1e-6 }; ///< Accepted relative physical projection residual.
+    bool   m_dmStartupEnabled{ false },
+        m_dmReady{ false };               ///< Startup opt-in is rejected; preparation result is immutable.
+    std::atomic<double>   m_dmScale{ 0 }; ///< DM-only commissioning scale, independent of model amplitudes.
+    std::atomic<uint64_t> m_dmRequest{ 0 },
+        m_dmApplied{ 0 }; ///< Packed revised enable request and sample-boundary acknowledgement.
+    std::atomic<accelSimDetail::dmState> m_dmState{ accelSimDetail::dmState::disabled }; ///< Low-rate status snapshot.
+    std::atomic<bool>                    m_dmCalibrationValid{
+        false }; ///< Filesystem supervision can only invalidate prepared calibration.
+    struct stat                 m_dmModesStat{}, m_dmMaskStat{}; ///< Calibration identity recorded before acquisition.
+    accelSimDetail::dmInjection m_dmInjection; ///< Acquisition-owned precomputed synthesis and zeroing state.
+    pcf::IndiProperty m_indiP_dmEnable, m_indiP_dmScale, m_indiP_dmStatus; ///< Minimal low-rate DM controls/status.
+    /// Compatible accelerometer controls, serialized by m_controlMutex.
+    pcf::IndiProperty m_indiP_fps, m_indiP_numChannels, m_indiP_alpha, m_indiP_synchroDelay;
+    /// Diagnostic properties and configured external subscriptions.
+    pcf::IndiProperty m_indiP_timingDiag, m_indiP_simDiag, m_indiP_fpsSource, m_indiP_numChannelsSource;
+
+    /// Define the accelerometer-owned properties, separated from thread startup for testing.
+    int setupProperties();
+    /// Send coherent app-owned controls and diagnostics at ordinary app-loop cadence.
+    void updateINDI( const diagnostics &snapshot /**< [in] coherent worker snapshot */ );
+    /// Open and claim the synchronization source, returning positive to retry.
+    int openSync();
+    /// Release the claimed source semaphore and mapping.
+    void closeSync();
+    /// Detect a source mapping that vanished or was replaced.
+    bool syncStale();
+    /// Wait for the next accelerometer deadline while accepting independent WFS references.
+    int waitSync();
+    /// Enter holdover and publish unlocked status without stopping the sampling clock.
+    void invalidateSync();
+    /// Transfer diagnostics; forced transfers wait only for the app-loop snapshot copy.
+    void snapshotDiagnostics( bool force /**< [in] require delivery for lifecycle events */ );
+    /// Consume a source reference and update its phase/counter diagnostics independently of publication.
+    void syncTiming( uint64_t producer /**< [in] current source counter */,
+                     int64_t  arrival /**< [in] monotonic semaphore arrival */ );
+    /// Report bounded clock correction and lock against the most recent valid phase reference.
+    void updateSyncDiagnostics();
+    /// Wait interruptibly for an absolute monotonic deadline.
+    int waitUntil( int64_t deadline /**< [in] monotonic deadline in ns */ );
+    /// Get monotonic nanoseconds without conversion of epoch time to double.
+    static int64_t monotonicNow();
+    /// Send a property state, leaving its last accepted values intact on error.
+    int propertyState( pcf::IndiProperty &property /**< [in,out] property to acknowledge */,
+                       bool               valid /**< [in] whether the update was accepted */ );
+    /// Validate and enqueue an FPS update without touching model state.
+    int requestRate( double value /**< [in] requested FPS */ );
+    /// Validate the fixed two-channel interface.
+    int requestChannels( double value /**< [in] requested channel count */ );
+    /// Extract a finite numeric target, falling back to current for compatible clients.
+    static double target( const pcf::IndiProperty &property /**< [in] incoming update */ );
+    /// Prepare calibration and an explicitly configured owned channel before starting acquisition.
+    void prepareDM();
+    /// Check calibration identity outside the sample path; changes require restart/revalidation.
+    bool calibrationUnchanged() const;
+    /// Report controls/status without acquiring the DM writer or publishing images.
+    void updateDMINDI();
+
+  public:
+    /// Construct without opening any hardware or shared-memory stream.
+    accelSim();
+    /// Stop output callbacks before their cache/mutex lifetimes end; preserve the nonthrowing framework contract.
+    ~accelSim() noexcept override;
+    /// Register app and helper configuration keys.
+    void setupConfig() override;
+    /// Load and validate startup configuration.
+    void loadConfig() override;
+    /// Load configuration without starting threads, for focused tests.
+    int loadConfigImpl( mx::app::appConfigurator &config /**< [in] parsed configuration */ );
+    /// Register properties, prepare optional DM injection, and start the existing helper threads.
+    int appStartup() override;
+    /// Publish diagnostics at ordinary application cadence.
+    int appLogic() override;
+    /// Join acquisition, zero the owned DM contribution, and release mappings.
+    int appShutdown() override;
+    /// Set the two-channel stream geometry; a missing synchronization source does not block acquisition.
+    int configureAcquisition();
+    /// Return the nominal active sampling rate to frameGrabber.
+    float fps();
+    /// Initialize acquisition pacing and source counters.
+    int startAcquisition();
+    /// Acquire one fresh sample; positive returns never publish an old pair.
+    int acquireAndCheckValid();
+    /// Copy one X/Y pair, optionally calibrated zero; framework owns metadata and semaphore posts.
+    int loadImageIntoStream( void *destination /**< [out] frameGrabber destination plane */ );
+    /// Publish optional DM injection from the acquired physical sample, then transfer diagnostics.
+    int frameGrabberPostPublish( IMAGE *stream /**< [in] framework-owned output, not modified here */ );
+    /// Release synchronization input during an explicit framework reconfiguration.
+    int reconfig();
+    /// Check the existing frame-grabber telemetry cadence.
+    int checkRecordTimes();
+    /// Record the existing timing telemetry schema.
+    int recordTelem( const telem_fgtimings *tag /**< [in] telemetry dispatch tag */ );
+    /// Handle a local nominal-rate update.
+    INDI_NEWCALLBACK_DECL( accelSim, m_indiP_fps );
+    /// Handle the compatible fixed-channel control.
+    INDI_NEWCALLBACK_DECL( accelSim, m_indiP_numChannels );
+    /// Handle timing EMA changes, independent of AR damping.
+    INDI_NEWCALLBACK_DECL( accelSim, m_indiP_alpha );
+    /// Handle signed synchronization phase offsets.
+    INDI_NEWCALLBACK_DECL( accelSim, m_indiP_synchroDelay );
+    /// Follow configured external nominal-rate metadata.
+    INDI_SETCALLBACK_DECL( accelSim, m_indiP_fpsSource );
+    /// Follow configured external channel metadata, accepting only two.
+    INDI_SETCALLBACK_DECL( accelSim, m_indiP_numChannelsSource );
+    /// Request an enable/disable transition acknowledged at a completed sample boundary.
+    INDI_NEWCALLBACK_DECL( accelSim, m_indiP_dmEnable );
+    /// Set the independent commissioning scale in [0,1].
+    INDI_NEWCALLBACK_DECL( accelSim, m_indiP_dmScale );
+};
+
+inline accelSim::accelSim() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+{
+    m_shmimName = "acc000";
+}
+
+inline accelSim::~accelSim() noexcept
+{
+    m_output.stop(); // Join captured callbacks before cache/mutex destruction if startup never reached appShutdown.
+}
+
+inline void accelSim::setupConfig()
+{
+    DMSYNCOPATIONPRODUCER_SETUP_CONFIG( config );
+    FRAMEGRABBER_SETUP_CONFIG( config );
+    TELEMETER_SETUP_CONFIG( config );
+    const auto add = [this]( const std::string &section,
+                             const std::string &key,
+                             const std::string &type,
+                             const std::string &description )
+    {
+        const std::string name = section + "." + key;
+        config.add( name, "", name, argType::Required, section, key, false, type, description );
+    };
+    add( "sim", "fps", "double", "Initial nominal sampling rate [Hz], default 6000." );
+    add( "sim",
+         "zeroOutput",
+         "bool",
+         "Publish calibrated zero-acceleration ADC counts only; default false, physics/DM unchanged." );
+    add( "sim", "seed", "uint64_t", "Numerical random seed, default 42." );
+    add( "sim", "modeSeed", "uint64_t", "High-frequency parameter seed, default 123." );
+    add( "sim", "leverArm", "double", "Effective lever arm [m], default 10." );
+    add( "sensor", "noisePSD", "double", "One-sided acceleration noise PSD, default 1e-8." );
+    add( "adc", "zero", "double", "ADC zero point [counts], default 2048." );
+    add( "adc", "voltsPerBit", "double", "Empirical volts per count, default 0.0083799." );
+    add( "adc", "sensitivity", "double", "Empirical sensitivity, default 1.02." );
+    add( "accel", "numChannels", "int", "Compatibility channel count; must be 2." );
+    for( const std::string section : { "fps", "numChannels" } )
+    {
+        add( section, "device", "string", "External INDI source; empty disables subscription." );
+        add( section, "property", "string", "External property name." );
+        add( section, "element", "string", "External element name, default current." );
+        add( section, "tol", "double", "Compatibility tolerance key; hardware callback does not apply it." );
+    }
+    add( "synchro", "shmimName", "string", "Trigger input stream; empty selects timer acquisition." );
+    add( "synchro", "postDelay", "int", "Signed phase offset [us], default 0." );
+    add( "synchro", "timeout", "double", "Source silence timeout [s]; sampling continues in holdover, default 0.01." );
+    add( "synchro", "maxSlew", "double", "Maximum phase correction per accelerometer interval, fraction in (0,0.25]." );
+    add( "synchro",
+         "referenceFps",
+         "double",
+         "Nominal WFS cadence for phase tracking; 0 learns first measured period." );
+    add( "synchro", "alpha", "double", "Timing EMA coefficient, default 0.01." );
+    for( const std::string key : { "dtTransfer_ns",
+                                   "wfsProcess_ns",
+                                   "dtF_ns",
+                                   "wfsRead_ns",
+                                   "delayLockAbsThreshold_ns",
+                                   "delayLockFracThreshold",
+                                   "cadenceGuard_ns" } )
+        add( "synchro", key, "double", "mcp3208Ctrl synchronized timing-model parameter." );
+    add( "dm",
+         "channelName",
+         "string",
+         "Existing exclusively owned channel; experiment uses dm01disp10_aux; empty disables access." );
+    add( "dm", "modeCube", "string", "Approved surface-micron TT FITS cube; first two planes are used." );
+    add( "dm", "mask", "string", "Deployed dmmask FITS fitting support, not the offloader actuator mask." );
+    add( "dm", "enabled", "bool", "Must be false; enable only through controlled runtime INDI handover." );
+    add( "dm", "scale", "double", "Independent DM-only scale [0,1], default 0." );
+    for( const char *key : { "output_authorized", "routing_verified", "max_abs_um", "max_step_um", "ack_timeout_us" } )
+        add( "dm", key, "string", "Explicit tagged auxiliary output authorization; zero limits inhibit." );
+    add( "dm", "maxRelativeResidual", "double", "Maximum calibrated physical fit residual, default 1e-6." );
+}
+
+inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
+{
+    if( m_dmReady )
+    {
+        m_shutdown = true;
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "DM producer configuration is startup-only; stopping for own-channel removal" } );
+    }
+    FRAMEGRABBER_LOAD_CONFIG( config );
+    TELEMETER_LOAD_CONFIG( config );
+    config( m_parameters.m_fps, "sim.fps" );
+    config( m_zeroOutput, "sim.zeroOutput" );
+    config( m_parameters.m_seed, "sim.seed" );
+    config( m_parameters.m_modeSeed, "sim.modeSeed" );
+    config( m_parameters.m_leverArm, "sim.leverArm" );
+    config( m_parameters.m_noisePSD, "sensor.noisePSD" );
+    config( m_parameters.m_zero, "adc.zero" );
+    config( m_parameters.m_voltsPerBit, "adc.voltsPerBit" );
+    config( m_parameters.m_sensitivity, "adc.sensitivity" );
+    config( m_fpsDevice, "fps.device" );
+    config( m_fpsProperty, "fps.property" );
+    config( m_fpsElement, "fps.element" );
+    config( m_fpsTol, "fps.tol" );
+    config( m_channelsDevice, "numChannels.device" );
+    config( m_channelsProperty, "numChannels.property" );
+    config( m_channelsElement, "numChannels.element" );
+    config( m_channelsTol, "numChannels.tol" );
+    config( m_syncName, "synchro.shmimName" );
+    config( m_syncTimeout, "synchro.timeout" );
+    config( m_maxSlew, "synchro.maxSlew" );
+    config( m_referenceFps, "synchro.referenceFps" );
+    config( m_dtTransfer, "synchro.dtTransfer_ns" );
+    config( m_wfsProcess, "synchro.wfsProcess_ns" );
+    config( m_dtF, "synchro.dtF_ns" );
+    config( m_wfsRead, "synchro.wfsRead_ns" );
+    config( m_lockAbsolute, "synchro.delayLockAbsThreshold_ns" );
+    config( m_lockFraction, "synchro.delayLockFracThreshold" );
+    config( m_guard, "synchro.cadenceGuard_ns" );
+    double alpha     = .01;
+    int    postDelay = 0;
+    double channels  = 2;
+    config( alpha, "synchro.alpha" );
+    config( postDelay, "synchro.postDelay" );
+    config( channels, "accel.numChannels" );
+    double dmScale = 0;
+    DMSYNCOPATIONPRODUCER_LOAD_CONFIG( config );
+    config( m_dmChannel, "dm.channelName" );
+    config( m_outputConfig.m_authorized, "dm.output_authorized" );
+    config( m_outputConfig.m_routingVerified, "dm.routing_verified" );
+    config( m_outputConfig.m_maxAbs, "dm.max_abs_um" );
+    config( m_outputConfig.m_maxStep, "dm.max_step_um" );
+    config( m_outputAckUs, "dm.ack_timeout_us" );
+    if( !std::isfinite( m_outputConfig.m_maxAbs ) || !std::isfinite( m_outputConfig.m_maxStep ) ||
+        m_outputConfig.m_maxAbs < 0 || m_outputConfig.m_maxStep < 0 || !std::isfinite( m_outputAckUs ) ||
+        m_outputAckUs < 0 || m_outputAckUs > 1000000 || ( !m_dmChannel.empty() && m_dmChannel != "dm01disp10_aux" ) )
+        return -1;
+    m_outputConfig.m_ackTimeoutNs = std::llround( m_outputAckUs * 1000 );
+
+    config( m_dmModes, "dm.modeCube" );
+    config( m_dmMask, "dm.mask" );
+    config( m_dmStartupEnabled, "dm.enabled" );
+    config( dmScale, "dm.scale" );
+    config( m_dmResidual, "dm.maxRelativeResidual" );
+    try
+    {
+        if( m_dmStartupEnabled || !std::isfinite( dmScale ) || dmScale < 0 || dmScale > 1 ||
+            !std::isfinite( m_dmResidual ) || m_dmResidual < 0 || m_dmResidual >= 1 ||
+            ( !m_dmChannel.empty() && ( m_dmChannel == m_shmimName || m_dmChannel == m_syncName ||
+                                        m_dmChannel.find( '/' ) != std::string::npos || m_dmChannel == "dm01disp" ) ) )
+            throw std::invalid_argument( "invalid DM configuration; startup enable is prohibited" );
+        if( channels != 2 || !std::isfinite( alpha ) || postDelay < -1000000 || postDelay > 1000000 ||
+            ( !m_syncName.empty() && m_syncName == m_shmimName ) )
+            throw std::invalid_argument( "invalid channels, alpha, phase offset, or self-trigger stream" );
+        if( !std::isfinite( m_syncTimeout ) || m_syncTimeout <= 0 || m_syncTimeout > 3600 ||
+            !std::isfinite( m_maxSlew ) || m_maxSlew <= 0 || m_maxSlew > .25 || !std::isfinite( m_referenceFps ) ||
+            m_referenceFps < 0 || m_referenceFps > 1e9 ||
+            ( m_referenceFps > 0 && 1e9 / m_referenceFps > double( std::numeric_limits<int64_t>::max() ) ) )
+            throw std::invalid_argument( "invalid synchronization timeout, slew, or reference FPS" );
+        for( double *value :
+             { &m_dtTransfer, &m_wfsProcess, &m_dtF, &m_wfsRead, &m_lockAbsolute, &m_lockFraction, &m_guard } )
+        {
+            if( !std::isfinite( *value ) )
+                throw std::invalid_argument( "nonfinite timing configuration" );
+            *value = std::max( 0.0, *value );
+        }
+        if( !std::isfinite( m_dtTransfer + m_wfsProcess + m_dtF + m_wfsRead ) )
+            throw std::invalid_argument( "timing-model overflow" );
+        m_model.configure( m_parameters, accelSimDetail::referenceModes( m_parameters.m_modeSeed ) );
+        m_maxFrequency = m_model.m_modes.back().m_spec.m_frequency;
+    }
+    catch( const std::exception &error )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, error.what() } );
+    }
+    m_alpha        = std::clamp( alpha, 0.0, 1.0 );
+    m_postDelay    = postDelay;
+    m_activeFps    = m_parameters.m_fps;
+    m_requestedFps = m_parameters.m_fps;
+    if( dmScale != 0 )
+        return log<software_error, -1>( { __FILE__, __LINE__, "Disturbance scale must start at zero" } );
+    m_dmScale = 0;
+    return 0;
+}
+
+inline void accelSim::loadConfig()
+{
+    if( loadConfigImpl( config ) < 0 )
+        m_shutdown = true;
+}
+
+inline int accelSim::setupProperties()
+{
+    CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_dmEnable, "dm_enable" );
+    m_indiP_dmEnable["toggle"] = pcf::IndiElement::Off;
+    CREATE_REG_INDI_NEW_NUMBERD( m_indiP_dmScale, "dm_scale", 0, 1, .001, "%.3f", "DM scale", "DM" );
+    m_indiP_dmScale["current"] = m_dmScale.load();
+    m_indiP_dmScale["target"]  = m_dmScale.load();
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_dmStatus, "dm_status", "DM readiness", "DM" );
+    for( const char *name : { "ready", "active", "fault", "requested", "zero_acknowledged", "transport_fault" } )
+        m_indiP_dmStatus.add( pcf::IndiElement( name ) );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_fps, "fps", 0, 10000, 1, "%d", "", "" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_numChannels, "numChannels", 0, 8, 1, "%d", "", "" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_alpha, "alpha", 0., 1., .00001, "%.5f", "", "" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_synchroDelay, "synchroDelay", -1000000, 1000000, 1, "%d", "us", "" );
+    for( const char *element : { "current", "target" } )
+    {
+        m_indiP_fps[element]          = m_activeFps.load();
+        m_indiP_numChannels[element]  = 2;
+        m_indiP_alpha[element]        = m_alpha.load();
+        m_indiP_synchroDelay[element] = m_postDelay.load();
+    }
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_timingDiag, "timingDiag", "Timing Diagnostics", "Diagnostics" );
+    for( const char *name : c_timingNames )
+        m_indiP_timingDiag.add( pcf::IndiElement( name ) );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_simDiag, "sim_diag", "Simulation Diagnostics", "Diagnostics" );
+    for( const char *name : { "skipped_publications",
+                              "discontinuities",
+                              "late_samples",
+                              "max_lateness_us",
+                              "source_period_ratio",
+                              "clip_x_low",
+                              "clip_x_high",
+                              "clip_y_low",
+                              "clip_y_high" } )
+        m_indiP_simDiag.add( pcf::IndiElement( name ) );
+    if( !m_fpsDevice.empty() )
+    {
+        REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsDevice, m_fpsProperty );
+    }
+    if( !m_channelsDevice.empty() )
+    {
+        REG_INDI_SETPROP( m_indiP_numChannelsSource, m_channelsDevice, m_channelsProperty );
+    }
+    return 0;
+}
+
+inline bool accelSim::calibrationUnchanged() const
+{
+    const auto same = []( const std::string &path, const struct stat &original )
+    {
+        struct stat current;
+        if( stat( path.c_str(), &current ) != 0 || current.st_ino != original.st_ino ||
+            current.st_size != original.st_size || current.st_mtime != original.st_mtime ||
+            current.st_ctime != original.st_ctime )
+            return false;
+#ifdef __APPLE__
+        return current.st_mtimespec.tv_nsec == original.st_mtimespec.tv_nsec &&
+               current.st_ctimespec.tv_nsec == original.st_ctimespec.tv_nsec;
+#else
+        return current.st_mtim.tv_nsec == original.st_mtim.tv_nsec &&
+               current.st_ctim.tv_nsec == original.st_ctim.tv_nsec;
+#endif
+    };
+    return same( m_dmModes, m_dmModesStat ) && same( m_dmMask, m_dmMaskStat );
+}
+
+inline void accelSim::prepareDM()
+{
+    if( m_dmChannel.empty() )
+        return;
+    try
+    {
+        if( stat( m_dmModes.c_str(), &m_dmModesStat ) != 0 || stat( m_dmMask.c_str(), &m_dmMaskStat ) != 0 )
+            throw std::invalid_argument( "DM calibration paths must identify the approved TT cube and dmmask" );
+        mx::fits::fitsFile<double>    ff;
+        mx::improc::eigenCube<double> modes, mask;
+        if( ff.read( modes, m_dmModes ) != mx::error_t::noerror || modes.rows() != 50 || modes.cols() != 50 ||
+            modes.planes() < 2 || ff.read( mask, m_dmMask ) != mx::error_t::noerror || mask.rows() != 50 ||
+            mask.cols() != 50 || mask.planes() != 1 || !calibrationUnchanged() )
+            throw std::invalid_argument( "invalid or changed DM calibration geometry" );
+        const std::vector<double> mode0( modes.image( 0 ).data(), modes.image( 0 ).data() + 2500 );
+        const std::vector<double> mode1( modes.image( 1 ).data(), modes.image( 1 ).data() + 2500 );
+        const std::vector<double> weights( mask.data(), mask.data() + 2500 );
+        m_dmInjection.prepare( mode0, mode1, weights, m_dmResidual );
+        m_output.configure( m_outputConfig, m_dmChannel, m_syncopationTiming, m_writeLeadUs, 2500 );
+        m_output.start(
+            [this]
+            {
+                const auto now = monotonicNow();
+                return m_dmHealthy.load() && m_dmCalibrationValid.load() && m_dmSampleNs.load() >= 0 &&
+                       now - m_dmSampleNs.load() <= 250000;
+            },
+            [this]( const synco::Request &, const synco::Record &, std::int64_t now, std::span<float> pixels )
+            {
+                std::unique_lock<std::mutex> lock( m_dmPixelsMutex, std::try_to_lock );
+                if( !lock.owns_lock() || pixels.size() != 2500 || m_dmSampleNs.load() < 0 ||
+                    now - m_dmSampleNs.load() > 250000 )
+                    return false;
+                std::copy( m_dmPixels.begin(), m_dmPixels.end(), pixels.begin() );
+                return true;
+            } );
+        m_dmReady            = true;
+        m_dmCalibrationValid = true;
+        log<text_log>( "DM channel prepared disabled: " + m_dmChannel + "; exclusive operator handover required",
+                       logPrio::LOG_NOTICE );
+    }
+    catch( const std::exception &error )
+    {
+        m_output.stop();
+        m_dmState = accelSimDetail::dmState::calibrationFault;
+        log<text_log>( std::string( "DM injection unavailable: " ) + error.what(), logPrio::LOG_ERROR );
+    }
+}
+
+inline void accelSim::updateDMINDI()
+{
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    const auto                  output = m_output.status();
+    const auto                  state  = m_dmState.load();
+#if defined( DDSPC_OPERATIONAL_BUILD ) && !defined( DDSPC_SHADOW_ONLY )
+    constexpr bool outputCapable = true;
+#else
+    constexpr bool outputCapable = false;
+#endif
+
+    const bool fault =
+        output.m_fault || ( state != accelSimDetail::dmState::disabled && state != accelSimDetail::dmState::active );
+    m_indiP_dmStatus["ready"]             = outputCapable && m_dmReady && m_dmCalibrationValid.load() &&
+                                            m_outputConfig.m_authorized && m_outputConfig.m_routingVerified &&
+                                            m_activeFps == 8000 && m_dmHealthy.load();
+    m_indiP_dmStatus["active"]            = output.m_acknowledged;
+    m_indiP_dmStatus["requested"]         = output.m_requested;
+    m_indiP_dmStatus["zero_acknowledged"] = output.m_zeroConfirmed && output.m_acknowledgements > 0;
+    m_indiP_dmStatus["transport_fault"]   = output.m_fault;
+    m_indiP_dmStatus["fault"]             = static_cast<int>( state ) > 1 ? static_cast<int>( state ) : 0;
+    m_indiP_dmStatus.setState( fault ? pcf::IndiProperty::Alert : pcf::IndiProperty::Ok );
+    if( m_indiDriver )
+        m_indiDriver->sendSetProperty( m_indiP_dmStatus );
+    updateSwitchIfChanged( m_indiP_dmEnable,
+                           "toggle",
+                           ( m_dmArmPending.load() || output.m_requested ) ? pcf::IndiElement::On
+                                                                           : pcf::IndiElement::Off,
+                           ( output.m_requested ? !output.m_acknowledged : !output.m_zeroConfirmed ) ? INDI_BUSY
+                           : fault                                                                   ? INDI_ALERT
+                                                                                                     : INDI_OK );
+}
+
+inline int accelSim::appStartup()
+{
+    if( setupProperties() < 0 )
+        return -1;
+    prepareDM();
+    TELEMETER_APP_STARTUP;
+    FRAMEGRABBER_APP_STARTUP;
+    state( stateCodes::OPERATING );
+    return 0;
+}
+
+inline int accelSim::appLogic()
+{
+    FRAMEGRABBER_APP_LOGIC;
+    TELEMETER_APP_LOGIC;
+    FRAMEGRABBER_UPDATE_INDI;
+    diagnostics snapshot;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_snapshotMutex );
+        snapshot = m_snapshot;
+    }
+    updateINDI( snapshot );
+    if( m_dmReady )
+    {
+        // Existing producer transport owns stream supervision and exclusive source ownership.
+        if( !calibrationUnchanged() )
+            m_dmCalibrationValid = false;
+    }
+    if( m_dmArmPending.load() && m_dmHealthy.load() && monotonicNow() - m_dmSampleNs.load() <= 250000 &&
+        m_output.request( true ) )
+        m_dmArmPending.store( false );
+    updateDMINDI();
+    return 0;
+}
+
+inline void accelSim::updateINDI( const diagnostics &snapshot )
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_controlMutex );
+        const auto                  fpsState = m_indiP_fps.getState() == INDI_ALERT           ? INDI_ALERT
+                                               : m_rateApplied.load() == m_rateRequest.load() ? INDI_OK
+                                                                                              : INDI_BUSY;
+        updatesIfChanged<double>(
+            m_indiP_fps, { "current", "target" }, { m_activeFps.load(), m_requestedFps.load() }, fpsState );
+        updatesIfChanged<double>(
+            m_indiP_alpha, { "current", "target" }, { m_alpha.load(), m_alpha.load() }, m_indiP_alpha.getState() );
+        updatesIfChanged<int>( m_indiP_synchroDelay,
+                               { "current", "target" },
+                               { m_postDelay.load(), m_postDelay.load() },
+                               m_indiP_synchroDelay.getState() );
+        indi::updatesIfChanged<double>( m_indiP_timingDiag,
+                                        c_timingNames,
+                                        std::vector<double>( snapshot.m_timing.begin(), snapshot.m_timing.end() ),
+                                        m_indiDriver );
+        updatesIfChanged<double>( m_indiP_simDiag,
+                                  { "skipped_publications",
+                                    "discontinuities",
+                                    "late_samples",
+                                    "max_lateness_us",
+                                    "source_period_ratio",
+                                    "clip_x_low",
+                                    "clip_x_high",
+                                    "clip_y_low",
+                                    "clip_y_high" },
+                                  { double( snapshot.m_skipped ),
+                                    double( snapshot.m_discontinuities ),
+                                    double( snapshot.m_late ),
+                                    snapshot.m_maxLateUs,
+                                    snapshot.m_cadenceRatio,
+                                    double( snapshot.m_low[0] ),
+                                    double( snapshot.m_high[0] ),
+                                    double( snapshot.m_low[1] ),
+                                    double( snapshot.m_high[1] ) } );
+    }
+}
+
+inline int accelSim::appShutdown()
+{
+    FRAMEGRABBER_APP_SHUTDOWN;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_controlMutex );
+        if( m_dmReady && !m_output.stop() )
+            log<text_log>( "DM final zero failed; operator cleanup required", logPrio::LOG_ERROR );
+        m_dmReady = false;
+    }
+    closeSync();
+    log<text_log>( "accelSim skipped=" + std::to_string( m_diagnostics.m_skipped ) +
+                   " discontinuities=" + std::to_string( m_diagnostics.m_discontinuities ) +
+                   " late_samples=" + std::to_string( m_diagnostics.m_late ) +
+                   " max_lateness_us=" + std::to_string( m_diagnostics.m_maxLateUs ) + " clip_x_low=" +
+                   std::to_string( m_model.m_clipLow[0] ) + " clip_x_high=" + std::to_string( m_model.m_clipHigh[0] ) +
+                   " clip_y_low=" + std::to_string( m_model.m_clipLow[1] ) +
+                   " clip_y_high=" + std::to_string( m_model.m_clipHigh[1] ) );
+    TELEMETER_APP_SHUTDOWN;
+    return 0;
+}
+
+inline int64_t accelSim::monotonicNow()
+{
+    timespec now;
+    if( clock_gettime( CLOCK_MONOTONIC, &now ) != 0 )
+        throw std::runtime_error( "CLOCK_MONOTONIC failed" );
+    return int64_t( now.tv_sec ) * 1000000000LL + now.tv_nsec;
+}
+
+inline int accelSim::waitUntil( int64_t deadline )
+{
+    while( !shutdown() && !m_reconfig )
+    {
+        if( m_requestedFps.load() != m_activeFps.load() )
+            return 1;
+        const int64_t remaining = deadline - monotonicNow();
+        if( remaining <= 0 )
+            return 0;
+        // Absolute schedule, bounded sleeps for shutdown/rate changes; no busy wait.
+        const int64_t interval = std::min<int64_t>( remaining, 1000000 );
+        timespec      delay{ 0, static_cast<long>( interval ) };
+        if( nanosleep( &delay, nullptr ) < 0 && errno != EINTR )
+            return -1;
+    }
+    return 1;
+}
+
+inline int accelSim::configureAcquisition()
+{
+    m_width    = 2;
+    m_height   = 1;
+    m_dataType = _DATATYPE_UINT16;
+    if( !m_syncName.empty() )
+        openSync(); // Optional reference: absence must not block acc000 creation.
+    return 0;
+}
+
+inline float accelSim::fps()
+{
+    return m_activeFps.load();
+}
+
+inline int accelSim::startAcquisition()
+{
+    m_schedule.reset( monotonicNow(), m_activeFps.load() );
+    m_lastAcquisition = m_triggerPrediction = 0;
+    if( !m_syncName.empty() )
+        m_phaseClock.reset( m_schedule.m_epoch, m_activeFps.load() );
+    m_nextSyncProbe                     = 0;
+    m_measureReference                  = false;
+    m_fresh                             = false;
+    m_diagnostics.m_timing              = {};
+    m_diagnostics.m_timing[modeCode]    = m_syncName.empty() ? 0 : 1;
+    m_diagnostics.m_timing[delayTarget] = m_postDelay.load();
+    if( m_syncOpen )
+        ImageStreamIO_semflush( &m_syncImage, m_syncIndex );
+    snapshotDiagnostics( true );
+    return 0;
+}
+
+inline int accelSim::openSync()
+{
+    if( m_syncOpen )
+        return 0;
+    char        filename[1024];
+    struct stat status;
+    ImageStreamIO_filename( filename, sizeof( filename ), m_syncName.c_str() );
+    if( stat( filename, &status ) != 0 || ImageStreamIO_openIm( &m_syncImage, m_syncName.c_str() ) != 0 )
+        return 1;
+    m_syncOpen = true;
+    if( m_syncImage.md[0].sem < SEMAPHORE_MAXVAL || stat( filename, &status ) != 0 )
+    {
+        m_syncIndex = -1;
+        closeSync();
+        return 1;
+    }
+    m_syncInode = status.st_ino;
+    m_syncIndex = ImageStreamIO_getsemwaitindex( &m_syncImage, 5 );
+    if( m_syncIndex < 0 )
+    {
+        closeSync();
+        return 1;
+    }
+    return 0;
+}
+
+inline void accelSim::closeSync()
+{
+    if( m_syncOpen )
+    {
+        if( m_syncIndex >= 0 )
+            m_syncImage.semReadPID[m_syncIndex] = 0;
+        ImageStreamIO_closeIm( &m_syncImage );
+    }
+    m_syncImage = {};
+    m_syncOpen  = false;
+    m_syncIndex = -1;
+    m_syncInode = 0;
+}
+
+inline bool accelSim::syncStale()
+{
+    if( !m_syncOpen || m_syncImage.md[0].sem <= 0 )
+        return true;
+    char        filename[1024];
+    struct stat status;
+    ImageStreamIO_filename( filename, sizeof( filename ), m_syncName.c_str() );
+    return stat( filename, &status ) != 0 || status.st_ino != m_syncInode;
+}
+
+inline void accelSim::syncTiming( uint64_t producer, int64_t arrival )
+{
+    if( !m_phaseClock.reference( producer,
+                                 arrival,
+                                 m_alpha.load(),
+                                 m_dtTransfer + m_wfsProcess + m_dtF + m_wfsRead,
+                                 m_postDelay.load() * 1000.0,
+                                 m_referenceFps ) )
+        return;
+    if( !m_phaseClock.m_valid )
+    {
+        m_diagnostics.invalidateSync( m_postDelay.load() );
+        m_triggerPrediction = 0;
+        m_measureReference  = false;
+    }
+    auto &t          = m_diagnostics.m_timing;
+    t[producerId]    = m_phaseClock.m_producer;
+    t[producerDelta] = m_phaseClock.m_delta;
+    if( m_phaseClock.m_delta > 1 )
+    {
+        t[dropped] += m_phaseClock.m_delta - 1;
+        ++t[gapCount];
+    }
+    t[semaphorePeriod] = m_phaseClock.m_sourcePeriod / 1000;
+    t[delayModel]      = m_phaseClock.m_modelDelay / 1000;
+    t[delayTarget]     = m_phaseClock.m_valid ? m_phaseClock.m_delay / 1000 : m_postDelay.load();
+    if( !m_phaseClock.m_valid )
+        m_triggerPrediction = 0;
+    m_diagnostics.updateTrigger( arrival, m_triggerPrediction );
+    if( m_phaseClock.m_valid && !m_measureReference )
+    {
+        m_measureReference  = true;
+        m_latencyArrival    = arrival;
+        m_latencyPrediction = m_triggerPrediction;
+    }
+    m_diagnostics.m_cadenceRatio = m_phaseClock.m_sourcePeriod * m_activeFps.load() / 1e9;
+    updateSyncDiagnostics();
+}
+
+inline void accelSim::updateSyncDiagnostics()
+{
+    auto &t = m_diagnostics.m_timing;
+    if( !m_phaseClock.m_valid )
+    {
+        t[lock] = 0;
+        return;
+    }
+    const double residual = ( m_phaseClock.m_applied - m_phaseClock.m_target ) / 1000;
+    t[delayApplied]       = std::fmod( t[delayTarget] + residual, t[semaphorePeriod] );
+    if( t[delayApplied] < 0 )
+        t[delayApplied] += t[semaphorePeriod];
+    t[delay]       = t[delayApplied];
+    t[delayBudget] = m_phaseClock.m_budget / 1000;
+    t[capped]      = std::abs( residual ) > t[delayBudget] ? 1 : 0;
+    m_diagnostics.updatePhaseError();
+    t[lock] = std::abs( t[phaseError] ) <= m_lockAbsolute / 1000 &&
+                      std::abs( t[phaseError] ) <= m_lockFraction * t[semaphorePeriod]
+                  ? 1
+                  : 0;
+}
+
+inline void accelSim::invalidateSync()
+{
+    m_phaseClock.invalidate();
+    m_diagnostics.invalidateSync( m_postDelay.load() );
+    m_triggerPrediction = 0;
+    m_measureReference  = false;
+    snapshotDiagnostics( true );
+}
+
+inline int accelSim::waitSync()
+{
+    const int64_t timeout = std::max<int64_t>( 1, std::llround( m_syncTimeout * 1e9 ) );
+    while( !shutdown() && !m_reconfig )
+    {
+        if( m_requestedFps.load() != m_activeFps.load() )
+            return 1;
+        int64_t now = monotonicNow();
+        if( now >= m_nextSyncProbe )
+        {
+            m_nextSyncProbe = now + timeout;
+            if( m_syncOpen && syncStale() )
+            {
+                closeSync();
+                m_phaseClock.invalidate( true );
+                invalidateSync();
+            }
+            if( !m_syncOpen && openSync() == 0 )
+            {
+                m_phaseClock.invalidate( true );
+                ImageStreamIO_semflush( &m_syncImage, m_syncIndex );
+            }
+        }
+        if( m_phaseClock.expired( now, timeout ) )
+            invalidateSync();
+        now                     = monotonicNow();
+        const int64_t remaining = m_phaseClock.deadline() - now;
+        if( remaining <= 0 )
+        {
+            // Service at most one queued reference even when every acquisition is late;
+            // an overloaded producer must not starve source-counter/phase observations.
+            if( m_syncOpen && sem_trywait( m_syncImage.semptr[m_syncIndex] ) == 0 )
+            {
+                ++m_diagnostics.m_timing[received];
+                syncTiming( m_syncImage.md[0].cnt0, monotonicNow() );
+            }
+            return 0;
+        }
+        if( !m_syncOpen )
+            return waitUntil( m_phaseClock.deadline() );
+        // Wait for either a WFS reference or the next accelerometer deadline. Receiving a
+        // reference never changes that frozen deadline and never publishes a frame itself.
+        timespec until;
+        if( clock_gettime( CLOCK_REALTIME, &until ) < 0 )
+            return -1;
+        const int64_t ns = until.tv_nsec + std::min<int64_t>( remaining, 1000000 );
+        until.tv_sec += ns / 1000000000;
+        until.tv_nsec = ns % 1000000000;
+        if( sem_timedwait( m_syncImage.semptr[m_syncIndex], &until ) == 0 )
+        {
+            ++m_diagnostics.m_timing[received];
+            syncTiming( m_syncImage.md[0].cnt0, monotonicNow() );
+        }
+        else if( errno != ETIMEDOUT && errno != EINTR )
+        {
+            closeSync();
+            m_phaseClock.invalidate( true );
+            invalidateSync();
+        }
+    }
+    return 1;
+}
+
+inline int accelSim::acquireAndCheckValid()
+{
+    m_fresh = false;
+    if( shutdown() || m_reconfig )
+        return 1;
+    try
+    {
+        if( m_rateRequest.load() != m_rateApplied.load() )
+        {
+            double   requested;
+            uint64_t revision;
+            { //mutex scope
+                std::lock_guard<std::mutex> guard( m_controlMutex );
+                requested = m_requestedFps.load();
+                revision  = m_rateRequest.load();
+            }
+            if( requested != m_activeFps.load() )
+            {
+                m_model.setRate( requested );
+                m_activeFps = requested;
+                ++m_diagnostics.m_discontinuities;
+                m_schedule.reset( monotonicNow(), requested );
+                m_lastAcquisition = m_triggerPrediction = 0;
+                if( !m_syncName.empty() )
+                {
+                    m_phaseClock.reset( m_schedule.m_epoch, requested );
+                    invalidateSync();
+                }
+            }
+            m_rateApplied = revision; // A newer callback remains Busy until its own boundary.
+        }
+        uint64_t skipped = 0;
+        int64_t  deadline;
+        if( m_syncName.empty() )
+        {
+            deadline         = m_schedule.deadline();
+            const int result = waitUntil( deadline );
+            if( result != 0 )
+                return result;
+            const int64_t now = monotonicNow();
+            skipped           = m_schedule.consume( now );
+            // Lateness is measured against the original deadline, including skipped periods.
+        }
+        else
+        {
+            const int result = waitSync();
+            if( result != 0 )
+                return result;
+            deadline = m_phaseClock.deadline();
+        }
+        if( shutdown() || m_reconfig || ( !m_syncName.empty() && m_requestedFps.load() != m_activeFps.load() ) )
+        {
+            if( !m_syncName.empty() )
+                invalidateSync();
+            return 1;
+        }
+        const int64_t acquired = monotonicNow();
+        if( clock_gettime( CLOCK_REALTIME, &m_currImageTimestamp ) < 0 )
+        {
+            if( !m_syncName.empty() )
+                invalidateSync();
+            return -1;
+        }
+        const double late = std::max( 0.0, ( acquired - deadline ) / 1000.0 );
+        if( late > 0 )
+            ++m_diagnostics.m_late;
+        m_diagnostics.m_maxLateUs = std::max( m_diagnostics.m_maxLateUs, late );
+        if( !m_syncName.empty() )
+            skipped = m_phaseClock.consume(
+                acquired, m_maxSlew, m_phaseClock.m_period - m_diagnostics.m_timing[service] * 1000 - m_guard );
+        m_diagnostics.m_skipped += skipped;
+        if( m_model.advance( skipped ) )
+            ++m_diagnostics.m_discontinuities;
+        const int64_t completed = monotonicNow();
+        auto         &t         = m_diagnostics.m_timing;
+        t[channelReadout]       = ( completed - acquired ) / 1000.0;
+        if( m_syncName.empty() )
+        {
+            t[triggerInterval] = m_lastAcquisition ? ( acquired - m_lastAcquisition ) / 1000.0 : 0;
+            t[delayTarget]     = m_postDelay.load();
+        }
+        else
+        {
+            const double alpha = m_alpha.load();
+            t[service] = m_lastAcquisition ? alpha * t[channelReadout] + ( 1 - alpha ) * t[service] : t[channelReadout];
+            if( m_phaseClock.m_valid && m_measureReference && acquired >= m_latencyPrediction )
+            {
+                const double latency = ( acquired - m_latencyArrival ) / 1000.0;
+                t[readLatency]       = t[readLatency] > 0 ? alpha * latency + ( 1 - alpha ) * t[readLatency] : latency;
+                t[latencyError]      = ( acquired - m_latencyPrediction ) / 1000.0;
+                m_measureReference   = false;
+            }
+            updateSyncDiagnostics();
+            if( late > m_lockAbsolute / 1000 || late > m_lockFraction * t[semaphorePeriod] )
+                t[lock] = 0;
+        }
+        m_lastAcquisition = acquired;
+        m_fresh           = true;
+        return 0;
+    }
+    catch( const std::exception &error )
+    {
+        m_shutdown = true;
+        if( !m_syncName.empty() )
+            invalidateSync();
+        return log<software_error, -1>( { __FILE__, __LINE__, error.what() } );
+    }
+}
+
+inline int accelSim::loadImageIntoStream( void *destination )
+{
+    if( !m_fresh || destination == nullptr )
+    {
+        return -1;
+    }
+
+    const auto counts = accelSimDetail::adcOutput( m_model.m_sample, m_parameters, m_zeroOutput );
+    std::memcpy( destination, counts.data(), 2 * sizeof( uint16_t ) );
+    m_fresh = false;
+    ++m_diagnostics.m_timing[frameSequence];
+    if( !m_syncName.empty() )
+    {
+        ++m_diagnostics.m_timing[written];
+    }
+
+    return 0;
+}
+
+inline void accelSim::snapshotDiagnostics( bool force )
+{
+    m_diagnostics.m_low  = m_model.m_clipLow;
+    m_diagnostics.m_high = m_model.m_clipHigh;
+    { //mutex scope
+        std::unique_lock<std::mutex> guard( m_snapshotMutex, std::defer_lock );
+        if( force )
+            guard.lock();
+        else if( !guard.try_lock() )
+            return;
+        m_snapshot = m_diagnostics;
+    }
+}
+
+inline int accelSim::frameGrabberPostPublish( IMAGE *stream )
+{
+    static_cast<void>( stream );
+    const uint64_t request = m_dmRequest.load();
+    if( m_dmReady )
+    {
+        const auto stage = [this]( const std::vector<float> &pixels )
+        {
+            std::unique_lock<std::mutex> lock( m_dmPixelsMutex, std::try_to_lock );
+            if( !lock.owns_lock() )
+                return true; // Retain the prior timestamped cache; its freshness gate still expires normally.
+            std::copy( pixels.begin(), pixels.end(), m_dmPixels.begin() );
+            m_dmSampleNs.store( monotonicNow() );
+            return true;
+        };
+        const bool healthy   = m_dmCalibrationValid.load() && m_activeFps.load() == 8000 &&
+                               ( !m_syncName.empty() && m_phaseClock.m_valid );
+        auto       publisher = stage;
+        m_dmState =
+            m_dmInjection.service( m_model.m_sample, request | uint64_t( 1 ), m_dmScale.load(), healthy, publisher );
+        m_dmHealthy.store( healthy && ( m_dmState.load() == accelSimDetail::dmState::active ||
+                                        m_dmState.load() == accelSimDetail::dmState::disabled ) );
+        m_dmApplied = request;
+    }
+    snapshotDiagnostics( false );
+    return 0;
+}
+
+inline int accelSim::reconfig()
+{
+    m_fresh = false;
+    if( m_dmReady )
+        m_dmHealthy.store( false );
+    closeSync();
+    m_phaseClock.invalidate( true );
+    m_model.restart();
+    ++m_diagnostics.m_discontinuities;
+    if( !m_syncName.empty() )
+        invalidateSync();
+    return 0;
+}
+
+inline int accelSim::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_fgtimings() );
+}
+
+inline int accelSim::recordTelem( const telem_fgtimings *tag )
+{
+    static_cast<void>( tag );
+    return recordFGTimings( true );
+}
+
+inline int accelSim::propertyState( pcf::IndiProperty &property, bool valid )
+{
+    property.setState( valid ? pcf::IndiProperty::Ok : pcf::IndiProperty::Alert );
+    if( m_indiDriver )
+        m_indiDriver->sendSetProperty( property );
+    return valid ? 0 : -1;
+}
+
+inline double accelSim::target( const pcf::IndiProperty &property )
+{
+    try
+    {
+        if( property.find( "target" ) )
+            return property["target"].get<double>();
+        if( property.find( "current" ) )
+            return property["current"].get<double>();
+    }
+    catch( const std::exception & )
+    {
+    }
+    return std::numeric_limits<double>::quiet_NaN();
+}
+
+inline int accelSim::requestRate( double value )
+{
+    const bool valid = std::isfinite( value ) && value > 2 * m_maxFrequency && value <= 10000;
+    if( !valid )
+        return propertyState( m_indiP_fps, false );
+    m_requestedFps = value;
+    ++m_rateRequest;
+    updateIfChanged( m_indiP_fps, "target", value, INDI_BUSY );
+    m_indiP_fps["target"] = value;
+    m_indiP_fps.setState( INDI_BUSY );
+    return 0;
+}
+
+inline int accelSim::requestChannels( double value )
+{
+    return propertyState( m_indiP_numChannels, value == 2 );
+}
+
+inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_dmEnable )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_dmEnable, ipRecv );
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    if( !ipRecv.find( "toggle" ) )
+        return propertyState( m_indiP_dmEnable, false );
+    const bool enable = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+    if( enable &&
+        ( !m_dmReady || !m_dmCalibrationValid.load() || !calibrationUnchanged() || m_activeFps.load() != 8000 ) )
+        return propertyState( m_indiP_dmEnable, false );
+#if defined( DDSPC_SHADOW_ONLY ) || !defined( DDSPC_OPERATIONAL_BUILD )
+    if( enable )
+        return propertyState( m_indiP_dmEnable, false );
+#endif
+    if( enable && ( !m_outputConfig.m_authorized || !m_outputConfig.m_routingVerified || m_outputConfig.m_maxAbs <= 0 ||
+                    m_outputConfig.m_maxStep <= 0 || m_outputConfig.m_ackTimeoutNs <= 0 ) )
+        return propertyState( m_indiP_dmEnable, false );
+    m_dmArmPending.store( enable );
+    if( !enable )
+        m_output.request( false );
+    m_dmRequest = ( m_dmRequest.load() & ~uint64_t( 1 ) ) + 2 + uint64_t( enable );
+    if( !m_dmReady && !enable )
+        m_dmApplied = m_dmRequest.load(); // No channel is owned and no zero publication is pending.
+    m_indiP_dmEnable["toggle"] = enable ? pcf::IndiElement::On : pcf::IndiElement::Off;
+    m_indiP_dmEnable.setState( pcf::IndiProperty::Busy );
+    if( m_indiDriver )
+        m_indiDriver->sendSetProperty( m_indiP_dmEnable );
+    return 0;
+}
+
+inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_dmScale )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_dmScale, ipRecv );
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    const double                value = target( ipRecv );
+    if( !std::isfinite( value ) || value < 0 || value > 1 )
+        return propertyState( m_indiP_dmScale, false );
+    m_dmScale                  = value;
+    m_indiP_dmScale["current"] = value;
+    m_indiP_dmScale["target"]  = value;
+    return propertyState( m_indiP_dmScale, true );
+}
+
+inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_fps )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != "fps" )
+        return -1;
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    return requestRate( target( ipRecv ) );
+}
+
+inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_numChannels )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != "numChannels" )
+        return -1;
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    return requestChannels( target( ipRecv ) );
+}
+
+inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_alpha )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != "alpha" )
+        return -1;
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    const double                value = target( ipRecv );
+    if( !std::isfinite( value ) )
+        return propertyState( m_indiP_alpha, false );
+    m_alpha                  = std::clamp( value, 0.0, 1.0 );
+    m_indiP_alpha["current"] = m_alpha.load();
+    m_indiP_alpha["target"]  = m_alpha.load();
+    return propertyState( m_indiP_alpha, true );
+}
+
+inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_synchroDelay )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != "synchroDelay" )
+        return -1;
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    const double                value = target( ipRecv );
+    if( !std::isfinite( value ) || value < -1000000 || value > 1000000 )
+        return propertyState( m_indiP_synchroDelay, false );
+    m_postDelay                     = static_cast<int>( value );
+    m_indiP_synchroDelay["current"] = m_postDelay.load();
+    m_indiP_synchroDelay["target"]  = m_postDelay.load();
+    return propertyState( m_indiP_synchroDelay, true );
+}
+
+inline INDI_SETCALLBACK_DEFN( accelSim, m_indiP_fpsSource )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fpsSource, ipRecv );
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    if( !ipRecv.find( m_fpsElement ) )
+        return propertyState( m_indiP_fps, false );
+    try
+    {
+        return requestRate( ipRecv[m_fpsElement].get<double>() );
+    }
+    catch( const std::exception & )
+    {
+        return propertyState( m_indiP_fps, false );
+    }
+}
+
+inline INDI_SETCALLBACK_DEFN( accelSim, m_indiP_numChannelsSource )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_numChannelsSource, ipRecv );
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    if( !ipRecv.find( m_channelsElement ) )
+        return propertyState( m_indiP_numChannels, false );
+    try
+    {
+        return requestChannels( ipRecv[m_channelsElement].get<double>() );
+    }
+    catch( const std::exception & )
+    {
+        return propertyState( m_indiP_numChannels, false );
+    }
+}
+
+} // namespace app
+} // namespace MagAOX
+#endif

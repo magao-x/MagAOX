@@ -34,6 +34,7 @@ struct ShadowPrediction
     double   m_originPrediction{ 0 }; ///< Forecast using only origin state and a held-last-confirmed-input assumption.
     bool     m_originValid{ false }; ///< False for older auto-origins whose future input was already known when frozen.
     unsigned m_phase{ 0 };           ///< Upstream counter phase; repeated WFS targets remain real measurements.
+    std::uint64_t m_modelEpoch{ 0 }; ///< Model-reset incarnation of the frozen forecast.
     std::uint64_t m_adcCounter{ 0 }, m_version{ 0 }; ///< Individual ADC and immutable coefficient version.
     std::int64_t  m_decisionNs{ -1 }, m_completedNs{ -1 }, m_slotTargetNs{ -1 }; ///< Actual local prediction events.
     double        m_candidate{ 0 };           ///< Private modal candidate; never an observed training command.
@@ -124,6 +125,9 @@ struct ShadowConfig
 
     /// Opt-in operational penalty scaling; historical causal replay defaults remain literal.
     bool m_scaledPenalty{ false };
+
+    /// Freeze the fitted excitation certificate when learning is paused; input validity remains mandatory.
+    bool m_freezeQualification{ false };
 
     /// Relative rank threshold after feature column normalization.
     realT m_rankTolerance{ 1e-5f };

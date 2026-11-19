@@ -49,16 +49,18 @@ struct OnlineShadowWorker::Impl : public ShadowPredictionSink
     std::size_t            m_head{ 0 }, m_tail{ 0 }, m_count{ 0 }; ///< Qualified queue positions under mailbox lock.
     std::optional<MultirateContract> m_contract; ///< At most one reviewed session awaiting installation.
     mutable std::mutex               m_mailbox,
-        m_snapshot; ///< Neither is held during Eigen processing; acquisition never takes either.
-    OnlineShadowStatus                   m_status; ///< Published scalar status.
-    std::array<Matrix, 2>                m_plans; ///< Published owned diagnostic plans, never added to training queues.
-    std::atomic<bool>                    m_running{ false }; ///< Stop flag, not an actuation enable.
-    std::atomic<unsigned>                m_requested{ 0 };   ///< Diagnostic selection only.
-    std::atomic<std::uint64_t>           m_drops{ 0 };  ///< Qualified queue/contention losses, separate from raw drops.
-    std::thread                          m_thread;      ///< Joined before engine/queue destruction.
-    ShadowPredictionQueue                m_predictions; ///< Optional bounded SPSC scalar diagnostics, never commands.
-    NativePipelineConfig                 m_nativeConfig; ///< Startup-only live receiver contract.
-    std::unique_ptr<NativeInputPipeline> m_native;       ///< Numerical-thread packet assembly, never acquisition work.
+        m_snapshot;                      ///< Neither is held during Eigen processing; acquisition never takes either.
+    OnlineShadowStatus         m_status; ///< Published scalar status.
+    std::array<Matrix, 2>      m_plans;  ///< Published owned diagnostic plans, never added to training queues.
+    std::atomic<bool>          m_running{ false };   ///< Stop flag, not an actuation enable.
+    std::atomic<bool>          m_learning{ false };  ///< Operator-owned intent, never implied by startup or selection.
+    std::atomic<std::uint64_t> m_resetRevision{ 0 }; ///< Requested model reset, immediately revokes old readiness.
+    std::atomic<unsigned>      m_requested{ 0 };     ///< Diagnostic selection only.
+    std::atomic<std::uint64_t> m_drops{ 0 };         ///< Qualified queue/contention losses, separate from raw drops.
+    std::thread                m_thread;             ///< Joined before engine/queue destruction.
+    ShadowPredictionQueue      m_predictions;        ///< Optional bounded SPSC scalar diagnostics, never commands.
+    NativePipelineConfig       m_nativeConfig;       ///< Startup-only live receiver contract.
+    std::unique_ptr<NativeInputPipeline> m_native;   ///< Numerical-thread packet assembly, never acquisition work.
     std::unique_ptr<PhaseShadow> m_phase; ///< ADC owner evaluates immutable gains; numerical owner alone learns.
     std::shared_ptr<SyncoShadowProducer> m_shadowProducer; ///< Immutable lifetime while acquisition runs.
     std::array<NativeObservation, 4>     m_lastNative;     ///< Sole acquisition-producer continuity high waters.
@@ -98,7 +100,8 @@ OnlineShadowWorker::Impl::Impl( const OnlineShadowConfig &c )
 }
 void OnlineShadowWorker::Impl::prediction( const ShadowPrediction &sample ) noexcept
 {
-    m_predictions.push( sample );
+    if( m_config.m_predictionCapacity )
+        m_predictions.push( sample );
 }
 void OnlineShadowWorker::Impl::record()
 {
@@ -110,6 +113,8 @@ void OnlineShadowWorker::Impl::record()
     {
         for( unsigned n = 0; n < 256 && m_predictions.pop( r ); ++n )
         {
+            if( r.m_modelEpoch != m_resetRevision.load() )
+                continue;
             if( m_traceRows.load() >= m_config.m_predictionMaxRows )
             {
                 m_traceLimit.store( true );
@@ -119,7 +124,7 @@ void OnlineShadowWorker::Impl::record()
                 continue;
             if( std::fprintf( m_trace,
                               "%u,%llu,%llu,%u,%u,%.17g,%.17g,%.17g,%u,%u,%llu,%llu,%llu,%u,%llu,%llu,%lld,%lld,%lld,%."
-                              "17g,%u,%lld,%lld,%lld,%lld,%lld\n",
+                              "17g,%u,%lld,%lld,%lld,%lld,%lld,%llu\n",
                               unsigned( r.m_mode ),
                               (unsigned long long)r.m_origin,
                               (unsigned long long)r.m_target,
@@ -145,7 +150,8 @@ void OnlineShadowWorker::Impl::record()
                               (long long)r.m_slotStep,
                               (long long)r.m_slotEpoch,
                               (long long)r.m_slotGeneration,
-                              (long long)r.m_slotCutoffNs ) < 0 )
+                              (long long)r.m_slotCutoffNs,
+                              (unsigned long long)r.m_modelEpoch ) < 0 )
                 m_traceIoError.store( true );
             else
                 ++m_traceRows;
@@ -202,7 +208,10 @@ void OnlineShadowWorker::Impl::run()
                 m_native->schedule( schedule->first, schedule->second, now_ns() );
             m_engine.request( m_requested.load() ? ShadowMode::AccelAssisted : ShadowMode::Standard );
             if( m_phase )
+            {
                 m_phase->request( m_requested.load() ? ShadowMode::AccelAssisted : ShadowMode::Standard );
+                m_phase->learning( m_learning.load() );
+            }
             const auto drops = m_drops.load() + m_raw.drops() + ( m_commandInputs ? m_commandInputs->drops() : 0 );
             if( drops != observedDrops )
             {
@@ -412,6 +421,9 @@ void OnlineShadowWorker::start()
 {
     if( m_impl->m_thread.joinable() )
         throw std::logic_error( "Online worker already started" );
+    m_impl->m_learning.store( false );
+    m_impl->m_resetRevision.store( 0 );
+    m_impl->m_requested.store( 0 );
     m_impl->m_engine.qualify( {} ); // Restart never implicitly reuses a trusted session or ready model.
     m_impl->m_predictions.reset();
     m_impl->m_commandPending.reset();
@@ -487,7 +499,7 @@ void OnlineShadowWorker::start()
                               "mode,origin,target,horizon,channel,origin_prediction,conditional_prediction,measurement,"
                               "origin_valid,late,generation,epoch,layout,phase,adc_counter,model_version,"
                               "decision_ns,completed_ns,slot_target_ns,candidate,conditional_valid,"
-                              "slot_cycle,slot_step,slot_epoch,slot_generation,slot_cutoff_ns\n" ) < 0 )
+                              "slot_cycle,slot_step,slot_epoch,slot_generation,slot_cutoff_ns,model_epoch\n" ) < 0 )
                 throw std::runtime_error( "Cannot write private prediction CSV header" );
         }
         m_impl->m_thread = std::thread( &Impl::run, m_impl.get() );
@@ -689,12 +701,18 @@ bool OnlineShadowWorker::qualify( const MultirateContract &contract )
 void OnlineShadowWorker::request( ShadowMode mode )
 {
     m_impl->m_requested.store( mode == ShadowMode::AccelAssisted );
+    if( m_impl->m_phase )
+        m_impl->m_phase->request( mode );
 }
 OnlineShadowStatus OnlineShadowWorker::status() const
 {
     std::lock_guard<std::mutex> lock( m_impl->m_snapshot );
     auto                        s = m_impl->m_status;
-    s.m_rawQueued                 = m_impl->m_phase ? m_impl->m_phase->queued() : m_impl->m_raw.queued();
+    if( m_impl->m_phase && s.m_modelEpoch != m_impl->m_resetRevision.load() )
+    {
+        s.m_qualified = s.m_standard.m_ready = s.m_assisted.m_ready = s.m_predictionValid = false;
+    }
+    s.m_rawQueued         = m_impl->m_phase ? m_impl->m_phase->queued() : m_impl->m_raw.queued();
     s.m_drops             = ( m_impl->m_phase ? s.m_drops : 0 ) + m_impl->m_drops.load() + m_impl->m_raw.drops() +
                             ( m_impl->m_commandInputs ? m_impl->m_commandInputs->drops() : 0 );
     s.m_traceRows         = m_impl->m_traceRows.load();
@@ -716,7 +734,12 @@ bool OnlineShadowWorker::read_prediction( ShadowPrediction &sample )
 {
     if( !m_impl->m_config.m_predictionFile.empty() )
         return false; // Exactly one SPSC consumer.
-    return m_impl->m_predictions.pop( sample );
+    do
+    {
+        if( !m_impl->m_predictions.pop( sample ) )
+            return false;
+    } while( sample.m_modelEpoch != m_impl->m_resetRevision.load() );
+    return true;
 }
 bool OnlineShadowWorker::candidate( ShadowMode mode, Matrix &plan ) const
 {
@@ -730,3 +753,30 @@ bool OnlineShadowWorker::candidate( ShadowMode mode, Matrix &plan ) const
     return true;
 }
 } // namespace DDSPC
+
+namespace DDSPC
+{
+void OnlineShadowWorker::learning( bool enabled )
+{
+    m_impl->m_learning.store( enabled );
+    if( m_impl->m_phase )
+        m_impl->m_phase->learning( enabled );
+}
+bool OnlineShadowWorker::reset_models()
+{
+    if( !m_impl->m_phase )
+        return false;
+    ++m_impl->m_resetRevision;
+    m_impl->m_phase->reset_models();
+    return true;
+}
+bool OnlineShadowWorker::slot( ShadowMode                         mode,
+                               const MagAOX::app::synco::Request &r,
+                               const MagAOX::app::synco::Record  &s,
+                               std::int64_t                       now,
+                               std::span<float>                   pixels )
+{
+    return m_impl->m_running.load() && m_impl->m_shadowProducer &&
+           m_impl->m_shadowProducer->command_for( mode, r, s, now, pixels );
+}
+} //namespace DDSPC

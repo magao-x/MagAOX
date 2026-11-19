@@ -132,7 +132,8 @@ struct OnlineShadowStatus
     std::int64_t  m_originNs{ -1 }, m_deadlineNs{ -1 }; ///< Actual latest frozen origin/cutoff, not a clock mapping.
     std::uint64_t m_fastOpportunities{ 0 }, m_fastPredictions{ 0 }, m_wfsReceived{ 0 }; ///< Distinct multirate events.
     std::array<std::uint64_t, 4> m_phasePredictions{}; ///< Accepted fresh ADC predictions at each upstream phase.
-    double m_fastUs{ -1 }, m_fastPeakUs{ -1 };         ///< Measured fast-owner inference/render latency, not WCET.
+    std::uint64_t m_modelEpoch{ 0 }; ///< Completed model-reset incarnation, independent of producer clocks.
+    double        m_fastUs{ -1 }, m_fastPeakUs{ -1 }; ///< Measured fast-owner inference/render latency, not WCET.
 };
 
 /// Serialized qualified assembler reused by the native worker and deterministic tests; no I/O or publisher API.

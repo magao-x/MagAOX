@@ -245,15 +245,13 @@ bool SyncoShadowProducer::callback( const synco::Record &s, std::int64_t now )
         ++m_missed;
     return valid; // The private image is deliberately never passed to syncopationPublish.
 }
-bool SyncoShadowProducer::copy( const synco::Request &r,
-                                const synco::Record  &s,
-                                std::int64_t          now,
-                                std::span<float>      pixels )
+bool SyncoShadowProducer::copy(
+    const synco::Request &r, const synco::Record &s, std::int64_t now, std::span<float> pixels, int strictMode )
 {
     const auto     started = std::chrono::steady_clock::now();
     const unsigned mask    = m_models.load() & m_planMask.load();
-    const unsigned first   = m_requested.load() ? 1 : 0;
-    for( int mode = int( first ); mode >= 0; --mode )
+    const unsigned first   = strictMode >= 0 ? unsigned( strictMode ) : ( m_requested.load() ? 1 : 0 );
+    for( int mode = int( first ); mode >= ( strictMode >= 0 ? strictMode : 0 ); --mode )
     {
         if( !( mask & ( 1u << mode ) ) )
             continue;
@@ -296,3 +294,13 @@ void SyncoShadowProducer::status( OnlineShadowStatus &s ) const
     s.m_callbackPeakUs = m_peakNs.load() < 0 ? -1 : m_peakNs.load() / 1000.;
 }
 } // namespace DDSPC
+
+namespace DDSPC
+{
+bool SyncoShadowProducer::command_for(
+    ShadowMode mode, const synco::Request &r, const synco::Record &s, std::int64_t now, std::span<float> pixels )
+{
+    std::unique_lock<std::mutex> lock( m_mutex, std::try_to_lock );
+    return lock.owns_lock() && copy( r, s, now, pixels, mode == ShadowMode::AccelAssisted ? 1 : 0 );
+}
+} //namespace DDSPC

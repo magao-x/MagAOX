@@ -72,6 +72,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup accelSim_unit_test accelSim Unit Tests
+ * \brief Physical simulation, ADC encoding, synchronization and own-channel output tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup loPredCtrlAcc_unit_test loPredCtrlAcc Numerical Unit Tests
  * \brief Independent offline DDSPC history, identification, and control-law tests.
  * \ingroup application_unit_test

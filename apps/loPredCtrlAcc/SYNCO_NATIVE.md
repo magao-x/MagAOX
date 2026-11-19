@@ -1,3 +1,5 @@
+Current output/control milestone: [OPERATIONAL_DDSPC.md](OPERATIONAL_DDSPC.md). The report below describes the prior shadow-only profile; default builds remain strict shadow-only.
+
 Current live path: [PHASE_DDSPC.md](PHASE_DDSPC.md) supersedes the WFS-origin-only preparation below with ADC-driven inference and WFS-driven phase identification. The existing producer API and output prohibitions remain unchanged.
 
 # Native DDSPC inputs and the existing syncopation producer

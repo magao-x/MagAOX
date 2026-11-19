@@ -167,6 +167,7 @@ PhaseReplay::PhaseReplay( bool qr, bool related, unsigned pixels, int horizon, i
         c.m_calibration.m_shapes( p, 1 ) = -.01;
     }
     m_pipeline = std::make_unique<DDSPC::PhaseShadow>( c, m_config );
+    m_pipeline->learning( true );
     m_decoder.attached( 11, 100 );
 }
 void PhaseReplay::command( std::span<const float> values, std::int64_t now )
@@ -666,6 +667,45 @@ TEST_CASE( "Native phase models can adapt at every real WFS target", "[multirate
     REQUIRE( after.m_standard.m_updates == before.m_standard.m_updates + 1 );
     REQUIRE( after.m_assisted.m_updates == before.m_assisted.m_updates + 1 );
     REQUIRE( after.m_fastOpportunities == before.m_fastOpportunities + 4 );
+}
+/** \brief Learning freezes both fitted banks without stopping inference; reset revokes every old coefficient. */
+TEST_CASE( "Native learning freeze preserves fitted coefficients and prediction; reset revokes them",
+           "[multirate][phase][output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    DDSPC::PhaseShadow::learning;
+    DDSPC::PhaseShadow::reset_models;
+#endif
+    // clang-format on
+    PhaseReplay replay( GENERATE( false, true ) );
+    for( unsigned n = 0; n < 700; ++n )
+        replay.step();
+    REQUIRE( replay.m_pipeline->status().m_standard.m_ready );
+    REQUIRE( replay.m_pipeline->status().m_assisted.m_ready );
+    const auto before   = replay.m_pipeline->status();
+    const auto standard = replay.m_pipeline->coefficients( DDSPC::ShadowMode::Standard, 0 );
+    const auto assisted = replay.m_pipeline->coefficients( DDSPC::ShadowMode::AccelAssisted, 3 );
+    replay.m_pipeline->learning( false );
+    for( unsigned n = 0; n < 200; ++n )
+        replay.step();
+    const auto frozen = replay.m_pipeline->status();
+    REQUIRE( frozen.m_standard.m_updates == before.m_standard.m_updates );
+    REQUIRE( frozen.m_assisted.m_updates == before.m_assisted.m_updates );
+    REQUIRE( replay.m_pipeline->coefficients( DDSPC::ShadowMode::Standard, 0 ) == standard );
+    REQUIRE( replay.m_pipeline->coefficients( DDSPC::ShadowMode::AccelAssisted, 3 ) == assisted );
+    REQUIRE( frozen.m_fastPredictions > before.m_fastPredictions );
+    REQUIRE( frozen.m_standard.m_ready );
+    replay.m_pipeline->reset_models();
+    replay.step();
+    const auto reset = replay.m_pipeline->status();
+    REQUIRE_FALSE( reset.m_standard.m_ready );
+    REQUIRE_FALSE( reset.m_assisted.m_ready );
+    REQUIRE( reset.m_standard.m_updates == 0 );
+    replay.m_pipeline->learning( true );
+    for( unsigned n = 0; n < 700; ++n )
+        replay.step();
+    REQUIRE( replay.m_pipeline->status().m_assisted.m_ready );
 }
 /** \brief Actual advertised timing is used directly, while a changed WFS-to-slot phase cannot silently reuse a fit. */
 TEST_CASE( "Native phase receiver accepts nominal periods and rejects changed slot association", "[multirate][phase]" )

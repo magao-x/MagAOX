@@ -39,6 +39,7 @@ using namespace mx::improc;
 #include "native_observer.hpp"
 #include "online_shadow.hpp"
 #include "../../libMagAOX/app/dev/dmSyncopationProducer.hpp"
+#include "../../libMagAOX/app/syncoOutput.hpp"
 #include "shadow_pipeline.hpp"
 
 namespace MagAOX
@@ -193,8 +194,34 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     std::unique_ptr<DDSPC::NativeObserver> m_nativeObserver;   ///< Stops before its borrowed online sink is destroyed.
     DDSPC::NativePipelineConfig m_nativeInputs; ///< Startup-only calibrated native receiver; upstream owns phase lock.
     std::string m_nativeCalibrationFile;        ///< Reviewed full-image projection; empty leaves training inhibited.
-    std::string m_auxChannel{ "dm10disp10_aux" }; ///< Future producer identity only; shadow never opens this image.
-    pcf::IndiProperty m_indiP_upstreamTiming;     ///< Read-only subscription to the actual acquisition producer status.
+    std::string m_auxChannel{ "dm10disp10_aux" }; ///< Exact own producer identity; shadow builds never open this image.
+    SyncoOutput m_output;                 ///< Own-channel existing producer; strictly inert in shadow-only builds.
+    SyncoOutputConfig m_outputConfig;     ///< Explicit startup authorization and approved surface limits.
+    double            m_outputAckUs{ 0 }; ///< Reviewed transport acknowledgement timeout.
+    bool        m_correctionInputVerified{ false };   ///< Existing command source excludes the injected disturbance.
+    std::string m_commandDomain{ "total_requested" }; ///< Actual declared identification input, never inferred.
+    std::atomic<unsigned> m_nativeRequestedMode{
+        0 };                                     ///< Exact active selection; mode transitions require confirmed zero.
+    std::atomic<bool> m_nativeLearning{ false }; ///< Learning intent, independent of predictive output.
+    bool              m_explorationAuthorized{
+        false }; ///< Separate explicit authorization for the existing Gaussian exploration convention.
+    double            m_explorationLimit{ 0 }; ///< Approved absolute modal exploration bound; zero disables it.
+    std::atomic<bool> m_exploring{ false },
+        m_predictionRequested{ false };  ///< Distinct exploratory and predictive intent.
+    std::mutex m_nativeExplorationMutex; ///< Serializes operator sequence installation and producer-only consumption.
+    std::vector<std::pair<unsigned, double>>
+        m_nativeExploration; ///< Existing count/strength sequence, in actual advertised slots.
+    /// Copy an existing prediction or an explicitly authorized exploration sample for an actual producer Request.
+    bool outputCandidate( const MagAOX::app::synco::Request &request /**< [in] Existing slot. */,
+                          const MagAOX::app::synco::Record  &schedule /**< [in] Existing timing. */,
+                          std::int64_t                       now /**< [in] Actual local time. */,
+                          std::span<float>                   pixels /**< [out] Full calibrated image. */ );
+    /// Qualify the declared own corrective-input domain, without requiring excitation before an authorized probe.
+    bool explorationQualified() const;
+    /// Check selected model, native input contract and the declared corrective-command domain.
+    bool outputQualified() const;
+
+    pcf::IndiProperty m_indiP_upstreamTiming; ///< Read-only subscription to the actual acquisition producer status.
 
     /// Private read-only run state and per-source transport diagnostics.
     pcf::IndiProperty                                        m_indiP_nativeShadow;
@@ -508,7 +535,7 @@ class loPredCtrlAcc : public MagAOXApp<true>,
     /// Default c'tor.
     loPredCtrlAcc();
 
-    /// D'tor, declared and defined for noexcept.
+    /// Stop output callbacks before captured state is destroyed, including unsuccessful startup.
     ~loPredCtrlAcc() noexcept;
 
     /// Declare legacy and startup-only shadow configuration keys.
@@ -699,7 +726,11 @@ inline std::string accelShmimT::indiPrefix()
     return "accel";
 }
 
-inline loPredCtrlAcc::~loPredCtrlAcc() noexcept = default;
+inline loPredCtrlAcc::~loPredCtrlAcc() noexcept
+{
+    m_output
+        .stop(); // Join captured callbacks while every application member is still alive, including startup failure.
+}
 
 inline void loPredCtrlAcc::save( std::string directory )
 {
@@ -722,7 +753,33 @@ inline loPredCtrlAcc::loPredCtrlAcc() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_R
 inline void loPredCtrlAcc::setupConfig()
 {
     DMSYNCOPATIONPRODUCER_SETUP_CONFIG( config );
-    for( const char *key : { "calibration",
+    for( const char *key : { "exploration_authorized", "exploration_limit" } )
+        config.add( std::string( "parameters." ) + key,
+                    "",
+                    std::string( "parameters." ) + key,
+                    argType::Optional,
+                    "parameters",
+                    key,
+                    false,
+                    "string",
+                    "Explicit native exploration authorization and modal bound." );
+    for( const char *key : { "authorized",
+                             "routing_verified",
+                             "correction_input_verified",
+                             "max_abs_um",
+                             "max_step_um",
+                             "ack_timeout_us" } )
+        config.add( std::string( "output." ) + key,
+                    "",
+                    std::string( "output." ) + key,
+                    argType::Optional,
+                    "output",
+                    key,
+                    false,
+                    "string",
+                    "Explicit output authorization; zero limits inhibit." );
+    for( const char *key : { "command_domain",
+                             "calibration",
                              "sync_device",
                              "sync_property",
                              "sync_reference",
@@ -1135,7 +1192,25 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
         return log<software_error, -1>( { __FILE__, __LINE__, "Native input/producer configuration is startup-only" } );
     }
     DMSYNCOPATIONPRODUCER_LOAD_CONFIG( _config );
+    _config( m_explorationAuthorized, "parameters.exploration_authorized" );
+    _config( m_explorationLimit, "parameters.exploration_limit" );
     _config( m_auxChannel, "dm.channelName" );
+    _config( m_outputConfig.m_authorized, "output.authorized" );
+    _config( m_outputConfig.m_routingVerified, "output.routing_verified" );
+    _config( m_correctionInputVerified, "output.correction_input_verified" );
+    _config( m_outputConfig.m_maxAbs, "output.max_abs_um" );
+    _config( m_outputConfig.m_maxStep, "output.max_step_um" );
+    _config( m_outputAckUs, "output.ack_timeout_us" );
+    _config( m_commandDomain, "native_inputs.command_domain" );
+    if( !std::isfinite( m_outputConfig.m_maxAbs ) || !std::isfinite( m_outputConfig.m_maxStep ) ||
+        m_outputConfig.m_maxAbs < 0 || m_outputConfig.m_maxStep < 0 ||
+        ( m_commandDomain != "total_requested" && m_commandDomain != "corrective_requested" ) ||
+        !std::isfinite( m_outputAckUs ) || m_outputAckUs < 0 || m_outputAckUs > 1000000 ||
+        m_auxChannel != "dm10disp10_aux" )
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "Invalid output timing or required dm10disp10_aux identity" } );
+    m_outputConfig.m_ackTimeoutNs = std::llround( m_outputAckUs * 1000 );
+
     if( m_auxChannel.size() < 5 || m_auxChannel.substr( m_auxChannel.size() - 4 ) != "_aux" ||
         m_auxChannel.find_first_of( "/\\ \t\n" ) != std::string::npos )
         return -1;
@@ -1160,12 +1235,14 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
             { __FILE__, __LINE__, "Online model/source settings require a fresh application session" } );
     }
     _config( m_shadowMode, "parameters.shadow" );
-#ifdef DDSPC_SHADOW_ONLY
+#if defined( DDSPC_SHADOW_ONLY ) || defined( DDSPC_OPERATIONAL_BUILD )
     if( !m_shadowMode )
     {
         m_shutdown = true;
         return log<software_error, -1>(
-            { __FILE__, __LINE__, "Shadow-only build requires parameters.shadow=true; legacy output is forbidden." } );
+            { __FILE__,
+              __LINE__,
+              "Guarded native build requires parameters.shadow=true; Legacy output is forbidden." } );
     }
 #endif
     _config( m_shadowPipelineEnabled, "parameters.shadow_pipeline" );
@@ -1348,8 +1425,8 @@ inline int loPredCtrlAcc::loadConfigImpl( mx::app::appConfigurator &_config )
     {
         try
         {
-#ifndef DDSPC_SHADOW_ONLY
-            throw std::invalid_argument( "Native observation requires DDSPC_SHADOW_ONLY=yes" );
+#if !defined( DDSPC_SHADOW_ONLY ) && !defined( DDSPC_OPERATIONAL_BUILD )
+            throw std::invalid_argument( "Native observation requires an explicit guarded build profile" );
 #endif
             if( !m_shadowMode || m_shadowPipelineEnabled || !m_adcEnabled || m_accelEnabled || m_ownShmim )
                 throw std::invalid_argument(
@@ -2026,7 +2103,7 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
                 ? std::to_string( ( s.m_nowNs - s.m_startedNs ) / 1000000000 )
                 : "unavailable",
             inputGood ? "adc_wfs_healthy_dm_independent" : "adc_wfs_degraded",
-            "true",
+            m_output.status().m_acknowledged ? "false" : "true",
             std::to_string( errors ) } );
     for( std::size_t i = 0; i < 4; ++i )
     {
@@ -2152,11 +2229,15 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
             ( online.m_candidateValid || online.m_predictionValid )
                 ? ( online.m_effective == DDSPC::ShadowMode::Standard ? "standard" : "accel_assisted" )
                 : "unavailable",
-            online.m_running && online.m_qualified && !online.m_overrun ? "qualified_worker_enabled" : "inhibited",
-            online.m_candidateValid ? "shadow_candidate_valid"
-                                    : ( online.m_predictionValid ? ( online.m_predictionLate ? "queued_forecast_late"
-                                                                                             : "diagnostic_forecast" )
-                                                                 : "inhibited" ),
+            m_exploring.load()        ? "learning_authorized_exploration"
+            : m_nativeLearning.load() ? ( m_commandDomain == "corrective_requested" ? "learning_corrective_requests"
+                                                                                    : "total_request_diagnostic_only" )
+                                      : "coefficients_frozen",
+            m_output.status().m_acknowledged ? "correction_transport_acknowledged"
+            : online.m_candidateValid ? "shadow_candidate_valid"
+                                      : ( online.m_predictionValid ? ( online.m_predictionLate ? "queued_forecast_late"
+                                                                                               : "diagnostic_forecast" )
+                                                                   : "inhibited" ),
             standard.m_ready ? "true" : "false",
             assisted.m_ready ? "true" : "false" } );
     number( NativeOperator::Performance,
@@ -2178,8 +2259,12 @@ inline void loPredCtrlAcc::updateNativeOperatorINDI()
               online.m_computeUs } );
     text( NativeOperator::Safety,
           { "dm_write_enabled", "output_reason", "timing_interlock", "model_interlock" },
-          { "false",
-            "compile_time_shadow_only",
+          { m_output.status().m_acknowledged ? "true" : "false",
+            std::string( m_output.status().m_reason ) +
+                ";requested=" + std::to_string( m_output.status().m_requested ) +
+                ";transport_ack=" + std::to_string( m_output.status().m_acknowledged ) + ";zero_ack=" +
+                std::to_string( m_output.status().m_zeroConfirmed && m_output.status().m_acknowledgements > 0 ) +
+                ";receipts=" + std::to_string( m_output.status().m_acknowledgements ),
             online.m_qualified ? ( online.m_schedule ? "source_contract_verified_slot_deadlines_required"
                                                      : "synco_schedule_unqualified" )
                                : "upstream_contract_or_command_history_unqualified",
@@ -2262,7 +2347,7 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
           "command_queue_occupancy",
           "elapsed_sec" },
         { 1,
-          double( !online.m_qualified || online.m_overrun ),
+          double( !m_nativeLearning.load() || !online.m_qualified || online.m_overrun ),
           double( online.m_exposure ),
           double( online.m_qualified && online.m_inputEvidence == DDSPC::InputEvidence::VerifiedApplied &&
                   ( online.m_standard.m_dataValid || online.m_assisted.m_dataValid ) ),
@@ -2403,21 +2488,22 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
                                          source.m_publicationClock } );
         m_nativeReportedSamples[i] = v.m_samples;
     }
-    updatesIfChanged<double>( m_indiP_nativeSafety,
-                              { "shadow",
-                                "active",
-                                "dm_write_enabled",
-                                "acquisition_enabled",
-                                "diagnostics_enabled",
-                                "training_enabled",
-                                "native_prediction_enabled" },
-                              { 1,
-                                0,
-                                0,
-                                double( m_adcEnabled && m_nativeShadowEnabled ),
-                                1,
-                                double( online.m_running && online.m_qualified && !online.m_overrun ),
-                                double( online.m_candidateValid ) } );
+    updatesIfChanged<double>(
+        m_indiP_nativeSafety,
+        { "shadow",
+          "active",
+          "dm_write_enabled",
+          "acquisition_enabled",
+          "diagnostics_enabled",
+          "training_enabled",
+          "native_prediction_enabled" },
+        { double( !m_output.status().m_acknowledged ),
+          double( m_output.status().m_acknowledged ),
+          double( m_output.status().m_acknowledged ),
+          double( m_adcEnabled && m_nativeShadowEnabled ),
+          1,
+          double( m_nativeLearning.load() && online.m_running && online.m_qualified && !online.m_overrun ),
+          double( online.m_candidateValid ) } );
     updatesIfChanged<double>( m_indiP_nativeTiming,
                               { "adc_period_us",
                                 "wfs_period_us",
@@ -2431,12 +2517,14 @@ inline void loPredCtrlAcc::updateNativeShadowINDI()
     updatesIfChanged<std::string>(
         m_indiP_nativeInterlocks,
         { "output", "training", "timing", "dm_evidence", "requested_mode", "effective_mode" },
-        { "compile_time_shadow_only",
+        { m_output.status().m_reason,
           m_onlineWorker ? online.m_reason : "exposure_and_applied_input_contract_unqualified",
           online.m_qualified ? "source_contract_verified_phase_statistics_unavailable"
                              : "source_clock_and_phase_reference_unqualified",
           online.m_qualified ? ( online.m_inputEvidence == DDSPC::InputEvidence::Requested
-                                     ? "observed_combined_requests_not_physical_application"
+                                     ? ( m_commandDomain == "corrective_requested"
+                                             ? "observed_own_correction_requests_not_physical_application"
+                                             : "observed_total_requests_diagnostic_only" )
                                      : "independent_verified_applied_certificates_required_per_slot" )
                              : "command_observation_not_physical_application",
           m_shadowRequested,
@@ -2710,6 +2798,8 @@ inline void loPredCtrlAcc::updateShadowINDI()
 inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_ddspcMode )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_ddspcMode, ipRecv );
+    if( m_nativeShadowEnabled && ( m_output.status().m_requested || !m_output.status().m_zeroConfirmed ) )
+        return -1;
     std::lock_guard<std::mutex> lock( m_indiMutex );
     int                         onCount   = 0;
     bool                        valid     = m_shadowMode && ipRecv.getType() == pcf::IndiProperty::Switch;
@@ -2735,6 +2825,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_ddspcMode )( const pcf::Ind
             valid = m_shadowController && m_shadowController->select( requested );
         if( valid )
         {
+            m_nativeRequestedMode.store( requested == DDSPC::ShadowMode::AccelAssisted );
             m_shadowRequested = requested == DDSPC::ShadowMode::Standard ? "standard" : "accel_assisted";
             if( m_onlineWorker )
                 m_onlineWorker->request( requested );
@@ -2783,15 +2874,15 @@ inline int loPredCtrlAcc::appStartup()
     if( m_nativeShadowEnabled &&
         ( !m_nativeShadowConfigValid || !m_shadowMode || !m_adcEnabled || m_shadowPipelineEnabled ) )
         return -1;
-#ifndef DDSPC_SHADOW_ONLY
+#if !defined( DDSPC_SHADOW_ONLY ) && !defined( DDSPC_OPERATIONAL_BUILD )
     if( m_nativeShadowEnabled )
         return -1;
 #endif
     if( m_shadowPipelineEnabled && ( !m_shadowMode || !m_shadowPipelineConfigValid ) )
         return log<software_error, -1>( { __FILE__, __LINE__, "Shared pipeline startup requires shadow=true." } );
-#ifdef DDSPC_SHADOW_ONLY
+#if defined( DDSPC_SHADOW_ONLY ) || defined( DDSPC_OPERATIONAL_BUILD )
     if( !m_shadowMode )
-        return log<software_error, -1>( { __FILE__, __LINE__, "Shadow-only build refuses legacy startup." } );
+        return log<software_error, -1>( { __FILE__, __LINE__, "Guarded native build refuses Legacy startup." } );
 #endif
     if( m_adcEnabled && !m_shadowMode )
     {
@@ -2826,6 +2917,17 @@ inline int loPredCtrlAcc::appStartup()
         CREATE_REG_INDI_NEW_TEXT( m_indiP_filename, "filename", "", "" );
     }
 
+    if( m_nativeShadowEnabled )
+    {
+        createStandardIndiToggleSw( m_indiP_learningToggle, "learn", "Learning State", "Learn Controls" );
+        registerIndiPropertyNew( m_indiP_learningToggle, INDI_NEWCALLBACK( m_indiP_learningToggle ) );
+        createStandardIndiToggleSw( m_indiP_predictingToggle, "predict", "Predict State", "Predictive Controls" );
+        registerIndiPropertyNew( m_indiP_predictingToggle, INDI_NEWCALLBACK( m_indiP_predictingToggle ) );
+        createStandardIndiRequestSw( m_indiP_resetToggle, "reset_model", "Reset both native models", "Reset Model" );
+        registerIndiPropertyNew( m_indiP_resetToggle, INDI_NEWCALLBACK( m_indiP_resetToggle ) );
+        m_nativeLearning.store( false );
+        CREATE_REG_INDI_NEW_TEXT( m_indiP_exploration, "exploration_sequence", "Explicit bounded probe", "Learning" );
+    }
     if( setupShadowINDI() < 0 || ( m_shadowMode && setupAdcINDI() < 0 ) )
     {
         return -1;
@@ -2839,22 +2941,24 @@ inline int loPredCtrlAcc::appStartup()
 
     if( !compactNativeINDI() )
     {
-        createStandardIndiToggleSw( m_indiP_learningToggle, "learn", "Learning State", "Learn Controls" );
-        registerIndiPropertyNew( m_indiP_learningToggle, INDI_NEWCALLBACK( m_indiP_learningToggle ) );
+        if( !m_nativeShadowEnabled )
+        {
+            createStandardIndiToggleSw( m_indiP_learningToggle, "learn", "Learning State", "Learn Controls" );
+            registerIndiPropertyNew( m_indiP_learningToggle, INDI_NEWCALLBACK( m_indiP_learningToggle ) );
 
-        createStandardIndiToggleSw( m_indiP_learningStdToggle, "learn_std", "Learning State", "Learn Controls" );
-        registerIndiPropertyNew( m_indiP_learningStdToggle, INDI_NEWCALLBACK( m_indiP_learningStdToggle ) );
+            createStandardIndiToggleSw( m_indiP_learningStdToggle, "learn_std", "Learning State", "Learn Controls" );
+            registerIndiPropertyNew( m_indiP_learningStdToggle, INDI_NEWCALLBACK( m_indiP_learningStdToggle ) );
 
-        createStandardIndiToggleSw( m_indiP_predictingToggle, "predict", "Predict State", "Predictive Controls" );
-        registerIndiPropertyNew( m_indiP_predictingToggle, INDI_NEWCALLBACK( m_indiP_predictingToggle ) );
+            createStandardIndiToggleSw( m_indiP_predictingToggle, "predict", "Predict State", "Predictive Controls" );
+            registerIndiPropertyNew( m_indiP_predictingToggle, INDI_NEWCALLBACK( m_indiP_predictingToggle ) );
 
-        createStandardIndiToggleSw(
-            m_indiP_integratingToggle, "integrate", "Integration State", "Integration Controls" );
-        registerIndiPropertyNew( m_indiP_integratingToggle, INDI_NEWCALLBACK( m_indiP_integratingToggle ) );
+            createStandardIndiToggleSw(
+                m_indiP_integratingToggle, "integrate", "Integration State", "Integration Controls" );
+            registerIndiPropertyNew( m_indiP_integratingToggle, INDI_NEWCALLBACK( m_indiP_integratingToggle ) );
 
-        createStandardIndiRequestSw( m_indiP_resetToggle, "reset_model", "Reset the RLS model", "Reset Model" );
-        registerIndiPropertyNew( m_indiP_resetToggle, INDI_NEWCALLBACK( m_indiP_resetToggle ) );
-
+            createStandardIndiRequestSw( m_indiP_resetToggle, "reset_model", "Reset the RLS model", "Reset Model" );
+            registerIndiPropertyNew( m_indiP_resetToggle, INDI_NEWCALLBACK( m_indiP_resetToggle ) );
+        }
         createStandardIndiRequestSw( m_indiP_saveToggle, "save_state", "Save the controller state", "Save State" );
         registerIndiPropertyNew( m_indiP_saveToggle, INDI_NEWCALLBACK( m_indiP_saveToggle ) );
 
@@ -2934,6 +3038,16 @@ inline int loPredCtrlAcc::appStartup()
             }
             m_nativeObserver = std::make_unique<DDSPC::NativeObserver>( m_nativeShadowConfig );
             m_nativeObserver->start( *m_adcReader, m_onlineWorker.get() );
+            m_output.configure( m_outputConfig,
+                                m_auxChannel,
+                                m_syncopationTiming,
+                                m_writeLeadUs,
+                                m_nativeInputs.m_calibration.m_shapes.rows() );
+            m_output.start( [this] { return m_exploring.load() ? explorationQualified() : outputQualified(); },
+                            [this]( const MagAOX::app::synco::Request &r,
+                                    const MagAOX::app::synco::Record  &schedule,
+                                    std::int64_t                       now,
+                                    std::span<float> pixels ) { return outputCandidate( r, schedule, now, pixels ); } );
         }
         catch( const std::exception &error )
         {
@@ -3009,6 +3123,24 @@ inline int loPredCtrlAcc::appLogic()
         updateAdcINDI();
     }
 
+    if( m_nativeShadowEnabled )
+    {
+        const auto output          = m_output.status();
+        const auto models          = m_onlineWorker ? m_onlineWorker->status() : DDSPC::OnlineShadowStatus{};
+        const bool learningSettled = models.m_standard.m_trainingEnabled == m_nativeLearning.load() &&
+                                     models.m_assisted.m_trainingEnabled == m_nativeLearning.load();
+        updateSwitchIfChanged( m_indiP_learningToggle,
+                               "toggle",
+                               m_nativeLearning.load() ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                               learningSettled ? INDI_OK : INDI_BUSY );
+        updateSwitchIfChanged( m_indiP_predictingToggle,
+                               "toggle",
+                               m_predictionRequested.load() && output.m_requested ? pcf::IndiElement::On
+                                                                                  : pcf::IndiElement::Off,
+                               output.m_fault                                                              ? INDI_ALERT
+                               : ( output.m_requested ? !output.m_acknowledged : !output.m_zeroConfirmed ) ? INDI_BUSY
+                                                                                                           : INDI_OK );
+    }
     if( compactNativeINDI() )
         return 0;
 
@@ -3065,6 +3197,8 @@ inline int loPredCtrlAcc::appShutdown()
         if( m_shadowPipeline )
             m_shadowPipeline->invalidate();
     }
+    if( !m_output.stop() )
+        log<software_error>( { __FILE__, __LINE__, "DDSPC zero not acknowledged; operator removal required" } );
     if( m_nativeObserver )
         m_nativeObserver->stop();
     if( m_onlineWorker )
@@ -3560,8 +3694,8 @@ inline int loPredCtrlAcc::processImage( void *curr_src, const dev::shmimT &dummy
 
 inline int loPredCtrlAcc::configureAcquisition()
 {
-#ifdef DDSPC_SHADOW_ONLY
-    return -1; // Unconditional commissioning-build inhibition, including invalid runtime state.
+#if defined( DDSPC_SHADOW_ONLY ) || defined( DDSPC_OPERATIONAL_BUILD )
+    return -1; // Unconditional Legacy-output inhibition in both guarded native build profiles.
 #endif
     if( m_shadowMode )
         return -1;
@@ -3579,8 +3713,8 @@ inline float loPredCtrlAcc::fps()
 
 inline int loPredCtrlAcc::startAcquisition()
 {
-#ifdef DDSPC_SHADOW_ONLY
-    return -1; // Unconditional commissioning-build inhibition, including invalid runtime state.
+#if defined( DDSPC_SHADOW_ONLY ) || defined( DDSPC_OPERATIONAL_BUILD )
+    return -1; // Unconditional Legacy-output inhibition in both guarded native build profiles.
 #endif
     if( m_shadowMode )
         return -1;
@@ -3589,8 +3723,8 @@ inline int loPredCtrlAcc::startAcquisition()
 
 inline int loPredCtrlAcc::acquireAndCheckValid()
 {
-#ifdef DDSPC_SHADOW_ONLY
-    return 1; // Unconditional commissioning-build inhibition, including invalid runtime state.
+#if defined( DDSPC_SHADOW_ONLY ) || defined( DDSPC_OPERATIONAL_BUILD )
+    return 1; // Unconditional Legacy-output inhibition in both guarded native build profiles.
 #endif
     if( m_shadowMode )
         return 1;
@@ -3624,8 +3758,8 @@ inline int loPredCtrlAcc::acquireAndCheckValid()
 
 inline int loPredCtrlAcc::loadImageIntoStream( void *dest )
 {
-#ifdef DDSPC_SHADOW_ONLY
-    return -1; // Unconditional commissioning-build inhibition, including invalid runtime state.
+#if defined( DDSPC_SHADOW_ONLY ) || defined( DDSPC_OPERATIONAL_BUILD )
+    return -1; // Unconditional Legacy-output inhibition in both guarded native build profiles.
 #endif
     if( m_shadowMode )
         return -1;
@@ -3657,6 +3791,53 @@ inline int loPredCtrlAcc::recordTelem( const telem_fgtimings * )
 
 inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_exploration )( const pcf::IndiProperty &ipRecv )
 {
+    if( m_nativeShadowEnabled )
+    {
+        INDI_VALIDATE_CALLBACK_PROPS( m_indiP_exploration, ipRecv );
+        if( !m_explorationAuthorized || !m_nativeLearning.load() || m_predictionRequested.load() ||
+            !m_output.status().m_zeroConfirmed || !std::isfinite( m_explorationLimit ) || m_explorationLimit <= 0 ||
+            !ipRecv.find( "target" ) )
+            return -1;
+        std::vector<std::pair<unsigned, double>> sequence;
+        std::stringstream                        input( ipRecv["target"].get<std::string>() );
+        std::string                              count, strength;
+        while( std::getline( input, count, ',' ) )
+        {
+            if( !std::getline( input, strength, ',' ) )
+                return -1;
+            try
+            {
+                std::size_t nc = 0, ns = 0;
+                const auto  n     = std::stoul( count, &nc );
+                const auto  sigma = std::stod( strength, &ns );
+                if( nc != count.size() || ns != strength.size() || !n || n > 1000000 || !std::isfinite( sigma ) ||
+                    sigma <= 0 || sigma > m_explorationLimit || sequence.size() >= 32 )
+                    return -1;
+                sequence.emplace_back( n, sigma );
+            }
+            catch( ... )
+            {
+                return -1;
+            }
+        }
+        if( sequence.empty() )
+            return -1;
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_nativeExplorationMutex );
+            m_nativeExploration = std::move( sequence );
+        }
+        m_exploring.store( true );
+        if( !m_output.request( true ) )
+        {
+            m_exploring.store( false );
+            return -1;
+        }
+        updatesIfChanged<std::string>( m_indiP_exploration,
+                                       { "current", "target" },
+                                       { ipRecv["target"].get<std::string>(), ipRecv["target"].get<std::string>() },
+                                       INDI_BUSY );
+        return 0;
+    }
     if( m_shadowMode )
         return -1; // Legacy controls cannot affect shadow execution.
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_exploration, ipRecv );
@@ -3747,6 +3928,25 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_filename )( const pcf::Indi
 
 inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_learningToggle )( const pcf::IndiProperty &ipRecv )
 {
+    if( m_nativeShadowEnabled )
+    {
+        INDI_VALIDATE_CALLBACK_PROPS( m_indiP_learningToggle, ipRecv );
+        if( !ipRecv.find( "toggle" ) || !m_onlineWorker )
+            return -1;
+        const auto value = ipRecv["toggle"].getSwitchState();
+        if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
+            return -1;
+        const bool enabled = value == pcf::IndiElement::On;
+        m_nativeLearning.store( enabled );
+        m_onlineWorker->learning( enabled );
+        if( enabled && m_correctionInputVerified && m_commandDomain == "corrective_requested" &&
+            m_nativeShadowConfig.m_streams[3].m_name == m_auxChannel && m_nativeInputs.m_calibration.m_shapes.size() )
+            m_output.initialize();
+        if( !enabled && m_exploring.exchange( false ) )
+            m_output.request( false );
+        updateSwitchIfChanged( m_indiP_learningToggle, "toggle", value, INDI_BUSY );
+        return 0;
+    }
     if( m_shadowMode )
         return -1; // Legacy controls cannot affect shadow execution.
     if( ipRecv.getName() != m_indiP_learningToggle.getName() )
@@ -3892,6 +4092,28 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_integratingToggle )( const 
 
 inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_predictingToggle )( const pcf::IndiProperty &ipRecv )
 {
+    if( m_nativeShadowEnabled )
+    {
+        INDI_VALIDATE_CALLBACK_PROPS( m_indiP_predictingToggle, ipRecv );
+        if( !ipRecv.find( "toggle" ) )
+            return -1;
+        const auto value = ipRecv["toggle"].getSwitchState();
+        if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
+            return -1;
+        const bool enabled = value == pcf::IndiElement::On;
+        if( enabled && ( m_exploring.load() || m_output.status().m_fault ) )
+            return -1;
+        if( !enabled )
+            m_exploring.store( false );
+        const bool accepted = m_output.request( enabled );
+        if( accepted )
+            m_predictionRequested.store( enabled );
+        updateSwitchIfChanged( m_indiP_predictingToggle,
+                               "toggle",
+                               accepted ? value : pcf::IndiElement::Off,
+                               accepted ? INDI_BUSY : INDI_ALERT );
+        return accepted ? 0 : -1;
+    }
     if( m_shadowMode )
         return -1; // Legacy controls cannot affect shadow execution.
     if( ipRecv.getName() != m_indiP_predictingToggle.getName() )
@@ -3929,6 +4151,21 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_predictingToggle )( const p
 
 inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc, m_indiP_resetToggle )( const pcf::IndiProperty &ipRecv )
 {
+    if( m_nativeShadowEnabled )
+    {
+        INDI_VALIDATE_CALLBACK_PROPS( m_indiP_resetToggle, ipRecv );
+        const auto output = m_output.status();
+        if( output.m_requested || !output.m_zeroConfirmed || !m_onlineWorker )
+            return -1;
+        if( ipRecv.find( "request" ) && ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+        {
+            m_predictionRequested.store( false );
+            if( !m_output.clear_fault() || !m_onlineWorker->reset_models() )
+                return -1;
+            updateSwitchIfChanged( m_indiP_resetToggle, "request", pcf::IndiElement::Off, INDI_OK );
+        }
+        return 0;
+    }
     if( m_shadowMode )
     {
         INDI_VALIDATE_CALLBACK_PROPS( m_indiP_resetToggle, ipRecv );
@@ -4115,5 +4352,68 @@ inline INDI_SETCALLBACK_DEFN( loPredCtrlAcc, m_indiP_upstreamTiming )( const pcf
 
 } // namespace app
 } // namespace MagAOX
+
+namespace MagAOX::app
+{
+inline bool loPredCtrlAcc::outputQualified() const
+{
+    if( !m_onlineWorker || !m_correctionInputVerified || m_commandDomain != "corrective_requested" ||
+        m_nativeInputs.m_calibration.m_shapes.size() == 0 || m_nativeShadowConfig.m_streams[3].m_name != m_auxChannel )
+        return false;
+    const auto state = m_onlineWorker->status();
+    return state.m_running && state.m_qualified && state.m_schedule && !state.m_overrun &&
+           ( state.m_requested == DDSPC::ShadowMode::AccelAssisted ) == bool( m_nativeRequestedMode.load() ) &&
+           ( state.m_requested == DDSPC::ShadowMode::Standard ? state.m_standard.m_ready
+                                                              : state.m_assisted.m_ready && state.m_syncValid );
+}
+inline bool loPredCtrlAcc::explorationQualified() const
+{
+    if( !m_onlineWorker || !m_correctionInputVerified || m_commandDomain != "corrective_requested" ||
+        !m_nativeInputs.m_calibration.m_shapes.size() || m_nativeShadowConfig.m_streams[3].m_name != m_auxChannel )
+        return false;
+    const auto state = m_onlineWorker->status();
+    return state.m_running && state.m_qualified && state.m_schedule && !state.m_overrun && state.m_syncValid &&
+           m_nativeLearning.load();
+}
+inline bool loPredCtrlAcc::outputCandidate( const MagAOX::app::synco::Request &r,
+                                            const MagAOX::app::synco::Record  &schedule,
+                                            std::int64_t                       now,
+                                            std::span<float>                   pixels )
+{
+    if( !m_exploring.load() )
+        return m_onlineWorker && m_onlineWorker->slot( m_nativeRequestedMode.load() ? DDSPC::ShadowMode::AccelAssisted
+                                                                                    : DDSPC::ShadowMode::Standard,
+                                                       r,
+                                                       schedule,
+                                                       now,
+                                                       pixels );
+    std::unique_lock<std::mutex> lock( m_nativeExplorationMutex, std::try_to_lock );
+    if( !lock.owns_lock() )
+        return false;
+    if( m_nativeExploration.empty() )
+    {
+        m_output.request( false );
+        m_exploring.store( false );
+        return false;
+    }
+    auto                 &step = m_nativeExploration.front();
+    std::array<double, 2> modal{};
+    for( int m = 0; m < m_num_modes; ++m )
+        modal[m] = std::clamp( step.second * m_distribution( m_generator ), -m_explorationLimit, m_explorationLimit );
+    const auto &shapes = m_nativeInputs.m_calibration.m_shapes;
+    if( pixels.size() != std::size_t( shapes.rows() ) )
+        return false;
+    for( std::size_t p = 0; p < pixels.size(); ++p )
+    {
+        pixels[p] = 0;
+        for( int m = 0; m < m_num_modes; ++m )
+            pixels[p] += float( shapes( p, m ) * modal[m] );
+    }
+    if( !--step.first )
+        m_nativeExploration.erase( m_nativeExploration.begin() );
+    return true;
+}
+
+} //namespace MagAOX::app
 
 #endif // loPredCtrlAcc_hpp

@@ -1,3 +1,5 @@
+Current output/control milestone: [OPERATIONAL_DDSPC.md](OPERATIONAL_DDSPC.md). The report below describes the prior shadow-only profile; default builds remain strict shadow-only.
+
 # Native loPredCtrlAcc commissioning
 
 The normal `loPredCtrlAcc` executable now uses the standard MagAO-X application

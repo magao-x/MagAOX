@@ -1,3 +1,5 @@
+Current operator/output milestone and additional mock-producer test commands: [OPERATIONAL_DDSPC.md](../OPERATIONAL_DDSPC.md). Historical numerical results below retain their original build/profile scope.
+
 Current 8-kHz inference / 2-kHz learning path: [PHASE_DDSPC.md](../PHASE_DDSPC.md). `check-multirate` includes actual ADC conversion, phase RLS/QR, held-command baseline checks, 1/2/4/8-frame horizons, coherent/unrelated inputs, causal timestamps, exact synco targets, two-owner handoff and fast-path measurements. No live stream or native application is started.
 
 Current native integration: [SYNCO_NATIVE.md](../SYNCO_NATIVE.md).

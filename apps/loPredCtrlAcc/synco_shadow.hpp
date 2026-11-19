@@ -74,7 +74,8 @@ class SyncoShadowProducer
     bool copy( const MagAOX::app::synco::Request &request /**< [in] Exact base request. */,
                const MagAOX::app::synco::Record  &schedule /**< [in] Current coherent schedule. */,
                std::int64_t                       nowNs /**< [in] Actual copy time. */,
-               std::span<float>                   pixels /**< [out] Caller-owned complete image. */ );
+               std::span<float>                   pixels /**< [out] Caller-owned complete image. */,
+               int strictMode = -1 /**< [in] Explicit active selection, or -1 for historical diagnostic fallback. */ );
 
   public:
     /// Allocate current, preceding and work buffers per model, plus the sole private callback image.
@@ -119,6 +120,12 @@ class SyncoShadowProducer
                   std::int64_t                       nowNs /**< [in] Actual preparation readout time. */,
                   std::span<float>                   pixels /**< [out] Caller-owned complete private image. */ );
 
+    /// Read an exact selected model for physical output; never silently changes the experiment's controller.
+    bool command_for( ShadowMode                         mode /**< [in] Explicit selected model. */,
+                      const MagAOX::app::synco::Request &request /**< [in] Actual slot. */,
+                      const MagAOX::app::synco::Record  &schedule /**< [in] Current schedule. */,
+                      std::int64_t                       nowNs /**< [in] Actual time. */,
+                      std::span<float>                   pixels /**< [out] Owned image. */ );
     /// Copy bounded scalar outcomes; never reports physical application or transport acknowledgement.
     void status( OnlineShadowStatus &status /**< [out] Existing compact worker diagnostics. */ ) const;
 };

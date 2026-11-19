@@ -94,13 +94,15 @@ TEST_CASE( "Installed native application defaults to continuous read-only acquis
         for( const auto &[name, property] : app.m_registered )
         {
             elements += property->getNumElements();
-            REQUIRE( property->getPerm() ==
-                     ( name == "ddspc_mode" ? pcf::IndiProperty::ReadWrite : pcf::IndiProperty::ReadOnly ) );
+            REQUIRE( property->getPerm() == ( name == "ddspc_mode" || name == "learn" || name == "predict" ||
+                                                      name == "reset_model" || name == "exploration_sequence"
+                                                  ? pcf::IndiProperty::ReadWrite
+                                                  : pcf::IndiProperty::ReadOnly ) );
         }
-        REQUIRE( elements == 60 );
-        REQUIRE( app.m_registered.size() == 11 );
+        REQUIRE( elements == 65 );
+        REQUIRE( app.m_registered.size() == 15 );
         REQUIRE_FALSE( app.m_registered.count( "native_adc" ) );
-        REQUIRE_FALSE( app.m_registered.count( "learn" ) );
+        REQUIRE( app.m_registered.count( "learn" ) );
         auto mode = app.m_indiP_ddspcMode;
         mode["standard"].setSwitchState( pcf::IndiElement::Off );
         mode["accel_assisted"].setSwitchState( pcf::IndiElement::On );
@@ -271,7 +273,7 @@ TEST_CASE( "Installed online shadow worker preserves all timing and output guard
     REQUIRE_FALSE( app.processNativeApplied( request ) );
     app.m_nativeNextDiagnosticNs = 0;
     REQUIRE( app.appLogic() == 0 );
-    REQUIRE( app.property( "ddspc_control" )["training"].get<std::string>() == "inhibited" );
+    REQUIRE( app.property( "ddspc_control" )["training"].get<std::string>() == "coefficients_frozen" );
     REQUIRE( app.property( "safety" )["dm_write_enabled"].get<std::string>() == "false" );
     REQUIRE( app.property( "safety" )["model_interlock"].get<std::string>() == "native_calibration_unavailable" );
     REQUIRE( app.inhibited() );
@@ -349,4 +351,35 @@ TEST_CASE( "Native phase app accepts existing AD7689 DDSPC status schema", "[nat
     REQUIRE( app.appShutdown() == 0 );
     REQUIRE( ddspc_test_output_calls() == 0 );
 }
+/** \brief Native operator controls preserve Legacy inhibition and refuse unqualified physical output. */
+TEST_CASE( "Native learn predict and reset controls preserve qualification", "[native-observation][app][output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc::newCallBack_m_indiP_learningToggle;
+    MagAOX::app::loPredCtrlAcc::newCallBack_m_indiP_predictingToggle;
+    MagAOX::app::loPredCtrlAcc::newCallBack_m_indiP_resetToggle;
+#endif
+    // clang-format on
+    InstalledApplication app;
+    REQUIRE( app.load( { { "online_shadow.enabled", "1" }, { "parameters.accel_history", "1" } } ) );
+    REQUIRE( app.appStartup() == 0 );
+    auto learn = app.property( "learn" );
+    learn["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_learningToggle( learn ) == 0 );
+    auto predict = app.property( "predict" );
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_predictingToggle( predict ) < 0 );
+    predict["toggle"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( app.newCallBack_m_indiP_predictingToggle( predict ) == 0 );
+    learn["toggle"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( app.newCallBack_m_indiP_learningToggle( learn ) == 0 );
+    auto reset = app.property( "reset_model" );
+    reset["request"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_resetToggle( reset ) == 0 );
+    REQUIRE( app.inhibited() );
+    REQUIRE( app.appShutdown() == 0 );
+    REQUIRE( ddspc_test_output_calls() == 0 );
+}
+
 } // namespace libXWCTest::loPredCtrlAccTest

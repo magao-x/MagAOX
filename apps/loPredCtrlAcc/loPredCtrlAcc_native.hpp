@@ -1,10 +1,10 @@
 /** \file loPredCtrlAcc_native.hpp
- * \brief Installed MagAO-X entrypoint with continuous input acquisition and mandatory output inhibition.
+ * \brief Installed MagAO-X entrypoint with continuous acquisition and explicitly guarded syncopation output.
  */
 #ifndef loPredCtrlAcc_native_hpp
 #define loPredCtrlAcc_native_hpp
-#ifndef DDSPC_SHADOW_ONLY
-    #error "The installed loPredCtrlAcc application requires DDSPC_SHADOW_ONLY"
+#if !defined( DDSPC_SHADOW_ONLY ) && !defined( DDSPC_OPERATIONAL_BUILD )
+    #error "The installed application requires an explicit guarded native build profile"
 #endif
 #include "loPredCtrlAcc.hpp"
 

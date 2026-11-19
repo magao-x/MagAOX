@@ -347,7 +347,8 @@ void ShadowController::step( Model &item, const ShadowRecord &record, bool assis
             state.m_reason = ShadowReason::Untrained;
             if( item.m_segmentUpdates >= std::max<std::uint64_t>( state.m_features, m_config.m_minUpdates ) )
             {
-                if( item.m_rankDirty && index % m_config.m_updateStride == 0 )
+                if( item.m_rankDirty && index % m_config.m_updateStride == 0 &&
+                    ( state.m_trainingEnabled || !m_config.m_freezeQualification ) )
                 {
                     DDSPC_PROFILE_SCOPE( Rank );
                     item.m_scaled = item.m_features;
