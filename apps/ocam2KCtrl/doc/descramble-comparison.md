@@ -55,11 +55,11 @@ stage instrumentation; the cause of the earlier larger penalty remains
 unresolved. Final qualification should also use the intended operating
 instrumentation setting, fixed throughout each matched comparison.
 
-The later 2,000-FPS optimized/parallel-labeled capture averages 33.760 versus
+The later 2,000-FPS optimized/parallel capture averages 33.760 versus
 37.423 us acquisition-to-write, with reported standard deviations 1.067 versus
-1.119 us. Applied worker-state confirmation is tracked in the engineering
-record. Together with the earlier SDK comparisons, this supports selecting
-optimized as the default; the worker remains an explicit experiment.
+1.119 us. The operator confirmed parallel was running on CPU32 with the
+framegrabber on CPU33. Together with the earlier SDK comparisons, this supports
+selecting optimized as the default; the worker remains an explicit experiment.
 
 After finishing that experiment, remove or empty `descramble.cpuset` at the
 next operator restart to disable worker creation and restore its reserved core

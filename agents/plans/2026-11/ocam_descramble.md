@@ -51,8 +51,8 @@ Host verified as `mx11`. This pass inspects local source and configuration
 only; no instrument commands, benchmarks, or implementation were run.
 Status as of 2026-11-18: **the operator comparison favors single-thread
 optimized, which is now the default requested method**. The latest
-parallel-labeled RTC capture is about 3.66 us slower acquisition-to-write;
-method/placement readback confirmation is tracked with that measurement below.
+confirmed parallel RTC capture is about 3.66 us slower acquisition-to-write,
+with the worker on CPU32 and framegrabber on CPU33 sharing L3.
 SDK remains explicitly selectable and is the fallback for unsupported modes or
 unvalidated mappings. The earlier small spread penalty versus SDK remains part
 of the default tradeoff; long-run tails and complete-loop qualification are
@@ -66,7 +66,7 @@ correctness, jitter, frame delivery, or end-to-end AO latency. Following the
 operator comparisons, default to the validated optimized single-thread path,
 retain SDK as the explicit reference and unsupported-mode/table fallback, and
 keep live INDI comparison methods. The worker experiment has not justified
-dedicating another core in the latest labeled RTC capture.
+dedicating another core in the latest confirmed RTC capture.
 
 ### Findings from the current code
 
@@ -1417,39 +1417,39 @@ has `33` and `32-39`. Thus CPU32/33 share L3 and have no other online SMT
 siblings in that readback. CPU31 is not on their CCD. The comparison was
 prepared with `camwfs_sw`/CPU32 for the worker and `camwfs`/CPU33 for acquisition.
 
-The telemetry excerpt itself does not include applied-method or worker-state
-readbacks. Operator confirmation of `applied=parallel`, `parallel=running`,
-`caller_cpu=33`, and `worker_cpu=32` has been requested to distinguish active
-worker timing from SDK fallback. This does not block the default decision,
-which also relies on the earlier SDK/optimized/SDK comparisons. No return-to-
-optimized segment, stage-timing setting, conversion-stage samples, frame-quality
-counters or end-to-end loop measurements are supplied in this excerpt.
+The operator subsequently confirmed `applied=parallel`, `parallel=running`,
+`caller_cpu=33`, and `worker_cpu=32` for the parallel capture. This establishes
+that the measured run used the active worker on the intended shared-L3 core,
+rather than SDK fallback. The default decision also relies on the earlier
+SDK/optimized/SDK comparisons. No return-to-optimized segment, stage-timing
+setting, conversion-stage samples, frame-quality counters or end-to-end loop
+measurements are supplied in this excerpt.
 
 Arithmetic averages of every supplied window summary, in microseconds:
 
-| Metric | Optimized | Parallel-labeled |
+| Metric | Optimized | Parallel |
 | --- | ---: | ---: |
 | Acquisition-to-write mean | 33.760375 | 37.422939 |
 | Acquisition-to-write reported standard deviation | 1.067152 | 1.118703 |
 | Acquisition-interval reported standard deviation | 0.559981 | 0.587159 |
 | Publication-interval reported standard deviation | 1.703262 | 1.770800 |
 
-The parallel-labeled mean is **3.662563 us (10.85%) slower** than optimized,
+The parallel mean is **3.662563 us (10.85%) slower** than optimized,
 with **0.051551 us (4.83%) greater reported standard deviation**. Publication-
 interval standard deviation increases 0.067538 us (3.97%). These are arithmetic
 averages of rolling-window summaries, not pooled frame distributions,
 independent experiments, standard errors or percentile estimates.
 
-All parallel-labeled means, 37.400656–37.439290 us, exceed all optimized means,
+All parallel means, 37.400656–37.439290 us, exceed all optimized means,
 33.714670–33.790704 us. Reported WMA standard deviations likewise do not overlap:
 1.08049–1.18351 us versus 1.04968–1.07959 us. The first two parallel reports have
 larger spread, but excluding both as a sensitivity check gives 37.426396 us
 mean and 1.097645 us average standard deviation; the slower-mean conclusion
 persists. No samples are excluded from the main comparison.
 
-Assuming the worker was active, this result supports retiring parallel as the
-preferred performance direction: it spends another core and regresses the
-complete acquisition-to-write time. It is consistent with the local warning
+With worker activity and placement confirmed, this result supports retiring
+parallel as the preferred performance direction: it spends another core and
+regresses the complete acquisition-to-write time. It is consistent with the local warning
 that kernel speedup can disappear after staging, but these aggregate timings
 do not isolate handoff, cache ownership, frequency or copy costs. They do not
 establish which component caused the regression.
