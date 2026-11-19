@@ -1,11 +1,17 @@
 /** \file loPredCtrlAcc.cpp
- * \brief Standard installed MagAO-X application entrypoint, with native inputs and physical output inhibited.
+ * \brief Operational DDSPC application entrypoint with existing syncopation auxiliary output.
  */
-#include "loPredCtrlAcc_native.hpp"
+#if defined( DDSPC_OPERATIONAL_BUILD ) && !defined( DDSPC_SHADOW_ONLY )
+    #include "loPredCtrlAcc_operational.hpp"
+using Controller = MagAOX::app::loPredCtrlAcc_operational;
+#else
+    #include "loPredCtrlAcc_native.hpp"
+using Controller = MagAOX::app::loPredCtrlAcc_native;
+#endif
 
 /// Run the standard framework lifecycle using the invocation/configuration name as the INDI identity.
 int main( int argc /**< [in] Argument count. */, char **argv /**< [in] Standard MagAO-X arguments. */ )
 {
-    MagAOX::app::loPredCtrlAcc_native app;
+    Controller app;
     return app.main( argc, argv );
 }

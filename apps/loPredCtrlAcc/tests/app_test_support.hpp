@@ -9,6 +9,7 @@
 #include <mutex>
 #include <vector>
 #include <semaphore.h>
+#include <ImageStreamIO/ImageStreamIO.h>
 
 #include "../../../libMagAOX/app/indiMacros.hpp"
 #include "../../../libMagAOX/app/indiUtils.hpp"
@@ -161,6 +162,15 @@ class MagAOXApp
                                 const std::string & /**< [in] Label. */,
                                 const std::string & /**< [in] Group. */ );
 
+    /// Create the real current/target numeric schema without a server.
+    template <typename T>
+    int createStandardIndiNumber( pcf::IndiProperty &p /**< [out] Property. */,
+                                  const std::string &name /**< [in] Property name. */,
+                                  const T           &minimum /**< [in] Unused display minimum. */,
+                                  const T           &maximum /**< [in] Unused display maximum. */,
+                                  const T           &step /**< [in] Unused display step. */,
+                                  const std::string &format /**< [in] Unused display format. */ );
+
     /// Create a one-of-many selector, with all elements initially off.
     int createStandardIndiSelectionSw( pcf::IndiProperty              &p /**< [out] Property. */,
                                        const std::string              &n /**< [in] Name. */,
@@ -265,6 +275,17 @@ inline int MagAOXApp<useIndi>::createROIndiText( pcf::IndiProperty &p /**< [out]
 {
     createProperty( p, n, pcf::IndiProperty::Text, true );
     p.add( pcf::IndiElement( element, "" ) );
+    return 0;
+}
+
+template <bool useIndi>
+template <typename T>
+inline int MagAOXApp<useIndi>::createStandardIndiNumber(
+    pcf::IndiProperty &p, const std::string &name, const T &, const T &, const T &, const std::string & )
+{
+    createProperty( p, name, pcf::IndiProperty::Number, false );
+    p.add( pcf::IndiElement( "current", 0.0 ) );
+    p.add( pcf::IndiElement( "target", 0.0 ) );
     return 0;
 }
 
@@ -453,6 +474,9 @@ class shmimMonitor : public TestLifecycle
     /// Fixture stream shape and type; no ImageStreamIO object exists.
     uint32_t m_width{ 1 }, m_height{ 1 }, m_dataType{ _DATATYPE_FLOAT };
 
+    /// Optional process-private metadata for WFS callback tests; never attached to shared memory.
+    IMAGE m_imageStream{};
+
     /// Fixture name and reader preference.
     std::string m_shmimName;
     bool        m_getExistingFirst{ false };
@@ -496,6 +520,12 @@ inline int telemeter<D>::checkRecordTimes( telem_fgtimings /**< [in] Record type
 } // namespace MagAOX::app
 
 // Mirror helper dispatch while replacing only the hardware-owning bases above.
+#define SHMIMMONITOR_SETUP_CONFIG( c ) shmimMonitorT::setupConfig( c )
+#define SHMIMMONITOR_LOAD_CONFIG( c ) shmimMonitorT::loadConfig( c )
+#define SHMIMMONITOR_APP_STARTUP shmimMonitorT::appStartup()
+#define SHMIMMONITOR_APP_LOGIC shmimMonitorT::appLogic()
+#define SHMIMMONITOR_APP_SHUTDOWN shmimMonitorT::appShutdown()
+#define SHMIMMONITOR_UPDATE_INDI shmimMonitorT::updateINDI()
 #define FRAMEGRABBER_SETUP_CONFIG( c ) frameGrabberT::setupConfig( c )
 #define FRAMEGRABBER_LOAD_CONFIG( c ) frameGrabberT::loadConfig( c )
 #define FRAMEGRABBER_APP_STARTUP frameGrabberT::appStartup()

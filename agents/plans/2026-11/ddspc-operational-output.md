@@ -219,3 +219,48 @@ acquisition applications, original loPredCtrl, loPredCtrlAcc's production source
 and configuration, and the existing producer/timing headers are unchanged.
 Only the shared helper's explicit simulator-policy branch changes output policy;
 there is no change to the slot protocol or DM channel assignments.
+
+## Operational RTC controller and lab handoff
+
+The normal loPredCtrlAcc build now uses the WFS monitor, the existing independent
+QR/covariance RLS models, and the syncopation producer. The explicit native-observe
+build remains available for historical replay. The configuration takes the WFS
+stream from the existing native configuration, the model settings from the
+recorded loPredCtrl profile, and the FITS cube path from the existing tweeter
+configuration. The controller retains its own auxiliary copy receipts for training.
+It confirms removal with a tagged zero on that source.
+
+Standard decisions use only WFS and command history. The assisted fit adds the
+ordered 8 kHz X/Y measurements already synchronized upstream. Both models make
+one decision per 2 kHz WFS frame, use the same command history and control objective,
+and score matching forecast origins and measured targets. The producer holds each
+prepared surface for the available DM slots. Operator gain, learn, predict, mode,
+reset and the three-stage loPredCtrl exploration sequence are available via INDI.
+
+### Changed files
+
+- Application entry and build in `apps/loPredCtrlAcc/Makefile`, `loPredCtrlAcc.cpp`
+  and the new `loPredCtrlAcc_operational.hpp`.
+- Paired learner and original regularization in `shadow_controller.hpp` and
+  `shadow_controller.cpp`.
+- Optional exact copied-payload notification and native image geometry validation
+  in `libMagAOX/app/syncoOutput.hpp`.
+- Active configuration in `apps/loPredCtrlAcc/loPredCtrlAcc.conf` and
+  `examples/operational/loPredCtrlAcc.conf`.
+- Operator steps in `RTC_TESTING.md`, linked from `NATIVE_APPLICATION.md` and
+  `OPERATIONAL_DDSPC.md`.
+- Verification in `tests/Makefile.offline`, `tests/app_test_support.hpp`,
+  `tests/rtc_controller_test.cpp`, `tests/synco_transport_test.cpp`,
+  `tests/operational_config_test.py`, `tests/native_deployment_test.py` and
+  `tests/native_producer_test.py`. Relative application paths above are under
+  `apps/loPredCtrlAcc`.
+
+The workstation tests exercise the WFS callback with ACC disconnected, both RLS
+solvers, frozen models, the supplied dimensions and exploration stages, FITS
+planes, upstream sample continuity and the actual producer base with a mock
+consumer. The synthetic closed-loop tests require each mode's held-out residual
+RMS to fall below half of the corresponding uncontrolled RMS. Run the native
+build and measure actual optical response and RTC timing on the laboratory system.
+The workstation's native build stops at the missing flatlogcodes prerequisite.
+The deployed WFS-to-DM sign, scale and optional mask, and the physical ADC
+calibration if using AD7689, require the installed instrument configuration.

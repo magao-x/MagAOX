@@ -18,15 +18,16 @@
 
 namespace MagAOX::app
 {
-/// Explicit commissioning authorization; DDSPC keeps mandatory bounds unless the application selects producer defaults.
+/// Optional commissioning bounds; operational applications may select the existing producer's finite-value/ack policy.
 struct SyncoOutputConfig
 {
     bool         m_authorized{ false }, m_routingVerified{ false }; ///< Both are startup-only operator assertions.
     double       m_maxAbs{ 0 }, m_maxStep{ 0 }; ///< Approved full-image surface-micron limits; no guessed defaults.
     std::int64_t m_ackTimeoutNs{
-        0 }; ///< DDSPC requires a positive timeout; producer defaults permit zero/base-only ack wait.
-    bool m_producerDefaults{
-        false }; ///< App-only finite-value/base-ack policy, used by accelSim; never an INDI/config switch.
+        0 }; ///< Strict bounds require a positive timeout; producer defaults permit zero/base-only ack wait.
+    bool m_producerDefaults{ false }; ///< App-selected finite-value/base-ack policy; never an INDI/config trust switch.
+    std::uint32_t m_width{ 0 },
+        m_height{ 0 }; ///< Optional exact geometry from a two-dimensional synthesis calibration.
 };
 
 /// Copyable requested/transport-acknowledged state; never a physical application certificate.
@@ -234,6 +235,8 @@ class SyncoOutput : protected dev::dmSyncopationProducer<SyncoOutput>
     std::function<bool()> m_qualified; ///< Read current application eligibility without acquiring output intent.
     std::function<bool( const synco::Request &, const synco::Record &, std::int64_t, std::span<float> )>
         m_candidate; ///< Copy-only prepared image callback; never fits a model.
+    std::function<void( std::span<const float> )>
+        m_copied; ///< Optional owner notification after an exact copied acknowledgement; no physical-application claim.
     /// Own base poll/publish calls; no independent slot clock is generated.
     void run();
 
@@ -249,7 +252,9 @@ class SyncoOutput : protected dev::dmSyncopationProducer<SyncoOutput>
     /// Start only a local producer thread; strict shadow builds never start it or attach streams.
     void start( std::function<bool()> qualified /**< [in] Current input/model gate. */,
                 std::function<bool( const synco::Request &, const synco::Record &, std::int64_t, std::span<float> )>
-                    candidate /**< [in] Copy an already prepared exact-slot image. */ );
+                    candidate /**< [in] Copy an already prepared exact-slot image. */,
+                std::function<void( std::span<const float> )> copied =
+                    {} /**< [in] Optional nonblocking notification of the copied own contribution. */ );
     /// Prepare an authorized own-channel zero after an explicit learning request; does not enable correction.
     bool initialize();
     /// Explicit INDI intent; startup always remains off.
@@ -285,13 +290,15 @@ inline void SyncoOutput::configure(
 }
 inline void SyncoOutput::start(
     std::function<bool()>                                                                                qualified,
-    std::function<bool( const synco::Request &, const synco::Record &, std::int64_t, std::span<float> )> candidate )
+    std::function<bool( const synco::Request &, const synco::Record &, std::int64_t, std::span<float> )> candidate,
+    std::function<void( std::span<const float> )>                                                        copied )
 {
     std::lock_guard<std::mutex> lock( m_mutex );
     if( m_thread.joinable() )
         throw std::logic_error( "Output already started" );
     m_qualified = std::move( qualified );
     m_candidate = std::move( candidate );
+    m_copied    = std::move( copied );
 #if defined( DDSPC_OPERATIONAL_BUILD ) && !defined( DDSPC_SHADOW_ONLY )
     if( m_config.m_authorized && m_config.m_routingVerified && !m_thread.joinable() )
     {
@@ -352,6 +359,27 @@ inline void SyncoOutput::run()
     synco::Request pending;
     bool           haveRequest = false;
     std::int64_t   stopping    = -1;
+    // Called with the output mutex held, before the single payload buffer may be reused.
+    auto receive = [&]( const synco::CommitRecord &commit )
+    {
+        synco::AckRecord ack{};
+        if( m_state->pending() && synco::readRecord( m_syncopationAck, ack ) && synco::acknowledges( ack, commit ) )
+        {
+            const bool copied = ack[synco::ackStatus] == synco::copied;
+            m_state->acknowledge( copied );
+            if( copied && m_copied )
+            {
+                try
+                {
+                    m_copied( m_pixels );
+                }
+                catch( ... )
+                {
+                    m_state->fault( "copy_callback_exception_zero_pending" );
+                }
+            }
+        }
+    };
     while( m_running.load() )
     {
         const auto now = synco::monotonicNs();
@@ -369,11 +397,7 @@ inline void SyncoOutput::run()
         { //mutex scope
             std::lock_guard<std::mutex> lock( m_mutex );
             if( m_syncopationOutstanding )
-            {
-                synco::AckRecord ack{};
-                if( synco::readRecord( m_syncopationAck, ack ) && synco::acknowledges( ack, m_syncopationPending ) )
-                    m_state->acknowledge( ack[synco::ackStatus] == synco::copied );
-            }
+                receive( m_syncopationPending );
             m_state->check( now, qualified );
             const auto state = m_state->status();
             wanted           = state.m_requested;
@@ -398,7 +422,9 @@ inline void SyncoOutput::run()
                 std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
                 continue;
             }
-            if( !syncopationGeometry( m_source ) || m_source.md->nelement != m_pixels.size() )
+            if( !syncopationGeometry( m_source ) || m_source.md->nelement != m_pixels.size() ||
+                ( m_config.m_width && m_source.md->size[0] != m_config.m_width ) ||
+                ( m_config.m_height && m_source.md->size[1] != m_config.m_height ) )
             {
                 std::lock_guard<std::mutex> lock( m_mutex );
                 m_state->fault( "auxiliary_geometry" );
@@ -410,11 +436,14 @@ inline void SyncoOutput::run()
                 zero = true;
             }
         }
-        const bool owned  = m_syncopationOutstanding;
-        const int  polled = haveRequest ? 0 : syncopationPoll( pending, m_source );
+        const bool owned          = m_syncopationOutstanding;
+        const auto previousCommit = m_syncopationPending;
+        const int  polled         = haveRequest ? 0 : syncopationPoll( pending, m_source );
         if( owned && !m_syncopationOutstanding )
         { //mutex scope
             std::lock_guard<std::mutex> lock( m_mutex );
+            receive( previousCommit ); // The receipt may have arrived during the base poll.
+            zero = m_state->zero_needed();
             if( m_state->pending() )
             {
                 m_state->transport_reset();
@@ -468,7 +497,7 @@ inline void SyncoOutput::run()
                 {
                     current = false;
                 }
-                //mutex scope
+                // mutex scope
                 std::lock_guard<std::mutex> lock( m_mutex );
                 if( !current )
                 {

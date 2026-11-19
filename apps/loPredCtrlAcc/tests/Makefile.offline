@@ -251,3 +251,14 @@ check-operational-controls:
 	  $(BUILD_DIR)/operational-controls/ddspc_offline_test
 	$(BUILD_DIR)/operational-controls/ddspc_offline_test '[native-observation][app],[output]'
 	python3 -m unittest discover -s $(TEST_DIR) -p operational_config_test.py
+
+# Actual operational app and both real learners, with private WFS/DM data and explicit synthetic copy receipts.
+.PHONY: check-rtc-controller
+check-rtc-controller:
+	$(MAKE) -f $(TEST_DIR)/Makefile.offline BUILD_DIR=$(BUILD_DIR)/rtc-controller CXX=$(CXX) \
+	  DDSPC_MINIMAL_APP_TESTS=yes CXXFLAGS='$(CXXFLAGS) -DDDSPC_OPERATIONAL_BUILD' \
+	  LDFLAGS='$(LDFLAGS) -Wl,-rpath,$(shell pkg-config --variable=libdir mxlib)' \
+	  LDLIBS='-pthread $(shell pkg-config --libs-only-L --libs-only-l mxlib)' \
+	  SOURCES='$(filter-out $(TEST_DIR)/ddspc_app_test.cpp $(TEST_DIR)/ddspc_shadow_pipeline_test.cpp,$(SHADOW_TEST_SOURCES)) $(TEST_DIR)/rtc_controller_test.cpp $(TEST_DIR)/operational_platform.cpp' \
+	  $(BUILD_DIR)/rtc-controller/ddspc_offline_test
+	$(BUILD_DIR)/rtc-controller/ddspc_offline_test '[rtc-controller]'

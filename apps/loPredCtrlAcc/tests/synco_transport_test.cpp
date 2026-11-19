@@ -243,7 +243,9 @@ TEST_CASE( "Real producer publishes independent prepared standard and assisted m
     const auto               other = images.at( "dm01disp10_aux" ).pixels;
     MagAOX::app::SyncoOutput output;
     output.configure( { true, true, 100, 100, 10000000 }, "dm10disp10_aux", "private_timing", 30, 4 );
-    std::atomic<bool> slotsValid{ true };
+    std::atomic<bool>          slotsValid{ true };
+    std::atomic<std::uint64_t> copiedCount{ 0 };
+    std::atomic<bool>          copiedActive{ false }, copiedZero{ false };
     output.start( [] { return true; },
                   [&]( const auto &request, const auto &record, std::int64_t now, std::span<float> pixels )
                   {
@@ -251,6 +253,16 @@ TEST_CASE( "Real producer publishes independent prepared standard and assisted m
                           slotsValid.store( false );
                       std::fill( pixels.begin(), pixels.end(), candidate );
                       return true;
+                  },
+                  [&]( std::span<const float> pixels )
+                  {
+                      ++copiedCount;
+                      if( pixels.front() == 0 )
+                          copiedZero.store( true );
+                      else if( pixels.front() == candidate )
+                          copiedActive.store( true );
+                      else
+                          slotsValid.store( false );
                   } );
     REQUIRE_FALSE( output.status().m_requested );
     REQUIRE( output.request( true ) );
@@ -259,6 +271,9 @@ TEST_CASE( "Real producer publishes independent prepared standard and assisted m
     REQUIRE( wait_for( [&] { return output.status().m_zeroConfirmed; } ) );
     REQUIRE( output.stop() );
     REQUIRE( slotsValid.load() );
+    REQUIRE( copiedCount.load() == output.status().m_acknowledgements );
+    REQUIRE( copiedActive.load() );
+    REQUIRE( copiedZero.load() );
     REQUIRE( images.at( "dm01disp10_aux" ).pixels == other );
     for( auto value : images.at( "dm10disp10_aux" ).pixels )
         REQUIRE( value == 0 );

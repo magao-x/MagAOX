@@ -1,3 +1,5 @@
+> **Current RTC procedure:** Use [RTC_TESTING.md](RTC_TESTING.md) for the operational controller, configuration, install commands and INDI sequence. The report below describes the earlier commissioning build.
+
 Current output/control milestone: [OPERATIONAL_DDSPC.md](OPERATIONAL_DDSPC.md). The report below describes the prior shadow-only profile; default builds remain strict shadow-only.
 
 # Native loPredCtrlAcc commissioning

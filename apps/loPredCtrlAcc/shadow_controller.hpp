@@ -129,6 +129,9 @@ struct ShadowConfig
     /// Freeze the fitted excitation certificate when learning is paused; input validity remains mandatory.
     bool m_freezeQualification{ false };
 
+    /// Diagnostic replay may require full regressor rank; operational RLS uses its configured positive prior.
+    bool m_requireFullRank{ true };
+
     /// Relative rank threshold after feature column normalization.
     realT m_rankTolerance{ 1e-5f };
 
@@ -387,6 +390,9 @@ class ShadowController
     /// Enable or pause one learner without changing selection or the other learner.
     void training( ShadowMode mode /**< [in] Learner to configure. */,
                    bool       enabled /**< [in] Requested adaptation state. */ );
+
+    /// Change the shared command penalty without resetting either independent fit.
+    void regularization( realT value /**< [in] Finite positive penalty, as in loPredCtrl exploration stages. */ );
 
     /// Reset one learner, its diagnostics, and histories; selection and the other learner are retained.
     void reset( ShadowMode mode /**< [in] Independent model to reset. */ );
