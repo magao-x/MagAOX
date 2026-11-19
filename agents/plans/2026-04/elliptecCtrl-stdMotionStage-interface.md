@@ -119,3 +119,54 @@ Implementation status after the test stage:
   - `apps/elliptecCtrl/elliptecCtrl.hpp`: `96.4%` line coverage, `100%` function coverage.
   - `libMagAOX/app/dev/stdMotionStage.hpp`: `99.0%` line coverage, `100%` function coverage.
 - Those results satisfy the repo-standard coverage target for this work item (`100%` function coverage and at least `95%` statement/line coverage).
+
+Hardware bring-up (ELL21) — design review, 2026-11-18:
+- Symptom: on an ELL21 rotation mount, pressing `home` cycles the app between HOMING, NOTCONNECTED and NOTHOMED.
+- Reference: Thorlabs ELLx OEM/Bare modules protocol manual, Issue 12 (ETN032283-D03).
+- Findings from the manual:
+  - `ho`/`ma`/`mr` reply with `GS<code>` while incomplete (busy or error) and with `PO<pos>` when the move completes.
+  - `st` only stops continuous (`fw`/`bw` with jog step 0) motion; it does not interrupt `ma`/`ho`.
+  - ELL21: 65536 pulses/rev, 360 deg travel.
+  - ELL16/ELL21 minimum acceptable velocity is 50%; lower values may stall.
+  - GS codes other than 00 (OK) and 09 (busy) are errors (e.g. 02 mechanical timeout, 0C out of range) and must not be treated as idle.
+- Findings from the code:
+  - Serial I/O is not serialized: INDI callbacks (home/preset/absDeg/etc.) issue `txrx_` from the INDI thread while `appLogic()` polls from the main thread, so the two threads can consume each other's reply frames.
+  - `q_status_()`/`q_position_()` accept whatever frame arrives next and do not check address or header.
+- Decisions:
+  - Default `motion.velPercent` is 80.
+  - Enforce a per-model minimum velocity (50% for ELL16/ELL21/ELL22, detected from the `in` reply) on both config and INDI input, logging a warning when clamped.
+  - Serialize all serial I/O with `m_indiMutex`, matching `smc100ccCtrl`/`zaberCtrl`/`filterWheelCtrl`: `appLogic()` holds it around connect/poll/reconnect, and every `elliptecCtrl` INDI callback acquires it (the `stdMotionStage` callbacks already do).
+  - Motion commands (`ho`, `ma`, `mr`, `om`) are issued without waiting for completion so callbacks never hold the mutex for the duration of a move; the poll loop observes `GS09`/`PO` to track progress and completion.
+  - Replace the "next frame is the answer" I/O with a generic frame reader: parse address/header/payload, drop frames for other addresses, log malformed frames at debug, and dispatch by header (`GS` -> `m_gs`, `PO` -> position only, `IN` -> device info including model and pulses/rev).
+  - Queries (`gs`, `gp`, `in`) write, then dispatch every received frame until the expected header arrives or the timeout expires; each poll first drains already-buffered frames non-blocking.
+  - Motion completion is decided by status only: a pending move/home completes when `gs` returns `00`, provided busy was observed at least once or ~200 ms elapsed since the command. `PO` frames never signal completion because `gp` also returns `PO`.
+  - Add a config flag `serial.trace` that logs every TX/RX frame at `LOG_DEBUG2`, to diagnose hardware behavior from logdump (first target: confirm the ELL21 answers `gs` with `GS09` during a home).
+  - Device-reported errors (GS codes other than 00/09) are logged at `LOG_ERROR` with the manual's meaning, clear the pending operation and the moving state, set `m_homed = false` if the failed operation was a home, surface the error text in `status`, and keep the port open.
+  - Only true communication failures (read timeout, write/read error) count against `m_commMaxMisses`; malformed or unexpected frames do not. Reconnect only when the budget is exhausted.
+  - Drop the separate busy read timeout; use a single short read timeout (~1 s) since `gs` answers promptly mid-move.
+  - Reconnect preserves `m_homed` (only power-off clears it). If the first `gs` after reconnect returns `09`, treat it as an unknown motion in progress (OPERATING) until `00`.
+  - After power-on the stage stays NOTHOMED until homed; presets and `absDeg` moves remain allowed while NOTHOMED (matches `smc100ccCtrl`).
+  - Implement `stage.powerOnHome`: when true, issue one home after the first connection following power-on (not after a USB reconnect). The ELL21 instrument config should set `powerOnHome=true` (follow-up in the config repo).
+  - Post-home offset stays app-side but uses an absolute move: on home `GS00`, issue `ma` to `stage.homeOffset` (not `mr`). Home + offset is one operation: state remains HOMING and `m_homed` is set only when the offset move also reports `00`; an offset failure is treated as a failed home. Do not modify the device's stored home offset (`so`). `homeOffset` only sets the post-home rest position; presets and `absDeg` remain in device coordinates.
+  - Single-turn 360 deg model: display/telemetry wrap position to [0, 360); `absDeg` accepts [0, 360) and maps to `ma` in [0, 65536) pulses (verify with the trace that `ma` from a multi-turn count lands correctly); `relDeg`/`relMove` may be either sign, limited to +/-360 per step; preset matching uses circular distance. Remove `stage.allowMultiturn` and the 720 deg limits.
+  - Add `stage.presetTolerance` (deg, default 0.5) used for preset matching with circular distance. Reject configs where distinct preset positions are closer than 2x the tolerance (exact duplicates remain allowed as name aliases).
+  - `stop()` sends `st` under the mutex without waiting and does not assume success: pending operation and moving state are left for the status poll to resolve. A `GS03` reply logs a warning and sets `status` to "Stop not supported; move will complete" (not a fault). `m_preset_target` is cleared only once the device reports idle after a stop request. Verify on hardware whether `st` interrupts `ma`/`ho` on the ELL21.
+  - `optimize` (`om`) tracked as `Pending::Optimize` with status-based completion. While optimizing: soft misses do not count toward the reconnect budget until `motion.optimizeTimeoutSec` (default 600) elapses (then treated as a failure); state OPERATING with status "Optimizing motors (may take minutes)"; motion requests (preset, home, absDeg, relative) are rejected with a warning while `stop` passes through. After completion set `m_homed = false` (no automatic re-home).
+  - `save` (`us`) allowed only when idle and not optimizing; logged at `LOG_NOTICE` since it writes device EEPROM.
+  - New config `stage.enableMaintenance` (default false): when false, `optimize` and `save` INDI properties are read-only/rejected.
+  - Tests: replace the stateless `fakeElliptecDevice` with a stateful fake ELL21 on the existing PTY (pulse position at 65536/rev, timed motion, `GS09` while busy, unsolicited `PO` on completion, `in` info string, `st` -> `GS03` by default, timed `om`) with fault injection (GS02/GS0C errors, dropped replies, stray/malformed frames, under-velocity, position slip across power-off).
+  - Regression scenarios: (1) home + offset completes HOMING -> READY without NOTCONNECTED; (2) concurrent INDI-thread home vs looping `appLogic()` completes without misses; (3) late `PO` during a `gs` query neither breaks the poll nor completes early; (4) `GS02` during home -> NOTHOMED, port open, status shows error; (5) `powerOnHome` homes once after power-on, not after reconnect; (6) preset arrival within 0.5 deg including 0/360 wrap; (7) optimize exceeds miss budget without reconnect, rejects motion, ends NOTHOMED; (8) `stop` with `GS03` leaves move to complete.
+  - Bug-first: write scenarios 1-3 against the current code and confirm they fail before fixing. Keep the 100% function / >=95% line coverage targets; `stdMotionStage_probe` stays.
+  - Work continues on `jrmales/elliptecCtrl` (coordinated with Jared). The rebased branch must be force-pushed (`--force-with-lease`) before new commits are shared. Commit order: failing fake-device tests (scenarios 1-3); serial/threading fix (mutex, frame reader, non-blocking motion, trace); behavior changes (errors, homing/powerOnHome/offset, 360 deg model, preset tolerance, velocity floor, stop, maintenance) with their tests, split where practical; documentation + plan; formatting.
+- Hardware acceptance checklist (ELL21, `serial.trace=true`; record results here):
+  1. Connect: `in` identifies ELL21 with 65536 pulses/rev; app reaches NOTHOMED/READY with velocity 80.
+  2. Power-on: `powerOnHome` homes once, applies offset, ends READY with no NOTCONNECTED in logs.
+  3. Manual home from READY: clean HOMING -> READY; trace shows `GS09` during and `GS00`/`PO` at completion.
+  4. Presets: each preset reports the correct `presetName` on arrival; record landing error vs. the 0.5 deg tolerance.
+  5. Wrap: moves crossing 0/360 in both directions via `absDeg` and `relMove`; an `ma` after more than a full turn of relative moves.
+  6. Stop: `stop` during a long move; record whether it stops or replies `GS03`.
+  7. USB reconnect: reconnects, keeps `m_homed`, no re-home.
+  8. PDU power cycle: POWEROFF -> NOTHOMED -> auto-home -> READY.
+  9. Optimize (maintenance enabled): record `om` duration, no reconnect, ends NOTHOMED.
+  10. Logdump `telem_stage` / `telem_position` covering the above.
+- Note: the earlier "Implementation status" sections describe the first refactor and test passes; the ELL21 design review above supersedes them where they conflict (notably the fake device, timeouts, `stop()` semantics, and the 720 deg range).

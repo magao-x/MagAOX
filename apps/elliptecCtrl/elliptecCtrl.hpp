@@ -29,10 +29,18 @@ namespace app
 /// The MagAO-X Elliptec stage controller.
 /** Uses the Elliptec serial protocol while exposing the standard MagAO-X motion-stage interface.
  *
- * Elliptec protocol reference:
- * - TX: `<ADDR><cmd>[args]` with no CRLF
- * - RX: a single CRLF-terminated line
+ * Elliptec protocol reference (Thorlabs ELLx OEM/Bare modules protocol manual, Issue 12):
+ * - TX: `<ADDR><cmd>[args]` with no terminator; command lengths are fixed per command
+ * - RX: CRLF-terminated frames `<ADDR><HEADER><payload>`
+ * - motion commands (`ho`, `ma`, `mr`, `om`) reply `GS09` while busy (or an error `GS`) and report `PO` or `GS00`
+ *   on completion, so they are sent without waiting and their progress is tracked by polling `gs`
  * - commands used here: `in`, `gs`, `gp`, `hoX`, `st`, `us`, `om`, `svHH`, `maXXXXXXXX`, `mrXXXXXXXX`
+ *
+ * Threading: all serial I/O is serialized by `m_indiMutex`. `appLogic()` holds it while talking to the
+ * device, the app's INDI callbacks acquire it, and the `stdMotionStage` callbacks acquire it before calling
+ * `moveTo()` / `startHoming()`. `stop()` is called without the mutex and acquires it itself.
+ *
+ * The stage is modeled as a single 360 degree circle: positions are reported wrapped into [0, 360).
  *
  * \ingroup elliptecCtrl
  */
@@ -58,6 +66,10 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     virtual void setupConfig() override;
 
     /// Implementation of configuration loading, separated for helper-macro use.
+    /**
+     * \returns 0 on success
+     * \returns -1 on an invalid configuration
+     */
     int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] application configuration from which to load */ );
 
     /// Load the application configuration.
@@ -78,17 +90,20 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Handle continued operation while powered off.
     virtual int whilePowerOff() override;
 
-    /// Stop the current motion request.
+    /// Request a stop of the current motion.
+    /** Called by `stdMotionStage` without `m_indiMutex` held; acquires it itself. The Elliptec `st` command only
+     * stops continuous motion, so the request is sent but the pending operation is left for the poll to resolve.
+     */
     int stop();
 
-    /// Begin a homing sequence.
+    /// Begin a homing sequence. Caller holds `m_indiMutex`.
     int startHoming();
 
-    /// Resolve the active preset index for the current stage angle.
+    /// Resolve the active 0-based preset index for the current stage angle, or -1 if not at a preset.
     float presetNumber();
 
-    /// Move to a preset target supplied by `stdMotionStage`.
-    int moveTo( float target /**< [in] preset number or preset position supplied by the base helper */ );
+    /// Move to a target supplied by `stdMotionStage`. Caller holds `m_indiMutex`.
+    int moveTo( float target /**< [in] preset number (m_movingState == 0) or preset position in degrees */ );
 
     /// Check whether staged telemetry records need to be forced.
     int checkRecordTimes();
@@ -123,6 +138,19 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Handle a new save request.
     INDI_NEWCALLBACK_DECL( elliptecCtrl, m_ipSave );
 
+    /// Human-readable meaning of an Elliptec `GS` status code.
+    static std::string statusMeaning( uint8_t code /**< [in] status/error code from a `GS` frame */ );
+
+    /// Minimum acceptable velocity percentage for an Elliptec model, or 0 if unrestricted.
+    static int minVelocityForModel( uint8_t model /**< [in] model number from the `in` reply, e.g. 21 */ );
+
+    /// Wrap an angle into [0, 360).
+    static double wrapDeg( double deg /**< [in] angle in degrees */ );
+
+    /// Shortest angular distance between two angles on a circle, in [0, 180].
+    static double circularDistanceDeg( double a, /**< [in] first angle in degrees */
+                                       double b /**< [in] second angle in degrees */ );
+
   protected:
     /** \name Configurable Parameters - Data
      *
@@ -141,26 +169,23 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Elliptec device address nibble encoded as ASCII hex.
     char m_addr{ '0' };
 
-    /// Default read timeout for serial transactions in milliseconds.
-    int m_readTimeoutMs{ 3000 };
-
-    /// Read timeout while a command is pending or the device reports BUSY.
-    int m_busyReadTimeoutMs{ 6000 };
+    /// Read timeout for a query reply in milliseconds.
+    int m_readTimeoutMs{ 1000 };
 
     /// Optional post-write delay in milliseconds.
     int m_postWriteSleepMs{ 0 };
 
     /// Velocity percentage command value.
-    int m_velPercent{ 40 };
+    int m_velPercent{ 80 };
 
-    /// Relative move to apply after homing completes.
+    /// Absolute angle in degrees to move to after a home completes; 0 leaves the stage at home.
     double m_homeOffsetDeg{ 0.0 };
 
-    /// Whether absolute moves may span two turns instead of wrapping into one turn.
-    bool m_allowMultiturn{ false };
-
-    /// Pulses per 360-degree revolution, from configuration or device query.
+    /// Pulses per 360-degree revolution, from configuration or the `in` reply.
     uint32_t m_pulsesPerRev{ 0 };
+
+    /// Whether `m_pulsesPerRev` was set by configuration and must not be overridden by the device.
+    bool m_pulsesPerRevConfigured{ false };
 
     /// Device command used to run the optimize routine.
     std::string m_cmdOptimize{ "om" };
@@ -168,8 +193,20 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Device command used to save parameters.
     std::string m_cmdSave{ "us" };
 
-    /// Consecutive soft poll misses tolerated before forcing a reconnect.
+    /// Consecutive missed replies tolerated before forcing a reconnect.
     int m_commMaxMisses{ 3 };
+
+    /// Whether every transmitted and received frame is logged at `LOG_DEBUG2`.
+    bool m_serialTrace{ false };
+
+    /// Angular tolerance in degrees for deciding the stage is at a preset.
+    double m_presetToleranceDeg{ 0.5 };
+
+    /// Whether the maintenance commands (`optimize`, `save`) are enabled.
+    bool m_enableMaintenance{ false };
+
+    /// Maximum duration of an optimize routine before it is treated as failed, in seconds.
+    double m_optimizeTimeoutSec{ 600 };
 
     ///@}
 
@@ -181,49 +218,72 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Open file descriptor for the serial port, or `-1` when closed.
     int m_fd{ -1 };
 
+    /// Received bytes not yet assembled into a complete frame.
+    std::string m_rxBuf;
+
     /// Whether the serial link is currently open and usable.
     bool m_connected{ false };
 
-    /// Whether the stage was last seen in a powered-on state.
-    bool m_wasPowered{ false };
-
-    /// Last known absolute position in degrees.
+    /// Last known absolute position in degrees, wrapped into [0, 360).
     double m_posDeg{ 0.0 };
 
-    /// Last known absolute position in native pulses.
+    /// Last known absolute position in native pulses, as reported by the device.
     int32_t m_posPulses{ 0 };
 
-    /// Whether this process has completed a homing sequence since power-up.
+    /// Whether the stage has completed a homing sequence since power-on. Preserved across reconnects.
     bool m_homed{ false };
 
-    /// Last status byte returned by the `gs` query.
+    /// Last status byte received in a `GS` frame.
     uint8_t m_gs{ 0x00 };
+
+    /// Model number from the `in` reply (e.g. 21 for an ELL21), or 0 if unknown.
+    uint8_t m_model{ 0 };
 
     /// Relative step size in degrees used by the `relMove` request.
     double m_relStepDeg{ 1.0 };
 
-    /// Pending Elliptec command type tracked until the next successful poll resolves it.
+    /// Long-running device operation tracked until the status poll resolves it.
     enum class Pending
     {
-        None,
-        MoveAbs,
-        MoveRel,
-        Home,
-        OffsetRel,
-        Optimize,
-        Stop,
-        Velocity,
-        Save
+        None,       ///< No operation in progress.
+        Move,       ///< An absolute or relative move.
+        Home,       ///< A home command.
+        HomeOffset, ///< The absolute move to `m_homeOffsetDeg` that completes a home.
+        Optimize    ///< The motor optimization routine.
     };
 
-    /// Command currently in flight against the controller.
+    /// Operation currently in progress on the device.
     Pending m_pending{ Pending::None };
+
+    /// Time the current pending operation was commanded.
+    std::chrono::steady_clock::time_point m_pendingStart;
+
+    /// Whether a busy status has been seen since the current pending operation was commanded.
+    bool m_sawBusy{ false };
+
+    /// First error status code reported during the current pending operation, or 0.
+    uint8_t m_latchedError{ 0 };
+
+    /// Whether a stop was requested during the current pending operation.
+    bool m_stopRequested{ false };
+
+    /// Whether the next connection should perform the power-on home (when `stage.powerOnHome` is set).
+    bool m_powerOnHomePending{ true };
 
     /// Operator-facing status text supplement for the current in-flight action.
     std::string m_statusHint;
 
-    /// Count of consecutive soft communication misses.
+    /// Operator-facing error text from the most recent failed operation, cleared by the next command.
+    std::string m_errorText;
+
+    /// Count of consecutive missed replies.
     int m_commMisses{ 0 };
+
+    /// Whether position telemetry has been recorded since startup.
+    bool m_positionRecorded{ false };
+
+    /// Position in degrees at the last position telemetry record.
+    double m_lastRecordedPosDeg{ 0.0 };
 
     ///@}
 
@@ -258,7 +318,17 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
 
     ///@}
 
+    /// A parsed Elliptec reply frame.
+    struct frameT
+    {
+        char        addr{ 0 }; ///< Device address character.
+        std::string header;    ///< Upper-case two-letter reply header, e.g. "GS", "PO", "IN".
+        std::string payload;   ///< Data following the header, without CRLF.
+    };
+
     /** \name Serial Helpers
+     *
+     * All serial helpers require the caller to hold `m_indiMutex`.
      *
      * @{
      */
@@ -269,35 +339,67 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Open and configure the serial port.
     int openPort_();
 
-    /// Close the serial port if it is open.
+    /// Close the serial port if it is open and discard any partial input.
     void closePort_();
 
-    /// Drain unread input bytes from the serial port.
-    int drainInput_();
-
-    /// Write a full command frame to the serial port.
+    /// Write raw bytes to the serial port.
     int writeAll_( const std::string &s /**< [in] bytes to write */ );
 
-    /// Read a CRLF-terminated frame from the serial port.
-    int readFrame_( std::string &out,       /**< [out] received frame including CRLF */
-                    int          timeout_ms /**< [in] timeout in milliseconds */
+    /// Read one complete, well-formed frame.
+    /** Malformed lines are logged at debug level and skipped.
+     * \returns 0 when a frame was read
+     * \returns 1 on timeout
+     * \returns -1 on a hard error
+     */
+    int readFrame_( frameT &frame,     /**< [out] the parsed frame */
+                    int     timeout_ms /**< [in] timeout in milliseconds, 0 for non-blocking */
     );
 
-    /// Construct a device frame from the command payload.
+    /// Construct a device command from the payload by prefixing the address.
     std::string frame_( const std::string &cmd /**< [in] command payload without address */ ) const;
 
-    /// Transmit a command and optionally receive its reply.
-    int txrx_( const std::string &cmd,       /**< [in] command payload without address */
-               std::string       *reply,     /**< [out] reply string, or null for fire-and-forget */
-               int                timeout_ms /**< [in] default timeout in milliseconds */
+    /// Send a command without waiting for a reply.
+    int send_( const std::string &cmd /**< [in] command payload without address */ );
+
+    /// Dispatch every complete frame already received, without blocking.
+    /**
+     * \returns 0 on success
+     * \returns -1 on a hard error
+     */
+    int drainFrames_();
+
+    /// Send a command and wait for a reply with the given header.
+    /** Frames that arrive first with other headers or addresses are dispatched to `handleFrame_()`.
+     * \returns 0 when the expected frame arrived
+     * \returns 1 on timeout
+     * \returns -1 on a hard error
+     */
+    int query_( const std::string &cmd,       /**< [in] command payload without address */
+                const std::string &header,    /**< [in] expected reply header */
+                frameT            &reply,     /**< [out] the expected reply */
+                int                timeout_ms /**< [in] timeout in milliseconds */
     );
 
     ///@}
 
     /** \name Protocol Access
      *
+     * All protocol helpers require the caller to hold `m_indiMutex`.
+     *
      * @{
      */
+
+    /// Dispatch an unsolicited or unexpected frame by header.
+    void handleFrame_( const frameT &frame /**< [in] received frame */ );
+
+    /// Apply a status code from a `GS` frame.
+    void handleStatusCode_( uint8_t code /**< [in] status/error code */ );
+
+    /// Parse a `PO` payload into the current position.
+    void parsePosition_( const std::string &payload /**< [in] 8 hex digit position payload */ );
+
+    /// Parse an `IN` payload into the model and pulses per revolution.
+    void parseInfo_( const std::string &payload /**< [in] info payload following "IN" */ );
 
     /// Query static device information.
     int q_info_();
@@ -308,35 +410,46 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Query the current device position.
     int q_position_();
 
-    /// Issue a home command.
-    int cmd_home_( uint8_t dir = 0 /**< [in] Elliptec home-direction nibble */ );
+    /// Send a home command and begin tracking it.
+    int cmd_home_( uint8_t dir = 0 /**< [in] Elliptec home-direction nibble, 0 clockwise */ );
 
-    /// Issue a stop command.
+    /// Send a stop command and report the device's reply.
+    /**
+     * \returns the GS code replied, or -1 on error / no reply
+     */
     int cmd_stop_();
 
-    /// Issue the optimize command and wait for its first response.
-    int cmd_optimize_wait_();
+    /// Send the optimize command and begin tracking it.
+    int cmd_optimize_();
 
-    /// Issue the save command and wait for its first response.
+    /// Send the save command and wait for its status reply.
     int cmd_save_();
 
-    /// Set the device velocity percentage.
+    /// Set the device velocity percentage and wait for its status reply.
     int cmd_setvel_( int pct /**< [in] velocity percentage from 0 to 100 */ );
 
-    /// Command an absolute move in native pulses.
+    /// Send an absolute move in native pulses.
     int cmd_moveAbs_pulses_( int32_t pulses /**< [in] absolute target in native pulses */ );
 
-    /// Command a relative move in native pulses.
+    /// Send a relative move in native pulses.
     int cmd_moveRel_pulses_( int32_t pulses /**< [in] relative delta in native pulses */ );
 
     ///@}
 
     /** \name Motion Helpers
      *
+     * All motion helpers require the caller to hold `m_indiMutex`.
+     *
      * @{
      */
 
-    /// Move to an absolute angle in degrees.
+    /// Whether a new motion may be commanded now; logs a warning naming the request when not.
+    bool motionAllowed_( const std::string &what /**< [in] name of the requested action for the log */ );
+
+    /// Record that a long-running operation has been commanded.
+    void beginPending_( Pending p /**< [in] the operation now in progress */ );
+
+    /// Move to an absolute angle in degrees, wrapped into [0, 360).
     int moveAbsDeg_( double deg /**< [in] absolute stage angle in degrees */ );
 
     /// Execute the current relative move request.
@@ -348,17 +461,27 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Start an absolute move in degrees after the caller has updated target bookkeeping.
     int startMoveToDeg_( double deg /**< [in] absolute stage angle in degrees */ );
 
+    /// Clamp a velocity request to [model minimum, 100], logging a warning when raised.
+    int applyVelocityFloor_( int pct /**< [in] requested velocity percentage */ );
+
     /// Convert degrees into native pulses.
     int32_t degToPulses_( double deg /**< [in] angle in degrees */ ) const;
 
-    /// Convert native pulses into degrees.
+    /// Convert native pulses into degrees, without wrapping.
     double pulsesToDeg_( int32_t pulses /**< [in] position in native pulses */ ) const;
 
-    /// Resolve the preset index matching the supplied angle.
+    /// Resolve the preset index matching the supplied angle on the circle.
     int presetIndexForPosition_( double deg /**< [in] angle to compare against preset positions */ ) const;
 
     /// Return the matching tolerance used for preset comparisons.
     double presetToleranceDeg_() const;
+
+    /// Check that distinct preset positions are separable by the preset tolerance.
+    /**
+     * \returns 0 if valid
+     * \returns -1 if two distinct presets are closer than twice the tolerance
+     */
+    int validatePresets_();
 
     /// Update `m_preset` and `m_preset_target` from the current motion state.
     void syncPresetState_();
@@ -366,8 +489,28 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Update the high-level FSM state from the current connection and motion state.
     void syncControllerState_();
 
-    /// Poll the device and resolve the current pending command.
+    /// Poll the device and resolve the current pending operation.
+    /**
+     * \returns 0 on a successful poll
+     * \returns 1 on a tolerated missed reply
+     * \returns -1 when the connection must be re-established
+     */
     int pollDevice_();
+
+    /// Resolve the pending operation from the latest status.
+    void resolvePending_();
+
+    /// Complete the pending operation successfully.
+    void completePending_();
+
+    /// Fail the pending operation, logging and surfacing the reason.
+    void failPending_( const std::string &reason /**< [in] operator-facing reason */ );
+
+    /// Connect to the device and query its initial state.
+    int connect_();
+
+    /// Drop the connection after communication failure.
+    void disconnect_();
 
     /// Push the current operator-facing status properties.
     void updateStatus_();
@@ -386,6 +529,76 @@ inline elliptecCtrl::elliptecCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REP
     m_powerMgtEnabled  = true;
     m_defaultPositions = false;
     m_moving           = -1;
+}
+
+/* ---------- Static helpers ---------- */
+
+inline std::string elliptecCtrl::statusMeaning( uint8_t code )
+{
+    switch( code )
+    {
+    case 0:
+        return "OK";
+    case 1:
+        return "communication time out";
+    case 2:
+        return "mechanical time out";
+    case 3:
+        return "command error or not supported";
+    case 4:
+        return "value out of range";
+    case 5:
+        return "module isolated";
+    case 6:
+        return "module out of isolation";
+    case 7:
+        return "initializing error";
+    case 8:
+        return "thermal error";
+    case 9:
+        return "busy";
+    case 10:
+        return "sensor error";
+    case 11:
+        return "motor error";
+    case 12:
+        return "out of range";
+    case 13:
+        return "over current error";
+    default:
+        return "reserved status " + std::to_string( static_cast<int>( code ) );
+    }
+}
+
+inline int elliptecCtrl::minVelocityForModel( uint8_t model )
+{
+    // Protocol manual: "Lowest acceptable velocity to ELL16 and ELL21 is 50%". ELL22 shares the ELL21 drive.
+    if( model == 16 || model == 21 || model == 22 )
+    {
+        return 50;
+    }
+
+    return 0;
+}
+
+inline double elliptecCtrl::wrapDeg( double deg )
+{
+    double w = std::fmod( deg, 360.0 );
+    if( w < 0 )
+    {
+        w += 360.0;
+    }
+    if( w >= 360.0 )
+    {
+        w -= 360.0;
+    }
+    return w;
+}
+
+inline double elliptecCtrl::circularDistanceDeg( double a, double b )
+{
+    double d = std::abs( wrapDeg( a ) - wrapDeg( b ) );
+    return ( d > 180.0 ) ? 360.0 - d : d;
 }
 
 /* ---------- Config ---------- */
@@ -409,24 +622,14 @@ inline void elliptecCtrl::setupConfig()
                 "Elliptec address nibble (0-F)" );
 
     config.add( "serial.readTimeoutMs",
-                "3000",
+                "1000",
                 "serial.readTimeoutMs",
                 argType::Optional,
                 "serial",
                 "readTimeoutMs",
                 false,
                 "int",
-                "Read timeout (ms)" );
-
-    config.add( "serial.busyReadTimeoutMs",
-                "6000",
-                "serial.busyReadTimeoutMs",
-                argType::Optional,
-                "serial",
-                "busyReadTimeoutMs",
-                false,
-                "int",
-                "Read timeout (ms) while device is BUSY/pending" );
+                "Timeout (ms) waiting for a query reply" );
 
     config.add( "serial.postWriteSleepMs",
                 "0",
@@ -438,6 +641,16 @@ inline void elliptecCtrl::setupConfig()
                 "int",
                 "Sleep after write (ms)" );
 
+    config.add( "serial.trace",
+                "false",
+                "serial.trace",
+                argType::Optional,
+                "serial",
+                "trace",
+                false,
+                "bool",
+                "Log every transmitted and received frame at LOG_DEBUG2" );
+
     // Behavior
     config.add( "stage.homeOffset",
                 "0.0",
@@ -447,17 +660,27 @@ inline void elliptecCtrl::setupConfig()
                 "homeOffset",
                 false,
                 "double",
-                "Relative offset (deg) to move after homing" );
+                "Absolute angle (deg) to move to after homing; 0 leaves the stage at home" );
 
-    config.add( "stage.allowMultiturn",
-                "false",
-                "stage.allowMultiturn",
+    config.add( "stage.presetTolerance",
+                "0.5",
+                "stage.presetTolerance",
                 argType::Optional,
                 "stage",
-                "allowMultiturn",
+                "presetTolerance",
+                false,
+                "double",
+                "Angular tolerance (deg) for being at a preset" );
+
+    config.add( "stage.enableMaintenance",
+                "false",
+                "stage.enableMaintenance",
+                argType::Optional,
+                "stage",
+                "enableMaintenance",
                 false,
                 "bool",
-                "If false, wrap abs to [0,720)" );
+                "Enable the optimize and save maintenance commands" );
 
     // Conversion
     config.add( "stage.pulsesPerRev",
@@ -472,14 +695,24 @@ inline void elliptecCtrl::setupConfig()
 
     // Motion UI
     config.add( "motion.velPercent",
-                "40",
+                "80",
                 "motion.velPercent",
                 argType::Optional,
                 "motion",
                 "velPercent",
                 false,
                 "int",
-                "Velocity percent 0..100" );
+                "Velocity percent 0..100 (raised to the model minimum)" );
+
+    config.add( "motion.optimizeTimeoutSec",
+                "600",
+                "motion.optimizeTimeoutSec",
+                argType::Optional,
+                "motion",
+                "optimizeTimeoutSec",
+                false,
+                "double",
+                "Maximum duration (s) of the optimize routine" );
 
     // Command aliases
     config.add( "device.optimizeCmd",
@@ -511,7 +744,7 @@ inline void elliptecCtrl::setupConfig()
                 "maxPollMisses",
                 false,
                 "int",
-                "Consecutive poll timeouts tolerated before reconnect" );
+                "Consecutive missed replies tolerated before reconnect" );
 
     if( dev::stdMotionStage<elliptecCtrl>::setupConfig( config ) < 0 )
     {
@@ -539,21 +772,30 @@ inline int elliptecCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     }
 
     _config( m_readTimeoutMs, "serial.readTimeoutMs" );
-    _config( m_busyReadTimeoutMs, "serial.busyReadTimeoutMs" );
-    if( m_busyReadTimeoutMs < m_readTimeoutMs )
+    if( m_readTimeoutMs < 1 )
     {
-        m_busyReadTimeoutMs = m_readTimeoutMs;
+        m_readTimeoutMs = 1;
     }
     _config( m_postWriteSleepMs, "serial.postWriteSleepMs" );
+    _config( m_serialTrace, "serial.trace" );
 
     _config( m_homeOffsetDeg, "stage.homeOffset" );
-    _config( m_allowMultiturn, "stage.allowMultiturn" );
+    m_homeOffsetDeg = wrapDeg( m_homeOffsetDeg );
+
+    _config( m_presetToleranceDeg, "stage.presetTolerance" );
+    if( m_presetToleranceDeg <= 0 )
+    {
+        return log<text_log, -1>( "stage.presetTolerance must be positive", logPrio::LOG_CRITICAL );
+    }
+
+    _config( m_enableMaintenance, "stage.enableMaintenance" );
 
     uint32_t ppr = 0;
     _config( ppr, "stage.pulsesPerRev" );
     if( ppr )
     {
-        m_pulsesPerRev = ppr;
+        m_pulsesPerRev           = ppr;
+        m_pulsesPerRevConfigured = true;
     }
 
     _config( m_velPercent, "motion.velPercent" );
@@ -565,6 +807,8 @@ inline int elliptecCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     {
         m_velPercent = 100;
     }
+
+    _config( m_optimizeTimeoutSec, "motion.optimizeTimeoutSec" );
 
     _config( m_cmdOptimize, "device.optimizeCmd" );
     _config( m_cmdSave, "device.saveCmd" );
@@ -578,6 +822,11 @@ inline int elliptecCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     if( dev::stdMotionStage<elliptecCtrl>::loadConfig( _config ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "Error from stdMotionStage::loadConfig" } );
+    }
+
+    if( validatePresets_() < 0 )
+    {
+        return -1;
     }
 
     TELEMETER_LOAD_CONFIG( _config );
@@ -603,11 +852,11 @@ inline int elliptecCtrl::appStartup()
     }
 
     // absDeg
-    CREATE_REG_INDI_NEW_NUMBERD( m_ipAbsDeg, "absDeg", 0.0, 720.0, 0.001, "", "Absolute (deg)", "rotation" );
+    CREATE_REG_INDI_NEW_NUMBERD( m_ipAbsDeg, "absDeg", 0.0, 360.0, 0.001, "", "Absolute (deg)", "rotation" );
     indi::updateIfChanged( m_ipAbsDeg, "current", m_posDeg, m_indiDriver, INDI_IDLE );
 
     // relDeg (step holder)
-    CREATE_REG_INDI_NEW_NUMBERD( m_ipRelDeg, "relDeg", -720.0, 720.0, 0.001, "", "Relative step (deg)", "rotation" );
+    CREATE_REG_INDI_NEW_NUMBERD( m_ipRelDeg, "relDeg", -360.0, 360.0, 0.001, "", "Relative step (deg)", "rotation" );
     indi::updateIfChanged( m_ipRelDeg, "current", m_relStepDeg, m_indiDriver, INDI_IDLE );
     indi::updateIfChanged( m_ipRelDeg, "target", m_relStepDeg, m_indiDriver, INDI_IDLE );
 
@@ -663,24 +912,45 @@ inline int elliptecCtrl::appLogic()
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
+    // Power is being switched off: leave the device alone; onPowerOff() handles the transition.
     if( powerState() != 1 || powerStateTarget() != 1 )
     {
-        state( stateCodes::POWEROFF );
+        TELEMETER_APP_LOGIC;
+        return 0;
+    }
 
-        if( m_wasPowered )
+    { // mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        if( !m_connected )
         {
-            if( onPowerOff() < 0 )
+            if( m_startupDelayMs )
             {
-                return log<software_error, -1>( { __FILE__, __LINE__ } );
+                std::this_thread::sleep_for( std::chrono::milliseconds( m_startupDelayMs ) );
             }
 
-            m_wasPowered = false;
+            if( connect_() < 0 )
+            {
+                state( stateCodes::NOTCONNECTED );
+                m_moving = -2;
+                updateStatus_();
+            }
         }
         else
         {
-            if( whilePowerOff() < 0 )
+            int prc = pollDevice_();
+            if( prc < 0 )
             {
-                return log<software_error, -1>( { __FILE__, __LINE__ } );
+                disconnect_();
+            }
+            else
+            {
+                indi::updateIfChanged( m_ipVelPct, "current", m_velPercent, m_indiDriver, INDI_IDLE );
+
+                if( prc == 0 )
+                {
+                    recordPosition();
+                }
             }
         }
 
@@ -688,103 +958,6 @@ inline int elliptecCtrl::appLogic()
         {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
         }
-
-        TELEMETER_APP_LOGIC;
-        return 0;
-    }
-
-    if( state() == stateCodes::POWEROFF )
-    {
-        state( stateCodes::NOTCONNECTED );
-    }
-
-    m_wasPowered = true;
-
-    if( !m_connected )
-    {
-        if( m_startupDelayMs )
-        {
-            std::this_thread::sleep_for( std::chrono::milliseconds( m_startupDelayMs ) );
-        }
-
-        if( openPort_() == 0 )
-        {
-            m_connected = true;
-            state( stateCodes::CONNECTED );
-            log<text_log>( "elliptecCtrl connected on " + m_port );
-
-            drainInput_();
-            (void)q_info_();
-            (void)q_position_();
-            (void)q_status_();
-            (void)cmd_setvel_( m_velPercent );
-            (void)q_status_();
-
-            syncPresetState_();
-            syncControllerState_();
-            recordPosition( true );
-            recordStage( true );
-            updateStatus_();
-
-            if( m_indiDriver )
-            {
-                m_ipStageNamePos.setTimeStamp( pcf::TimeStamp() );
-                m_indiDriver->sendSetProperty( m_ipStageNamePos );
-            }
-        }
-        else
-        {
-            state( stateCodes::NOTCONNECTED );
-            m_moving  = -2;
-            m_pending = Pending::None;
-            updateStatus_();
-
-            if( dev::stdMotionStage<elliptecCtrl>::updateINDI() < 0 )
-            {
-                return log<software_error, -1>( { __FILE__, __LINE__ } );
-            }
-
-            TELEMETER_APP_LOGIC;
-            return 0;
-        }
-    }
-
-    int prc = pollDevice_();
-    if( prc < 0 )
-    {
-        closePort_();
-        m_connected = false;
-        state( stateCodes::NOTCONNECTED );
-        m_moving     = -2;
-        m_pending    = Pending::None;
-        m_commMisses = 0;
-        syncPresetState_();
-        syncControllerState_();
-        recordPosition( true );
-        updateStatus_();
-
-        if( dev::stdMotionStage<elliptecCtrl>::updateINDI() < 0 )
-        {
-            return log<software_error, -1>( { __FILE__, __LINE__ } );
-        }
-
-        TELEMETER_APP_LOGIC;
-        return 0;
-    }
-    // prc == 0 (fresh ok) or prc == +1 (soft miss tolerated) -> continue
-
-    // Push abs position & velocity UI
-    indi::updateIfChanged( m_ipAbsDeg, "current", m_posDeg, m_indiDriver, ( m_gs == 0x09 ? INDI_BUSY : INDI_IDLE ) );
-    indi::updateIfChanged( m_ipVelPct, "current", m_velPercent, m_indiDriver, INDI_IDLE );
-
-    if( prc == 0 )
-    {
-        recordPosition();
-    }
-
-    if( dev::stdMotionStage<elliptecCtrl>::updateINDI() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
     TELEMETER_APP_LOGIC;
@@ -799,6 +972,8 @@ inline int elliptecCtrl::appShutdown()
     }
 
     TELEMETER_APP_SHUTDOWN;
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
     closePort_();
     return 0;
 }
@@ -810,16 +985,21 @@ inline int elliptecCtrl::onPowerOff()
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
     closePort_();
-    m_connected  = false;
-    m_pending    = Pending::None;
-    m_commMisses = 0;
+    m_connected          = false;
+    m_pending            = Pending::None;
+    m_stopRequested      = false;
+    m_latchedError       = 0;
+    m_commMisses         = 0;
+    m_homed              = false;
+    m_powerOnHomePending = true;
     m_statusHint.clear();
-    m_homed = false;
+    m_errorText.clear();
     clearPresetNameTracking();
     m_preset_target = 0;
     syncPresetState_();
-    syncControllerState_();
     updateStatus_();
     recordStage( true );
     recordPosition( true );
@@ -834,32 +1014,138 @@ inline int elliptecCtrl::whilePowerOff()
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
+    TELEMETER_APP_LOGIC;
+
     return 0;
+}
+
+/* ---------- Connection ---------- */
+
+inline int elliptecCtrl::connect_()
+{
+    if( openPort_() < 0 )
+    {
+        return -1;
+    }
+
+    m_connected  = true;
+    m_commMisses = 0;
+    state( stateCodes::CONNECTED );
+    log<text_log>( "elliptecCtrl connected on " + m_port );
+
+    if( q_info_() != 0 )
+    {
+        log<text_log>( "no reply to info query", logPrio::LOG_WARNING );
+    }
+
+    if( m_pulsesPerRev == 0 )
+    {
+        log<text_log>( "pulses per revolution unknown; moves are disabled until the device reports it",
+                       logPrio::LOG_ERROR );
+    }
+
+    m_velPercent = applyVelocityFloor_( m_velPercent );
+    if( cmd_setvel_( m_velPercent ) != 0 )
+    {
+        log<text_log>( "velocity was not acknowledged", logPrio::LOG_WARNING );
+    }
+    indi::updateIfChanged( m_ipVelPct, "target", m_velPercent, m_indiDriver, INDI_IDLE );
+
+    (void)q_position_();
+    (void)q_status_();
+
+    // If the device is already moving (e.g. after a USB reconnect) this reports an unknown motion.
+    m_pending = Pending::None;
+    resolvePending_();
+
+    syncPresetState_();
+    syncControllerState_();
+    recordPosition( true );
+    recordStage( true );
+    updateStatus_();
+
+    if( m_indiDriver )
+    {
+        m_ipStageNamePos.setTimeStamp( pcf::TimeStamp() );
+        m_indiDriver->sendSetProperty( m_ipStageNamePos );
+    }
+
+    if( m_powerOnHomePending )
+    {
+        m_powerOnHomePending = false;
+
+        if( m_powerOnHome )
+        {
+            log<text_log>( "homing after power-on" );
+            if( startHoming() < 0 )
+            {
+                log<text_log>( "power-on home could not be started", logPrio::LOG_ERROR );
+            }
+        }
+    }
+
+    return 0;
+}
+
+inline void elliptecCtrl::disconnect_()
+{
+    log<text_log>( "lost communication with the device; reconnecting", logPrio::LOG_WARNING );
+
+    closePort_();
+    m_connected     = false;
+    m_pending       = Pending::None;
+    m_stopRequested = false;
+    m_latchedError  = 0;
+    m_commMisses    = 0;
+    m_moving        = -2;
+    m_statusHint.clear();
+    state( stateCodes::NOTCONNECTED );
+    syncPresetState_();
+    recordStage( true );
+    recordPosition( true );
+    updateStatus_();
 }
 
 /* ---------- stdMotionStage surface ---------- */
 
 inline int elliptecCtrl::stop()
 {
-    if( powerState() != 1 || powerStateTarget() != 1 )
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    indi::updateSwitchIfChanged( m_indiP_stop, "request", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
+
+    if( powerState() != 1 || powerStateTarget() != 1 || !m_connected )
     {
         return 0;
     }
 
-    int rc = cmd_stop_();
-    if( rc == 0 )
+    int code = cmd_stop_();
+
+    if( m_pending != Pending::None )
     {
-        clearPresetNameTracking();
-        m_preset_target = 0;
-        m_statusHint.clear();
-        syncPresetState_();
-        syncControllerState_();
-        indi::updateSwitchIfChanged( m_indiP_stop, "request", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
-        updateStatus_();
-        recordStage( true );
-        recordPosition( true );
+        m_stopRequested = true;
     }
-    return rc;
+
+    if( code == 3 )
+    {
+        log<text_log>( "stop is not supported by the device during this motion; the move will complete",
+                       logPrio::LOG_WARNING );
+        if( m_pending != Pending::None )
+        {
+            m_statusHint = "Stop not supported; move will complete";
+        }
+    }
+    else if( code < 0 )
+    {
+        log<text_log>( "no reply to stop request", logPrio::LOG_WARNING );
+    }
+    else
+    {
+        log<text_log>( "stop requested" );
+    }
+
+    updateStatus_();
+    return 0;
 }
 
 inline int elliptecCtrl::startHoming()
@@ -869,24 +1155,27 @@ inline int elliptecCtrl::startHoming()
         return 0;
     }
 
-    // Non-blocking: issue command, mark pending; main loop will poll and update position
-    int rc = cmd_home_( 0 );
-    if( rc < 0 )
+    indi::updateSwitchIfChanged( m_indiP_home, "request", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
+
+    if( !motionAllowed_( "home" ) )
     {
-        return rc;
+        return 0;
+    }
+
+    if( cmd_home_( 0 ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "home command failed" } );
     }
 
     clearPresetNameTracking();
     m_preset_target = 0;
+    m_homed         = false;
     syncPresetState_();
     syncControllerState_();
-    indi::updateSwitchIfChanged( m_indiP_home, "request", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
     updateStatus_();
     recordStage( true );
     recordPosition( true );
 
-    // opportunistic position read
-    (void)q_position_();
     return 0;
 }
 
@@ -921,6 +1210,11 @@ inline int elliptecCtrl::moveTo( float target )
     else
     {
         idx = presetIndexForPosition_( deg );
+    }
+
+    if( !motionAllowed_( "preset move" ) )
+    {
+        return 0;
     }
 
     if( idx >= 0 )
@@ -976,14 +1270,11 @@ inline int elliptecCtrl::recordStage( bool force )
 
 inline int elliptecCtrl::recordPosition( bool force )
 {
-    static double last_posDeg = 0.0;
-    static bool   first       = true;
-
-    if( first || m_posDeg != last_posDeg || force )
+    if( !m_positionRecorded || m_posDeg != m_lastRecordedPosDeg || force )
     {
         telem<telem_position>( static_cast<float>( m_posDeg ) );
-        last_posDeg = m_posDeg;
-        first       = false;
+        m_lastRecordedPosDeg = m_posDeg;
+        m_positionRecorded   = true;
     }
 
     return 0;
@@ -1006,6 +1297,14 @@ INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipAbsDeg )( const pcf::IndiProperty &ipRe
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    if( !motionAllowed_( "absolute move" ) )
+    {
+        return 0;
+    }
+
+    tgt = wrapDeg( tgt );
     indi::updateIfChanged( m_ipAbsDeg, "target", tgt, m_indiDriver, INDI_BUSY );
 
     clearPresetNameTracking();
@@ -1016,7 +1315,6 @@ INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipAbsDeg )( const pcf::IndiProperty &ipRe
         return log<software_error, -1>( { __FILE__, __LINE__, "moveAbsDeg failed" } );
     }
 
-    (void)q_position_();
     return 0;
 }
 
@@ -1024,18 +1322,21 @@ INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipAbsDeg )( const pcf::IndiProperty &ipRe
 INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipRelDeg )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_ipRelDeg, ipRecv );
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
     double step = m_relStepDeg;
     if( indiTargetUpdate( m_ipRelDeg, step, ipRecv, true ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
-    if( step < -720.0 )
+    if( step < -360.0 )
     {
-        step = -720.0;
+        step = -360.0;
     }
-    if( step > 720.0 )
+    if( step > 360.0 )
     {
-        step = 720.0;
+        step = 360.0;
     }
     m_relStepDeg = step;
     indi::updateIfChanged( m_ipRelDeg, "current", m_relStepDeg, m_indiDriver, INDI_IDLE );
@@ -1059,6 +1360,15 @@ INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipRelMove )( const pcf::IndiProperty &ipR
 
     if( ipRecv.at( "request" ).getSwitchState() == pcf::IndiElement::On )
     {
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        indi::updateSwitchIfChanged( m_ipRelMove, "request", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
+
+        if( !motionAllowed_( "relative move" ) )
+        {
+            return 0;
+        }
+
         clearPresetNameTracking();
         m_movingState   = 0;
         m_preset_target = 0;
@@ -1073,10 +1383,6 @@ INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipRelMove )( const pcf::IndiProperty &ipR
         updateStatus_();
         recordStage( true );
         recordPosition( true );
-
-        (void)q_position_();
-
-        indi::updateSwitchIfChanged( m_ipRelMove, "request", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
     }
     return 0;
 }
@@ -1094,23 +1400,18 @@ INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipVelPct )( const pcf::IndiProperty &ipRe
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
-    if( pct < 0 )
-    {
-        pct = 0;
-    }
-    if( pct > 100 )
-    {
-        pct = 100;
-    }
-    if( cmd_setvel_( pct ) < 0 )
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    pct = applyVelocityFloor_( pct );
+
+    if( m_connected && cmd_setvel_( pct ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "setvel failed" } );
     }
     m_velPercent = pct;
     indi::updateIfChanged( m_ipVelPct, "current", m_velPercent, m_indiDriver, INDI_IDLE );
     indi::updateIfChanged( m_ipVelPct, "target", m_velPercent, m_indiDriver, INDI_IDLE );
-    recordStage( true );
-    recordPosition( true );
     return 0;
 }
 
@@ -1127,16 +1428,36 @@ INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipOptimize )( const pcf::IndiProperty &ip
     {
         return 0;
     }
+
     if( ipRecv.at( "request" ).getSwitchState() == pcf::IndiElement::On )
     {
-        (void)cmd_optimize_wait_();
-        m_statusHint = "Running Optimization Routine";
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        indi::updateSwitchIfChanged( m_ipOptimize, "request", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
+
+        if( !m_enableMaintenance )
+        {
+            log<text_log>( "optimize rejected: maintenance commands are disabled (stage.enableMaintenance)",
+                           logPrio::LOG_WARNING );
+            return 0;
+        }
+
+        if( !motionAllowed_( "optimize" ) )
+        {
+            return 0;
+        }
+
+        if( cmd_optimize_() < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "optimize command failed" } );
+        }
+
+        log<text_log>( "motor optimization started; this may take several minutes", logPrio::LOG_NOTICE );
         syncPresetState_();
         syncControllerState_();
         updateStatus_();
         recordStage( true );
         recordPosition( true );
-        indi::updateSwitchIfChanged( m_ipOptimize, "request", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
     }
     return 0;
 }
@@ -1154,16 +1475,34 @@ INDI_NEWCALLBACK_DEFN( elliptecCtrl, m_ipSave )( const pcf::IndiProperty &ipRecv
     {
         return 0;
     }
+
     if( ipRecv.at( "request" ).getSwitchState() == pcf::IndiElement::On )
     {
-        (void)cmd_save_();
-        m_statusHint = "Saving Tuning Parameters";
-        syncPresetState_();
-        syncControllerState_();
-        updateStatus_();
-        recordStage( true );
-        recordPosition( true );
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
         indi::updateSwitchIfChanged( m_ipSave, "request", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
+
+        if( !m_enableMaintenance )
+        {
+            log<text_log>( "save rejected: maintenance commands are disabled (stage.enableMaintenance)",
+                           logPrio::LOG_WARNING );
+            return 0;
+        }
+
+        if( !m_connected || m_pending != Pending::None )
+        {
+            log<text_log>( "save rejected: the stage must be connected and idle", logPrio::LOG_WARNING );
+            return 0;
+        }
+
+        log<text_log>( "saving device parameters to non-volatile memory", logPrio::LOG_NOTICE );
+
+        if( cmd_save_() != 0 )
+        {
+            log<text_log>( "save was not acknowledged", logPrio::LOG_ERROR );
+        }
+
+        updateStatus_();
     }
     return 0;
 }
@@ -1222,6 +1561,7 @@ inline int elliptecCtrl::openPort_()
         return -1;
     }
     tcflush( m_fd, TCIOFLUSH );
+    m_rxBuf.clear();
     return 0;
 }
 
@@ -1232,24 +1572,7 @@ inline void elliptecCtrl::closePort_()
         ::close( m_fd );
         m_fd = -1;
     }
-}
-
-inline int elliptecCtrl::drainInput_()
-{
-    if( m_fd < 0 )
-    {
-        return -1;
-    }
-    char tmp[256];
-    for( ;; )
-    {
-        ssize_t n = ::read( m_fd, tmp, sizeof( tmp ) );
-        if( n <= 0 )
-        {
-            break;
-        }
-    }
-    return 0;
+    m_rxBuf.clear();
 }
 
 inline int elliptecCtrl::writeAll_( const std::string &s )
@@ -1280,41 +1603,83 @@ inline int elliptecCtrl::writeAll_( const std::string &s )
     return 0;
 }
 
-inline int elliptecCtrl::readFrame_( std::string &out, int timeout_ms )
+inline int elliptecCtrl::readFrame_( frameT &frame, int timeout_ms )
 {
-    out.clear();
     if( m_fd < 0 )
     {
         return -1;
     }
+
     auto start = std::chrono::steady_clock::now();
-    char ch;
+
     while( true )
     {
-        if( std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - start ).count() >
-            timeout_ms )
+        // Extract a complete line if one is buffered.
+        size_t eol = m_rxBuf.find( "\r\n" );
+        while( eol != std::string::npos )
         {
-            return 1; // soft timeout
-        }
-        struct pollfd pfd
-        {
-            m_fd, POLLIN, 0
-        };
-        int pr = ::poll( &pfd, 1, 25 );
-        if( pr <= 0 )
-        {
-            continue;
-        }
-        ssize_t r = ::read( m_fd, &ch, 1 );
-        if( r == 1 )
-        {
-            out.push_back( ch );
-            size_t n = out.size();
-            if( n >= 2 && out[n - 2] == '\r' && out[n - 1] == '\n' )
+            std::string line = m_rxBuf.substr( 0, eol );
+            m_rxBuf.erase( 0, eol + 2 );
+
+            if( m_serialTrace )
             {
+                log<text_log>( "RX: " + line, logPrio::LOG_DEBUG2 );
+            }
+
+            if( line.size() >= 3 && std::isxdigit( (unsigned char)line[0] ) && std::isalpha( (unsigned char)line[1] ) &&
+                std::isalpha( (unsigned char)line[2] ) )
+            {
+                frame.addr      = (char)std::toupper( (unsigned char)line[0] );
+                frame.header    = line.substr( 1, 2 );
+                frame.header[0] = (char)std::toupper( (unsigned char)frame.header[0] );
+                frame.header[1] = (char)std::toupper( (unsigned char)frame.header[1] );
+                frame.payload   = line.substr( 3 );
                 return 0;
             }
-            continue;
+
+            log<text_log>( "discarding malformed frame: '" + line + "'", logPrio::LOG_DEBUG );
+            eol = m_rxBuf.find( "\r\n" );
+        }
+
+        int elapsed = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - start ).count() );
+        int remaining = timeout_ms - elapsed;
+
+        struct pollfd pfd{ m_fd, POLLIN, 0 };
+
+        int pr = ::poll( &pfd, 1, ( remaining > 0 ) ? std::min( remaining, 25 ) : 0 );
+        if( pr < 0 )
+        {
+            if( errno == EINTR )
+            {
+                continue;
+            }
+            return -1;
+        }
+
+        if( pr > 0 )
+        {
+            if( pfd.revents & ( POLLERR | POLLHUP | POLLNVAL ) )
+            {
+                return -1;
+            }
+
+            char    buf[256];
+            ssize_t r = ::read( m_fd, buf, sizeof( buf ) );
+            if( r > 0 )
+            {
+                m_rxBuf.append( buf, buf + r );
+                continue;
+            }
+            if( r < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR )
+            {
+                return -1;
+            }
+        }
+
+        if( remaining <= 0 )
+        {
+            return 1; // timeout
         }
     }
 }
@@ -1328,125 +1693,227 @@ inline std::string elliptecCtrl::frame_( const std::string &cmd ) const
     return f;
 }
 
-inline int elliptecCtrl::txrx_( const std::string &cmd, std::string *reply, int timeout_ms )
+inline int elliptecCtrl::send_( const std::string &cmd )
 {
     std::string f = frame_( cmd );
-    if( writeAll_( f ) < 0 )
+
+    if( m_serialTrace )
+    {
+        log<text_log>( "TX: " + f, logPrio::LOG_DEBUG2 );
+    }
+
+    return writeAll_( f );
+}
+
+inline int elliptecCtrl::drainFrames_()
+{
+    frameT f;
+    int    rc;
+    while( ( rc = readFrame_( f, 0 ) ) == 0 )
+    {
+        handleFrame_( f );
+    }
+
+    return ( rc < 0 ) ? -1 : 0;
+}
+
+inline int elliptecCtrl::query_( const std::string &cmd, const std::string &header, frameT &reply, int timeout_ms )
+{
+    // Dispatch anything already received (e.g. a motion acknowledgement) so it is not taken as this reply.
+    if( drainFrames_() < 0 )
     {
         return -1;
     }
-    if( !reply )
+
+    if( send_( cmd ) < 0 )
     {
-        return 0;
+        return -1;
     }
-    const int tmo = ( m_pending != Pending::None || m_gs == 0x09 ) ? m_busyReadTimeoutMs : timeout_ms;
-    int       rc  = readFrame_( *reply, tmo );
-    // rc: 0 ok, 1 timeout (soft), -1 hard error
-    return rc;
+
+    auto start = std::chrono::steady_clock::now();
+
+    while( true )
+    {
+        int elapsed = static_cast<int>(
+            std::chrono::duration_cast<std::chrono::milliseconds>( std::chrono::steady_clock::now() - start ).count() );
+        int remaining = timeout_ms - elapsed;
+        if( remaining < 0 )
+        {
+            remaining = 0;
+        }
+
+        frameT f;
+        int    rc = readFrame_( f, remaining );
+        if( rc != 0 )
+        {
+            return rc;
+        }
+
+        if( f.addr == m_addr && f.header == header )
+        {
+            reply = f;
+            return 0;
+        }
+
+        handleFrame_( f );
+    }
 }
 
 /* ---------- Protocol queries ---------- */
 
-inline int elliptecCtrl::q_info_()
+inline void elliptecCtrl::handleFrame_( const frameT &frame )
 {
-    std::string r;
-    int         rc = txrx_( "in", &r, m_readTimeoutMs );
-    if( rc < 0 )
+    if( frame.addr != m_addr )
     {
-        return -1;
-    }
-    if( rc > 0 )
-    {
-        return +1;
-    }
-    if( r.size() >= 2 && r[r.size() - 2] == '\r' )
-    {
-        r.resize( r.size() - 2 );
+        return;
     }
 
-    if( m_pulsesPerRev == 0 && r.size() >= 8 )
+    if( frame.header == "GS" )
     {
-        bool hex = true;
-        for( size_t i = r.size() - 8; i < r.size(); ++i )
+        if( frame.payload.size() >= 2 && std::isxdigit( (unsigned char)frame.payload[0] ) &&
+            std::isxdigit( (unsigned char)frame.payload[1] ) )
         {
-            if( !std::isxdigit( (unsigned char)r[i] ) )
-            {
-                hex = false;
-                break;
-            }
-        }
-        if( hex )
-        {
-            uint32_t v = 0;
-            for( size_t i = r.size() - 8; i < r.size(); ++i )
-            {
-                char c = (char)std::toupper( (unsigned char)r[i] );
-                v      = ( v << 4 ) | (uint32_t)( ( c <= '9' ) ? ( c - '0' ) : ( 10 + ( c - 'A' ) ) );
-            }
-            if( v )
-            {
-                m_pulsesPerRev = v;
-            }
+            handleStatusCode_( static_cast<uint8_t>( std::stoul( frame.payload.substr( 0, 2 ), nullptr, 16 ) ) );
         }
     }
+    else if( frame.header == "PO" )
+    {
+        parsePosition_( frame.payload );
+    }
+    else if( frame.header == "IN" )
+    {
+        parseInfo_( frame.payload );
+    }
+}
+
+inline void elliptecCtrl::handleStatusCode_( uint8_t code )
+{
+    m_gs = code;
+
+    if( code == 0x09 )
+    {
+        if( m_pending != Pending::None )
+        {
+            m_sawBusy = true;
+        }
+        return;
+    }
+
+    if( code == 0x00 )
+    {
+        return;
+    }
+
+    if( m_pending != Pending::None )
+    {
+        if( m_latchedError == 0 )
+        {
+            m_latchedError = code;
+        }
+        return;
+    }
+
+    const std::string text = "Error: " + statusMeaning( code );
+    if( m_errorText != text )
+    {
+        log<text_log>( "device reported status " + std::to_string( (int)code ) + " (" + statusMeaning( code ) + ")",
+                       logPrio::LOG_WARNING );
+        m_errorText = text;
+    }
+}
+
+inline void elliptecCtrl::parsePosition_( const std::string &payload )
+{
+    if( payload.size() < 8 )
+    {
+        return;
+    }
+
+    uint32_t v = 0;
+    for( size_t i = 0; i < 8; ++i )
+    {
+        char c = (char)std::toupper( (unsigned char)payload[i] );
+        if( !std::isxdigit( (unsigned char)c ) )
+        {
+            return;
+        }
+        v = ( v << 4 ) | (uint32_t)( ( c <= '9' ) ? ( c - '0' ) : ( 10 + ( c - 'A' ) ) );
+    }
+
+    m_posPulses = static_cast<int32_t>( v );
+    m_posDeg    = wrapDeg( pulsesToDeg_( m_posPulses ) );
+}
+
+inline void elliptecCtrl::parseInfo_( const std::string &payload )
+{
+    if( payload.size() >= 2 && std::isxdigit( (unsigned char)payload[0] ) &&
+        std::isxdigit( (unsigned char)payload[1] ) )
+    {
+        uint8_t model = static_cast<uint8_t>( std::stoul( payload.substr( 0, 2 ), nullptr, 16 ) );
+        if( model != m_model )
+        {
+            m_model = model;
+            log<text_log>( "device is an ELL" + std::to_string( (int)m_model ) );
+        }
+    }
+
+    if( m_pulsesPerRevConfigured || payload.size() < 8 )
+    {
+        return;
+    }
+
+    const std::string tail = payload.substr( payload.size() - 8 );
+    for( char c : tail )
+    {
+        if( !std::isxdigit( (unsigned char)c ) )
+        {
+            return;
+        }
+    }
+
+    uint32_t v = static_cast<uint32_t>( std::stoul( tail, nullptr, 16 ) );
+    if( v )
+    {
+        m_pulsesPerRev = v;
+    }
+}
+
+inline int elliptecCtrl::q_info_()
+{
+    frameT r;
+    int    rc = query_( "in", "IN", r, m_readTimeoutMs );
+    if( rc != 0 )
+    {
+        return rc;
+    }
+
+    parseInfo_( r.payload );
     return 0;
 }
 
 inline int elliptecCtrl::q_status_()
 {
-    std::string r;
-    const int   tmo = ( m_gs == 0x09 || m_pending != Pending::None ) ? m_busyReadTimeoutMs : m_readTimeoutMs;
-    int         rc  = txrx_( "gs", &r, tmo );
-    if( rc < 0 )
+    frameT r;
+    int    rc = query_( "gs", "GS", r, m_readTimeoutMs );
+    if( rc != 0 )
     {
-        return -1;
+        return rc;
     }
-    if( rc > 0 )
-    {
-        return +1;
-    }
-    if( r.size() >= 6 && ( r[1] == 'G' || r[1] == 'g' ) && ( r[2] == 'S' || r[2] == 's' ) &&
-        std::isxdigit( (unsigned char)r[3] ) && std::isxdigit( (unsigned char)r[4] ) )
-    {
-        auto nyb = []( char c ) -> uint8_t
-        {
-            c = (char)std::toupper( (unsigned char)c );
-            return ( c <= '9' ) ? ( c - '0' ) : ( 10 + ( c - 'A' ) );
-        };
-        m_gs = (uint8_t)( ( nyb( r[3] ) << 4 ) | nyb( r[4] ) );
-    }
+
+    handleFrame_( r );
     return 0;
 }
 
 inline int elliptecCtrl::q_position_()
 {
-    std::string r;
-    const int   tmo = ( m_gs == 0x09 || m_pending != Pending::None ) ? m_busyReadTimeoutMs : m_readTimeoutMs;
-    int         rc  = txrx_( "gp", &r, tmo );
-    if( rc < 0 )
+    frameT r;
+    int    rc = query_( "gp", "PO", r, m_readTimeoutMs );
+    if( rc != 0 )
     {
-        return -1;
+        return rc;
     }
-    if( rc > 0 )
-    {
-        return +1;
-    }
-    if( r.size() >= 11 && ( r[1] == 'P' || r[1] == 'p' ) && ( r[2] == 'O' || r[2] == 'o' ) )
-    {
-        int32_t pulses = 0;
-        for( int i = 0; i < 8; i++ )
-        {
-            char c = (char)std::toupper( (unsigned char)r[3 + i] );
-            if( !std::isxdigit( (unsigned char)c ) )
-            {
-                pulses = m_posPulses;
-                break;
-            }
-            pulses = ( pulses << 4 ) | (int32_t)( ( c <= '9' ) ? ( c - '0' ) : ( 10 + ( c - 'A' ) ) );
-        }
-        m_posPulses = pulses;
-        m_posDeg    = pulsesToDeg_( m_posPulses );
-    }
+
+    parsePosition_( r.payload );
     return 0;
 }
 
@@ -1454,50 +1921,60 @@ inline int elliptecCtrl::q_position_()
 
 inline int elliptecCtrl::cmd_home_( uint8_t dir )
 {
-    char        nib = "0123456789ABCDEF"[dir & 0xF];
-    std::string r;
-    m_pending    = Pending::Home;
-    m_moving     = 2;
-    m_statusHint = "HOMING";
-    if( txrx_( std::string( "ho" ) + nib, &r, m_readTimeoutMs ) < 0 )
+    char nib = "0123456789ABCDEF"[dir & 0xF];
+    if( send_( std::string( "ho" ) + nib ) < 0 )
     {
         return -1;
     }
+
+    beginPending_( Pending::Home );
+    m_statusHint = "Homing";
     return 0;
 }
 
 inline int elliptecCtrl::cmd_stop_()
 {
-    std::string r;
-    m_pending = Pending::Stop;
-    if( txrx_( "st", &r, m_readTimeoutMs ) < 0 )
+    frameT r;
+    if( query_( "st", "GS", r, m_readTimeoutMs ) != 0 )
     {
         return -1;
     }
-    return 0;
+
+    if( r.payload.size() < 2 || !std::isxdigit( (unsigned char)r.payload[0] ) ||
+        !std::isxdigit( (unsigned char)r.payload[1] ) )
+    {
+        return -1;
+    }
+
+    int code = static_cast<int>( std::stoul( r.payload.substr( 0, 2 ), nullptr, 16 ) );
+    if( code == 0x09 && m_pending != Pending::None )
+    {
+        m_sawBusy = true;
+    }
+    return code;
 }
 
-inline int elliptecCtrl::cmd_optimize_wait_()
+inline int elliptecCtrl::cmd_optimize_()
 {
-    std::string r;
-    m_pending    = Pending::Optimize;
-    m_moving     = 1;
-    m_statusHint = "Running Optimization Routine";
-    if( txrx_( m_cmdOptimize, &r, m_readTimeoutMs ) < 0 )
+    if( send_( m_cmdOptimize ) < 0 )
     {
         return -1;
     }
+
+    beginPending_( Pending::Optimize );
+    m_statusHint = "Optimizing motors (may take minutes)";
     return 0;
 }
 
 inline int elliptecCtrl::cmd_save_()
 {
-    std::string r;
-    m_pending    = Pending::Save;
-    m_moving     = 1;
-    m_statusHint = "Saving...";
-    int rc       = txrx_( m_cmdSave, &r, m_readTimeoutMs );
-    return rc;
+    frameT r;
+    if( query_( m_cmdSave, "GS", r, m_readTimeoutMs ) != 0 )
+    {
+        return -1;
+    }
+
+    return ( r.payload.compare( 0, 2, "00" ) == 0 ) ? 0 : -1;
 }
 
 inline int elliptecCtrl::cmd_setvel_( int pct )
@@ -1512,24 +1989,27 @@ inline int elliptecCtrl::cmd_setvel_( int pct )
     }
     char buf[3];
     std::snprintf( buf, sizeof( buf ), "%02X", pct );
-    std::string r;
-    m_pending = Pending::Velocity;
-    int rc    = txrx_( std::string( "sv" ) + buf, &r, m_readTimeoutMs );
-    return rc;
+
+    frameT r;
+    int    rc = query_( std::string( "sv" ) + buf, "GS", r, m_readTimeoutMs );
+    if( rc != 0 )
+    {
+        return rc;
+    }
+
+    return ( r.payload.compare( 0, 2, "00" ) == 0 ) ? 0 : 1;
 }
 
 inline int elliptecCtrl::cmd_moveAbs_pulses_( int32_t pulses )
 {
     char hex[9];
     std::snprintf( hex, sizeof( hex ), "%08X", (uint32_t)pulses );
-    std::string r;
-    m_pending    = Pending::MoveAbs;
-    m_moving     = 1;
-    m_statusHint = "Moving...";
-    if( txrx_( std::string( "ma" ) + hex, &r, m_readTimeoutMs ) < 0 )
+    if( send_( std::string( "ma" ) + hex ) < 0 )
     {
         return -1;
     }
+
+    beginPending_( Pending::Move );
     return 0;
 }
 
@@ -1537,18 +2017,56 @@ inline int elliptecCtrl::cmd_moveRel_pulses_( int32_t pulses )
 {
     char hex[9];
     std::snprintf( hex, sizeof( hex ), "%08X", (uint32_t)pulses );
-    std::string r;
-    m_pending    = Pending::MoveRel;
-    m_moving     = 1;
-    m_statusHint = "Moving...";
-    if( txrx_( std::string( "mr" ) + hex, &r, m_readTimeoutMs ) < 0 )
+    if( send_( std::string( "mr" ) + hex ) < 0 )
     {
         return -1;
     }
+
+    beginPending_( Pending::Move );
     return 0;
 }
 
-/* ---------- Degree wrappers ---------- */
+/* ---------- Motion helpers ---------- */
+
+inline bool elliptecCtrl::motionAllowed_( const std::string &what )
+{
+    if( !m_connected )
+    {
+        log<text_log>( what + " rejected: not connected", logPrio::LOG_WARNING );
+        return false;
+    }
+
+    if( m_pulsesPerRev == 0 )
+    {
+        log<text_log>( what + " rejected: pulses per revolution unknown", logPrio::LOG_ERROR );
+        return false;
+    }
+
+    if( m_pending == Pending::Optimize )
+    {
+        log<text_log>( what + " rejected: motor optimization in progress", logPrio::LOG_WARNING );
+        return false;
+    }
+
+    if( m_pending == Pending::Home || m_pending == Pending::HomeOffset )
+    {
+        log<text_log>( what + " rejected: homing in progress", logPrio::LOG_WARNING );
+        return false;
+    }
+
+    return true;
+}
+
+inline void elliptecCtrl::beginPending_( Pending p )
+{
+    m_pending       = p;
+    m_pendingStart  = std::chrono::steady_clock::now();
+    m_sawBusy       = false;
+    m_latchedError  = 0;
+    m_stopRequested = false;
+    m_errorText.clear();
+    m_moving = ( p == Pending::Home || p == Pending::HomeOffset ) ? 2 : 1;
+}
 
 inline int32_t elliptecCtrl::degToPulses_( double deg ) const
 {
@@ -1570,18 +2088,11 @@ inline double elliptecCtrl::pulsesToDeg_( int32_t pulses ) const
 
 inline int elliptecCtrl::moveAbsDeg_( double deg )
 {
-    if( !m_allowMultiturn )
+    int32_t p = degToPulses_( wrapDeg( deg ) );
+    if( m_pulsesPerRev > 0 && p >= static_cast<int32_t>( m_pulsesPerRev ) )
     {
-        while( deg < 0.0 )
-        {
-            deg += 720.0;
-        }
-        while( deg >= 720. )
-        {
-            deg -= 720.0;
-        }
+        p -= static_cast<int32_t>( m_pulsesPerRev );
     }
-    int32_t p = degToPulses_( deg );
     return cmd_moveAbs_pulses_( p );
 }
 
@@ -1596,13 +2107,37 @@ inline int elliptecCtrl::moveRelDegCmdFromRelMove_()
     return moveRelDeg_( m_relStepDeg );
 }
 
+inline int elliptecCtrl::applyVelocityFloor_( int pct )
+{
+    if( pct > 100 )
+    {
+        pct = 100;
+    }
+
+    if( pct < 0 )
+    {
+        pct = 0;
+    }
+
+    int minVel = minVelocityForModel( m_model );
+    if( pct < minVel )
+    {
+        log<text_log>( "velocity " + std::to_string( pct ) + "% is below the ELL" + std::to_string( (int)m_model ) +
+                           " minimum; using " + std::to_string( minVel ) + "%",
+                       logPrio::LOG_WARNING );
+        pct = minVel;
+    }
+
+    return pct;
+}
+
 inline int elliptecCtrl::presetIndexForPosition_( double deg ) const
 {
     const double tol = presetToleranceDeg_();
 
     for( size_t i = 0; i < m_presetPositions.size(); ++i )
     {
-        if( std::abs( static_cast<double>( m_presetPositions[i] ) - deg ) <= tol )
+        if( circularDistanceDeg( static_cast<double>( m_presetPositions[i] ), deg ) <= tol )
         {
             return static_cast<int>( i );
         }
@@ -1613,12 +2148,28 @@ inline int elliptecCtrl::presetIndexForPosition_( double deg ) const
 
 inline double elliptecCtrl::presetToleranceDeg_() const
 {
-    if( m_pulsesPerRev == 0 )
+    return m_presetToleranceDeg;
+}
+
+inline int elliptecCtrl::validatePresets_()
+{
+    for( size_t i = 0; i < m_presetPositions.size(); ++i )
     {
-        return 1e-3;
+        for( size_t j = i + 1; j < m_presetPositions.size(); ++j )
+        {
+            double d = circularDistanceDeg( m_presetPositions[i], m_presetPositions[j] );
+            if( d > 0 && d < 2 * m_presetToleranceDeg )
+            {
+                std::string n1 = ( i < m_presetNames.size() ) ? m_presetNames[i] : std::to_string( i );
+                std::string n2 = ( j < m_presetNames.size() ) ? m_presetNames[j] : std::to_string( j );
+                return log<text_log, -1>( "presets " + n1 + " and " + n2 +
+                                              " are closer than twice stage.presetTolerance",
+                                          logPrio::LOG_CRITICAL );
+            }
+        }
     }
 
-    return std::max( 1e-6, std::abs( pulsesToDeg_( 1 ) ) / 2.0 );
+    return 0;
 }
 
 inline void elliptecCtrl::syncPresetState_()
@@ -1683,6 +2234,11 @@ inline void elliptecCtrl::syncControllerState_()
 
 inline int elliptecCtrl::pollDevice_()
 {
+    if( drainFrames_() < 0 )
+    {
+        return -1;
+    }
+
     int rcP = q_position_();
     int rcS = q_status_();
 
@@ -1692,87 +2248,35 @@ inline int elliptecCtrl::pollDevice_()
         return -1;
     }
 
-    // Soft timeouts => debounce; reconnect if too many misses in a row
+    // Missed replies => debounce; reconnect if too many in a row
     if( rcP > 0 || rcS > 0 )
     {
+        if( m_pending == Pending::Optimize )
+        {
+            // The bus is occupied during optimization; silence is expected until the routine times out.
+            double elapsed = std::chrono::duration<double>( std::chrono::steady_clock::now() - m_pendingStart ).count();
+            if( elapsed < m_optimizeTimeoutSec )
+            {
+                updateStatus_();
+                return +1;
+            }
+
+            failPending_( "motor optimization timed out" );
+        }
+
         if( ++m_commMisses <= m_commMaxMisses )
         {
             updateStatus_();
-            return +1; // tolerated soft miss
+            return +1;
         }
-        else
-        {
-            m_commMisses = 0;
-            return -1; // exceeded budget -> force reconnect
-        }
+
+        m_commMisses = 0;
+        return -1;
     }
 
-    // Success path
     m_commMisses = 0;
 
-    if( m_gs == 0x09 )
-    { // BUSY
-        switch( m_pending )
-        {
-        case Pending::Home:
-            m_moving = 2;
-            break;
-        case Pending::MoveAbs:
-        case Pending::MoveRel:
-        case Pending::OffsetRel:
-        case Pending::Optimize:
-        case Pending::Velocity:
-        case Pending::Save:
-        case Pending::Stop:
-            m_moving = 1;
-            break;
-        case Pending::None:
-            if( m_moving <= 0 )
-            {
-                m_moving = 1; // external motion
-            }
-            break;
-        }
-    }
-    else
-    { // OK (idle)
-        switch( m_pending )
-        {
-        case Pending::Home:
-            m_homed   = true;
-            m_pending = Pending::None;
-            m_moving  = 0;
-            m_statusHint.clear();
-            if( std::abs( m_homeOffsetDeg ) > 0.0 )
-            {
-                if( moveRelDeg_( m_homeOffsetDeg ) == 0 )
-                {
-                    m_pending    = Pending::OffsetRel;
-                    m_moving     = 1;
-                    m_statusHint = "Homed. Now applying offset...";
-                    recordStage( true );
-                    recordPosition( true );
-                }
-            }
-            break;
-
-        case Pending::OffsetRel:
-        case Pending::MoveAbs:
-        case Pending::MoveRel:
-        case Pending::Velocity:
-        case Pending::Save:
-        case Pending::Stop:
-        case Pending::Optimize:
-            m_pending = Pending::None;
-            m_moving  = 0;
-            m_statusHint.clear();
-            break;
-
-        case Pending::None:
-            m_moving = ( m_homed ? 0 : -1 );
-            break;
-        }
-    }
+    resolvePending_();
 
     syncPresetState_();
     syncControllerState_();
@@ -1780,13 +2284,120 @@ inline int elliptecCtrl::pollDevice_()
     return 0;
 }
 
-inline void elliptecCtrl::updateStatus_()
+inline void elliptecCtrl::resolvePending_()
 {
-    if( !m_indiDriver )
+    if( m_pending == Pending::None )
+    {
+        // Busy with nothing commanded: external motion, or a move still running after a reconnect.
+        m_moving = ( m_gs == 0x09 ) ? 1 : ( m_homed ? 0 : -1 );
+        return;
+    }
+
+    if( m_latchedError != 0 )
+    {
+        failPending_( statusMeaning( m_latchedError ) );
+        return;
+    }
+
+    if( m_gs == 0x09 )
+    {
+        m_moving = ( m_pending == Pending::Home || m_pending == Pending::HomeOffset ) ? 2 : 1;
+        return;
+    }
+
+    if( m_gs != 0x00 )
     {
         return;
     }
 
+    // Idle reported. Guard against a status read taken before the device started the command.
+    double elapsed = std::chrono::duration<double>( std::chrono::steady_clock::now() - m_pendingStart ).count();
+    if( !m_sawBusy && elapsed < 0.2 )
+    {
+        return;
+    }
+
+    completePending_();
+}
+
+inline void elliptecCtrl::completePending_()
+{
+    switch( m_pending )
+    {
+    case Pending::Home:
+        if( m_homeOffsetDeg != 0.0 )
+        {
+            int32_t p = degToPulses_( m_homeOffsetDeg );
+            if( cmd_moveAbs_pulses_( p ) < 0 )
+            {
+                failPending_( "post-home offset move could not be sent" );
+                return;
+            }
+
+            beginPending_( Pending::HomeOffset );
+            m_statusHint = "Homed. Applying offset";
+            recordStage( true );
+            recordPosition( true );
+            return;
+        }
+
+        m_homed = true;
+        log<text_log>( "homing complete" );
+        break;
+
+    case Pending::HomeOffset:
+        m_homed = true;
+        log<text_log>( "homing complete" );
+        break;
+
+    case Pending::Optimize:
+        m_homed = false;
+        log<text_log>( "motor optimization complete; the stage must be re-homed", logPrio::LOG_NOTICE );
+        break;
+
+    case Pending::Move:
+    case Pending::None:
+        break;
+    }
+
+    m_pending       = Pending::None;
+    m_stopRequested = false;
+    m_moving        = m_homed ? 0 : -1;
+    m_statusHint.clear();
+    recordStage( true );
+    recordPosition( true );
+}
+
+inline void elliptecCtrl::failPending_( const std::string &reason )
+{
+    std::string what = "move";
+    if( m_pending == Pending::Home || m_pending == Pending::HomeOffset )
+    {
+        what    = "home";
+        m_homed = false;
+    }
+    else if( m_pending == Pending::Optimize )
+    {
+        what    = "optimize";
+        m_homed = false;
+    }
+
+    log<text_log>( what + " failed: " + reason, logPrio::LOG_ERROR );
+
+    m_pending       = Pending::None;
+    m_latchedError  = 0;
+    m_stopRequested = false;
+    m_moving        = m_homed ? 0 : -1;
+    m_statusHint.clear();
+    m_errorText = "Error: " + what + " failed (" + reason + ")";
+    clearPresetNameTracking();
+    m_preset_target = 0;
+    recordStage( true );
+    recordPosition( true );
+}
+
+inline void elliptecCtrl::updateStatus_()
+{
     std::string s;
     if( state() == stateCodes::POWEROFF )
     {
@@ -1798,11 +2409,15 @@ inline void elliptecCtrl::updateStatus_()
     }
     else if( m_moving == 2 )
     {
-        s = "Homing";
+        s = ( !m_statusHint.empty() ? m_statusHint : "Homing" );
     }
     else if( m_moving == 1 )
     {
         s = ( !m_statusHint.empty() ? m_statusHint : "Busy" );
+    }
+    else if( !m_errorText.empty() )
+    {
+        s = m_errorText;
     }
     else if( !m_homed )
     {
@@ -1828,6 +2443,12 @@ inline void elliptecCtrl::updateStatus_()
             changed = true;
         }
     }
+
+    if( !m_indiDriver )
+    {
+        return;
+    }
+
     if( changed )
     {
         m_ipStatus.setState( ( m_moving > 0 ) ? INDI_BUSY : INDI_IDLE );

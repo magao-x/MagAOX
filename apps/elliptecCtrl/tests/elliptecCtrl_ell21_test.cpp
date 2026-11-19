@@ -487,12 +487,11 @@ class ell21App : public MagAOX::app::elliptecCtrl
         m_tel.m_logLevel = logPrio::LOG_TELEM;
         m_maxInterval    = 3600.0;
 
-        m_port              = port;
-        m_startupDelayMs    = 0;
-        m_readTimeoutMs     = 100;
-        m_busyReadTimeoutMs = 100;
-        m_powerState        = 1;
-        m_powerTargetState  = 1;
+        m_port             = port;
+        m_startupDelayMs   = 0;
+        m_readTimeoutMs    = 100;
+        m_powerState       = 1;
+        m_powerTargetState = 1;
 
         m_presetPositions = { 0.0F, 90.0F, 180.0F };
         m_presetNames     = { "zero", "ninety", "oneEighty" };
