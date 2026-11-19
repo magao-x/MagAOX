@@ -558,7 +558,7 @@ TEST_CASE( "accelSim distinguishes timing activity from publishable slots", "[ac
 TEST_CASE( "accelSim commits all four scheduler steps with the deployed write lead", "[accelSim][dm-output]" )
 {
     dmOutputFixture fixture( 50 );
-    fixture.enable( .1 );
+    fixture.enable( 2.5 ); // Scales above one amplify the same target-time surface linearly.
     auto &app     = fixture.m_app;
     auto &source  = g_images.at( "dm01disp10_aux" );
     g_wakeDelayNs = 3000;
@@ -575,9 +575,9 @@ TEST_CASE( "accelSim commits all four scheduler steps with the deployed write le
             REQUIRE( ready[synco::cmdStep] == slot % 4 );
             REQUIRE( target == origin + slot * 125000 );
             REQUIRE( ready[synco::cmdReadyNs] < ready[synco::cmdCutoff] );
-            REQUIRE( source.m_pixels[0] == Approx( expected( app, target, .1, 0 ) ).margin( 1e-8 ) );
+            REQUIRE( source.m_pixels[0] == Approx( expected( app, target, 2.5, 0 ) ).margin( 1e-7 ) );
             // One subframe of timing error would be detected at this tolerance.
-            REQUIRE( std::abs( expected( app, target, .1, 0 ) - expected( app, target - 125000, .1, 0 ) ) > 1e-7 );
+            REQUIRE( std::abs( expected( app, target, 2.5, 0 ) - expected( app, target - 125000, 2.5, 0 ) ) > 1e-6 );
             // The actual scheduler snapshots at the cutoff; its exact receipt is visible on the next poll.
             g_tick = ready[synco::cmdCutoff] + 3000;
             acknowledge();

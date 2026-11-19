@@ -16,6 +16,8 @@ namespace app
 namespace accelSimDetail
 {
 
+constexpr double maxDMScale = 100; ///< Upper limit of the linear DM-only amplitude scale.
+
 /// Result of the stateless staging adapter retained for existing controller test callers.
 enum class dmState
 {
@@ -48,13 +50,13 @@ class dmInjection
     /// Return a complete finite scaled command; invalid input throws without publishing.
     const std::vector<float> &
     synthesize( const sample &value /**< [in] physical sample; only noise-free pointing is used */,
-                double        scale /**< [in] independent DM amplitude scale in [0,1] */ );
+                double        scale /**< [in] independent DM amplitude scale in [0,maxDMScale] */ );
 
     /// Preserve existing staging call sites without timing gates, revisions or latched state.
     template <typename publisherT>
     dmState service( const sample &value /**< [in] completed physical sample */,
                      uint64_t      request /**< [in] legacy enable request; only bit zero is used */,
-                     double        scale /**< [in] independent amplitude scale in [0,1] */,
+                     double        scale /**< [in] independent amplitude scale in [0,maxDMScale] */,
                      bool /**< [in] unused former timing qualification */,
                      publisherT &publish /**< [in,out] private command staging callback */ );
 };
@@ -85,7 +87,7 @@ inline bool dmInjection::ready() const
 
 inline const std::vector<float> &dmInjection::synthesize( const sample &value, double scale )
 {
-    if( !ready() || !std::isfinite( scale ) || scale < 0 || scale > 1 )
+    if( !ready() || !std::isfinite( scale ) || scale < 0 || scale > maxDMScale )
         throw std::invalid_argument( "invalid DM calibration or scale" );
     // The existing basis rejects nonfinite pointing and float overflow before returning a command.
     const auto &command = m_basis->synthesize( pointingDisturbance( value ) );

@@ -263,7 +263,7 @@ class accelSim : public MagAOXApp<true>,
     INDI_SETCALLBACK_DECL( accelSim, m_indiP_numChannelsSource );
     /// Request scaled output or tagged zero removal through the existing producer.
     INDI_NEWCALLBACK_DECL( accelSim, m_indiP_dmEnable );
-    /// Set the independent commissioning scale in [0,1].
+    /// Set the independent commissioning scale in [0,100].
     INDI_NEWCALLBACK_DECL( accelSim, m_indiP_dmScale );
 };
 
@@ -334,7 +334,7 @@ inline void accelSim::setupConfig()
     add( "dm", "modeCube", "string", "Approved surface-micron TT FITS cube; first two planes are used." );
     add( "dm", "mask", "string", "Deployed dmmask FITS fitting support, not the offloader actuator mask." );
     add( "dm", "enabled", "bool", "Must be false; use the runtime dm_enable control." );
-    add( "dm", "scale", "double", "Independent DM-only scale [0,1], default 0." );
+    add( "dm", "scale", "double", "Independent DM-only linear scale [0,100], default 0." );
     add( "dm", "maxRelativeResidual", "double", "Maximum calibrated physical fit residual, default 1e-6." );
 }
 
@@ -396,7 +396,7 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_dmResidual, "dm.maxRelativeResidual" );
     try
     {
-        if( m_dmStartupEnabled || !std::isfinite( dmScale ) || dmScale < 0 || dmScale > 1 ||
+        if( m_dmStartupEnabled || !std::isfinite( dmScale ) || dmScale < 0 || dmScale > accelSimDetail::maxDMScale ||
             !std::isfinite( m_dmResidual ) || m_dmResidual < 0 || m_dmResidual >= 1 ||
             ( !m_dmChannel.empty() && ( m_dmChannel == m_shmimName || m_dmChannel == m_syncName ||
                                         m_dmChannel.find( '/' ) != std::string::npos || m_dmChannel == "dm01disp" ) ) )
@@ -443,7 +443,8 @@ inline int accelSim::setupProperties()
 {
     CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_dmEnable, "dm_enable" );
     m_indiP_dmEnable["toggle"] = pcf::IndiElement::Off;
-    CREATE_REG_INDI_NEW_NUMBERD( m_indiP_dmScale, "dm_scale", 0, 1, .001, "%.3f", "DM scale", "DM" );
+    CREATE_REG_INDI_NEW_NUMBERD(
+        m_indiP_dmScale, "dm_scale", 0, accelSimDetail::maxDMScale, .001, "%.3f", "DM scale", "DM" );
     m_indiP_dmScale["current"] = m_dmScale.load();
     m_indiP_dmScale["target"]  = m_dmScale.load();
     CREATE_REG_INDI_RO_NUMBER( m_indiP_dmStatus, "dm_status", "DM readiness", "DM" );
@@ -1293,7 +1294,7 @@ inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_dmScale )( const pcf::IndiProper
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_dmScale, ipRecv );
     std::lock_guard<std::mutex> guard( m_controlMutex );
     const double                value = target( ipRecv );
-    if( !std::isfinite( value ) || value < 0 || value > 1 )
+    if( !std::isfinite( value ) || value < 0 || value > accelSimDetail::maxDMScale )
         return propertyState( m_indiP_dmScale, false );
     m_dmScale                  = value;
     m_indiP_dmScale["current"] = value;
