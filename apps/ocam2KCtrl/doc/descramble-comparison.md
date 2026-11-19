@@ -1,9 +1,9 @@
 # OCAM descramble comparison
 
-The optional bin2 methods produce the same pixels as the SDK using a mapping
-prepared and validated during camera configuration. The SDK remains the
-default. Other camera modes and tables that do not match the validated
-structure use the SDK even when a candidate is requested.
+The bin2 methods produce the same pixels as the SDK using a mapping prepared
+and validated during camera configuration. `optimized` is the default requested
+method. Other camera modes and tables that do not match the validated
+structure use the SDK fallback. SDK remains explicitly selectable.
 
 The development workstation measurements and validation record are in the
 [engineering plan](../../../agents/plans/2026-11/ocam_descramble.md).
@@ -11,16 +11,17 @@ They do not establish performance on the RTC.
 
 ## Configuration and status
 
-Existing configurations need no change. To persist a selection after it has
-been qualified, the optional setting is:
+Omitting the method setting now selects `optimized`. Explicit existing settings
+still take precedence, including `sdk`; remove that override or select optimized
+to adopt the new default:
 
 ```ini
 [camera]
-descrambleMethod=mapped
+descrambleMethod=optimized
 ```
 
 The accepted values are `sdk`, `compact`, `mapped`, `optimized`, and `parallel`;
-the default is `sdk`. An unknown value fails configuration. All candidates
+the default is `optimized`. An unknown value fails configuration. All candidates
 require the same validated structured bin2 mapping in the app. `parallel`
 also requires the explicit worker setup below. The offline helper can compare
 other modes.
@@ -54,6 +55,16 @@ stage instrumentation; the cause of the earlier larger penalty remains
 unresolved. Final qualification should also use the intended operating
 instrumentation setting, fixed throughout each matched comparison.
 
+The later 2,000-FPS optimized/parallel-labeled capture averages 33.760 versus
+37.423 us acquisition-to-write, with reported standard deviations 1.067 versus
+1.119 us. Applied worker-state confirmation is tracked in the engineering
+record. Together with the earlier SDK comparisons, this supports selecting
+optimized as the default; the worker remains an explicit experiment.
+
+After finishing that experiment, remove or empty `descramble.cpuset` at the
+next operator restart to disable worker creation and restore its reserved core
+to the previous workload. Do not mix that workload change into an A/B interval.
+
 | INDI property / element | Meaning |
 | --- | --- |
 | `descramble_method.sdk` / `.compact` / `.mapped` / `.optimized` / `.parallel` | Requested method; exactly one switch is On. |
@@ -67,8 +78,11 @@ The request is latched once for an entire frame. `applied` changes after the
 load completes and is published by the ordinary app thread. A changed request
 is Busy until acknowledged. An unavailable candidate request is Alert and
 uses SDK conversion; the request is retained for a later compatible camera
-configuration. Selecting `sdk` restores the reference path. No method change
-issues camera serial commands or restarts acquisition.
+configuration. This also applies to the default optimized request outside
+validated bin2: SDK fallback succeeds, while the unavailable optimized request
+reports Alert. Configure `sdk` explicitly when that is the intended mode.
+Selecting `sdk` restores the reference path. No method change issues camera
+serial commands or restarts acquisition.
 
 `applied` describes completion of conversion and optional digital sampling;
 the existing frameGrabber staging copy and stream publication follow it.
