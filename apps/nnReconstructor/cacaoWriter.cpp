@@ -13,9 +13,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#ifdef PO4AO_ROUTE_TEST
-    #include "../po4ao/tests/po4aoRouteTestAbi.hpp"
-#elif defined( NNRECONSTRUCTOR_TEST )
+#ifdef NNRECONSTRUCTOR_TEST
     #include "tests/cacaoWriterTestAbi.hpp"
 #else
 extern "C"
@@ -35,9 +33,11 @@ cacaoWriter::cacaoWriter( const std::string &shmDirectory, const std::string &pr
 bool cacaoWriter::running()
 {
     FUNCTION_PARAMETER_STRUCT_MD md{};
-    struct stat                  info{};
-    const auto                   path = m_shmDirectory + "/" + m_name + ".fps.shm";
-    const int                    fd   = open( path.c_str(), O_RDONLY | O_CLOEXEC );
+    struct stat info
+    {
+    };
+    const auto path = m_shmDirectory + "/" + m_name + ".fps.shm";
+    const int  fd   = open( path.c_str(), O_RDONLY | O_CLOEXEC );
     if( fd < 0 )
     {
         throw std::runtime_error( "Cannot read CACAO FPS: " + path );
@@ -111,7 +111,9 @@ void cacaoWriter::command( bool enabled )
     {
         throw std::runtime_error( "CACAO controller FIFO is unavailable" );
     }
-    struct stat info{};
+    struct stat info
+    {
+    };
     if( fstat( fd, &info ) != 0 || !S_ISFIFO( info.st_mode ) )
     {
         close( fd );

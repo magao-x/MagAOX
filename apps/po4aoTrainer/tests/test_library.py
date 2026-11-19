@@ -313,7 +313,8 @@ def test_set_policy_requires_fresh_warmup_preserves_control_and_library(
     supervisor.publish(source, supervisor.record["generation"], threading.Event())
     supervisor.submit("save_policy", {"label": "internal"})
     assert finish(supervisor, "library") == [("save_policy", "Ok", "")]
-    saved = supervisor.status["saved_policy"]
+    saved = next(iter(supervisor.catalog))
+    assert supervisor.status["message"] == "save_policy complete: " + saved
     supervisor.set_parameter("policy_learning_rate", 1e-7)
     supervisor.submit("set_policy", {"id": saved})
     assert finish(supervisor) == [("set_policy", "Ok", "")]
@@ -331,7 +332,8 @@ def test_set_policy_requires_fresh_warmup_preserves_control_and_library(
     supervisor.submit("reset", {"request": True})
     finish(supervisor)
     assert saved in supervisor.library.catalog()
-    assert supervisor.status["selected_policy"] == ""
+    assert supervisor.record.get("selected_policy", "") == ""
+    assert not {"selected_policy", "saved_policy", "library_phase"} & supervisor.status.keys()
     assert supervisor.desired["training"]["policy_learning_rate"] == 1e-7
     supervisor.close()
 
@@ -361,7 +363,7 @@ def test_save_pins_acknowledged_pair_while_publication_advances(
     release.set()
     finish(supervisor, "library")
     assert supervisor.record["eligible"]["model_id"] == second
-    saved = supervisor.catalog[supervisor.status["saved_policy"]]
+    saved = next(iter(supervisor.catalog.values()))
     assert saved["model_id"] == first
     supervisor.close()
     restarted = Supervisor(LibraryRuntime(), config)

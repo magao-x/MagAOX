@@ -54,6 +54,8 @@ class po4ao : public xWidget
 
     std::set<std::string> m_defined; ///< Properties with observed definitions, including command permissions.
 
+    QElapsedTimer m_definitionQueryAge; ///< Bounds retries when value updates arrived without definitions.
+
     std::map<std::string, bool>
         m_pending; ///< Requests keyed by device.property; value records an observed Busy acknowledgement.
 
@@ -89,6 +91,9 @@ class po4ao : public xWidget
     /// Attach named property subscriptions through the existing publisher.
     void subscribe() override;
 
+    /// Request missing property definitions without issuing control commands; retry at most every five seconds.
+    void requestMissingDefinitions();
+
     /// Mark transport connection without inferring device readiness.
     void onConnect() override;
 
@@ -123,9 +128,6 @@ class po4ao : public xWidget
 
     /// Request a shared modulation-link preference without moving the modulator.
     void on_checkModulation_clicked( bool checked /**< [in] Requested linking preference. */ );
-
-    /// Request a whole-app Start/Stop through the native routing worker.
-    void on_buttonRunPO4AO_clicked();
 
     /// Request PO4AO activation or coordinated disable according to observed control state.
     void on_buttonPO4AO_clicked();
@@ -226,7 +228,14 @@ inline po4ao::po4ao( const std::string &device,
         label->setMinimumHeight( 2 * label->fontMetrics().height() );
     }
     m_statusTimer.setInterval( 500 );
-    connect( &m_statusTimer, &QTimer::timeout, this, &po4ao::updateGUI );
+    connect( &m_statusTimer,
+             &QTimer::timeout,
+             this,
+             [this]()
+             {
+                 requestMissingDefinitions();
+                 updateGUI();
+             } );
     m_statusTimer.start();
     m_ackTimer.setSingleShot( true );
     m_ackTimer.setInterval( 10000 );
@@ -290,8 +299,6 @@ inline void po4ao::subscribe()
         m_parent->addSubscriberProperty( this, m_device, name );
     }
     for( const auto *name : { "fsm",
-                              "run_enable",
-                              "run_status",
                               "control_enable",
                               "reset_model",
                               "recollect_warmup",
@@ -336,6 +343,7 @@ inline void po4ao::onDisconnect()
     m_runtimeSequence.clear();
     m_properties.clear();
     m_defined.clear();
+    m_definitionQueryAge.invalidate();
     m_pending.clear();
     m_routePending.clear();
     m_managed            = false;
@@ -486,11 +494,8 @@ inline void po4ao::syncPolicies()
 
 inline void po4ao::updateTrainingControls( bool ready )
 {
-    const auto phase    = status( "training_phase" );
-    const auto runPhase = value( m_runtimeDevice, "run_status", "phase" );
-    const bool routeQuiet =
-        runPhase.empty() || runPhase == "unverified" || runPhase == "running" || runPhase == "stopped";
-    const bool idle = ready && routeQuiet && m_routePending.empty() && ( phase == "idle" || phase == "error" ) &&
+    const auto phase = status( "training_phase" );
+    const bool idle  = ready && m_routePending.empty() && ( phase == "idle" || phase == "error" ) &&
                       !busy( { "po4ao_enable", "reset", "recollect", "learning", "set_policy" } );
     m_ui.comboPolicy->setEnabled( ready && m_ui.comboPolicy->count() > 0 );
     m_ui.comboPolicy->setToolTip( m_ui.comboPolicy->currentText() );
@@ -591,8 +596,8 @@ inline void po4ao::acknowledge( const pcf::IndiProperty &property )
         bool       requestedValid = false, appliedValid = false;
         const auto requested = QString::fromStdString( value( m_runtimeDevice, "model_status", "reset_request" ) )
                                    .toULongLong( &requestedValid );
-        const auto applied   = QString::fromStdString( value( m_runtimeDevice, "model_status", "reset_applied" ) )
-                                   .toULongLong( &appliedValid );
+        const auto applied = QString::fromStdString( value( m_runtimeDevice, "model_status", "reset_applied" ) )
+                                 .toULongLong( &appliedValid );
         if( requestedValid && requested > m_nativeResetAfter )
         {
             m_pending[resetKey] = true; // Generation advancement acknowledges even a coalesced Busy transition.
@@ -761,6 +766,26 @@ inline void po4ao::observeHeartbeat( const pcf::IndiProperty &property )
     m_haveHeartbeat = true;
 }
 
+inline void po4ao::requestMissingDefinitions()
+{
+    if( !m_connected || ( m_definitionQueryAge.isValid() && m_definitionQueryAge.elapsed() < 5000 ) )
+    {
+        return;
+    }
+    // Shared discovery accepts setProperty, but commands also need their definition and permissions.
+    for( const auto &entry : m_properties )
+    {
+        if( !m_defined.count( entry.first ) )
+        {
+            pcf::IndiProperty query;
+            query.setDevice( entry.second.getDevice() );
+            query.setName( entry.second.getName() );
+            sendGetProperties( query );
+            m_definitionQueryAge.start();
+        }
+    }
+}
+
 inline void po4ao::handleDefProperty( const pcf::IndiProperty &property )
 {
     if( property.getDevice() != m_device && property.getDevice() != m_nnDevice &&
@@ -908,7 +933,7 @@ inline void po4ao::updateGUI()
     const bool reconstructionReady = nnLive && knownSource &&
                                      ( reconstructionPhase == "idle" || reconstructionPhase == "error" ) &&
                                      !busy( { "nn_activate", "reconstructor" }, m_nnDevice );
-    const bool catalog             = m_defined.count( m_nnDevice + ".model" ) && m_ui.comboEngine->count() > 0;
+    const bool catalog = m_defined.count( m_nnDevice + ".model" ) && m_ui.comboEngine->count() > 0;
     m_ui.comboEngine->setEnabled( nnLive && catalog && !busy( { "nn_activate", "reconstructor" }, m_nnDevice ) );
     m_ui.comboEngine->setToolTip( m_ui.comboEngine->currentText() );
     m_ui.buttonEnableNN->setEnabled(
@@ -933,27 +958,35 @@ inline void po4ao::updateGUI()
     }
     m_ui.checkModulation->setEnabled(
         nnLive && commandAvailable( "link_modulation", pcf::IndiProperty::Switch, { "toggle" }, m_nnDevice ) );
-    m_ui.labelModulation->setText( "Modulation: " + QString::fromStdString( !nnLive || nnStatus( "modulation" ).empty()
-                                                                                ? "Unknown"
-                                                                                : nnStatus( "modulation" ) ) );
+    bool         modulationKnown = false;
+    const double modulation      = QString::fromStdString( nnStatus( "modulation" ) ).toDouble( &modulationKnown );
+    QString      modulationText  = "Unknown";
+    if( nnLive && modulationKnown )
+    {
+        // ttmModulator modState: 0 off, 1 rest, 2 midset, 3 set, 4 modulating.
+        if( modulation == 4 )
+        {
+            modulationText = "Modulating";
+        }
+        else if( modulation == 3 )
+        {
+            modulationText = "Not modulating";
+        }
+        else if( modulation == 0 )
+        {
+            modulationText = "Off";
+        }
+        else if( modulation == 1 )
+        {
+            modulationText = "At rest";
+        }
+        else if( modulation == 2 )
+        {
+            modulationText = "Setting";
+        }
+    }
+    m_ui.labelModulation->setText( "Modulation: " + modulationText );
 
-    const auto runPhase    = value( m_runtimeDevice, "run_status", "phase" );
-    const auto runProperty = m_properties.find( m_runtimeDevice + ".run_enable" );
-    const bool appRunning  = runProperty != m_properties.end() && runProperty->second.find( "toggle" ) &&
-                             runProperty->second["toggle"].getSwitchState() == pcf::IndiElement::On;
-    m_ui.buttonRunPO4AO->setText( appRunning ? "Stop PO4AO" : "Start PO4AO" );
-    m_ui.buttonRunPO4AO->setEnabled(
-        m_connected && m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000 && !m_runtimeInstance.empty() &&
-        !busy( { "reset_model", "reload_engine" }, m_runtimeDevice ) &&
-        value( m_runtimeDevice, "model_status", "reset_request" ) ==
-            value( m_runtimeDevice, "model_status", "reset_applied" ) &&
-        value( m_runtimeDevice, "model_status", "reload" ) != "loading" &&
-        value( m_runtimeDevice, "model_status", "reload" ) != "ready" &&
-        commandAvailable( "run_enable", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) &&
-        ( runPhase == "unverified" || runPhase == "running" || runPhase == "stopped" || runPhase == "failed" ) );
-    m_ui.labelRunPO4AO->setText(
-        QString::fromStdString( runPhase + " | " + value( m_runtimeDevice, "run_status", "route" ) ) );
-    m_ui.labelRunPO4AO->setToolTip( QString::fromStdString( value( m_runtimeDevice, "run_status", "error" ) ) );
     updateTrainingControls( ready );
     if( !ready )
     {
@@ -961,17 +994,14 @@ inline void po4ao::updateGUI()
         return;
     }
 
-    const bool routeQuiet =
-        runPhase.empty() || runPhase == "unverified" || runPhase == "running" || runPhase == "stopped";
-    const bool runAvailable    = runPhase.empty() || runPhase == "unverified" || runPhase == "running";
-    const bool runtimePending  = !m_routePending.empty() || !routeQuiet;
+    const bool runtimePending  = !m_routePending.empty();
     const auto controller      = ready ? status( "controller" ) : std::string( "unknown" );
     const bool enabled         = controller == "po4ao" || controller == "fallback";
     const bool knownController = enabled || controller == "integrator";
     const auto learning        = ready ? status( "learning" ) : std::string( "unknown" );
     const auto phase           = status( "training_phase" );
     const bool trainingReady   = ready && !runtimePending && ( phase == "idle" || phase == "error" ) &&
-                                 !busy( { "po4ao_enable", "reset", "recollect", "learning", "set_policy" } );
+                               !busy( { "po4ao_enable", "reset", "recollect", "learning", "set_policy" } );
     m_ui.buttonPO4AO->setText( enabled ? "Disable policy" : "Enable policy" );
     const bool disableReady = ready && !runtimePending && enabled && phase != "resetting" && phase != "reset_pending" &&
                               !busy( { "reset", "po4ao_enable" } );
@@ -981,7 +1011,7 @@ inline void po4ao::updateGUI()
     m_ui.buttonReset->setEnabled( ready && !runtimePending && phase != "resetting" &&
                                   commandAvailable( "reset", pcf::IndiProperty::Switch, { "request" } ) );
     const auto collection = status( "collection" );
-    m_ui.buttonWarmup->setEnabled( runAvailable && trainingReady && knownController && collection != "collecting" &&
+    m_ui.buttonWarmup->setEnabled( trainingReady && knownController && collection != "collecting" &&
                                    commandAvailable( "recollect", pcf::IndiProperty::Switch, { "request" } ) );
     QString collectionText = ready ? stateLabel( collection ) : "Unknown";
     if( ready && collection == "collecting" )
@@ -998,7 +1028,7 @@ inline void po4ao::updateGUI()
     const bool paused  = learning == "paused" || learning == "completed";
     m_ui.buttonLearning->setText( running ? "Pause learning" : paused ? "Resume learning" : "Start learning" );
     m_ui.buttonLearning->setEnabled(
-        runAvailable && trainingReady && collection != "collecting" && ( running || paused || learning == "idle" ) &&
+        trainingReady && collection != "collecting" && ( running || paused || learning == "idle" ) &&
         ( running || ( status( "warmup_required" ) != "yes" && status( "initialization_required" ) != "yes" ) ) &&
         commandAvailable( "learning", pcf::IndiProperty::Switch, { "run", "pause" } ) );
     m_ui.labelLearning->setText( status( "initialization_required" ) == "yes" ? "Set policy or Reset required"
@@ -1044,14 +1074,10 @@ inline void po4ao::updateGUI()
 
 inline void po4ao::updateRuntimeGUI()
 {
-    const auto fsm      = value( m_runtimeDevice, "fsm", "state" );
-    const bool fresh    = m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000;
-    const auto runPhase = value( m_runtimeDevice, "run_status", "phase" );
-    const bool routeQuiet =
-        runPhase.empty() || runPhase == "unverified" || runPhase == "running" || runPhase == "stopped";
-    const bool runAvailable   = runPhase.empty() || runPhase == "unverified" || runPhase == "running";
-    const bool trainerPending = !m_routePending.empty() || !routeQuiet;
-    const bool ready = m_connected && fresh && !m_runtimeInstance.empty() &&
+    const auto fsm            = value( m_runtimeDevice, "fsm", "state" );
+    const bool fresh          = m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000;
+    const bool trainerPending = !m_routePending.empty();
+    const bool ready          = m_connected && fresh && !m_runtimeInstance.empty() &&
                        m_defined.count( m_runtimeDevice + ".model_status" ) && ( fsm == "READY" || fsm == "OPERATING" );
     m_ui.labelConnection->setText( !m_connected ? "Disconnected"
                                    : ready      ? "PO4AO ready / trainer unavailable"
@@ -1060,9 +1086,9 @@ inline void po4ao::updateRuntimeGUI()
                                                 : "Waiting for PO4AO" );
     const auto selection = m_properties.find( m_runtimeDevice + ".control_enable" );
     const bool known     = selection != m_properties.end() && selection->second.find( "toggle" ) &&
-                           ( selection->second["toggle"].getSwitchState() == pcf::IndiElement::On ||
-                             selection->second["toggle"].getSwitchState() == pcf::IndiElement::Off );
-    const bool enabled   = known && selection->second["toggle"].getSwitchState() == pcf::IndiElement::On;
+                       ( selection->second["toggle"].getSwitchState() == pcf::IndiElement::On ||
+                         selection->second["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    const bool enabled = known && selection->second["toggle"].getSwitchState() == pcf::IndiElement::On;
     m_ui.buttonPO4AO->setText( enabled ? "Disable policy" : "Enable policy" );
     m_ui.buttonPO4AO->setEnabled(
         ready && !trainerPending && known && !busy( { "reset_model" }, m_runtimeDevice ) &&
@@ -1075,7 +1101,7 @@ inline void po4ao::updateRuntimeGUI()
         commandAvailable( "control_enable", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice, true ) &&
         commandAvailable( "reset_model", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) );
     m_ui.buttonWarmup->setEnabled(
-        runAvailable && ready && !trainerPending && !busy( { "control_enable", "reset_model" }, m_runtimeDevice ) &&
+        ready && !trainerPending && !busy( { "control_enable", "reset_model" }, m_runtimeDevice ) &&
         commandAvailable( "recollect_warmup", pcf::IndiProperty::Switch, { "toggle" }, m_runtimeDevice ) );
     m_ui.buttonLearning->setEnabled( false );
     m_ui.buttonLearning->setText( "Start learning" );
@@ -1187,18 +1213,6 @@ inline void po4ao::on_buttonPO4AO_clicked()
                           pcf::IndiElement::On,
                       m_runtimeDevice );
     }
-}
-
-inline void po4ao::on_buttonRunPO4AO_clicked()
-{
-    updateGUI();
-    if( !m_ui.buttonRunPO4AO->isEnabled() )
-    {
-        return;
-    }
-    const bool running =
-        m_properties.at( m_runtimeDevice + ".run_enable" )["toggle"].getSwitchState() == pcf::IndiElement::On;
-    submitSwitch( "run_enable", "toggle", !running, m_runtimeDevice );
 }
 
 inline void po4ao::on_buttonReset_clicked()

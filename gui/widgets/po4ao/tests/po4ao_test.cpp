@@ -1070,116 +1070,134 @@ TEST_CASE( "Save the compact panel preview", "[.preview]" )
     REQUIRE( f.m_widget.grab().save( path ) );
 }
 
-/** \brief Whole-app Start/Stop sends native explicit targets without the optional trainer. */
-TEST_CASE( "Whole-app PO4AO controls are independent of policy selection", "[po4ao]" )
-{
-    Fixture f( false );
-    f.runtime( true );
-    f.define( runtimeSwitch( "run_enable", true ) );
-    f.define( text( "po4ao", "run_status", { { "phase", "running" }, { "route", "po4ao_output" }, { "error", "" } } ) );
-    REQUIRE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
-    REQUIRE( f.control<QPushButton>( "buttonRunPO4AO" )->text() == "Stop PO4AO" );
-    f.m_widget.on_buttonRunPO4AO_clicked();
-    REQUIRE( f.m_publisher.m_commands.back().getDevice() == "po4ao" );
-    REQUIRE( f.m_publisher.m_commands.back().getName() == "run_enable" );
-    REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::Off );
-    f.m_publisher.handleSetProperty( runtimeSwitch( "run_enable", true, pcf::IndiProperty::Busy ) );
-    f.m_publisher.handleSetProperty( text( "po4ao", "run_status", { { "phase", "switching_input" } } ) );
-    drain();
-    REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
-    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
-    REQUIRE_FALSE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
-    f.m_publisher.handleSetProperty( runtimeSwitch( "run_enable", false ) );
-    f.m_publisher.handleSetProperty(
-        text( "po4ao", "run_status", { { "phase", "stopped" }, { "route", "aol1_modevalWFS" } } ) );
-    drain();
-    REQUIRE( f.control<QPushButton>( "buttonRunPO4AO" )->text() == "Start PO4AO" );
-    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->text() == "Disable policy" );
-    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
-    REQUIRE_FALSE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
-}
-
-/** \brief Visible model transitions gate routing, and a raced rejection clears the request latch. */
-TEST_CASE( "Run controls handle model conflicts and rejection", "[po4ao][reviewRegression]" )
-{
-    Fixture f( false );
-    f.runtime( true );
-    f.define( runtimeSwitch( "run_enable", true ) );
-    f.define( text( "po4ao", "run_status", { { "phase", "running" }, { "route", "po4ao_output" }, { "error", "" } } ) );
-    SECTION( "visible reset" )
-    {
-        f.define( runtimeSwitch( "reset_model", true, pcf::IndiProperty::Busy ) );
-        REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
-    }
-    SECTION( "visible reload" )
-    {
-        f.define( runtimeSwitch( "reload_engine", true, pcf::IndiProperty::Busy ) );
-        REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
-    }
-    SECTION( "reset generation still pending" )
-    {
-        f.m_publisher.handleSetProperty(
-            text( "po4ao", "model_status", { { "reset_request", "2" }, { "reset_applied", "1" } } ) );
-        drain();
-        REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
-    }
-    SECTION( "reload awaits frame activation" )
-    {
-        f.m_publisher.handleSetProperty( text( "po4ao", "model_status", { { "reload", "ready" } } ) );
-        drain();
-        REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
-    }
-    SECTION( "conflict arrives after click" )
-    {
-        REQUIRE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
-        f.m_widget.on_buttonRunPO4AO_clicked();
-        REQUIRE_FALSE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
-        f.m_publisher.handleSetProperty( runtimeSwitch( "run_enable", true, pcf::IndiProperty::Alert ) );
-        drain();
-        REQUIRE( f.control<QPushButton>( "buttonRunPO4AO" )->isEnabled() );
-    }
-}
-
-/** \brief A delayed routing rejection releases only the request latch; routing Busy and timeout keep their meanings. */
-TEST_CASE( "Routing rejection acknowledges a raced native policy request", "[po4ao][regression]" )
+/** \brief Value-only updates must not permanently suppress discovery of command definitions after restart.
+ * \ingroup po4aoGUI_unit_test
+ */
+TEST_CASE( "PO4AO recovers missing command definitions", "[po4ao][definitionRecovery]" )
 {
     // clang-format off
 #ifdef PO4AOGUI_TEST_DOXYGEN_REF
-    xqt::po4ao::acknowledge;
+    xqt::po4ao::handleSetProperty;
+    xqt::po4ao::handleDefProperty;
+    xqt::po4ao::requestMissingDefinitions;
+    xqt::po4ao::updateGUI;
+#endif
+    // clang-format on
+    bool managed = false;
+    SECTION( "Native policy Enable" )
+    {
+    }
+    SECTION( "Managed policy Enable" )
+    {
+        managed = true;
+    }
+    Fixture f( managed );
+    f.runtime( false );
+    if( managed )
+    {
+        f.status( { { "controller", "integrator" },
+                    { "learning", "idle" },
+                    { "training_phase", "idle" },
+                    { "collection", "unknown" },
+                    { "retained_policy", "" },
+                    { "message", "reset complete" },
+                    { "error", "" } } );
+    }
+    const std::string device = managed ? "trainer" : "po4ao";
+    const std::string name   = managed ? "po4ao_enable" : "control_enable";
+    f.erase( device, name );
+    auto property = runtimeSwitch( name, false );
+    property.setDevice( device );
+    f.m_publisher.handleSetProperty( property ); // A value update is not a command definition.
+    drain();
+    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    const auto queryCount = [&]()
+    {
+        return std::count_if( f.m_publisher.m_queries.begin(),
+                              f.m_publisher.m_queries.end(),
+                              [&]( const pcf::IndiProperty &query )
+                              {
+                                  return query.getDevice() == device && query.getName() == name;
+                              } );
+    };
+    const auto queries = queryCount();
+    f.m_publisher.tick( std::chrono::seconds( 1 ) );
+    REQUIRE( queryCount() == queries ); // Shared discovery considers this property received.
+    QThread::msleep( 550 );
+    drain();
+    REQUIRE( queryCount() == queries + 1 );
+    REQUIRE( f.m_publisher.m_queries.back().getDevice() == device );
+    REQUIRE( f.m_publisher.m_queries.back().getName() == name );
+    QThread::msleep( 550 );
+    drain();
+    REQUIRE( queryCount() == queries + 1 ); // Definition retries are bounded.
+    REQUIRE( f.m_publisher.m_commands.empty() );
+    f.define( property );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
+    f.m_widget.on_buttonPO4AO_clicked();
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    REQUIRE( f.m_publisher.m_commands.back().getDevice() == device );
+    REQUIRE( f.m_publisher.m_commands.back().getName() == name );
+    REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::On );
+}
+
+/** \brief The panel offers policy selection without a whole-app Start/Stop control.
+ * \ingroup po4aoGUI_unit_test
+ */
+TEST_CASE( "PO4AO panel exposes policy control without app Start Stop", "[po4ao]" )
+{
+    // clang-format off
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
+    xqt::po4ao::updateGUI;
     xqt::po4ao::on_buttonPO4AO_clicked;
 #endif
     // clang-format on
-    Fixture f( false );
+    Fixture f;
     f.runtime( false );
-    f.define( runtimeSwitch( "run_enable", true ) );
-    f.define( text( "po4ao", "run_status", { { "phase", "running" } } ) );
+    REQUIRE( f.m_widget.findChild<QPushButton *>( "buttonRunPO4AO" ) == nullptr );
+    REQUIRE( f.m_widget.findChild<QLabel *>( "labelRunPO4AO" ) == nullptr );
+    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->text() == "Enable policy" );
     REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    REQUIRE( f.m_publisher.m_commands.empty() );
     f.m_widget.on_buttonPO4AO_clicked();
-    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
-    // Another client already started routing; its Busy readback arrives after our local request.
-    f.define( runtimeSwitch( "run_enable", true, pcf::IndiProperty::Busy ) );
-    f.define( text( "po4ao", "run_status", { { "phase", "switching_input" } } ) );
-    f.m_widget.acknowledgementTimeout();
-    REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
-    SECTION( "rejection precedes routing completion" )
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
+    REQUIRE( f.m_publisher.m_commands.back().getName() == "po4ao_enable" );
+}
+
+/** \brief Display actual modulation state in words, including unavailable and transitional readbacks. */
+TEST_CASE( "Modulation state uses operator labels", "[po4ao][regression]" )
+{
+    // clang-format off
+#ifdef PO4AOGUI_TEST_DOXYGEN_REF
+    xqt::po4ao::updateGUI;
+#endif
+    // clang-format on
+    Fixture f;
+    for( const auto &[value, label] : std::vector<std::pair<std::string, QString>>{ { "4.00", "Modulating" },
+                                                                                    { "3.00", "Not modulating" },
+                                                                                    { "0.00", "Off" },
+                                                                                    { "1.00", "At rest" },
+                                                                                    { "2.00", "Setting" },
+                                                                                    { "-1.00", "Unknown" },
+                                                                                    { "", "Unknown" },
+                                                                                    { "invalid", "Unknown" },
+                                                                                    { "3.5", "Unknown" } } )
     {
-        f.define( runtimeSwitch( "control_enable", false, pcf::IndiProperty::Alert ) );
-        REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+        f.define( text( "nn_test",
+                        "reconstruction_status",
+                        { { "reconstructor", "nn" },
+                          { "phase", "idle" },
+                          { "error", "" },
+                          { "modulation", value },
+                          { "heartbeat", value },
+                          { "instance", "nn-1" } } ) );
+        REQUIRE( f.control<QLabel>( "labelModulation" )->text() == "Modulation: " + label );
     }
-    SECTION( "rejection follows routing completion" )
-    {
-        f.define( runtimeSwitch( "run_enable", false ) );
-        f.define( text( "po4ao", "run_status", { { "phase", "stopped" } } ) );
-        f.define( runtimeSwitch( "control_enable", false ) );
-        f.m_widget.acknowledgementTimeout();
-        REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
-        f.define( runtimeSwitch( "control_enable", false, pcf::IndiProperty::Alert ) );
-    }
-    f.define( runtimeSwitch( "run_enable", false ) );
-    f.define( text( "po4ao", "run_status", { { "phase", "stopped" } } ) );
-    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
-    f.define( runtimeSwitch( "control_enable", false ) );
-    REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+    f.m_widget.onDisconnect();
+    REQUIRE( f.control<QLabel>( "labelModulation" )->text() == "Modulation: Unknown" );
 }
 
 } // namespace po4aoGUITest

@@ -9,7 +9,6 @@
 #define po4ao_impl_hpp
 
 #include "po4ao_control.hpp"
-#include "po4ao_run.hpp"
 
 inline po4ao::po4ao() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
@@ -1036,7 +1035,6 @@ inline int po4ao::sendOutput()
     {
         return -1;
     }
-    m_outputSequence.fetch_add( 1, std::memory_order_release );
     return 0;
 }
 
@@ -1084,21 +1082,6 @@ inline int po4ao::appStartup()
     }
     m_lastStatsUpdate = std::chrono::steady_clock::now();
 
-    createStandardIndiToggleSw( m_indiP_run, "run_enable" );
-    if( registerIndiPropertyNew( m_indiP_run, INDI_NEWCALLBACK( m_indiP_run ) ) < 0 )
-    {
-        return -1;
-    }
-    createROIndiText( m_indiP_runStatus, "run_status", "phase" );
-    for( const auto *element : { "route", "error", "owner", "verified" } )
-    {
-        m_indiP_runStatus.add( pcf::IndiElement( element ) );
-    }
-    if( registerIndiPropertyReadOnly( m_indiP_runStatus ) < 0 )
-    {
-        return -1;
-    }
-    REG_INDI_SETPROP( m_indiP_nnRouting, m_nnDevice, "routing_status" );
     createStandardIndiToggleSw( m_indiP_reloadToggle, "reload_engine" );
     registerIndiPropertyNew( m_indiP_reloadToggle, INDI_NEWCALLBACK( m_indiP_reloadToggle ) );
     createStandardIndiToggleSw( m_indiP_resetModel, "reset_model" );
@@ -1121,7 +1104,6 @@ inline int po4ao::appStartup()
         m_indiP_runtimeStats.add( pcf::IndiElement( element ) );
     }
     REG_INDI_NEWPROP_NOCB( m_indiP_modelStatus, "model_status", pcf::IndiProperty::Text );
-    m_indiP_modelStatus.add( pcf::IndiElement( "run_phase" ) );
     m_indiP_modelStatus.add( pcf::IndiElement( "active_id" ) );
     m_indiP_modelStatus.add( pcf::IndiElement( "active_backend" ) );
     for( const char *element : { "reload",
@@ -1233,12 +1215,6 @@ inline int po4ao::recordTelem( const telem_po4ao * )
 
 inline int po4ao::appShutdown()
 {
-    m_runCancel.store( true );
-    m_routeIO.m_cancelled.store( true );
-    if( m_runThread.joinable() )
-    {
-        m_runThread.join();
-    }
     // Always release worker/model resources, even when the monitor reports a shutdown error.
     const int monitorStatus = shmimMonitorT::appShutdown();
     m_controlRequest.fetch_and( ~uint64_t{ 1 }, std::memory_order_acq_rel );
@@ -1319,7 +1295,7 @@ inline int po4ao::allocate( const dev::shmimT &dummy )
         {
             m_inputState = std::unique_ptr<float[], HostBufferDeleter>( new float[inputCapacity], HostBufferDeleter{} );
             m_output     = std::unique_ptr<float[], HostBufferDeleter>( new float[static_cast<size_t>( m_nModes )],
-                                                                        HostBufferDeleter{} );
+                                                                    HostBufferDeleter{} );
         }
     }
     memset( m_inputState.get(), 0, inputCapacity * sizeof( float ) );
@@ -1339,8 +1315,8 @@ inline int po4ao::allocate( const dev::shmimT &dummy )
     m_readyRead.store( 0, std::memory_order_relaxed );
     m_readyWrite.store( 0, std::memory_order_relaxed );
     // Reallocation invalidates snapshots, but must not lose a pre-attachment recollection request.
-    const bool recollectPending  = m_warmupRecollectRequest.load( std::memory_order_acquire ) >
-                                   WarmupCollection::generation( m_collection.token() );
+    const bool recollectPending = m_warmupRecollectRequest.load( std::memory_order_acquire ) >
+                                  WarmupCollection::generation( m_collection.token() );
     m_activeCollectionGeneration = m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
     m_publicationGeneration      = 0;
     m_initialWarmupPending       = WarmupCollection::phase( m_collection.token() ) == CollectionPhase::idle;

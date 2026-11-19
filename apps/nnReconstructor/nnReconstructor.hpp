@@ -288,12 +288,6 @@ class nnReconstructor : public MagAOXApp<true>,
 
     uint64_t m_switchSequence{ 0 }; ///< Advancing application heartbeat for GUI freshness.
 
-    pcf::IndiProperty m_indiP_routingHold, m_indiP_routingStatus; ///< PO4AO writer reservation request and readback.
-
-    std::string m_routingOwner, m_routingSource, m_routingPhase{ "idle" }; ///< Serialized routing reservation.
-
-    std::string m_routingReleasedOwner; ///< Last reservation whose original writer was verifiably restored.
-
     std::string m_switchInstance; ///< Process-lifetime identity for invalidating cached GUI state.
 
     std::chrono::steady_clock::time_point m_switchStarted{}, m_modQuery{}; ///< Phase deadline and query throttle.
@@ -308,9 +302,6 @@ class nnReconstructor : public MagAOXApp<true>,
 
     /// Unwind partial startup as well as normal shutdown without retaining owned resources.
     ~nnReconstructor() noexcept;
-
-    /// Reserve writer ownership for a PO4AO routing operation, or restore its previous owner.
-    INDI_NEWCALLBACK_DECL( nnReconstructor, m_indiP_routingHold );
 
     /// Register existing parameters and app-local control configuration.
     virtual void setupConfig();
@@ -1277,9 +1268,9 @@ inline int nnReconstructor::allocate( const dev::shmimT &dummy )
     const size_t crop  = m_pupPix - 2 * zeroPad;
     const size_t width = shmimMonitorT::m_width, height = shmimMonitorT::m_height;
     const bool   valid = md.datatype == _DATATYPE_FLOAT && md.location == -1 && ( md.naxis == 2 || md.naxis == 3 ) &&
-                         shmimMonitorT::m_imageStream.array.raw && size_t( pup_offset1_x ) + crop <= width &&
-                         size_t( pup_offset2_x ) + crop <= width && size_t( pup_offset1_y ) + crop <= height &&
-                         size_t( pup_offset2_y ) + crop <= height;
+                       shmimMonitorT::m_imageStream.array.raw && size_t( pup_offset1_x ) + crop <= width &&
+                       size_t( pup_offset2_x ) + crop <= width && size_t( pup_offset1_y ) + crop <= height &&
+                       size_t( pup_offset2_y ) + crop <= height;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
         m_updated     = false;
@@ -1732,11 +1723,7 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_enable )( const pcf::IndiPropert
         return 0;
     }
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if( !m_routingOwner.empty() )
-    {
-        return -1;
-    }
-    const auto value = ipRecv["toggle"].getSwitchState();
+    const auto                  value = ipRecv["toggle"].getSwitchState();
     if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
@@ -1811,7 +1798,7 @@ INDI_NEWCALLBACK_DEFN( nnReconstructor, m_indiP_model )( const pcf::IndiProperty
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_model, ipRecv );
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if( !m_routingOwner.empty() || ( m_switchPhase != "idle" && m_switchPhase != "error" ) )
+    if( m_switchPhase != "idle" && m_switchPhase != "error" )
     {
         return -1;
     }

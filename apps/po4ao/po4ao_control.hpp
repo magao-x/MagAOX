@@ -226,12 +226,8 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
     std::lock_guard<std::mutex> callbackLock( m_callbackMutex );
-    if( !m_runAdmission.load( std::memory_order_acquire ) )
-    {
-        return 0;
-    }
-    const auto started       = std::chrono::steady_clock::now();
-    auto       recordLatency = [this, started]()
+    const auto                  started       = std::chrono::steady_clock::now();
+    auto                        recordLatency = [this, started]()
     {
         const auto elapsed =
             std::chrono::duration_cast<std::chrono::microseconds>( std::chrono::steady_clock::now() - started );
@@ -442,8 +438,7 @@ inline void po4ao::updateControlStatus()
     // Keep lifetime, request generations and heartbeat in one observed property update.
     updateIfChanged<std::string>(
         m_indiP_modelStatus,
-        { "run_phase",
-          "active_id",
+        { "active_id",
           "active_backend",
           "effective_controller",
           "effective_id",
@@ -456,8 +451,7 @@ inline void po4ao::updateControlStatus()
           "control_applied",
           "reset_request",
           "reset_applied" },
-        { m_runPhase,
-          modelText( active ),
+        { modelText( active ),
           active == 0 ? "fallback" : ( m_activeCpuInference.load( std::memory_order_acquire ) ? "cpu" : "tensorrt" ),
           controllers[static_cast<size_t>( m_effectiveController.load( std::memory_order_acquire ) )],
           modelText( m_effectiveModelId.load( std::memory_order_acquire ) ),
@@ -484,44 +478,25 @@ inline void po4ao::updateControlStatus()
     updateSwitchIfChanged( m_indiP_controlToggle,
                            "toggle",
                            ( applied & 1 ) ? pcf::IndiElement::On : pcf::IndiElement::Off,
-                           m_controlRejected ? INDI_ALERT : ( control == applied ? INDI_OK : INDI_BUSY ) );
-    updateSwitchIfChanged( m_indiP_resetModel,
-                           "toggle",
-                           pcf::IndiElement::Off,
-                           m_resetRejected ? INDI_ALERT : ( reset == resetApplied ? INDI_OK : INDI_BUSY ) );
+                           control == applied ? INDI_OK : INDI_BUSY );
+    updateSwitchIfChanged(
+        m_indiP_resetModel, "toggle", pcf::IndiElement::Off, reset == resetApplied ? INDI_OK : INDI_BUSY );
     updateSwitchIfChanged( m_indiP_reloadToggle,
                            "toggle",
                            pcf::IndiElement::Off,
-                           m_reloadRejected || reload == 3 ? INDI_ALERT : ( reload == 0 ? INDI_OK : INDI_BUSY ) );
+                           reload == 3 ? INDI_ALERT : ( reload == 0 ? INDI_OK : INDI_BUSY ) );
     updateSwitchIfChanged( m_indiP_recollectWarmup,
                            "toggle",
                            pcf::IndiElement::Off,
-                           m_recollectRejected ? INDI_ALERT
-                           : pendingCollection || phase == CollectionPhase::collecting ||
+                           pendingCollection || phase == CollectionPhase::collecting ||
                                    phase == CollectionPhase::publishing
                                ? INDI_BUSY
                                : ( phase == CollectionPhase::interrupted ? INDI_ALERT : INDI_OK ) );
 }
 
-inline int po4ao::rejectModelCommand( pcf::IndiProperty &property, bool &rejected )
-{
-    rejected = true;
-    // Keep the applied switch value and acknowledge every request, including repeated rejections.
-    property.setState( INDI_ALERT );
-    if( m_indiDriver )
-    {
-        m_indiDriver->sendSetProperty( property );
-    }
-    return -1;
-}
-
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if( m_runBusy )
-    {
-        return rejectModelCommand( m_indiP_reloadToggle, m_reloadRejected );
-    }
     if( ipRecv.getName() != m_indiP_reloadToggle.getName() || !ipRecv.find( "toggle" ) )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid reload property" } );
@@ -540,7 +515,6 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &i
         std::lock_guard<std::mutex> errorLock( m_reloadErrorMutex );
         m_reloadError.clear();
     }
-    m_reloadRejected = false;
     m_reloadGeneration.store( m_modelGeneration.load( std::memory_order_acquire ), std::memory_order_release );
     m_reloadRequested.store( true, std::memory_order_release );
     m_loaderCondition.notify_one();
@@ -551,10 +525,6 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_reloadToggle )( const pcf::IndiProperty &i
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_resetModel )( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if( m_runBusy )
-    {
-        return rejectModelCommand( m_indiP_resetModel, m_resetRejected );
-    }
     if( ipRecv.getName() != m_indiP_resetModel.getName() || !ipRecv.find( "toggle" ) )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid model-reset property" } );
@@ -564,7 +534,6 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_resetModel )( const pcf::IndiProperty &ipR
         return 0;
     }
 
-    m_resetRejected           = false;
     const uint64_t generation = m_modelGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
     m_modelResetRequest.store( generation, std::memory_order_release );
     updateSwitchIfChanged( m_indiP_resetModel, "toggle", pcf::IndiElement::Off, INDI_BUSY );
@@ -575,10 +544,6 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_resetModel )( const pcf::IndiProperty &ipR
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_controlToggle )( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if( m_runBusy )
-    {
-        return rejectModelCommand( m_indiP_controlToggle, m_controlRejected );
-    }
     if( ipRecv.getName() != m_indiP_controlToggle.getName() )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid control property" } );
@@ -588,7 +553,6 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_controlToggle )( const pcf::IndiProperty &
     {
         return -1;
     }
-    m_controlRejected       = false;
     const uint64_t enabled  = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On ? 1 : 0;
     uint64_t       previous = m_controlRequest.load( std::memory_order_acquire );
     if( ( previous & 1 ) == enabled )
@@ -616,10 +580,6 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_controlToggle )( const pcf::IndiProperty &
 INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_recollectWarmup )( const pcf::IndiProperty &ipRecv )
 {
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
-    if( m_runBusy || !m_runRunning )
-    {
-        return rejectModelCommand( m_indiP_recollectWarmup, m_recollectRejected );
-    }
     if( ipRecv.getName() != m_indiP_recollectWarmup.getName() || !ipRecv.find( "toggle" ) )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid warm-up recollection property" } );
@@ -629,7 +589,6 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_recollectWarmup )( const pcf::IndiProperty
         return 0;
     }
 
-    m_recollectRejected = false;
     { //mutex scope
         std::lock_guard<std::mutex> publicationLock( m_publicationMutex );
         const uint64_t              generation = m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
@@ -645,23 +604,8 @@ INDI_NEWCALLBACK_DEFN( po4ao, m_indiP_recollectWarmup )( const pcf::IndiProperty
 inline int po4ao::appLogic()
 {
     SHMIMMONITOR_APP_LOGIC;
-    updateRunControl();
     std::unique_lock<std::mutex> lock( m_indiMutex );
     SHMIMMONITOR_UPDATE_INDI;
-    { //mutex scope
-        std::unique_lock<std::mutex> callbackLock( m_callbackMutex, std::try_to_lock );
-        if( !m_runBusy && !m_runRunning && !m_runAdmission.load() && callbackLock.owns_lock() )
-        {
-            activatePendingEngine();
-            const auto reset = m_modelResetRequest.exchange( 0 );
-            if( reset )
-            {
-                resetActiveModel( reset );
-                m_appliedReset.store( reset );
-            }
-            m_appliedControl.store( m_controlRequest.load() );
-        }
-    }
     updateControlStatus();
     updateRuntimeStatistics();
     TELEMETER_APP_LOGIC;

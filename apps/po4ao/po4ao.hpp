@@ -30,7 +30,6 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 #include "po4ao_utils.hpp"
-#include "po4aoRouting.hpp"
 
 /** \defgroup po4ao PO4AO
  * \brief Real-time modal policy control with asynchronous model loading and replay publication.
@@ -270,41 +269,22 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     Po4aoSamples m_runtimeSamples;         ///< Coherent fixed-size callback telemetry window.
     uint64_t     m_lastTelemSequence{ 0 }; ///< Last sequence actually written to telemetry.
 
-    std::atomic<uint64_t> m_missedFrames{ 0 };               ///< Source counter discontinuities.
-    std::atomic<uint64_t> m_deadlineMisses{ 0 };             ///< Callbacks exceeding the configured deadline.
-    std::atomic<uint64_t> m_inferenceFailures{ 0 };          ///< Inference or result-validation failures.
-    std::atomic<uint64_t> m_replayDrops{ 0 };                ///< Episodes dropped because the publisher lagged.
-    std::atomic<uint64_t> m_activeModelId{ 0 };              ///< Selected policy hash; zero reports fallback.
-    std::atomic<bool>     m_activeCpuInference{ false };     ///< Whether the active policy runs on CPU.
-    uint64_t              m_lastInputCounter{ 0 };           ///< Previous source cnt0 used for gap detection.
-    bool                  m_haveInputCounter{ false };       ///< Whether the previous source counter is valid.
-    std::chrono::steady_clock::time_point m_lastStatsUpdate; ///< Previous telemetry publication time.
-    /// Rejected model requests remain visible until the corresponding command is accepted; guarded by m_indiMutex.
-    bool m_reloadRejected{ false }, m_resetRejected{ false }, m_controlRejected{ false }, m_recollectRejected{ false };
-
-    pcf::IndiProperty  m_indiP_reloadToggle;     ///< Asynchronous model-reload request.
-    pcf::IndiProperty  m_indiP_resetModel;       ///< Active-model reset request.
-    pcf::IndiProperty  m_indiP_controlToggle;    ///< Select learned control or proportional fallback.
-    pcf::IndiProperty  m_indiP_recollectWarmup;  ///< Fresh warm-up collection request.
-    pcf::IndiProperty  m_indiP_runtimeStats;     ///< Latency and failure counters.
-    pcf::IndiProperty  m_indiP_collectionStatus; ///< Collection identity, progress and publication completion.
-    Po4aoRouteIO       m_routeIO;                ///< Installed command/readback boundary, owned by the routing worker.
-    Po4aoRouteSnapshot m_runSnapshot;            ///< Pre-request routing identity retained after failure.
-    std::thread        m_runThread;              ///< Non-real-time routing operation, joined on shutdown.
-    std::mutex         m_callbackMutex; ///< Serializes callback work, attachment allocation and stopped-model changes.
-    std::atomic<bool>  m_runCancel{ false }, m_runAdmission{ true }; ///< Shutdown cancellation and callback admission.
-    std::atomic<uint64_t> m_outputSequence{ 0 }; ///< Completed output publications for fresh-start verification.
-    bool m_runPending{ false }, m_runBusy{ false }, m_runTarget{ true }, m_runRunning{ true }, m_runVerified{ false },
-        m_runCheckOnly{ false };    ///< INDI-mutex-owned run intent and completion.
-    uint64_t    m_runSequence{ 0 }; ///< Unique operation number within this runtime.
-    std::string m_runPhase{ "unverified" }, m_runRoute{ "unknown" }, m_runError,
-        m_runOwner;                ///< Routing progress and actual input.
-    std::string m_runRequestError; ///< Rejection diagnostic kept separate from the retained operation failure.
-    std::string m_nnDevice{ "nnReconstructor" }, m_nnRoutingOwner, m_nnRoutingSource, m_nnRoutingPhase, m_nnInstance,
-        m_nnSequence, m_reservedInstance;                    ///< Independent NN reservation readbacks.
-    std::string                           m_nnReleasedOwner; ///< Last token whose writer restoration NN acknowledged.
-    std::chrono::steady_clock::time_point m_nnObserved{};    ///< Latest NN routing readback.
-    pcf::IndiProperty m_indiP_run, m_indiP_runStatus, m_indiP_nnRouting; ///< Native run control and writer reservation.
+    std::atomic<uint64_t> m_missedFrames{ 0 };                     ///< Source counter discontinuities.
+    std::atomic<uint64_t> m_deadlineMisses{ 0 };                   ///< Callbacks exceeding the configured deadline.
+    std::atomic<uint64_t> m_inferenceFailures{ 0 };                ///< Inference or result-validation failures.
+    std::atomic<uint64_t> m_replayDrops{ 0 };                      ///< Episodes dropped because the publisher lagged.
+    std::atomic<uint64_t> m_activeModelId{ 0 };                    ///< Selected policy hash; zero reports fallback.
+    std::atomic<bool>     m_activeCpuInference{ false };           ///< Whether the active policy runs on CPU.
+    uint64_t              m_lastInputCounter{ 0 };                 ///< Previous source cnt0 used for gap detection.
+    bool                  m_haveInputCounter{ false };             ///< Whether the previous source counter is valid.
+    std::chrono::steady_clock::time_point m_lastStatsUpdate;       ///< Previous telemetry publication time.
+    pcf::IndiProperty                     m_indiP_reloadToggle;    ///< Asynchronous model-reload request.
+    pcf::IndiProperty                     m_indiP_resetModel;      ///< Active-model reset request.
+    pcf::IndiProperty                     m_indiP_controlToggle;   ///< Select learned control or proportional fallback.
+    pcf::IndiProperty                     m_indiP_recollectWarmup; ///< Fresh warm-up collection request.
+    pcf::IndiProperty                     m_indiP_runtimeStats;    ///< Latency and failure counters.
+    pcf::IndiProperty m_indiP_collectionStatus; ///< Collection identity, progress and publication completion.
+    std::mutex        m_callbackMutex;          ///< Serializes frame processing and input allocation.
 
     pcf::IndiProperty m_indiP_modelStatus; ///< Active model ID and reload state.
                                            ///@}
@@ -419,10 +399,6 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     /// Fill the controlled prefix with the proportional fallback, before noise and limiting.
     void makeIntegratorCommand( const float *observation /**< [in] Current modal observation. */ );
 
-    /// Acknowledge a rejected model request; caller holds the INDI mutex.
-    int rejectModelCommand( pcf::IndiProperty &property /**< [in,out] Command with its applied switch value. */,
-                            bool              &rejected /**< [out] Retain Alert until a later request is accepted. */ );
-
     /// Publish frame acknowledgements, effective controller, model and collection state.
     void updateControlStatus();
 
@@ -457,37 +433,6 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     /// Invalidate replay snapshots and request a fresh exploratory warm-up.
     INDI_NEWCALLBACK_DECL( po4ao, m_indiP_recollectWarmup );
     ///@}
-
-    /// Queue an explicit whole-app Start/Stop target independently of policy selection.
-    INDI_NEWCALLBACK_DECL( po4ao, m_indiP_run );
-
-    /// Observe the independent NN writer reservation.
-    INDI_SETCALLBACK_DECL( po4ao, m_indiP_nnRouting );
-
-    /// Publish routing progress under the INDI mutex.
-    void runPhase( const std::string &phase /**< [in] Current operation stage. */ );
-
-    /// Wait outside locks for completion, cancellation or deadline.
-    void waitRun( const std::function<bool()> &ready /**< [in] Completion predicate. */,
-                  Po4aoRouteBackend::Deadline  deadline /**< [in] Operation deadline. */ );
-
-    /// Request a reservation or restore the reserved writer.
-    void requestWriterHold( const std::string &action /**< [in] hold or release. */ );
-
-    /// Check a fresh NN routing reservation readback.
-    bool writerHeld( bool released /**< [in] Check restoration instead of reservation. */ );
-
-    /// Check exact-token restoration under the caller's INDI lock.
-    bool reservationReleased() const;
-
-    /// Acknowledge a rejected request without changing operation state; caller holds the INDI lock.
-    int rejectRun( const std::string &reason /**< [in] Request rejection reason. */ );
-
-    /// Run one serialized routing operation outside real-time callbacks.
-    void runWorker( bool start /**< [in] Explicit requested target. */ );
-
-    /// Launch queued work and publish actual run status.
-    void updateRunControl();
 
     /// Allocate fixed-size controller state after the monitored stream opens.
     int allocate( const dev::shmimT &dummy /**< [in] Tag identifying the monitored input. */ );

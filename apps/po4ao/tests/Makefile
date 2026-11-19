@@ -5,7 +5,7 @@ all: test
 .build/catch_main.o: ../../../tests/catch2/catch.hpp
 	mkdir -p .build
 	printf '#define CATCH_CONFIG_MAIN\n#include "../../../tests/catch2/catch.hpp"\n' | $(CXX) $(CXXFLAGS) -x c++ -c -o $@ -
-.build/po4ao_test: po4ao_test.cpp ../po4ao_utils.hpp ../po4ao_control.hpp ../po4aoRouting.hpp ../po4ao_run.hpp ../../nnReconstructor/cacaoWriter.hpp ../../nnReconstructor/tests/nnTestSupport.hpp .build/catch_main.o
+.build/po4ao_test: po4ao_test.cpp ../po4ao_utils.hpp ../po4ao_control.hpp ../../nnReconstructor/tests/nnTestSupport.hpp .build/catch_main.o
 	$(CXX) $(CXXFLAGS) po4ao_test.cpp .build/catch_main.o -o $@
 test: .build/po4ao_test
 	./.build/po4ao_test
@@ -23,12 +23,6 @@ FLATBUFFERS_CFLAGS ?= $(shell pkg-config --cflags flatbuffers)
 telemetry: .build/po4ao_telemetry_test
 	./.build/po4ao_telemetry_test
 .PHONY: telemetry
-
-.build/po4ao_route_io_test: po4ao_route_io_test.cpp po4aoRouteTestAbi.hpp ../po4aoRouting.cpp ../po4aoRouting.hpp ../../nnReconstructor/cacaoWriter.cpp ../../nnReconstructor/cacaoWriter.hpp .build/catch_main.o
-	$(CXX) $(CXXFLAGS) -DPO4AO_ROUTE_TEST po4ao_route_io_test.cpp ../po4aoRouting.cpp ../../nnReconstructor/cacaoWriter.cpp .build/catch_main.o -o $@
-routing: .build/po4ao_route_io_test
-	./.build/po4ao_route_io_test
-.PHONY: routing
 
 # Unchanged upstream monitor with real POSIX semaphores and a mapping boundary double.
 .build/po4ao_monitor_test: po4ao_monitor_test.cpp ../../../libMagAOX/app/dev/shmimMonitor.hpp stubs/ImageStreamIO/ImageStreamIO.h

@@ -28,16 +28,6 @@ class nnReconstructor_test : public nnReconstructor
     /// Submit Enable without waiting for the asynchronous loader.
     int queueEnable();
 
-    /// Exercise the app-local PO4AO writer reservation callback.
-    int hold( const std::string &owner /**< [in] Operation token. */,
-              const std::string &action /**< [in] hold or release. */ );
-
-    /// Read the reservation phase published by the production app.
-    std::string holdPhase() const;
-
-    /// Read the exact completed reservation token from the published status.
-    std::string releasedOwner() const;
-
     /// Send an explicit writer handover request.
     int switchTo( const std::string &target, /**< [in] Desired writer. */
                   const std::string &expected /**< [in] Observed source. */ );
@@ -206,26 +196,6 @@ inline int nnReconstructor_test::queueEnable()
 {
     return requestEnabled( true );
 }
-inline int nnReconstructor_test::hold( const std::string &owner, const std::string &action )
-{
-    pcf::IndiProperty request( pcf::IndiProperty::Text );
-    request.setName( "routing_hold" );
-    request.add( pcf::IndiElement( "owner" ) );
-    request.add( pcf::IndiElement( "action" ) );
-    request["owner"]  = owner;
-    request["action"] = action;
-    return newCallBack_m_indiP_routingHold( request );
-}
-inline std::string nnReconstructor_test::releasedOwner() const
-{
-    return m_indiP_routingStatus["released_owner"].get<std::string>();
-}
-
-inline std::string nnReconstructor_test::holdPhase() const
-{
-    return m_routingPhase;
-}
-
 inline int nnReconstructor_test::switchTo( const std::string &target, const std::string &expected )
 {
     pcf::IndiProperty request( pcf::IndiProperty::Text );
@@ -843,10 +813,10 @@ TEST_CASE( "disable waits for admitted inference and discards its late result", 
     entered.get_future().wait();
     const int  disabled     = app.enable( false );
     auto       publisher    = std::async( std::launch::async,
-                                          [&]
-                                          {
+                                 [&]
+                                 {
                                      return app.claim();
-                                          } );
+                                 } );
     const auto before       = publisher.wait_for( std::chrono::milliseconds( 20 ) );
     const bool acknowledged = app.acknowledged();
     release.set_value();
@@ -1110,10 +1080,10 @@ TEST_CASE( "shutdown cancels a background replacement without freeing live resou
     app.control();
     entered.get_future().wait();
     auto       shutdown = std::async( std::launch::async,
-                                      [&]
-                                      {
+                                [&]
+                                {
                                     app.appShutdown();
-                                      } );
+                                } );
     const auto before   = shutdown.wait_for( std::chrono::milliseconds( 20 ) );
     release.set_value();
     shutdown.get();
@@ -1221,10 +1191,10 @@ TEST_CASE( "inference failure cannot strand a disable transition", "[nnReconstru
     };
     nnTest::executeFailure = true;
     auto producer          = std::async( std::launch::async,
-                                         [&]
-                                         {
+                                [&]
+                                {
                                     app.frame();
-                                         } );
+                                } );
     entered.get_future().wait();
     const int result = app.enable( false );
     release.set_value();
@@ -1689,81 +1659,6 @@ TEST_CASE( "NN late activation cannot recreate disabled GPU resources", "[nnReco
     MagAOX::app::nnReconstructor::replaceModel;
 #endif
     // clang-format on
-}
-
-/** \brief PO4AO owns an exclusive writer reservation until the original writer is restored. */
-TEST_CASE( "Routing reservation preserves NN ownership across CACAO restarts", "[nnReconstructor][routing]" )
-{
-    nnReconstructor_test app;
-    app.prepare();
-    app.frame();
-    REQUIRE( app.claim() );
-    app.copy();
-    app.complete();
-    app.linkModulation();
-    REQUIRE( app.hold( "po4ao-1", "hold" ) == 0 );
-    REQUIRE( app.enable( true ) < 0 );
-    REQUIRE( app.activate( 1 ) < 0 );
-    REQUIRE( app.select( 1 ) < 0 );
-    REQUIRE( app.hold( "other", "release" ) < 0 );
-    REQUIRE( app.hold( "po4ao-1", "release" ) < 0 );
-    REQUIRE( app.claim() );
-    REQUIRE( app.copy() == std::vector<float>( 3, 0 ) );
-    app.complete();
-    app.switchStep();
-    REQUIRE( app.holdPhase() == "held" );
-    REQUIRE( app.releasedOwner().empty() );
-    REQUIRE( nnTest::liveAllocations == 0 );
-    nnTest::cacaoRunning = true; // The calibration utility has restarted its writer.
-    REQUIRE( app.hold( "po4ao-1", "release" ) == 0 );
-    for( int i = 0; i < 10 && app.switchPhase() != "starting_nn"; ++i )
-    {
-        app.switchStep();
-        if( app.switchPhase() == "preparing_nn" )
-        {
-            REQUIRE( app.waitLoad() );
-        }
-    }
-    REQUIRE( app.switchPhase() == "starting_nn" );
-    REQUIRE_FALSE( nnTest::cacaoRunning );
-    REQUIRE( app.enable( true ) < 0 ); // Reservation still covers first-result acknowledgement.
-    app.reconnect();
-    app.frame();
-    app.frame();
-    REQUIRE( app.claim() );
-    app.copy();
-    app.complete();
-    app.switchStep();
-    REQUIRE( app.holdPhase() == "released" );
-    REQUIRE( app.releasedOwner() == "po4ao-1" );
-    REQUIRE( app.acknowledged() );
-    REQUIRE( app.m_sent.empty() );
-    // clang-format off
-#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
-    MagAOX::app::nnReconstructor::newCallBack_m_indiP_routingHold;
-    MagAOX::app::nnReconstructor::updateReconstructorControls;
-#endif
-    // clang-format on
-}
-
-/** \brief A CACAO reservation does not introduce NN output or change the selected host model. */
-TEST_CASE( "Routing reservation preserves CACAO ownership", "[nnReconstructor][routing]" )
-{
-    nnReconstructor_test app;
-    app.prepare( false );
-    nnTest::cacaoRunning = true;
-    REQUIRE( app.hold( "po4ao-2", "hold" ) == 0 );
-    app.switchStep();
-    REQUIRE( app.holdPhase() == "held" );
-    REQUIRE( app.releasedOwner().empty() );
-    REQUIRE_FALSE( app.claim() );
-    REQUIRE( app.hold( "po4ao-2", "release" ) == 0 );
-    app.switchStep();
-    REQUIRE( app.holdPhase() == "released" );
-    REQUIRE( app.releasedOwner() == "po4ao-2" );
-    REQUIRE( app.loaded() == "first.trt" );
-    REQUIRE( nnTest::liveAllocations == 0 );
-    REQUIRE( nnTest::cacaoCommands.empty() );
 }
 
 } // namespace libXWCTest::nnReconstructorTest

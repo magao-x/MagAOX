@@ -65,7 +65,6 @@ class Supervisor:
             None  # In-memory (persisted candidate, exact runtime ticket) binding.
         )
         self.last_control = None
-        self.last_run_available = True
         self.foreign_model = ""
         self.worker = None
         self.preparing_worker = None
@@ -94,12 +93,9 @@ class Supervisor:
         }
         self.status = dict(
             heartbeat="",
-            library_phase="idle",
             initialization_required=(
                 "yes" if self.record.get("initialization_required") else "no"
             ),
-            selected_policy=self.record.get("selected_policy", ""),
-            saved_policy="",
             save_available="no",
             warmup_required=(
                 "yes" if self.record.get("warmup_required") is not None else "no"
@@ -269,8 +265,6 @@ class Supervisor:
                     raise RuntimeError(
                         "Runtime identity/reset changed; waiting for reconciliation"
                     )
-                if (command == "recollect" or (command == "learning" and values.get("run"))) and observed.get("run_phase", "unverified") not in ("running", "unverified"):
-                    raise RuntimeError("Start PO4AO before collecting or starting learning")
                 if command == "learning" and values.get("run") and self.foreign_model:
                     raise RuntimeError(
                         "External policy is not part of this managed session; restore an eligible policy or Reset"
@@ -326,19 +320,19 @@ class Supervisor:
                 atomic_json(self.record_path, self.record)
                 self.status.update(
                     retained_policy="",
-                    selected_policy="",
                     warmup_required="no",
                     initialization_required="no",
                 )
             cancel = threading.Event()
             operation.update(cancel=cancel, command=command, values=dict(values))
-            self.status[domain + "_phase"] = {
-                "reset": "resetting",
-                "recollect": "recollecting",
-                "po4ao_enable": (
-                    "enabling" if values.get("toggle", False) else "disabling"
-                ),
-            }.get(command, command)
+            if domain == "training":
+                self.status["training_phase"] = {
+                    "reset": "resetting",
+                    "recollect": "recollecting",
+                    "po4ao_enable": (
+                        "enabling" if values.get("toggle", False) else "disabling"
+                    ),
+                }.get(command, command)
             generation = self.record["generation"]
             operation["future"] = operation["pool"].submit(
                 self.execute, command, values, cancel, generation
@@ -472,7 +466,7 @@ class Supervisor:
             )
             with self.lock:
                 self.catalog = self.library.catalog()
-                self.status["saved_policy"] = saved["id"]
+            return saved["id"]
         elif command == "set_policy":
             self.load_policy(values["id"], cancel, generation)
         elif command == "publish":
@@ -574,7 +568,6 @@ class Supervisor:
                 )
                 atomic_json(self.record_path, self.record)
                 self.status.update(
-                    selected_policy=identity,
                     warmup_required="yes",
                     learning="paused",
                     initialization_required="no",
@@ -776,17 +769,6 @@ class Supervisor:
                 "running",
                 "waiting",
             )
-            run_available = observed.get("run_phase", "unverified") in (
-                "running", "unverified"
-            )
-            if not run_available:
-                # Cancel work crossing the routing boundary once. A new Set policy
-                # while stopped must remain usable and must not resume learning.
-                if self.last_run_available:
-                    operation["cancel"].set()
-                if active_worker:
-                    self.worker.send({"run": False})
-            self.last_run_available = run_available
             if (
                 self.last_control is not None
                 and control != self.last_control
@@ -1002,15 +984,18 @@ class Supervisor:
                     self.status["learning"] = (
                         "resetting" if self.record["reset_pending"] else "idle"
                     )
-                self.status[name + "_phase"] = (
-                    "reset_pending"
-                    if self.record["reset_pending"] and name == "training"
-                    else "error" if error else "idle"
-                )
+                if name == "training":
+                    self.status["training_phase"] = (
+                        "reset_pending"
+                        if self.record["reset_pending"]
+                        else "error" if error else "idle"
+                    )
                 self.status["error"] = str(error) if error else ""
                 self.status["message"] = operation["command"] + (
                     " failed" if error else " complete"
                 )
+                if operation["command"] == "save_policy" and not error:
+                    self.status["message"] += ": " + future.result()
                 if operation["command"] != "publish":
                     self.events.append(
                         (

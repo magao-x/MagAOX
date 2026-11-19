@@ -768,7 +768,6 @@ class Rig:
             reload="idle",
             reload_error="",
             sequence="1",
-            run_phase="unverified",
         )
         for name in (
             "control_enable",
@@ -1473,39 +1472,6 @@ def test_new_publication_cannot_replace_an_unresolved_ticket(config):
         rig.complete_load()
         supervisor.tick()
         assert supervisor.record["eligible"]["model_id"] == model_a
-    finally:
-        supervisor.close()
-        rig.close()
-
-
-def test_whole_app_routing_pauses_learning_without_resuming_it(config):
-    """Native routing preserves the managed model/session and never restarts numerical work."""
-    rig = Rig()
-    supervisor = Supervisor(rig.runtime, config)
-    worker = NumericalWorker(supervisor.desired)
-    supervisor.worker = worker
-    try:
-        supervisor.reconcile_runtime()
-        rig.update("po4ao", "model_status", run_phase="switching_input")
-        supervisor.reconcile_runtime()
-        assert worker.state == "paused"
-        assert not worker.closed
-        with pytest.raises(RuntimeError, match="Start PO4AO"):
-            supervisor.submit("learning", {"run": True})
-        rig.update("po4ao", "model_status", run_phase="stopped")
-        supervisor.reconcile_runtime()
-        assert worker.state == "paused"
-        # A new policy-selection operation while stopped is not cancelled each tick.
-        operation = supervisor.domains["training"]
-        operation["cancel"] = threading.Event()
-        operation["command"] = "set_policy"
-        supervisor.reconcile_runtime()
-        assert not operation["cancel"].is_set()
-        rig.update("po4ao", "model_status", run_phase="running")
-        supervisor.reconcile_runtime()
-        assert worker.state == "paused"
-        assert supervisor.worker is worker
-        assert not any(message.get("run") is True for message in worker.messages)
     finally:
         supervisor.close()
         rig.close()
