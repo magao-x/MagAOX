@@ -74,6 +74,7 @@ Follow these code style and documentation rules exactly.
 13) Scoped Block Comments
   - For any `{}` block used only to control lock/mutex lifetime, annotate the opening brace as:
     - `{ //mutex scope`
+  - clang-format rewrites this as `{ // mutex scope` and cannot be configured not to, so restore `{ //mutex scope` after running clang-format.
 
 14) Branch Naming (MagAOX)
   - Feature branches must be namespaced by the active username.
@@ -141,3 +142,28 @@ Follow these code style and documentation rules exactly.
 - Summarize what changed.
 - List affected files.
 - Note any follow-up items or potential edge cases.
+
+26) Control-Flow Braces and Logical Spacing
+  - Always use explicit braces for `if`, `else`, `for`, `while`, and `do` bodies, including single-statement bodies.
+  - Use the existing Allman brace style; do not compress control bodies onto one line.
+  - Leave a blank line between setup statements and the following control block, and between a completed block and the next logical operation.
+  - Separate logical groups of declarations or operations with blank lines; keep closely related operations together.
+
+27) INDI Publish/Subscribe
+  - Register subscriptions during startup using the existing framework helpers.
+  - Do not periodically request subscribed properties or call
+    sendGetPropertySetList(true) to refresh them. Leave initial requests,
+    unresolved-subscription retries, and recovery to the framework.
+  - INDI properties commonly publish only when changed. Retain the last
+    received value until another update or explicit invalidation.
+  - Do not treat silence as stale state or introduce receipt-age expiry
+    unless the source explicitly guarantees a documented heartbeat.
+
+28) Real-Time Shared-Memory Streams
+  - Loop latency is sensitive to cache-line sharing between cores, especially across L3 domains (each 8-core CCD on the RTC). Treat any new reader, writer, copy method, or placement change on a loop stream as a measurable change, not a free one.
+  - Writers should not fill a loop stream in place while doing other work: load into a private buffer, then copy into the stream (`MagAOX::streamCopy`, non-temporal). For cameras use `framegrabber.staged`.
+  - In `dev::frameGrabber`, keep `md->write = 1` before the load; setting it just before the copy cost ~2 us.
+  - Readers should copy a frame out once and work on the copy, and keep per-frame work vectorizable (e.g. `getPixFramePointer`, not per-pixel `getPix`).
+  - A spinning reader (`spin` without `spinSleep`) needs a cpuset with no SCHED_FIFO thread of the same or lower priority on that core, including the app's own framegrabber.
+  - Non-temporal stores can help or hurt (they helped the camwfs staged copy, but hurt a cbuff's copy into its large output buffer). Provide such changes as options and have the user A/B them on the instrument.
+  - Measure the writer's own time (e.g. `fg_timing.delta_aw`), not only end-to-end loop time, to locate where a cost lands. See `agents/plans/2026-11/shmim-monitor-speedups.md`.

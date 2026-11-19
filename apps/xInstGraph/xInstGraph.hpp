@@ -75,9 +75,6 @@ class xInstGraph : public MagAOXApp<true>
     /// Requested output diagram path, resolved against the current directory.
     std::filesystem::path m_outputPath;
 
-    /// Permit replacement of an existing regular output file at startup.
-    bool m_clobberOutput{ false };
-
     ///@}
 
     /** \name Output Ownership - Data
@@ -134,7 +131,7 @@ class xInstGraph : public MagAOXApp<true>
     /// True when configuration stops before all node settings can be consumed.
     bool m_configLoadFailed{ false };
 
-    /// Validate that the output is distinct from the input and may be published.
+    /// Validate that the output is distinct from the input and is absent or a replaceable regular file.
     int checkOutputPath( std::string &error /**< [out] reason for a rejected path */ ) const;
 
     /// Create a private staging file in the output directory.
@@ -158,9 +155,9 @@ class xInstGraph : public MagAOXApp<true>
 
     /// Serialize the current graph state into a complete XML document.
     /** \returns 0 on success with the document in xml.
-      * \returns -1 on a serialization failure, with the reason in error.
-      */
-    int renderGraph( std::string &xml,  /**< [out] complete XML document */
+     * \returns -1 on a serialization failure, with the reason in error.
+     */
+    int renderGraph( std::string &xml, /**< [out] complete XML document */
                      std::string &error /**< [out] serialization failure */ );
 
     /// Write and verify a complete graph snapshot through the staging descriptor.
@@ -177,7 +174,7 @@ class xInstGraph : public MagAOXApp<true>
         std::vector<std::pair<std::string, std::string>> &nodeTypes, /**< [out] validated section and type pairs */
         std::string                                      &error /**< [out] reason validation failed */ );
 
-    /// Publish the staged initial snapshot according to the clobber policy.
+    /// Publish the staged initial snapshot, replacing any regular file left at the output path.
     int publishOutput( std::string &error /**< [out] reason publication failed */ );
 
     /// Atomically replace this run's published output with the staged update.
@@ -196,7 +193,7 @@ class xInstGraph : public MagAOXApp<true>
     /// Release registered properties and any output owned by this run.
     ~xInstGraph() noexcept;
 
-    /// Register the graph input, output, and clobber settings.
+    /// Register the graph input and output settings.
     virtual void setupConfig();
 
     /// Load graph configuration; exposed separately for the test harness.
@@ -286,12 +283,6 @@ inline int xInstGraph::checkOutputPath( std::string &error ) const
         inputInfo.st_ino == outputTarget.st_ino )
     {
         error = "graph output path refers to the input graph";
-        return -1;
-    }
-
-    if( !m_clobberOutput )
-    {
-        error = "graph output already exists (set graph.clobberOutput=true to replace it): " + m_outputPath.string();
         return -1;
     }
 
@@ -421,7 +412,7 @@ inline int xInstGraph::writeSnapshot( const std::string &xml, std::string &error
         }
         mode = prior.st_mode & 0777;
     }
-    else if( m_clobberOutput && ::lstat( m_outputPath.c_str(), &prior ) == 0 && S_ISREG( prior.st_mode ) )
+    else if( ::lstat( m_outputPath.c_str(), &prior ) == 0 && S_ISREG( prior.st_mode ) )
     {
         mode = prior.st_mode & 0777;
     }
@@ -501,39 +492,17 @@ inline int xInstGraph::publishOutput( std::string &error )
         return -1;
     }
 
-    if( m_clobberOutput )
+    if( ::rename( m_stagePath.c_str(), m_outputPath.c_str() ) < 0 )
     {
-        if( ::rename( m_stagePath.c_str(), m_outputPath.c_str() ) < 0 )
-        {
-            error = "cannot publish graph output: " + std::string( std::strerror( errno ) );
-            return -1;
-        }
-        m_stagePath.clear();
-    }
-    else
-    {
-        if( ::link( m_stagePath.c_str(), m_outputPath.c_str() ) < 0 )
-        {
-            error = "cannot publish graph output without replacing an existing file: " +
-                    std::string( std::strerror( errno ) );
-            return -1;
-        }
+        error = "cannot publish graph output: " + std::string( std::strerror( errno ) );
+        return -1;
     }
 
+    m_stagePath.clear();
     m_outputIdentity  = m_stageIdentity;
     m_outputFd        = m_stageFd;
     m_stageFd         = -1;
     m_outputPublished = true;
-
-    if( !m_stagePath.empty() )
-    {
-        if( ::unlink( m_stagePath.c_str() ) < 0 )
-        {
-            error = "cannot remove graph staging link: " + std::string( std::strerror( errno ) );
-            return -1;
-        }
-        m_stagePath.clear();
-    }
 
     m_graph.outputPath( m_outputPath.string() );
     return 0;
@@ -633,16 +602,6 @@ inline void xInstGraph::setupConfig()
                 false,
                 "string",
                 "path to the output graph .drawio file" );
-
-    config.add( "graph.clobberOutput",
-                "",
-                "graph.clobberOutput",
-                argType::Required,
-                "graph",
-                "clobberOutput",
-                false,
-                "bool",
-                "replace an existing regular output file at startup (default false)" );
 }
 
 inline int xInstGraph::validateNodeConfig( mx::app::appConfigurator                         &_config,
@@ -746,7 +705,6 @@ inline int xInstGraph::loadConfigImpl( mx::app::appConfigurator &_config )
     }
 
     m_outputPath = std::filesystem::absolute( outputPath ).lexically_normal();
-    _config( m_clobberOutput, "graph.clobberOutput" );
 
     std::string emsg;
     m_graph.autoSave( false );

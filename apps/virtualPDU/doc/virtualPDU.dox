@@ -41,18 +41,19 @@
  * and conflicting control across separate instances when designing deployment configs.
  * Configuration is loaded at startup; live reconfiguration is not supported.
  *
- * `[device] pollInterval` sets explicit source refresh spacing in seconds (default 5).
- * `staleTimeout` sets the maximum age of valid channel/FSM observations (default 15),
- * and must exceed pollInterval. A source must report Text `fsm.state=READY` and a valid
- * Text channel state before commands are accepted. A fresh Unk state is valid and permits
- * dispatch while keeping observed power unknown, matching the standard outlet interface. Target-only messages do not refresh
- * observed-state validity. Because dispatch uses the existing synchronous delay logic,
- * choose a stale limit longer than the longest sequence plus refresh/transport latency.
+ * Sources are observed only through INDI subscriptions to their `fsm` and channel
+ * properties; they are never polled. Each update replaces the last observation, and an
+ * observation stays valid until the source publishes a change. A source must report Text
+ * `fsm.state=READY` and a valid Text channel state before commands are accepted. An Unk
+ * state is valid and permits dispatch while keeping observed power unknown, matching the
+ * standard outlet interface. Target-only messages do not change observed-state validity.
+ * The obsolete `[device] pollInterval` and `staleTimeout` keys are ignored with a warning.
  *
  * Unavailable dependencies block only virtual channels that use them. The service itself
- * stays READY. Source loss/expiry makes affected virtual outlets unknown. A mid-sequence
+ * stays READY. A source that reports a non-READY FSM state makes its virtual outlets unknown.
+ * A source that stops publishing without a state change is not detected. A mid-sequence
  * failure stops later sends without rollback or automatic replay of already sent commands.
- * The refresh interval bounds detection delay; a distributed power operation is not atomic.
+ * A distributed power operation is not atomic.
  * The virtual target is announced before its command sequence starts. Both
  * zaberLowLevel and zaberLowLevelBinary consumers pause communication for an Off target
  * and suppress expected transport failures while their observed state is still On;
@@ -66,8 +67,8 @@
  * within one channel is reported separately. Duplicate endpoint mappings identify both
  * `[outletN]` sections and the remote device/channel.
  *
- * Other diagnostics cover missing/gapped mappings, missing device/channel fields, invalid
- * refresh/expiry intervals, self-reference, reserved names, malformed numeric values,
+ * Other diagnostics cover missing/gapped mappings, missing device/channel fields,
+ * self-reference, reserved names, malformed numeric values,
  * outlet bounds, delay limits, order permutations, and mismatched order/delay entry counts.
  * Each order/delay array must have the same number of entries as that channel's outlet list.
  * These errors request shutdown; sharing outlets remains unsupported.

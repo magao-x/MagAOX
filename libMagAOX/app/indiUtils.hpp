@@ -1,6 +1,5 @@
 /** \file indiUtils.hpp
  * \brief MagAO-X INDI Utilities
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * History:
  * - 2019-01-03 created by JRM
@@ -102,15 +101,12 @@ void updateIfChanged( pcf::IndiProperty &p,      ///< [in/out] The property cont
 
     try
     {
-        // This is same code in IndiElement
-        std::stringstream ssValue;
-        ssValue.precision( 15 );
-        ssValue << std::boolalpha << newVal;
+        // Do comparison in string space, formatted as IndiElement does
+        std::string newStr = pcf::formatIndiValue( newVal );
 
         pcf::IndiProperty::PropertyStateType oldState = p.getState();
 
-        // Do comparison in string space, not raw value
-        if( p[el].getValue() != ssValue.str() || oldState != newState )
+        if( p[el].getValue() != newStr || oldState != newState )
         {
             p[el].set( newVal );
             p.setTimeStamp( pcf::TimeStamp() );
@@ -144,7 +140,9 @@ void updateIfChanged( pcf::IndiProperty &p, ///< [in/out] The property containin
                       pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok )
 {
     if( !indiDriver )
+    {
         return;
+    }
 
     size_t n = 0; // loop index outside so we can use it for error reporting.
 
@@ -155,18 +153,17 @@ void updateIfChanged( pcf::IndiProperty &p, ///< [in/out] The property containin
         pcf::IndiProperty::PropertyStateType oldState = p.getState();
 
         if( oldState != newState )
+        {
             changed = true;
+        }
 
         for( n = 0; n < els.size() && changed != true; ++n )
         {
-            // This is same code in IndiElement
-            std::stringstream ssValue;
-            ssValue.precision( 15 );
-            ssValue << std::boolalpha << newVals[n];
-
-            // compare in string space
-            if( p[els[n]].getValue() != ssValue.str() )
+            // compare in string space, formatted as IndiElement does
+            if( p[els[n]].getValue() != pcf::formatIndiValue( newVals[n] ) )
+            {
                 changed = true;
+            }
         }
 
         // and if there are changes, we send an update
@@ -215,7 +212,9 @@ void updatesIfChanged( pcf::IndiProperty    &p,   ///< [in/out] The property con
                        pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok )
 {
     if( !indiDriver )
+    {
         return;
+    }
 
     size_t n = 0; // loop index outside so we can use it for error reporting.
 
@@ -226,18 +225,17 @@ void updatesIfChanged( pcf::IndiProperty    &p,   ///< [in/out] The property con
         pcf::IndiProperty::PropertyStateType oldState = p.getState();
 
         if( oldState != newState )
+        {
             changed = true;
+        }
 
         for( n = 0; n < els.size() && changed != true; ++n )
         {
-            // This is same code in IndiElement
-            std::stringstream ssValue;
-            ssValue.precision( 15 );
-            ssValue << std::boolalpha << newVals[n];
-
-            // compare in string space
-            if( p[els[n]].getValue() != ssValue.str() )
+            // compare in string space, formatted as IndiElement does
+            if( p[els[n]].getValue() != pcf::formatIndiValue( newVals[n] ) )
+            {
                 changed = true;
+            }
         }
 
         // and if there are changes, we send an update
@@ -362,7 +360,9 @@ void updateSelectionSwitchIfChanged(
     pcf::IndiProperty::PropertyStateType newState = pcf::IndiProperty::Ok )
 {
     if( !indiDriver )
+    {
         return;
+    }
 
     if( !p.find( el ) )
     {

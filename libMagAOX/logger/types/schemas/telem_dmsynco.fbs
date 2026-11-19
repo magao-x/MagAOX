@@ -1,0 +1,646 @@
+/// \file telem_dmsynco.fbs
+/// \brief Scheduler telemetry with independent timing, reader protection and bounded shadow evidence.
+namespace MagAOX.logger;
+
+// Values and coverage are seconds; publication values retain their external clock.
+table DmSyncoTimingStats
+{
+    count:ulong;
+    mean:double;
+    stddev:double;
+    min:double;
+    max:double;
+    span:double;
+    valid:bool;
+}
+
+// Consecutive primary publication intervals classified around their retained-window median.
+// All durations and coverage are seconds. Conditional counts are the directed-transition denominators.
+table DmSyncoIntervalPairs
+{
+    enabled:bool;
+    intervals:ulong;
+    pairs:ulong;
+    median:double;
+    threshold:double;
+    after_late:DmSyncoTimingStats (required);
+    after_early:DmSyncoTimingStats (required);
+    late_early_sum:DmSyncoTimingStats (required);
+    early_late_sum:DmSyncoTimingStats (required);
+}
+
+// External-stamp population is primary writetime, camera_timing atime or camera_publication_timing writetime.
+table DmSyncoPrimaryTiming
+{
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    window_sec:double;
+    span_sec:double;
+    age_sec:double;
+    capacity:ulong;
+    queued:ulong;
+    enabled:bool;
+    valid:bool;
+    publication:DmSyncoTimingStats (required);
+    receipt:DmSyncoTimingStats (required);
+    events:ulong;
+    receipts:ulong;
+    synthetic:ulong;
+    rejected:ulong;
+    duplicates:ulong;
+    counter_gaps:ulong;
+    invalid:ulong;
+    dropped:ulong;
+    interval_pairs:DmSyncoIntervalPairs;
+}
+
+table DmSyncoCombinerTiming
+{
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    window_sec:double;
+    span_sec:double;
+    age_sec:double;
+    capacity:ulong;
+    queued:ulong;
+    enabled:bool;
+    writer_pid:long;
+    trigger_inode:ulong;
+    primary_counter:ulong;
+    publication_interval:DmSyncoTimingStats (required);
+    receipt_interval:DmSyncoTimingStats (required);
+    execution:DmSyncoTimingStats (required);
+    publication:DmSyncoTimingStats (required);
+    primary_start:DmSyncoTimingStats (required);
+    primary_publication:DmSyncoTimingStats (required);
+    events:ulong;
+    receipts:ulong;
+    synthetic:ulong;
+    rejected:ulong;
+    duplicates:ulong;
+    counter_gaps:ulong;
+    invalid_metadata:ulong;
+    missing_trace:ulong;
+    invalid_trace:ulong;
+    repeated_start:ulong;
+    unlinked_primary:ulong;
+    invalid_primary:ulong;
+    repeated_primary:ulong;
+    dropped:ulong;
+}
+
+// Trace row zero is the latest primary producer; increasing rows follow its upstream inputs.
+// All stage durations, signed changes, reference intervals and coverage are seconds.
+table DmSyncoPipelineStage
+{
+    row_index:ulong;
+    pid:long;
+    input_inode:ulong;
+    execution:DmSyncoTimingStats (required);
+    handoff:DmSyncoTimingStats (required);
+    late_execution:DmSyncoTimingStats (required);
+    late_handoff:DmSyncoTimingStats (required);
+    early_execution:DmSyncoTimingStats (required);
+    early_handoff:DmSyncoTimingStats (required);
+    late_execution_change:DmSyncoTimingStats (required);
+    late_handoff_change:DmSyncoTimingStats (required);
+    early_execution_change:DmSyncoTimingStats (required);
+    early_handoff_change:DmSyncoTimingStats (required);
+}
+
+table DmSyncoPipelineQuality
+{
+    events:ulong;
+    receipts:ulong;
+    synthetic:ulong;
+    rejected:ulong;
+    duplicates:ulong;
+    counter_gaps:ulong;
+    invalid_metadata:ulong;
+    missing_trace:ulong;
+    invalid_trace:ulong;
+    topology_changes:ulong;
+    truncated:ulong;
+    dropped:ulong;
+}
+
+table DmSyncoPipelineTiming
+{
+    enabled:bool;
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    window_sec:double;
+    span_sec:double;
+    age_sec:double;
+    capacity:ulong;
+    queued:ulong;
+    median:double;
+    threshold:double;
+    intervals:ulong;
+    late:ulong;
+    early:ulong;
+    stage_count:ulong;
+    total:DmSyncoPipelineQuality (required);
+    stages:[DmSyncoPipelineStage] (required);
+    source_interval:DmSyncoTimingStats (required);
+    late_source_interval:DmSyncoTimingStats (required);
+    early_source_interval:DmSyncoTimingStats (required);
+    late_publication_change:DmSyncoTimingStats (required);
+    early_publication_change:DmSyncoTimingStats (required);
+}
+
+// Conditional shadow outcomes. None of these counts represents an actual auxiliary delivery.
+table DmSyncoSimulationStep
+{
+    considered:ulong;
+    would_run:ulong;
+    skipped:ulong;
+    early_main:ulong;
+    missing_main:ulong;
+    missing_output:ulong;
+    reader_hold:ulong;
+    expired:ulong;
+    overlap:ulong;
+    release_missing:ulong;
+    release_late:ulong;
+    backend_busy:ulong;
+    backend_wrap:ulong;
+    preparation_busy:ulong;
+    credit_full:ulong;
+}
+
+// Trigger provenance and overlap classification; all interval boundaries below are half-open.
+enum DmSyncoOverlapOrigin:ubyte { primary = 0, combined = 1 }
+enum DmSyncoOverlapWindow:ubyte { copy = 0, readerHold = 1, backend = 2 }
+
+// Slow counter/time cadence uses the monotonic observation clock, independently of phase filtering.
+enum DmSyncoCadenceState:ubyte { nominal = 0, growing = 1, full = 2 }
+
+table DmSyncoCadence
+{
+    period_q32:ulong;
+    state:DmSyncoCadenceState;
+    epoch:ulong;
+    anchors:ulong;
+    cycles:ulong;
+    updates:ulong;
+    rejected:ulong;
+    span_ns:long;
+    window_ns:long;
+    update_ns:long;
+    observation_ns:long;
+    updated_ns:long;
+}
+
+// Receipt through lock-acquired times use the model's monotonic clock.
+// Publication/start/update times retain the producer clock and are never compared to model times.
+table DmSyncoOverlapObservation
+{
+    stream_inode:ulong;
+    trigger_inode:ulong;
+    receipt_ns:long;
+    callback_ns:long;
+    lock_request_ns:long;
+    lock_acquired_ns:long;
+    publication_ns:long;
+    primary_publication_ns:long;
+    start_ns:long;
+    update_ns:long;
+}
+
+// One retrospective overlap with the actual main's prediction and the modeled copy's own plan.
+table DmSyncoOverlapEvent
+{
+    id:ulong;
+    session:ulong;
+    main_counter:ulong;
+    combined_counter:ulong;
+    plan_counter:ulong;
+    last_main_counter:ulong;
+    step:int;
+    origin:DmSyncoOverlapOrigin;
+    window:DmSyncoOverlapWindow;
+    observed_ns:long;
+    main_grid_ns:long;
+    plan_grid_ns:long;
+    period_ns:long;
+    copy_begin_ns:long;
+    copy_end_ns:long;
+    reader_end_ns:long;
+    last_main_ns:long;
+    last_output_ns:long;
+    observation:DmSyncoOverlapObservation (required);
+    plan_estimator_id:ulong;
+    last_estimator_id:ulong;
+    period_q32:ulong;
+    plan_fraction_q32:long;
+    backend_end_ns:long;
+}
+
+// Lifetime queue accounting survives model resets; a drained batch can contain earlier sessions.
+table DmSyncoOverlapTrace
+{
+    enabled:bool;
+    detected:ulong;
+    drained:ulong;
+    dropped:ulong;
+    queued:ulong;
+    capacity:ulong;
+    log_failed:ulong;
+    batch_count:ulong;
+    events:[DmSyncoOverlapEvent] (required);
+}
+
+// Accepted-primary estimator targets use rounded monotonic nanoseconds and optional signed Q32 remainders.
+// publication_interval_ns is elapsed producer-clock time, not an absolute model timestamp.
+table DmSyncoEstimatorSample
+{
+    id:ulong;
+    session:ulong;
+    sequence:ulong;
+    counter:ulong;
+    observed_ns:long;
+    publication_interval_ns:long;
+    sequential:bool;
+    interval_accepted:bool;
+    period_samples:ulong;
+    phase_samples:ulong;
+    period_before_ns:long;
+    period_ns:long;
+    predicted_ns:long;
+    next_counter:ulong;
+    source_plan_counter:ulong;
+    source_estimator_id:ulong;
+    source_grid_ns:long;
+    base_grid_ns:long;
+    candidate_ns:long;
+    phase_gain:double;
+    phase_slew_ns:long;
+    raw_correction_ns:long;
+    applied_correction_ns:long;
+    committed_grid_ns:long;
+    committed:bool;
+    period_before_q32:ulong;
+    source_fraction_q32:long;
+    base_fraction_q32:long;
+    committed_fraction_q32:long;
+    cadence:DmSyncoCadence;
+}
+
+// Triggered pre/post estimator coverage has separate lifetime selection/loss accounting.
+table DmSyncoEstimatorTrace
+{
+    enabled:bool;
+    observed:ulong;
+    triggers:ulong;
+    selected:ulong;
+    drained:ulong;
+    dropped:ulong;
+    queued:ulong;
+    capacity:ulong;
+    log_failed:ulong;
+    history:ulong;
+    history_capacity:ulong;
+    post_remaining:ulong;
+    batch_count:ulong;
+    samples:[DmSyncoEstimatorSample] (required);
+}
+
+// Predictions and model readiness on the same-host monotonic clock; this is not hardware arming.
+table DmSyncoSimulation
+{
+    enabled:bool;
+    valid:bool;
+    feasible:bool;
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    last_main_ns:long;
+    counter:ulong;
+    steps:int;
+    period_ns:long;
+    grid_ns:long;
+    phase_ns:long;
+    phase_min_ns:long;
+    phase_max_ns:long;
+    phase_count:ulong;
+    period_samples:ulong;
+    phase_samples:ulong;
+    next_grid_ns:long;
+    next_active_ns:long;
+    early_reserve_ns:long;
+    delivery_ns:long;
+    keepout_ns:long;
+    guard_ns:long;
+    snapshot_ns:long;
+    copy_ns:long;
+    lead_ns:long;
+    observation_ns:long;
+    visibility_ns:long;
+    reserve_ns:long;
+    window:ulong;
+    phase_gain:double;
+    phase_slew_ns:long;
+    duplicates:ulong;
+    gaps:ulong;
+    resets:ulong;
+    invalid:ulong;
+    excluded:ulong;
+    output_gaps:ulong;
+    associations:ulong;
+    outcomes:[DmSyncoSimulationStep] (required);
+    cadence_min_period_ns:long;
+    overlap_trace:DmSyncoOverlapTrace;
+    estimator_trace:DmSyncoEstimatorTrace;
+    cadence:DmSyncoCadence;
+    readiness:DmSyncoReadiness;
+    pipeline:DmSyncoPipeline;
+    main_wait_trace:DmSyncoMainWaitTrace;
+}
+
+// Self-contained conditional job stages use monotonic model time; zero stage endpoints are unavailable.
+// The existing counter is the combined-stream counter for a main, or the primary cycle for an auxiliary.
+// primary_counter explicitly labels the primary cycle; observation producer fields keep their own clock.
+table DmSyncoMainWaitJob
+{
+    id:ulong;
+    counter:ulong;
+    primary_counter:ulong;
+    step:int;
+    anchor_ns:long;
+    input_ns:long;
+    prep_ns:long;
+    vector_ns:long;
+    reader_ns:long;
+    sdk_ns:long;
+    sdk_ready_ns:long;
+    post_ns:long;
+    retired_ns:long;
+    observation:DmSyncoOverlapObservation (required);
+}
+
+// Clipped half-open resource-blocking intervals identify preparation/reader and native-worker roles.
+// captured_ns is the first model observation of this owner blocking the waiting main, not SDK evidence.
+table DmSyncoMainWaitBlocker
+{
+    job:DmSyncoMainWaitJob (required);
+    captured_ns:long;
+    prep_begin_ns:long;
+    prep_end_ns:long;
+    sdk_begin_ns:long;
+    sdk_end_ns:long;
+}
+
+// A genuine main whose modeled SDK entry waited; frozen assumptions survive session/configuration changes.
+// Waits exclude service: prep_wait=prep-input; sdk_wait=sdk-vector; emitted=sdk entry.
+table DmSyncoMainWaitEvent
+{
+    id:ulong;
+    session:ulong;
+    ordinal:ulong;
+    emitted_ns:long;
+    delivery_ns:long;
+    prepare_ns:long;
+    reader_ns:long;
+    sdk_service_ns:long;
+    post_service_ns:long;
+    prep_wait_ns:long;
+    sdk_wait_ns:long;
+    main:DmSyncoMainWaitJob (required);
+    blockers:[DmSyncoMainWaitBlocker] (required);
+    blocker_count:ulong;
+    provenance_complete:bool;
+}
+
+// Independent bounded delayed-main queue coverage; disabled collection can still drain historical evidence.
+table DmSyncoMainWaitTrace
+{
+    enabled:bool;
+    detected:ulong;
+    drained:ulong;
+    dropped:ulong;
+    queued:ulong;
+    capacity:ulong;
+    log_failed:ulong;
+    batch_count:ulong;
+    events:[DmSyncoMainWaitEvent] (required);
+}
+
+// Conditional pipeline resources; fixed credits include future accepted auxiliary reservations.
+table DmSyncoPipeline
+{
+    enabled:bool;
+    prepare_ns:long;
+    sdk_service_ns:long;
+    post_ns:long;
+    capacity:ulong;
+    in_flight:ulong;
+    maximum_in_flight:ulong;
+    main_admitted:ulong;
+    auxiliary_admitted:ulong;
+    retired:ulong;
+    discarded:ulong;
+    main_sdk_waits:ulong;
+    main_credit_misses:ulong;
+    resets:ulong;
+    sdk_ready_ns:long;
+    post_ready_ns:long;
+    maximum_main_wait_ns:long;
+    main_clearance_shortfall_ns:long;
+    sdk_cycle_feasible:bool;
+    post_cycle_feasible:bool;
+    credit_cycle_feasible:bool;
+    main_protection_feasible:bool;
+}
+
+// Raw publication fields identify producers and are never subtracted from the monotonic observer clock.
+table DmSyncoReaderIdentity
+{
+    inode:ulong;
+    counter:ulong;
+    publication_sec:long;
+    publication_nsec:long;
+}
+
+table DmSyncoReaderPrimary
+{
+    input:DmSyncoReaderIdentity (required);
+    observed_ns:long;
+}
+
+table DmSyncoReaderCombined
+{
+    input:DmSyncoReaderIdentity (required);
+    primary_inode:ulong;
+    primary_counter:ulong;
+    start_ns:long;
+    observed_ns:long;
+    budget_ns:long;
+}
+
+// Versioned controller outcome; started/finished/receipt/observed are same-host monotonic nanoseconds.
+// receipt_ns is zero in legacy captures and otherwise preserves the raw semaphore-return observation.
+table DmSyncoReaderCompletion
+{
+    protocol_version:ulong;
+    session:ulong;
+    epoch:ulong;
+    sequence:ulong;
+    state:ulong;
+    input:DmSyncoReaderIdentity (required);
+    started_ns:long;
+    finished_ns:long;
+    outcome:ubyte;
+    callback_result:long;
+    publisher_pid:ulong;
+    observed_ns:long;
+    kind:ubyte;
+    backend_result:long = -9223372036854775808;
+    receipt_ns:long;
+}
+
+// Only actual main-command reader releases supply evidence. Virtual auxiliary readers/backend times are assumptions.
+table DmSyncoReadinessEvidence
+{
+    completed:DmSyncoReaderCompletion (required);
+    source_epoch:ulong;
+    coherent:bool;
+}
+
+table DmSyncoReadinessQuality
+{
+    observed:ulong;
+    qualified:ulong;
+    invalid:ulong;
+    incoherent:ulong;
+    duplicates:ulong;
+    gaps:ulong;
+    source_resets:ulong;
+    identity_mismatch:ulong;
+    sdk_failed:ulong;
+    queue_drops:ulong;
+}
+
+// Optional new shadow policy; no field asserts actual auxiliary delivery, backend readiness or hardware settling.
+table DmSyncoReadiness
+{
+    reader_release_ready:bool;
+    virtual_reader_ns:long;
+    backend_ns:long;
+    reader_cycle_feasible:bool;
+    backend_cycle_feasible:bool;
+    latest_release:DmSyncoReadinessEvidence;
+    total:DmSyncoReadinessQuality (required);
+}
+
+// Completion offset and model slack are signed; all absolute local times are monotonic nanoseconds.
+table DmSyncoReaderSample
+{
+    primary:DmSyncoReaderPrimary (required);
+    combined:DmSyncoReaderCombined (required);
+    completed:DmSyncoReaderCompletion (required);
+    base_ns:long;
+    offset_ns:long;
+    required_ns:long;
+    observed_hold_ns:long;
+    slack_ns:long;
+}
+
+table DmSyncoReaderQuality
+{
+    events:ulong;
+    primary:ulong;
+    combined:ulong;
+    completion:ulong;
+    matched:ulong;
+    busy:ulong;
+    unavailable:ulong;
+    error:ulong;
+    unqualified:ulong;
+    invalid:ulong;
+    incoherent:ulong;
+    duplicates:ulong;
+    sequence_gaps:ulong;
+    counter_gaps:ulong;
+    source_resets:ulong;
+    stale_epoch:ulong;
+    missing_primary:ulong;
+    missing_combined:ulong;
+    identity_mismatch:ulong;
+    evicted:ulong;
+    expired:ulong;
+    dropped_primary:ulong;
+    dropped_combined:ulong;
+    dropped_completion:ulong;
+    sdk_results:ulong;
+    sdk_success:ulong;
+    sdk_failed:ulong;
+    receipt_unavailable:ulong;
+    receipt_invalid:ulong;
+    first_enriched:ulong;
+}
+
+// Trailing populations are in seconds; extrema and full worst-event evidence survive window expiration.
+// This is observational software-reader protection, not hardware settling or a scheduler release.
+table DmSyncoReaderTiming
+{
+    enabled:bool;
+    session:ulong;
+    sequence:ulong;
+    now_ns:long;
+    window_sec:double;
+    capacity:ulong;
+    queued:ulong;
+    pending_primary:ulong;
+    pending_combined:ulong;
+    pending_completion:ulong;
+    span_sec:double;
+    age_sec:double;
+    completion_offset:DmSyncoTimingStats (required);
+    required_hold:DmSyncoTimingStats (required);
+    observed_hold:DmSyncoTimingStats (required);
+    processing:DmSyncoTimingStats (required);
+    notification:DmSyncoTimingStats (required);
+    model_slack:DmSyncoTimingStats (required);
+    total:DmSyncoReaderQuality (required);
+    worst_valid:bool;
+    worst:DmSyncoReaderSample;
+    max_required_hold_ns:long;
+    max_observed_hold_ns:long;
+    over_budget:ulong;
+    kind:ubyte;
+    // Both absent is legacy; current writers emit both, including empty populations.
+    wake:DmSyncoTimingStats;
+    capture:DmSyncoTimingStats;
+    worst_notification_valid:bool;
+    worst_notification:DmSyncoReaderSample;
+}
+
+table Telem_dmsynco_fb
+{
+    state:int;
+    steps:int;
+    period_ns:long;
+    delivered:ulong;
+    missed:ulong;
+    faults:ulong;
+    cached:ulong;
+    snapshot_ns:long;
+    copy_ns:long;
+    residuals_ns:[long];
+    advances_ns:[long];
+    primary_timing:DmSyncoPrimaryTiming;
+    schedule_valid:bool = true;
+    combiner_timing:DmSyncoCombinerTiming;
+    camera_timing:DmSyncoPrimaryTiming;
+    pipeline_timing:DmSyncoPipelineTiming;
+    camera_publication_timing:DmSyncoPrimaryTiming;
+    simulation:DmSyncoSimulation;
+    reader_timing:DmSyncoReaderTiming;
+    reader_release_timing:DmSyncoReaderTiming;
+}
+
+root_type Telem_dmsynco_fb;

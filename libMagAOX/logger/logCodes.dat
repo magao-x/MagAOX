@@ -73,6 +73,9 @@ telem_coretemps          20825    telem_coretemps
 telem_coreloads          20826    telem_coreloads
 telem_drivetemps         20827    telem_drivetemps
 telem_usage              20828    telem_usage
+telem_gpu                20829    telem_gpu
+telem_irq                20830    telem_irq
+telem_raid               20831    telem_raid
 
 telem_cooler             20850    telem_cooler
 
@@ -80,8 +83,12 @@ telem_chrony_status      20860    telem_chrony_status
 telem_chrony_stats       20861    telem_chrony_stats
 
 telem_dmspeck            20890    telem_dmspeck
+telem_dmsynco            20891    telem_dmsynco
+telem_dmtimings          20892    telem_dmtimings
 
 telem_fgtimings          20905    telem_fgtimings
+telem_fgstage            20906    telem_fgstage
+telem_fgtrace            20907    telem_fgtrace
 
 telem_dmmodes            20910    telem_dmmodes
 

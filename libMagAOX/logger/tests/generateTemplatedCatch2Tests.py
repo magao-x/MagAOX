@@ -43,7 +43,31 @@ gTestFixtures = {
         "setpoints": "{{3, 6, 4}, {6, 12, 8}, {9, 18, 12}}",
         "requestedMode": "2",
         "activeMode": "2"
+    },
+    "telem_gpu": {
+        "gpus": '{{"", "", "ok", '
+                '65, 0.75, 0.25, 256, 8192, 1400, 1410, 7000, 255, 1234567890.25, 0}, '
+                '{"", "", "missing", '
+                '40, 0.1, 0.5, 512, 16384, 500, 510, 2000, 0, 1234567880.5, 7}}'
+    },
+    "telem_irq": {
+        "ok": "{1, 0, 1}",
+        "checkTime": "1234567890.25"
+    },
+    "telem_raid": {
+        "status": "1",
+        "arrays": "{{0, 35, 2, 2}, {7, 37, 3, 2}}",
+        "checkTime": "1234567890.25"
     }
+}
+
+# Domain aggregates stored as table vectors have production decoders rather than
+# FlatBuffers struct constructors. Include timestamps omitted by state equality.
+gVectorAdapters = {
+    "telem_gpu": {"gpus": {"vectorType": "MagAOX::logger::telem_gpu::gpuT",
+                           "decoder": "gpus", "extraVectorMembers": ["m_sampleTime"]}},
+    "telem_raid": {"arrays": {"vectorType": "MagAOX::logger::telem_raid::arrayT",
+                              "decoder": "arrays", "extraVectorMembers": []}}
 }
 
 # Check Jinja2 is installed; retain the existing installation fallback.
@@ -357,20 +381,27 @@ def makeFieldAssertions(field : dict, actual : str, expected : str) -> list[str]
         return [f"REQUIRE({actual}.{name} == {expected}.{name});" for name, _ in field["schemaMembers"]]
     if "char *" in field["type"]:
         return [f"REQUIRE(strcmp({actual}, {expected}) == 0);"]
+    if "extraVectorMembers" in field:
+        return [f"REQUIRE({actual} == {expected});",
+                f"for(size_t i = 0; i < {expected}.size(); ++i)", "{"] + [
+                    f"    REQUIRE({actual}[i].{member} == {expected}[i].{member});"
+                    for member in field["extraVectorMembers"]
+                ] + ["}"]
     return [f"REQUIRE({actual} == {expected});"]
 
 def findMatchingSchemaField(schemaFieldInfo, fieldName):
-    """Find an exact field name in the root or a nested schema table."""
-    for schemaField in schemaFieldInfo:
-        if isinstance(schemaField, tuple) and schemaField[0] == fieldName:
+    """Match the parameter name, then its snake_case form, in root or nested fields."""
+    for candidate in (fieldName, re.sub(r"(?<!^)(?=[A-Z])", "_", fieldName).lower()):
+        for schemaField in schemaFieldInfo:
+            if isinstance(schemaField, tuple) and schemaField[0] == candidate:
                 return schemaField, None
-        if isinstance(schemaField, dict):
-            subTableName = next(iter(schemaField))
-            for subField in schemaField[subTableName]:
-                if len(subField) != 2:
-                    continue
-                if subField[0] == fieldName:
-                    return subField, subTableName
+            if isinstance(schemaField, dict):
+                subTableName = next(iter(schemaField))
+                for subField in schemaField[subTableName]:
+                    if len(subField) != 2:
+                        continue
+                    if subField[0] == candidate:
+                        return subField, subTableName
     return None, None # no matching field in schema for given fieldName
 
 def setDefaultArgOfLastField(fieldsList, fieldParts):
@@ -554,6 +585,9 @@ def getMessageFieldInfo(messageStructIdxs: list, lines : list, schemaFieldInfo :
 
                 if name in gTestFixtures.get(logName, {}):
                     fieldDict["fixture"] = gTestFixtures[logName][name]
+                if name in gVectorAdapters.get(logName, {}):
+                    fieldDict.update(gVectorAdapters[logName][name])
+                    fieldDict["type"] = f"std::vector<{fieldDict['vectorType']}>"
                 fieldDict["testVal"] = makeTestVal(fieldDict)
 
                 # add field dict to list of fields

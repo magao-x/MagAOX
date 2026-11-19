@@ -13,22 +13,36 @@ INCLUDEDEPS= \
 	app/indiMacros.hpp \
 	app/indiUtils.hpp \
 	app/semUtils.hpp \
+	app/framePoll.hpp \
 	app/stateCodes.hpp \
 	app/dev/semUtilsDerived.hpp \
 	app/dev/outletController.hpp \
 	app/dev/ioDevice.hpp \
 	app/dev/stdMotionStage.hpp \
 	app/dev/frameGrabber.hpp \
+	app/dev/frameGrabberTiming.hpp \
 	app/dev/stdCamera.hpp \
 	app/dev/edtCamera.hpp \
 	app/dev/dssShutter.hpp \
 	app/dev/shmimMonitor.hpp \
 	app/dev/dm.hpp \
+	app/dev/dmTiming.hpp \
+	app/dev/dmCompletion.hpp \
+	app/dev/dmReaderTiming.hpp \
+	app/dev/dmPipelineTiming.hpp \
 	app/dev/telemeter.hpp \
 	app/dev/dmPokeWFS.hpp \
 	common/config.hpp \
 	common/defaults.hpp \
 	common/environment.hpp \
+	common/dmTiming.hpp \
+	common/dmCompletion.hpp \
+	common/dmReaderTiming.hpp \
+	common/frameGrabberTiming.hpp \
+	common/spscQueue.hpp \
+	common/streamCopy.hpp \
+	common/timingStats.hpp \
+	common/dmPipelineTiming.hpp \
 	file/fileTimes.hpp \
 	file/stdFileName.hpp \
 	file/stdSubDir.hpp \
@@ -70,8 +84,12 @@ INCLUDEDEPS= \
 	logger/types/telem_coretemps.hpp \
 	logger/types/telem_dmmodes.hpp \
 	logger/types/telem_dmspeck.hpp \
+	logger/types/telem_dmsynco.hpp \
+	logger/types/telem_dmtimings.hpp \
 	logger/types/telem_drivetemps.hpp \
 	logger/types/telem_fgtimings.hpp \
+	logger/types/telem_fgstage.hpp \
+	logger/types/telem_fgtrace.hpp \
 	logger/types/telem_flowrpm.hpp \
 	logger/types/telem_fxngen.hpp \
 	logger/types/telem_loopgain.hpp \
@@ -105,6 +123,9 @@ INCLUDEDEPS= \
 	logger/types/telem_telvane.hpp \
 	logger/types/telem_temps.hpp \
 	logger/types/telem_usage.hpp \
+	logger/types/telem_gpu.hpp \
+	logger/types/telem_irq.hpp \
+	logger/types/telem_raid.hpp \
 	logger/types/telem_w2tcsoffloader.hpp \
 	logger/types/telem_zaber.hpp \
 	logger/types/text_log.hpp \
@@ -112,6 +133,8 @@ INCLUDEDEPS= \
 	logger/types/user_log.hpp \
 	sys/thSetuid.hpp \
 	sys/runCommand.hpp \
+	sys/boundedCommand.hpp \
+	sys/cpuList.hpp \
 	tty/ttyErrors.hpp \
 	tty/ttyIOUtils.hpp \
 	tty/ttyUSB.hpp \
@@ -136,6 +159,8 @@ OBJS = \
 	logger/logBinarySchemata.o \
 	modbus/modbus.o \
 	sys/runCommand.o \
+	sys/boundedCommand.o \
+	sys/cpuList.o \
 	sys/thSetuid.o \
 	tty/netSerial.o \
 	tty/telnetConn.o \
@@ -154,6 +179,9 @@ app/MagAOXApp.o: app/MagAOXApp.hpp app/indiDriver.hpp app/indiMacros.hpp app/ind
 
 app/stateCodes.o: app/stateCodes.hpp
 
+sys/boundedCommand.o: sys/boundedCommand.hpp
+sys/cpuList.o: sys/cpuList.hpp
+
 libMagAOX.hpp.gch: libMagAOX.hpp $(INCLUDEDEPS) logger/generated/logTypes.hpp $(OBJS)
 ../../flatlogs/bin/flatlogcodes:
 	cd ../../flatlogs && make install
@@ -167,6 +195,10 @@ libMagAOX.a: libMagAOX.hpp.gch $(OBJS)
 
 logger/logMeta.o: logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/logMeta.cpp logger/generated/logTypes.hpp
 logger/logMap.o: logger/logMap.hpp logger/logMap.cpp
+logger/logMeta.o logger/logMap.o: logger/types/telem_dmsynco.hpp common/dmReaderTiming.hpp
+logger/logMeta.o logger/logMap.o: logger/types/telem_dmtimings.hpp common/dmTiming.hpp
+logger/logMeta.o: logger/types/telem_gpu.hpp logger/types/telem_irq.hpp logger/types/telem_raid.hpp
+logger/logBinarySchemata.o: logger/generated/logTypes.hpp logger/generated/binarySchemata.inc
 
 clean:
 	rm -f libMagAOX.hpp.gch

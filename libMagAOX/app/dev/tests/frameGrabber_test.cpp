@@ -9,6 +9,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <filesystem>
 
 /// \cond DOXYGEN_SUPPRESS_TEST_HARNESS
@@ -42,22 +43,37 @@ Streams::Streams()
     char directory[] = "/tmp/framegrabber-test-XXXXXX";
     REQUIRE( mkdtemp( directory ) != nullptr );
     m_directory = directory;
+
     if( const char *previous = getenv( "MILK_SHM_DIR" ) )
     {
         m_hadPrevious = true;
         m_previous    = previous;
     }
+
     REQUIRE( setenv( "MILK_SHM_DIR", m_directory.c_str(), 1 ) == 0 );
 }
 
 Streams::~Streams()
 {
     if( m_hadPrevious )
+    {
         setenv( "MILK_SHM_DIR", m_previous.c_str(), 1 );
+    }
     else
+    {
         unsetenv( "MILK_SHM_DIR" );
+    }
+
     std::error_code error;
     std::filesystem::remove_all( m_directory, error );
+}
+
+/// Select the suite's private stream directory once, and return a unique stream name.
+std::string streamName()
+{
+    static Streams  streams;
+    static unsigned sequence = 0;
+    return "framegrabber_" + std::to_string( getpid() ) + "_" + std::to_string( ++sequence );
 }
 
 /// Minimal fake camera running the real framegrabber loop with local shared memory.
@@ -211,9 +227,7 @@ class Camera : public MagAOX::app::dev::frameGrabber<Camera>
 
 Camera::Camera()
 {
-    static Streams  streams;
-    static unsigned sequence   = 0;
-    m_shmimName                = "framegrabber_" + std::to_string( getpid() ) + "_" + std::to_string( ++sequence );
+    m_shmimName                = streamName();
     m_fgThreadInit             = false;
     m_width                    = 2;
     m_height                   = 2;
@@ -248,9 +262,13 @@ void Camera::stop()
         std::lock_guard<std::mutex> lock( m_mutex );
         m_stop = true;
     }
+
     m_condition.notify_all();
+
     if( m_worker.joinable() )
+    {
         m_worker.join();
+    }
 }
 
 void Camera::request( int target )
@@ -260,6 +278,7 @@ void Camera::request( int target )
         m_requested = target;
         m_reconfig  = true;
     }
+
     m_condition.notify_all();
 }
 
@@ -269,6 +288,7 @@ void Camera::release()
         std::lock_guard<std::mutex> lock( m_mutex );
         m_release = true;
     }
+
     m_condition.notify_all();
 }
 
@@ -282,11 +302,20 @@ bool Camera::wait( Predicate predicate )
 void Camera::pause( Pause point, std::unique_lock<std::mutex> &lock )
 {
     if( m_pauseAt != point )
+    {
         return;
+    }
+
     m_pauseAt = Pause::none;
     m_paused  = true;
     m_condition.notify_all();
-    if( !m_condition.wait_for( lock, 5s, [this] { return m_release || m_stop; } ) )
+
+    if( !m_condition.wait_for( lock,
+                               5s,
+                               [this]
+                               {
+                                   return m_release || m_stop;
+                               } ) )
     {
         m_timedOut = true;
         m_stop     = true;
@@ -300,11 +329,13 @@ int Camera::configureAcquisition()
     m_snapshots.push_back( target );
     m_condition.notify_all();
     pause( Pause::configure, lock );
+
     if( m_configFailures > 0 )
     {
         --m_configFailures;
         return -1;
     }
+
     m_applied.push_back( target );
     m_condition.notify_all();
     return 0;
@@ -322,11 +353,13 @@ int Camera::startAcquisition()
     std::lock_guard<std::mutex> lock( m_mutex );
     ++m_starts;
     m_condition.notify_all();
+
     if( m_startFailures > 0 )
     {
         --m_startFailures;
         return -1;
     }
+
     return 0;
 }
 
@@ -335,11 +368,18 @@ int Camera::acquireAndCheckValid()
     std::unique_lock<std::mutex> lock( m_mutex );
     ++m_acquisitions;
     m_condition.notify_all();
-    if( !m_condition.wait_for( lock, 5s, [this] { return m_stop || m_reconfig || m_power <= 0; } ) )
+
+    if( !m_condition.wait_for( lock,
+                               5s,
+                               [this]
+                               {
+                                   return m_stop || m_reconfig || m_power <= 0;
+                               } ) )
     {
         m_timedOut = true;
         m_stop     = true;
     }
+
     return 1;
 }
 
@@ -353,12 +393,14 @@ int Camera::reconfig()
 {
     std::unique_lock<std::mutex> lock( m_mutex );
     ++m_restarts;
+
     if( m_reconfigFailures > 0 )
     {
         --m_reconfigFailures;
         m_condition.notify_all();
         return -1;
     }
+
     m_selected = m_requested;
     m_condition.notify_all();
     pause( Pause::reconfig, lock );
@@ -375,8 +417,12 @@ stateCodes::stateCodeT Camera::state()
     std::unique_lock<std::mutex> lock( m_mutex );
     ++m_stateChecks;
     m_condition.notify_all();
+
     if( m_restarts > 0 )
+    {
         pause( Pause::ready, lock );
+    }
+
     return m_state;
 }
 
@@ -395,6 +441,244 @@ int Camera::log( const typename Log::messageT &message, flatlogs::logPrioT prior
     static_cast<void>( priority );
     return 0;
 }
+
+/// Fake relay running the real framegrabber loop, publishing queued frames with supplied timing.
+class RelayCamera : public MagAOX::app::dev::frameGrabber<RelayCamera>
+{
+  public:
+    /// Disable pixel flipping for this fixture.
+    static constexpr bool c_frameGrabber_flippable = false;
+
+    /// Timing of one frame, as supplied to or published by the framegrabber.
+    struct Frame
+    {
+        timespec atime;     ///< Acquisition time.
+        timespec writetime; ///< Write time.
+        uint64_t cnt0;      ///< Frame counter.
+        bool     relay;     ///< Whether the relay hook supplies the write time and counter.
+    };
+
+    /// Serialize the queues between the test and the worker.
+    std::mutex m_mutex;
+
+    /// Notify the worker of queued frames and the test of published frames.
+    std::condition_variable m_condition;
+
+    /// Thread-safe simulated application shutdown.
+    std::atomic<bool> m_stop{ false };
+
+    /// Owned thread invoking the production worker directly.
+    std::thread m_worker;
+
+    /// Frames waiting to be acquired, protected by m_mutex.
+    std::deque<Frame> m_queued;
+
+    /// Frame being published, used only by the worker.
+    Frame m_current{};
+
+    /// Timing read back from the stream metadata after each publication, protected by m_mutex.
+    std::vector<Frame> m_published;
+
+    /// Timing read back from the stream's per-frame arrays after each publication, protected by m_mutex.
+    std::vector<Frame> m_publishedArrays;
+
+    /// Stream data type after each publication, protected by m_mutex.
+    std::vector<uint8_t> m_publishedTypes;
+
+    /// Initialize a unique local output circular buffer and disable latency accumulation.
+    RelayCamera();
+
+    /// Stop and join the worker.
+    ~RelayCamera();
+
+    /// Queue a frame and launch the worker if needed.
+    void push( const Frame &frame /**< [in] Frame timing to acquire. */ );
+
+    /// Wait a bounded time for a number of published frames.
+    bool waitPublished( size_t count /**< [in] Number of published frames. */ );
+
+    /// Stop and join the worker.
+    void stop();
+
+    /// Request a new output data type, applied on the next configuration.
+    void dataType( uint8_t type /**< [in] ImageStreamIO data type. */ );
+
+    /// Accept the preset geometry.
+    int configureAcquisition();
+
+    /// Disable latency statistics.
+    float fps();
+
+    /// Accept acquisition start.
+    int startAcquisition();
+
+    /// Wait for a queued frame and set its acquisition time, returning early for shutdown or reconfiguration.
+    int acquireAndCheckValid();
+
+    /// Accept the frame without pixels.
+    int loadImageIntoStream( void *destination /**< [out] Frame destination. */ );
+
+    /// Accept reconfiguration.
+    int reconfig();
+
+    /// Supply the queued write time and counter when the frame requests relaying.
+    int frameGrabberRelayTiming( timespec &writetime /**< [out] Write time to publish. */,
+                                 uint64_t &cnt0 /**< [in/out] Frame counter to publish. */ );
+
+    /// Read back the published timing.
+    int frameGrabberPostPublish( IMAGE *imageStream /**< [in] Published stream. */ );
+
+    /// Report the thread-safe shutdown flag.
+    bool shutdown();
+
+    /// Report operation.
+    stateCodes::stateCodeT state();
+
+    /// Report power on.
+    int powerState();
+
+    /// Discard worker diagnostics without starting application logging.
+    template <class Log>
+    static int log( const typename Log::messageT &message /**< [in] Diagnostic payload. */,
+                    flatlogs::logPrioT priority = flatlogs::logPrio::LOG_DEFAULT /**< [in] Diagnostic priority. */ );
+};
+
+RelayCamera::RelayCamera()
+{
+    m_shmimName                = streamName();
+    m_fgThreadInit             = false;
+    m_width                    = 2;
+    m_height                   = 2;
+    m_dataType                 = _DATATYPE_FLOAT;
+    m_circBuffLength           = 4;
+    m_latencyCircBuffMaxLength = 0;
+}
+
+RelayCamera::~RelayCamera()
+{
+    stop();
+}
+
+void RelayCamera::push( const Frame &frame )
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_mutex );
+        m_queued.push_back( frame );
+    }
+    m_condition.notify_all();
+    if( !m_worker.joinable() )
+    {
+        m_worker = std::thread( [this] { fgThreadExec(); } );
+    }
+}
+
+bool RelayCamera::waitPublished( size_t count )
+{
+    std::unique_lock<std::mutex> lock( m_mutex );
+    return m_condition.wait_for( lock, 4s, [&] { return m_published.size() >= count; } );
+}
+
+void RelayCamera::stop()
+{
+    m_stop = true;
+    m_condition.notify_all();
+    if( m_worker.joinable() )
+        m_worker.join();
+}
+
+void RelayCamera::dataType( uint8_t type )
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_mutex );
+        m_dataType = type;
+        m_reconfig = true;
+    }
+    m_condition.notify_all();
+}
+
+int RelayCamera::configureAcquisition()
+{
+    return 0;
+}
+
+float RelayCamera::fps()
+{
+    return 0;
+}
+
+int RelayCamera::startAcquisition()
+{
+    return 0;
+}
+
+int RelayCamera::acquireAndCheckValid()
+{
+    std::unique_lock<std::mutex> lock( m_mutex );
+    if( !m_condition.wait_for( lock, 5s, [this] { return m_stop || m_reconfig || !m_queued.empty(); } ) || m_stop ||
+        m_reconfig )
+        return 1;
+    m_current = m_queued.front();
+    m_queued.pop_front();
+    m_currImageTimestamp = m_current.atime;
+    return 0;
+}
+
+int RelayCamera::loadImageIntoStream( void *destination )
+{
+    static_cast<void>( destination );
+    return 0;
+}
+
+int RelayCamera::reconfig()
+{
+    return 0;
+}
+
+int RelayCamera::frameGrabberRelayTiming( timespec &writetime, uint64_t &cnt0 )
+{
+    if( !m_current.relay )
+        return 1;
+    writetime = m_current.writetime;
+    cnt0      = m_current.cnt0;
+    return 0;
+}
+
+int RelayCamera::frameGrabberPostPublish( IMAGE *imageStream )
+{
+    uint64_t slot = imageStream->md->cnt1;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_mutex );
+        m_publishedTypes.push_back( imageStream->md->datatype );
+        m_published.push_back( { imageStream->md->atime, imageStream->md->writetime, imageStream->md->cnt0, false } );
+        m_publishedArrays.push_back(
+            { imageStream->atimearray[slot], imageStream->writetimearray[slot], imageStream->cntarray[slot], false } );
+    }
+    m_condition.notify_all();
+    return 0;
+}
+
+bool RelayCamera::shutdown()
+{
+    return m_stop;
+}
+
+stateCodes::stateCodeT RelayCamera::state()
+{
+    return stateCodes::OPERATING;
+}
+
+int RelayCamera::powerState()
+{
+    return 1;
+}
+
+template <class Log>
+int RelayCamera::log( const typename Log::messageT &message, flatlogs::logPrioT priority )
+{
+    static_cast<void>( message );
+    static_cast<void>( priority );
+    return 0;
+}
 } // namespace frameGrabberHarness
 /// \endcond
 
@@ -404,6 +688,7 @@ namespace libXWCTest
 namespace frameGrabberTest
 {
 using frameGrabberHarness::Camera;
+using frameGrabberHarness::RelayCamera;
 using MagAOX::app::stateCodes;
 
 /// Requests arriving after the worker's configuration snapshot must configure the latest setting on the next pass.
@@ -417,20 +702,31 @@ TEST_CASE( "frameGrabber preserves requests arriving during configuration", "[fr
     #endif
     // clang-format on
     Camera camera;
+
     SECTION( "during the derived configuration callback" )
     {
         camera.m_pauseAt = Camera::Pause::configure;
     }
+
     SECTION( "after configuration while preparing the latency buffers" )
     {
         camera.m_pauseAt = Camera::Pause::fps;
     }
+
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_paused; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_paused;
+        } ) );
     camera.request( 2 );
     camera.request( 3 );
     camera.release();
-    REQUIRE( camera.wait( [&] { return camera.m_applied.size() >= 2 && camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_applied.size() >= 2 && camera.m_acquisitions >= 1;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
@@ -451,20 +747,31 @@ TEST_CASE( "frameGrabber preserves requests around deferred mode selection", "[f
     // clang-format on
     Camera camera;
     camera.m_applyInReconfig = true;
+
     SECTION( "during cleanup after the mode snapshot" )
     {
         camera.m_pauseAt = Camera::Pause::reconfig;
     }
+
     SECTION( "after cleanup before the next configuration" )
     {
         camera.m_pauseAt = Camera::Pause::ready;
     }
+
     camera.request( 2 );
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_paused; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_paused;
+        } ) );
     camera.request( 3 );
     camera.release();
-    REQUIRE( camera.wait( [&] { return camera.m_applied.size() >= 3 && camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_applied.size() >= 3 && camera.m_acquisitions >= 1;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
@@ -486,25 +793,37 @@ TEST_CASE( "frameGrabber retries requests after configuration and acquisition-st
     Camera camera;
     camera.m_pauseAt          = Camera::Pause::configure;
     bool configurationFailure = false;
+
     SECTION( "configuration fails once" )
     {
         camera.m_configFailures = 1;
         configurationFailure    = true;
     }
+
     SECTION( "acquisition startup fails once" )
     {
         camera.m_startFailures = 1;
     }
+
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_paused; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_paused;
+        } ) );
     camera.request( 2 );
     camera.release();
-    REQUIRE( camera.wait( [&] { return camera.m_snapshots.size() >= 2 && camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_snapshots.size() >= 2 && camera.m_acquisitions >= 1;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
     REQUIRE( camera.m_snapshots == std::vector<int>{ 1, 2, 2 } );
     REQUIRE( camera.m_restarts == 1 );
+
     if( configurationFailure )
     {
         REQUIRE( camera.m_applied == std::vector<int>{ 2, 2 } );
@@ -517,7 +836,7 @@ TEST_CASE( "frameGrabber retries requests after configuration and acquisition-st
     }
 }
 
-/// Failed cleanup must leave a retry request until deferred camera settings are successfully selected.
+/// Retry failed cleanup before configuration until deferred camera settings are successfully selected.
 /** \ingroup frameGrabber_unit_test */
 TEST_CASE( "frameGrabber retries a failed reconfiguration cleanup", "[frameGrabber]" )
 {
@@ -532,13 +851,17 @@ TEST_CASE( "frameGrabber retries a failed reconfiguration cleanup", "[frameGrabb
     camera.request( 2 );
     camera.request( 3 );
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_applied.size() >= 3 && camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_applied.size() >= 2 && camera.m_acquisitions >= 1;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
-    REQUIRE( camera.m_snapshots == std::vector<int>{ 1, 1, 3 } );
-    REQUIRE( camera.m_applied == std::vector<int>{ 1, 1, 3 } );
-    REQUIRE( camera.m_starts == 3 );
+    REQUIRE( camera.m_snapshots == std::vector<int>{ 1, 3 } );
+    REQUIRE( camera.m_applied == std::vector<int>{ 1, 3 } );
+    REQUIRE( camera.m_starts == 2 );
     REQUIRE( camera.m_restarts == 2 );
 }
 
@@ -555,9 +878,17 @@ TEST_CASE( "frameGrabber consumes queued requests and handles requests during ac
     camera.request( 2 );
     camera.request( 3 );
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_acquisitions >= 1;
+        } ) );
     camera.request( 4 );
-    REQUIRE( camera.wait( [&] { return camera.m_acquisitions >= 2; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_acquisitions >= 2;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
@@ -580,20 +911,93 @@ TEST_CASE( "frameGrabber retains requests while waiting for readiness and power"
     camera.m_power = 0;
     camera.request( 2 );
     camera.start();
-    REQUIRE( camera.wait( [&] { return camera.m_stateChecks > 0; } ) );
-    REQUIRE( camera.wait( [&] { return camera.m_snapshots.empty(); } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_stateChecks > 0;
+        } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_snapshots.empty();
+        } ) );
     camera.m_state = stateCodes::READY;
-    REQUIRE( camera.wait( [&] { return camera.m_powerChecks > 0; } ) );
-    REQUIRE( camera.wait( [&] { return camera.m_snapshots.empty(); } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_powerChecks > 0;
+        } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_snapshots.empty();
+        } ) );
     camera.request( 3 );
     camera.m_power = 1;
-    REQUIRE( camera.wait( [&] { return camera.m_acquisitions >= 1; } ) );
+    REQUIRE( camera.wait(
+        [&]
+        {
+            return camera.m_acquisitions >= 1;
+        } ) );
     camera.stop();
     REQUIRE_FALSE( camera.m_timedOut );
     REQUIRE_FALSE( camera.m_exception );
     REQUIRE( camera.m_applied == std::vector<int>{ 3, 3 } );
     REQUIRE( camera.m_starts == 2 );
     REQUIRE( camera.m_restarts == 1 );
+}
+
+/// A relaying derived class sets the published write time and counter, and declining falls back to the clock and
+/// increment.
+/** \ingroup frameGrabber_unit_test */
+TEST_CASE( "frameGrabber publishes relayed write times and counters", "[frameGrabber]" )
+{
+    // clang-format off
+    #ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
+    MagAOX::app::dev::frameGrabber::fgThreadExec;
+    MagAOX::app::dev::frameGrabber::relayTimingHook;
+    #endif
+    // clang-format on
+    RelayCamera camera;
+    camera.push( { { 10, 1 }, { 10, 2 }, 100, true } );
+    camera.push( { { 11, 1 }, { 11, 2 }, 200, true } );
+    camera.push( { { 12, 1 }, { 0, 0 }, 0, false } );
+    REQUIRE( camera.waitPublished( 3 ) );
+    camera.stop();
+
+    for( auto *published : { &camera.m_published, &camera.m_publishedArrays } )
+    {
+        const std::vector<RelayCamera::Frame> &p = *published;
+        REQUIRE( p[0].atime.tv_sec == 10 );
+        REQUIRE( p[0].writetime.tv_sec == 10 );
+        REQUIRE( p[0].writetime.tv_nsec == 2 );
+        REQUIRE( p[0].cnt0 == 100 );
+        REQUIRE( p[1].writetime.tv_sec == 11 );
+        REQUIRE( p[1].cnt0 == 200 );
+        REQUIRE( p[2].atime.tv_sec == 12 );
+        REQUIRE( p[2].writetime.tv_sec > 1000000000 );
+        REQUIRE( p[2].cnt0 == 201 );
+    }
+}
+
+/// A data type change with unchanged geometry recreates the output stream.
+/** \ingroup frameGrabber_unit_test */
+TEST_CASE( "frameGrabber recreates the stream when only the data type changes", "[frameGrabber]" )
+{
+    // clang-format off
+    #ifdef FRAMEGRABBER_TEST_DOXYGEN_REF
+    MagAOX::app::dev::frameGrabber::fgThreadExec;
+    #endif
+    // clang-format on
+    RelayCamera camera;
+    camera.push( { { 10, 1 }, { 10, 2 }, 100, true } );
+    REQUIRE( camera.waitPublished( 1 ) );
+    camera.dataType( _DATATYPE_INT16 );
+    camera.push( { { 11, 1 }, { 11, 2 }, 101, true } );
+    REQUIRE( camera.waitPublished( 2 ) );
+    camera.stop();
+
+    REQUIRE( camera.m_publishedTypes == std::vector<uint8_t>{ _DATATYPE_FLOAT, _DATATYPE_INT16 } );
 }
 } // namespace frameGrabberTest
 } // namespace libXWCTest

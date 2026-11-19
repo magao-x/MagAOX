@@ -75,6 +75,8 @@ apps_rtc = \
 	pupilFit \
 	t2wOffloader \
 	dmSpeckle \
+	dmSyncopation \
+	loopTimingMonitor \
 	w2tcsOffloader \
 	pwfsSlopeCalc \
     kcubeCtrl \
@@ -135,6 +137,8 @@ all_buildable_apps = \
 	dmPokeCenter \
 	dmPokeXCorr \
 	dmSpeckle \
+	dmSyncopation \
+	loopTimingMonitor \
 	filterWheelCtrl \
 	flipperCtrl \
 	flowRPM \
@@ -265,7 +269,8 @@ all_rtimv_plugins = \
 	pwfsAlignment \
 	dmStatus \
 	warnings \
-	acquisition
+	acquisition \
+	valueDisplay
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -310,7 +315,8 @@ scripts_to_install = \
 	inventory_files \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
-	cyverse_replicate 
+	cyverse_replicate \
+	xnormconfig
 
 ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup
