@@ -10,7 +10,9 @@
 #include <cstring>
 #include <mutex>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <thread>
+#include <unistd.h>
 
 #include <mx/improc/eigenCube.hpp>
 #include <mx/ioutils/fits/fitsFile.hpp>
@@ -47,6 +49,107 @@ class dmProducer : public dev::dmSyncopationProducer<dmProducer>
   protected:
     bool m_shutdown{ false }; ///< Set only after the output thread has finished its final zero attempt.
 };
+
+/// Low-overhead DM publication statistics, accumulated by the DM worker and drained by the app loop.
+struct dmStatistics
+{
+    static constexpr size_t c_steps = 4; ///< Subframes reported individually; later steps are counted in step 3.
+
+    std::array<uint64_t, c_steps> m_advertised{}, m_requests{}, m_published{},
+        m_copied{}; ///< Cumulative per-step slots seen in records, returned by poll, committed and copied.
+
+    uint64_t m_preparedHits{ 0 }, m_preparedMisses{ 0 }; ///< Commits using a staged surface / synthesized on demand.
+
+    int64_t m_lastRecordEpoch{ 0 }, m_lastRecordGeneration{ 0 }, m_lastRecordCycle{ -1 }; ///< Last counted record.
+
+    std::array<uint32_t, 256> m_marginHistogram{}; ///< Interval margins in 1-us bins; the last bin collects >=255 us.
+
+    uint64_t m_skippedSlots{ 0 }; ///< Cumulative slots never returned between consecutive requests of one plan.
+
+    int64_t m_lastSlot{ -1 }; ///< Ordinal cycle*steps+step of the last request, or -1 after a plan change.
+
+    int64_t m_lastEpoch{ 0 }, m_lastGeneration{ 0 }; ///< Scheduler plan identity of m_lastSlot.
+
+    int64_t m_lastPoll{ 0 }; ///< Monotonic time of the previous poll while output was serviced [ns].
+
+    /// Per-interval timing in microseconds: count, sum, and extreme values since the last drain.
+    struct interval
+    {
+        uint64_t m_count{ 0 };   ///< Samples in this interval.
+        double   m_sum{ 0 };     ///< Sum of samples.
+        double   m_min{ 0 };     ///< Smallest sample.
+        double   m_max{ 0 };     ///< Largest sample.
+        double   m_squares{ 0 }; ///< Sum of squared samples.
+
+        /// Add one sample.
+        void add( double value /**< [in] sample [us] */ );
+
+        /// Return the interval mean, or zero when empty.
+        double mean() const;
+
+        /// Return the interval standard deviation (RMS jitter about the mean), or zero when empty.
+        double rms() const;
+    };
+
+    interval m_pollGap; ///< Time between consecutive polls: worker wake and service latency.
+    interval m_slack;   ///< Cutoff minus the time a new request was first observed.
+    interval m_prepare; ///< Timeline evaluation plus surface synthesis.
+    interval m_margin;  ///< Cutoff minus the committed ready time.
+    interval m_publish; ///< Producer publish call duration, including its intentional wait to cutoff-writeLead.
+    interval m_lead;    ///< Target minus the committed ready time.
+    interval m_receipt; ///< Time the copy receipt was first observed after the commit's cutoff.
+
+    /// Return the margin below which the given fraction of interval commits fell, from the histogram [us].
+    double marginQuantile( double fraction /**< [in] lower-tail fraction, e.g. 0.01 */ ) const;
+
+    /// Return the reporting index of a scheduler step.
+    static size_t index( int step /**< [in] scheduler step */ );
+};
+
+inline void dmStatistics::interval::add( double value )
+{
+    m_min = m_count ? std::min( m_min, value ) : value;
+    m_max = m_count ? std::max( m_max, value ) : value;
+    m_sum += value;
+    m_squares += value * value;
+    ++m_count;
+}
+
+inline double dmStatistics::interval::mean() const
+{
+    return m_count ? m_sum / m_count : 0;
+}
+
+inline double dmStatistics::interval::rms() const
+{
+    return m_count ? std::sqrt( std::max( 0.0, m_squares / m_count - mean() * mean() ) ) : 0;
+}
+
+inline double dmStatistics::marginQuantile( double fraction ) const
+{
+    uint64_t total = 0, seen = 0;
+    for( auto count : m_marginHistogram )
+        total += count;
+    for( size_t bin = 0; bin < m_marginHistogram.size(); ++bin )
+        if( ( seen += m_marginHistogram[bin] ) > fraction * total )
+            return double( bin );
+    return 0;
+}
+
+/// One privately prepared surface for an exact advertised slot; never written to the source until published.
+struct stagedCommand
+{
+    synco::Request          m_request{};      ///< Exact slot identity, including targetNs and cutoffNs.
+    double                  m_scale{ 0 };     ///< dm_scale used for the surface.
+    uint64_t                m_timeline{ 0 };  ///< Timeline generation of the evaluated pointing.
+    bool                    m_valid{ false }; ///< Whether the surface is complete and finite.
+    std::array<float, 2500> m_pixels{};       ///< Preallocated calibrated surface.
+};
+
+inline size_t dmStatistics::index( int step )
+{
+    return std::min<size_t>( std::max( step, 0 ), c_steps - 1 );
+}
 } // namespace accelSimDetail
 
 /// Simulated accelerometer acquisition with optional DM injection of the same realization at scheduler targets.
@@ -131,21 +234,47 @@ class accelSim : public MagAOXApp<true>,
                                                                                  "sync_producer_frame_delta",
                                                                                  "mode_code" };
 
+    /// dm_timing element names: interval statistics in microseconds, reset at each app-loop report.
+    inline static constexpr std::array<const char *, 19> c_dmTimingNames{ "samples",
+                                                                          "poll_gap_mean_us",
+                                                                          "poll_gap_max_us",
+                                                                          "slack_min_us",
+                                                                          "slack_mean_us",
+                                                                          "prepare_mean_us",
+                                                                          "prepare_max_us",
+                                                                          "publish_mean_us",
+                                                                          "publish_max_us",
+                                                                          "margin_min_us",
+                                                                          "margin_mean_us",
+                                                                          "margin_rms_us",
+                                                                          "margin_p01_us",
+                                                                          "margin_p001_us",
+                                                                          "lead_min_us",
+                                                                          "lead_mean_us",
+                                                                          "receipt_mean_us",
+                                                                          "receipt_max_us",
+                                                                          "slack_rms_us" };
+
     using diagnostics = accelSimDetail::diagnostics;
-    diagnostics         m_diagnostics, m_snapshot;        ///< Worker state and synchronized app-loop snapshot.
-    std::mutex          m_snapshotMutex;                  ///< Protects only snapshot copies, never acquisition work.
-    std::mutex          m_controlMutex;                   ///< Serializes app-owned INDI properties and their callbacks.
+    diagnostics         m_diagnostics, m_snapshot; ///< Worker state and synchronized app-loop snapshot.
+    std::mutex          m_snapshotMutex;           ///< Protects only snapshot copies, never acquisition work.
+    std::mutex          m_controlMutex;            ///< Serializes app-owned INDI properties and their callbacks.
+    std::mutex          m_dmMutex; ///< Guards DM flags, bookkeeping and statistics; never held across INDI I/O.
     std::string         m_dmChannel, m_dmModes, m_dmMask; ///< Explicit owned channel and approved calibration paths.
-    IMAGE               m_dmImage{};       ///< Existing auxiliary source, written only through dmSyncopationProducer.
-    std::thread         m_dmThread;        ///< Sole owner of producer poll/publish and acknowledgement observations.
-    std::atomic<bool>   m_dmStop{ false }; ///< Request final tagged removal and join independently of acquisition.
+    IMAGE               m_dmImage{}; ///< Existing auxiliary source, written only through dmSyncopationProducer.
+    std::thread         m_dmThread;  ///< Sole owner of producer poll/publish and acknowledgement observations.
+    bool                m_dmThreadInit{ true }; ///< Startup synchronizer for framework priority and cpuset setup.
+    pid_t               m_dmThreadID{ 0 };      ///< DM worker thread ID, set by the worker for threadStart.
+    pcf::IndiProperty   m_dmThreadProp;         ///< Framework thread property (th-dm: pid and priority).
+    int                 m_dmThreadPrio{ 0 };    ///< DM worker real-time priority; 0 keeps SCHED_OTHER.
+    std::string         m_dmThreadCpuset;       ///< DM worker cpuset; empty leaves placement unchanged.
+    std::atomic<bool>   m_dmStop{ false };      ///< Request final tagged removal and join independently of acquisition.
     std::atomic<bool>   m_dmCommandValid{ true }; ///< Current numerical validity; a valid synthesis clears the error.
     double              m_dmResidual{ 1e-6 };     ///< Accepted relative physical projection residual.
     bool                m_dmStartupEnabled{ false }; ///< Startup enable remains unsupported; operators use dm_enable.
     bool                m_dmReady{ false }; ///< Immutable calibration preparation result until acquisition has joined.
     std::atomic<double> m_dmScale{ 0 };     ///< DM-only amplitude scale, independent of model amplitudes.
-    bool                m_dmEnabled{ false },
-        m_dmZeroPending{ false }; ///< Operator request and required removal, under control mutex.
+    bool m_dmEnabled{ false }, m_dmZeroPending{ false }; ///< Operator request and required removal, under m_dmMutex.
     bool m_dmActive{ false }, m_dmZeroAcknowledged{ false }; ///< Last copied contribution and explicit zero receipt.
     bool m_dmTransportFault{ false }; ///< Current transport availability, without fault latching.
     bool m_dmAwaitingAck{ false }, m_dmPendingZero{ false }; ///< Receipt bookkeeping for this app's latest commit.
@@ -156,9 +285,15 @@ class accelSim : public MagAOXApp<true>,
     uint64_t m_dmTimelineMisses{ 0 };             ///< Requests skipped because the target was outside the timeline.
     uint64_t m_dmPublished{ 0 };                  ///< Successful tagged ready commits by this instance.
     uint64_t m_dmCopied{ 0 }, m_dmDiscarded{ 0 }; ///< Exact transport dispositions for this instance's commits.
-    struct stat                 m_dmModesStat{}, m_dmMaskStat{}; ///< Calibration identities checked while loading.
-    accelSimDetail::dmInjection m_dmInjection;                   ///< DM-thread-owned precomputed physical synthesis.
+    struct stat                  m_dmModesStat{}, m_dmMaskStat{}; ///< Calibration identities checked while loading.
+    accelSimDetail::dmInjection  m_dmInjection;                   ///< DM-thread-owned precomputed physical synthesis.
+    accelSimDetail::dmStatistics m_dmStats; ///< Per-step counts and interval timing, under m_dmMutex.
+    std::array<accelSimDetail::stagedCommand, accelSimDetail::dmStatistics::c_steps>
+                      m_dmStage;    ///< Surfaces prepared ahead for the current record's steps, under m_dmMutex.
+    synco::Record     m_dmRecord{}; ///< Last coherent scheduler record read for staging and counting.
+    uint64_t          m_dmRecordCounter{ 0 };                              ///< Schedule stream counter of m_dmRecord.
     pcf::IndiProperty m_indiP_dmEnable, m_indiP_dmScale, m_indiP_dmStatus; ///< Minimal low-rate DM controls/status.
+    pcf::IndiProperty m_indiP_dmSteps, m_indiP_dmTiming; ///< Per-step counts and per-report-interval timing.
     /// Compatible accelerometer controls, serialized by m_controlMutex.
     pcf::IndiProperty m_indiP_fps, m_indiP_numChannels, m_indiP_alpha, m_indiP_synchroDelay;
     /// Diagnostic properties and configured external subscriptions.
@@ -209,7 +344,13 @@ class accelSim : public MagAOXApp<true>,
     void updateDMINDI();
     /// Service the existing tagged producer once; returns whether a payload was committed.
     bool serviceDM();
-    /// Publish private samples or pending zeros without blocking accelerometer acquisition.
+    /// Read a newly published scheduler record, count its slots, and optionally stage its surfaces ahead.
+    void observeSchedule( bool stage /**< [in] prepare surfaces for the record's remaining steps */ );
+    /// Prepare one step's surface privately unless an identical valid surface is already staged.
+    void stageStep( int step /**< [in] scheduler step of m_dmRecord */ );
+    /// Framework thread starter: record the thread ID and wait for priority/cpuset setup.
+    static void dmThreadStart( accelSim *app /**< [in] application owning the DM worker */ );
+    /// Publish target-time surfaces or pending zeros without blocking accelerometer acquisition.
     void dmThreadExec();
     /// Join the producer after its final removal attempt and release its mappings.
     void stopDM();
@@ -336,6 +477,8 @@ inline void accelSim::setupConfig()
     add( "dm", "enabled", "bool", "Must be false; use the runtime dm_enable control." );
     add( "dm", "scale", "double", "Independent DM-only linear scale [0,100], default 0." );
     add( "dm", "maxRelativeResidual", "double", "Maximum calibrated physical fit residual, default 1e-6." );
+    add( "dm", "threadPrio", "int", "DM worker real-time priority [0,99], as dmSpeckle; 0 (default) is SCHED_OTHER." );
+    add( "dm", "cpuset", "string", "Dedicated cpuset for the DM worker, as dmSpeckle; empty (default) is unchanged." );
 }
 
 inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
@@ -394,8 +537,12 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_dmStartupEnabled, "dm.enabled" );
     config( dmScale, "dm.scale" );
     config( m_dmResidual, "dm.maxRelativeResidual" );
+    config( m_dmThreadPrio, "dm.threadPrio" );
+    config( m_dmThreadCpuset, "dm.cpuset" );
     try
     {
+        if( m_dmThreadPrio < 0 || m_dmThreadPrio > 99 )
+            throw std::invalid_argument( "dm.threadPrio must be in [0,99]" );
         if( m_dmStartupEnabled || !std::isfinite( dmScale ) || dmScale < 0 || dmScale > accelSimDetail::maxDMScale ||
             !std::isfinite( m_dmResidual ) || m_dmResidual < 0 || m_dmResidual >= 1 ||
             ( !m_dmChannel.empty() && ( m_dmChannel == m_shmimName || m_dmChannel == m_syncName ||
@@ -465,6 +612,15 @@ inline int accelSim::setupProperties()
                               "discarded",
                               "outstanding" } )
         m_indiP_dmStatus.add( pcf::IndiElement( name ) );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_dmSteps, "dm_steps", "DM per-subframe counts", "DM" );
+    for( const std::string kind : { "advertised_", "requests_", "published_", "copied_" } )
+        for( size_t step = 0; step < accelSimDetail::dmStatistics::c_steps; ++step )
+            m_indiP_dmSteps.add( pcf::IndiElement( kind + std::to_string( step ) ) );
+    for( const char *name : { "skipped_slots", "prepared_hits", "prepared_misses" } )
+        m_indiP_dmSteps.add( pcf::IndiElement( name ) );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_dmTiming, "dm_timing", "DM timing per report interval", "DM" );
+    for( const char *name : c_dmTimingNames )
+        m_indiP_dmTiming.add( pcf::IndiElement( name ) );
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_fps, "fps", 0, 10000, 1, "%d", "", "" );
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_numChannels, "numChannels", 0, 8, 1, "%d", "", "" );
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_alpha, "alpha", 0., 1., .00001, "%.5f", "", "" );
@@ -539,8 +695,21 @@ inline void accelSim::prepareDM()
         const std::vector<double> mode1( modes.image( 1 ).data(), modes.image( 1 ).data() + 2500 );
         const std::vector<double> weights( mask.data(), mask.data() + 2500 );
         m_dmInjection.prepare( mode0, mode1, weights, m_dmResidual );
-        m_dmReady  = true;
-        m_dmThread = std::thread( &accelSim::dmThreadExec, this );
+        m_dmReady = true;
+        // The dmSpeckle worker pattern: framework thread with configured real-time priority and cpuset.
+        if( threadStart( m_dmThread,
+                         m_dmThreadInit,
+                         m_dmThreadID,
+                         m_dmThreadProp,
+                         m_dmThreadPrio,
+                         m_dmThreadCpuset,
+                         "dm",
+                         this,
+                         dmThreadStart ) < 0 )
+        {
+            stopDM();
+            throw std::runtime_error( "DM worker thread priority/cpuset setup failed" );
+        }
         log<text_log>( "DM channel prepared disabled: " + m_dmChannel + "; exclusive operator handover required",
                        logPrio::LOG_NOTICE );
     }
@@ -553,40 +722,112 @@ inline void accelSim::prepareDM()
 
 inline void accelSim::updateDMINDI()
 {
+    bool                         attached, active, enabled, zeroAcknowledged, transportFault, zeroPending, outstanding;
+    std::array<uint64_t, 9>      counts;
+    accelSimDetail::dmStatistics stats;
+    { //mutex scope
+        // Copy only; INDI I/O below never runs while the DM worker could be waiting for this mutex.
+        std::lock_guard<std::mutex> guard( m_dmMutex );
+        attached         = m_syncopationSchedule.md != nullptr;
+        active           = m_dmActive;
+        enabled          = m_dmEnabled;
+        zeroAcknowledged = m_dmZeroAcknowledged;
+        transportFault   = m_dmTransportFault;
+        zeroPending      = m_dmZeroPending;
+        outstanding      = m_syncopationOutstanding;
+        counts           = { m_dmPollWaits,
+                             m_dmRequests,
+                             m_dmTimelineMisses,
+                             m_dmLateReturns,
+                             m_dmRejected,
+                             m_dmPublished,
+                             m_dmCopied,
+                             m_dmDiscarded,
+                             0 };
+        stats            = m_dmStats;
+        for( auto *interval : { &m_dmStats.m_pollGap,
+                                &m_dmStats.m_slack,
+                                &m_dmStats.m_prepare,
+                                &m_dmStats.m_margin,
+                                &m_dmStats.m_publish,
+                                &m_dmStats.m_lead,
+                                &m_dmStats.m_receipt } )
+            *interval = {};
+        m_dmStats.m_marginHistogram = {};
+    }
     std::lock_guard<std::mutex> guard( m_controlMutex );
     const bool                  fault     = ( !m_dmChannel.empty() && !m_dmReady ) || !m_dmCommandValid.load();
     m_indiP_dmStatus["ready"]             = static_cast<int>( m_dmReady );
-    m_indiP_dmStatus["attached"]          = static_cast<int>( m_syncopationSchedule.md != nullptr );
-    m_indiP_dmStatus["active"]            = static_cast<int>( m_dmActive );
-    m_indiP_dmStatus["requested"]         = static_cast<int>( m_dmEnabled );
-    m_indiP_dmStatus["zero_acknowledged"] = static_cast<int>( m_dmZeroAcknowledged );
-    m_indiP_dmStatus["transport_fault"]   = static_cast<int>( m_dmTransportFault );
+    m_indiP_dmStatus["attached"]          = static_cast<int>( attached );
+    m_indiP_dmStatus["active"]            = static_cast<int>( active );
+    m_indiP_dmStatus["requested"]         = static_cast<int>( enabled );
+    m_indiP_dmStatus["zero_acknowledged"] = static_cast<int>( zeroAcknowledged );
+    m_indiP_dmStatus["transport_fault"]   = static_cast<int>( transportFault );
     m_indiP_dmStatus["fault"]             = static_cast<int>( fault );
-    m_indiP_dmStatus["poll_waits"]        = m_dmPollWaits;
-    m_indiP_dmStatus["requests"]          = m_dmRequests;
-    m_indiP_dmStatus["timeline_misses"]   = m_dmTimelineMisses;
-    m_indiP_dmStatus["late_returns"]      = m_dmLateReturns;
-    m_indiP_dmStatus["rejected"]          = m_dmRejected;
-    m_indiP_dmStatus["published"]         = m_dmPublished;
-    m_indiP_dmStatus["copied"]            = m_dmCopied;
-    m_indiP_dmStatus["discarded"]         = m_dmDiscarded;
-    m_indiP_dmStatus["outstanding"]       = static_cast<int>( m_syncopationOutstanding );
-    m_indiP_dmStatus.setState( fault || m_dmTransportFault ? INDI_ALERT : INDI_OK );
+    m_indiP_dmStatus["poll_waits"]        = counts[0];
+    m_indiP_dmStatus["requests"]          = counts[1];
+    m_indiP_dmStatus["timeline_misses"]   = counts[2];
+    m_indiP_dmStatus["late_returns"]      = counts[3];
+    m_indiP_dmStatus["rejected"]          = counts[4];
+    m_indiP_dmStatus["published"]         = counts[5];
+    m_indiP_dmStatus["copied"]            = counts[6];
+    m_indiP_dmStatus["discarded"]         = counts[7];
+    m_indiP_dmStatus["outstanding"]       = static_cast<int>( outstanding );
+    m_indiP_dmStatus.setState( fault || transportFault ? INDI_ALERT : INDI_OK );
+    for( size_t step = 0; step < stats.c_steps; ++step )
+    {
+        m_indiP_dmSteps["advertised_" + std::to_string( step )] = stats.m_advertised[step];
+        m_indiP_dmSteps["requests_" + std::to_string( step )]   = stats.m_requests[step];
+        m_indiP_dmSteps["published_" + std::to_string( step )]  = stats.m_published[step];
+        m_indiP_dmSteps["copied_" + std::to_string( step )]     = stats.m_copied[step];
+    }
+    m_indiP_dmSteps["skipped_slots"]   = stats.m_skippedSlots;
+    m_indiP_dmSteps["prepared_hits"]   = stats.m_preparedHits;
+    m_indiP_dmSteps["prepared_misses"] = stats.m_preparedMisses;
+    const std::array<double, c_dmTimingNames.size()> timing{ double( stats.m_margin.m_count ),
+                                                             stats.m_pollGap.mean(),
+                                                             stats.m_pollGap.m_max,
+                                                             stats.m_slack.m_min,
+                                                             stats.m_slack.mean(),
+                                                             stats.m_prepare.mean(),
+                                                             stats.m_prepare.m_max,
+                                                             stats.m_publish.mean(),
+                                                             stats.m_publish.m_max,
+                                                             stats.m_margin.m_min,
+                                                             stats.m_margin.mean(),
+                                                             stats.m_margin.rms(),
+                                                             stats.marginQuantile( .01 ),
+                                                             stats.marginQuantile( .001 ),
+                                                             stats.m_lead.m_min,
+                                                             stats.m_lead.mean(),
+                                                             stats.m_receipt.mean(),
+                                                             stats.m_receipt.m_max,
+                                                             stats.m_slack.rms() };
+    for( size_t n = 0; n < timing.size(); ++n )
+        m_indiP_dmTiming[c_dmTimingNames[n]] = timing[n];
     if( m_indiDriver )
+    {
         m_indiDriver->sendSetProperty( m_indiP_dmStatus );
+        m_indiDriver->sendSetProperty( m_indiP_dmSteps );
+        m_indiDriver->sendSetProperty( m_indiP_dmTiming );
+    }
     updateSwitchIfChanged( m_indiP_dmEnable,
                            "toggle",
-                           m_dmEnabled ? pcf::IndiElement::On : pcf::IndiElement::Off,
-                           fault || m_dmTransportFault                         ? INDI_ALERT
-                           : m_dmZeroPending || ( m_dmEnabled && !m_dmActive ) ? INDI_BUSY
-                                                                               : INDI_OK );
+                           enabled ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           fault || transportFault                 ? INDI_ALERT
+                           : zeroPending || ( enabled && !active ) ? INDI_BUSY
+                                                                   : INDI_OK );
 }
 
 inline bool accelSim::serviceDM()
 {
-    std::lock_guard<std::mutex> guard( m_controlMutex );
+    std::lock_guard<std::mutex> guard( m_dmMutex );
+    auto                       &stats = m_dmStats;
     if( !m_dmEnabled && !m_dmZeroPending && !m_syncopationOutstanding )
+    {
+        stats.m_lastPoll = 0; // Idle periods are not wake latency.
         return false;
+    }
     if( !m_dmImage.md )
     {
         if( ImageStreamIO_openIm( &m_dmImage, m_dmChannel.c_str() ) != 0 )
@@ -604,6 +845,10 @@ inline bool accelSim::serviceDM()
         m_dmImage = {};
         return false;
     }
+    const int64_t polledAt = synco::monotonicNs();
+    if( stats.m_lastPoll )
+        stats.m_pollGap.add( ( polledAt - stats.m_lastPoll ) / 1e3 );
+    stats.m_lastPoll = polledAt;
     synco::Request request{};
     const int      polled = syncopationPoll( request, m_dmImage );
     m_dmTransportFault    = polled < 0;
@@ -614,9 +859,11 @@ inline bool accelSim::serviceDM()
         synco::AckRecord ack{};
         if( synco::readRecord( m_syncopationAck, ack ) && synco::acknowledges( ack, m_syncopationPending ) )
         {
+            stats.m_receipt.add( ( polledAt - m_syncopationPending[synco::cmdCutoff] ) / 1e3 );
             if( ack[synco::ackStatus] == synco::copied )
             {
                 ++m_dmCopied;
+                ++stats.m_copied[stats.index( int( m_syncopationPending[synco::cmdStep] ) )];
                 m_dmActive           = !m_dmPendingZero;
                 m_dmZeroAcknowledged = m_dmPendingZero;
                 if( m_dmPendingZero )
@@ -630,7 +877,26 @@ inline bool accelSim::serviceDM()
     if( polled == 0 )
         ++m_dmPollWaits;
     else if( polled > 0 )
+    {
         ++m_dmRequests;
+        ++stats.m_requests[stats.index( request.step )];
+        stats.m_slack.add( ( request.cutoffNs - polledAt ) / 1e3 );
+        // Slots never returned between consecutive requests of one plan (ordinal cycle*steps+step is consecutive).
+        synco::Record record{};
+        if( synco::readRecord( m_syncopationSchedule, record ) && record[synco::epoch] == request.epoch &&
+            record[synco::generation] == request.generation && record[synco::steps] > 0 )
+        {
+            const int64_t slot = request.cycle * record[synco::steps] + request.step;
+            if( stats.m_lastSlot >= 0 && stats.m_lastEpoch == request.epoch &&
+                stats.m_lastGeneration == request.generation && slot > stats.m_lastSlot + 1 )
+                stats.m_skippedSlots += slot - stats.m_lastSlot - 1;
+            stats.m_lastSlot       = slot;
+            stats.m_lastEpoch      = request.epoch;
+            stats.m_lastGeneration = request.generation;
+        }
+        else
+            stats.m_lastSlot = -1;
+    }
     if( !m_syncopationOutstanding )
         m_dmAwaitingAck = false; // The base also releases ownership on scheduler reset.
     if( polled < 0 )
@@ -640,12 +906,27 @@ inline bool accelSim::serviceDM()
         m_dmImage = {};
     }
     if( polled <= 0 || ( !m_dmEnabled && !m_dmZeroPending ) )
-        return false;
-    static const std::array<float, 2500> zeros{};
-    const float                         *pixels = zeros.data();
-    bool                                 zero   = m_dmZeroPending;
-    if( !zero )
     {
+        if( polled == 0 ) // Nothing publishable now: count new records and prepare their surfaces ahead.
+            observeSchedule( m_dmEnabled && !m_dmZeroPending );
+        return false;
+    }
+    static const std::array<float, 2500> zeros{};
+    const float                         *pixels     = zeros.data();
+    bool                                 zero       = m_dmZeroPending;
+    const size_t                         stageIndex = size_t( request.step );
+    if( !zero && stageIndex < m_dmStage.size() && m_dmStage[stageIndex].m_valid &&
+        syncopationSame( m_dmStage[stageIndex].m_request, request ) &&
+        m_dmStage[stageIndex].m_scale == m_dmScale.load() &&
+        m_dmStage[stageIndex].m_timeline == m_timeline.generation() )
+    {
+        pixels = m_dmStage[stageIndex].m_pixels.data(); // Prepared ahead for exactly this slot.
+        ++stats.m_preparedHits;
+        m_dmCommandValid = true;
+    }
+    else if( !zero )
+    {
+        ++stats.m_preparedMisses;
         // Same realization as acc000, evaluated at the scheduler's CLOCK_MONOTONIC target, as dmSpeckle does.
         accelSimDetail::sample physical;
         if( !m_timeline.physical( request.targetNs, physical ) )
@@ -664,19 +945,99 @@ inline bool accelSim::serviceDM()
             zero             = true; // Remove the contribution until a valid command can be synthesized.
         }
     }
-    if( !syncopationPublish( pixels, request, m_dmImage ) )
+    const int64_t prepared  = synco::monotonicNs();
+    const bool    published = syncopationPublish( pixels, request, m_dmImage );
+    const int64_t returned  = synco::monotonicNs();
+    stats.m_prepare.add( ( prepared - polledAt ) / 1e3 );
+    stats.m_publish.add( ( returned - prepared ) / 1e3 );
+    stats.m_lastPoll = returned; // The intentional wait to cutoff-writeLead is not wake latency.
+    if( !published )
     {
-        if( synco::monotonicNs() >= request.cutoffNs )
+        if( returned >= request.cutoffNs )
             ++m_dmLateReturns;
         else
             ++m_dmRejected;
         return false;
     }
     ++m_dmPublished;
+    ++stats.m_published[stats.index( request.step )];
+    const double margin = ( request.cutoffNs - m_syncopationPending[synco::cmdReadyNs] ) / 1e3;
+    stats.m_margin.add( margin );
+    ++stats.m_marginHistogram[size_t( std::clamp( margin, 0.0, double( stats.m_marginHistogram.size() - 1 ) ) )];
+    stats.m_lead.add( ( request.targetNs - m_syncopationPending[synco::cmdReadyNs] ) / 1e3 );
     m_dmPendingZero      = zero;
     m_dmAwaitingAck      = true;
     m_dmZeroAcknowledged = false;
     return true;
+}
+
+inline void accelSim::observeSchedule( bool stage )
+{
+    if( !m_syncopationSchedule.md )
+        return;
+    const uint64_t counter = m_syncopationSchedule.md->cnt0;
+    synco::Record  record{};
+    if( counter != m_dmRecordCounter && synco::readRecord( m_syncopationSchedule, record ) )
+    {
+        m_dmRecordCounter = counter;
+        m_dmRecord        = record;
+        auto &stats       = m_dmStats;
+        if( synco::validProductionRecord( record, synco::monotonicNs() ) &&
+            ( record[synco::epoch] != stats.m_lastRecordEpoch ||
+              record[synco::generation] != stats.m_lastRecordGeneration ||
+              record[synco::cycle] != stats.m_lastRecordCycle ) )
+        {
+            for( int step = 0; step < record[synco::steps]; ++step )
+                if( record[synco::cutoffs + step] )
+                    ++stats.m_advertised[stats.index( step )];
+            stats.m_lastRecordEpoch      = record[synco::epoch];
+            stats.m_lastRecordGeneration = record[synco::generation];
+            stats.m_lastRecordCycle      = record[synco::cycle];
+        }
+    }
+    const int64_t now = synco::monotonicNs();
+    if( !stage || !synco::validProductionRecord( m_dmRecord, now ) )
+        return;
+    for( int step = 0; step < std::min<int>( m_dmRecord[synco::steps], int( m_dmStage.size() ) ); ++step )
+        if( m_dmRecord[synco::cutoffs + step] > now )
+            stageStep( step );
+}
+
+inline void accelSim::stageStep( int step )
+{
+    const auto request = synco::request( m_dmRecord, step );
+    const auto scale   = m_dmScale.load();
+    auto      &entry   = m_dmStage[size_t( step )];
+    if( entry.m_valid && syncopationSame( entry.m_request, request ) && entry.m_scale == scale &&
+        entry.m_timeline == m_timeline.generation() )
+        return;
+    entry.m_valid = false;
+    accelSimDetail::sample physical;
+    uint64_t               generation = 0;
+    if( !m_timeline.physical( request.targetNs, physical, &generation ) )
+        return; // Publication will evaluate on demand and count a timeline miss if still unavailable.
+    try
+    {
+        const auto &surface = m_dmInjection.synthesize( physical, scale );
+        std::copy( surface.begin(), surface.end(), entry.m_pixels.begin() );
+        entry.m_request  = request;
+        entry.m_scale    = scale;
+        entry.m_timeline = generation;
+        entry.m_valid    = true;
+    }
+    catch( const std::exception & )
+    {
+        // An invalid surface is never staged; the publication path reports the numerical fault.
+    }
+}
+
+inline void accelSim::dmThreadStart( accelSim *app )
+{
+    app->m_dmThreadID = syscall( SYS_gettid );
+    // Wait for threadStart to finish priority and cpuset placement, as frameGrabber and dmSpeckle do.
+    while( app->m_dmThreadInit && !app->shutdown() && !app->m_dmStop.load() )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    app->dmThreadExec();
 }
 
 inline void accelSim::dmThreadExec()
@@ -685,23 +1046,31 @@ inline void accelSim::dmThreadExec()
     while( true )
     {
         if( m_dmStop.load() || shutdown() )
-        {
+        { //mutex scope
+            std::lock_guard<std::mutex> guard( m_dmMutex );
             if( !stopping )
-            { //mutex scope
-                std::lock_guard<std::mutex> guard( m_controlMutex );
+            {
                 stopping        = monotonicNow();
                 m_dmZeroPending = m_dmZeroPending || m_dmEnabled || m_dmActive || m_syncopationOutstanding;
                 m_dmEnabled     = false;
             }
-            { //mutex scope
-                std::lock_guard<std::mutex> guard( m_controlMutex );
-                // Preserve the existing bounded shutdown attempt; never invent an acknowledgement.
-                if( !m_dmZeroPending || monotonicNow() - stopping >= 100000000 )
-                    break;
-            }
+            // Preserve the existing bounded shutdown attempt; never invent an acknowledgement.
+            if( !m_dmZeroPending || monotonicNow() - stopping >= 100000000 )
+                break;
         }
-        if( !serviceDM() )
-            std::this_thread::sleep_for( std::chrono::microseconds( 50 ) );
+        if( serviceDM() )
+            continue; // Poll again at once for the receipt and the next slot.
+        // dmSpeckle's polling intervals: 10 us while awaiting a request or receipt, 1 ms idle, 100 ms after a
+        // transport failure. With a real-time priority there is no timer slack on these sleeps.
+        std::chrono::microseconds pause{ 10 };
+        { //mutex scope
+            std::lock_guard<std::mutex> guard( m_dmMutex );
+            if( !m_dmEnabled && !m_dmZeroPending && !m_syncopationOutstanding )
+                pause = std::chrono::microseconds( 1000 );
+            else if( m_dmTransportFault )
+                pause = std::chrono::microseconds( 100000 );
+        }
+        std::this_thread::sleep_for( pause );
     }
 }
 
@@ -1279,9 +1648,14 @@ inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_dmEnable )( const pcf::IndiPrope
     const bool enable = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
     if( enable && !m_dmReady )
         return propertyState( m_indiP_dmEnable, false );
-    m_dmEnabled = enable;
-    if( !enable && m_dmReady )
-        m_dmZeroPending = true;
+    {                                                     // mutex scope
+        std::lock_guard<std::mutex> dmGuard( m_dmMutex ); // Lock order: control, then DM.
+        m_dmEnabled = enable;
+        if( !enable && m_dmReady )
+            m_dmZeroPending = true;
+        for( auto &entry : m_dmStage )
+            entry.m_valid = false; // Staged surfaces are regenerated after the next enable.
+    }
     m_indiP_dmEnable["toggle"] = enable ? pcf::IndiElement::On : pcf::IndiElement::Off;
     m_indiP_dmEnable.setState( pcf::IndiProperty::Busy );
     if( m_indiDriver )

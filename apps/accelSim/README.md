@@ -174,6 +174,66 @@ copied them, while `active=1` shows the last copy was an enabled command.
 `zero_acknowledged=1` with `active=0` means removal was copied. Only
 `transport_fault=1` (or `attached=0` while enabled) indicates a transport failure.
 
+### DM worker and 8-kHz publication timing
+
+The DM worker follows dmSpeckle's producer pattern. It is started by the framework
+`threadStart` with `dm.threadPrio` and `dm.cpuset`, the same keys as dmSpeckle's
+`[modulator]`. The supplied `acc000.conf` uses the established producer settings
+`threadPrio=20` and a dedicated cpuset (`spare31`), separate from `dmtweeter-synco`
+(priority 30) and the acquisition core. Defaults are 0 (`SCHED_OTHER`) and empty.
+After an unsuccessful poll the worker sleeps 10 us while output is active, 1 ms when
+idle and 100 ms after a transport failure. It polls again at once after a commit.
+The DM worker no longer shares a mutex with INDI property I/O, so app-loop updates
+cannot delay it.
+
+**Timing contract** (from the producer base and the dev scheduler):
+
+- The scheduler publishes one record when it observes each primary (main) update. The record holds
+  the targets of steps 1, 2, 3 and 0 (the next main) at main + 125/250/375/500 us. Each cutoff is
+  `readyLeadUs=70` earlier; the scheduler snapshots, copies and acknowledges at the cutoff.
+- `syncopationPoll()` returns the earliest step whose cutoff is still ahead, and only after the
+  previous commit's receipt (or a plan reset). One command can be outstanding at a time, and a
+  step becomes eligible only after the previous slot's cutoff.
+- `syncopationPublish()` waits until `cutoff - writeLeadUs`, publishing at once if that has passed,
+  and must complete by the cutoff. `writeLeadUs` only delays early commits.
+- Steps 2, 3 and 0 are therefore eligible for about 120 us before their cutoffs. Step 1 exists only
+  from its record's publication until main + 55 us, so its margin is bounded by the scheduler
+  (`readyLeadUs`, record latency), not by accelSim.
+
+**Advance preparation.** While the worker waits for a receipt, it reads each new record. It then
+prepares the surfaces of all remaining steps privately, in four preallocated buffers, from the
+timeline at each exact `targetNs`. A staged surface is used only if its slot identity (epoch,
+generation, cycle, step, target, cutoff), `dm_scale` and timeline generation match. Disabling
+clears the buffers. Otherwise the surface is synthesized on observation. The base still owns the
+single source buffer, so nothing is published before eligibility or over an unconsumed command.
+On a development Mac a staged publication takes 1.3 us (p99 1.6 us), against 3.0 us when
+synthesized on observation. Staging a record (up to four surfaces) takes about 6 us, off the
+critical path.
+
+**writeLeadUs.** With surfaces prepared ahead, waiting only shortens the margin. `acc000.conf` sets
+`writeLeadUs=125` (one subframe), so each request commits as soon as it becomes eligible. In the
+simulated scheduler with prompt wakes, the mean margin rises from 45 to 95 us. Steps 2, 3 and 0
+keep more than 70 us, and step 1 keeps 30-45 us; all four steps are still published.
+
+`dm_steps` reports cumulative `advertised_N` (slots seen in scheduler records),
+`requests_N`, `published_N` and `copied_N` for each subframe N (0-3). It also reports
+`skipped_slots` and `prepared_hits`/`prepared_misses` (staged versus synthesized surfaces).
+Use the differences to classify losses:
+- Cycle count × steps minus `advertised` were never requested.
+- `advertised` minus `requests` were not observed in time.
+- `requests` minus `published` were not published in time; see `late_returns`, `rejected`
+  and `timeline_misses`.
+- `published` minus `copied` were published but not copied (`discarded`). Skipped slots are scheduler slots of one plan
+that no poll returned before their cutoffs. `dm_timing` reports statistics for each
+app-loop report interval (about 1 s): `samples` (commits), `poll_gap_mean_us` and
+`poll_gap_max_us` (time between polls: sleep plus wake latency), and `slack_min_us`
+and `slack_mean_us` (cutoff minus first observation of a request). It also reports
+`prepare_*` (timeline plus synthesis), `publish_*` (the producer call, including its
+intentional wait to `cutoff - writeLeadUs`) and `margin_*` (cutoff minus commit time:
+minimum, mean, RMS and the 1% and 0.1% lower quantiles). `lead_*` gives target minus commit
+time, `receipt_*` when the copy receipt was observed after the cutoff, and `slack_rms_us` the
+observation jitter.
+
 **Primary cadence requirement.** Production syncopation needs the main publisher
 (`dm01disp03`) to update at or above the scheduler's `tracking.minMainRateHz`
 (default 500 Hz). The main publisher controls step 0. Without updates, the scheduler

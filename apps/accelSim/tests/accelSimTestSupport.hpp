@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <ctime>
+#include <thread>
 #include "../../loPredCtrlAcc/tests/app_test_support.hpp"
 
 #undef MAGAOX_CURRENT_SHA1
@@ -56,6 +57,18 @@ class AccelSimTestApp : public MagAOXApp<useIndi>
 
     /// Observe the shared fixture shutdown request.
     bool shutdown() const;
+
+    /// Start a worker like MagAOXApp::threadStart, without privileges, priority, cpuset or INDI registration.
+    template <class thisPtr, class Function>
+    int threadStart( std::thread       &thrd /**< [out] started worker */,
+                     bool              &thrdInit /**< [out] cleared once setup is complete */,
+                     pid_t             &tpid /**< [out] reset; the worker fills it */,
+                     pcf::IndiProperty &thProp /**< [in] unused thread property */,
+                     int                thrdPrio /**< [in] unused priority */,
+                     const std::string &cpuset /**< [in] unused cpuset */,
+                     const std::string &thrdName /**< [in] unused name */,
+                     thisPtr           *thrdThis /**< [in] worker argument */,
+                     Function         &&thrdStart /**< [in] static worker entry point */ );
 
     /// Register real INDI current/target elements in local memory.
     template <typename T, typename... Args>
@@ -117,6 +130,25 @@ template <bool useIndi>
 bool AccelSimTestApp<useIndi>::shutdown() const
 {
     return this->m_shutdown;
+}
+
+template <bool useIndi>
+template <class thisPtr, class Function>
+int AccelSimTestApp<useIndi>::threadStart( std::thread &thrd,
+                                           bool        &thrdInit,
+                                           pid_t       &tpid,
+                                           pcf::IndiProperty &,
+                                           int,
+                                           const std::string &,
+                                           const std::string &,
+                                           thisPtr   *thrdThis,
+                                           Function &&thrdStart )
+{
+    thrdInit = true;
+    tpid     = 0;
+    thrd     = std::thread( thrdStart, thrdThis );
+    thrdInit = false;
+    return 0;
 }
 
 template <bool useIndi>
