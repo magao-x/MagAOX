@@ -70,14 +70,22 @@ averaged 28.826 us acquisition-to-write with 0.799 us reported standard
 deviation, versus the earlier optimized 33.760 us and 1.067 us. However,
 acquisition/publication interval spread rose to roughly 28 us and the operator
 confirmed it disappeared on returning to optimized. Parallel therefore remains
-experimental. The RTC reported a 950 ms/s RT budget; the new 100 us post-job
-sleep tests whether reducing continuous worker CPU occupancy resolves that
-regression while retaining the WMA gain. Instrument results for this sleep
-setting are pending.
+experimental. The RTC reported a 950 ms/s RT budget, motivating the 100 us
+post-job sleep to reduce continuous worker CPU occupancy.
 
-After finishing that experiment, remove or empty `descramble.cpuset` at the
-next operator restart to disable worker creation and restore its reserved core
-to the previous workload. Do not mix that workload change into an A/B interval.
+The subsequent operator-reported 2 kHz sleep trial averages **29.003 us WMA**
+with **0.775 us reported standard deviation**. Acquisition-interval spread
+returns to 0.541 us, and publication-interval spread is 1.270 us. Relative to
+the earlier optimized capture, WMA improves by **4.757 us (14.1%)** and its
+reported spread by **27.4%**, while the large interval-jitter penalty is absent.
+This supports the worker option at 2 kHz. A matched 3.6 kHz crossover and
+longer-run frame-delivery, tail and complete-loop checks remain. The generic
+method default stays optimized. These are averages of supplied rolling-window
+summaries; the numerical optimized reference comes from an earlier capture.
+
+If the worker is not retained after qualification, remove or empty
+`descramble.cpuset` at the next operator restart to disable worker creation
+and restore its reserved core to the previous workload. Do not mix that workload change into an A/B interval.
 
 | INDI property / element | Meaning |
 | --- | --- |

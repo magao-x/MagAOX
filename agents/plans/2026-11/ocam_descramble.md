@@ -49,26 +49,28 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 Investigation date: 2026-11-16. Source baseline: `dev`, `cbc1d5cf`.
 Host verified as `mx11`. This pass inspects local source and configuration
 only; no instrument commands, benchmarks, or implementation were run.
-Status as of 2026-11-18: **optimized is the default requested method; the
-first confirmed parallel capture after the power-target fix lowers
-acquisition-to-write time but worsens frame-interval jitter**. Its seven
-window means average 28.826 us versus the earlier optimized 33.760 us, and reported WMA standard
-deviation averages 0.799 us versus 1.067 us. Acquisition/publication interval
-spread is much larger in this new capture. The operator confirmed active
-parallel on CPUs 33/32 and that this interval jitter disappears on returning
-to optimized. The RTC has a 950 ms/s RT runtime budget and only the worker
-in its reserved cpuset. A configurable 100 us post-job sleep has passed local
-correctness and concurrency checks; keep optimized selected until its instrument crossover
-resolves the interval regression.
-The earlier 37.423 us capture labeled parallel is not valid worker evidence:
-the operator corrected its status to `parked`, and follow-up diagnostics
-identified SDK fallback caused by an empty power target despite observed On.
-The fix and optimized default were pushed by the operator through `b11297d0`.
-SDK remains explicitly selectable and is the fallback for unsupported modes or
-unvalidated mappings. The earlier small spread penalty versus SDK remains part
-of the default tradeoff; long-run tails and complete-loop qualification are
-not established by short telemetry excerpts. Deployment and hardware execution
-remain operator steps.
+Status as of 2026-11-18: **the operator's 2 kHz sleep-then-spin parallel
+trial retains the latency gain and removes the large interval-jitter penalty**.
+With the configured 100 us post-job sleep, ten WMA window means average
+29.003 us versus the earlier optimized 33.760 us; reported WMA standard
+deviation averages 0.775 us versus 1.067 us. Acquisition-interval standard
+deviation is back near its earlier level (0.541 us versus 0.560 us), and
+publication-interval standard deviation averages 1.270 us versus 1.703 us.
+This supports the worker option on the reserved same-CCD core at 2 kHz.
+A 3.6 kHz crossover, longer-run tails/frame delivery and complete-loop checks
+remain before broader qualification. The generic requested-method default
+remains optimized; no new default or resource assignment follows automatically
+from these short captures.
+
+The RTC reports a 950 ms/s RT runtime budget. Continuous-spin parallel had
+about 28 us acquisition/publication interval spread, which disappeared when
+the operator switched back to optimized. Sleeping between jobs resolves that
+symptom in this trial and is consistent with CPU-budget pressure; direct RT
+throttling evidence has not been captured. The older 37.423 us capture labeled
+parallel remains invalid worker evidence because an empty power target caused
+SDK fallback with the worker parked. SDK remains explicitly selectable and
+the fallback for unsupported modes or unvalidated mappings. Deployment and
+hardware execution remain operator steps.
 
 ## Task Summary
 
@@ -76,10 +78,11 @@ Reduce camwfs's acquisition-to-publication cost without degrading image
 correctness, jitter, frame delivery, or end-to-end AO latency. Following the
 operator comparisons, default to the validated optimized single-thread path,
 retain SDK as the explicit reference and unsupported-mode/table fallback, and
-keep live INDI comparison methods. The corrected worker improves processing
-mean and spread, but the operator's crossover ties much larger acquisition/
-publication interval jitter to parallel mode. Resolve that regression before
-considering a production worker or dedicating another core.
+keep live INDI comparison methods. The corrected worker with 100 us post-job
+sleep improves processing mean/spread without the large interval regression
+seen during continuous spinning at 2 kHz. Complete the 3.6 kHz and sustained
+loop comparisons before deciding whether to dedicate the second core for
+normal operation.
 
 ### Findings from the current code
 
@@ -1749,8 +1752,65 @@ delivery as well as WMA; a lower WMA alone does not qualify the worker.
 To reproduce continuous spin, set `descramble.sleepUs=0` and restart before
 another matched crossover. The setting is startup-only; method changes remain
 live. Keep the same scheduling budget for the comparison. A timer oversleep
-can move a later frame's wake delay into WMA; no instrument result is yet
-available for the new sleep setting.
+can move a later frame's wake delay into WMA. The first 2 kHz instrument
+result for the new sleep setting is recorded below.
 
 Affected files: the controller and shared worker headers, their application
 and standalone protocol tests, this plan, and the operator comparison guide.
+
+
+## Sleep then spin RTC result at 2 kHz — 2026-11-18
+
+The operator reported "that did it" and supplied ten `fgtimes` reports after
+the 100 us sleep-then-spin change. Log timestamps span
+2026-11-19T02:15:10.222825407–02:15:19.759283914; this entry uses the
+client-local date 2026-11-18. The supplied acquisition/publication means are
+500.000575/500.000507 us on average, confirming approximately **2,000 FPS**.
+This is the operator-reported sleep trial; no separate status dump or new
+numeric optimized reference is included with this excerpt.
+
+Arithmetic averages of every supplied window summary, in microseconds:
+
+| Metric | Earlier optimized | Continuous-spin parallel | Parallel with 100 us sleep |
+| --- | ---: | ---: | ---: |
+| Acquisition-to-write mean | 33.760375 | 28.825956 | 29.003462 |
+| Acquisition-to-write reported standard deviation | 1.067152 | 0.799171 | 0.774912 |
+| Acquisition-interval reported standard deviation | 0.559981 | 27.797043 | 0.541290 |
+| Publication-interval reported standard deviation | 1.703262 | 27.827214 | 1.269744 |
+
+Compared with the earlier optimized capture, the new WMA mean is
+**4.756913 us (14.09%) lower**, and its average reported standard deviation
+is **0.292240 us (27.39%) lower**. Acquisition-interval spread is back near
+the earlier optimized level; publication-interval spread is 0.433518 us
+(25.45%) lower in these summaries. No statistically significant improvement
+in acquisition jitter is inferred from the small 0.018691 us difference.
+
+The sleep trial's WMA mean is only 0.177506 us (0.62%) above the earlier
+continuous-spin capture, while its large acquisition/publication jitter is
+absent. This is a cross-capture numerical comparison, not an isolated estimate
+of sleep overhead. All ten WMA means fall within 28.968264–29.037761 us and
+reported WMA standard deviations within 0.755712–0.801976 us. Acquisition
+standard deviations span 0.506091–0.699818 us, and publication standard
+deviations span 1.24050–1.33308 us; no windows were discarded.
+
+The result supports the intended experiment: retain most of the two-core
+latency benefit while removing the cadence penalty observed with continuous
+spinning. It strengthens the CPU-occupancy/RT-budget explanation, but no
+scheduler throttle counters or trace were supplied, so the precise mechanism
+remains an inference. These values are arithmetic means of rolling-window
+summaries, not pooled frame statistics, independent trials, tail bounds, or
+complete-loop latency. The comparison references earlier captures rather
+than a new adjacent numeric optimized interval.
+
+Next, repeat a settled optimized/parallel/optimized comparison at **3.6 kHz**
+with `sleep_us=100`, keeping placement, partition, reader load, instrumentation,
+gain and synchronization fixed. Follow with a longer run checking frame
+delivery, tails and complete-loop behavior. Retain the generic optimized
+default and the explicit parallel option while completing those checks; no
+implementation, scheduling budget or instrument configuration changes are
+made from this report alone.
+
+Parsed data and calculations are in `/tmp/ocam-sleep100-rtc-20261118.json`.
+The engineering plan and operator comparison guide are the only changed
+files. Their numerical checks and `git diff --check` passed; no code tests or
+instrument commands were run for this documentation-only update.
