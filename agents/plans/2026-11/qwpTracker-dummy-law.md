@@ -49,12 +49,12 @@ Defects that must be fixed for the app to function:
 1. **Commands never reach the stages.** `updateQwpStages()` writes the stage angle into the app's own `qwp1`/`qwp2`
    properties and calls `sendNewProperty` on them (lines 360-361, 373-374), instead of targeting the stage device.
    It also first publishes the fast-axis target to the same element, then overwrites it with the stage angle.
-2. **Wrong stage property.** It subscribes to `<stage>.position`, which `elliptecCtrl` does not publish. Its absolute
-   position is `absDeg` (`current`/`target`, 0-360, `apps/elliptecCtrl/elliptecCtrl.hpp:375`).
+2. **Stage property.** It subscribes to `<stage>.position`, which `elliptecCtrl` did not publish at the time (it used
+   `absDeg`). Resolved by rebasing onto `jrmales/elliptecCtrl` (`6c62e237`), where `absDeg` became `position`.
 3. **Wrong device names.** Defaults are `stageqwp1rot`/`stageqwp2rot`; the deployed stages are `stageqwprot1/2`.
 4. **FSM fight.** Both stage `fsm` callbacks call `state(...)` on the tracker, so the tracker's state flips between the
    two stages' states.
-5. **No wrapping.** `sign*(tgt - zero)` can be negative or >= 360; `absDeg` accepts only [0, 360].
+5. **No wrapping.** `sign*(tgt - zero)` can be negative or >= 360 (`absDeg` accepted only [0, 360]).
 6. **Tracking on at startup** (`m_tracking{true}`) with no K-mirror angle yet received: the app would command the
    stages immediately on start.
 7. **No locking.** `appLogic` reads state shared with INDI callbacks without `m_indiMutex` (cf. `kTracker::appLogic`).
@@ -65,16 +65,17 @@ Defects that must be fixed for the app to function:
 
 ## Key Assumptions
 - K-mirror angle is `stagek.position.current` (mechanical degrees), the property `kTracker` commands.
-- QWP stage absolute position is `elliptecCtrl` `absDeg` (`current`/`target`, degrees, 0-360); `absDeg` accepts a new
-  target while the stage is `OPERATING` (retarget), checked in `elliptecCtrl.hpp` `m_ipAbsDeg` callback.
+- QWP stage absolute position is `elliptecCtrl` `position` (`current`/`target`, degrees, 0-360; targets outside
+  [0, 360) are wrapped); it accepts a new target while the stage is `OPERATING` (retarget), checked in the
+  `elliptecCtrl.hpp` `m_indiP_position` callback.
 - Stage FSM is the standard `<stage>.fsm.state`.
 - ELL21 absolute moves do not take the shortest path across 0/360 (hence decision 6).
 - A QWP is 180-degree periodic and both halves of the mount are optically equivalent.
 
 ## Requirements
-1. Subscribe `stagek.position`, `stageqwprotN.absDeg`, `stageqwprotN.fsm` with `REG_INDI_SETPROP`; no polling.
+1. Subscribe `stagek.position`, `stageqwprotN.position`, `stageqwprotN.fsm` with `REG_INDI_SETPROP`; no polling.
 2. `computeTargets(k)` holds the dummy law; pure mapping helpers (fast axis <-> stage, wrap, nearest equivalent).
-3. Stage targets sent with `sendNewProperty( <stageN absDeg>, "target", deg )` from `appLogic`, outside the mutex.
+3. Stage targets sent with `sendNewProperty( <stageN position>, "target", deg )` from `appLogic`, outside the mutex.
 4. Tracking/manual exclusive modes, event-driven tracking, pending sends, derived FSM, startup off (decisions 3-5, 8).
 5. Config: `[qwp1]`/`[qwp2]` `zero`, `sign`, `devName`; `[k] devName`; telemeter config. Read-only INDI for zeros.
 6. Telemetry unchanged, recorded on change of current angles or tracking.
@@ -125,7 +126,7 @@ Built with `QWPTRACKER_TEST_NOSEND`, so stage commands are recorded (device, val
 2. Nearest equivalent: chooses `s` or `s+180` by circular distance from current, including across 0/360; move <= 90.
 3. `computeTargets`: `qwp1 = 2k`, `qwp2 = -2k` for a few k (pins the placeholder so a law change is deliberate).
 4. Config: defaults (`stageqwprot1/2`, `stagek`, zero 0, signs) and overrides via `loadConfigImpl`.
-5. Callbacks: injected `stagek.position.current` stores k and flags; injected `absDeg.current` gives folded fast axis;
+5. Callbacks: injected `stagek.position.current` stores k and flags; injected `position.current` gives folded fast axis;
    first stage position initializes `target`.
 6. Tracking: with both stages READY and tracking on, a K update -> `appLogic` sends the expected stage angles once;
    a repeated identical K sends nothing; no K yet -> nothing sent.
@@ -141,13 +142,13 @@ Branch `ml/qwpTracker` (exists, follows `<username>/<feature>`). Header-only app
    statics). Remove `m_updateInterval`, `m_kmirror`.
 2. Helpers (static or free inline in the header): `wrap360`, `fold180`, `fastToStage`, `stageToFast`,
    `nearestEquivalent`. `computeTargets(k, t1, t2)` with the dummy law.
-3. `appStartup`: `REG_INDI_SETPROP` for `stagek.position`, `absDeg`/`fsm` per stage; outbound `absDeg` properties
-   built like `kTracker::m_indiP_kpos` (`setDevice`, `setName("absDeg")`, element `target`); app `tracking`,
+3. `appStartup`: `REG_INDI_SETPROP` for `stagek.position`, `position`/`fsm` per stage; outbound `position` properties
+   built like `kTracker::m_indiP_kpos` (`setDevice`, `setName("position")`, element `target`); app `tracking`,
    `qwp1`/`qwp2`, read-only `qwp1_zero`/`qwp2_zero`; telemeter. Initial state from stage states (NOTCONNECTED).
 4. `appLogic`: lock `m_indiMutex` (try_lock as kTracker); if tracking and `m_kUpdated`, compute targets, publish
    `qwpN.target`, mark sends pending; for each pending stage that is READY/OPERATING, choose the nearest equivalent
    stage angle, skip if equal to last sent; release lock; send; derive and set FSM; telemetry.
-5. Callbacks: `stagek` stores k; `absDeg` updates stage/fast-axis current and (once) target; `fsm` stores stage state;
+5. Callbacks: `stagek` stores k; `position` updates stage/fast-axis current and (once) target; `fsm` stores stage state;
    `qwpN` new-target per decision 3; `tracking` toggle per decisions 3/8. Fix the misspelled `m_indiP_stagewp1rotFsm`.
 6. Remove `std::cerr` debug prints; log targets with `text_log` only on mode changes and manual sends.
 7. Commits: (1) functional + tests + this plan, (2) Doxygen pass (file block, class brief, `///` on all members and
@@ -164,7 +165,7 @@ Branch `ml/qwpTracker` (exists, follows `<username>/<feature>`). Header-only app
 
 ## Implementation Status (2026-11-19)
 - `apps/qwpTracker/qwpTracker.hpp` rewritten per decisions 1-10. Per-QWP state lives in `qwpStage m_qwp[2]`
-  (calibration, stage state/position, fast-axis current/target, pending flag, last command, outbound `absDeg`
+  (calibration, stage state/position, fast-axis current/target, pending flag, last command, outbound `position`
   property). Static helpers `computeTargets`, `wrap360`, `fold180`, `stageToFast`, `fastToStage`, `trackerState`.
   `updateStages()` is the single send path (from `appLogic`, manual targets and tracking-on); it selects commands under
   `m_indiMutex` and sends after releasing it. Manual requests and tracking-on clear `haveSent` so they are always sent.
@@ -191,3 +192,9 @@ Branch `ml/qwpTracker` (exists, follows `<username>/<feature>`). Header-only app
   [k]
   devName=stagek
   ```
+
+## Rebase onto jrmales/elliptecCtrl (2026-11-19)
+- Rebased `ml/qwpTracker` onto `origin/jrmales/elliptecCtrl` (`fe3d4de7`), which replaces the elliptecCtrl
+  `absDeg`/`relDeg`/`relMove` interface with a standard `position` property (`current`/`target`).
+- qwpTracker now subscribes to `stageqwprot{1,2}.position.current` and commands `stageqwprot{1,2}.position.target`
+  (members `m_indiP_qwp1Position`/`m_indiP_qwp2Position`, outbound `qwpStage::cmd` named `position`).

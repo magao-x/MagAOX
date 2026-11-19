@@ -102,11 +102,11 @@ class qwpTracker_test : public qwpTracker
     {
         pcf::IndiProperty ip( pcf::IndiProperty::Number );
         ip.setDevice( m_qwp[n].devName );
-        ip.setName( "absDeg" );
+        ip.setName( "position" );
         ip.add( pcf::IndiElement( "current" ) );
         ip["current"].set( deg );
 
-        return ( n == 0 ) ? setCallBack_m_indiP_qwp1AbsDeg( ip ) : setCallBack_m_indiP_qwp2AbsDeg( ip );
+        return ( n == 0 ) ? setCallBack_m_indiP_qwp1Position( ip ) : setCallBack_m_indiP_qwp2Position( ip );
     }
 
     /// Report a stage state.
@@ -305,8 +305,8 @@ TEST_CASE( "qwpTracker reports fast-axis angles from stage positions", "[qwpTrac
     // clang-format off
     #ifdef QWPTRACKER_TEST_DOXYGEN_REF
     qwpTracker::setCallBack_m_indiP_stagek(pcf::IndiProperty());
-    qwpTracker::setCallBack_m_indiP_qwp1AbsDeg(pcf::IndiProperty());
-    qwpTracker::setCallBack_m_indiP_qwp2AbsDeg(pcf::IndiProperty());
+    qwpTracker::setCallBack_m_indiP_qwp1Position(pcf::IndiProperty());
+    qwpTracker::setCallBack_m_indiP_qwp2Position(pcf::IndiProperty());
     qwpTracker::stagePosUpdate();
     #endif
     // clang-format on

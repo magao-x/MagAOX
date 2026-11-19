@@ -81,7 +81,7 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
 
         int nSent{ 0 }; ///< The number of stage commands issued, for diagnostics and tests.
 
-        pcf::IndiProperty cmd; ///< The outbound `absDeg.target` command property for the stage.
+        pcf::IndiProperty cmd; ///< The outbound `position.target` command property for the stage.
     };
 
   protected:
@@ -222,7 +222,7 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
      */
     pcf::IndiProperty &qwpProp( int n /**< [in] the QWP index, 0 or 1 */ );
 
-    /// Handle a stage `absDeg` update.
+    /// Handle a stage `position` update.
     /**
      * \returns 0 always
      */
@@ -252,11 +252,11 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
   protected:
     pcf::IndiProperty m_indiP_stagek; ///< The subscribed K-mirror stage `position` property.
 
-    pcf::IndiProperty m_indiP_qwp1AbsDeg; ///< The subscribed QWP1 stage `absDeg` property.
+    pcf::IndiProperty m_indiP_qwp1Position; ///< The subscribed QWP1 stage `position` property.
 
     pcf::IndiProperty m_indiP_qwp1Fsm; ///< The subscribed QWP1 stage `fsm` property.
 
-    pcf::IndiProperty m_indiP_qwp2AbsDeg; ///< The subscribed QWP2 stage `absDeg` property.
+    pcf::IndiProperty m_indiP_qwp2Position; ///< The subscribed QWP2 stage `position` property.
 
     pcf::IndiProperty m_indiP_qwp2Fsm; ///< The subscribed QWP2 stage `fsm` property.
 
@@ -273,13 +273,13 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
     INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_stagek );
 
     /// Handle QWP1 stage position updates.
-    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp1AbsDeg );
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp1Position );
 
     /// Handle QWP1 stage state updates.
     INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp1Fsm );
 
     /// Handle QWP2 stage position updates.
-    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp2AbsDeg );
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp2Position );
 
     /// Handle QWP2 stage state updates.
     INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp2Fsm );
@@ -416,11 +416,11 @@ int qwpTracker::appStartup()
 {
     REG_INDI_SETPROP( m_indiP_stagek, m_kDevName, "position" );
 
-    REG_INDI_SETPROP( m_indiP_qwp1AbsDeg, m_qwp[0].devName, "absDeg" );
+    REG_INDI_SETPROP( m_indiP_qwp1Position, m_qwp[0].devName, "position" );
 
     REG_INDI_SETPROP( m_indiP_qwp1Fsm, m_qwp[0].devName, "fsm" );
 
-    REG_INDI_SETPROP( m_indiP_qwp2AbsDeg, m_qwp[1].devName, "absDeg" );
+    REG_INDI_SETPROP( m_indiP_qwp2Position, m_qwp[1].devName, "position" );
 
     REG_INDI_SETPROP( m_indiP_qwp2Fsm, m_qwp[1].devName, "fsm" );
 
@@ -428,7 +428,7 @@ int qwpTracker::appStartup()
     {
         q.cmd = pcf::IndiProperty( pcf::IndiProperty::Number );
         q.cmd.setDevice( q.devName );
-        q.cmd.setName( "absDeg" );
+        q.cmd.setName( "position" );
         q.cmd.add( pcf::IndiElement( "target" ) );
     }
 
@@ -776,9 +776,9 @@ INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stagek )( const pcf::IndiProperty &ip
     return 0;
 }
 
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_qwp1AbsDeg )( const pcf::IndiProperty &ipRecv )
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_qwp1Position )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp1AbsDeg, ipRecv );
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp1Position, ipRecv );
 
     return stagePosUpdate( 0, ipRecv );
 }
@@ -790,9 +790,9 @@ INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_qwp1Fsm )( const pcf::IndiProperty &i
     return stageStateUpdate( 0, ipRecv );
 }
 
-INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_qwp2AbsDeg )( const pcf::IndiProperty &ipRecv )
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_qwp2Position )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp2AbsDeg, ipRecv );
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp2Position, ipRecv );
 
     return stagePosUpdate( 1, ipRecv );
 }
