@@ -37,6 +37,12 @@ to the installed branch/commit so records identify the running software.
 
 ## Session and control behavior
 
+The native PO4AO app processes frames continuously and starts with predictive
+control disabled. Enable/Disable selects the policy or fallback; there is no
+separate whole-app Start/Stop command or automatic downstream routing/calibration
+change. NN/CACAO handover remains a separate reconstructor control. The GUI labels
+modulation state 4 as "Modulating" and state 3 as "Not modulating".
+
 - Start/Resume and Pause retain the same worker, models, Adam state, normalization
   and policy references. Pause settles issued publications before acknowledging.
 - Enable selects the latest eligible learned policy. Disable pauses learning and
@@ -46,7 +52,8 @@ to the installed branch/commit so records identify the running software.
 - Recollect pauses learning, obtains fresh exploration data and resumes only a
   previously running session after collection completes. Partial data is rejected.
 - Save policy copies one acknowledged engine and matching policy/dynamics snapshot
-  into an immutable, checksummed library bundle.
+  into an immutable, checksummed library bundle. The completion message includes
+  its saved bundle ID; `policy_catalog` lists the available bundles.
 - Set policy validates and restores both networks in a new worker. Normalization
   is retained, current hyperparameters apply, and Adam/replay/history/iteration
   start fresh. Learning stays paused. Enable if needed and recollect fresh warmup
@@ -61,7 +68,7 @@ Runtime restart/reset, stale readbacks and unknown external policies invalidate 
 pause managed operations. Publication completion requires the matching runtime
 acknowledgement. Temporary fallback retains the known numerical policy reference.
 Closing the GUI leaves inference/training alone; losing supervisor supervision
-stops its worker. Whole-app routing does not automatically resume learning.
+stops its worker.
 
 The operator owns loop state and the choice of notebook or managed training. The
 trainer does not control notebook processes or adopt their optimizer state. Reset
