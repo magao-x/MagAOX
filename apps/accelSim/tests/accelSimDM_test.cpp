@@ -11,6 +11,7 @@
     #include "../accelSim.hpp"
     #include "../accelSimDMStream.hpp"
     #include <filesystem>
+    #include <fstream>
     #include <unistd.h>
 #endif
 
@@ -84,6 +85,34 @@ TEST_CASE( "accelSim DM lifecycle and zero scale", "[accelSim][dm-runtime]" )
     REQUIRE( dm.service( value, 7, 1, true, sink ) == dmState::active );
     REQUIRE( dm.zero( sink ) ); // Same operation used after acquisition joins on shutdown.
     REQUIRE( sink.m_last[0] == 0 );
+}
+
+/** \brief Disabled startup tolerates missing synchronization; timing loss after enable requires explicit rearm.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim DM startup synchronization and runtime rearm", "[accelSim][dm-runtime]" )
+{
+    dmFixture   sink;
+    dmInjection dm;
+    sample      value;
+    value.m_pointing = { .0029, -.001 };
+    REQUIRE( dm.service( value, 0, 0, false, sink ) == dmState::disabled );
+    dm.prepare( sink.m_x, sink.m_y, sink.m_weights, 1e-6 );
+    for( int n = 0; n < 100; ++n )
+        REQUIRE( dm.service( value, 0, 0, false, sink ) == dmState::disabled );
+    REQUIRE( dm.service( value, 0, .25, true, sink ) == dmState::disabled );
+    REQUIRE( sink.m_count == 0 );
+    REQUIRE( dm.service( value, 3, .25, true, sink ) == dmState::active );
+    REQUIRE( sink.m_last[0] != 0 );
+    REQUIRE( dm.service( value, 3, .25, false, sink ) == dmState::timingFault );
+    REQUIRE( std::all_of( sink.m_last.begin(), sink.m_last.end(), []( float v ) { return v == 0; } ) );
+    const auto count = sink.m_count;
+    for( int n = 0; n < 100; ++n )
+        REQUIRE( dm.service( value, 3, 1, true, sink ) == dmState::timingFault );
+    REQUIRE( sink.m_count == count ); // Recovered timing and changed scale cannot rearm output.
+    REQUIRE( dm.service( value, 4, .25, true, sink ) == dmState::disabled );
+    REQUIRE( dm.service( value, 7, .25, true, sink ) == dmState::active );
+    REQUIRE( sink.m_last[0] != 0 );
 }
 
 /** \brief The requested amplitude scale preserves calibrated surfaces, including large finite commands.
@@ -192,16 +221,31 @@ struct dmAppTest : MagAOX::app::accelSim
     using accelSim::config;
     using accelSim::m_activeFps;
     using accelSim::m_configName;
+    using accelSim::m_dmApplied;
     using accelSim::m_dmCalibrationValid;
+    using accelSim::m_dmHealthy;
     using accelSim::m_dmInjection;
+    using accelSim::m_dmMask;
+    using accelSim::m_dmMaskStat;
+    using accelSim::m_dmModes;
+    using accelSim::m_dmModesStat;
     using accelSim::m_dmPixels;
     using accelSim::m_dmReady;
     using accelSim::m_dmRequest;
+    using accelSim::m_dmSampleNs;
     using accelSim::m_dmScale;
+    using accelSim::m_dmState;
     using accelSim::m_fresh;
+    using accelSim::m_indiP_dmEnable;
+    using accelSim::m_indiP_dmScale;
+    using accelSim::m_indiP_dmStatus;
     using accelSim::m_model;
     using accelSim::m_outputConfig;
+    using accelSim::m_phaseClock;
+    using accelSim::m_syncName;
     using accelSim::setupProperties;
+    using accelSim::syncTiming;
+    using accelSim::updateDMINDI;
 };
 /// \endcond
 
@@ -238,6 +282,126 @@ TEST_CASE( "accelSim DM controls default disabled", "[accelSim][dm-controls]" )
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::setupProperties;
+    MagAOX::app::accelSim::newCallBack_m_indiP_dmEnable;
+    MagAOX::app::accelSim::newCallBack_m_indiP_dmScale;
+#endif
+    // clang-format on
+}
+
+/** \brief Actual sample-boundary and INDI paths recover readiness while off, stage scaled frames, zero and latch
+ * faults.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim DM readiness recovers before operator enable", "[accelSim][dm-controls]" )
+{
+    dmAppTest app;
+    app.m_configName = "accelSim-dm-test";
+    app.setupConfig();
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.setupProperties() == 0 );
+    app.m_model.setRate( 8000 );
+    app.m_activeFps = 8000;
+    dmFixture calibration;
+    app.m_dmInjection.prepare( calibration.m_x, calibration.m_y, calibration.m_weights, 1e-6 );
+    app.m_dmReady                        = true;
+    app.m_dmCalibrationValid             = true;
+    app.m_outputConfig.m_authorized      = true;
+    app.m_outputConfig.m_routingVerified = true;
+    app.m_syncName                       = "accelsim-private-wfs"; // References below never open a stream.
+    app.m_phaseClock.reset( 1000000000, 8000 );
+    for( int n = 0; n < 4; ++n )
+        REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    app.updateDMINDI();
+    REQUIRE( app.m_dmState == dmState::disabled );
+    REQUIRE_FALSE( app.m_dmHealthy );
+    REQUIRE( app.m_dmSampleNs == -1 );
+    REQUIRE( app.m_indiP_dmStatus["fault"].get<int>() == 0 );
+    REQUIRE( app.m_indiP_dmStatus["ready"].get<bool>() == 0 );
+
+    app.syncTiming( 1, 1000000000 );
+    app.syncTiming( 2, 1000500000 );
+    REQUIRE( app.m_phaseClock.m_valid );
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    app.updateDMINDI();
+    REQUIRE( app.m_dmRequest == 0 );
+    REQUIRE( app.m_dmApplied == 0 );
+    REQUIRE( app.m_dmState == dmState::disabled );
+    REQUIRE( app.m_dmHealthy );
+    REQUIRE( app.m_dmSampleNs == -1 ); // Readiness does not require a cached enabled command.
+    REQUIRE( app.m_indiP_dmStatus["active"].get<bool>() == 0 );
+    REQUIRE( app.m_indiP_dmStatus["requested"].get<bool>() == 0 );
+    REQUIRE( app.m_indiP_dmStatus["zero_acknowledged"].get<bool>() == 0 );
+    #if defined( DDSPC_OPERATIONAL_BUILD ) && !defined( DDSPC_SHADOW_ONLY )
+    REQUIRE( app.m_indiP_dmStatus["ready"].get<bool>() == 1 );
+
+    // Only the existing calibration-identity check needs files; projection uses the synthetic planes above.
+    char path[] = "/tmp/accelSim-dm-controls-XXXXXX";
+    REQUIRE( mkdtemp( path ) != nullptr );
+    app.m_dmModes = std::string( path ) + "/modes";
+    app.m_dmMask  = std::string( path ) + "/mask";
+    std::ofstream( app.m_dmModes ).close();
+    std::ofstream( app.m_dmMask ).close();
+    REQUIRE( stat( app.m_dmModes.c_str(), &app.m_dmModesStat ) == 0 );
+    REQUIRE( stat( app.m_dmMask.c_str(), &app.m_dmMaskStat ) == 0 );
+    auto scale      = app.m_indiP_dmScale;
+    scale["target"] = .25;
+    REQUIRE( app.newCallBack_m_indiP_dmScale( scale ) == 0 );
+    auto enable      = app.m_indiP_dmEnable;
+    enable["toggle"] = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) == 0 );
+    REQUIRE( app.m_dmRequest == 3 );
+    for( int n = 0; n < 8000; ++n )
+    {
+        app.m_model.step();
+        REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+        REQUIRE( app.m_dmState == dmState::active );
+        REQUIRE( app.m_dmApplied == 3 );
+        const pointingDisturbance pointing( app.m_model.m_sample );
+        for( size_t p : { size_t( 0 ), size_t( 1249 ), size_t( 2499 ) } )
+            REQUIRE( app.m_dmPixels[p] == Approx( .25 * pointing.surface( ( double( p % 50 ) - 24.5 ) * 6.5 / 48,
+                                                                          ( double( p / 50 ) - 24.5 ) * 6.5 / 48 ) )
+                                              .margin( 1e-8 ) );
+    }
+    REQUIRE( app.m_dmSampleNs >= 0 );
+    enable["toggle"] = pcf::IndiElement::Off;
+    REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) == 0 );
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    REQUIRE( app.m_dmApplied == 4 );
+    REQUIRE( app.m_dmState == dmState::disabled );
+    REQUIRE( std::all_of( app.m_dmPixels.begin(), app.m_dmPixels.end(), []( float v ) { return v == 0; } ) );
+    enable["toggle"] = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) == 0 );
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    REQUIRE( app.m_dmState == dmState::active );
+    app.m_phaseClock.invalidate();
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    REQUIRE( app.m_dmState == dmState::timingFault );
+    REQUIRE_FALSE( app.m_dmHealthy );
+    REQUIRE( std::all_of( app.m_dmPixels.begin(), app.m_dmPixels.end(), []( float v ) { return v == 0; } ) );
+    app.syncTiming( 3, 1001000000 );
+    app.syncTiming( 4, 1001500000 );
+    REQUIRE( app.m_phaseClock.m_valid );
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    app.updateDMINDI();
+    REQUIRE( app.m_dmState == dmState::timingFault );
+    REQUIRE( app.m_indiP_dmStatus["ready"].get<bool>() == 0 );
+    REQUIRE( app.m_indiP_dmStatus["fault"].get<int>() == 5 );
+    REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) == 0 ); // Only explicit operator intent clears the latch.
+    REQUIRE( app.frameGrabberPostPublish( nullptr ) == 0 );
+    REQUIRE( app.m_dmState == dmState::active );
+    REQUIRE( app.m_dmHealthy );
+    std::filesystem::remove_all( path );
+    #else
+    REQUIRE( app.m_indiP_dmStatus["ready"].get<bool>() == 0 );
+    auto enable      = app.m_indiP_dmEnable;
+    enable["toggle"] = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_dmEnable( enable ) < 0 );
+    #endif
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::frameGrabberPostPublish;
+    MagAOX::app::accelSim::syncTiming;
+    MagAOX::app::accelSim::updateDMINDI;
     MagAOX::app::accelSim::newCallBack_m_indiP_dmEnable;
     MagAOX::app::accelSim::newCallBack_m_indiP_dmScale;
 #endif
@@ -294,8 +458,12 @@ TEST_CASE( "accelSim DM private native publication", "[.][accelSim-dm-streams]" 
         // The app stages only private pixels; actual producer protocol is covered by synco_transport_test.cpp.
         app.m_dmReady            = true;
         app.m_dmCalibrationValid = true;
-        app.m_dmRequest          = 3;
-        app.m_dmScale            = 1;
+        app.m_syncName           = "accelsim-private-wfs";
+        app.m_phaseClock.reset( 1000000000, 8000 );
+        app.syncTiming( 1, 1000000000 );
+        app.syncTiming( 2, 1000500000 );
+        app.m_dmRequest = 3;
+        app.m_dmScale   = 1;
         app.m_model.step();
         const auto sample = app.m_model.m_sample;
         const auto ticks  = app.m_model.m_ticks;
