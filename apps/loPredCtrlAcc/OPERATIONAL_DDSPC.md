@@ -6,7 +6,7 @@ producer. It supersedes the output prohibitions in historical shadow-only report
 `DDSPC_SHADOW_ONLY`. No installation, instrument access or native Linux link was
 performed during development. The supplied configurations deliberately inhibit
 actuation until the real route, calibration, synchronization association and
-approved bounds are supplied. They are not commissioned instrument settings.
+approved DDSPC bounds are supplied. They are not commissioned instrument settings.
 
 ## Implemented path
 
@@ -59,8 +59,9 @@ that an old process left the mirror at zero. Direct or
 non-cooperating writers must be excluded by commissioning; the base's lock
 protects cooperating producers, not arbitrary writers.
 
-Absolute and per-update pixel limits, qualification, finite values, exact slots,
-receipt timeouts and discard/restart faults are enforced. An invalid/late candidate
+DDSPC absolute/per-update pixel limits and receipt timeouts remain mandatory.
+Both providers enforce qualification, finite values, exact slots and discard/restart
+faults. accelSim follows the base-only acknowledgement contract described below. An invalid/late candidate
 inhibits rather than retagging it for a later slot. Disable/fault/shutdown submits
 zero for this owner only. Removal zero bypasses the active slew limit: approval
 must cover removal of the bounded contribution. Requested OFF does not falsely
@@ -70,6 +71,49 @@ consumer/ack cannot guarantee removal; the app reports unconfirmed zero and
 requires operator cleanup through the established DM infrastructure. A crash,
 SIGKILL or stopped scheduler likewise cannot be made into proof of removal.
 Never stop the scheduler first. A receipt is not a mirror-state certificate.
+
+## Simulator limits and acknowledgement convention
+
+accelSim uses an application-selected producer-default policy: finite values,
+matching copy/discard acknowledgement and the existing ownership/deadline/zero
+protocol, without mandatory `max_abs_um`, `max_step_um`, or `ack_timeout_us`.
+Legacy copies of those keys are accepted and ignored. No independent steady-state
+acknowledgement timer is added: an unacknowledged payload remains consumer-owned
+and cannot be overwritten. Disable queues own zero after that ownership is released;
+shutdown retains the existing bounded wait and explicit unconfirmed-removal result.
+
+The shared helper defaults to the strict DDSPC policy. Only accelSim selects the
+producer convention in C++; no configuration/INDI switch can select it in the
+controller. loPredCtrlAcc's three requirements and finite/bound/timeout checks
+remain unchanged.
+
+Source review:
+
+- `apps/bmcCtrl/bmcCtrl.hpp:452-509`: calibrated combined displacement is converted
+  to normalized squared voltage, clipped to [0,1], square-rooted and sent to the
+  SDK. This is final summed-command saturation, not a signed per-auxiliary limit
+  or a comparison with the prior command. Calibration is loaded at lines619-650.
+- `libMagAOX/app/dev/dm.hpp:2877-2901`: delta telemetry is relative to the flat,
+  not a per-update slew limiter. Saturation monitoring at lines3072-3101 is an
+  interval trip mechanism, not an instantaneous source limit.
+- Existing `dmSpeckle` amplitude scaling (`apps/dmSpeckle/dmSpeckle.hpp:653-691`)
+  and original `loPredCtrl` modal output (`apps/loPredCtrl/loPredCtrl.hpp:584-608`,
+  `690-696`) do not implement equivalent pixel amplitude/step caps.
+- The locally available syncopation branch, commit
+  `bb5a5d89c594bc7949af2949f457a1520b7a3845`, uses finite checks and base poll/publish
+  in `apps/dmSpeckle/dmSpeckle.hpp:519-642`, with no such three mandatory settings.
+  Its `apps/bmcCtrl/bmcPipeline.hpp:199-220` also clips normalized voltage, and
+  `apps/dmSyncopation/dmSyncopationProduction.hpp:173-198,218-242` validates/copies
+  finite requests without per-source amplitude or step limiting.
+- No local executable/configuration mapping for the name `tweeterMod` was found
+  in either checked-out tree or the inspected syncopation branch. It is not
+  assumed to be `ttmModulator`, which drives the separate WFS modulation function
+  generator (`apps/ttmModulator/ttmModulator.hpp:304-310`). Its deployed identity
+  and the two actual auxiliary routes require instrument-side confirmation.
+
+This follows the requested simulator convention without claiming equivalent
+hardware slew protection or weakening DDSPC. The physical model, ADC calibration,
+upstream synchronization and scale range are unchanged.
 
 ## Two independent contributions and identification
 
@@ -159,11 +203,12 @@ Before editing the private experiment copies, obtain/review all of:
 4. Approved accelSim TT cube revision and **actual matching dmmask path**. The
    supplied existing documented cube path is not a certificate of its deployed
    contents. `dm.scale` is dimensionless [0,1]; approval must relate it to the
-   resulting optical motion and pixel bounds. The physical coupling/model is
+   resulting optical motion. DDSPC pixel bounds are separately approved. The physical coupling/model is
    unchanged; this milestone adds no new WFS calibration.
-5. Separate approved full-image `max_abs_um`, `max_step_um`, transport
-   `ack_timeout_us` for each app, and output exclusive ownership/routing checks.
-   Limits of zero inhibit. No generic safe physical amplitudes are implied.
+5. Approved controller `[output]` `max_abs_um`, `max_step_um`, and transport
+   `ack_timeout_us`, plus exclusive ownership/routing checks for both apps.
+   These three settings are required only for loPredCtrlAcc; zero inhibits DDSPC.
+   accelSim no longer requires or uses them. No generic safe amplitude is implied.
 6. Explicit `[output] authorized=true`, `routing_verified=true`,
    `correction_input_verified=true` for the controller, and `[dm]
    output_authorized=true`, `routing_verified=true` for accelSim, **only after**

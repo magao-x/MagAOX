@@ -299,10 +299,11 @@ TEST_CASE( "Simulator same-sample disturbance uses tagged publication and indepe
     model.step();
     const auto               sample = model.m_sample;
     const auto               ticks  = model.m_ticks;
-    std::atomic<double>      scale{ 0 };
+    std::atomic<double>      scale{ GENERATE( 0.0, 0.5 ) };
     std::atomic<bool>        allFinite{ true };
     MagAOX::app::SyncoOutput output;
-    output.configure( { true, true, 10, 10, 10000000 }, "dm01disp10_aux", "private_timing", 30, 2500 );
+    // Simulator follows dmSpeckle's existing producer policy; all three removed settings are zero.
+    output.configure( { true, true, 0, 0, 0, true }, "dm01disp10_aux", "private_timing", 30, 2500 );
     output.start( [] { return true; },
                   [&]( const auto &, const auto &, std::int64_t, std::span<float> pixels )
                   {

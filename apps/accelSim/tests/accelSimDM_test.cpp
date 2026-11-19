@@ -200,6 +200,7 @@ struct dmAppTest : MagAOX::app::accelSim
     using accelSim::m_dmScale;
     using accelSim::m_fresh;
     using accelSim::m_model;
+    using accelSim::m_outputConfig;
     using accelSim::setupProperties;
 };
 /// \endcond
@@ -217,6 +218,8 @@ TEST_CASE( "accelSim DM controls default disabled", "[accelSim][dm-controls]" )
     REQUIRE_FALSE( app.m_dmReady );
     REQUIRE( app.m_dmRequest == 0 );
     REQUIRE( app.m_dmScale == 0 );
+    REQUIRE( app.m_outputConfig.m_producerDefaults );
+    REQUIRE( app.m_outputConfig.m_ackTimeoutNs == 0 );
     pcf::IndiProperty enable( pcf::IndiProperty::Switch );
     enable.setDevice( "accelSim-dm-test" );
     enable.setName( "dm_enable" );
