@@ -199,6 +199,7 @@ inline int xctrlLog::open( const std::string &logsDir )
     char day[16], stamp[40];
     strftime( day, sizeof( day ), "%Y_%m_%d", &ut );
     strftime( stamp, sizeof( stamp ), "%Y%m%d%H%M%S", &ut );
+    // the nanoseconds as exactly 9 digits: 1000000000 + 42 is "1000000042", which without its leading 1 is "000000042"
     std::string fileName = std::string( "xctrl_" ) + stamp + std::to_string( 1000000000L + ts.tv_nsec ).substr( 1 ) +
                            "." + MAGAOX_default_logExt;
 
@@ -240,14 +241,16 @@ inline int xctrlLog::open( const std::string &logsDir )
 
     // the newest file of the day, unless it is full
     std::string newest;
-    int         lfd = dup( dfd );
-    DIR        *d   = lfd < 0 ? nullptr : fdopendir( lfd );
+    // closedir() closes the descriptor fdopendir() was given, so it gets a copy and dfd stays open
+    int  lfd = dup( dfd );
+    DIR *d   = lfd < 0 ? nullptr : fdopendir( lfd );
     if( d )
     {
         for( dirent *e; ( e = readdir( d ) ); )
         {
             // the names differ only in their timestamps, so the newest sorts last
             std::string n = e->d_name;
+            // xctrl_ (6 characters), 23 digits of time, then .binlog from character 29 on
             if( n.size() == fileName.size() && n.compare( 0, 6, "xctrl_" ) == 0 &&
                 n.compare( 29, std::string::npos, fileName, 29, std::string::npos ) == 0 && n > newest )
             {
@@ -257,11 +260,14 @@ inline int xctrlLog::open( const std::string &logsDir )
         closedir( d );
     }
     struct stat st;
+    // a regular file, not a symbolic link a user may have put there, and under the size at which logs rotate
     if( !newest.empty() && fstatat( dfd, newest.c_str(), &st, AT_SYMLINK_NOFOLLOW ) == 0 && S_ISREG( st.st_mode ) &&
         st.st_size < static_cast<off_t>( MAGAOX_default_max_logSize ) )
     {
         m_fd = openat( dfd, newest.c_str(), O_WRONLY | O_APPEND | O_NOFOLLOW | O_CLOEXEC );
     }
+    // else a new file: O_EXCL never reuses an existing one, O_NOFOLLOW never writes through a link, and O_CLOEXEC
+    // keeps the commands we run, e.g. systemctl, from inheriting it
     if( m_fd < 0 )
     {
         m_fd = openat( dfd, fileName.c_str(), O_WRONLY | O_APPEND | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644 );
@@ -288,6 +294,8 @@ inline bool xctrlLog::isOpen() const
 
 inline void xctrlLog::message( msgLevel level, const std::string &msg, bool console )
 {
+    // indexed by msgLevel, in its order: info, note, action, success, warning, error.  The colors are ANSI escapes:
+    // blue, green, yellow, red; "" is no color.
     static const char *colors[] = { "", "", "\033[34m", "\033[32m", "\033[33m", "\033[31m" };
     static const char *labels[] = { "", "note: ", "", "", "warning: ", "error: " };
     int                l        = static_cast<int>( level );
@@ -295,7 +303,7 @@ inline void xctrlLog::message( msgLevel level, const std::string &msg, bool cons
     bool err = level == msgLevel::warning || level == msgLevel::error;
     if( console && !( err && m_quiet ) )
     {
-        bool          color = ( err ? m_colorErr : m_colorOut ) && colors[l][0];
+        bool          color = ( err ? m_colorErr : m_colorOut ) && colors[l][0]; // [0]: this level has a color
         std::ostream &os    = err ? std::cerr : std::cout;
         if( err )
         {
@@ -312,6 +320,7 @@ inline void xctrlLog::logEntry( msgLevel level, const std::string &msg )
     {
         return;
     }
+    // the log priority of each msgLevel, in its order
     static const flatlogs::logPrioT prios[] = { flatlogs::logPrio::LOG_INFO,
                                                 flatlogs::logPrio::LOG_NOTICE,
                                                 flatlogs::logPrio::LOG_INFO,

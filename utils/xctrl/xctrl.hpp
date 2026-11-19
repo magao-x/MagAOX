@@ -11,11 +11,13 @@
 #include <cmath>
 #include <cctype>
 #include <cerrno>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -322,6 +324,24 @@ int runCommand( const std::vector<std::string> &argv, /**< [in] the command and 
                 bool         asCaller = false,        /**< [in] [optional] run as the calling user, not as root */
                 bool         stdErr   = false /**< [in] [optional] capture its standard error in output too */ );
 
+/// How an app's settings in systemd compare with its .conf
+/**
+ * \ingroup xctrl
+ */
+struct settingsState
+{
+    bool                     ok{ false };        ///< the .conf and executable could be checked
+    std::vector<std::string> errors;             ///< why ok is false
+    std::string              path;               ///< the app's drop-in
+    std::string              content;            ///< the drop-in its .conf makes now
+    bool                     fileStale{ false }; ///< the drop-in differs from content: not registered yet
+    bool                     loadStale{ false }; ///< systemd has not loaded the drop-in on disk
+    bool                     running{ false };   ///< the app is running, starting or reloading
+    bool                     runStale{ false };  ///< running since before its registered settings last changed
+    std::string              wdHave;             ///< the watchdog of the run, as systemd shows it, if it differs
+    double                   wdWant{ -1 };       ///< the configured watchdog, seconds
+};
+
 /// How an app's state is reported
 /**
  * \ingroup xctrl
@@ -474,13 +494,13 @@ class xCtrl
     /// The service instances of the role that are active or activating
     std::vector<std::string> activeApps();
 
-    /// Start apps, the INDI server after the others
+    /// Start apps: ssh tunnels, then the INDI server, then the others
     /**
      * \returns 0 if all started, else non-zero
      */
     int startApps( const std::vector<appEntry> &apps /**< [in] the apps */ );
 
-    /// Stop apps, the INDI server after the others
+    /// Stop apps: the others, then the INDI server, then ssh tunnels
     /**
      * \returns 0 if all stopped, else non-zero
      */
@@ -546,6 +566,25 @@ class xCtrl
      */
     int refreshApps( const std::vector<appEntry> &apps /**< [in] the apps about to start */ );
 
+    /// The role's INDI server and ssh tunnels among the registered apps, which order every drop-in
+    void registeredOrdering( std::string              &server, /**< [out] the INDI server, "" if none */
+                             std::vector<std::string> &tunnels /**< [out] the ssh tunnel apps */ );
+
+    /// Compare an app's drop-in, what systemd has loaded, and what it runs with, against its .conf
+    /**
+     * \returns the comparison; ok is false, with the reasons, if the .conf or executable has a problem
+     */
+    settingsState checkSettings( const appEntry                     &app,     /**< [in] the app */
+                                 const directiveMap                 &role,    /**< [in] the role-wide directives */
+                                 const std::string                  &server,  /**< [in] the role's INDI server */
+                                 const std::vector<std::string>     &tunnels, /**< [in] the role's ssh tunnels */
+                                 std::map<std::string, std::string> &props /**< [in] systemctl show of the app */ );
+
+    /// Warn about running apps whose settings changed since they started, and how to apply the new ones
+    void warnOutdatedRunning(
+        const std::vector<std::string>                            &names, /**< [in] the apps to check */
+        std::map<std::string, std::map<std::string, std::string>> &props /**< [in] systemctl show of the apps */ );
+
     /** \name Commands
      * @{
      */
@@ -591,6 +630,7 @@ inline std::string lower( const std::string &s )
     std::string r( s );
     for( auto &c : r )
     {
+        // the <cctype> functions take an unsigned char value: a negative char, e.g. a UTF-8 byte, is undefined
         c = static_cast<char>( tolower( static_cast<unsigned char>( c ) ) );
     }
     return r;
@@ -609,6 +649,8 @@ inline std::string trim( const std::string &s )
 
 inline bool validName( const std::string &s )
 {
+    // 128 keeps magaox-<role>-app@NAME.service well within systemd's 256-character unit names; a first letter or
+    // digit keeps a name from looking like an option, e.g. -n NAME
     if( s.empty() || s.size() > 128 || !isalnum( static_cast<unsigned char>( s[0] ) ) )
     {
         return false;
@@ -638,6 +680,7 @@ inline bool validValue( valueKind kind, const std::string &v )
         {
             return true;
         }
+        // digits with at most one decimal point, not first or last: 5, 0.5, 120
         bool dot = false;
         for( size_t i = 0; i < v.size(); ++i )
         {
@@ -653,6 +696,7 @@ inline bool validValue( valueKind kind, const std::string &v )
         return !v.empty();
     }
     case valueKind::count:
+        // digits only, fewer than 10 so the count fits an int
         return !v.empty() && v.size() < 10 &&
                std::all_of( v.begin(), v.end(), []( char c ) { return isdigit( static_cast<unsigned char>( c ) ); } );
     case valueKind::restart:
@@ -681,9 +725,10 @@ inline proclist parseProclist( std::istream &in )
             toks.push_back( tok );
         }
 
+        // a blank line, or a first word followed by a # comment rather than an executable, e.g. a header
         if( toks.empty() || ( toks.size() > 1 && toks[1][0] == '#' ) )
         {
-            continue; // blank line or comment
+            continue;
         }
 
         // a disabled process, e.g. "#!camsci1 picamCtrl" or "#! -camsci1 picamCtrl"; any other "#" line is a comment
@@ -694,7 +739,7 @@ inline proclist parseProclist( std::istream &in )
         }
         if( commented )
         {
-            std::string        rest = line.substr( line.find( "#!" ) + 2 );
+            std::string        rest = line.substr( line.find( "#!" ) + 2 ); // after the 2 characters of #!
             std::istringstream cs( rest );
             toks.clear();
             while( cs >> tok )
@@ -788,7 +833,7 @@ inline std::string editProclist(
         {
             return false; // only a comment, never an app's line
         }
-        t.erase( 0, commented ? 2 : 0 );
+        t.erase( 0, commented ? 2 : 0 ); // drop the #!
         std::istringstream       ss( t );
         std::vector<std::string> toks;
         std::string              tok;
@@ -811,7 +856,9 @@ inline std::string editProclist(
     std::vector<std::string> lines;
     std::istringstream       in( text );
     std::string              line;
-    bool                     hasActive = false, hasAny = false;
+    // first, whether the app has an active line (then enable has nothing to do) and any line at all (add appends
+    // only if not)
+    bool hasActive = false, hasAny = false;
     while( std::getline( in, line ) )
     {
         bool c, m = match( line, c );
@@ -840,8 +887,9 @@ inline std::string editProclist(
             l = "#!" + l;
             ++changed;
         }
-        else if( edit == proclistEdit::uncomment && c && !hasActive )
+        else if( edit == proclistEdit::uncomment && c && !hasActive ) // only the first disabled line
         {
+            // drop the #! and any spaces after it, keeping the - prefix if there is one
             l.erase( 0, l.find( "#!" ) + 2 );
             l.erase( 0, l.find_first_not_of( " \t" ) );
             hasActive = true;
@@ -849,6 +897,7 @@ inline std::string editProclist(
         }
         out << l << "\n";
     }
+    // an app with no line to enable, or not in the proclist at all for add, gets newLine at the end
     if( ( ( edit == proclistEdit::uncomment && !hasActive ) || ( edit == proclistEdit::append && !hasAny ) ) &&
         !newLine.empty() )
     {
@@ -888,6 +937,7 @@ inline double timespanSeconds( const std::string &span )
     double             total = 0;
     std::istringstream ss( t );
     std::string        tok;
+    // each token is a number and a unit, e.g. "1min" "30.5s": i ends at the first character of the unit
     while( ss >> tok )
     {
         size_t i = 0;
@@ -925,7 +975,7 @@ inline confMap parseConf( std::istream &in )
 
         if( line.front() == '[' && line.back() == ']' )
         {
-            section = trim( line.substr( 1, line.size() - 2 ) );
+            section = trim( line.substr( 1, line.size() - 2 ) ); // the name between the brackets
             continue;
         }
 
@@ -937,6 +987,8 @@ inline confMap parseConf( std::istream &in )
 
         std::string key = trim( line.substr( 0, eq ) );
         std::string val = trim( line.substr( eq + 1 ) );
+
+        // TOML values: "string", 'string' or [array], kept as the text inside
         if( val.size() >= 2 &&
             ( ( val.front() == '"' && val.back() == '"' ) || ( val.front() == '\'' && val.back() == '\'' ) ||
               ( val.front() == '[' && val.back() == ']' ) ) )
@@ -986,6 +1038,7 @@ systemdSettings( directiveMap &dirs, std::vector<std::string> &errors, const con
 
     for( const auto &kv : conf )
     {
+        // keys of the [systemd] section start with the 8 characters "systemd."
         if( kv.first.compare( 0, 8, "systemd." ) == 0 && known.count( kv.first ) == 0 )
         {
             errors.push_back( source + ": unknown setting [systemd] " + kv.first.substr( 8 ) );
@@ -1195,6 +1248,7 @@ inline int runCommand( const std::vector<std::string> &argv, std::string *output
     }
     if( pid == 0 )
     {
+        // in the child: its stdout (fd 1), and stderr (fd 2) if asked, go into the pipe we read
         if( output )
         {
             dup2( pfd[1], 1 );
@@ -1205,6 +1259,8 @@ inline int runCommand( const std::vector<std::string> &argv, std::string *output
             close( pfd[0] );
             close( pfd[1] );
         }
+        // setuid, we are root only in effect: become wholly the caller, or wholly root, as systemctl needs.  The
+        // group goes first, as only root may change it.  126, as a shell does, for a command that could not run.
         if( geteuid() == 0 )
         {
             uid_t u = asCaller ? getuid() : 0;
@@ -1254,6 +1310,7 @@ inline int runCommand( const std::vector<std::string> &argv, std::string *output
             return -1;
         }
     }
+    // the exit code, or -1 if it was killed by a signal
     return WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
 }
 
@@ -1289,6 +1346,7 @@ inline appState classify( const std::map<std::string, std::string> &props, bool 
     {
         return { 4, "stopping", magenta };
     }
+    // failed, or stopped by something other than a clean stop: the result says what, e.g. watchdog or exit-code
     if( active == "failed" || ( !result.empty() && result != "success" ) )
     {
         return { 5, "dead (" + result + ")", red };
@@ -1337,7 +1395,7 @@ inline void xCtrl::usage( std::ostream &os ) const
           "                         last watchdog ping, CPU, memory and GPU memory\n"
           "  peek [NAME...]         state and last log lines of the apps (-n LINES, default 10)\n"
           "  inspect NAME           follow an app's console output (-n LINES, default 50)\n"
-          "  startup [NAME...]      start the apps enabled for automatic startup, the INDI server last;\n"
+          "  startup [NAME...]      start the apps enabled for automatic startup, the INDI server first;\n"
           "                         with names, start those apps\n"
           "  start NAME...          start apps, enabled or not; systemd supervises them either way.\n"
           "                         start, startup and restart first apply changes in the apps' .conf,\n"
@@ -1425,6 +1483,10 @@ inline int xCtrl::settlePrivileges()
         setenv( "PAGER", "cat", 1 );
     }
 
+    // journalctl (peek, inspect) colors warnings and errors only on a terminal whose TERM it knows, and TERM was just
+    // cleared; tell it directly, as decided for our own output, which also honors NO_COLOR
+    setenv( "SYSTEMD_COLORS", m_color ? "1" : "0", 1 );
+
     // every command but looking is logged; a real run opens the log as root, before privileges are dropped, so any
     // user's commands go to the one log.  A test run logs under --top as the caller, a dry run not at all.
     static const std::set<std::string> look = { "status", "lstatus", "peek", "inspect" };
@@ -1488,6 +1550,7 @@ inline int xCtrl::settlePrivileges()
         keepRoot = operatorAllowed();
     }
 
+    // for good: real, effective and saved ids all the caller's, the group first while we may still change it
     if( setuidRun && !keepRoot )
     {
         gid_t g = getgid();
@@ -1554,7 +1617,7 @@ inline int xCtrl::parseArgs( int argc, char **argv )
         }
         else if( a.compare( 0, 7, "--role=" ) == 0 )
         {
-            m_role = a.substr( 7 );
+            m_role = a.substr( 7 ); // after the 7 characters of --role=
         }
         else if( a == "--top" )
         {
@@ -1623,6 +1686,8 @@ inline int xCtrl::parseArgs( int argc, char **argv )
             size_t p = line.find( "MAGAOX_ROLE=" );
             if( p != std::string::npos )
             {
+                // e.g. export MAGAOX_ROLE="ICC"; # comment: the value after the 12 characters of MAGAOX_ROLE=,
+                // without quotes, up to a space or ;
                 std::string v = trim( line.substr( p + 12 ) );
                 v.erase( std::remove( v.begin(), v.end(), '"' ), v.end() );
                 v.erase( std::remove( v.begin(), v.end(), '\'' ), v.end() );
@@ -1672,6 +1737,7 @@ inline int xCtrl::systemctl( const std::vector<std::string> &args, bool offline 
         line += ( line.empty() ? "" : " " ) + a;
     }
 
+    // with --sysroot only the commands that just edit files under it run, e.g. enable; the rest need a running systemd
     if( m_dryRun || ( !m_sysroot.empty() && !offline ) )
     {
         say( msgLevel::info ) << ( m_dryRun ? "[dry-run] " : "[sysroot, not run] " ) << line;
@@ -2082,15 +2148,17 @@ inline int xCtrl::deregister( const std::vector<std::string> &names )
     return rc;
 }
 
-inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
+/// The realtime clock minus the monotonic clock, seconds: converts systemd's monotonic timestamps
+inline double monotonicOffset()
 {
-    if( apps.empty() )
-    {
-        return 0;
-    }
-    unitNames u( m_role );
+    timespec rt, mono;
+    clock_gettime( CLOCK_REALTIME, &rt );
+    clock_gettime( CLOCK_MONOTONIC, &mono );
+    return ( rt.tv_sec + rt.tv_nsec / 1e9 ) - ( mono.tv_sec + mono.tv_nsec / 1e9 );
+}
 
-    // the ordering in the drop-ins depends on all registered apps
+inline void xCtrl::registeredOrdering( std::string &server, std::vector<std::string> &tunnels )
+{
     std::vector<appEntry> all;
     for( const auto &n : registered() )
     {
@@ -2100,12 +2168,115 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
             all.push_back( a );
         }
     }
-    std::string              server;
-    std::vector<std::string> tunnels;
     serverAndTunnels( all, server, tunnels );
+}
 
-    std::vector<std::string> errors, names;
+inline settingsState xCtrl::checkSettings( const appEntry                     &app,
+                                           const directiveMap                 &role,
+                                           const std::string                  &server,
+                                           const std::vector<std::string>     &tunnels,
+                                           std::map<std::string, std::string> &p )
+{
+    unitNames     u( m_role );
+    settingsState st;
+    directiveMap  dirs;
+    if( !prepareApp( app, dirs, st.errors ) )
+    {
+        return st;
+    }
+    st.ok      = true;
+    st.path    = unitDir() + "/" + u.instance( app.name ) + ".d/override.conf";
+    st.content = dropIn( u, app, m_top + "/bin", dirs, server, tunnels );
+
+    st.fileStale = !sameContent( st.path, st.content );
+    st.loadStale = p["NeedDaemonReload"] == "yes";
+    st.running   = p["ActiveState"] == "active" || p["ActiveState"] == "activating" || p["ActiveState"] == "reloading";
+    st.wdWant    = timespanSeconds( dirs.count( "WatchdogSec" ) ? dirs["WatchdogSec"] : role.at( "WatchdogSec" ) );
+    if( !st.running )
+    {
+        return st;
+    }
+
+    // systemd fixes the watchdog when the app starts, so a run keeps the one it started with
+    double have = p.count( "WatchdogUSec" ) ? timespanSeconds( p["WatchdogUSec"] ) : -1;
+    if( have >= 0 && st.wdWant >= 0 && std::abs( have - st.wdWant ) > 1e-3 )
+    {
+        st.wdHave   = p["WatchdogUSec"];
+        st.runStale = true;
+    }
+
+    // the drop-in, rewritten only when it changes, newer than the run: e.g. registered again while running
+    struct stat fs;
+    double      started = p.count( "ExecMainStartTimestampMonotonic" )
+                              ? strtod( p["ExecMainStartTimestampMonotonic"].c_str(), nullptr )
+                              : 0;
+    if( started > 0 && stat( st.path.c_str(), &fs ) == 0 )
+    {
+        // the start is in monotonic microseconds, the file time on the realtime clock: compare realtime seconds
+        double startRt = monotonicOffset() + started / 1e6;
+        st.runStale    = st.runStale || fs.st_mtim.tv_sec + fs.st_mtim.tv_nsec / 1e9 > startRt;
+    }
+    return st;
+}
+
+inline void xCtrl::warnOutdatedRunning( const std::vector<std::string>                            &names,
+                                        std::map<std::string, std::map<std::string, std::string>> &props )
+{
+    std::string              server;
+    std::vector<std::string> tunnels, errors;
     directiveMap             role = roleDirectives( errors );
+    registeredOrdering( server, tunnels );
+
+    for( const auto &n : names )
+    {
+        appEntry a;
+        if( !registryRead( a, n ) )
+        {
+            continue;
+        }
+        settingsState st = checkSettings( a, role, server, tunnels, props[n] );
+        if( !st.running )
+        {
+            continue; // a stopped app starts with whatever is registered then
+        }
+        if( !st.ok )
+        {
+            for( const auto &e : st.errors )
+            {
+                say( msgLevel::warning ) << e;
+            }
+        }
+        else if( st.fileStale || st.loadStale )
+        {
+            say( msgLevel::warning ) << n << ": " << n << ".conf changed since it was registered; it runs with the "
+                                     << "old settings until a privileged user restarts it: sudo " << m_prog
+                                     << " restart " << n;
+        }
+        else if( st.runStale )
+        {
+            char wd[64] = "";
+            if( !st.wdHave.empty() )
+            {
+                snprintf( wd, sizeof( wd ), " (watchdog %s, now %gs)", st.wdHave.c_str(), st.wdWant );
+            }
+            say( msgLevel::warning ) << n << ": runs with settings registered before it started" << wd << "; " << m_prog
+                                     << " restart " << n << " applies the new ones";
+        }
+    }
+}
+
+inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
+{
+    if( apps.empty() )
+    {
+        return 0;
+    }
+
+    // the ordering in the drop-ins depends on all registered apps
+    std::string              server;
+    std::vector<std::string> tunnels, errors, names;
+    registeredOrdering( server, tunnels );
+    directiveMap role = roleDirectives( errors );
     for( const auto &e : errors )
     {
         say( msgLevel::warning ) << e;
@@ -2121,58 +2292,41 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
     std::vector<std::string> outdated;
     for( const auto &a : apps )
     {
-        directiveMap             dirs;
-        std::vector<std::string> aerr;
-        if( !prepareApp( a, dirs, aerr ) )
+        settingsState st = checkSettings( a, role, server, tunnels, props[a.name] );
+        if( !st.ok )
         {
-            for( const auto &e : aerr )
+            for( const auto &e : st.errors )
             {
                 say( msgLevel::warning ) << e;
             }
             say( msgLevel::warning ) << a.name << " starts with its last good settings";
             continue;
         }
+        // anything systemd has, or would start the app with, differing from its .conf
+        bool changed = st.fileStale || st.loadStale || ( st.running && !st.wdHave.empty() );
 
-        std::string path    = unitDir() + "/" + u.instance( a.name ) + ".d/override.conf";
-        std::string content = dropIn( u, a, m_top + "/bin", dirs, server, tunnels );
-        int         w       = 0;
-        if( m_privileged )
-        {
-            w = writeFile( path, content, 0644 );
-            rc |= w < 0;
-        }
-        else if( !sameContent( path, content ) )
-        {
-            w = 1; // out of date, but ours is not to write
-        }
-
-        // the watchdog systemd has now, against the one configured; systemd fixes it when the app starts, so it
-        // only means something for an app that is running, a stopped one shows infinity or its last run's
-        auto &p = props[a.name];
-        bool  running =
-            p["ActiveState"] == "active" || p["ActiveState"] == "activating" || p["ActiveState"] == "reloading";
-        double want     = timespanSeconds( dirs.count( "WatchdogSec" ) ? dirs["WatchdogSec"] : role["WatchdogSec"] );
-        double have     = running && p.count( "WatchdogUSec" ) ? timespanSeconds( p["WatchdogUSec"] ) : -1;
-        bool   stale    = p.count( "NeedDaemonReload" ) && p["NeedDaemonReload"] == "yes";
-        bool   wdChange = have >= 0 && want >= 0 && std::abs( have - want ) > 1e-3;
+        // a user who may not change the systemd configuration starts the app as it is registered
         if( !m_privileged )
         {
-            if( w == 1 || stale || wdChange )
+            if( changed )
             {
                 outdated.push_back( a.name );
             }
             continue;
         }
-        if( wdChange )
-        {
-            say( msgLevel::info ) << a.name << ": watchdog " << p["WatchdogUSec"] << " -> " << want
-                                  << "s, from its configuration";
-        }
-        else if( w == 1 )
+
+        int w = writeFile( st.path, st.content, 0644 );
+        rc |= w < 0;
+        if( w == 1 )
         {
             say( msgLevel::info ) << a.name << ": settings updated from its configuration";
         }
-        reload = reload || w == 1 || stale || wdChange;
+        if( st.running && ( w == 1 || !st.wdHave.empty() ) )
+        {
+            say( msgLevel::warning ) << a.name << " is running: " << m_prog << " restart " << a.name
+                                     << " applies its new settings";
+        }
+        reload = reload || w == 1 || st.loadStale || !st.wdHave.empty();
     }
 
     if( reload )
@@ -2182,13 +2336,9 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
 
     for( const auto &n : outdated )
     {
-        say( msgLevel::warning ) << n << ": " << n
-                                 << ".conf changed since it was registered; it will run with the registered settings";
-    }
-    if( !outdated.empty() )
-    {
-        say( msgLevel::warning ) << "to update the registered settings in systemd, a privileged user "
-                                 << "must run the start command or update the settings via the register command";
+        say( msgLevel::warning ) << n << ": " << n << ".conf changed since it was registered; it starts with the "
+                                 << "registered settings. To apply the new ones, re-register it (sudo " << m_prog
+                                 << " register) or start it with sudo (sudo " << m_prog << " start " << n << ")";
     }
     return rc;
 }
@@ -2196,10 +2346,10 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
 inline int xCtrl::startApps( const std::vector<appEntry> &apps )
 {
     unitNames                u( m_role );
-    std::vector<std::string> others{ "start" }, server{ "start" }, reset{ "reset-failed" }, names;
+    std::vector<std::string> tunnels{ "start" }, others{ "start" }, server{ "start" }, reset{ "reset-failed" }, names;
     for( const auto &a : apps )
     {
-        ( a.isServer() ? server : others ).push_back( u.instance( a.name ) );
+        ( a.isServer() ? server : a.isTunnel() ? tunnels : others ).push_back( u.instance( a.name ) );
         names.push_back( a.name );
     }
 
@@ -2219,15 +2369,20 @@ inline int xCtrl::startApps( const std::vector<appEntry> &apps )
         systemctl( reset );
     }
 
-    // systemctl start waits for the apps to report READY=1, then the INDI server starts
+    // the INDI server first, so the apps connect to it as they start, after the tunnels its remote links go through;
+    // systemctl start waits for each to report READY=1
     int rc = 0;
-    if( others.size() > 1 )
+    if( tunnels.size() > 1 )
     {
-        rc |= systemctl( others );
+        rc |= systemctl( tunnels );
     }
     if( server.size() > 1 )
     {
         rc |= systemctl( server );
+    }
+    if( others.size() > 1 )
+    {
+        rc |= systemctl( others );
     }
     return rc;
 }
@@ -2235,15 +2390,18 @@ inline int xCtrl::startApps( const std::vector<appEntry> &apps )
 inline int xCtrl::stopApps( const std::vector<std::string> &names )
 {
     unitNames                u( m_role );
-    std::vector<std::string> others{ "stop" }, server{ "stop" };
+    std::vector<std::string> others{ "stop" }, server{ "stop" }, tunnels{ "stop" };
     for( const auto &n : names )
     {
         appEntry a;
-        bool     isServer = registryRead( a, n ) ? a.isServer() : n.compare( 0, 2, "is" ) == 0;
-        ( isServer ? server : others ).push_back( u.instance( n ) );
+        // an app no longer registered: INDI servers are named is<ROLE>, e.g. isICC
+        bool known    = registryRead( a, n );
+        bool isServer = known ? a.isServer() : n.compare( 0, 2, "is" ) == 0;
+        ( isServer ? server : known && a.isTunnel() ? tunnels : others ).push_back( u.instance( n ) );
     }
 
-    // the INDI server stops last, so the apps' last messages get through
+    // the reverse of startApps(): the INDI server after the apps, so their last messages get through, and the
+    // tunnels its remote links go through last
     int rc = 0;
     if( others.size() > 1 )
     {
@@ -2252,6 +2410,10 @@ inline int xCtrl::stopApps( const std::vector<std::string> &names )
     if( server.size() > 1 )
     {
         rc |= systemctl( server );
+    }
+    if( tunnels.size() > 1 )
+    {
+        rc |= systemctl( tunnels );
     }
     return rc;
 }
@@ -2629,14 +2791,15 @@ inline int xCtrl::cmdRestart()
     {
         ( a.isServer() ? server : others ).push_back( u.instance( a.name ) );
     }
+    // the INDI server first, as in startApps()
     int rc = 0;
-    if( others.size() > 1 )
-    {
-        rc |= systemctl( others );
-    }
     if( server.size() > 1 )
     {
         rc |= systemctl( server );
+    }
+    if( others.size() > 1 )
+    {
+        rc |= systemctl( others );
     }
     return rc;
 }
@@ -2751,19 +2914,24 @@ inline int xCtrl::cmdStatus()
             std::cout << ( m_color ? r.st.color : "" ) << r.name << ": " << r.st.label
                       << ( pid.empty() ? "" : " (pid: " + pid + ")" ) << reset << "\n";
         }
+        warnOutdatedRunning( names, props );
         return 0;
     }
 
-    // a number from systemctl show, or -1 if it is not set, e.g. when accounting is off
-    auto num = []( std::map<std::string, std::string> &p, const char *key ) -> double
+    // a number from systemctl show, or -1 if it is not set.  systemd shows an unset number, e.g. MemoryCurrent when
+    // memory accounting is off, as the largest 64-bit unsigned value, 18446744073709551615; and words like "[not set]"
+    // or "infinity" do not start with a digit.
+    static const std::string unset = std::to_string( std::numeric_limits<uint64_t>::max() );
+    auto                     num   = []( std::map<std::string, std::string> &p, const char *key ) -> double
     {
         if( !p.count( key ) || p[key].empty() || !isdigit( static_cast<unsigned char>( p[key][0] ) ) ||
-            p[key] == "18446744073709551615" )
+            p[key] == unset )
         {
             return -1;
         }
         return strtod( p[key].c_str(), nullptr );
     };
+    // now on the monotonic clock, in microseconds like systemd's ...Monotonic timestamps
     auto monoUsec = []() -> double
     {
         struct timespec ts;
@@ -2784,7 +2952,7 @@ inline int xCtrl::cmdStatus()
             double c0 = num( props[n], "CPUUsageNSec" ), c1 = num( again[n], "CPUUsageNSec" );
             if( c0 >= 0 && c1 >= c0 && !pidOf( n ).empty() )
             {
-                cpuPct[n] = 100 * ( c1 - c0 ) / 1e3 / dt;
+                cpuPct[n] = 100 * ( c1 - c0 ) / 1e3 / dt; // CPU nanoseconds / 1e3 per elapsed microsecond, %
             }
         }
     }
@@ -2795,6 +2963,7 @@ inline int xCtrl::cmdStatus()
     std::string                   smi;
     bool                          haveSmi = false;
     std::string                   path    = getenv( "PATH" ) ? getenv( "PATH" ) : "/usr/bin:/bin";
+    // look for nvidia-smi in each directory of PATH, from b to the next ':' at e, as a shell would
     for( size_t b = 0, e; b <= path.size() && !haveSmi; b = e + 1 )
     {
         e       = std::min( path.find( ':', b ), path.size() );
@@ -2883,7 +3052,7 @@ inline int xCtrl::cmdStatus()
             double start = num( p, "ExecMainStartTimestampMonotonic" );
             if( start > 0 )
             {
-                snprintf( v, sizeof( v ), "%.0f", ( now - start ) / 1e6 );
+                snprintf( v, sizeof( v ), "%.0f", ( now - start ) / 1e6 ); // microseconds to seconds
                 up = v;
             }
             double last = num( p, "WatchdogTimestampMonotonic" );
@@ -2900,7 +3069,7 @@ inline int xCtrl::cmdStatus()
             double m = num( p, "MemoryCurrent" );
             if( m >= 0 )
             {
-                snprintf( v, sizeof( v ), "%.1f", m / 1048576 );
+                snprintf( v, sizeof( v ), "%.1f", m / 1048576 ); // bytes to MiB, 1024 * 1024
                 mem = v;
             }
             if( gpuMiB.count( r.name ) )
@@ -2928,6 +3097,7 @@ inline int xCtrl::cmdStatus()
                   gpu.c_str() );
         std::cout << ( m_color ? r.st.color : "" ) << buf << reset << "\n";
     }
+    warnOutdatedRunning( names, props );
     return 0;
 }
 
@@ -3217,7 +3387,7 @@ inline int xCtrl::main( int argc, char **argv )
 {
     // also installed as xctrl
     std::string invoked = argc > 0 ? argv[0] : "xctrl";
-    m_prog              = invoked.substr( invoked.find_last_of( '/' ) + 1 );
+    m_prog              = invoked.substr( invoked.find_last_of( '/' ) + 1 ); // without its directory
 
     if( parseArgs( argc, argv ) < 0 )
     {

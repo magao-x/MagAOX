@@ -68,8 +68,8 @@ touched by `enable`, `disable`, `add` or `delete`.
 
 On the command line, `--` lets a name start with `-`: `sudo xctrl add -- -camsci-1 someExec`.
 
-The app run by `xindiserver` is the role's INDI server. Apps are ordered after it, so they stop before it and their
-last messages get through; it is ordered after the `sshDigger` tunnels.
+The app run by `xindiserver` is the role's INDI server. Apps are ordered after it, so it starts first and they stop
+before it, and their last messages get through; it is ordered after the `sshDigger` tunnels, which start before it.
 
 # Settings
 
@@ -127,7 +127,7 @@ Any user can run `xctrl`. It is installed setuid root, and decides from who ran 
 | anyone                      | `status [NAME...]`     | Every registered app, one line each, `name: state (pid: N)`, colored and sorted by state: running green, manually started (running with autostart off) blue, disabled (`#!`, not running) yellow, not started cyan, starting/stopping magenta, dead red. `-v` adds a table with autostart, restarts, uptime, seconds since the last watchdog notification, watchdog timeout, CPU % now, memory and GPU memory. |
 | anyone                      | `peek [NAME...]`       | State and the last `logdump` lines of the apps (`-n LINES`, default 10), with the console output of an app that is not running. |
 | anyone                      | `inspect NAME`         | Follow the app's console output. `journalctl` on the .service will show similar output. |
-| xsup, group magaox          | `startup [NAME...]`    | Start the apps enabled for automatic startup, then the INDI server; with names, start those apps. |
+| xsup, group magaox          | `startup [NAME...]`    | Start the INDI server, then the apps enabled for automatic startup; with names, start those apps, the INDI server first. |
 | xsup, group magaox          | `start NAME...`        | Start apps, enabled or not. The sentinel supervises them either way.     |
 | xsup, group magaox          | `stop NAME...`         | Stop apps. They stay stopped until started again: systemd does not restart an app that was stopped on purpose, but `startup` or a reboot with `boot on` starts enabled ones. |
 | xsup, group magaox          | `shutdown NAME...\|--all` | As `stop`; `--all` stops every running app of the role, enabled or not, then the INDI server. |
@@ -170,9 +170,19 @@ privileged user's `start`, `startup` or `restart` does that. For anyone else, su
 registered settings, and `xctrl` warns that its `.conf` changed and how to apply it:
 
 ```
-warning: maths_CO4: maths_CO4.conf changed since it was registered; it will run with the registered settings
-warning: to update the registered settings in systemd, a privileged user must run the start command or update the settings via the register command
+warning: maths_CO4: maths_CO4.conf changed since it was registered; it starts with the registered settings. To apply the new ones, re-register it (sudo xctrl register) or start it with sudo (sudo xctrl start maths_CO4)
 ```
+
+`status` also warns about apps that are running with settings other than their `.conf`'s, ignoring apps that are
+not running, which get the registered settings when they start:
+
+```
+warning: maths_CO4: maths_CO4.conf changed since it was registered; it runs with the old settings until a privileged user restarts it: sudo xctrl restart maths_CO4
+warning: maths_CO4: runs with settings registered before it started (watchdog 2s, now 0.5s); xctrl restart maths_CO4 applies the new ones
+```
+
+The first is a `.conf` edited since the app was registered; the second an app registered again, e.g. by a privileged
+`start`, while it kept running: systemd fixes the watchdog when an app starts, so only a restart applies it.
 
 The generated files under `/etc/systemd/system` and `/etc/magaox-<role>` are readable by everyone (files 0644,
 directories 0755, whatever the caller's umask), so any user can compare them.
@@ -208,6 +218,9 @@ Messages are colored on a terminal (unless `NO_COLOR` is set): errors red, as `e
 Errors and warnings go to stderr, the rest to stdout. `-q` (`--quiet`) leaves warnings and errors off the console,
 showing only the normal output, e.g. `xctrl status -vq`; they are still logged, and the exit status still reports a
 failure. Single-letter flags combine: `-vq` is `-v -q`.
+
+The journal lines that `peek` and `inspect` show are colored as `journalctl` colors them, warnings yellow and errors
+red, on a terminal and unless `NO_COLOR` is set.
 
 Every command except `status`, `peek` and `inspect` is also logged, with all its messages, timestamped, in the
 standard MagAO-X binary log format, so it reads like any app's log:
