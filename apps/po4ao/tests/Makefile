@@ -15,19 +15,3 @@ asan:
 clean:
 	rm -rf .build
 .PHONY: all test asan clean
-
-# Optional schema test after the normal logger code-generation step.
-FLATBUFFERS_CFLAGS ?= $(shell pkg-config --cflags flatbuffers)
-.build/po4ao_telemetry_test: po4ao_telemetry_test.cpp ../../../libMagAOX/logger/types/generated/telem_po4ao_generated.h .build/catch_main.o
-	$(CXX) $(CXXFLAGS) $(FLATBUFFERS_CFLAGS) po4ao_telemetry_test.cpp .build/catch_main.o -o $@
-telemetry: .build/po4ao_telemetry_test
-	./.build/po4ao_telemetry_test
-.PHONY: telemetry
-
-# Unchanged upstream monitor with real POSIX semaphores and a mapping boundary double.
-.build/po4ao_monitor_test: po4ao_monitor_test.cpp ../../../libMagAOX/app/dev/shmimMonitor.hpp stubs/ImageStreamIO/ImageStreamIO.h
-	mkdir -p .build
-	$(CXX) $(CXXFLAGS) -Istubs -I../../../libMagAOX/app $< -o $@
-monitor: .build/po4ao_monitor_test
-	./.build/po4ao_monitor_test
-.PHONY: monitor

@@ -137,8 +137,8 @@ MPLBACKEND=Agg python -m pytest apps/po4aoTrainer/tests
 
 Tests use synthetic CPU inputs, offline INDI boundaries and owned local child
 processes. The independent `tests/fixtures/notebook_iteration.npz` reference uses
-`rtol=1e-5`, `atol=1e-7`; pause/resume also checks exact CPU results. Its adjacent
-JSON records the pinned original notebook/helper hashes, seeds and library
-versions. Those hashes describe original provenance, not refactored module bytes.
+`rtol=1e-5`, `atol=1e-7`; pause/resume also checks exact CPU results. The parity test in
+`tests/test_training.py` records the original notebook and helper hashes,
+seeds and library versions.
 CPU/fake-backend tests do not establish CUDA/TensorRT ABI, GPU release, installed
 utility behavior or live instrument readiness; these require target validation.

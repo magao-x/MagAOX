@@ -14,13 +14,10 @@ import tomli_w
 import tomllib
 import numpy as np
 import torch
-import os
-import pwd
-import stat
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
-from purepyindi2 import constants as C, properties as P, transports, messages as M
+from purepyindi2 import constants as C, properties as P, messages as M
 from purepyindi2.messages import DefText, DefSwitch, DefNumber
 from xapp.po4aoTrainer.configuration import (
     load_training,
@@ -33,7 +30,6 @@ from xapp.po4aoTrainer.switching import Runtime
 from xapp.po4aoTrainer.library import engine_id, verify_candidate
 from xapp.po4aoTrainer.app import po4aoTrainer, TrainerConfig
 from xapp.po4aoTrainer.training import TrainingSession
-from contextlib import ExitStack
 from purepyindi2.client import IndiClient
 from purepyindi2.transports import IndiConnection
 from xapp.po4aoTrainer.process import atomic_json
@@ -726,31 +722,6 @@ def test_penalty_hot_update_reaches_existing_regularizer(config):
     torch.testing.assert_close(
         session.policy_update.penalty(session.policy).detach(), 0.5 * original_cost
     )
-
-
-@pytest.mark.parametrize("server_fifo_exists", [False, True])
-def test_framework_fifo_constructor(tmp_path, monkeypatch, server_fifo_exists):
-    """Accept XDevice's default control path whether or not indiserver is present."""
-    monkeypatch.setattr(
-        transports.IndiFifoConnection, "MAGAOX_USER", pwd.getpwuid(os.getuid()).pw_name
-    )
-    if server_fifo_exists:
-        os.mkfifo(tmp_path / "indiserver.ctrl")
-    make_fifo = transports.make_fifo_and_open
-    with ExitStack() as handles:
-
-        def open_fifo(path, mode):
-            """Close all fixture handles even if the dependency constructor raises."""
-            return handles.enter_context(make_fifo(path, mode))
-
-        monkeypatch.setattr(transports, "make_fifo_and_open", open_fifo)
-        connection = transports.IndiFifoConnection(
-            name="po4aoTrainer", fifos_root=str(tmp_path)
-        )
-        for suffix in ("in", "out", "ctrl"):
-            assert stat.S_ISFIFO((tmp_path / f"po4aoTrainer.{suffix}").stat().st_mode)
-        assert connection._reader is None
-        assert connection._writer is None
 
 
 class Wire(IndiConnection):

@@ -1141,32 +1141,6 @@ TEST_CASE( "Saving a pair does not pause a running publication", "[po4ao]" )
     REQUIRE_FALSE( f.control<QPushButton>( "buttonSavePolicy" )->isEnabled() );
 }
 
-/** \brief Save a representative real-widget preview without connecting an INDI client. */
-TEST_CASE( "Save the compact panel preview", "[.preview]" )
-{
-    Fixture f;
-    f.control<QComboBox>( "comboEngine" )->setCurrentIndex( 0 );
-    f.status( { { "reconstructor", "nn" },
-                { "controller", "po4ao" },
-                { "learning", "running" },
-                { "active_policy", "a31c480de728b941" },
-                { "retained_policy", "a31c480de728b941" } } );
-    f.define( text( "trainer", "progress", { { "iteration", "250" } } ) );
-    if( std::getenv( "PO4AO_NOTEBOOK_PREVIEW" ) )
-    {
-        f.erase( "trainer", "" );
-        f.runtime( true );
-    }
-    f.control<QComboBox>( "comboPolicy" )->setCurrentIndex( 0 );
-    f.m_widget.resize( 540, 410 );
-    f.m_widget.show();
-    drain();
-    REQUIRE( f.m_widget.width() == 540 );
-    const char *path = std::getenv( "PO4AO_SCREENSHOT" );
-    REQUIRE( path != nullptr );
-    REQUIRE( f.m_widget.grab().save( path ) );
-}
-
 /** \brief Value-only updates must not permanently suppress discovery of command definitions after restart.
  * \ingroup po4aoGUI_unit_test
  */
