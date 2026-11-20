@@ -164,10 +164,10 @@ class po4aoTrainer(XDevice):
 
     def handle_request(self, prop, message):
         """Acknowledge admission immediately and leave bounded operations to the supervisor."""
-        self.log.info("Received %s request: %s", prop.name, dict(message))
         with self._property_lock:
             try:
                 values = {key: message[key] for key in message}
+                self.log.info("Received %s request: %s", prop.name, values)
                 if prop.name in PARAMETERS:
                     if set(values) != {"target"}:
                         raise ValueError("Set only the target element")

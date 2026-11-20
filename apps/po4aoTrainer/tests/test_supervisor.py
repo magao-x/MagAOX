@@ -554,8 +554,9 @@ def test_worker_protocol_failure_is_reported_without_stopping_companion(config):
     supervisor.close()
 
 
-def test_live_parameter_and_catalog_indi_contract(config):
-    """The actual XDevice sends Busy/current/target, rejects forged current, and redefines catalogs."""
+@pytest.fixture
+def trainer_device(config):
+    """Start the real device dispatcher with in-memory transport and capture its readbacks."""
     from collections import defaultdict
 
     app = object.__new__(po4aoTrainer)
@@ -569,28 +570,53 @@ def test_live_parameter_and_catalog_indi_contract(config):
     )
     app.setup()
     try:
-        prop = app.properties["command_regularization"]
-        app.handle_request(prop, {"target": 0.025})
-        states = [state for name, state, values in emitted if name == prop.name]
-        assert states[-2:] == [C.PropertyState.BUSY, C.PropertyState.OK]
-        assert prop["current"] == prop["target"] == 0.025
-        app.handle_request(prop, {"current": 1, "target": 1})
-        app.loop()
-        assert prop.state == C.PropertyState.ALERT
-        assert prop["target"] == 0.025
-        app.handle_request(prop, {"target": 0.01})
-        assert prop.state == C.PropertyState.OK
-        app.supervisor.catalog = {
-            "saved_id": dict(
-                label="internal", created_utc="2026-11-03T15:22:00+00:00", iteration=300
-            )
-        }
-        app.publish_catalog()
-        assert set(app.properties["policy_catalog"]) == {"saved_id"}
-        assert app.properties["policy_catalog"].perm == C.PropertyPerm.READ_ONLY
+        app._setup_complete = True
+        yield app, emitted
     finally:
         app.teardown()
         app._telem_file = SimpleNamespace(close=lambda: None)
+
+
+@pytest.mark.parametrize(
+    "name,switches",
+    [("learning", {"run": True, "pause": False}), ("po4ao_enable", {"toggle": True})],
+)
+def test_operator_switch_dispatch(trainer_device, monkeypatch, name, switches):
+    """Deliver actual INDI NewSwitchVectors through the registered Start and Enable callbacks."""
+    app, emitted = trainer_device
+    admitted = []
+    monkeypatch.setattr(app.supervisor, "submit", lambda *args: admitted.append(args))
+    message = M.NewSwitchVector(device=app.name, name=name)
+    for key, enabled in switches.items():
+        state = C.SwitchState.ON if enabled else C.SwitchState.OFF
+        message.add_element(M.OneSwitch(name=key, _value=state))
+    app.handle_message(message)
+    assert admitted == [(name, switches)]
+    assert emitted[-1][:2] == (name, C.PropertyState.BUSY)
+
+
+def test_live_parameter_and_catalog_indi_contract(trainer_device):
+    """The actual XDevice sends Busy/current/target, rejects forged current, and redefines catalogs."""
+    app, emitted = trainer_device
+    prop = app.properties["command_regularization"]
+    app.handle_request(prop, {"target": 0.025})
+    states = [state for name, state, values in emitted if name == prop.name]
+    assert states[-2:] == [C.PropertyState.BUSY, C.PropertyState.OK]
+    assert prop["current"] == prop["target"] == 0.025
+    app.handle_request(prop, {"current": 1, "target": 1})
+    app.loop()
+    assert prop.state == C.PropertyState.ALERT
+    assert prop["target"] == 0.025
+    app.handle_request(prop, {"target": 0.01})
+    assert prop.state == C.PropertyState.OK
+    app.supervisor.catalog = {
+        "saved_id": dict(
+            label="internal", created_utc="2026-11-03T15:22:00+00:00", iteration=300
+        )
+    }
+    app.publish_catalog()
+    assert set(app.properties["policy_catalog"]) == {"saved_id"}
+    assert app.properties["policy_catalog"].perm == C.PropertyPerm.READ_ONLY
 
 
 def test_supervisor_and_notebook_import_boundaries():
