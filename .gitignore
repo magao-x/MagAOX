@@ -52,7 +52,6 @@ apps/andorCtrl/andorCtrl
 apps/acronameUsbHub/acronameUsbHub
 apps/acronameUsbHub/utils/configusbhub
 apps/alignLoop/alignLoop
-apps/acesxeCtrl/acesxeCtrl
 
 #b
 apps/baslerCtrl/baslerCtrl
@@ -65,13 +64,17 @@ apps/closedLoopIndi/closedLoopIndi
 apps/cred2Ctrl/cred2Ctrl
 
 #d
+apps/dlDataCollection/dlDataCollection
 apps/dmMode/dmMode
-apps/dmModulator/dmModulator
 apps/dmPokeCenter/dmPokeCenter
 apps/dmPokeXCorr/dmPokeXCorr
 apps/dmRecon/dmRecon
 apps/dmSpeckle/dmSpeckle
 apps/dmSyncopation/dmSyncopation
+
+#e
+apps/elliptecCtrl/elliptecCtrl
+apps/elliptecLowLevel/elliptecLowLevel
 
 #f
 apps/filterWheelCtrl/filterWheelCtrl
@@ -100,6 +103,7 @@ INDI/INDI/indiserver
 INDI/INDI/setINDI
 INDI/xindidriver/xindidriver
 apps/indiTSAccumulator/indiTSAccumulator
+apps/irisaoCtrl/irisaoCtrl
 
 #k
 apps/kcubeCtrl/kcubeCtrl
@@ -112,10 +116,10 @@ apps/loopTimingMonitor/loopTimingMonitor
 
 #m
 apps/mcp3008Ctrl/mcp3008Ctrl
+apps/mcp3208Ctrl/mcp3208Ctrl
 apps/modalFilter/modalFilter
 apps/modalGainOpt/modalGainOpt
 apps/modalPSDs/modalPSDs
-apps/mwfsMonitor/mwfsMonitor
 apps/mzmqServer/mzmqServer
 apps/mzmqClient/mzmqClient
 
@@ -125,19 +129,22 @@ apps/nnReconstructor/nnReconstructor
 #o
 apps/observerCtrl/observerCtrl
 apps/ocam2KCtrl/ocam2KCtrl
-apps/openLoopPSDs/openLoopPSDs
 
 #p
+apps/photonCounter/photonCounter
 apps/pi335Ctrl/pi335Ctrl
 apps/picamCtrl/picamCtrl
 apps/picoMotorCtrl/picoMotorCtrl
+apps/po4ao/po4ao
 apps/psfFit/psfFit
 apps/psfAcq/psfAcq
 apps/pupilAlign/pupilAlign
 apps/pupilFit/pupilFit
 apps/pvcamCtrl/pvcamCtrl
 apps/pwfsSlopeCalc/pwfsSlopeCalc
-apps/photonCounter
+
+#q
+apps/qhyCtrl/qhyCtrl
 
 #r
 apps/rhusbMon/rhusbMon
@@ -161,6 +168,7 @@ apps/sysMonitor/sysMonitor
 apps/t2wOffloader/t2wOffloader
 apps/timeSeriesSimulator/timeSeriesSimulator
 apps/tcsInterface/tcsInterface
+apps/template/template
 apps/trippLitePDU/trippLitePDU
 apps/ttmModulator/ttmModulator
 
@@ -223,6 +231,7 @@ tests/testMagAOXsetuid
 tests/test_stderr.txt
 tests/results/
 
+xlog*.binlog
 
 #Devel stuff in flatlogs
 flatlogs/src/flatlogcodes
