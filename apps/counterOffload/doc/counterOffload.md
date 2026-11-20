@@ -90,13 +90,18 @@ The read-only `stats` property reports these counters:
 Calibrate mode tunes `rampStartUs`, `rampDurationUs` and `gain` to minimize the wavefront error spike that offloading
 causes, measured in the closed-loop WFS PSDs.
 
-**Figure of merit.** The power of the raw closed-loop PSDs (`aol1_raw_clpsds`, from modalPSDs) within `halfWidthHz` of
+**Figure of merit.** The power of the averaged closed-loop PSDs (`aol1_clpsds`, from modalPSDs) within `halfWidthHz` of
 the offload rate `t2wOffloader.fps`, summed over the first `t2wOffloader.numModes` modes. It is reported as a ratio to a
 baseline measured at gain 0, the counter-offload off.
 
-**Averaging.** Each evaluation waits one PSD window plus `settleS` after the change, so that only PSDs of data taken
-after the change are used, then averages `nAverage` of them (at least 2). The baseline is re-measured every
-`baselineEvery` evaluations to follow drift.
+**Averaging.** `aol1_clpsds` is the mean of the raw PSDs over the last `psdAvgTime` (10 s), republished every 0.5 s. Its
+oldest data are `psdAvgTime + psdTime` (10.5 s) old. After each change, an evaluation therefore waits `settleS` (11 s),
+so that only PSDs made entirely of data taken after the change are used. It then averages the next `nAverage` (3)
+published PSDs, 0.5 s apart.
+
+These samples share most of their data. Their standard deviation (`fomStd`) shows whether the value is stable; it is
+not an independent noise estimate. If you change modalPSDs `psdAvgTime` or `psdTime`, change `settleS` to match. The
+baseline is re-measured every `baselineEvery` evaluations to follow drift.
 
 **Scan.**
 
@@ -105,7 +110,7 @@ after the change are used, then averages `nAverage` of them (at least 2). The ba
 3. Rescan each over ± one step at half the step, then evaluate the vertex of a parabola through the minimum.
 4. Apply the best parameters and log them at INFO, as values to copy into the config.
 
-With the defaults a run takes about 5 minutes.
+With the defaults a run is about 70 measurements of about 12 s each, so about 14 minutes.
 
 **Running it.** With the loop closed, offloading, and the app enabled:
 
@@ -130,15 +135,15 @@ and `ratio`.
 
 | Setting | INDI | Default | Meaning |
 | --- | --- | --- | --- |
-| `psds.shmimName` | — | `aol1_raw_clpsds` | Raw closed-loop PSD stream, frequency × mode. |
+| `psds.shmimName` | — | `aol1_clpsds` | Averaged closed-loop PSD stream, frequency × mode. |
 | `calibrate.freqStream` | — | `aol1_freq` | Frequency axis of the PSDs. |
 | `calibrate.offloadDevice` | — | `t2wOffloader` | Source of `fps` and `numModes`. |
 | `calibrate.halfWidthHz` | `calibHalfWidthHz` | 10 | Band half width around the offload rate, Hz. |
 | `calibrate.modeMax` | — | 0 | Modes summed; 0 uses `t2wOffloader.numModes`. |
-| `calibrate.nAverage` | — | 6 | PSDs averaged per evaluation, at least 2. |
+| `calibrate.nAverage` | — | 3 | Settled PSDs averaged per evaluation, at least 2. |
 | `calibrate.baselineEvery` | — | 5 | Evaluations between baselines. |
-| `calibrate.settleS` | — | 0.5 | Settling beyond one PSD window, s. |
-| `calibrate.timeoutS` | — | 15 | Longest wait for an evaluation's PSDs, s. |
+| `calibrate.settleS` | — | 11 | Wait after each change before PSDs count; must cover `psdAvgTime + psdTime`, s. |
+| `calibrate.timeoutS` | — | 5 | Longest wait for an evaluation's PSDs after settling, s. |
 | `calibrate.abortRatio` | — | 3 | Abort above this multiple of the baseline. |
 | `calibrate.startGridUs` | — | 0,400,25 | `rampStartUs` scan: min, max, step. |
 | `calibrate.durationGridUs` | — | 100,600,50 | `rampDurationUs` scan: min, max, step. |
