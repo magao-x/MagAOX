@@ -42,7 +42,8 @@ namespace app
 /** Each update of the input stream (normally `aol0_tweeterOffload`) starts one ramp of that offload change.
  * For each scheduler slot the published command is `-gain * (A + sum_k delta_k * ramp(target - t0_k))`, where
  * completed ramps are folded into the accumulator `A`, which is multiplied by `(1 - leak)` after every
- * successful publication.  Disabling stops accepting new offloads only; active ramps and the leak continue.
+ * successful publication.  Disabling stops accepting new offloads and requests a zero, so the contribution is
+ * cleared at the next slot.
  *
  * \ingroup counterOffload
  */
@@ -241,6 +242,11 @@ class counterOffload : public MagAOXApp<true>,
 
     /// Apply the leak after a successful publication.  The caller must hold m_stateMutex.
     void afterPublish();
+
+    /// Enable or disable accepting offloads; disabling also requests a zero of the contribution.
+    /** \returns true if the enabled state changed
+     */
+    bool setEnabled( bool on /**< [in] true to accept new offloads */ );
 
   protected:
     /** \name Producer Thread
@@ -807,6 +813,23 @@ inline void counterOffload::afterPublish()
     }
 }
 
+inline bool counterOffload::setEnabled( bool on )
+{
+    if( on == m_enabled )
+    {
+        return false;
+    }
+
+    if( !on )
+    {
+        m_zeroRequested = true; // clear the contribution at the next slot
+    }
+
+    m_enabled = on;
+
+    return true;
+}
+
 inline void counterOffload::coThreadStart( counterOffload *c )
 {
     c->coThreadExec();
@@ -939,10 +962,9 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_enable )( const pcf::IndiProperty
 
     const bool on = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
 
-    if( on != m_enabled )
+    if( setEnabled( on ) )
     {
-        m_enabled = on;
-        log<text_log>( on ? "enabled" : "disabled", logPrio::LOG_NOTICE );
+        log<text_log>( on ? "enabled" : "disabled, zero requested", logPrio::LOG_NOTICE );
     }
 
     updateSwitchIfChanged(

@@ -36,6 +36,7 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_ramps;
     using counterOffload::m_syncopationTiming;
     using counterOffload::m_timeOffsetUs;
+    using counterOffload::m_zeroRequested;
 
     /// Set up 2x2 buffers and a gain of 0.5.
     counterOffload_test()
@@ -266,6 +267,7 @@ TEST_CASE( "counterOffload state handling", "[counterOffload]" )
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::clearState();
     counterOffload::processImage(nullptr, dev::shmimT());
+    counterOffload::setEnabled(false);
     #endif
     // clang-format on
 
@@ -304,6 +306,24 @@ TEST_CASE( "counterOffload state handling", "[counterOffload]" )
         app.processImage( d.data(), dev::shmimT() );
         REQUIRE( app.m_events == 1 );
         REQUIRE( app.active() == 1 );
+    }
+
+    SECTION( "disabling requests a zero, enabling does not" )
+    {
+        REQUIRE( app.setEnabled( true ) );
+        REQUIRE_FALSE( app.m_zeroRequested );
+        REQUIRE_FALSE( app.setEnabled( true ) );
+
+        app.addRamp( d.data(), 0 );
+        app.buildCommand( 500 * us );
+        app.addRamp( d.data(), 500 * us );
+
+        REQUIRE( app.setEnabled( false ) );
+        REQUIRE_FALSE( app.m_enabled );
+        REQUIRE( app.m_zeroRequested );
+        REQUIRE( app.needPublish() ); // the producer thread must not go idle before the zero is published
+
+        REQUIRE_FALSE( app.setEnabled( false ) );
     }
 }
 

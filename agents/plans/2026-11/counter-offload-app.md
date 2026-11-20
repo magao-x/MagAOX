@@ -101,7 +101,7 @@ dmSyncopation copies the contribution into `dm01disp08` and triggers dmcomb. cou
   - `gain`;
   - ramp start, ramp duration, `leak` (0–1) and time offset;
   - read-only counters: events received, slots published, missed and failed slots, active ramps.
-- **R6.** Disabling stops accepting new offloads.
+- **R6.** Disabling stops accepting new offloads and zeros the contribution at the next slot (changed 2026-11-19; it previously kept the contribution, or let it leak).
   - With `leak > 0`, the app keeps publishing the leaking contribution until it is negligible, then publishes an explicit zero and goes idle.
   - With `leak = 0`, the contribution is held, as with dmSpeckle, until the operator sends `zero`.
 - **R7.** Follow the AGENTS.md documentation and test rules.
@@ -249,7 +249,7 @@ Checks for the first RTC build:
 
 **2026-11-19: bench.** counterOffload writes to the DM successfully through synco.
 
-**2026-11-19: proposed change (not yet implemented): zero on disable.**
+**2026-11-19: zero on disable (implemented).**
 - Request: turning `enable` off should zero the DM stream automatically.
 - Current behaviour (R6): disabling only stops accepting offloads. The contribution is kept (leak 0) or decays (leak > 0), and a zero is published only through the `zero` request.
 - Change: in the `enable` NEW callback, when the toggle goes On→Off, also set `m_zeroRequested = true`.
@@ -258,6 +258,7 @@ Checks for the first RTC build:
   - If synco is not producing, the zero is published at the next slot after it resumes. That is the same as for the `zero` request today.
 - Docs: update R6 and `doc/counterOffload.md` (disabling now zeros the output immediately; there is no decay on disable).
 - Test: a unit test that disabling with a nonzero accumulator and active ramps gives an all-zero command at the next slot.
+- Implementation: a new `setEnabled(on)` helper sets `m_enabled` and, on On→Off, `m_zeroRequested`; the `enable` callback calls it and logs "disabled, zero requested". The test section "disabling requests a zero, enabling does not" checks `setEnabled()` and that `needPublish()` stays true. The zero itself goes through the existing `clearState()` path, which "clearState removes ramps and the accumulator" already covers.
 
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->
