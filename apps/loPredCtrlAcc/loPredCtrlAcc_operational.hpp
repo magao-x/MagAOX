@@ -9,6 +9,10 @@
 #include <mutex>
 #include <random>
 #include <sstream>
+#include <thread>
+
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include <mx/ioutils/fits/fitsFile.hpp>
 #include <mx/improc/eigenCube.hpp>
@@ -25,9 +29,15 @@
 namespace MagAOX::app
 {
 /// Operational loPredCtrl workflow; upstream owns ACC/WFS synchronization and the DM owns its scheduler.
-/** Both independent models use identical WFS-rate command histories and objectives. The assisted model additionally
- * receives every individual upstream 8-kHz ACC sample in a rolling history frozen at each 2-kHz WFS origin.
- * Commands are held between WFS decisions and delivered at the existing producer's advertised slots.
+/** Both independent models decide once per 2-kHz WFS frame from the same copied command history and objective. The
+ * standard model is single-rate, as in loPredCtrl, and its command is held on the four DM slots of a frame. The
+ * assisted model additionally receives every individual upstream 8-kHz ACC sample in a rolling history frozen at the
+ * WFS origin, and plans four distinct slot commands per frame (ShadowConfig::m_assistedCommandSlots = 4).
+ *
+ * Slot ordinals are scheduler cycle*steps+step. A decision indexes its plan from the newest slot copied when the WFS
+ * frame arrived; the producer worker renders the planned command of each actual Request. Training uses the commands
+ * copied by the scheduler since the previous decision (missed or discarded slots retain the previous copy), lifted
+ * for the assisted model and averaged for the single-rate standard model.
  */
 class loPredCtrlAcc_operational : public MagAOXApp<true>,
                                   public dev::shmimMonitor<loPredCtrlAcc_operational>,
@@ -49,8 +59,8 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
     std::uint32_t m_calWidth{ 0 }, m_calHeight{ 0 }; ///< Exact native FITS plane dimensions when using a cube.
 
-    /// Exact owned auxiliary; no configuration can redirect this app to a combined DM destination.
-    std::string m_channel{ "dm10disp10_aux" };
+    /// Exact owned auxiliary source; must be a scheduler `_aux` image, never a combined DM destination.
+    std::string m_channel{ "dm01disp10_aux" };
 
     /// Independent raw ADC decoder; absence or invalid calibration affects only the assisted model.
     bool                              m_accelEnabled{ true };
@@ -88,12 +98,47 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     std::array<double, 2>    m_matchedSquared{};
     std::uint64_t m_matchedTargets{ 0 }; ///< Scalars scored by both models, excluding unmatched gaps and warmup.
 
-    /// Brief payload/acknowledged-request exchange, kept separate from all RLS and QR work.
-    std::mutex         m_commandMutex;
-    std::vector<float> m_pixels;
-    DDSPC::Matrix      m_copiedCommand;
-    bool               m_commandKnown{ false };
-    SyncoOutput        m_output;
+    /// Number of DM slots per WFS frame: four scheduler steps at 2 kHz give 8-kHz output.
+    static constexpr int c_slots = 4;
+
+    /// Size of the copied-slot ring; covers more than three frames of slots.
+    static constexpr int c_ring = 16;
+
+    /// Brief plan/copied-command exchange with the producer worker, kept separate from all RLS and QR work.
+    std::mutex m_commandMutex;
+
+    /// Chronological modal command per slot for the latest decision; column j is slot m_planBase+1+j.
+    DDSPC::Matrix m_slotPlan;
+
+    /// Newest copied slot ordinal when m_slotPlan was decided; -1 indexes the plan from its first column.
+    std::int64_t m_planBase{ -1 };
+
+    /// Copied modal command of recent slot ordinals (column ordinal % c_ring); gaps hold the retained copy.
+    DDSPC::Matrix m_appliedSlots;
+
+    std::int64_t m_appliedOrdinal{ -1 }; ///< Newest copied slot ordinal; -1 until a copy in this scheduler epoch.
+
+    std::int64_t m_appliedEpoch{ 0 }, m_appliedGeneration{ 0 }; ///< Scheduler incarnation of the ordinals.
+
+    std::int64_t m_steps{ c_slots }; ///< Scheduler steps per cycle from the latest record.
+
+    std::int64_t m_decisionOrdinal{ -1 }; ///< m_appliedOrdinal at the previous accepted WFS decision.
+
+    bool m_slotRestart{ false }; ///< Slot history restarted since the last decision; its snapshot ordinal is stale.
+
+    std::uint64_t m_slotShifts{ 0 }; ///< Decisions whose interval contained other than zero or four new copies.
+
+    DDSPC::Matrix m_copiedCommand;         ///< Newest copied modal command, used before slot ordinals are known.
+    bool          m_commandKnown{ false }; ///< m_copiedCommand is finite and current.
+
+    SyncoOutput m_output; ///< Bounded enable/zero/receipt state around the existing producer.
+
+    std::thread       m_outputThread;             ///< Framework DM worker running the producer loop.
+    bool              m_outputThreadInit{ true }; ///< threadStart synchronizer for priority and cpuset setup.
+    pid_t             m_outputThreadID{ 0 };      ///< Worker thread ID, set by the worker for threadStart.
+    pcf::IndiProperty m_outputThreadProp;         ///< Framework thread property (th-dm: pid and priority).
+    int               m_outputThreadPrio{ 0 };    ///< Worker real-time priority; 0 keeps SCHED_OTHER.
+    std::string       m_outputThreadCpuset;       ///< Worker cpuset; empty leaves placement unchanged.
 
     /// Operator intent; learning OFF freezes both models while prediction can continue.
     bool                           m_learning{ false }, m_predicting{ false };
@@ -131,22 +176,38 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
                         DDSPC::Matrix                    &features /**< [out] Newest-first X/Y pairs. */,
                         std::int64_t                      now /**< [in] Frozen WFS cutoff. */ );
 
-    /// Process one WFS decision using the last transport-acknowledged own request to close the preceding interval.
+    /// Copy the four slot commands applied since the previous decision; caller holds m_commandMutex.
+    /** Returns the newest copied ordinal. applied is modes by c_slots, oldest slot first, or empty when unknown.
+     * Fewer than four new copies (missed slots or idle output) are preceded by the retained previous copy.
+     */
+    std::int64_t appliedSlots( DDSPC::Matrix &applied /**< [out] Chronological copied modal commands. */ ) const;
+
+    /// Process one WFS decision, closing the preceding interval with the commands copied during it.
     int step( const DDSPC::Matrix &measurement /**< [in] Current calibrated WFS modes. */,
               std::uint64_t        counter /**< [in] Original WFS publication counter. */,
               const DDSPC::Matrix &features /**< [in] Individual raw ACC lift. */,
               bool                 assistedValid /**< [in] Upstream lock and complete causal sensor history. */,
-              const DDSPC::Matrix &acknowledged /**< [in] Own command copied by decision time, empty if unknown. */,
+              const DDSPC::Matrix &applied /**< [in] Slot commands copied since the last decision, or empty. */,
+              std::int64_t         ordinal /**< [in] Newest copied slot ordinal at decision time, or -1. */,
               std::int64_t         now /**< [in] Current monotonic decision time. */ );
 
     /// Check only current WFS/selected sensor input; bootstrap prediction may explore before a model is trained.
     bool outputValid() const;
 
-    /// Copy a prepared WFS-rate image for an actual existing producer Request.
-    bool outputCandidate( std::span<float> pixels /**< [out] Complete own auxiliary payload. */ );
+    /// Render the planned modal command of an actual existing producer Request.
+    bool outputCandidate( const synco::Request &request /**< [in] Exact slot being prepared. */,
+                          const synco::Record  &schedule /**< [in] Coherent schedule, for steps per cycle. */,
+                          std::span<float>      pixels /**< [out] Complete own auxiliary payload. */ );
 
-    /// Retain only the exact transport-copied own contribution, separately from physical application.
-    void copied( std::span<const float> pixels /**< [in] Matching acknowledged own payload. */ );
+    /// Retain the exact transport-copied own contribution of a slot, separately from physical application.
+    void copied( const synco::CommitRecord &commit /**< [in] Acknowledged commit identity. */,
+                 std::span<const float>     pixels /**< [in] Matching acknowledged own payload. */ );
+
+    /// Worker entry for MagAOXApp::threadStart; waits for priority/cpuset setup, then runs the producer loop.
+    static void outputThreadStart( loPredCtrlAcc_operational *app /**< [in] Application owning the worker. */ );
+
+    /// Request removal, join the worker and report whether the own zero was acknowledged.
+    bool stopOutput();
 
     /// Validate the original exploration CSV grammar before replacing the running sequence.
     static std::vector<Stage> parseExploration( const std::string &text /**< [in] count,sigma,lambda triples. */ );
@@ -223,10 +284,11 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
 inline loPredCtrlAcc_operational::loPredCtrlAcc_operational() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-    m_settings.m_modes         = 2;
-    m_settings.m_prior         = 1e-5f;
-    m_settings.m_accelHistory  = 1;
-    m_settings.m_useQrd        = true;
+    m_settings.m_modes                = 2;
+    m_settings.m_prior                = 1e-5f;
+    m_settings.m_accelHistory         = 1;
+    m_settings.m_useQrd               = true;
+    m_settings.m_assistedCommandSlots = c_slots;
     m_settings.m_scaledPenalty = m_settings.m_externalOrigins = m_settings.m_freezeQualification = true;
     m_settings.m_requireFullRank                                                                 = false;
     m_calibration.m_indices                                                                      = { 0, 1 };
@@ -235,8 +297,25 @@ inline loPredCtrlAcc_operational::loPredCtrlAcc_operational() : MagAOXApp( MAGAO
 inline loPredCtrlAcc_operational::~loPredCtrlAcc_operational() noexcept
 {
     m_shutdown = true;
-    m_output.stop();
+    stopOutput();
     shmimMonitorT::appShutdown();
+}
+
+inline bool loPredCtrlAcc_operational::stopOutput()
+{
+    m_output.stop();
+    if( m_outputThread.joinable() )
+        m_outputThread.join();
+    return m_output.status().m_zeroConfirmed;
+}
+
+inline void loPredCtrlAcc_operational::outputThreadStart( loPredCtrlAcc_operational *app )
+{
+    app->m_outputThreadID = syscall( SYS_gettid );
+    // Wait for threadStart to finish priority and cpuset placement, as dmSpeckle and accelSim do.
+    while( app->m_outputThreadInit && !app->m_shutdown )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    app->m_output.work(); // Runs until stopOutput(), including the final own-channel zero.
 }
 
 inline void loPredCtrlAcc_operational::setupConfig()
@@ -253,6 +332,8 @@ inline void loPredCtrlAcc_operational::setupConfig()
     add( "parameters", "qrd", "bool", "Use QR-RLS for both independent models." );
     for( const auto &key : { "channelName", "modeCube", "mask", "calibration" } )
         add( "dm", key, "string", "Existing own auxiliary/calibration; calibration overrides modeCube/mask." );
+    add( "dm", "threadPrio", "int", "DM worker real-time priority [0,99], as dmSpeckle; 0 (default) is SCHED_OTHER." );
+    add( "dm", "cpuset", "string", "DM worker cpuset; empty (default) leaves placement unchanged." );
     add( "adc", "enabled", "bool", "Use upstream synchronized ADC inputs for the assisted model." );
     for( const auto &key : { "shmimName", "profile", "sync_device", "sync_property" } )
         add( "adc", key, "string", "Existing ADC source or existing upstream lock diagnostic." );
@@ -296,7 +377,10 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         config( m_modeCube, "dm.modeCube" );
         config( m_mask, "dm.mask" );
         config( m_calibrationFile, "dm.calibration" );
-        if( m_channel != "dm10disp10_aux" || m_syncopationTiming.empty() || shmimMonitorT::m_shmimName.empty() ||
+        config( m_outputThreadPrio, "dm.threadPrio" );
+        config( m_outputThreadCpuset, "dm.cpuset" );
+        if( m_channel.size() <= 4 || !m_channel.ends_with( "_aux" ) || m_outputThreadPrio < 0 ||
+            m_outputThreadPrio > 99 || m_syncopationTiming.empty() || shmimMonitorT::m_shmimName.empty() ||
             !std::isfinite( m_gain ) || std::abs( m_gain ) > 10 || !std::isfinite( m_inputTimeout ) ||
             m_inputTimeout <= 0 || m_inputTimeout > 1 || m_settings.m_modes < 1 || m_settings.m_modes > 2 ||
             accelHistory < 1 || accelHistory > 16 )
@@ -394,8 +478,8 @@ inline void loPredCtrlAcc_operational::loadCalibration()
         m_calibration.m_projection.cols() != shapes.rows() || m_calibration.m_projection.rows() != m_settings.m_modes ||
         !m_calibration.m_projection.allFinite() )
         throw std::invalid_argument( "Missing complete calibrated DM synthesis/projection" );
-    m_pixels.assign( shapes.rows(), 0 );
     m_copiedCommand = DDSPC::Matrix::Zero( m_settings.m_modes, 1 );
+    m_appliedSlots  = DDSPC::Matrix::Zero( m_settings.m_modes, c_ring );
 }
 
 inline void loPredCtrlAcc_operational::resetModels()
@@ -407,11 +491,15 @@ inline void loPredCtrlAcc_operational::resetModels()
     m_matchedTargets = 0;
     for( auto mode : { DDSPC::ShadowMode::Standard, DDSPC::ShadowMode::AccelAssisted } )
         m_models->training( mode, m_learning );
-    for( auto &plan : m_plans )
-        plan = DDSPC::Matrix::Zero( m_settings.m_future * m_settings.m_modes, 1 );
+    m_plans[0]    = DDSPC::Matrix::Zero( m_settings.m_future * m_settings.m_modes, 1 );
+    m_plans[1]    = DDSPC::Matrix::Zero( m_settings.m_future * m_settings.m_modes * c_slots, 1 );
     m_pending     = {};
     m_havePending = false;
     m_wfsCounter  = 0;
+    std::lock_guard<std::mutex> lock( m_commandMutex );
+    m_slotPlan        = DDSPC::Matrix::Zero( m_settings.m_modes, m_settings.m_future * c_slots );
+    m_planBase        = -1;
+    m_decisionOrdinal = -1;
 }
 
 inline void loPredCtrlAcc_operational::prediction( const DDSPC::ShadowPrediction &sample ) noexcept
@@ -491,11 +579,27 @@ inline bool loPredCtrlAcc_operational::sensorHistory( const DDSPC::AdcBatch     
     return features.allFinite();
 }
 
+inline std::int64_t loPredCtrlAcc_operational::appliedSlots( DDSPC::Matrix &applied ) const
+{
+    applied.resize( m_settings.m_modes, 0 );
+    if( m_appliedOrdinal >= 0 && m_decisionOrdinal >= 0 && m_appliedOrdinal >= m_decisionOrdinal )
+    {
+        applied.resize( m_settings.m_modes, c_slots );
+        for( int j = 0; j < c_slots; ++j )
+            applied.col( j ) =
+                m_appliedSlots.col( std::max( m_appliedOrdinal - c_slots + 1 + j, m_decisionOrdinal ) % c_ring );
+    }
+    else if( m_commandKnown )
+        applied = m_copiedCommand.replicate( 1, c_slots ); // No slot history yet: the retained copy is held.
+    return m_appliedOrdinal;
+}
+
 inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
                                             std::uint64_t        counter,
                                             const DDSPC::Matrix &features,
                                             bool                 assistedValid,
-                                            const DDSPC::Matrix &acknowledged,
+                                            const DDSPC::Matrix &applied,
+                                            std::int64_t         ordinal,
                                             std::int64_t         now )
 {
     std::lock_guard<std::mutex> lock( m_modelMutex );
@@ -517,14 +621,25 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
                           ( selected == DDSPC::ShadowMode::Standard || assistedValid );
     if( probing )
         m_models->regularization( m_exploration.front().m_lambda );
+    const int modes = m_settings.m_modes, frames = m_settings.m_future;
     if( m_havePending )
     {
-        m_pending.m_appliedCommand = acknowledged;
-        m_pending.m_appliedValid   = acknowledged.size() == m_settings.m_modes;
+        // The standard single-rate input is the frame's mean slot command, equal to the held command in standard mode.
+        const bool known                 = applied.rows() == modes && applied.cols() == c_slots;
+        m_pending.m_appliedValid         = known;
+        m_pending.m_assistedAppliedValid = known;
+        if( known )
+        {
+            m_pending.m_appliedCommand = applied.rowwise().mean();
+            m_pending.m_assistedAppliedCommand.resize( modes * c_slots, 1 );
+            for( int j = 0; j < c_slots; ++j ) // Newest slot first, as ShadowRecord requires.
+                m_pending.m_assistedAppliedCommand.middleRows( ( c_slots - 1 - j ) * modes, modes ) = applied.col( j );
+        }
         m_models->process( m_pending );
     }
+    // Column c_slots*f+j is slot j of frame f after this decision; plans are newest-first frames (and slots).
     bool          selectedReady = false;
-    DDSPC::Matrix command       = m_gain * measurement;
+    DDSPC::Matrix plan          = ( m_gain * measurement ).replicate( 1, frames * c_slots );
     for( unsigned model = 0; model < 2; ++model )
     {
         const auto    mode = model ? DDSPC::ShadowMode::AccelAssisted : DDSPC::ShadowMode::Standard;
@@ -535,25 +650,48 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
         if( mode == selected )
             selectedReady = ready;
         if( m_predicting && mode == selected && ready )
-            command += m_plans[model].bottomRows( m_settings.m_modes );
+            for( int f = 0; f < frames; ++f )
+                for( int j = 0; j < c_slots; ++j )
+                    plan.col( c_slots * f + j ) +=
+                        model
+                            ? m_plans[1].middleRows( ( ( frames - 1 - f ) * c_slots + c_slots - 1 - j ) * modes, modes )
+                            : m_plans[0].middleRows( ( frames - 1 - f ) * modes, modes );
     }
     const bool numericalFault = m_models->status( selected ).m_reason == DDSPC::ShadowReason::NumericalFault;
     if( probing && !numericalFault )
     {
+        // Standard probes are held for the frame, as in loPredCtrl; assisted probes excite each slot independently.
         auto &stage = m_exploration.front();
-        for( int mode = 0; mode < m_settings.m_modes; ++mode )
-            command( mode ) += stage.m_sigma * m_distribution( m_generator );
+        for( int mode = 0; mode < modes; ++mode )
+        {
+            float draw = stage.m_sigma * m_distribution( m_generator );
+            for( int j = 0; j < c_slots; ++j )
+            {
+                if( j && selected == DDSPC::ShadowMode::AccelAssisted )
+                    draw = stage.m_sigma * m_distribution( m_generator );
+                plan( mode, j ) += draw;
+            }
+        }
         if( !--stage.m_count )
             m_exploration.erase( m_exploration.begin() );
     }
     if( !m_predicting || numericalFault )
-        command.setZero();
-    const DDSPC::Matrix image  = m_calibration.m_shapes * command;
-    const bool          finite = image.allFinite();
+        plan.setZero();
+    const bool finite = plan.allFinite();
     { //mutex scope
         std::lock_guard<std::mutex> commandLock( m_commandMutex );
+        if( m_slotRestart ) // The ordinal was read before a scheduler reset; re-anchor at the next decision.
+            ordinal = -1;
+        else if( ordinal >= 0 && m_decisionOrdinal >= 0 && ordinal != m_decisionOrdinal &&
+                 ordinal - m_decisionOrdinal != c_slots )
+            ++m_slotShifts;
+        m_slotRestart     = false;
+        m_decisionOrdinal = ordinal;
         if( finite )
-            std::copy( image.data(), image.data() + image.size(), m_pixels.begin() );
+        {
+            m_slotPlan = plan;
+            m_planBase = ordinal;
+        }
         m_assistedValid.store( assistedValid );
         m_candidateValid.store( finite && !numericalFault &&
                                 ( !m_predicting || selectedReady || probing || ( m_learning && m_gain != 0 ) ) );
@@ -579,21 +717,45 @@ inline bool loPredCtrlAcc_operational::outputValid() const
            ( ( m_assistedValid.load() && m_syncLocked.load() ) || m_mode == DDSPC::ShadowMode::Standard );
 }
 
-inline bool loPredCtrlAcc_operational::outputCandidate( std::span<float> pixels )
+inline bool loPredCtrlAcc_operational::outputCandidate( const synco::Request &request,
+                                                        const synco::Record  &schedule,
+                                                        std::span<float>      pixels )
 {
     std::lock_guard<std::mutex> lock( m_commandMutex );
-    if( pixels.size() != m_pixels.size() )
+    if( pixels.size() != std::size_t( m_calibration.m_shapes.rows() ) || !m_slotPlan.cols() )
         return false;
-    std::copy( m_pixels.begin(), m_pixels.end(), pixels.begin() );
+    m_steps                = schedule[synco::steps];
+    const auto   ordinal   = request.cycle * m_steps + request.step;
+    std::int64_t slot      = 0; // Unknown base: the decision's first slot, as with a held command.
+    const bool   sameEpoch = request.epoch == m_appliedEpoch && request.generation == m_appliedGeneration;
+    if( m_planBase >= 0 && sameEpoch && ordinal > m_planBase )
+        slot = std::min<std::int64_t>( ordinal - m_planBase - 1, m_slotPlan.cols() - 1 );
+    Eigen::Map<DDSPC::Matrix>( pixels.data(), pixels.size(), 1 ).noalias() =
+        m_calibration.m_shapes * m_slotPlan.col( slot );
     return true;
 }
 
-inline void loPredCtrlAcc_operational::copied( std::span<const float> pixels )
+inline void loPredCtrlAcc_operational::copied( const synco::CommitRecord &commit, std::span<const float> pixels )
 {
     std::lock_guard<std::mutex>     lock( m_commandMutex );
     Eigen::Map<const DDSPC::Matrix> image( pixels.data(), pixels.size(), 1 );
     m_copiedCommand.noalias() = m_calibration.m_projection * image;
     m_commandKnown            = m_copiedCommand.allFinite();
+    const auto ordinal        = commit[synco::cmdCycle] * m_steps + commit[synco::cmdStep];
+    if( commit[synco::cmdEpoch] != m_appliedEpoch || commit[synco::cmdGeneration] != m_appliedGeneration ||
+        m_appliedOrdinal < 0 || ordinal <= m_appliedOrdinal || ordinal - m_appliedOrdinal > c_ring )
+    {
+        // New scheduler incarnation or a long gap: restart slot history at this copy.
+        m_appliedEpoch      = commit[synco::cmdEpoch];
+        m_appliedGeneration = commit[synco::cmdGeneration];
+        m_planBase = m_decisionOrdinal = -1;
+        m_slotRestart                  = true;
+    }
+    else // Missed or discarded slots retain the previous copy at the destination.
+        for( auto skipped = m_appliedOrdinal + 1; skipped < ordinal; ++skipped )
+            m_appliedSlots.col( skipped % c_ring ) = m_appliedSlots.col( m_appliedOrdinal % c_ring );
+    m_appliedSlots.col( ordinal % c_ring ) = m_copiedCommand;
+    m_appliedOrdinal                       = ordinal;
 }
 
 inline int loPredCtrlAcc_operational::allocate( const dev::shmimT & )
@@ -613,13 +775,12 @@ inline int loPredCtrlAcc_operational::allocate( const dev::shmimT & )
 
 inline int loPredCtrlAcc_operational::processImage( void *source, const dev::shmimT & )
 {
-    DDSPC::Matrix acknowledged;
-    std::int64_t  now;
+    DDSPC::Matrix applied;
+    std::int64_t  now, ordinal;
     { //mutex scope
         std::lock_guard<std::mutex> commandLock( m_commandMutex );
-        now = synco::monotonicNs();
-        if( m_commandKnown )
-            acknowledged = m_copiedCommand;
+        now     = synco::monotonicNs();
+        ordinal = appliedSlots( applied );
     }
     const auto &metadata = *shmimMonitorT::m_imageStream.md;
     const auto  counter  = metadata.cnt0;
@@ -641,7 +802,7 @@ inline int loPredCtrlAcc_operational::processImage( void *source, const dev::shm
     if( metadata.write || counter != metadata.cnt0 )
         return 0;
     const bool valid = acceleration( features, now );
-    return step( measurement, counter, features, valid, acknowledged, now );
+    return step( measurement, counter, features, valid, applied, ordinal, now );
 }
 
 inline bool loPredCtrlAcc_operational::removed() const
@@ -719,7 +880,9 @@ inline int loPredCtrlAcc_operational::setupINDI()
                              "matched_assisted_rmse",
                              "matched_targets",
                              "transport_published",
-                             "transport_acks" } )
+                             "transport_acks",
+                             "transport_skipped",
+                             "slot_shifts" } )
         m_indiP_performance.add( pcf::IndiElement( key, 0.0 ) );
     if( registerIndiPropertyReadOnly( m_indiP_performance ) < 0 )
         return -1;
@@ -738,7 +901,7 @@ inline int loPredCtrlAcc_operational::setupINDI()
 
 inline int loPredCtrlAcc_operational::appStartup()
 {
-    if( m_shutdown || !m_models || m_pixels.empty() || setupINDI() < 0 )
+    if( m_shutdown || !m_models || !m_calibration.m_shapes.rows() || setupINDI() < 0 )
         return -1;
     try
     {
@@ -766,11 +929,25 @@ inline int loPredCtrlAcc_operational::appStartup()
         output.m_authorized = output.m_routingVerified = output.m_producerDefaults = true;
         output.m_width                                                             = m_calWidth;
         output.m_height                                                            = m_calHeight;
-        m_output.configure( output, m_channel, m_syncopationTiming, m_writeLeadUs, m_pixels.size() );
-        m_output.start( [this] { return outputValid(); },
-                        [this]( const synco::Request &, const synco::Record &, std::int64_t, std::span<float> pixels )
-                        { return outputCandidate( pixels ); },
-                        [this]( std::span<const float> pixels ) { copied( pixels ); } );
+        m_output.configure( output, m_channel, m_syncopationTiming, m_writeLeadUs, m_calibration.m_shapes.rows() );
+        m_output.start(
+            [this] { return outputValid(); },
+            [this](
+                const synco::Request &request, const synco::Record &schedule, std::int64_t, std::span<float> pixels )
+            { return outputCandidate( request, schedule, pixels ); },
+            [this]( const synco::CommitRecord &commit, std::span<const float> pixels ) { copied( commit, pixels ); },
+            false );
+        // The dmSpeckle worker pattern: framework thread with configured real-time priority and cpuset.
+        if( threadStart( m_outputThread,
+                         m_outputThreadInit,
+                         m_outputThreadID,
+                         m_outputThreadProp,
+                         m_outputThreadPrio,
+                         m_outputThreadCpuset,
+                         "dm",
+                         this,
+                         outputThreadStart ) < 0 )
+            throw std::runtime_error( "DM worker thread priority/cpuset setup failed" );
         m_output.initialize();
         SHMIMMONITOR_APP_STARTUP;
     }
@@ -790,7 +967,7 @@ inline int loPredCtrlAcc_operational::appLogic()
     const auto            output = m_output.status();
     DDSPC::ShadowStatus   standard, assisted;
     bool                  learning, predicting;
-    std::uint64_t         matched;
+    std::uint64_t         matched, shifts;
     std::array<double, 2> squared;
     { //mutex scope
         std::lock_guard<std::mutex> modelLock( m_modelMutex );
@@ -802,6 +979,10 @@ inline int loPredCtrlAcc_operational::appLogic()
         predicting = m_predicting;
         matched    = m_matchedTargets;
         squared    = m_matchedSquared;
+    }
+    { //mutex scope
+        std::lock_guard<std::mutex> commandLock( m_commandMutex );
+        shifts = m_slotShifts;
     }
     const auto now   = synco::monotonicNs();
     const auto last  = m_wfsReceipt.load();
@@ -860,7 +1041,9 @@ inline int loPredCtrlAcc_operational::appLogic()
                                 "matched_assisted_rmse",
                                 "matched_targets",
                                 "transport_published",
-                                "transport_acks" },
+                                "transport_acks",
+                                "transport_skipped",
+                                "slot_shifts" },
                               { double( standard.m_updates ),
                                 double( assisted.m_updates ),
                                 standard.m_originRmse,
@@ -869,7 +1052,9 @@ inline int loPredCtrlAcc_operational::appLogic()
                                 matched ? std::sqrt( squared[1] / matched ) : 0,
                                 double( matched ),
                                 double( output.m_published ),
-                                double( output.m_acknowledgements ) },
+                                double( output.m_acknowledgements ),
+                                double( output.m_skipped ),
+                                double( shifts ) },
                               INDI_OK );
     updatesIfChanged<std::string>( m_indiP_safety,
                                    { "output_state", "dm_write_enabled", "zero_confirmed" },
@@ -886,7 +1071,7 @@ inline int loPredCtrlAcc_operational::appLogic()
 
 inline int loPredCtrlAcc_operational::appShutdown()
 {
-    const bool removed = m_output.stop();
+    const bool removed = stopOutput();
     SHMIMMONITOR_APP_SHUTDOWN;
     m_adc.reset();
     if( !removed )
@@ -931,7 +1116,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
     if( enabled && !m_predicting )
     { //mutex scope
         std::lock_guard<std::mutex> commandLock( m_commandMutex );
-        std::fill( m_pixels.begin(), m_pixels.end(), 0 );
+        m_slotPlan.setZero();
     }
     if( enabled && !m_models->status( m_mode.load() ).m_ready &&
         !( m_learning && ( m_gain != 0 || !m_exploration.empty() ) ) )
@@ -959,7 +1144,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
     if( enabled && !m_predicting )
     { //mutex scope
         std::lock_guard<std::mutex> commandLock( m_commandMutex );
-        std::fill( m_pixels.begin(), m_pixels.end(), 0 );
+        m_slotPlan.setZero();
     }
     if( enabled && !m_output.request( true ) )
         return -1;

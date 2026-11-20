@@ -27,7 +27,9 @@ class OperationalConfigTest(unittest.TestCase):
         config = configuration(APP / 'loPredCtrlAcc.conf')
         self.assertEqual((APP / 'loPredCtrlAcc.conf').read_bytes(),
                          (APP / 'examples/operational/loPredCtrlAcc.conf').read_bytes())
-        self.assertEqual(config['dm']['channelName'], 'dm10disp10_aux')
+        self.assertEqual(config['dm']['channelName'], 'dm01disp09_aux')
+        self.assertEqual(config.getint('dm', 'threadPrio'), 20)
+        self.assertEqual(config.getfloat('syncopation', 'writeLeadUs'), 125)
         self.assertEqual(config['shmimMonitor']['shmimName'], 'aol1_modevalWFS')
         self.assertEqual(config['syncopation']['timingStream'], 'dmtweeter_synco_timing')
         simulator = configuration(ROOT / 'apps/accelSim/acc000.conf')

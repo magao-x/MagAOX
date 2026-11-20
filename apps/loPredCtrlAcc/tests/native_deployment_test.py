@@ -39,7 +39,7 @@ class NativeDeploymentTest(unittest.TestCase):
             self.assertEqual(config["adc"][key], original["adc"][key])
         self.assertTrue(config.getboolean("adc", "enabled"))
         self.assertEqual(config["shmimMonitor"]["shmimName"], "aol1_modevalWFS")
-        self.assertEqual(config["dm"]["channelName"], "dm10disp10_aux")
+        self.assertEqual(config["dm"]["channelName"], "dm01disp09_aux")
         self.assertNotIn("predict", config["parameters"])
         self.assertNotIn("framegrabber", [s.lower() for s in config.sections()])
 

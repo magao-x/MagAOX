@@ -254,8 +254,10 @@ TEST_CASE( "Real producer publishes independent prepared standard and assisted m
                       std::fill( pixels.begin(), pixels.end(), candidate );
                       return true;
                   },
-                  [&]( std::span<const float> pixels )
+                  [&]( const synco::CommitRecord &commit, std::span<const float> pixels )
                   {
+                      if( commit[synco::cmdVersion] != synco::productionVersion )
+                          slotsValid.store( false );
                       ++copiedCount;
                       if( pixels.front() == 0 )
                           copiedZero.store( true );
@@ -357,10 +359,59 @@ TEST_CASE( "Simulator same-sample disturbance uses tagged publication and indepe
     std::filesystem::remove_all( directory );
 }
 
-/** \brief Late, throwing, discarded or newly invalid candidates latch off and remove only this provider. */
+/** \brief An unavailable candidate skips its slot, retaining the last copy, without latching output off. */
+TEST_CASE( "Real producer skips slots it cannot prepare in time", "[operational-transport]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::SyncoOutput::work;
+    MagAOX::app::SyncoOutputState::skipped;
+#endif
+    // clang-format on
+    directory = std::filesystem::temp_directory_path() / ( "ddspc-private-skip-" + std::to_string( getpid() ) );
+    std::filesystem::create_directory( directory );
+    images.clear();
+    peaks.clear();
+    tick.store( 1000000000 );
+    accept.store( true );
+    make_image( "private_timing", synco::words, false );
+    make_image( "dm01disp09_aux", 4, true );
+    make_image( "dm01disp09_aux_ack", synco::ackWords, false );
+    schedule( tick.load() );
+    std::atomic<bool>        ready{ false };
+    MagAOX::app::SyncoOutput output;
+    output.configure( { true, true, 0, 0, 0, true }, "dm01disp09_aux", "private_timing", 30, 4 );
+    output.start( [] { return true; },
+                  [&]( const auto &, const auto &, std::int64_t, std::span<float> pixels )
+                  {
+                      std::fill( pixels.begin(), pixels.end(), .1f );
+                      return ready.load();
+                  },
+                  {},
+                  false );
+    std::thread worker( [&] { output.work(); } ); // Application-owned thread, as threadStart provides.
+    REQUIRE( output.request( true ) );
+    REQUIRE( wait_for( [&] { return output.status().m_skipped > 2; } ) );
+    REQUIRE_FALSE( output.status().m_fault );
+    REQUIRE( output.status().m_requested );
+    ready.store( true );
+    REQUIRE( wait_for( [&] { return output.status().m_acknowledged; } ) );
+    REQUIRE( output.request( false ) );
+    REQUIRE( wait_for( [&] { return output.status().m_zeroConfirmed; } ) );
+    output.stop();
+    worker.join();
+    REQUIRE( output.status().m_zeroConfirmed );
+    REQUIRE_FALSE( output.status().m_fault );
+    for( float value : images.at( "dm01disp09_aux" ).pixels )
+        REQUIRE( value == 0 );
+    images.clear();
+    std::filesystem::remove_all( directory );
+}
+
+/** \brief Throwing, discarded or newly invalid candidates latch off and remove only this provider. */
 TEST_CASE( "Real producer faults inhibit and remove their own contribution", "[operational-transport]" )
 {
-    const int failure = GENERATE( 0, 1, 2, 3 );
+    const int failure = GENERATE( 1, 2, 3 );
     directory = std::filesystem::temp_directory_path() / ( "ddspc-private-fault-" + std::to_string( getpid() ) );
     std::filesystem::create_directory( directory );
     images.clear();
@@ -379,8 +430,6 @@ TEST_CASE( "Real producer faults inhibit and remove their own contribution", "[o
     output.start( [&] { return qualified.load(); },
                   [&]( const auto &, const auto &, std::int64_t, std::span<float> pixels )
                   {
-                      if( failure == 0 )
-                          return false;
                       if( failure == 1 )
                           throw std::runtime_error( "Injected private callback failure" );
                       if( failure == 2 )

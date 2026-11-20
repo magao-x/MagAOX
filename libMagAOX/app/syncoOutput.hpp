@@ -36,8 +36,9 @@ struct SyncoOutputStatus
     bool m_requested{ false }, m_acknowledged{ false }, m_zeroConfirmed{ true },
         m_fault{ false }; ///< Operator intent, last copied contribution, removal and latched fault.
     std::uint64_t m_published{ 0 }, m_acknowledgements{ 0 },
-        m_rejected{ 0 };                ///< Committed payloads, exact receipts and failed bounds.
-    const char *m_reason{ "disabled" }; ///< Stable diagnostic text, without acquisition-thread string allocation.
+        m_rejected{ 0 };          ///< Committed payloads, exact receipts and failed bounds.
+    std::uint64_t m_skipped{ 0 }; ///< Observed slots not committed by their cutoff; synco retains the last copy.
+    const char   *m_reason{ "disabled" }; ///< Stable diagnostic text, without acquisition-thread string allocation.
 };
 
 /// Small deterministic output interlock reused by the two native providers and mock consumers.
@@ -77,6 +78,8 @@ class SyncoOutputState
     void submitted( std::span<const float> pixels /**< [in] Submitted own-channel values. */,
                     bool                   zero /**< [in] Explicit removal. */,
                     std::int64_t           now /**< [in] Actual completion. */ );
+    /// Count an observed slot that could not be committed by its cutoff; the consumer retains the last copy.
+    void skipped();
     /// Return whether a zero must be submitted before another active command.
     bool zero_needed() const;
     /// Return whether this owner can submit a new command.
@@ -202,6 +205,10 @@ inline void SyncoOutputState::submitted( std::span<const float> pixels, bool zer
     m_status.m_zeroConfirmed = false;
     ++m_status.m_published;
 }
+inline void SyncoOutputState::skipped()
+{
+    ++m_status.m_skipped;
+}
 inline bool SyncoOutputState::zero_needed() const
 {
     return m_initialZero || ( !m_status.m_requested && !m_status.m_zeroConfirmed );
@@ -235,7 +242,7 @@ class SyncoOutput : protected dev::dmSyncopationProducer<SyncoOutput>
     std::function<bool()> m_qualified; ///< Read current application eligibility without acquiring output intent.
     std::function<bool( const synco::Request &, const synco::Record &, std::int64_t, std::span<float> )>
         m_candidate; ///< Copy-only prepared image callback; never fits a model.
-    std::function<void( std::span<const float> )>
+    std::function<void( const synco::CommitRecord &, std::span<const float> )>
         m_copied; ///< Optional owner notification after an exact copied acknowledgement; no physical-application claim.
     /// Own base poll/publish calls; no independent slot clock is generated.
     void run();
@@ -250,11 +257,17 @@ class SyncoOutput : protected dev::dmSyncopationProducer<SyncoOutput>
                     double                   leadUs /**< [in] Existing producer lead setting. */,
                     std::size_t              pixels /**< [in] Calibrated full image. */ );
     /// Start only a local producer thread; strict shadow builds never start it or attach streams.
+    /** With ownThread false the application runs work() on its own framework thread, e.g. one started by
+     * MagAOXApp::threadStart with a configured real-time priority and cpuset.
+     */
     void start( std::function<bool()> qualified /**< [in] Current input/model gate. */,
                 std::function<bool( const synco::Request &, const synco::Record &, std::int64_t, std::span<float> )>
                     candidate /**< [in] Copy an already prepared exact-slot image. */,
-                std::function<void( std::span<const float> )> copied =
-                    {} /**< [in] Optional nonblocking notification of the copied own contribution. */ );
+                std::function<void( const synco::CommitRecord &, std::span<const float> )> copied =
+                    {} /**< [in] Optional nonblocking notification of the copied commit and own contribution. */,
+                bool ownThread = true /**< [in] Start an internal std::thread; false defers to work(). */ );
+    /// Run the producer loop on the caller's thread after start(..., false); returns after stop() completes removal.
+    void work();
     /// Prepare an authorized own-channel zero after an explicit learning request; does not enable correction.
     bool initialize();
     /// Explicit INDI intent; startup always remains off.
@@ -291,7 +304,8 @@ inline void SyncoOutput::configure(
 inline void SyncoOutput::start(
     std::function<bool()>                                                                                qualified,
     std::function<bool( const synco::Request &, const synco::Record &, std::int64_t, std::span<float> )> candidate,
-    std::function<void( std::span<const float> )>                                                        copied )
+    std::function<void( const synco::CommitRecord &, std::span<const float> )>                           copied,
+    bool                                                                                                 ownThread )
 {
     std::lock_guard<std::mutex> lock( m_mutex );
     if( m_thread.joinable() )
@@ -305,9 +319,16 @@ inline void SyncoOutput::start(
         m_stop.store( false );
         m_running.store( true );
         m_shutdown = false;
-        m_thread   = std::thread( &SyncoOutput::run, this );
+        if( ownThread )
+            m_thread = std::thread( &SyncoOutput::run, this );
     }
+#else
+    static_cast<void>( ownThread );
 #endif
+}
+inline void SyncoOutput::work()
+{
+    run();
 }
 inline bool SyncoOutput::initialize()
 {
@@ -371,7 +392,7 @@ inline void SyncoOutput::run()
             {
                 try
                 {
-                    m_copied( m_pixels );
+                    m_copied( commit, m_pixels );
                 }
                 catch( ... )
                 {
@@ -459,11 +480,13 @@ inline void SyncoOutput::run()
             haveRequest = true;
         const auto decision = synco::monotonicNs();
         if( haveRequest && decision >= pending.cutoffNs )
-        {
+        { //mutex scope
+            // A late slot is skipped, not faulted: synco retains the last copied contribution for it.
             std::lock_guard<std::mutex> lock( m_mutex );
-            m_state->fault( "expired_slot_zero_pending" );
+            m_state->skipped();
             haveRequest = false;
         }
+        bool published = false;
         if( haveRequest )
         {
             synco::Record schedule{};
@@ -513,15 +536,18 @@ inline void SyncoOutput::run()
                 }
                 if( m_state->validate( m_pixels, zero ) )
                 {
-                    if( syncopationPublish( m_pixels.data(), pending, m_source ) )
+                    published = syncopationPublish( m_pixels.data(), pending, m_source );
+                    if( published )
                         m_state->submitted( m_pixels, zero, synco::monotonicNs() );
                     else
-                        m_state->fault( "publication_failed_zero_unconfirmed" );
+                        m_state->skipped(); // Cutoff passed or the slot was revoked; transport loss faults in poll.
                     haveRequest = false;
                 }
             }
         }
-        std::this_thread::sleep_for( std::chrono::microseconds( 20 ) );
+        // Poll promptly, as dmSpeckle does; after a commit the next slot is checked at once.
+        if( !published )
+            std::this_thread::sleep_for( std::chrono::microseconds( 10 ) );
     }
     m_shutdown = true;
     syncopationClose();
