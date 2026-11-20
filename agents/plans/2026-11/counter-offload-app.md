@@ -431,7 +431,7 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
 
 **2026-11-19: RTC build.** The user built it on the RTC; it compiles and all unit test cases pass. The bench run is next.
 
-## Calibrate Change: Averaged PSDs and Full Propagation (planned 2026-11-20, not implemented)
+## Calibrate Change: Averaged PSDs and Full Propagation (implemented 2026-11-20, not yet built or tested)
 
 ### Request (user, 2026-11-20)
 "It takes about 10 seconds for any change in counterOffload parameters to propagate through to the clpsds. We need to 1. change to using the clpsds (10-sec avg) instead of the raw psds, and we need to wait until the effect has propagated through before we evaluate the cost of any combination of parameters."
@@ -481,3 +481,14 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
   - The defaults and help text for `psds.shmimName`, `settleS`, `nAverage` and `timeoutS`.
   - Docs, example config and the CSV description.
   - Tests: the existing gating test still applies; check the default values.
+
+### Implementation Log
+**2026-11-20: implemented.**
+- **Wait time:** `measure()` now sets `m_psdAfterNs = now + settleS`, with no `1/df` term.
+- **Defaults:**
+  - `psds.shmimName` is `aol1_clpsds`;
+  - `settleS` 11 s, `nAverage` 3, `timeoutS` 5 s;
+  - validation is unchanged (`nAverage` ≥ 2, `timeoutS` ≥ 1).
+- **Help text, docs and example config:** updated. The docs explain the 10.5 s figure, note that `fomStd` is a stability check, and say to change `settleS` if modalPSDs' `psdAvgTime` or `psdTime` changes.
+- **Test:** a new section checks the three defaults.
+- **Instance config on the RTC:** an instance config that copied the earlier example block sets the old values (`aol1_raw_clpsds`, 6, 0.5, 15). Remove those lines or update them.

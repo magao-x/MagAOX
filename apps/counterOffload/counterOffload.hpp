@@ -160,13 +160,13 @@ class counterOffload : public MagAOXApp<true>,
 
     int m_modeMax{ 0 }; ///< Number of PSD modes summed.  0 uses the offloader's numModes.
 
-    int m_nAverage{ 6 }; ///< Raw PSDs averaged for each evaluation, at least 2.
+    int m_nAverage{ 3 }; ///< Settled averaged PSDs, published 0.5 s apart, averaged for each evaluation, at least 2.
 
     int m_baselineEvery{ 5 }; ///< Re-measure the gain-0 baseline before every this many evaluations.
 
-    double m_settleS{ 0.5 }; ///< Settling time after a change, in addition to one PSD window, s.
+    double m_settleS{ 11 }; ///< Wait after a change before PSDs are collected; covers the modalPSDs average, s.
 
-    double m_timeoutS{ 15 }; ///< Longest wait for the PSDs of one evaluation, after settling, s.
+    double m_timeoutS{ 5 }; ///< Longest wait for the PSDs of one evaluation, after settling, s.
 
     double m_abortRatio{ 3 }; ///< Abort when an evaluation exceeds this multiple of the baseline.
 
@@ -388,7 +388,7 @@ class counterOffload : public MagAOXApp<true>,
      */
     int allocate( const psdShmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-    /// Collect the band power of a new raw PSD while a calibration evaluation is waiting for it.
+    /// Collect the band power of a new PSD while a calibration evaluation is waiting for it.
     /**
      * \returns 0 always
      */
@@ -741,7 +741,7 @@ inline void counterOffload::setupConfig()
                 "nAverage",
                 false,
                 "int",
-                "Raw PSDs averaged for each evaluation, at least 2.  Default is 6." );
+                "Settled averaged PSDs averaged for each evaluation, at least 2.  Default is 3." );
 
     config.add( "calibrate.baselineEvery",
                 "",
@@ -761,7 +761,8 @@ inline void counterOffload::setupConfig()
                 "settleS",
                 false,
                 "real",
-                "Settling time after a change, in addition to one PSD window, s.  Default is 0.5." );
+                "Wait after a change before PSDs are collected, s.  Must cover the modalPSDs average (psdAvgTime + "
+                "psdTime, 10.5 s by default).  Default is 11." );
 
     config.add( "calibrate.timeoutS",
                 "",
@@ -771,7 +772,7 @@ inline void counterOffload::setupConfig()
                 "timeoutS",
                 false,
                 "real",
-                "Longest wait for the PSDs of one evaluation after settling, s.  Default is 15." );
+                "Longest wait for the PSDs of one evaluation after settling, s.  Default is 5." );
 
     config.add( "calibrate.abortRatio",
                 "",
@@ -830,7 +831,7 @@ inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
 
     SHMIMMONITOR_LOAD_CONFIG( _config );
 
-    psdShmimMonitorT::m_shmimName = "aol1_raw_clpsds";
+    psdShmimMonitorT::m_shmimName = "aol1_clpsds";
 
     SHMIMMONITORT_LOAD_CONFIG( psdShmimMonitorT, _config );
 
@@ -1753,7 +1754,7 @@ inline bool counterOffload::measure( const calibParamsT &p, double &fom, double 
     std::unique_lock<std::mutex> lock( m_calibMutex );
 
     m_psdPowers.clear();
-    m_psdAfterNs           = synco::monotonicNs() + static_cast<int64_t>( ( 1.0 / m_df + m_settleS ) * 1e9 );
+    m_psdAfterNs           = synco::monotonicNs() + static_cast<int64_t>( m_settleS * 1e9 );
     const int64_t deadline = m_psdAfterNs + static_cast<int64_t>( m_timeoutS * 1e9 );
 
     while( m_psdPowers.size() < static_cast<size_t>( m_nAverage ) )

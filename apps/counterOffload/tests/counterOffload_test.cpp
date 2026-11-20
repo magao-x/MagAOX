@@ -45,6 +45,8 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_rampDurationUs;
     using counterOffload::m_ramps;
     using counterOffload::m_rampStartUs;
+    using counterOffload::m_settleS;
+    using counterOffload::m_timeoutS;
     using counterOffload::m_startGridUs;
     using counterOffload::m_syncopationTiming;
     using counterOffload::m_timeOffsetUs;
@@ -382,6 +384,13 @@ TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
         REQUIRE( app.validateConfig() == 0 );
         app.m_gain = 2.5;
         REQUIRE( app.validateConfig() < 0 );
+    }
+
+    SECTION( "calibration defaults wait out the 10.5 s modalPSDs average and take 3 samples" )
+    {
+        REQUIRE( app.m_settleS == 11 );
+        REQUIRE( app.m_nAverage == 3 );
+        REQUIRE( app.m_timeoutS == 5 );
     }
 
     SECTION( "calibration settings are checked" )
