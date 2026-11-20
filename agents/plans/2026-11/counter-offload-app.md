@@ -576,3 +576,15 @@ File: `counterOffload_calib_20261120T193905Z.csv`, copied to `~/Documents/MagAO-
   - New: clipping (command only; `A` anti-windup and recovery; no count within the limit).
   - Validation: `calibrate.leak` 0 and `maxCommand` 0 are rejected; the defaults are checked.
 - **Behaviour change.** With `leak` 0 in normal operation, `A` now saturates at `maxCommand` instead of growing, and the app warns. Continued operation should use `leak` > 0.
+
+**2026-11-20 bench: gain 0.8, leak 0.001 → `stats.clipped` = 47697.**
+- `clipped` counts slots since the app started in which the command or `A` was clipped, so the rate matters more than the total. 47697 slots is about 6 s of slots at 8 kHz.
+- **Expected size of `A`.**
+  - With leak 0.001 per slot at 8 kHz, `A` decays with τ = 1/(0.001 × 8000) = 125 ms. At 250 Hz that is about 31 offloads.
+  - If successive offloads have the same sign, `A` approaches 0.8 × 31 ≈ 25 times one offload step. Any actuator whose single-step offload exceeds 0.5/25 = 0.02 then holds `A` at the 0.5 clip level.
+  - If the offloads have zero mean, `A` stays near √31 × 0.8 ≈ 4.5 steps.
+- **Requested from the user:**
+  1. the `clipped` / `published` rate over ~10 s;
+  2. the peak |`dm01disp08_aux`| (pinned at 0.5?);
+  3. the peak |`aol0_tweeterOffload`| of one offload;
+  4. whether `aol0_modevalDM` drifts steadily one way (persistent offloading, which would also indicate a loop interaction).
