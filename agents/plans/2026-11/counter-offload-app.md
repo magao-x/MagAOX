@@ -271,7 +271,7 @@ Checks for the first RTC build:
 - **Woofer actuator clipping (`actLim`)** in t2wOffloader is not reflected in Δ (Part 1 limitation).
 - **Possible later additions:** telemetry and a handbook page.
 
-## Calibrate Mode (planned 2026-11-19, not implemented)
+## Calibrate Mode (planned 2026-11-19, questions answered, not implemented)
 
 ### Request (user, 2026-11-19, condensed)
 Tune the ramp so that the wavefront error spikes caused by offloading are mitigated. The figure of merit comes from the WFS closed-loop PSDs, published in real time in `aol1_clpsds`. The spike sits at (or very near) `t2wOffloader.offloadRate`, so integrate the PSD around that frequency and compare it across ramp parameters and with counter-offloading off. Plan a new `calibrate` mode of counterOffload that optimizes the ramp parameters to minimize this PSD spike.
@@ -301,28 +301,32 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
   - The calibration thread is separate and non-RT: low priority, on the same cpuset as the shmim monitor, never the producer's spare core.
   - It changes parameters only through the existing setters under `m_stateMutex`. The RT producer path is unchanged.
 - **Figure of merit.**
-  - `fom = Σ_modes Σ_bands Σ_{|f − k·f_off| ≤ halfWidth} PSD(f, mode)·df`.
+  - `fom = Σ_{mode < numModes} Σ_{|f − f_off| ≤ halfWidth} PSD(f, mode)·df`, the fundamental only (A-C4).
   - `f_off` comes from `t2wOffloader.fps`.
-  - Configurable: `halfWidthHz` (default 3 Hz, enough for the Hann main lobe at 1 Hz bins), the number of harmonics `nHarmonics` (default 1, the fundamental only), and the mode range `[modeMin, modeMax)` (default all modes).
-  - Each evaluation averages N raw PSDs (default 4) whose windows start after the parameter change.
+  - `halfWidthHz` defaults to 10 Hz and can be set by config and INDI, to match the spike width seen on the bench (A-C4).
+  - Modes: only the offloaded low-order modes `[0, numModes)` (A-C5). `numModes` is read from `t2wOffloader.numModes`, with an optional config override `modeMax`. This assumes PSD mode index k is offloaded mode k; see assumption CA1.
+  - **Averaging (A-C1): a score is never taken from a single PSD.**
+    - Each evaluation averages `nAverage` raw PSDs (default 6, minimum 2 enforced), all from windows that start after the parameter change, before integrating the band.
+    - Consecutive raw windows overlap by 50%, so 6 windows span about 3.5 s of data.
+    - Each CSV row also records the standard deviation of the per-window band integrals, as a noise estimate.
 - **Baseline.**
   - `fomOff` is measured with `gain = 0` at the start, and again every K points (default 5) to track drift.
   - Each point is reported as `ratio = fom / fomOff(interpolated)`.
 - **Optimizer: coordinate scans (recommended).**
   1. `rampStartUs` over a grid (default 0–400 µs, step 25), at the current duration and gain.
   2. `rampDurationUs` over a grid (default 100–600 µs, step 50), at the best start.
-  3. `gain` over a grid (default 0.5–1.2, step 0.1), at the best start and duration.
+  3. `gain` over a grid (default 0.5–1.5, step 0.1), at the best start and duration. Gain may exceed 1 (A-C3).
   4. Repeat 1–3 once over ±2 steps around the best point at half the step size.
   5. Parabolic fit through the best point and its neighbours, for a sub-grid estimate.
-  - Default run time: about 2 s per point and about 50 points, so a few minutes.
-  - Why coordinate scans: the objective is noisy, scans are robust, and each stage gives the operator a curve to inspect.
-  - Alternative: GSL Nelder–Mead (`gsl_multimin_fminimizer_nmsimplex2`). It needs fewer points but is fragile under noise.
+  - Default run time: about 4.5 s per point (1.5 s settle + 6 × 0.5 s) for about 65 points including baselines, so about 5 minutes.
+  - Coordinate scans were chosen (A-C6) because they are robust to noise and each stage gives a curve to inspect.
 - **End state.**
-  - If the best ratio is below `acceptRatio` (default 0.9), apply the best parameters and log them as suggested config values. The app never writes its config file.
-  - Otherwise restore the parameters from before calibration.
-  - Abort also restores the original parameters.
+  - On completion, apply the best parameters and log them at `LOG_INFO`, as suggested config values (A-C7). The app never writes its config file.
+  - If the best ratio is not below 1 (no improvement over off), still apply them, but also log a warning.
+  - Abort restores the parameters from before calibration.
 - **Safety.**
-  - Grid bounds are clamped to the INDI limits (`gain` ≤ 1 today; see Q-C3).
+  - Grid bounds are clamped to the INDI limits.
+  - The `gain` INDI and config maximum is raised from 1 to 2 (A-C3). That applies to normal operation too, so a gain above 1 is an operator choice.
   - Abort and restore if:
     - any point's `fom` exceeds `abortRatio × fomOff` (default 3);
     - no new raw PSD arrives within a timeout (loop opened, or modalPSDs stopped);
@@ -330,8 +334,17 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
     - the PSD geometry changes.
 - **Recording.**
   - Every point is logged as `text_log`: stage, parameters, fom, fomOff, ratio.
-  - The same values are written as one CSV row per point to a file in the app's log directory, for offline plotting.
-- **Config** (`[calibrate]` section): `psdStream` (`aol1_raw_clpsds`), `freqStream` (`aol1_freq`), `offloadDevice` (`t2wOffloader`), the band, mode, averaging and baseline settings above, grids, `acceptRatio`, `abortRatio`, `timeoutS`.
+  - One CSV per run, one row per point (A-C8), written to `calibrate.csvDir`, default `/home/xsup/counterOffload/`, created if missing. The file name is `<instance>_calib_<UTC timestamp>.csv`.
+  - Columns: time, stage, `rampStartUs`, `rampDurationUs`, `gain`, `f_off`, `numModes`, `halfWidthHz`, `nAverage`, fom, fom std, fomOff, ratio.
+- **Config** (`[calibrate]` section): `psdStream` (`aol1_raw_clpsds`), `freqStream` (`aol1_freq`), `offloadDevice` (`t2wOffloader`), the band, mode, averaging and baseline settings above, grids, `abortRatio`, `timeoutS`, `csvDir`.
+
+### Calibrate Key Assumptions
+- **CA1.** Mode index k in `aol1_raw_clpsds` is the same modal basis and order as t2wOffloader's offloaded mode k. Then the first `numModes` PSD rows are the offloaded modes. If not, the `modeMax` override (or a later explicit mode list) is needed. Please confirm.
+- **CA2.** `t2wOffloader.fps` is reachable over INDI from the RTC indiserver, as `dmtweeter-synco` is for t2wOffloader.
+- **CA3.** `numModes` and `t2wOffloader.fps` are constant during a run. A change aborts the run.
+
+### Calibrate Follow-ups
+- **Harmonics** (A-C4): add an `nHarmonics` option that sums bands at k·f_off below Nyquist, for higher-precision tuning. It is a small change to the band integral.
 
 ### Questions and Points of Clarification
 - **Q-C1. Raw or averaged PSDs?** You named `aol1_clpsds`. I recommend `aol1_raw_clpsds` for scoring: about 3 s per point instead of about 12 s, and it is published by the same app. `aol1_clpsds` would also work if the slower rate is acceptable, and could be an option.
@@ -344,6 +357,16 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
 - **Q-C6. Optimizer.** Coordinate scans (recommended) or Nelder–Mead?
 - **Q-C7. End state.** Automatically apply the best parameters when they beat `acceptRatio`, or always restore the original parameters and only report the result?
 - **Q-C8. Recording.** Is a per-run CSV plus `text_log` lines enough, or do you also want telemetry?
+
+### Answers
+- A-C1: using the raw PSDs is fine, but a single data point should never be used for scoring - there should definitely be an element of averaging, since there can be quite a bit of noise in those measurements. 
+- A-C2: yes, it runs on RTC
+- A-C3: yes, optimize those three while leaving the other two alone. yes, gain should be allowed to exceed 1.
+- A-C4: Use the fundamental mode only for now, but log this as a potential easy upgrade we could use for higher-precision tuning. the width of the PSD integral should be wider than 3 Hz, default to 10 but keep this as a tunable parameter so we can match what the PSDs show us on the bench.
+- A-C5: only the offloaded low-order modes.
+- A-C6: Coordinate scans
+- A-C7: apply the best parameters and record them in the log at the INFO level.
+- A-C8: per-run CSV is fine. It can be saved in a directory in /home/xsup
 
 ### Tests
 - **Unit tests:**
