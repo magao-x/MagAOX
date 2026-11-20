@@ -270,3 +270,90 @@ Checks for the first RTC build:
 - **Lowering the latency further** would need a smaller synco `readyLeadUs`, which requires requalification, or delaying the woofer write in t2wOffloader. Both are out of scope.
 - **Woofer actuator clipping (`actLim`)** in t2wOffloader is not reflected in Δ (Part 1 limitation).
 - **Possible later additions:** telemetry and a handbook page.
+
+## Calibrate Mode (planned 2026-11-19, not implemented)
+
+### Request (user, 2026-11-19, condensed)
+Tune the ramp so that the wavefront error spikes caused by offloading are mitigated. The figure of merit comes from the WFS closed-loop PSDs, published in real time in `aol1_clpsds`. The spike sits at (or very near) `t2wOffloader.offloadRate`, so integrate the PSD around that frequency and compare it across ramp parameters and with counter-offloading off. Plan a new `calibrate` mode of counterOffload that optimizes the ramp parameters to minimize this PSD spike.
+
+### Findings
+- **Producer:** `aol1_clpsds` comes from `apps/modalPSDs`. With `m_shmimBase` defaulting to `aol<loop>`, it publishes three streams:
+  - `aol1_freq`: 1 × nFreq frequency axis, `n·df` with `df = 1/psdTime`. That is 1 Hz at the default `psdTime` of 1 s.
+  - `aol1_raw_clpsds`: nFreq × nModes × depth circular buffer. One Hann-windowed PSD per window, published every `psdTime·(1 − overlap)` (0.5 s by default). The current plane is `cnt1`.
+  - `aol1_clpsds`: nFreq × nModes, the average of the raw PSDs over `psdAvgTime` (10 s by default).
+  - Each PSD is normalized so that Σ PSD·df equals the mode's variance over the window. The band integral is therefore directly a variance (WFS modal units²).
+- **Response time.** The averaged stream still holds pre-change data for about `psdAvgTime + psdTime` (about 11 s) after a parameter change. A raw PSD whose `writetime` is later than change time + `psdTime` + margin covers only post-change data. So scoring from `aol1_raw_clpsds` takes about 1.5 s to settle plus N × 0.5 s per evaluation. Scoring from `aol1_clpsds` takes at least 11 s per point.
+- **Spike frequency.** The real offload rate is `t2wOffloader.fps`, the read-only effective rate `dmRate/nAverage`. It can differ from the requested `offloadRate`: 300 Hz requested gives 296.3 Hz at 8 kHz. So the band should be centred on `t2wOffloader.fps`. An offload is a periodic step train, so its power can also show at harmonics 2f, 3f… below Nyquist (1 kHz at 2 kHz).
+- **Parameter degeneracy.** `timeOffsetUs` and `rampStartUs` both shift the ramp in time and are interchangeable. `leak` acts at low frequency, not at the offload rate. That leaves three free parameters: **`rampStartUs`, `rampDurationUs`, `gain`**. `gain = 0` gives a clean "counter off" reference without toggling `enable`, which now zeros the output and drops state.
+- **Quantization.** Commands are held for 125 µs slots, so the merit function versus `rampStartUs` will be step-like on that scale. Grid steps finer than about 25 µs are unlikely to resolve anything.
+- **Repo patterns.**
+  - A second input stream uses a tagged `dev::shmimMonitor<counterOffload, psdShmimT>`, as in `dmPokeCenter` / `dmPokeXCorr`.
+  - Remote INDI values are read with a SET-registered property, as in t2wOffloader's `fpsSource` / `syncoSource`.
+
+### Proposed Design
+- **Mode and state.**
+  - INDI `calibrate` switch (`start` / `abort`) and a read-only `calibration` property:
+    - `state`, `stage`, `point`;
+    - `fom`, `fomOff`, `ratio`;
+    - best `rampStartUs`, `rampDurationUs`, `gain`.
+  - It runs only while `enable` is on and the app is OPERATING. Otherwise it refuses with a log message.
+- **Calibration thread.**
+  - The calibration thread is separate and non-RT: low priority, on the same cpuset as the shmim monitor, never the producer's spare core.
+  - It changes parameters only through the existing setters under `m_stateMutex`. The RT producer path is unchanged.
+- **Figure of merit.**
+  - `fom = Σ_modes Σ_bands Σ_{|f − k·f_off| ≤ halfWidth} PSD(f, mode)·df`.
+  - `f_off` comes from `t2wOffloader.fps`.
+  - Configurable: `halfWidthHz` (default 3 Hz, enough for the Hann main lobe at 1 Hz bins), the number of harmonics `nHarmonics` (default 1, the fundamental only), and the mode range `[modeMin, modeMax)` (default all modes).
+  - Each evaluation averages N raw PSDs (default 4) whose windows start after the parameter change.
+- **Baseline.**
+  - `fomOff` is measured with `gain = 0` at the start, and again every K points (default 5) to track drift.
+  - Each point is reported as `ratio = fom / fomOff(interpolated)`.
+- **Optimizer: coordinate scans (recommended).**
+  1. `rampStartUs` over a grid (default 0–400 µs, step 25), at the current duration and gain.
+  2. `rampDurationUs` over a grid (default 100–600 µs, step 50), at the best start.
+  3. `gain` over a grid (default 0.5–1.2, step 0.1), at the best start and duration.
+  4. Repeat 1–3 once over ±2 steps around the best point at half the step size.
+  5. Parabolic fit through the best point and its neighbours, for a sub-grid estimate.
+  - Default run time: about 2 s per point and about 50 points, so a few minutes.
+  - Why coordinate scans: the objective is noisy, scans are robust, and each stage gives the operator a curve to inspect.
+  - Alternative: GSL Nelder–Mead (`gsl_multimin_fminimizer_nmsimplex2`). It needs fewer points but is fragile under noise.
+- **End state.**
+  - If the best ratio is below `acceptRatio` (default 0.9), apply the best parameters and log them as suggested config values. The app never writes its config file.
+  - Otherwise restore the parameters from before calibration.
+  - Abort also restores the original parameters.
+- **Safety.**
+  - Grid bounds are clamped to the INDI limits (`gain` ≤ 1 today; see Q-C3).
+  - Abort and restore if:
+    - any point's `fom` exceeds `abortRatio × fomOff` (default 3);
+    - no new raw PSD arrives within a timeout (loop opened, or modalPSDs stopped);
+    - `t2wOffloader.fps` changes during the run;
+    - the PSD geometry changes.
+- **Recording.**
+  - Every point is logged as `text_log`: stage, parameters, fom, fomOff, ratio.
+  - The same values are written as one CSV row per point to a file in the app's log directory, for offline plotting.
+- **Config** (`[calibrate]` section): `psdStream` (`aol1_raw_clpsds`), `freqStream` (`aol1_freq`), `offloadDevice` (`t2wOffloader`), the band, mode, averaging and baseline settings above, grids, `acceptRatio`, `abortRatio`, `timeoutS`.
+
+### Questions and Points of Clarification
+- **Q-C1. Raw or averaged PSDs?** You named `aol1_clpsds`. I recommend `aol1_raw_clpsds` for scoring: about 3 s per point instead of about 12 s, and it is published by the same app. `aol1_clpsds` would also work if the slower rate is acceptable, and could be an option.
+- **Q-C2. Host.** Is modalPSDs for loop 1 running on the RTC, the same host as counterOffload? shmims are local, so if it runs on ICC, calibrate needs another approach. Please check with `ls /milk/shm/aol1_*psds*` on the RTC.
+- **Q-C3. Parameters.**
+  - Optimize `rampStartUs`, `rampDurationUs` and `gain`, leaving `timeOffsetUs` at 0 and `leak` fixed?
+  - Should `gain` be allowed above 1 during calibration? Undershoot by the woofer or tweeter-response differences might want it.
+- **Q-C4. Band.** Fundamental only, or include harmonics? Is a ±3 Hz half-width right, given your PSD settings?
+- **Q-C5. Modes.** Sum all modes, or only the offloaded low-order modes, for example `[0, t2wOffloader.numModes)`? Fewer modes means less unrelated noise in the merit function.
+- **Q-C6. Optimizer.** Coordinate scans (recommended) or Nelder–Mead?
+- **Q-C7. End state.** Automatically apply the best parameters when they beat `acceptRatio`, or always restore the original parameters and only report the result?
+- **Q-C8. Recording.** Is a per-run CSV plus `text_log` lines enough, or do you also want telemetry?
+
+### Tests
+- **Unit tests:**
+  - band-integral math on synthetic PSD/frequency arrays, covering bin edges, harmonics above Nyquist, mode range and `df` weighting;
+  - raw-window selection by `writetime` relative to the change time;
+  - scan logic against a synthetic quadratic objective with noise, which should converge near the true minimum;
+  - parabolic refinement;
+  - abort and restore paths;
+  - accept or restore by ratio.
+- **Bench (operator):**
+  - Run calibrate at a small grid first, starting from the current defaults.
+  - Confirm `fomOff` is repeatable, which sets the noise floor.
+  - Then a full run. Check the CSV curves and compare the PSDs with the best parameters against gain 0.
