@@ -232,33 +232,28 @@ pipeline timing collection, optional observer threads, per-event telemetry,
 phase/publication statistics, main SDK/reader diagnostic associations and
 app-logic profiling. It retains the publication-clock qualification, exact
 combined/read-done matching, required reader-release queue, scheduling and
-copy-cutoff checks, provider results, timing maxima, health and aggregate
-`zero_test`/`zero_clock` readbacks. Turning diagnostics off does not relax
-readiness or safety checks. The operational primary monitor and
-`readerReleaseMonitor` worker continue running; they are separate from the
-optional timing observers.
+copy-cutoff checks, provider results, timing maxima and aggregate telemetry.
+The default INDI build exposes the operator controls plus `health` and the
+short `timing` summary. The primary monitor and `readerReleaseMonitor` worker
+continue running.
 
 Keep `diagnostics.maxEvents` positive: production also uses this capacity for
 the required reader-release queue, so zero is rejected even in minimal mode.
 The preset retains 20000 entries. Do not disable the controller's operational
 completion or reader-release streams to reduce diagnostic overhead.
 
-For a detailed investigation, set `diagnostics.windowSec=2` and restart synco
-through the normal operator procedure. The existing `diagnostics.combiner`,
-`diagnostics.camera` and `diagnostics.pipeline` switches select their optional
-observers when the window is positive; their defaults are true. Restore a zero
-window and restart after the capture when minimal production operation is
-desired. These settings do not change diagnostic capture in the camera, DM
-controller or other applications.
+For detailed INDI readbacks, use the
+[diagnostic INDI build](dmSyncopation.md#diagnostic-indi-build). To collect the
+optional timing populations, set `diagnostics.windowSec=2` and restart synco.
+The `diagnostics.combiner`, `diagnostics.camera` and `diagnostics.pipeline`
+settings select their observers when the window is positive. Restore a zero
+window and restart for minimal collection.
 
-After restarting, verify `zero_test.diagnosticsEnabled`, `zero_phase.enabled`,
-`zero_publication.enabled` and `logic_timing.enabled` are all zero for minimal
-mode. The primary, camera, combiner and pipeline timing-quality properties also
-report `enabled=0`. These values describe collection, not scheduler readiness:
-`zero_clock`, scheduler counters and health still update during operation.
-Likewise, `reader_release_timing_quality.enabled=0` means its diagnostic
-aggregation is off; it does not mean the required reader-release worker or
-exact readiness checks are off. These mode indicators are fixed at startup.
+In the diagnostic build with a zero window, `zero_test.diagnosticsEnabled`,
+`zero_phase.enabled`, `zero_publication.enabled` and `logic_timing.enabled`
+report zero. The timing-quality `enabled` fields likewise describe optional
+collection. Publication-clock qualification and exact reader-release checks
+continue to run, and `zero_clock`, scheduler counters and health remain live.
 
 For managed dmSpeckle, configure its DM channel as the mapped auxiliary source
 and set the shared timing stream:
@@ -354,7 +349,7 @@ allow the DM trigger. Do not modify the managed source through another app
 callback or an independent zero/trigger path. Generate the next image in
 private storage while a source commitment remains outstanding.
 
-The read-only `production` INDI property reports passive copies/skips and
+In the diagnostic INDI build, `production` reports passive copies/skips and
 `accepted0`, `missing0`, `rejected0`, and corresponding indices in configured
 destination order. Accepted counts mean private snapshots; they are separate
 from destination-copy completion and DM delivery. Shared scheduler counters
@@ -370,7 +365,9 @@ production state, rate and publications, rather than a hypothetical shadow rate.
 
 ## Capture the running production setup
 
-Keep synco enabled and tweeterSpeck modulating with the settings being tested.
+The capture below uses the
+[diagnostic INDI build](dmSyncopation.md#diagnostic-indi-build). Keep synco
+enabled and tweeterSpeck modulating with the settings being tested.
 Use this read-only block from anywhere inside the MagAOX checkout. It captures
 120 seconds of telemetry after the before-snapshots finish; the bounded
 before/after queries add to the total wall time. It saves the current synco and

@@ -45,10 +45,11 @@ force a clean app rebuild and install before restarting synco:
 ```bash
 cd "$(git rev-parse --show-toplevel)" &&
 make -C apps/dmSyncopation clean &&
-make -C apps/dmSyncopation &&
-make -C apps/dmSyncopation install
+make -C apps/dmSyncopation CPPFLAGS=-DDMSYNCOPATION_DIAGNOSTIC_INDI=1 &&
+make -C apps/dmSyncopation CPPFLAGS=-DDMSYNCOPATION_DIAGNOSTIC_INDI=1 install
 ```
 
+The capture requires the [diagnostic INDI build](dmSyncopation.md#diagnostic-indi-build).
 The installed binary must expose `zero_test.labelVersion=9`,
 `zero_test.targetEndpoint=1` and `zero_test.idealPublisher=1`; an older
 coordinated-trial binary does not have the current progress/reporting interface.

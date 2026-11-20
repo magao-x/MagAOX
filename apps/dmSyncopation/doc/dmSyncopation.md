@@ -17,11 +17,9 @@ capture are disabled. Set `diagnostics.windowSec=2` and restart for detailed
 diagnostics. Keep `diagnostics.maxEvents` positive because it also sizes the
 required production reader-release queue. See the
 [production configuration](production-providers.md#configuration) for details.
-In minimal mode, `zero_test.diagnosticsEnabled`, `zero_phase.enabled`,
-`zero_publication.enabled` and `logic_timing.enabled` report zero. Diagnostic
-quality `enabled` fields describe collectors, not operational workers: the
-primary monitor and reader-release worker remain active, including when
-`reader_release_timing_quality.enabled=0`.
+The [default INDI interface](#indi-interface) keeps the operator controls and
+summary readbacks. Use the [diagnostic INDI build](#diagnostic-indi-build) for
+the detailed readbacks in the qualification procedures.
 
 Unless explicitly identified as production or read-only diagnostics, the
 provider, timing, keepout and acquisition sections below describe the older
@@ -396,14 +394,43 @@ Production keeps its configured budgets fixed and reports observed maxima separa
 
 ## INDI interface
 
-Application properties belong to the configured INDI device: `dmtweeter_synco` in the earlier example, `dmtweeter-synco` in the first operator deployment. The ordinary MagAOX FSM and monitor/telemeter properties are also present. The FSM can remain `READY` while synchronization is acquiring or unarmed; use `health.reason` and the timing summary to determine scheduling state.
+The properties below belong to the configured INDI device, usually
+`dmtweeter-synco`. The standard MagAOX FSM, monitor and telemeter properties
+are also present. The FSM can remain `READY` during acquisition. Read
+`health.reason` for the current phase and `timing.active` for the primed step
+count in the production and legacy schedulers.
 
 | Property | Type/access | Elements and behavior |
 | --- | --- | --- |
-| `enable` | Switch, read/write | `toggle`: On requests acquisition/operation; Off cancels work and acknowledges after the current callback is quiescent. Source/destination values are retained. |
-| `reacquire` | Switch, read/write | `request`: On invalidates the schedule and resets acquisition/feedback; the switch returns Off. It does not zero contributions or enable a disabled app. |
-| `settings` | Number, read/write while disabled | `steps`, `maxCadenceHz`, `keepoutUs`, `guardUs`, `step0LeadUs`. Supply one or more named elements; the update is validated and applied together. |
-| `timing` | Number, read-only | Main/camera/planned rate, requested/active/feasible counts, delivery/miss/fault/cache counters and maximum snapshot/copy durations, detailed below. |
+| `enable` | Switch, read/write | `toggle` requests acquisition and operation when On. Off acknowledges after the current callback quiesces. Both source and destination retain their last values. |
+| `reacquire` | Switch, read/write | `request` invalidates the schedule and resets acquisition when On, then returns Off. |
+| `settings` | Number, read/write while disabled | `steps` and `maxCadenceHz`. The legacy scheduler also exposes `keepoutUs`, `guardUs` and `step0LeadUs`. Finite trials add `durationSec`. Named elements are validated and applied together. |
+| `timing` | Number, read-only | Reference, planned and confirmed rates (`mainHz`, `plannedHz`, `deliveredHz`), step counts (`requested`, `active`, `feasible`) and skip count (`missed`). `faults` counts legacy scheduler invalidations. |
+| `health` | Text, read-only | Current phase (`reason`), latched fault (`lastFault`) and operating `mode`. |
+
+After changing `settings` while disabled, enable again to acquire a new schedule.
+
+### Diagnostic INDI build
+
+Clean and rebuild from the repository root to restore the diagnostic readbacks.
+
+```bash
+make -C apps/dmSyncopation clean
+make -C apps/dmSyncopation CPPFLAGS=-DDMSYNCOPATION_DIAGNOSTIC_INDI=1
+```
+
+Use the same `CPPFLAGS` for the install target. To return to the operator
+interface, clean and rebuild without the define. The build flag selects
+which properties are published. Runtime `diagnostics.windowSec` and observer
+settings still govern data collection and telemetry.
+
+The diagnostic build restores the extended `timing` fields, plus
+`health.periodSource`, `primary`, `combined`, `timingStream` and `mapping`.
+It also exposes the applicable producer, reader, main-export, zero-test and
+logic-profile properties and the cadence and simulation properties below.
+
+| Property | Type/access | Elements and behavior |
+| --- | --- | --- |
 | `primary_timing` | Number, read-only | Independent publication and receipt interval statistics, detailed below. Durations are seconds, not the microseconds used by the existing `timing` diagnostic elements. |
 | `primary_timing_quality` | Number, read-only | Collection/window/queue validity and cumulative observation-quality counts, detailed below. |
 | `primary_interval_pairs` | Number, read-only | Ordered primary publication-interval excursions, conditional successors and two-interval sums; durations are seconds. |
@@ -427,7 +454,6 @@ Application properties belong to the configured INDI device: `dmtweeter_synco` i
 | `simulation_main_wait_trace` | Number, read-only | Bounded delayed-main provenance FIFO coverage and losses in pipeline shadow mode. |
 | `simulation_estimator` | Number, read-only | Triggered estimator pre/post history, export coverage and losses. |
 | `simulation_cadence` | Number, read-only | Long-baseline cadence qualification, exact-period display, endpoint coverage and independent primary/refresh ages. |
-| `health` | Text, read-only | `reason`, `lastFault`, `periodSource`, `primary`, `combined`, `timingStream`, `mapping`, `mode`. Current phase/reason, latched fault, selected period reference and resolved stream identities. Mode also identifies simulation when selected. |
 
 `settings` uses its named elements directly; there are no numeric `current`/`target` pairs. Updates while enabled, unknown elements, nonfinite values and invalid counts/ranges are rejected without changing the active configuration. Changing `steps` never changes source-image count. After an accepted disabled update, enable again to acquire a new schedule.
 
@@ -1368,11 +1394,11 @@ Main records freeze the scheduler enable state, subdivision count and diagnostic
 generation with the primary observation. Mode records also report changes when
 frames stop. Both enable edges, scheduler reset, source discontinuity and queue
 loss establish new generations. Capture sequences include dropped records so a
-consumer can detect loss before shared-ring publication. The read-only
-`main_timing` INDI property reports diagnostic `enabled`, `generation`, queued
-records, capture `dropped`, and `publishFailures` totals. Exhausted 64-bit
-sequences or generations stop capture rather than reusing an identity. These diagnostics do
-not change the meaning or timing of the existing INDI enable acknowledgement.
+consumer can detect loss before shared-ring publication. The diagnostic INDI
+build exposes read-only `main_timing` status for capture enable, generation,
+queued records, drops and publication failures. Exhausting a 64-bit sequence
+or generation stops capture. The existing INDI enable acknowledgement retains
+its scheduler-quiescence semantics.
 
 A configured loop timing monitor joins each positive main label to the SDK
 record's exact combined-stream inode, counter and raw publication timestamp in
