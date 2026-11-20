@@ -588,3 +588,8 @@ File: `counterOffload_calib_20261120T193905Z.csv`, copied to `~/Documents/MagAO-
   2. the peak |`dm01disp08_aux`| (pinned at 0.5?);
   3. the peak |`aol0_tweeterOffload`| of one offload;
   4. whether `aol0_modevalDM` drifts steadily one way (persistent offloading, which would also indicate a loop interaction).
+
+**2026-11-20 bench: windup fixed.**
+- With the gain-at-arrival and clip fix installed, the tweeter no longer winds up at gain 1. Before the fix it wound up at about 0.4.
+- Clipping still occurs (`stats.clipped` 47697 at gain 0.8, leak 0.001), but the clip now bounds the counter as intended.
+- **Open item:** calibration aborts on any clipping during a run. Check the clip rate at the calibration leak (0.0025) before starting a run.
