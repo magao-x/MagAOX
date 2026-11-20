@@ -5,6 +5,8 @@
 #ifndef accelSimDM_hpp
 #define accelSimDM_hpp
 
+#include <algorithm>
+#include <array>
 #include <optional>
 
 #include "accelSimDisturbance.hpp"
@@ -31,8 +33,10 @@ enum class dmState
 /** One thread (accelSim's DM output thread) owns this helper; it never publishes or manages output state. */
 class dmInjection
 {
-    std::optional<tipTiltBasis> m_basis;   ///< Validated precomputed angular responses and reusable command.
-    std::vector<float>          m_command; ///< Complete scaled contribution, allocated only during preparation.
+    std::optional<tipTiltBasis> m_basis;          ///< Validated precomputed angular responses and reusable command.
+    std::vector<float>          m_command;        ///< Complete scaled contribution, allocated only during preparation.
+    std::array<double, 2>       m_residual{};     ///< Relative weighted fit residual of each simulated axis.
+    size_t                      m_fitPixels{ 0 }; ///< Pixels with nonzero fitting weight.
 
   public:
     /// Construct uncalibrated, without stream access.
@@ -40,9 +44,10 @@ class dmInjection
 
     /// Prepare fixed DM-pupil geometry and the existing validated projector before acquisition starts.
     /** The mask only weights the 2x2 fit of mode coefficients to physical pointing; the output is always the full
-     * supplied modes times that mapping and is never spatially masked. An empty mask fits over the modes' own
-     * support (pixels where either mode is nonzero) with uniform weights; pixels outside the cube's support carry
-     * no modal surface and would otherwise bias the fit. The unchanged residual tolerance rejects a support over
+     * supplied modes times that mapping and is never spatially masked. An empty mask fits, with uniform weights, over
+     * the nominal entrance pupil of the simulation geometry (48-pitch diameter centered on (24.5,24.5)) where either
+     * mode is nonzero. Pixels outside that pupil have no physical tilt to match, and pixels where the modes are zero
+     * carry no modal surface; either would bias the fit. The unchanged residual tolerance rejects a support over
      * which the modes are not the requested physical tilt.
      */
     void prepare( const std::vector<double> &mode0 /**< [in] first surface-micron TT plane, native order */,
@@ -50,9 +55,15 @@ class dmInjection
                   const std::vector<double> &mask /**< [in] dmmask fitting weights, or empty for mode support */,
                   double                     residual /**< [in] accepted relative fit residual */ );
 
-    /// Return uniform fitting weights over the pixels where either mode is nonzero.
-    static std::vector<double> modeSupport( const std::vector<double> &mode0 /**< [in] first mode plane */,
-                                            const std::vector<double> &mode1 /**< [in] second mode plane */ );
+    /// Return uniform fitting weights over the nominal pupil pixels where either 50x50 mode is nonzero.
+    static std::vector<double> pupilSupport( const std::vector<double> &mode0 /**< [in] first mode plane */,
+                                             const std::vector<double> &mode1 /**< [in] second mode plane */ );
+
+    /// Return the relative fit residual of each simulated axis from the latest successful preparation.
+    const std::array<double, 2> &residual() const;
+
+    /// Return the number of pixels with nonzero fitting weight in the latest successful preparation.
+    size_t fitPixels() const;
 
     /// Return whether calibration has been successfully prepared.
     bool ready() const;
@@ -85,20 +96,34 @@ inline void dmInjection::prepare( const std::vector<double> &mode0,
         x[n] = ( double( n % 50 ) - 24.5 ) * 6.5 / 48;
         y[n] = ( double( n / 50 ) - 24.5 ) * 6.5 / 48;
     }
-    tipTiltProjection projection( mode0, mode1, x, y, mask.empty() ? modeSupport( mode0, mode1 ) : mask, residual );
+    const std::vector<double> weights = mask.empty() ? pupilSupport( mode0, mode1 ) : mask;
+    tipTiltProjection         projection( mode0, mode1, x, y, weights, residual );
     m_basis.emplace( 50, 50, projection.response()[0], projection.response()[1] );
+    m_residual  = projection.relativeResidual();
+    m_fitPixels = size_t( std::count_if( weights.begin(), weights.end(), []( double w ) { return w > 0; } ) );
     m_command.assign( 2500, 0 );
 }
 
-inline std::vector<double> dmInjection::modeSupport( const std::vector<double> &mode0,
-                                                    const std::vector<double> &mode1 )
+inline std::vector<double> dmInjection::pupilSupport( const std::vector<double> &mode0,
+                                                      const std::vector<double> &mode1 )
 {
-    if( mode0.size() != mode1.size() )
-        throw std::invalid_argument( "mismatched DM mode planes" );
-    std::vector<double> weights( mode0.size() );
-    for( size_t n = 0; n < mode0.size(); ++n )
-        weights[n] = mode0[n] != 0 || mode1[n] != 0;
+    if( mode0.size() != 2500 || mode1.size() != 2500 )
+        throw std::invalid_argument( "invalid DM calibration geometry" );
+    std::vector<double> weights( 2500 );
+    for( size_t n = 0; n < 2500; ++n ) // Same pupil center and 48-pitch diameter as the prepare() coordinates.
+        weights[n] =
+            std::hypot( double( n % 50 ) - 24.5, double( n / 50 ) - 24.5 ) <= 24 && ( mode0[n] != 0 || mode1[n] != 0 );
     return weights;
+}
+
+inline const std::array<double, 2> &dmInjection::residual() const
+{
+    return m_residual;
+}
+
+inline size_t dmInjection::fitPixels() const
+{
+    return m_fitPixels;
 }
 
 inline bool dmInjection::ready() const

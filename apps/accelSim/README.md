@@ -122,8 +122,8 @@ lock qualifies it. A numerically invalid command publishes a zero, counted as a
 removal (not active), until the next valid synthesis. Ordinary missed slots,
 unavailable transport and discarded receipts are retried without a fault reset.
 
-Calibration still requires a finite 50-by-50 TT pair, matching fitting mask,
-full-rank physical projection and the configured residual tolerance. File identity
+Calibration requires a finite 50-by-50 TT pair, a full-rank physical projection
+and the configured residual tolerance; `dm.mask` is optional (see "Fitting support"). File identity
 is checked while loading; acquisition uses the validated in-memory calibration.
 The source must already be a compatible CPU float32 50-by-50 auxiliary image,
 with its scheduler and acknowledgement stream available. The base's cooperative
@@ -254,8 +254,8 @@ its shutdown flag; it adds no scheduling, ownership or qualification policy.
 The current implementation decisions and test limits are recorded in
 [accelSim-simple-dm-output.md](../../agents/plans/2026-11/accelSim-simple-dm-output.md).
 The complete configuration template is [acc000.conf](acc000.conf). It names the
-deployed scheduler stream `dmtweeter_synco_timing`; fill in the matching absolute
-`dm.modeCube`/`dm.mask` paths. The timeline adds no configuration keys.
+deployed scheduler stream `dmtweeter_synco_timing`; fill in the absolute
+`dm.modeCube` path and, optionally, `dm.mask`. The timeline adds no configuration keys.
 Retain the deployed `synchro.shmimName` if WFS phase-reference acquisition is
 wanted; leaving it empty selects timer acquisition. The template preserves the
 8-kHz rate, seeds, ADC calibration, two-channel format and source depth 128.
@@ -373,6 +373,32 @@ the physical mapping for the chosen simulation axes. There are 244 nonzero
 pixels outside the mask in each mode; retaining
 the full supplied mode shapes is intentional. Unit tests use synthetic modes
 and explicitly registered coordinates independently of these local FITS files.
+
+### Fitting support (`dm.mask`)
+
+The mask has one role: it weights the samples of the fit above. It does not mask
+the output, which is always the full first two planes of `dm.modeCube` times the
+fitted mapping, and it does not rescale the modes.
+
+- **`dm.mask` set:** unchanged behavior. The FITS file is stat'ed, read (50x50,
+  one plane), checked for changes while loading, and its values are the weights.
+- **`dm.mask` empty (default):** the weights are 1 on the pixels of the nominal
+  entrance pupil (within 24 pitches of (24.5,24.5), the same geometry that sets the
+  physical scale) where either mode is nonzero, and 0 elsewhere. No mask file is
+  stat'ed or read.
+
+Uniform weights over the whole 50x50 grid are not appropriate. The fit would include
+pixels outside the pupil, where there is no physical tilt to match, and pixels where
+the modes are zero; both bias the mapping. The deployed `CMmodesDM.00` planes have
+244 nonzero pixels outside `dmmask`. The nominal pupil has 1,804 pixels and
+`dmmask` 1,715, so the two supports differ; how they differ has not been checked
+against the deployed files. Whichever support is used,
+`dm.maxRelativeResidual` must hold: if the modes are not the requested physical tilt
+over the nominal pupil, preparation fails with "TT modes cannot reconstruct the
+requested physical surface within tolerance" and DM output stays unavailable; then
+supply `dm.mask`. The startup log reports which support was used, its pixel count
+and both relative residuals; compare a masked and an unmasked start to confirm
+the mapping on the RTC.
 
 For these exact local modes, nominal geometry, and `dmmask`, the measured mapping
 is shown below for review; it is **not hardcoded** into the helper:
