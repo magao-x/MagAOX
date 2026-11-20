@@ -41,6 +41,7 @@ class qwpTracker_test : public qwpTracker
     using qwpTracker::m_lawDir;
     using qwpTracker::m_laws;
     using qwpTracker::m_qwp;
+    using qwpTracker::m_retryTol;
     using qwpTracker::m_tracking;
 
     /// Construct with a scratch directory for telemetry and the law tables.
@@ -174,6 +175,15 @@ class qwpTracker_test : public qwpTracker
         stagePos( 1, pos2 );
         stageState( 0, "READY" );
         stageState( 1, "READY" );
+    }
+
+    /// Simulate a move by the stage: OPERATING, then READY at a final position.
+    void move( int   n, /**< [in] QWP index */
+               float deg /**< [in] where the stage stops */ )
+    {
+        stageState( n, "OPERATING" );
+        stagePos( n, deg );
+        stageState( n, "READY" );
     }
 
     /// Request tracking on or off.
@@ -431,6 +441,7 @@ TEST_CASE( "qwpTracker configuration", "[qwpTracker]" )
         REQUIRE( app.m_kDevName == "stagek" );
         REQUIRE( app.m_filterDevName == "fwsci1" );
         REQUIRE( app.m_lawDir == "qwptrack" );
+        REQUIRE( app.m_retryTol == Approx( 0.5 ) );
     }
 
     SECTION( "overrides" )
@@ -440,7 +451,8 @@ TEST_CASE( "qwpTracker configuration", "[qwpTracker]" )
                                      "[qwp2]\nzero=200\nsign=1\ndevName=q2\n"
                                      "[k]\ndevName=kk\n"
                                      "[filter]\ndevName=fw\n"
-                                     "[law]\ndir=laws\n" ) == 0 );
+                                     "[law]\ndir=laws\n"
+                                     "[retry]\ntolerance=0.2\n" ) == 0 );
 
         REQUIRE( app.m_qwp[0].zero == Approx( 12.5 ) );
         REQUIRE( app.m_qwp[0].sign == -1 );
@@ -451,6 +463,7 @@ TEST_CASE( "qwpTracker configuration", "[qwpTracker]" )
         REQUIRE( app.m_kDevName == "kk" );
         REQUIRE( app.m_filterDevName == "fw" );
         REQUIRE( app.m_lawDir == "laws" );
+        REQUIRE( app.m_retryTol == Approx( 0.2 ) );
     }
 
     SECTION( "invalid sign" )
@@ -611,6 +624,57 @@ TEST_CASE( "qwpTracker tracks the K-mirror", "[qwpTracker]" )
 
         REQUIRE( app.m_qwp[0].nSent == 2 );
         REQUIRE( app.m_qwp[0].lastSent == Approx( 14 ) );
+    }
+
+    SECTION( "a stage that stops away from its target is sent it once more" )
+    {
+        app.stagesReady( 0, 0 );
+        app.kPos( 5 );
+        app.track( true );
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+
+        app.move( 0, 8 ); // missed 10
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 2 );
+        REQUIRE( app.m_qwp[0].lastSent == Approx( 10 ) );
+
+        app.move( 0, 8 ); // missed again: no further retry
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 2 );
+
+        // a new target re-arms the retry
+        app.kPos( 6 );
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 3 );
+        app.move( 0, 11 ); // missed 12
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 4 );
+        REQUIRE( app.m_qwp[0].lastSent == Approx( 12 ) );
+    }
+
+    SECTION( "a stage that stops within tolerance is not resent" )
+    {
+        app.stagesReady( 0, 0 );
+        app.kPos( 5 );
+        app.track( true );
+
+        app.move( 0, 10.4 );
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+    }
+
+    SECTION( "a miss after tracking stops is not resent" )
+    {
+        app.stagesReady( 0, 0 );
+        app.kPos( 5 );
+        app.track( true );
+
+        app.stageState( 0, "OPERATING" );
+        app.track( false );
+        app.stagePos( 0, 8 );
+        app.stageState( 0, "READY" );
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 1 );
     }
 
     SECTION( "a filter without a law holds, and a law becoming available re-targets without a K update" )

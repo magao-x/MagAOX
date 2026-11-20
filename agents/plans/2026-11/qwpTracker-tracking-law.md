@@ -209,7 +209,11 @@ Branch `ml/qwpTracker` (this app's feature branch; not yet merged to `dev`).
   QWP stays wrong until K moves enough to change its target.
 - **Fix (agreed 2026-11-20):** qwptrack commands a stage only when it is `READY`; targets computed while it is
   `OPERATING` stay pending and only the latest is sent once it stops. Tested by "a moving stage is not retargeted".
-- Not done (user deferred): a one-time resend when a stage settles more than 0.1 deg from the last command.
+- **Retry (agreed 2026-11-20):** when a stage goes OPERATING -> READY more than `[retry] tolerance` (default 0.5 deg,
+  matching `elliptecLowLevel` `motion.targetTolerance`, rather than the 0.1 deg first proposed, so moves the low level
+  reports complete are not resent) from its last command, with no newer target pending, that command is sent once
+  more and logged as a warning. A new command re-arms the retry; stopping tracking disarms it so a stop never moves a
+  stage. Tested by "a stage that stops away from its target is sent it once more" and its neighbors.
 - Follow-up outside qwptrack: retargeting during a move should be handled in `elliptecLowLevel` (stop then move, or
   hold the latest target until the move completes), since `elliptecCtrl` advertises retargeting. Confirm the cause
   against the `elliptecqwp` log (move ignored vs small-move stall).

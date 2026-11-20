@@ -44,7 +44,8 @@ namespace app
  * A QWP is 180 degree periodic, so each fast-axis target is sent as whichever of the two equivalent stage angles is
  * nearest the stage's current position.  Fast-axis angles are reported in [0, 180).  Targets are sent only to a
  * READY stage; a target that changes while a stage is moving is held and the latest is sent when it stops, since the
- * ELL21 mounts do not reliably accept a new target mid-move.
+ * ELL21 mounts do not reliably accept a new target mid-move.  A stage that stops more than `retry.tolerance` from its
+ * last command is sent that command once more.
  *
  * While tracking, targets follow `computeTargets()` on every K-mirror update.  When not tracking, targets are set
  * manually through the `qwp1` and `qwp2` properties.
@@ -94,6 +95,10 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
 
         float lastSent{ 0 }; ///< The last stage angle commanded, in degrees.
 
+        bool settled{ false }; ///< True when the stage went from OPERATING to READY and has not been checked yet.
+
+        bool retried{ false }; ///< True when `lastSent` has already been resent once, or must not be resent.
+
         int nSent{ 0 }; ///< The number of stage commands issued, for diagnostics and tests.
 
         pcf::IndiProperty cmd; ///< The outbound `position.target` command property for the stage.
@@ -133,6 +138,9 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
     std::string m_filterDevName{ "fwsci1" }; ///< The device name of the filter wheel selecting the tracking law.
 
     std::string m_lawDir{ "qwptrack" }; ///< The directory, relative to the calib directory, of the law tables.
+
+    /// The distance, in degrees, from the last command beyond which a stopped stage has missed its target.
+    float m_retryTol{ 0.5 };
 
     ///@}
 
@@ -260,7 +268,9 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
   protected:
     /// Compute tracking targets if needed, send pending targets to READY stages, and update FSM and telemetry.
     /** Takes `m_indiMutex`; the caller must not hold it.  Commands are sent after the mutex is released.  A stage that
-     * is moving (OPERATING) keeps its target pending, and receives only the latest target once it is READY.
+     * is moving (OPERATING) keeps its target pending, and receives only the latest target once it is READY.  A stage
+     * that has stopped more than `m_retryTol` from its last command, with no newer target pending, is sent that
+     * command once more.
      *
      * \returns 0 on success
      * \returns -1 if a stage command could not be sent
@@ -470,6 +480,18 @@ void qwpTracker::setupConfig()
                 "The directory, relative to the calib directory, holding the qwp_law_<filter>.csv tracking law "
                 "tables.  Default is 'qwptrack'" );
 
+    config.add(
+        "retry.tolerance",
+        "",
+        "retry.tolerance",
+        argType::Required,
+        "retry",
+        "tolerance",
+        false,
+        "float",
+        "The distance, in degrees, from its last command beyond which a stopped stage is sent that command once "
+        "more.  Default is 0.5, matching elliptecLowLevel motion.targetTolerance." );
+
     TELEMETER_SETUP_CONFIG( config );
 }
 
@@ -492,6 +514,7 @@ int qwpTracker::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_kDevName, "k.devName" );
     _config( m_filterDevName, "filter.devName" );
     _config( m_lawDir, "law.dir" );
+    _config( m_retryTol, "retry.tolerance" );
 
     TELEMETER_LOAD_CONFIG( _config );
 
@@ -760,8 +783,9 @@ qwpTracker::trackerState( bool tracking, stateCodes::stateCodeT stage1, stateCod
 
 int qwpTracker::updateStages()
 {
-    float tgt[2]  = { 0, 0 };
-    bool  send[2] = { false, false };
+    float tgt[2]   = { 0, 0 };
+    bool  send[2]  = { false, false };
+    bool  retry[2] = { false, false };
 
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
@@ -806,6 +830,21 @@ int qwpTracker::updateStages()
         {
             qwpStage &q = m_qwp[n];
 
+            // a stage that stopped away from its last command, with nothing newer to send, gets one more try
+            if( q.settled )
+            {
+                q.settled = false;
+
+                float d = wrap360( q.stagePos - q.lastSent );
+
+                if( q.haveSent && !q.pending && !q.retried && std::min( d, 360 - d ) > m_retryTol )
+                {
+                    q.pending  = true;
+                    q.haveSent = false;
+                    retry[n]   = true;
+                }
+            }
+
             // the ELL21 does not reliably accept a new target while moving, so only command a stopped stage
             if( !q.pending || !q.havePos || q.stageState != stateCodes::READY )
             {
@@ -823,6 +862,7 @@ int qwpTracker::updateStages()
 
             q.lastSent = s;
             q.haveSent = true;
+            q.retried  = retry[n];
             tgt[n]     = s;
             send[n]    = true;
         }
@@ -836,6 +876,12 @@ int qwpTracker::updateStages()
 
     for( int n = 0; n < 2; ++n )
     {
+        if( send[n] && retry[n] )
+        {
+            log<text_log>( m_qwp[n].devName + " stopped away from its target, resending " + std::to_string( tgt[n] ),
+                           logPrio::LOG_WARNING );
+        }
+
         if( send[n] && sendStageTarget( n, tgt[n] ) < 0 )
         {
             rv = -1;
@@ -919,7 +965,14 @@ int qwpTracker::stageStateUpdate( int n, const pcf::IndiProperty &ipRecv )
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    m_qwp[n].stageState = stateCodes::str2CodeFast( st );
+    stateCodes::stateCodeT code = stateCodes::str2CodeFast( st );
+
+    if( code == stateCodes::READY && m_qwp[n].stageState == stateCodes::OPERATING )
+    {
+        m_qwp[n].settled = true;
+    }
+
+    m_qwp[n].stageState = code;
 
     return 0;
 }
@@ -1124,6 +1177,7 @@ INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_tracking )( const pcf::IndiProperty &
         for( int n = 0; n < 2; ++n )
         {
             m_qwp[n].pending = false;
+            m_qwp[n].retried = true; // stopping must not move the stages, including by a retry
             m_qwp[n].fastTgt = m_qwp[n].fastCur;
             updateIfChanged( qwpProp( n ), "target", m_qwp[n].fastTgt );
         }
