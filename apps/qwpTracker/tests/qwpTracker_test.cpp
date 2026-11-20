@@ -590,6 +590,29 @@ TEST_CASE( "qwpTracker tracks the K-mirror", "[qwpTracker]" )
         REQUIRE( app.m_qwp[1].lastSent == Approx( 10 ) );
     }
 
+    SECTION( "a moving stage is not retargeted; it receives only the latest target when it stops" )
+    {
+        app.stagesReady( 0, 0 );
+        app.kPos( 5 );
+        app.track( true );
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+
+        app.stageState( 0, "OPERATING" );
+        app.kPos( 6 );
+        app.logic();
+        app.kPos( 7 );
+        app.logic();
+
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+        REQUIRE( app.m_qwp[1].nSent == 3 ); // QWP2 stayed READY and followed every update
+
+        app.stageState( 0, "READY" );
+        app.logic();
+
+        REQUIRE( app.m_qwp[0].nSent == 2 );
+        REQUIRE( app.m_qwp[0].lastSent == Approx( 14 ) );
+    }
+
     SECTION( "a filter without a law holds, and a law becoming available re-targets without a K update" )
     {
         app.stagesReady( 0, 0 );

@@ -42,7 +42,9 @@ namespace app
  * stage angle, `stage = zero + sign * fastAxis`, so that the stage apps deal only in mechanical angles.
  *
  * A QWP is 180 degree periodic, so each fast-axis target is sent as whichever of the two equivalent stage angles is
- * nearest the stage's current position.  Fast-axis angles are reported in [0, 180).
+ * nearest the stage's current position.  Fast-axis angles are reported in [0, 180).  Targets are sent only to a
+ * READY stage; a target that changes while a stage is moving is held and the latest is sent when it stops, since the
+ * ELL21 mounts do not reliably accept a new target mid-move.
  *
  * While tracking, targets follow `computeTargets()` on every K-mirror update.  When not tracking, targets are set
  * manually through the `qwp1` and `qwp2` properties.
@@ -256,8 +258,9 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
     ///@}
 
   protected:
-    /// Compute tracking targets if needed, send pending targets to ready stages, and update FSM and telemetry.
-    /** Takes `m_indiMutex`; the caller must not hold it.  Commands are sent after the mutex is released.
+    /// Compute tracking targets if needed, send pending targets to READY stages, and update FSM and telemetry.
+    /** Takes `m_indiMutex`; the caller must not hold it.  Commands are sent after the mutex is released.  A stage that
+     * is moving (OPERATING) keeps its target pending, and receives only the latest target once it is READY.
      *
      * \returns 0 on success
      * \returns -1 if a stage command could not be sent
@@ -803,9 +806,8 @@ int qwpTracker::updateStages()
         {
             qwpStage &q = m_qwp[n];
 
-            bool ready = ( q.stageState == stateCodes::READY || q.stageState == stateCodes::OPERATING );
-
-            if( !q.pending || !q.havePos || !ready )
+            // the ELL21 does not reliably accept a new target while moving, so only command a stopped stage
+            if( !q.pending || !q.havePos || q.stageState != stateCodes::READY )
             {
                 continue;
             }

@@ -198,3 +198,23 @@ Branch `ml/qwpTracker` (this app's feature branch; not yet merged to `dev`).
 - **mxlib caveat:** `readColumns` accepts a row with a missing column and a `nan` entry without error, so those cases
   are not unit-tested; the app still checks sizes and finiteness as `adcTracker` does. The export script validates the
   tables before they reach `calib`.
+
+## On-instrument Test Findings (2026-11-20)
+- Law selection behaved as designed on the instrument: hold on `CH4-875`, `unknown` while fwsci1 moved, resume on `i`.
+- QWP1 repeatedly missed its target (`qwp1.current` 90.00 vs `target` 92.41) with elliptecCtrl reporting
+  `move failed (stopped away from target)`. The stage log shows a new target arriving while the stage was still moving
+  (READY/OPERATING flip 0.05 ms apart) before each failure. The dummy-law plan's assumption that the ELL21 accepts a
+  new target while `OPERATING` does not hold reliably: `elliptecLowLevel` sends the new `ma` and replaces its expected
+  target, but the mount does not end there. Because qwptrack does not repeat an identical stage command, the missed
+  QWP stays wrong until K moves enough to change its target.
+- **Fix (agreed 2026-11-20):** qwptrack commands a stage only when it is `READY`; targets computed while it is
+  `OPERATING` stay pending and only the latest is sent once it stops. Tested by "a moving stage is not retargeted".
+- Not done (user deferred): a one-time resend when a stage settles more than 0.1 deg from the last command.
+- Follow-up outside qwptrack: retargeting during a move should be handled in `elliptecLowLevel` (stop then move, or
+  hold the latest target until the move completes), since `elliptecCtrl` advertises retargeting. Confirm the cause
+  against the `elliptecqwp` log (move ignored vs small-move stall).
+- Residual race: between sending to a READY stage and receiving its `OPERATING` state, a further target could be sent;
+  the window is one INDI round trip and `appLogic` runs at 1 Hz.
+- Separately observed: qwptrack fell to `NOTCONNECTED` on each tracking stop, meaning one stage was in a state other
+  than READY/HOMING/NOTHOMED/OPERATING; resolved by power cycling the stages. While tracking, `trackerState` reports
+  `OPERATING` regardless, which hid this (possible follow-up).
