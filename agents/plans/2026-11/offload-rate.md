@@ -153,7 +153,7 @@ Per A1 (Q1 = a):
 - **GUI build.** `offloadCtrlGUI` was built and installed from a clone on exao1. That clone first needed the INDI client libraries: `make -C INDI/liblilxml` and `make -C INDI/libcommon`.
 - **GUI check.** The input box reads "Offload Rate (Hz)".
 - **Bench result.** With synco on, `dmtweeter-avg.nAverage` changed from 8 to 32, and `t2wOffloader.fps` stayed at 250 Hz (8000 Hz DM rate / 32), as intended.
-- **Not yet recorded:** a direct rate measurement of `aol0_tweeterOffload` with synco on, and the switch back to synco off (`nAverage` returning to 8).
+- **Synco on/off switching.** The offload frame rate does not change when synco is switched on or off, and `nAverage` returns to 8 when synco is turned off. The offload rate is constant across synco state, as required (R2, R3).
 
 **Checks for the first build:**
 - `sendNewProperty` with a `uint32_t` value;
