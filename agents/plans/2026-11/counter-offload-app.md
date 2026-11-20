@@ -430,3 +430,35 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
   - Telemetry.
 
 **2026-11-19: RTC build.** The user built it on the RTC; it compiles and all unit test cases pass. The bench run is next.
+
+## Calibrate Change: Averaged PSDs and Full Propagation (planned 2026-11-20, not implemented)
+
+### Request (user, 2026-11-20)
+"It takes about 10 seconds for any change in counterOffload parameters to propagate through to the clpsds. We need to 1. change to using the clpsds (10-sec avg) instead of the raw psds, and we need to wait until the effect has propagated through before we evaluate the cost of any combination of parameters."
+
+### Findings
+- **What `aol1_clpsds` holds.** It is a single nFreq × nModes plane. It is the mean of the last `ceil(psdAvgTime / (psdTime·overlap))` raw PSDs (`modalPSDs.hpp:1356-1374`): 20 windows at the defaults (`psdAvgTime` 10 s, `psdTime` 1 s, overlap 0.5). It is republished with each new raw PSD, every 0.5 s.
+- **Fully propagated time.** The oldest window in the average starts `(N−1)·psdTime·overlap + psdTime` = 9.5 + 1 = **10.5 s** before the publish. So an averaged PSD contains only data taken after a change if it was published at least 10.5 s after the change, plus a small margin for computation. This matches the ~10 s seen on the bench.
+- **Why the current code is wrong for this stream.** It waits only one window (1/df = 1 s) plus `settleS` (0.5 s). On the averaged stream, the first PSDs it would accept still contain about 9 s of data from before the change.
+- **Averaging.** One fully propagated `aol1_clpsds` sample is already an average of 20 raw PSDs (about 10 s of data), which satisfies A-C1. Successive samples share 19 of 20 windows. So averaging several consecutive samples adds little, and their spread (`fomStd`) does not measure the noise.
+
+### Proposed Change
+1. **Stream.** Change the `psds.shmimName` default from `aol1_raw_clpsds` to `aol1_clpsds`. The PSD monitor code is unchanged: it is already a 2-D float stream with the same geometry.
+2. **Settling.** Replace "one window + `settleS`" with a single total wait, `settleS`, measured from the parameter change. Only PSDs published after `change + settleS` are collected.
+   - Default 11 s (10.5 s + 0.5 s margin). The log and docs explain how it follows from modalPSDs `psdAvgTime` and `psdTime`.
+   - Option (see Q-D1): read `psdAvgTime` and `psdTime` from modalPSDs over INDI, and compute the wait automatically.
+3. **Samples per evaluation.** Default `nAverage` 1: the first fully propagated averaged PSD.
+   - Relax the minimum from 2 to 1. The "never a single point" rule is met by modalPSDs' own 10 s average.
+   - If `nAverage` > 1, consecutive samples are taken every 0.5 s, as now.
+   - `fomStd` becomes the spread over those samples. It is 0 when `nAverage` = 1 and is documented as not a noise estimate.
+4. **Timeout.** `timeoutS` still counts from the end of settling. Default 5 s.
+5. **Run time.** At about 11.5 s per measurement, the current grids (about 70 measurements) take about 13–14 minutes. See Q-D3.
+6. **Docs, CSV, tests.**
+   - Update `doc/counterOffload.md`, the example config, and the CSV column description: `nAverage` is the number of averaged-PSD samples.
+   - Update the validation test (`nAverage` 1 allowed, 0 rejected) and the PSD collection test (the settled-time gate is unchanged).
+
+### Questions and Points of Clarification
+- **Q-D1. Settling time.** Use a fixed configurable `settleS` (default 11 s), or compute it from modalPSDs' `psdAvgTime` and `psdTime` read over INDI? Computing it would need the modalPSDs device name in config, and would follow any change you make to `psdAvgTime`.
+- **Q-D2. Samples per evaluation.** Is one fully propagated `aol1_clpsds` sample per measurement acceptable? Or do you want several, for example 2–3 taken 0.5 s apart, or spaced a full `psdAvgTime` apart so they are independent? Spacing them out would add about 10 s each.
+- **Q-D3. Run length.** Keep the current grids (about 13–14 min), or coarsen the coarse pass? For example `rampStartUs` step 50, `rampDurationUs` step 100 and `gain` step 0.2 give about 45 measurements, about 9 min. The refine pass then works at half those steps.
+- **Q-D4. Baseline cadence.** At 11.5 s per measurement, a baseline every 5 measurements is about one per minute. Keep 5?
