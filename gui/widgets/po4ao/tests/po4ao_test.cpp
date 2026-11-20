@@ -81,7 +81,7 @@ struct Fixture
     template <typename T>
     T *control( const char *name /**< [in] Qt object name. */ );
 
-    /// Complete a command after its mandatory Busy acknowledgement.
+    /// Publish the usual Busy then Ok device readbacks.
     void complete( const std::string &name /**< [in] Command property. */ );
 };
 
@@ -326,8 +326,8 @@ TEST_CASE( "NN selection is staged until Enable", "[po4ao]" )
     REQUIRE( command.getName() == "nn_activate" );
     REQUIRE( command["model"].get<std::string>() == "engine1" );
     REQUIRE_FALSE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
-    f.acknowledge( "nn_activate", pcf::IndiProperty::Ok ); // Old Ok is not an acknowledgement.
-    REQUIRE_FALSE( f.control<QPushButton>( "buttonEnableNN" )->isEnabled() );
+    f.acknowledge( "nn_activate", pcf::IndiProperty::Ok ); // A coalesced terminal readback releases the local wait.
+    REQUIRE( f.control<QPushButton>( "buttonEnableNN" )->isEnabled() );
     f.complete( "nn_activate" );
     REQUIRE( f.control<QPushButton>( "buttonEnableNN" )->isEnabled() );
     REQUIRE( combo->currentData().toString() == "engine1" );
@@ -363,12 +363,20 @@ TEST_CASE( "Learning and PO4AO labels follow acknowledgements", "[po4ao]" )
     Fixture f;
     auto   *po = f.control<QPushButton>( "buttonPO4AO" );
     REQUIRE( po->text() == "Enable policy" );
-    f.m_widget.on_buttonPO4AO_clicked();
+    po->click();
     REQUIRE( po->text() == "Enable policy" );
+    REQUIRE( f.m_publisher.m_commands.size() == 1 );
     REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::On );
+    REQUIRE( po->isEnabled() );
+    auto *start = f.control<QPushButton>( "buttonLearning" );
+    REQUIRE( start->isEnabled() );
+    start->click();
+    REQUIRE( f.m_publisher.m_commands.size() == 2 );
+    REQUIRE( f.m_publisher.m_commands.back().getName() == "learning" );
+    f.acknowledge( "po4ao_enable", pcf::IndiProperty::Busy );
     f.status( { { "controller", "fallback" } } );
-    f.complete( "po4ao_enable" );
     REQUIRE( po->text() == "Disable policy" );
+    REQUIRE( po->isEnabled() );
     f.status( { { "learning", "waiting" } } );
     auto *learning = f.control<QPushButton>( "buttonLearning" );
     REQUIRE( learning->text() == "Pause learning" );
@@ -449,7 +457,9 @@ TEST_CASE( "Reset after unacknowledged Resume restores Start", "[po4ao][learning
 TEST_CASE( "Waiting learning can be paused during collection", "[po4ao][learning]" )
 {
     Fixture f;
-    f.status( { { "learning", "waiting" }, { "collection", "collecting" }, { "training_phase", "idle" } } );
+    f.status( { { "learning", "idle" }, { "collection", "collecting" }, { "training_phase", "idle" } } );
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    f.status( { { "learning", "waiting" } } );
     REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
     REQUIRE( f.control<QLabel>( "labelLearning" )->text() == "Waiting" );
     f.m_widget.on_buttonLearning_clicked();
@@ -586,18 +596,21 @@ TEST_CASE( "Disconnect and permissions prevent stale commands", "[po4ao]" )
     REQUIRE_FALSE( f.control<QPushButton>( "buttonEnableNN" )->isEnabled() );
 }
 
-/** \brief Missing acknowledgement remains visibly unknown and never resends the request. */
-TEST_CASE( "Acknowledgement timeout does not imply remote completion", "[po4ao]" )
+/** \brief A lost reply releases its own button without sending a second request or guessing the outcome. */
+TEST_CASE( "Missing reply permits a manual retry", "[po4ao]" )
 {
     Fixture f;
-    f.m_widget.on_buttonReconstructor_clicked();
-    f.m_widget.acknowledgementTimeout();
-    REQUIRE_FALSE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
-    REQUIRE( f.control<QLabel>( "labelStatus" )->text().contains( "unknown" ) );
-    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    auto   *button = f.control<QPushButton>( "buttonReconstructor" );
+    button->click();
+    REQUIRE_FALSE( button->isEnabled() );
+    QThread::msleep( 10100 );
+    f.nn(); // Refresh independent device capabilities after the receipt deadline.
+    f.status( { { "heartbeat", "2" } } );
+    REQUIRE( button->isEnabled() );
+    REQUIRE( f.control<QLabel>( "labelStatus" )->text().contains( "nn_test.reconstructor" ) );
     REQUIRE( f.m_publisher.m_commands.size() == 1 );
-    f.acknowledge( "reconstructor", pcf::IndiProperty::Alert );
-    REQUIRE( f.control<QPushButton>( "buttonReconstructor" )->isEnabled() );
+    button->click();
+    REQUIRE( f.m_publisher.m_commands.size() == 2 );
 }
 
 /** \brief Two clients send the same explicit destination and do not change each other's staged choices. */
@@ -654,7 +667,7 @@ TEST_CASE( "Disable supersedes busy training operations", "[po4ao]" )
         f.m_widget.on_buttonPO4AO_clicked();
         REQUIRE( f.m_publisher.m_commands.back().getName() == "po4ao_enable" );
         REQUIRE( f.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::Off );
-        REQUIRE_FALSE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
+        REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
     }
     // clang-format off
 #ifdef PO4AOGUI_TEST_DOXYGEN_REF

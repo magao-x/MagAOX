@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 
+#include <QDeadlineTimer>
 #include <QElapsedTimer>
 #include <QInputDialog>
 #include <QSignalBlocker>
@@ -54,8 +55,7 @@ class po4ao : public xWidget
 
     std::set<std::string> m_defined; ///< Properties with observed definitions, including command permissions.
 
-    std::map<std::string, bool>
-        m_pending; ///< Requests keyed by device.property; value records an observed Busy acknowledgement.
+    std::map<std::string, QDeadlineTimer> m_pending; ///< Local receipt deadlines keyed by device.property.
 
     bool m_managed{ false }; ///< Last selected command route, independent of transport connection.
 
@@ -76,8 +76,6 @@ class po4ao : public xWidget
     bool m_haveHeartbeat{ false }; ///< A baseline sequence has been observed in this device lifetime.
 
     QString m_policySelection; ///< Stable staged library ID, retained across catalog delete/redefine updates.
-
-    QTimer m_ackTimer; ///< Bounds the wait for initial acknowledgement; never retries a command.
 
   public:
     /// Construct one panel for C++ inference and an optional companion.
@@ -136,14 +134,14 @@ class po4ao : public xWidget
     /// Send a learning target without latching transient command acknowledgements; follow worker/operation status.
     void on_buttonLearning_clicked();
 
-    /// Report missing acknowledgement without retrying or pretending the operation failed remotely.
-    void acknowledgementTimeout();
-
   private:
     Ui::po4ao m_ui; ///< Qt Designer layout, using standard MagAO-X controls.
 
     /// Determine whether the optional trainer is live and controls this C++ device.
     bool trainerReady() const;
+
+    /// Check the trainer phase and outstanding session changes before starting another operation.
+    bool trainingIdle() const;
 
     /// Preserve unresolved operations when optional-trainer availability changes the command route.
     void updateRoute( bool managed /**< [in] Whether the optional trainer currently owns GUI commands. */ );
@@ -166,12 +164,12 @@ class po4ao : public xWidget
     std::string status( const std::string &element /**< [in] Status element name. */ ) const;
 
     /// Check that a defined writable command has the expected type and elements.
-    bool
-    commandAvailable( const std::string                  &name,     /**< [in] Command property. */
-                      pcf::IndiProperty::Type             type,     /**< [in] Expected INDI type. */
-                      std::initializer_list<const char *> elements, /**< [in] Required elements. */
-                      const std::string &device = "",               /**< [in] Source device; empty selects trainer. */
-                      bool supersede = false /**< [in] Permit native Reset to supersede control selection. */ ) const;
+    bool commandAvailable(
+        const std::string                  &name,        /**< [in] Command property. */
+        pcf::IndiProperty::Type             type,        /**< [in] Expected INDI type. */
+        std::initializer_list<const char *> elements,    /**< [in] Required elements. */
+        const std::string                  &device = "", /**< [in] Source device; empty selects trainer. */
+        bool supersede = false /**< [in] Use operation readback when the command switch may be stale. */ ) const;
 
     /// Determine whether this domain has a pending or observed Busy command.
     bool busy( std::initializer_list<const char *> names, /**< [in] Commands sharing an operation domain. */
@@ -196,7 +194,7 @@ class po4ao : public xWidget
     void submitParameter( const std::string &name, /**< [in] INDI numeric property. */
                           statusLineEdit    *entry /**< [in] Standard editable status field. */ );
 
-    /// Observe the Busy then terminal command acknowledgement sequence.
+    /// Release local waits on device readback and track native Reset to its applied generation.
     void acknowledge( const pcf::IndiProperty &property /**< [in] Device readback. */ );
 
     /// Latch a local request before sending it, preventing duplicate clicks until acknowledgement.
@@ -225,9 +223,6 @@ inline po4ao::po4ao( const std::string &device,
     m_statusTimer.setInterval( 500 );
     connect( &m_statusTimer, &QTimer::timeout, this, &po4ao::updateGUI );
     m_statusTimer.start();
-    m_ackTimer.setSingleShot( true );
-    m_ackTimer.setInterval( 10000 );
-    connect( &m_ackTimer, &QTimer::timeout, this, &po4ao::acknowledgementTimeout );
     connect( m_ui.comboEngine,
              QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this,
@@ -336,7 +331,6 @@ inline void po4ao::onDisconnect()
     m_managed            = false;
     m_nativeResetPending = false;
     m_message.clear();
-    m_ackTimer.stop();
     syncModels();
     syncPolicies();
     updateGUI();
@@ -479,11 +473,17 @@ inline void po4ao::syncPolicies()
     m_ui.comboPolicy->setCurrentIndex( m_ui.comboPolicy->findData( selected ) );
 }
 
-inline void po4ao::updateTrainingControls( bool ready )
+inline bool po4ao::trainingIdle() const
 {
     const auto phase = status( "training_phase" );
-    const bool idle  = ready && m_routePending.empty() && ( phase == "idle" || phase == "error" ) &&
-                      !busy( { "po4ao_enable", "reset", "recollect", "set_policy" } );
+    return m_routePending.empty() && ( phase == "idle" || phase == "error" ) &&
+           !m_pending.count( m_device + ".reset" ) && !m_pending.count( m_device + ".recollect" ) &&
+           !m_pending.count( m_device + ".set_policy" );
+}
+
+inline void po4ao::updateTrainingControls( bool ready )
+{
+    const bool idle = ready && trainingIdle();
     m_ui.comboPolicy->setEnabled( ready && m_ui.comboPolicy->count() > 0 );
     m_ui.comboPolicy->setToolTip( m_ui.comboPolicy->currentText() );
     m_ui.buttonSetPolicy->setEnabled( idle && m_ui.comboPolicy->currentIndex() >= 0 &&
@@ -587,7 +587,7 @@ inline void po4ao::acknowledge( const pcf::IndiProperty &property )
                                  .toULongLong( &appliedValid );
         if( requestedValid && requested > m_nativeResetAfter )
         {
-            m_pending[resetKey] = true; // Generation advancement acknowledges even a coalesced Busy transition.
+            m_pending[resetKey] = QDeadlineTimer( QDeadlineTimer::Forever ); // The runtime has admitted this Reset.
             m_message.clear();
             const auto control   = value( m_runtimeDevice, "model_status", "control_request" );
             const auto selection = m_properties.find( m_runtimeDevice + ".control_enable" );
@@ -603,34 +603,21 @@ inline void po4ao::acknowledge( const pcf::IndiProperty &property )
             }
         }
     }
-    auto pending = m_pending.find( property.createUniqueKey() );
-    if( pending != m_pending.end() )
+    const auto key = property.createUniqueKey();
+    if( m_pending.count( key ) && property.hasValidState() &&
+        ( property.getState() == pcf::IndiProperty::Busy || property.getState() == pcf::IndiProperty::Ok ||
+          property.getState() == pcf::IndiProperty::Alert ) )
     {
-        if( property.getState() == pcf::IndiProperty::Busy )
+        const bool failed = property.getState() == pcf::IndiProperty::Alert;
+        if( key != resetKey || !m_nativeResetPending || failed )
         {
-            pending->second = true;
-            m_message.clear();
-        }
-        else if( property.getState() == pcf::IndiProperty::Alert ||
-                 ( pending->second && property.getState() == pcf::IndiProperty::Ok &&
-                   !( m_nativeResetPending && pending->first == resetKey ) ) )
-        {
-            m_message = property.getState() == pcf::IndiProperty::Alert ? "Request failed; check backend status" : "";
-            if( pending->first == resetKey )
+            m_pending.erase( key );
+            if( key == resetKey )
             {
                 m_nativeResetPending = false;
             }
-            m_pending.erase( pending );
         }
-    }
-    bool waiting = false;
-    for( const auto &request : m_pending )
-    {
-        waiting |= !request.second;
-    }
-    if( !waiting )
-    {
-        m_ackTimer.stop();
+        m_message = failed ? "Request failed; check backend status" : "";
     }
 }
 
@@ -879,10 +866,6 @@ inline void po4ao::handleDelProperty( const pcf::IndiProperty &property )
             ++pending;
         }
     }
-    if( m_pending.empty() )
-    {
-        m_ackTimer.stop();
-    }
     syncModels();
     syncPolicies();
     updateGUI();
@@ -890,6 +873,23 @@ inline void po4ao::handleDelProperty( const pcf::IndiProperty &property )
 
 inline void po4ao::updateGUI()
 {
+    for( auto pending = m_pending.begin(); pending != m_pending.end(); )
+    {
+        if( pending->second.hasExpired() )
+        {
+            if( pending->first == m_runtimeDevice + ".reset_model" )
+            {
+                m_nativeResetPending = false;
+            }
+            m_message = "No reply to " + pending->first + ". Check device status.";
+            pending   = m_pending.erase( pending );
+        }
+        else
+        {
+            ++pending;
+        }
+    }
+
     const bool fresh = m_heartbeatAge.isValid() && m_heartbeatAge.elapsed() < 5000;
     const bool ready = trainerReady();
     updateRoute( ready );
@@ -971,13 +971,13 @@ inline void po4ao::updateGUI()
     const bool knownController = enabled || controller == "integrator";
     const auto learning        = ready ? status( "learning" ) : std::string( "unknown" );
     const auto phase           = status( "training_phase" );
-    const bool trainingReady   = ready && !runtimePending && ( phase == "idle" || phase == "error" ) &&
-                               !busy( { "po4ao_enable", "reset", "recollect", "set_policy" } );
+    const bool trainingReady   = trainingIdle();
     m_ui.buttonPO4AO->setText( enabled ? "Disable policy" : "Enable policy" );
-    const bool disableReady = ready && !runtimePending && enabled && phase != "resetting" && phase != "reset_pending" &&
-                              !busy( { "reset", "po4ao_enable" } );
-    m_ui.buttonPO4AO->setEnabled( ( enabled ? disableReady : trainingReady && knownController ) &&
-                                  commandAvailable( "po4ao_enable", pcf::IndiProperty::Switch, { "toggle" } ) );
+    const bool disableReady =
+        ready && !runtimePending && enabled && phase != "resetting" && phase != "reset_pending" && phase != "disabling";
+    m_ui.buttonPO4AO->setEnabled(
+        ( enabled ? disableReady : trainingReady && knownController ) &&
+        commandAvailable( "po4ao_enable", pcf::IndiProperty::Switch, { "toggle" }, m_device, true ) );
     m_ui.labelController->setText( stateLabel( controller ) );
     m_ui.buttonReset->setEnabled( ready && !runtimePending && phase != "resetting" &&
                                   commandAvailable( "reset", pcf::IndiProperty::Switch, { "request" } ) );
@@ -999,7 +999,7 @@ inline void po4ao::updateGUI()
     const bool paused  = learning == "paused" || learning == "completed";
     m_ui.buttonLearning->setText( running ? "Pause learning" : paused ? "Resume learning" : "Start learning" );
     m_ui.buttonLearning->setEnabled(
-        trainingReady && ( running || collection != "collecting" ) && ( running || paused || learning == "idle" ) &&
+        trainingReady && ( running || paused || learning == "idle" ) &&
         ( running || ( status( "warmup_required" ) != "yes" && status( "initialization_required" ) != "yes" ) ) &&
         commandAvailable( "learning", pcf::IndiProperty::Switch, { "run", "pause" }, m_device, true ) );
     m_ui.labelLearning->setText( status( "initialization_required" ) == "yes" ? "Set policy or Reset required"
@@ -1114,12 +1114,8 @@ inline void po4ao::updateRuntimeGUI()
 
 inline void po4ao::submit( const pcf::IndiProperty &property )
 {
-    m_pending[property.createUniqueKey()] = false;
-    m_message                             = "Awaiting acknowledgement";
-    if( !m_ackTimer.isActive() )
-    {
-        m_ackTimer.start();
-    }
+    m_pending[property.createUniqueKey()] = QDeadlineTimer( 10000 );
+    m_message                             = "Awaiting reply to " + property.createUniqueKey();
     updateGUI();
     sendNewProperty( property );
 }
@@ -1172,18 +1168,18 @@ inline void po4ao::on_buttonPO4AO_clicked()
     {
         return;
     }
-    if( m_managed )
+    const auto       &device = m_managed ? m_device : m_runtimeDevice;
+    const std::string name   = m_managed ? "po4ao_enable" : "control_enable";
+    bool              enable = status( "controller" ) == "integrator";
+    if( !m_managed )
     {
-        submitSwitch( "po4ao_enable", "toggle", status( "controller" ) == "integrator" );
+        enable = m_properties.at( device + "." + name )["toggle"].getSwitchState() == pcf::IndiElement::Off;
     }
-    else
-    {
-        submitSwitch( "control_enable",
-                      "toggle",
-                      m_properties.at( m_runtimeDevice + ".control_enable" )["toggle"].getSwitchState() !=
-                          pcf::IndiElement::On,
-                      m_runtimeDevice );
-    }
+
+    pcf::IndiProperty property( pcf::IndiProperty::Switch, device, name );
+    property.add( pcf::IndiElement( "toggle", enable ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+    m_message.clear();
+    sendNewProperty( property );
 }
 
 inline void po4ao::on_buttonReset_clicked()
@@ -1202,8 +1198,6 @@ inline void po4ao::on_buttonReset_clicked()
         m_nativeResetAfter =
             QString::fromStdString( value( m_runtimeDevice, "model_status", "reset_request" ) ).toULongLong();
         m_nativeResetPending = true;
-        m_ackTimer.start();
-        m_pending.erase( m_runtimeDevice + ".control_enable" ); // Reset owns completion of the superseded selection.
         pcf::IndiProperty control( pcf::IndiProperty::Switch, m_runtimeDevice, "control_enable" );
         control.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
         sendNewProperty( control ); // Off can be idempotent; its own Busy edge is not required.
@@ -1239,14 +1233,8 @@ inline void po4ao::on_buttonLearning_clicked()
     pcf::IndiProperty property( pcf::IndiProperty::Switch, m_device, "learning" );
     property.add( pcf::IndiElement( "run", run ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
     property.add( pcf::IndiElement( "pause", run ? pcf::IndiElement::Off : pcf::IndiElement::On ) );
-    // Desired-state actions follow worker/operation readback; the supervisor rejects concurrent requests.
+    m_message.clear();
     sendNewProperty( property );
-}
-
-inline void po4ao::acknowledgementTimeout()
-{
-    m_message = "No acknowledgement; operation state is unknown. Check device status.";
-    updateGUI(); // Keep the request latched. A timeout is not permission to resend it.
 }
 
 } // namespace xqt
