@@ -158,7 +158,7 @@ def analyze(directory, overrides, start=0, seconds=1, show=False):
     if not ((adc >= 0) & (adc <= 4095) & (adc == np.round(adc))).all():
         raise ValueError("Raw ADC samples violate the UINT16/12-bit contract")
     signals = {
-        "pointing": np.column_stack((data["pointing_x"], data["pointing_y"])) * 1000,
+        "pointing": np.column_stack((data["physical_x"], data["physical_y"])) * 1000,
         "wfs": np.column_stack((data["wfs_x"], data["wfs_y"])) * 1000,
         "accel": np.column_stack((data["accel_x"], data["accel_y"])),
         "adc": (adc - config["zero"]) * config["volts_per_bit"] / config["sensitivity"],

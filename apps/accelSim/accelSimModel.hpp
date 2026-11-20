@@ -28,11 +28,12 @@ constexpr uint64_t maxCatchUp  = 8; ///< Maximum skipped ticks advanced before a
 /// Parameters for one independent pair of pointing oscillators.
 struct modeSpec
 {
-    double m_frequency; ///< Mode frequency in Hz.
-    double m_accelRms;  ///< Requested per-axis acceleration RMS in m/s^2.
-    double m_r;         ///< Pole radius, specified directly as in the reference notebook.
-    double m_couplingX; ///< Fraction of X pointing sensed by the WFS.
-    double m_couplingY; ///< Fraction of Y pointing sensed by the WFS.
+    double m_frequency;            ///< Mode frequency in Hz.
+    double m_accelRms;             ///< Requested per-axis acceleration RMS in m/s^2.
+    double m_r;                    ///< Pole radius, specified directly as in the reference notebook.
+    double m_couplingX;            ///< Fraction of X pointing sensed by the WFS.
+    double m_couplingY;            ///< Fraction of Y pointing sensed by the WFS.
+    double m_opticalCoupling{ 1 }; ///< Fraction of this mode's pointing in optical tip/tilt (DM disturbance), [0,1].
 };
 
 /// Configurable physical model and empirical ADC calibration.
@@ -46,6 +47,8 @@ struct parameters
     double   m_zero{ 2048 };             ///< ADC zero point in counts.
     double   m_voltsPerBit{ 0.0083799 }; ///< Empirical volts-per-count calibration.
     double   m_sensitivity{ 1.02 };      ///< Empirical acceleration sensitivity.
+    uint64_t m_opticalSeed{ 7 };         ///< Seed of the independent optical-only disturbance.
+    double   m_opticalAmplitude{ 0 };    ///< Linear scale of the independent optical disturbance; zero disables it.
 };
 
 /// Stable stationary scaling and a two-sample oscillator history.
@@ -76,11 +79,12 @@ struct oscillator
 /// Physical and digitized quantities for one simultaneous X/Y sample.
 struct sample
 {
-    std::array<double, 2>   m_pointing{};     ///< Physical pointing in arcsec.
-    std::array<double, 2>   m_wfsPointing{};  ///< Coupled pointing in arcsec, without sensor noise.
-    std::array<double, 2>   m_acceleration{}; ///< Acceleration including sensor noise in m/s^2.
-    std::array<double, 2>   m_noise{};        ///< Sensor noise already included in m_acceleration, in m/s^2.
-    std::array<uint16_t, 2> m_adc{};          ///< Clipped raw X/Y ADC counts.
+    std::array<double, 2>   m_physicalPointing{}; ///< Mechanical pointing sensed by the accelerometer in arcsec.
+    std::array<double, 2>   m_pointing{};         ///< Optical tip/tilt pointing (DM disturbance) in arcsec.
+    std::array<double, 2>   m_wfsPointing{};      ///< Optical pointing times the WFS couplings, without sensor noise.
+    std::array<double, 2>   m_acceleration{};     ///< Acceleration including sensor noise in m/s^2.
+    std::array<double, 2>   m_noise{};            ///< Sensor noise already included in m_acceleration, in m/s^2.
+    std::array<uint16_t, 2> m_adc{};              ///< Clipped raw X/Y ADC counts.
 };
 
 /// One resolved mode with independent X/Y histories.
@@ -92,7 +96,11 @@ struct mode
 };
 
 /// Construct the notebook's 14 prominent and 200 weak modes once.
-std::vector<modeSpec> referenceModes( uint64_t seed /**< [in] mode-parameter seed */ );
+/** The optical couplings are empty (all 1), one value for all modes, or 15 values: the 14 prominent modes in
+ * notebook order (11 to 300 Hz), then one value shared by the 200 weak modes. Each must be in [0,1].
+ */
+std::vector<modeSpec> referenceModes( uint64_t                   seed /**< [in] mode-parameter seed */,
+                                      const std::vector<double> &coupling = {} /**< [in] optical couplings */ );
 
 /// Convert one arcsecond of pointing to acceleration for a mode.
 double accelerationFactor( double frequency /**< [in] frequency in Hz */,
@@ -138,6 +146,11 @@ class model
   private:
     std::mt19937_64                  m_rng;            ///< Reproducible generator owned by the model.
     std::normal_distribution<double> m_normal{ 0, 1 }; ///< Independent standard-normal draws.
+
+    /// Optical-only realization of the same population with its own generator; empty when the amplitude is zero.
+    std::vector<mode>                m_optical;
+    std::mt19937_64                  m_opticalRng;            ///< Generator of the independent optical disturbance.
+    std::normal_distribution<double> m_opticalNormal{ 0, 1 }; ///< Standard-normal draws of m_opticalRng.
 };
 
 /// Absolute monotonic pacing with fractional-nanosecond period accumulation.
@@ -374,8 +387,10 @@ inline double accelerationFactor( double frequency, double leverArm )
     return -( 2 * pi * frequency ) * ( 2 * pi * frequency ) * leverArm * arcsecToRad;
 }
 
-inline std::vector<modeSpec> referenceModes( uint64_t seed )
+inline std::vector<modeSpec> referenceModes( uint64_t seed, const std::vector<double> &coupling )
 {
+    if( coupling.size() > 1 && coupling.size() != 15 )
+        throw std::invalid_argument( "optical coupling needs 0, 1, or 15 values" );
     std::vector<modeSpec>                  specs{ { 11, .00025, .9999999, .05, .05 },
                                                   { 14, .00025, .9999999, .05, .05 },
                                                   { 17, .00025, .9999999, .05, .05 },
@@ -400,6 +415,8 @@ inline std::vector<modeSpec> referenceModes( uint64_t seed )
         const double envelope = std::exp( -.5 * std::pow( ( f - 250 ) / 250, 2 ) );
         specs.push_back( { f, amplitude( rng ) * ( .5 + 2 * envelope ), .998 - ( f - 100 ) / 800 * .006, .01, .01 } );
     }
+    for( size_t n = 0; n < specs.size() && !coupling.empty(); ++n ) // Prominent modes precede the weak population.
+        specs[n].m_opticalCoupling = coupling[coupling.size() == 1 ? 0 : std::min<size_t>( n, 14 )];
     std::sort( specs.begin(),
                specs.end(),
                []( const modeSpec &a, const modeSpec &b ) { return a.m_frequency < b.m_frequency; } );
@@ -423,20 +440,25 @@ inline void model::configure( const parameters &config, const std::vector<modeSp
 {
     if( !std::isfinite( config.m_leverArm ) || config.m_leverArm <= 0 || !std::isfinite( config.m_noisePSD ) ||
         config.m_noisePSD < 0 || !std::isfinite( config.m_zero ) || !std::isfinite( config.m_voltsPerBit ) ||
-        config.m_voltsPerBit <= 0 || !std::isfinite( config.m_sensitivity ) || config.m_sensitivity <= 0 )
-        throw std::invalid_argument( "invalid physical/ADC configuration" );
+        config.m_voltsPerBit <= 0 || !std::isfinite( config.m_sensitivity ) || config.m_sensitivity <= 0 ||
+        !std::isfinite( config.m_opticalAmplitude ) || config.m_opticalAmplitude < 0 )
+        throw std::invalid_argument( "invalid physical/ADC/optical configuration" );
     m_config = config;
     m_modes.clear();
     for( const auto &spec : specs )
     {
         const double factor = accelerationFactor( spec.m_frequency, config.m_leverArm );
         if( !std::isfinite( factor ) || factor >= 0 || !std::isfinite( spec.m_accelRms ) || spec.m_accelRms < 0 ||
-            !std::isfinite( spec.m_couplingX ) || !std::isfinite( spec.m_couplingY ) )
+            !std::isfinite( spec.m_couplingX ) || !std::isfinite( spec.m_couplingY ) ||
+            !( spec.m_opticalCoupling >= 0 && spec.m_opticalCoupling <= 1 ) )
             throw std::invalid_argument( "invalid vibration mode" );
         m_modes.push_back( { spec, factor, {} } );
     }
+    m_optical = config.m_opticalAmplitude > 0 ? m_modes : std::vector<mode>{};
     m_rng.seed( config.m_seed );
     m_normal.reset();
+    m_opticalRng.seed( config.m_opticalSeed );
+    m_opticalNormal.reset();
     m_clipLow  = {};
     m_clipHigh = {};
     m_ticks    = 0;
@@ -461,10 +483,11 @@ inline void model::setRate( double fps )
     const double sigma = std::sqrt( m_config.m_noisePSD * fps / 2 );
     if( !std::isfinite( sigma ) )
         throw std::invalid_argument( "sensor noise overflow" );
-    for( auto &mode : m_modes )
-        for( auto &axis : mode.m_axes )
-            axis.configure(
-                mode.m_spec.m_frequency, mode.m_spec.m_r, fps, mode.m_spec.m_accelRms / -mode.m_accelPerArcsec );
+    for( auto *modes : { &m_modes, &m_optical } )
+        for( auto &mode : *modes )
+            for( auto &axis : mode.m_axes )
+                axis.configure(
+                    mode.m_spec.m_frequency, mode.m_spec.m_r, fps, mode.m_spec.m_accelRms / -mode.m_accelPerArcsec );
     m_config.m_fps = fps;
     m_noiseSigma   = sigma;
     restart();
@@ -479,6 +502,13 @@ inline void model::restart()
             const double z2 = m_normal( m_rng );
             axis.initialize( z1, z2 );
         }
+    for( auto &mode : m_optical )
+        for( auto &axis : mode.m_axes )
+        {
+            const double z1 = m_opticalNormal( m_opticalRng );
+            const double z2 = m_opticalNormal( m_opticalRng );
+            axis.initialize( z1, z2 );
+        }
 }
 
 inline const sample &model::step()
@@ -489,12 +519,21 @@ inline const sample &model::step()
         for( size_t axis = 0; axis < 2; ++axis )
         {
             const double pointing = mode.m_axes[axis].step( m_normal( m_rng ) );
-            m_sample.m_pointing[axis] += pointing;
-            m_sample.m_wfsPointing[axis] +=
-                pointing * ( axis == 0 ? mode.m_spec.m_couplingX : mode.m_spec.m_couplingY );
+            const double optical  = pointing * mode.m_spec.m_opticalCoupling;
+            m_sample.m_physicalPointing[axis] += pointing;
+            m_sample.m_pointing[axis] += optical;
+            m_sample.m_wfsPointing[axis] += optical * ( axis == 0 ? mode.m_spec.m_couplingX : mode.m_spec.m_couplingY );
             m_sample.m_acceleration[axis] += mode.m_accelPerArcsec * pointing;
         }
     }
+    for( auto &mode : m_optical ) // Optical only: the accelerometer does not sense this disturbance.
+        for( size_t axis = 0; axis < 2; ++axis )
+        {
+            const double optical =
+                m_config.m_opticalAmplitude * mode.m_axes[axis].step( m_opticalNormal( m_opticalRng ) );
+            m_sample.m_pointing[axis] += optical;
+            m_sample.m_wfsPointing[axis] += optical * ( axis == 0 ? mode.m_spec.m_couplingX : mode.m_spec.m_couplingY );
+        }
     for( size_t axis = 0; axis < 2; ++axis )
     {
         m_sample.m_noise[axis] = m_noiseSigma * m_normal( m_rng );

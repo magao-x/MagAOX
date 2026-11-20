@@ -172,6 +172,7 @@ inline bool timeline::physical( int64_t time, sample &value, uint64_t *generatio
     {
         for( size_t axis = 0; axis < 2; ++axis )
         {
+            value.m_physicalPointing[axis] += w[j] * nodes[j].m_physicalPointing[axis];
             value.m_pointing[axis] += w[j] * nodes[j].m_pointing[axis];
             value.m_wfsPointing[axis] += w[j] * nodes[j].m_wfsPointing[axis];
             value.m_acceleration[axis] += w[j] * ( nodes[j].m_acceleration[axis] - nodes[j].m_noise[axis] );
