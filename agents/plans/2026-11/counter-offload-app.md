@@ -512,7 +512,7 @@ File: `counterOffload_calib_20261120T193905Z.csv`, copied to `~/Documents/MagAO-
   - `fomStd` is about 1% of `fom`, so it underestimates the real point-to-point noise by about 4–5×, as expected for overlapping averages.
   - With this noise, no `rampStartUs` dependence can be seen at gain 0.1.
 
-### Bench: Instability at Gain ≥ 0.4 (2026-11-20), Analysis and Proposed Fix (not implemented)
+### Bench: Instability at Gain ≥ 0.4 (2026-11-20), Analysis and Fix (implemented 2026-11-20, not yet built)
 **Observation (user).** The loop goes unstable once the gain reaches about 0.4. The tweeter display shows windup, with commands up to about 2×10⁶ against a real limit of about ±1.5. "The coarse search is too extreme."
 
 **Most likely cause: the gain scales the whole held contribution.**
@@ -549,3 +549,30 @@ File: `counterOffload_calib_20261120T193905Z.csv`, copied to `~/Documents/MagAO-
 - **Q-E3.** Clamp: default `maxCommand` 0.5? Clip and warn in normal operation, abort during calibration?
 - **Q-E4.** New default gain grid 0.1–1.0 in 0.1 steps? Or a different range?
 - **Q-E5.** Which stream showed the 2×10⁶: `dm01disp08_aux` (counter), the main loop channel, or the total `dm01disp`? It confirms where the windup is.
+
+**Answers and implementation (2026-11-20).**
+- **Q-E5:** the user reports the 2×10⁶ appeared on the counter channel as well as on `dm01disp`.
+  - So the offload loop itself ran away: the saturated tweeter left a residual, the main loop and t2wOffloader integrated it, and every larger offload Δ was added to the counter's `A` and mirrored by it.
+  - The clamp therefore limits `A` as well as the output.
+- **"Go ahead and implement fix":** Q-E1–E4 are implemented with the proposed defaults.
+  1. **Gain at arrival.**
+     - `addRamp()` stores `gain·Δ`. `buildCommand()` publishes `−(A + Σ ramps)`.
+     - A gain change never rescales `A`.
+     - The gain-0 baseline now means "stop countering new offloads".
+  2. **Clip.**
+     - New `counterOffload.maxCommand` (default 0.5, INDI `maxCommand`).
+     - `buildCommand()` clips `A` (anti-windup) and the command to ± `maxCommand`. Each slot that clips increments `stats.clipped`.
+     - `appLogic` logs a warning at most once per cycle while clipping continues.
+     - `measure()` aborts the calibration if `clipped` changed since the run started.
+  3. **Calibration leak (Q-E2: separate leak).**
+     - New `calibrate.leak` (default 0.0025, must be > 0).
+     - `runCalibration()` sets `m_leak` to it at the start and restores the original at the end, on success or abort.
+     - `appLogic` republishes `leak`.
+  4. **Gain grid:** the `gainGrid` default is 0.1, 1.0, 0.1.
+- **Tests.**
+  - The expected accumulator values are now the gain-scaled ones.
+  - The harness sets `maxCommand` 100 so the existing tests are not clipped.
+  - New: the gain is applied at arrival (a change does not rescale `A`; new offloads use the new gain).
+  - New: clipping (command only; `A` anti-windup and recovery; no count within the limit).
+  - Validation: `calibrate.leak` 0 and `maxCommand` 0 are rejected; the defaults are checked.
+- **Behaviour change.** With `leak` 0 in normal operation, `A` now saturates at `maxCommand` instead of growing, and the app warns. Continued operation should use `leak` > 0.

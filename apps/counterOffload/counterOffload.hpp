@@ -69,9 +69,10 @@ struct psdShmimT
 
 /// MagAO-X application publishing tweeter counter-offload commands as a dmSyncopation producer.
 /** Each update of the input stream (normally `aol0_tweeterOffload`) starts one ramp of that offload change.
- * For each scheduler slot the published command is `-gain * (A + sum_k delta_k * ramp(target - t0_k))`, where
- * completed ramps are folded into the accumulator `A`, which is multiplied by `(1 - leak)` after every
- * successful publication.  Disabling stops accepting new offloads and requests a zero, so the contribution is
+ * For each scheduler slot the published command is `-(A + sum_k gain_k * delta_k * ramp(target - t0_k))`, where
+ * gain_k is the gain when offload k arrived, completed ramps are folded into the accumulator `A`, which is multiplied
+ * by `(1 - leak)` after every successful publication, and `A` and the command are clipped to +/- maxCommand.  A gain
+ * change therefore affects only new offloads.  Disabling stops accepting new offloads and requests a zero, so the contribution is
  * cleared at the next slot.
  *
  * Calibrate mode scans rampStartUs, rampDurationUs and gain to minimize the closed-loop WFS PSD power in a band around
@@ -138,7 +139,9 @@ class counterOffload : public MagAOXApp<true>,
 
     double m_timeOffsetUs{ 0 }; ///< Offset added to the input receipt time to give the ramp reference, in us.
 
-    double m_gain{ 1 }; ///< Scale applied to the published command, 0 to 2.
+    double m_gain{ 1 }; ///< Scale applied to each new offload when it arrives, 0 to 2.
+
+    double m_maxCommand{ 0.5 }; ///< Largest magnitude of any pixel of the command and of the accumulator.
 
     double m_computeLeadUs{ 20 }; ///< Time reserved before the publish lead to compute the command, in us.
 
@@ -170,11 +173,13 @@ class counterOffload : public MagAOXApp<true>,
 
     double m_abortRatio{ 3 }; ///< Abort when an evaluation exceeds this multiple of the baseline.
 
+    double m_calibLeak{ 0.0025 }; ///< Leak used during a calibration run, restored afterwards; must be > 0.
+
     std::vector<double> m_startGridUs{ 0, 400, 25 }; ///< rampStartUs scan: min, max, step, in us.
 
     std::vector<double> m_durationGridUs{ 100, 600, 50 }; ///< rampDurationUs scan: min, max, step, in us.
 
-    std::vector<double> m_gainGrid{ 0.5, 1.5, 0.1 }; ///< gain scan: min, max, step.
+    std::vector<double> m_gainGrid{ 0.1, 1.0, 0.1 }; ///< gain scan: min, max, step.
 
     std::string m_csvDir{ "/home/xsup/counterOffload" }; ///< Directory for the per-run calibration CSV files.
 
@@ -215,6 +220,12 @@ class counterOffload : public MagAOXApp<true>,
     uint64_t m_failed{ 0 }; ///< Commands not published by syncopationPublish.
 
     uint64_t m_overflows{ 0 }; ///< Offloads folded immediately because the ramp pool was full.
+
+    std::atomic<uint64_t> m_clipped{ 0 }; ///< Slots in which the command or the accumulator was clipped.
+
+    uint64_t m_clippedLogged{ 0 }; ///< m_clipped at the last clipping warning.  appLogic only.
+
+    uint64_t m_calibClipStart{ 0 }; ///< m_clipped at the start of the current calibration run.
 
     ///@}
 
@@ -536,6 +547,8 @@ class counterOffload : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_leak; ///< Property to set the leak.
 
+    pcf::IndiProperty m_indiP_maxCommand; ///< Property to set the command clip level.
+
     pcf::IndiProperty m_indiP_rampStart; ///< Property to set the ramp start.
 
     pcf::IndiProperty m_indiP_rampDuration; ///< Property to set the ramp duration.
@@ -572,6 +585,8 @@ class counterOffload : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_gain );
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_leak );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_maxCommand );
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_rampStart );
 
@@ -661,7 +676,18 @@ inline void counterOffload::setupConfig()
                 "gain",
                 false,
                 "real",
-                "Scale applied to the published command, 0 to 2.  Default is 1." );
+                "Scale applied to each new offload when it arrives, 0 to 2.  Default is 1." );
+
+    config.add( "counterOffload.maxCommand",
+                "",
+                "counterOffload.maxCommand",
+                argType::Required,
+                "counterOffload",
+                "maxCommand",
+                false,
+                "real",
+                "Largest magnitude of any pixel of the command and of the held contribution; larger values are clipped.  "
+                "Default is 0.5." );
 
     config.add( "counterOffload.computeLeadUs",
                 "",
@@ -784,6 +810,16 @@ inline void counterOffload::setupConfig()
                 "real",
                 "Abort when an evaluation exceeds this multiple of the baseline.  Default is 3." );
 
+    config.add( "calibrate.leak",
+                "",
+                "calibrate.leak",
+                argType::Required,
+                "calibrate",
+                "leak",
+                false,
+                "real",
+                "Leak used during a calibration run and restored afterwards, above 0.  Default is 0.0025." );
+
     config.add( "calibrate.startGridUs",
                 "",
                 "calibrate.startGridUs",
@@ -812,7 +848,7 @@ inline void counterOffload::setupConfig()
                 "gainGrid",
                 false,
                 "vector<double>",
-                "gain scan as min,max,step.  Default is 0.5,1.5,0.1." );
+                "gain scan as min,max,step.  Default is 0.1,1.0,0.1." );
 
     config.add( "calibrate.csvDir",
                 "",
@@ -846,6 +882,7 @@ inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_computeLeadUs, "counterOffload.computeLeadUs" );
     _config( m_threadPrio, "counterOffload.threadPrio" );
     _config( m_threadCpuset, "counterOffload.cpuset" );
+    _config( m_maxCommand, "counterOffload.maxCommand" );
 
     _config( m_freqStream, "calibrate.freqStream" );
     _config( m_offloadDevice, "calibrate.offloadDevice" );
@@ -856,6 +893,7 @@ inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_settleS, "calibrate.settleS" );
     _config( m_timeoutS, "calibrate.timeoutS" );
     _config( m_abortRatio, "calibrate.abortRatio" );
+    _config( m_calibLeak, "calibrate.leak" );
     _config( m_startGridUs, "calibrate.startGridUs" );
     _config( m_durationGridUs, "calibrate.durationGridUs" );
     _config( m_gainGrid, "calibrate.gainGrid" );
@@ -892,13 +930,14 @@ inline int counterOffload::validateConfig()
         m_channel.compare( m_channel.size() - suffixLength, suffixLength, "_aux" ) != 0 ||
         m_syncopationTiming == m_channel || !inRange( m_rampStartUs, 0, 1e6 ) || !inRange( m_rampDurationUs, 1, 1e6 ) ||
         !inRange( m_leak, 0, 1 ) || !inRange( m_timeOffsetUs, -1e6, 1e6 ) || !inRange( m_gain, 0, 2 ) ||
-        !inRange( m_computeLeadUs, 0, 1e6 ) )
+        !inRange( m_computeLeadUs, 0, 1e6 ) || !inRange( m_maxCommand, 1e-6, 1e3 ) )
     {
         return -1;
     }
 
     if( !inRange( m_halfWidthHz, 0, 1e6 ) || m_modeMax < 0 || m_nAverage < 2 || m_baselineEvery < 1 ||
         !inRange( m_settleS, 0, 1e3 ) || !inRange( m_timeoutS, 1, 1e4 ) || !inRange( m_abortRatio, 1, 1e6 ) ||
+        !inRange( m_calibLeak, 1e-9, 1 ) ||
         !gridOk( m_startGridUs, 0, 1e6 ) || !gridOk( m_durationGridUs, 1, 1e6 ) || !gridOk( m_gainGrid, 0, 2 ) )
     {
         return -1;
@@ -935,6 +974,7 @@ inline int counterOffload::appStartup()
     numberT numbers[] = {
         { m_indiP_gain, "gain", 0, 2, m_gain, INDI_NEWCALLBACK( m_indiP_gain ) },
         { m_indiP_leak, "leak", 0, 1, m_leak, INDI_NEWCALLBACK( m_indiP_leak ) },
+        { m_indiP_maxCommand, "maxCommand", 1e-6, 1e3, m_maxCommand, INDI_NEWCALLBACK( m_indiP_maxCommand ) },
         { m_indiP_rampStart, "rampStartUs", 0, 1e6, m_rampStartUs, INDI_NEWCALLBACK( m_indiP_rampStart ) },
         { m_indiP_rampDuration, "rampDurationUs", 1, 1e6, m_rampDurationUs, INDI_NEWCALLBACK( m_indiP_rampDuration ) },
         { m_indiP_timeOffset, "timeOffsetUs", -1e6, 1e6, m_timeOffsetUs, INDI_NEWCALLBACK( m_indiP_timeOffset ) },
@@ -953,7 +993,7 @@ inline int counterOffload::appStartup()
     }
 
     createROIndiNumber( m_indiP_stats, "stats", "Counters" );
-    for( const char *el : { "events", "published", "failed", "overflows", "active" } )
+    for( const char *el : { "events", "published", "failed", "overflows", "active", "clipped" } )
     {
         m_indiP_stats.add( pcf::IndiElement( el ) );
         m_indiP_stats[el] = 0;
@@ -1062,11 +1102,31 @@ inline int counterOffload::appLogic()
             active += r.used;
         }
 
-        stats = { double( m_events ), double( m_published ), double( m_failed ), double( m_overflows ), active };
+        stats = { double( m_events ), double( m_published ), double( m_failed ), double( m_overflows ), active,
+                  double( m_clipped ) };
     }
 
-    updateIfChanged(
-        m_indiP_stats, std::vector<std::string>{ "events", "published", "failed", "overflows", "active" }, stats );
+    updateIfChanged( m_indiP_stats,
+                     std::vector<std::string>{ "events", "published", "failed", "overflows", "active", "clipped" },
+                     stats );
+
+    const uint64_t clipped = m_clipped;
+
+    if( clipped != m_clippedLogged ) // at most one warning per appLogic cycle
+    {
+        log<text_log>( "command clipped at +/- " + std::to_string( m_maxCommand ) + " in " +
+                           std::to_string( clipped - m_clippedLogged ) + " slots",
+                       logPrio::LOG_WARNING );
+        m_clippedLogged = clipped;
+    }
+
+    double leak;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_stateMutex );
+        leak = m_leak;
+    }
+
+    updateIfChanged( m_indiP_leak, std::vector<std::string>{ "current", "target" }, std::vector<double>{ leak, leak } );
 
     // Calibration changes the parameters from its own thread, so publish them here.
     const calibParamsT p = calibParams();
@@ -1241,7 +1301,8 @@ inline void counterOffload::addRamp( const realT *delta, int64_t t0Ns )
         ++m_overflows;
     }
 
-    slot->delta = Eigen::Map<const mx::improc::eigenImage<realT>>( delta, m_accum.rows(), m_accum.cols() );
+    slot->delta = static_cast<realT>( m_gain ) *
+                  Eigen::Map<const mx::improc::eigenImage<realT>>( delta, m_accum.rows(), m_accum.cols() );
     slot->t0Ns  = t0Ns;
     slot->used  = true;
 
@@ -1291,7 +1352,27 @@ inline void counterOffload::buildCommand( int64_t targetNs )
         }
     }
 
-    m_command = static_cast<realT>( -m_gain ) * ( m_command + m_accum );
+    const realT lim     = m_maxCommand;
+    bool        clipped = false;
+
+    if( m_accumNonzero && m_accum.abs().maxCoeff() > lim ) // anti-windup: never hold more than can be commanded
+    {
+        m_accum = m_accum.cwiseMax( -lim ).cwiseMin( lim );
+        clipped = true;
+    }
+
+    m_command = -( m_command + m_accum );
+
+    if( m_command.abs().maxCoeff() > lim )
+    {
+        m_command = m_command.cwiseMax( -lim ).cwiseMin( lim );
+        clipped   = true;
+    }
+
+    if( clipped )
+    {
+        ++m_clipped;
+    }
 }
 
 inline void counterOffload::clearState()
@@ -1591,6 +1672,15 @@ inline void counterOffload::runCalibration()
 {
     const calibParamsT original = calibParams();
 
+    double originalLeak;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_stateMutex );
+        originalLeak = m_leak;
+        m_leak       = m_calibLeak; // keep the held contribution small so gain steps cannot saturate the tweeter
+    }
+
+    m_calibClipStart = m_clipped;
+
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
         m_calibPoint     = 0;
@@ -1650,6 +1740,11 @@ inline void counterOffload::runCalibration()
                            " rampDurationUs=" + std::to_string( original[1] ) +
                            " gain=" + std::to_string( original[2] ),
                        logPrio::LOG_WARNING );
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_stateMutex );
+        m_leak = originalLeak;
     }
 
     if( m_csv.is_open() )
@@ -1768,6 +1863,10 @@ inline bool counterOffload::measure( const calibParamsT &p, double &fom, double 
         else if( !m_enabled )
         {
             why = "app disabled";
+        }
+        else if( m_clipped != m_calibClipStart )
+        {
+            why = "counter command clipped at maxCommand";
         }
         else if( std::fabs( m_offloadFps - m_bandCenterHz ) > 0.5 ||
                  ( m_modeMax == 0 && m_offloadModes != m_bandModes ) )
@@ -2056,6 +2155,12 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_leak )( const pcf::IndiProperty &
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_leak, ipRecv );
     return setNumber( m_indiP_leak, ipRecv, m_leak, 0, 1 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_maxCommand )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_maxCommand, ipRecv );
+    return setNumber( m_indiP_maxCommand, ipRecv, m_maxCommand, 1e-6, 1e3 );
 }
 
 INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_rampStart )( const pcf::IndiProperty &ipRecv )

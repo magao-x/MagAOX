@@ -27,7 +27,9 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_bandHalfWidthHz;
     using counterOffload::m_bandModes;
     using counterOffload::m_bandValid;
+    using counterOffload::m_calibLeak;
     using counterOffload::m_channel;
+    using counterOffload::m_clipped;
     using counterOffload::m_command;
     using counterOffload::m_df;
     using counterOffload::m_enabled;
@@ -36,6 +38,7 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_gain;
     using counterOffload::m_gainGrid;
     using counterOffload::m_leak;
+    using counterOffload::m_maxCommand;
     using counterOffload::m_nAverage;
     using counterOffload::m_overflows;
     using counterOffload::m_psdAfterNs;
@@ -52,11 +55,12 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_timeoutS;
     using counterOffload::m_zeroRequested;
 
-    /// Set up 2x2 buffers and a gain of 0.5.
+    /// Set up 2x2 buffers, a gain of 0.5, and a clip level high enough not to act.
     counterOffload_test()
     {
         setupBuffers( 2, 2 );
-        m_gain = 0.5;
+        m_gain       = 0.5;
+        m_maxCommand = 100;
     }
 
     /// Number of unfinished ramps.
@@ -171,7 +175,7 @@ TEST_CASE( "counterOffload commands a single ramped offload", "[counterOffload]"
         REQUIRE( app.m_command( 0, 0 ) == Approx( -1 ) );
         REQUIRE( app.active() == 0 );
         REQUIRE( app.m_accumNonzero );
-        REQUIRE( app.m_accum( 1, 0 ) == Approx( 2 ) );
+        REQUIRE( app.m_accum( 1, 0 ) == Approx( 1 ) );
     }
 
     SECTION( "the hand-over to the accumulator is continuous" )
@@ -180,6 +184,93 @@ TEST_CASE( "counterOffload commands a single ramped offload", "[counterOffload]"
         float before = app.m_command( 0, 0 );
         app.buildCommand( 451 * us );
         REQUIRE( app.m_command( 0, 0 ) == Approx( before ).margin( 1e-4 ) );
+    }
+}
+
+/// Verify the gain is applied when each offload arrives, not to the held contribution.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload applies the gain when an offload arrives", "[counterOffload]" )
+{
+    counterOffload_test app;
+    auto                d = delta( 2 );
+
+    app.addRamp( d.data(), 0 ); // at gain 0.5
+    app.buildCommand( 500 * us );
+    REQUIRE( app.m_command( 0, 0 ) == Approx( -1 ) );
+
+    SECTION( "a gain change does not change the held contribution" )
+    {
+        app.m_gain = 1;
+        app.buildCommand( 600 * us );
+        REQUIRE( app.m_command( 0, 0 ) == Approx( -1 ) );
+
+        app.m_gain = 0;
+        app.buildCommand( 700 * us );
+        REQUIRE( app.m_command( 0, 0 ) == Approx( -1 ) );
+    }
+
+    SECTION( "new offloads use the new gain" )
+    {
+        app.m_gain = 1;
+        app.addRamp( d.data(), 600 * us );
+        app.buildCommand( 1100 * us );
+        REQUIRE( app.m_command( 0, 0 ) == Approx( -3 ) );
+
+        app.m_gain = 0;
+        app.addRamp( d.data(), 1100 * us );
+        app.buildCommand( 1600 * us );
+        REQUIRE( app.m_command( 0, 0 ) == Approx( -3 ) );
+    }
+}
+
+/// Verify the command and the held contribution are clipped to maxCommand.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload clips the command and the accumulator", "[counterOffload]" )
+{
+    counterOffload_test app;
+    app.m_maxCommand = 0.6;
+
+    auto d = delta( 2 ); // 1 after the 0.5 gain
+
+    SECTION( "a ramp in progress is clipped in the command only" )
+    {
+        app.addRamp( d.data(), 0 );
+        app.addRamp( d.data(), 0 );
+        app.buildCommand( 285 * us ); // both at their midpoints: -1 before clipping
+        REQUIRE( app.m_command( 0, 0 ) == Approx( -0.6 ) );
+        REQUIRE( app.m_clipped == 1 );
+    }
+
+    SECTION( "the accumulator cannot wind up beyond the clip level" )
+    {
+        for( int n = 0; n < 10; ++n )
+        {
+            app.addRamp( d.data(), n * 1000 * us );
+            app.buildCommand( ( n * 1000 + 500 ) * us );
+        }
+
+        REQUIRE( app.m_accum.abs().maxCoeff() == Approx( 0.6 ) );
+        REQUIRE( app.m_command( 0, 0 ) == Approx( -0.6 ) );
+        REQUIRE( app.m_clipped == 10 );
+
+        // an offload of the opposite sign comes off the clip level at once
+        auto neg = delta( -2 );
+        app.addRamp( neg.data(), 20000 * us );
+        app.buildCommand( 20500 * us );
+        REQUIRE( app.m_command( 0, 0 ) == Approx( 0.4 ) );
+    }
+
+    SECTION( "commands within the clip level are not counted" )
+    {
+        app.m_gain = 0.25;
+        app.addRamp( d.data(), 0 );
+        app.buildCommand( 500 * us );
+        REQUIRE( app.m_command( 0, 0 ) == Approx( -0.5 ) );
+        REQUIRE( app.m_clipped == 0 );
     }
 }
 
@@ -227,7 +318,7 @@ TEST_CASE( "counterOffload leaks the completed contribution", "[counterOffload]"
     {
         app.m_leak = 0;
         app.afterPublish();
-        REQUIRE( app.m_accum( 0, 0 ) == Approx( 2 ) );
+        REQUIRE( app.m_accum( 0, 0 ) == Approx( 1 ) );
         REQUIRE_FALSE( app.needPublish() );
     }
 
@@ -236,7 +327,7 @@ TEST_CASE( "counterOffload leaks the completed contribution", "[counterOffload]"
         app.m_leak = 0.5;
         app.afterPublish();
         app.afterPublish();
-        REQUIRE( app.m_accum( 0, 0 ) == Approx( 0.5 ) );
+        REQUIRE( app.m_accum( 0, 0 ) == Approx( 0.25 ) );
         REQUIRE( app.needPublish() );
         app.buildCommand( 600 * us );
         REQUIRE( app.m_command( 0, 0 ) == Approx( -0.25 ) );
@@ -308,7 +399,7 @@ TEST_CASE( "counterOffload state handling", "[counterOffload]" )
         }
         REQUIRE( app.m_overflows == 1 );
         REQUIRE( app.active() == int( counterOffload::m_maxRamps ) );
-        REQUIRE( app.m_accum( 0, 0 ) == Approx( 2 ) );
+        REQUIRE( app.m_accum( 0, 0 ) == Approx( 1 ) );
     }
 
     SECTION( "offloads are ignored while disabled" )
@@ -391,6 +482,8 @@ TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
         REQUIRE( app.m_settleS == 11 );
         REQUIRE( app.m_nAverage == 3 );
         REQUIRE( app.m_timeoutS == 5 );
+        REQUIRE( app.m_gainGrid == std::vector<double>{ 0.1, 1.0, 0.1 } );
+        REQUIRE( app.m_calibLeak > 0 );
     }
 
     SECTION( "calibration settings are checked" )
@@ -404,6 +497,12 @@ TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
         REQUIRE( app.validateConfig() < 0 );
         app.m_startGridUs = { 0, 400, 25 };
         app.m_gainGrid    = { 0.5, 2.5, 0.1 }; // above the gain limit
+        REQUIRE( app.validateConfig() < 0 );
+        app.m_gainGrid  = { 0.1, 1.0, 0.1 };
+        app.m_calibLeak = 0; // calibration must leak the held contribution
+        REQUIRE( app.validateConfig() < 0 );
+        app.m_calibLeak  = 0.0025;
+        app.m_maxCommand = 0;
         REQUIRE( app.validateConfig() < 0 );
     }
 
