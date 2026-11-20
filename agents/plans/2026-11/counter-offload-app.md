@@ -339,8 +339,15 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
 - **Config** (`[calibrate]` section): `psdStream` (`aol1_raw_clpsds`), `freqStream` (`aol1_freq`), `offloadDevice` (`t2wOffloader`), the band, mode, averaging and baseline settings above, grids, `abortRatio`, `timeoutS`, `csvDir`.
 
 ### Calibrate Key Assumptions
-- **CA1.** Mode index k in `aol1_raw_clpsds` is the same modal basis and order as t2wOffloader's offloaded mode k. Then the first `numModes` PSD rows are the offloaded modes. If not, the `modeMax` override (or a later explicit mode list) is needed. Please confirm.
-- **CA2.** `t2wOffloader.fps` is reachable over INDI from the RTC indiserver, as `dmtweeter-synco` is for t2wOffloader.
+- **CA1 (open, 2026-11-19).** The user notes that the modal values are in `aol1_modevalWFS` and that `aol1_clpsds` is a power spectrum as a function of temporal frequency.
+  - From the code: modalPSDs reads a modal-amplitude stream, presumably `aol1_modevalWFS`, and sets `m_nModes = width × height` of that input (`modalPSDs.hpp:675`).
+  - It publishes `aol1_clpsds` as nFreq × nModes (`:836-851`): one temporal PSD per input mode. Frequency runs along the first axis; `aol1_freq` gives the values.
+  - So "only the offloaded low-order modes" (A-C5) means selecting PSD columns, that is modes of `aol1_modevalWFS`.
+  - The open question is whether WFS mode k in `aol1_modevalWFS` is the same as t2wOffloader mode k (plane k of its tweeter modes `m_tModesOrtho`).
+  - If the two bases differ, the default `modeMax = t2wOffloader.numModes` is only an approximation of "the offloaded modes". The override would then be set from the known mapping.
+  - Bench check: the second dimension of `aol1_clpsds` should equal the number of elements in `aol1_modevalWFS`.
+- **CA2 (confirmed 2026-11-19).** See below.
+- **CA2.** `t2wOffloader.fps` is reachable over INDI from the RTC indiserver, as `dmtweeter-synco` is for t2wOffloader. Confirmed by the user.
 - **CA3.** `numModes` and `t2wOffloader.fps` are constant during a run. A change aborts the run.
 
 ### Calibrate Follow-ups
