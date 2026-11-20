@@ -5,7 +5,9 @@
 #include "../../../tests/testXWC.hpp"
 #include "../accelSimDM.hpp"
 #include <chrono>
+#include <filesystem>
 #include <iostream>
+#include <unistd.h>
 
 #ifndef ACCELSIM_MODEL_ONLY
     #ifdef ACCELSIM_APP_TEST
@@ -130,15 +132,136 @@ TEST_CASE( "accelSim DM same sample and timing budget", "[accelSim][dm-runtime]"
               << " us (not a native stream/driver benchmark)\n";
 }
 
+/// \cond ACCELSIM_DM_FIXTURE
+/// Return the fixture's modes restricted to its circular support, zero elsewhere, as a pupil-limited cube would be.
+dmFixture pupilModes()
+{
+    dmFixture calibration;
+    for( size_t n = 0; n < 2500; ++n )
+        if( calibration.m_weights[n] == 0 )
+            calibration.m_x[n] = calibration.m_y[n] = 0;
+    return calibration;
+}
+
+/// Require a command to be the physical tilt inside the circular support and the modes' own values elsewhere.
+void requirePhysical( dmInjection &dm /**< [in] prepared injection */, const dmFixture &modes /**< [in] modes */ )
+{
+    sample value;
+    value.m_pointing = { -.0029, .0017 };
+    const pointingDisturbance pointing( value );
+    const auto               &command = dm.synthesize( value, 1 );
+    for( size_t n = 0; n < command.size(); ++n )
+    {
+        const double u = ( double( n % 50 ) - 24.5 ) * 6.5 / 48, v = ( double( n / 50 ) - 24.5 ) * 6.5 / 48;
+        if( modes.m_x[n] == 0 && modes.m_y[n] == 0 )
+            REQUIRE( command[n] == 0 ); // The modes, not a mask, define the spatial structure.
+        else
+            REQUIRE( command[n] == Approx( pointing.surface( u, v ) ).margin( 1e-8 ) );
+    }
+}
+/// \endcond
+
+/** \brief Without a mask the fit uses the nominal pupil where the modes are defined: identical to an explicit mask
+ * equal to that pupil, physically calibrated, and never spatially masked.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim DM calibration without a mask uses the nominal pupil", "[accelSim][dm-runtime]" )
+{
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSimDetail::dmInjection::prepare;
+    MagAOX::app::accelSimDetail::dmInjection::pupilSupport;
+#endif
+    // clang-format on
+    const auto modes = pupilModes();
+    REQUIRE( dmInjection::pupilSupport( modes.m_x, modes.m_y ) == modes.m_weights );
+    dmInjection unmasked, masked;
+    unmasked.prepare( modes.m_x, modes.m_y, {}, 1e-6 );
+    masked.prepare( modes.m_x, modes.m_y, modes.m_weights, 1e-6 );
+    REQUIRE( unmasked.fitPixels() == size_t( std::count( modes.m_weights.begin(), modes.m_weights.end(), 1. ) ) );
+    REQUIRE( unmasked.residual()[0] < 1e-9 );
+    requirePhysical( unmasked, modes );
+    sample value;
+    value.m_pointing = { .0011, -.0023 };
+    const auto first = unmasked.synthesize( value, 2.5 );
+    REQUIRE( first == masked.synthesize( value, 2.5 ) ); // Bit-identical to the explicit pupil mask.
+
+    // Modes defined on the whole grid: the fit still uses only the pupil, and the full planes are output.
+    const dmFixture full;
+    unmasked.prepare( full.m_x, full.m_y, {}, 1e-6 );
+    masked.prepare( full.m_x, full.m_y, full.m_weights, 1e-6 );
+    REQUIRE( unmasked.synthesize( value, 1 ) == masked.synthesize( value, 1 ) );
+    requirePhysical( unmasked, full );
+}
+
+/** \brief Outside-pupil mode values never affect the unmasked calibration but are still output; an explicit mask keeps
+ * its role of selecting the fitting support, and a non-tilt surface inside the support is rejected by the unchanged
+ * residual tolerance.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim DM mask selects the fitting support only", "[accelSim][dm-runtime]" )
+{
+    auto modes = pupilModes();
+    for( size_t n = 0; n < 2500; ++n )
+        if( modes.m_weights[n] == 0 )
+        {
+            modes.m_x[n] = .37; // Nonzero, non-tilt surface outside the pupil, as slaved edge actuators may have.
+            modes.m_y[n] = -.21;
+        }
+    dmInjection unmasked, masked;
+    unmasked.prepare( modes.m_x, modes.m_y, {}, 1e-6 );
+    masked.prepare( modes.m_x, modes.m_y, modes.m_weights, 1e-6 );
+    sample value;
+    value.m_pointing = { -.0029, .0017 };
+    const pointingDisturbance pointing( value );
+    const auto                command = unmasked.synthesize( value, 1 );
+    REQUIRE( command == masked.synthesize( value, 1 ) );
+    for( size_t n = 0; n < command.size(); ++n )
+    {
+        const double u = ( double( n % 50 ) - 24.5 ) * 6.5 / 48, v = ( double( n / 50 ) - 24.5 ) * 6.5 / 48;
+        if( modes.m_weights[n] )
+            REQUIRE( command[n] == Approx( pointing.surface( u, v ) ).margin( 1e-8 ) );
+        else // Outside the fitting support the output is still the full modes times the fitted mapping.
+            REQUIRE( command[n] != 0 );
+    }
+
+    // A distorted half pupil: only an explicit mask excluding it yields a valid calibration.
+    auto                distorted = pupilModes();
+    std::vector<double> left( 2500, 0 );
+    for( size_t n = 0; n < 2500; ++n )
+    {
+        const double u = double( n % 50 ) - 24.5, v = double( n / 50 ) - 24.5;
+        if( u > 0 )
+            distorted.m_x[n] += .01 * ( u * u + v * v ) / 576 * ( distorted.m_weights[n] != 0 );
+        else
+            left[n] = distorted.m_weights[n];
+    }
+    REQUIRE_THROWS_WITH( unmasked.prepare( distorted.m_x, distorted.m_y, {}, 1e-6 ),
+                         Catch::Matchers::Contains( "within tolerance" ) );
+    REQUIRE_FALSE( unmasked.ready() );
+    masked.prepare( distorted.m_x, distorted.m_y, left, 1e-6 );
+    const auto &kept = masked.synthesize( value, 1 );
+    for( size_t n = 0; n < kept.size(); ++n )
+        if( left[n] )
+            REQUIRE( kept[n] == Approx( pointing.surface( ( double( n % 50 ) - 24.5 ) * 6.5 / 48,
+                                                          ( double( n / 50 ) - 24.5 ) * 6.5 / 48 ) )
+                                    .margin( 1e-8 ) );
+    REQUIRE_THROWS( masked.prepare( modes.m_x, modes.m_y, std::vector<double>( 10, 1 ), 1e-6 ) );
+}
+
 #ifndef ACCELSIM_MODEL_ONLY
 /// \cond ACCELSIM_DM_APP_FIXTURE
 /// Expose actual app callbacks without starting framework threads.
 struct dmAppTest : MagAOX::app::accelSim
 {
+    using accelSim::calibrationUnchanged;
     using accelSim::config;
+    using accelSim::loadDMCalibration;
     using accelSim::m_configName;
     using accelSim::m_dmEnabled;
     using accelSim::m_dmInjection;
+    using accelSim::m_dmMask;
+    using accelSim::m_dmModes;
     using accelSim::m_dmReady;
     using accelSim::m_dmScale;
     using accelSim::m_dmZeroPending;
@@ -213,6 +336,61 @@ TEST_CASE( "accelSim DM simple operator controls", "[accelSim][dm-controls]" )
     MagAOX::app::accelSim::newCallBack_m_indiP_dmScale;
 #endif
     // clang-format on
+}
+#endif
+
+#ifndef ACCELSIM_MODEL_ONLY
+/** \brief The app loads the mode cube with or without dm.mask; an omitted mask is not stat'ed or read, an explicit
+ * mask is checked for changes, and both prepare the physical calibration.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim DM calibration files with and without a mask", "[accelSim][dm-controls]" )
+{
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::loadDMCalibration;
+    MagAOX::app::accelSim::calibrationUnchanged;
+#endif
+    // clang-format on
+    const auto directory = std::filesystem::temp_directory_path() / ( "accelSim-dm-" + std::to_string( getpid() ) );
+    std::filesystem::create_directories( directory );
+    const auto                    modes = pupilModes();
+    mx::improc::eigenCube<double> cube( 50, 50, 2 ), mask( 50, 50, 1 );
+    for( size_t n = 0; n < 2500; ++n )
+    {
+        cube.image( 0 ).data()[n] = modes.m_x[n];
+        cube.image( 1 ).data()[n] = modes.m_y[n];
+        mask.image( 0 ).data()[n] = modes.m_weights[n];
+    }
+    mx::fits::fitsFile<double> file;
+    const auto cubePath = ( directory / "modes.fits" ).string(), maskPath = ( directory / "mask.fits" ).string();
+    REQUIRE( file.write( cubePath, cube ) == mx::error_t::noerror );
+    REQUIRE( file.write( maskPath, mask ) == mx::error_t::noerror );
+    sample value;
+    value.m_pointing = { .0011, -.0023 };
+    std::vector<float> commands[2];
+    for( int masked = 0; masked < 2; ++masked )
+    {
+        dmAppTest app;
+        app.m_configName = "accelSim-dm-test";
+        app.setupConfig();
+        REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+        app.m_dmModes = cubePath;
+        app.m_dmMask  = masked ? maskPath : "";
+        REQUIRE_NOTHROW( app.loadDMCalibration() );
+        REQUIRE( app.m_dmInjection.ready() );
+        REQUIRE( app.calibrationUnchanged() );
+        commands[masked] = app.m_dmInjection.synthesize( value, 1 );
+        requirePhysical( app.m_dmInjection, modes );
+        if( masked )
+        {
+            app.m_dmMask = ( directory / "missing.fits" ).string();
+            REQUIRE_FALSE( app.calibrationUnchanged() );
+            REQUIRE_THROWS( app.loadDMCalibration() );
+        }
+    }
+    REQUIRE( commands[0] == commands[1] );
+    std::filesystem::remove_all( directory );
 }
 #endif
 

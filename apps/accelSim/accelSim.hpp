@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <sched.h>
@@ -344,7 +345,6 @@ class accelSim : public MagAOXApp<true>,
     void prepareDM();
     /// Check calibration identity while loading; acquisition uses the validated in-memory calibration.
     bool calibrationUnchanged() const;
-
     /// Read and validate the mode cube and optional mask, then prepare the physical projection; throws on failure.
     void loadDMCalibration();
     /// Report controls/status without acquiring the DM writer or publishing images.
@@ -480,10 +480,7 @@ inline void accelSim::setupConfig()
          "string",
          "Existing exclusively owned channel; experiment uses dm01disp10_aux; empty disables access." );
     add( "dm", "modeCube", "string", "Approved surface-micron TT FITS cube; first two planes are used." );
-    add( "dm",
-         "mask",
-         "string",
-         "Optional dmmask FITS fitting weights; empty (default) fits over the mode cube's nonzero support." );
+    add( "dm", "mask", "string", "Optional dmmask FITS fitting weights; empty (default) fits over the nominal pupil." );
     add( "dm", "enabled", "bool", "Must be false; use the runtime dm_enable control." );
     add( "dm", "scale", "double", "Independent DM-only linear scale [0,100], default 0." );
     add( "dm", "maxRelativeResidual", "double", "Maximum calibrated physical fit residual, default 1e-6." );
@@ -709,7 +706,7 @@ inline void accelSim::loadDMCalibration()
         throw std::invalid_argument( "invalid or changed DM calibration geometry" );
     const std::vector<double> mode0( modes.image( 0 ).data(), modes.image( 0 ).data() + 2500 );
     const std::vector<double> mode1( modes.image( 1 ).data(), modes.image( 1 ).data() + 2500 );
-    // No mask: the fit uses the cube's own support; the output is the full modes either way.
+    // No mask: the fit uses the nominal pupil where the modes are defined; the output is the full modes either way.
     const std::vector<double> weights =
         m_dmMask.empty() ? std::vector<double>() : std::vector<double>( mask.data(), mask.data() + 2500 );
     m_dmInjection.prepare( mode0, mode1, weights, m_dmResidual );
@@ -737,7 +734,15 @@ inline void accelSim::prepareDM()
             stopDM();
             throw std::runtime_error( "DM worker thread priority/cpuset setup failed" );
         }
-        log<text_log>( "DM channel prepared disabled: " + m_dmChannel + "; exclusive operator handover required",
+        char fit[160];
+        std::snprintf( fit,
+                       sizeof( fit ),
+                       "; fit over %s, %zu pixels, relative residuals %.3g %.3g",
+                       m_dmMask.empty() ? "the nominal pupil" : "dm.mask",
+                       m_dmInjection.fitPixels(),
+                       m_dmInjection.residual()[0],
+                       m_dmInjection.residual()[1] );
+        log<text_log>( "DM channel prepared disabled: " + m_dmChannel + fit + "; exclusive operator handover required",
                        logPrio::LOG_NOTICE );
     }
     catch( const std::exception &error )
