@@ -90,6 +90,7 @@ INCLUDEDEPS= \
 	logger/types/telem_fgtimings.hpp \
 	logger/types/telem_fgstage.hpp \
 	logger/types/telem_fgtrace.hpp \
+	logger/types/telem_po4ao.hpp \
 	logger/types/telem_flowrpm.hpp \
 	logger/types/telem_fxngen.hpp \
 	logger/types/telem_loopgain.hpp \
