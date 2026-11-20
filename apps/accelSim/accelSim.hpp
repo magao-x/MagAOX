@@ -285,19 +285,23 @@ class accelSim : public MagAOXApp<true>,
     bool m_dmAwaitingAck{ false }, m_dmPendingZero{ false }; ///< Receipt bookkeeping for this app's latest commit.
     uint64_t m_dmPollWaits{ 0 }; ///< Attached polls returning zero, including duplicate slots and outstanding receipts.
     uint64_t m_dmRequests{ 0 };  ///< Eligible requests returned by the producer.
-    uint64_t m_dmLateReturns{ 0 };                ///< Failed publish attempts returning at or after their cutoff.
-    uint64_t m_dmRejected{ 0 };                   ///< Failed publish attempts returning before their cutoff.
-    uint64_t m_dmTimelineMisses{ 0 };             ///< Requests skipped because the target was outside the timeline.
-    uint64_t m_dmPublished{ 0 };                  ///< Successful tagged ready commits by this instance.
-    uint64_t m_dmCopied{ 0 }, m_dmDiscarded{ 0 }; ///< Exact transport dispositions for this instance's commits.
-    struct stat                  m_dmModesStat{}, m_dmMaskStat{}; ///< Calibration identities checked while loading.
-    accelSimDetail::dmInjection  m_dmInjection;                   ///< DM-thread-owned precomputed physical synthesis.
-    accelSimDetail::dmStatistics m_dmStats; ///< Per-step counts and interval timing, under m_dmMutex.
+    uint64_t m_dmLateReturns{ 0 };                   ///< Failed publish attempts returning at or after their cutoff.
+    uint64_t m_dmRejected{ 0 };                      ///< Failed publish attempts returning before their cutoff.
+    uint64_t m_dmTimelineMisses{ 0 };                ///< Requests skipped because the target was outside the timeline.
+    uint64_t m_dmPublished{ 0 };                     ///< Successful tagged ready commits by this instance.
+    uint64_t m_dmCopied{ 0 }, m_dmDiscarded{ 0 };    ///< Exact transport dispositions for this instance's commits.
+    struct stat     m_dmModesStat{}, m_dmMaskStat{}; ///< Calibration identities checked while loading.
+    std::string     m_dmCalibration{ "fit" };        ///< dm.calibration: "fit" (physical tilt fit) or "coefficients".
+    Eigen::Matrix2d m_dmCoefficients{ Eigen::Matrix2d::Zero() };        ///< dm.coefficients K [mode coefficient/rad].
+    std::string     m_dmUnavailable{ "dm.channelName not configured" }; ///< Why DM output is unavailable, or "".
+    accelSimDetail::dmInjection  m_dmInjection; ///< DM-thread-owned precomputed physical synthesis.
+    accelSimDetail::dmStatistics m_dmStats;     ///< Per-step counts and interval timing, under m_dmMutex.
     std::array<accelSimDetail::stagedCommand, accelSimDetail::dmStatistics::c_steps>
                       m_dmStage;    ///< Surfaces prepared ahead for the current record's steps, under m_dmMutex.
     synco::Record     m_dmRecord{}; ///< Last coherent scheduler record read for staging and counting.
     uint64_t          m_dmRecordCounter{ 0 };                              ///< Schedule stream counter of m_dmRecord.
     pcf::IndiProperty m_indiP_dmEnable, m_indiP_dmScale, m_indiP_dmStatus; ///< Minimal low-rate DM controls/status.
+    pcf::IndiProperty m_indiP_dmCalibration; ///< Calibration method, K, fit residuals and unavailability reason.
     pcf::IndiProperty m_indiP_dmSteps, m_indiP_dmTiming; ///< Per-step counts and per-report-interval timing.
     /// Compatible accelerometer controls, serialized by m_controlMutex.
     pcf::IndiProperty m_indiP_fps, m_indiP_numChannels, m_indiP_alpha, m_indiP_synchroDelay;
@@ -343,10 +347,14 @@ class accelSim : public MagAOXApp<true>,
     static double target( const pcf::IndiProperty &property /**< [in] incoming update */ );
     /// Prepare calibration and an explicitly configured owned channel before starting acquisition.
     void prepareDM();
+    /// Load the configured calibration and log its method, K and residuals, or record why output is unavailable.
+    bool prepareDMCalibration();
     /// Check calibration identity while loading; acquisition uses the validated in-memory calibration.
     bool calibrationUnchanged() const;
-    /// Read and validate the mode cube and optional mask, then prepare the physical projection; throws on failure.
+    /// Read and validate the mode cube and optional mask, then prepare the configured calibration; throws the reason.
     void loadDMCalibration();
+    /// Describe the configured fitting support: dm.mask, uniform weights, or none for explicit coefficients.
+    std::string dmSupport() const;
     /// Report controls/status without acquiring the DM writer or publishing images.
     void updateDMINDI();
     /// Service the existing tagged producer once; returns whether a payload was committed.
@@ -480,10 +488,21 @@ inline void accelSim::setupConfig()
          "string",
          "Existing exclusively owned channel; experiment uses dm01disp10_aux; empty disables access." );
     add( "dm", "modeCube", "string", "Approved surface-micron TT FITS cube; first two planes are used." );
-    add( "dm", "mask", "string", "Optional dmmask FITS fitting weights; empty (default) fits over the nominal pupil." );
+    add( "dm",
+         "mask",
+         "string",
+         "dm.calibration=fit only: optional fitting-weight FITS (dmmask); empty uses weights 1.0 everywhere." );
     add( "dm", "enabled", "bool", "Must be false; use the runtime dm_enable control." );
     add( "dm", "scale", "double", "Independent DM-only linear scale [0,100], default 0." );
     add( "dm", "maxRelativeResidual", "double", "Maximum calibrated physical fit residual, default 1e-6." );
+    add( "dm",
+         "calibration",
+         "string",
+         "fit (default): fit K to the physical tilt surface; coefficients: use dm.coefficients without a fit." );
+    add( "dm",
+         "coefficients",
+         "string",
+         "K for dm.calibration=coefficients: K00,K01,K10,K11 mode coefficient per radian (rows modes, columns X,Y)." );
     add( "dm", "threadPrio", "int", "DM worker real-time priority [0,99], as dmSpeckle; 0 (default) is SCHED_OTHER." );
     add( "dm", "cpuset", "string", "Dedicated cpuset for the DM worker, as dmSpeckle; empty (default) is unchanged." );
 }
@@ -544,6 +563,9 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_dmStartupEnabled, "dm.enabled" );
     config( dmScale, "dm.scale" );
     config( m_dmResidual, "dm.maxRelativeResidual" );
+    config( m_dmCalibration, "dm.calibration" );
+    std::string coefficients;
+    config( coefficients, "dm.coefficients" );
     config( m_dmThreadPrio, "dm.threadPrio" );
     config( m_dmThreadCpuset, "dm.cpuset" );
     try
@@ -555,6 +577,37 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
             ( !m_dmChannel.empty() && ( m_dmChannel == m_shmimName || m_dmChannel == m_syncName ||
                                         m_dmChannel.find( '/' ) != std::string::npos || m_dmChannel == "dm01disp" ) ) )
             throw std::invalid_argument( "invalid DM configuration; startup enable is prohibited" );
+        if( m_dmCalibration == "coefficients" )
+        {
+            std::stringstream input( coefficients );
+            std::string       item;
+            int               count = 0;
+            while( std::getline( input, item, ',' ) )
+            {
+                std::size_t used = 0;
+                double      value;
+                try
+                {
+                    value = std::stod( item, &used );
+                }
+                catch( const std::exception & )
+                {
+                    used = 0;
+                }
+                if( count >= 4 || !used || item.find_first_not_of( " \t", used ) != std::string::npos ||
+                    !std::isfinite( value ) )
+                    throw std::invalid_argument( "dm.coefficients must be four finite numbers K00,K01,K10,K11" );
+                m_dmCoefficients( count / 2, count % 2 ) = value;
+                ++count;
+            }
+            if( count != 4 )
+                throw std::invalid_argument( "dm.coefficients must be four finite numbers K00,K01,K10,K11" );
+            if( !m_dmMask.empty() )
+                throw std::invalid_argument( "dm.mask applies only to dm.calibration=fit" );
+        }
+        else if( m_dmCalibration != "fit" || !coefficients.empty() )
+            throw std::invalid_argument(
+                "dm.calibration must be fit or coefficients; dm.coefficients needs coefficients" );
         if( channels != 2 || !std::isfinite( alpha ) || postDelay < -1000000 || postDelay > 1000000 ||
             ( !m_syncName.empty() && m_syncName == m_shmimName ) )
             throw std::invalid_argument( "invalid channels, alpha, phase offset, or self-trigger stream" );
@@ -619,6 +672,12 @@ inline int accelSim::setupProperties()
                               "discarded",
                               "outstanding" } )
         m_indiP_dmStatus.add( pcf::IndiElement( name ) );
+    createROIndiText( m_indiP_dmCalibration, "dm_calibration", "status" );
+    for( const char *name :
+         { "method", "support", "k00", "k01", "k10", "k11", "residual_x", "residual_y", "fit_pixels" } )
+        m_indiP_dmCalibration.add( pcf::IndiElement( name, "" ) );
+    if( registerIndiPropertyReadOnly( m_indiP_dmCalibration ) < 0 )
+        return -1;
     CREATE_REG_INDI_RO_NUMBER( m_indiP_dmSteps, "dm_steps", "DM per-subframe counts", "DM" );
     for( const std::string kind : { "advertised_", "requests_", "published_", "copied_" } )
         for( size_t step = 0; step < accelSimDetail::dmStatistics::c_steps; ++step )
@@ -693,63 +752,96 @@ inline bool accelSim::calibrationUnchanged() const
 
 inline void accelSim::loadDMCalibration()
 {
-    if( stat( m_dmModes.c_str(), &m_dmModesStat ) != 0 ||
-        ( !m_dmMask.empty() && stat( m_dmMask.c_str(), &m_dmMaskStat ) != 0 ) )
-        throw std::invalid_argument( "DM calibration paths must identify the approved TT cube and optional dmmask" );
+    if( stat( m_dmModes.c_str(), &m_dmModesStat ) != 0 )
+        throw std::invalid_argument( "dm.modeCube not found: " + m_dmModes );
+    if( !m_dmMask.empty() && stat( m_dmMask.c_str(), &m_dmMaskStat ) != 0 )
+        throw std::invalid_argument( "dm.mask not found: " + m_dmMask );
     mx::fits::fitsFile<double>    ff;
     mx::improc::eigenCube<double> modes, mask;
     if( ff.read( modes, m_dmModes ) != mx::error_t::noerror || modes.rows() != 50 || modes.cols() != 50 ||
-        modes.planes() < 2 ||
-        ( !m_dmMask.empty() && ( ff.read( mask, m_dmMask ) != mx::error_t::noerror || mask.rows() != 50 ||
-                                 mask.cols() != 50 || mask.planes() != 1 ) ) ||
-        !calibrationUnchanged() )
-        throw std::invalid_argument( "invalid or changed DM calibration geometry" );
+        modes.planes() < 2 )
+        throw std::invalid_argument( "dm.modeCube must be a readable 50x50 cube with at least two planes" );
+    if( !m_dmMask.empty() && ( ff.read( mask, m_dmMask ) != mx::error_t::noerror || mask.rows() != 50 ||
+                               mask.cols() != 50 || mask.planes() != 1 ) )
+        throw std::invalid_argument( "dm.mask must be a readable single 50x50 plane" );
+    if( !calibrationUnchanged() )
+        throw std::invalid_argument( "DM calibration files changed while loading" );
     const std::vector<double> mode0( modes.image( 0 ).data(), modes.image( 0 ).data() + 2500 );
     const std::vector<double> mode1( modes.image( 1 ).data(), modes.image( 1 ).data() + 2500 );
-    // No mask: the fit uses the nominal pupil where the modes are defined; the output is the full modes either way.
-    const std::vector<double> weights =
-        m_dmMask.empty() ? std::vector<double>() : std::vector<double>( mask.data(), mask.data() + 2500 );
-    m_dmInjection.prepare( mode0, mode1, weights, m_dmResidual );
+    if( m_dmCalibration == "coefficients" )
+        m_dmInjection.prepareCoefficients( mode0, mode1, m_dmCoefficients );
+    else // Without dm.mask the fit weights are 1.0 on every pixel; the output is the full modes either way.
+        m_dmInjection.prepare( mode0,
+                               mode1,
+                               m_dmMask.empty() ? std::vector<double>()
+                                                : std::vector<double>( mask.data(), mask.data() + 2500 ),
+                               m_dmResidual );
+}
+
+inline std::string accelSim::dmSupport() const
+{
+    if( m_dmCalibration == "coefficients" )
+        return "dm.coefficients, no fit";
+    return m_dmMask.empty() ? "uniform weights 1.0 over 50x50" : "dm.mask " + m_dmMask;
+}
+
+inline bool accelSim::prepareDMCalibration()
+{
+    try
+    {
+        loadDMCalibration();
+    }
+    catch( const std::exception &error )
+    {
+        m_dmReady       = false;
+        m_dmUnavailable = "calibration " + m_dmCalibration + " (" + dmSupport() + "): " + error.what();
+        log<text_log>( "DM injection unavailable: " + m_dmUnavailable, logPrio::LOG_ERROR );
+        return false;
+    }
+    m_dmUnavailable = "";
+    const auto &k   = m_dmInjection.mapping();
+    char        text[400];
+    std::snprintf( text,
+                   sizeof( text ),
+                   "DM calibration %s (%s): K [coefficient/rad] = [[%.12g, %.12g], [%.12g, %.12g]]; fit pixels %zu; "
+                   "relative residuals X %.3g, Y %.3g",
+                   accelSimDetail::dmCalibrationName( m_dmInjection.method() ),
+                   dmSupport().c_str(),
+                   k( 0, 0 ),
+                   k( 0, 1 ),
+                   k( 1, 0 ),
+                   k( 1, 1 ),
+                   m_dmInjection.fitPixels(),
+                   m_dmInjection.residual()[0],
+                   m_dmInjection.residual()[1] );
+    log<text_log>( text, logPrio::LOG_NOTICE );
+    return true;
 }
 
 inline void accelSim::prepareDM()
 {
-    if( m_dmChannel.empty() )
+    if( m_dmChannel.empty() || !prepareDMCalibration() )
         return;
-    try
+    m_dmReady = true;
+    // The dmSpeckle worker pattern: framework thread with configured real-time priority and cpuset.
+    if( threadStart( m_dmThread,
+                     m_dmThreadInit,
+                     m_dmThreadID,
+                     m_dmThreadProp,
+                     m_dmThreadPrio,
+                     m_dmThreadCpuset,
+                     "dm",
+                     this,
+                     dmThreadStart ) < 0 )
     {
-        loadDMCalibration();
-        m_dmReady = true;
-        // The dmSpeckle worker pattern: framework thread with configured real-time priority and cpuset.
-        if( threadStart( m_dmThread,
-                         m_dmThreadInit,
-                         m_dmThreadID,
-                         m_dmThreadProp,
-                         m_dmThreadPrio,
-                         m_dmThreadCpuset,
-                         "dm",
-                         this,
-                         dmThreadStart ) < 0 )
-        {
-            stopDM();
-            throw std::runtime_error( "DM worker thread priority/cpuset setup failed" );
-        }
-        char fit[160];
-        std::snprintf( fit,
-                       sizeof( fit ),
-                       "; fit over %s, %zu pixels, relative residuals %.3g %.3g",
-                       m_dmMask.empty() ? "the nominal pupil" : "dm.mask",
-                       m_dmInjection.fitPixels(),
-                       m_dmInjection.residual()[0],
-                       m_dmInjection.residual()[1] );
-        log<text_log>( "DM channel prepared disabled: " + m_dmChannel + fit + "; exclusive operator handover required",
-                       logPrio::LOG_NOTICE );
+        stopDM();
+        m_dmReady       = false;
+        m_dmUnavailable = "DM worker thread priority/cpuset setup failed";
+        log<text_log>( "DM injection unavailable: " + m_dmUnavailable, logPrio::LOG_ERROR );
+        return;
     }
-    catch( const std::exception &error )
-    {
-        m_dmReady = false;
-        log<text_log>( std::string( "DM injection unavailable: " ) + error.what(), logPrio::LOG_ERROR );
-    }
+    log<text_log>( "DM channel prepared disabled: " + m_dmChannel + "; exclusive operator handover required",
+                   logPrio::LOG_NOTICE );
 }
 
 inline void accelSim::updateDMINDI()
@@ -837,8 +929,28 @@ inline void accelSim::updateDMINDI()
                                                              stats.m_slack.rms() };
     for( size_t n = 0; n < timing.size(); ++n )
         m_indiP_dmTiming[c_dmTimingNames[n]] = timing[n];
+    // Calibration is fixed after startup: method, K [coefficient/rad], fit quality, or why output is unavailable.
+    const auto &k      = m_dmInjection.mapping();
+    auto        number = []( double value )
+    {
+        char text[32];
+        std::snprintf( text, sizeof( text ), "%.12g", value );
+        return std::string( text );
+    };
+    m_indiP_dmCalibration["status"]     = m_dmReady ? std::string( "ready" ) : m_dmUnavailable;
+    m_indiP_dmCalibration["method"]     = std::string( accelSimDetail::dmCalibrationName( m_dmInjection.method() ) );
+    m_indiP_dmCalibration["support"]    = dmSupport();
+    m_indiP_dmCalibration["k00"]        = number( k( 0, 0 ) );
+    m_indiP_dmCalibration["k01"]        = number( k( 0, 1 ) );
+    m_indiP_dmCalibration["k10"]        = number( k( 1, 0 ) );
+    m_indiP_dmCalibration["k11"]        = number( k( 1, 1 ) );
+    m_indiP_dmCalibration["residual_x"] = number( m_dmInjection.residual()[0] );
+    m_indiP_dmCalibration["residual_y"] = number( m_dmInjection.residual()[1] );
+    m_indiP_dmCalibration["fit_pixels"] = std::to_string( m_dmInjection.fitPixels() );
+    m_indiP_dmCalibration.setState( m_dmReady || m_dmChannel.empty() ? INDI_OK : INDI_ALERT );
     if( m_indiDriver )
     {
+        m_indiDriver->sendSetProperty( m_indiP_dmCalibration );
         m_indiDriver->sendSetProperty( m_indiP_dmStatus );
         m_indiDriver->sendSetProperty( m_indiP_dmSteps );
         m_indiDriver->sendSetProperty( m_indiP_dmTiming );
