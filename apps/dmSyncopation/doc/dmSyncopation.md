@@ -404,6 +404,7 @@ count in the production and legacy schedulers.
 | --- | --- | --- |
 | `enable` | Switch, read/write | `toggle` requests acquisition and operation when On. Off acknowledges after the current callback quiesces. Both source and destination retain their last values. |
 | `reacquire` | Switch, read/write | `request` invalidates the schedule and resets acquisition when On, then returns Off. |
+| `zero` | Switch, read/write | `request` clears the configured numbered destinations and triggers dmcomb once with the AO loop open and synco disabled. |
 | `settings` | Number, read/write while disabled | `steps` and `maxCadenceHz`. The legacy scheduler also exposes `keepoutUs`, `guardUs` and `step0LeadUs`. Finite trials add `durationSec`. Named elements are validated and applied together. |
 | `timing` | Number, read-only | Reference, planned and confirmed rates (`mainHz`, `plannedHz`, `deliveredHz`), step counts (`requested`, `active`, `feasible`) and skip count (`missed`). `faults` counts legacy scheduler invalidations. |
 | `health` | Text, read-only | Current phase (`reason`), latched fault (`lastFault`) and operating `mode`. |
@@ -1342,6 +1343,28 @@ A nonempty `syncopation.timingStream` enables managed mode. The DM channel name 
 Existing dmSpeckle INDI `frequency`, `amp`, `modulating` and `zero` controls apply. Read-only `dm.timing` reports the managed timing stream alongside the existing DM name/channel readback. The legacy trigger is forced off, enabling it is rejected, and its delay setting has no managed effect. Stopping modulation retains the last auxiliary value; use the explicit zero control to remove the contribution.
 
 ## Controller clearing and maintenance
+
+To clear only the syncopation contribution, open the AO loop, disable synco and
+wait for its `enable.toggle` to read Off. Pause other direct DM channel writers
+during the clear so that dmcomb has a single trigger to process. Then send
+`dmtweeter-synco.zero.request=On`. The request works with the primary stream
+idle. It clears every channel in `streams.destinations`, then publishes one
+counter increment and semaphore notification on the first destination. Keep
+dmcomb and the DM controller running so the updated sum reaches the mirror.
+Use the same dmcomb trigger routing that handles synco's auxiliary publications.
+
+The request returns to Off with state OK after one new combined frame, or
+Alert if validation fails or dmcomb does not publish a single new frame within
+100 ms. An alert after publication can leave the input channels cleared. The
+acknowledgement covers the combined stream. The controller's own status and
+telemetry report subsequent DM delivery.
+
+The `zero.loopDevice` setting names the source of `loop_state.toggle` and
+defaults to `holoop`. The request requires a received Off value. An empty device
+name omits the control. Read-only observation and finite zero trials omit it
+as well. Provider-owned `_aux` streams retain their contents. Stop modulation
+if the next enable should start without a fresh contribution, and clear legacy
+provider sources before enabling if they still contain an unwanted shape.
 
 Controller zero/release checks each existing numbered main channel for a matching `_aux` counterpart. Missing auxiliary streams are normal. Compatible CPU 2-D streams matching the configured geometry and scalar type are zeroed alongside the main channels. An incompatible or unopenable optional source is left untouched and reported as an error after the main channels and normal cleanup are cleared; it does not block main-channel clearing. Auxiliary clears update publication metadata/counters without semaphore notifications, preserving the controller's existing main-notification behavior.
 

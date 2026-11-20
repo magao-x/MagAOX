@@ -319,6 +319,10 @@ disabling synco or stopping either application. A "zero submitted" log confirms
 transport submission, not destination application. Stopping either application
 alone does not remove the last copied contribution.
 
+With the AO loop open and synco disabled, use
+`dmtweeter-synco.zero.request=On` to clear all configured destinations and
+trigger one dmcomb update. [Open-loop clearing procedure](dmSyncopation.md#controller-clearing-and-maintenance)
+
 ## Adding another producer application
 
 Derive from `dev::dmSyncopationProducer<yourApp>`, provide its friend declaration
