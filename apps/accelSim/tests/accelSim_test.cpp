@@ -4,6 +4,7 @@
  */
 #include "../../../tests/testXWC.hpp"
 #include "../accelSimOutput.hpp"
+#include <complex>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -75,6 +76,129 @@ TEST_CASE( "accelSim zero output preserves the physical vibration sequence", "[a
     }
     REQUIRE( motion );
     REQUIRE( varyingAdc );
+}
+
+/** \brief Optical coupling and the independent optical disturbance change only DM pointing, never measurements.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim optical coupling and independent disturbance", "[accelSim][model][optical]" )
+{
+    std::vector<double> coupling( 15 );
+    for( size_t n = 0; n < coupling.size(); ++n )
+        coupling[n] = n / 14.;
+    const auto specs = referenceModes( 123, coupling );
+    REQUIRE( referenceModes( 123, { .5 } ).back().m_opticalCoupling == .5 );
+    REQUIRE( referenceModes( 123 ).front().m_opticalCoupling == 1 );
+    for( const auto &spec : specs ) // Prominent frequencies map to their notebook index; weak modes share the last.
+    {
+        const std::array<double, 14> prominent{ 11, 14, 17, 20, 25, 28, 54, 56, 58, 75, 85, 120, 220, 300 };
+        const auto                   at = std::find( prominent.begin(), prominent.end(), spec.m_frequency );
+        REQUIRE( spec.m_opticalCoupling == coupling[at - prominent.begin()] );
+    }
+    REQUIRE_THROWS( referenceModes( 123, { 1, 1 } ) );
+    parameters config;
+    config.m_fps = 8000;
+    for( double bad : { -.1, 1.1, double( NAN ) } )
+        REQUIRE_THROWS( model().configure( config, referenceModes( 123, { bad } ) ) );
+    config.m_opticalAmplitude = -1;
+    REQUIRE_THROWS( model().configure( config, referenceModes( 123 ) ) );
+
+    config.m_opticalAmplitude = 0;
+    model baseline, unity, half, independent, twice, reseeded;
+    baseline.configure( config, referenceModes( 123 ) );
+    config.m_opticalSeed = 99; // Unused at zero amplitude.
+    unity.configure( config, referenceModes( 123, { 1 } ) );
+    half.configure( config, referenceModes( 123, { .5 } ) );
+    config.m_opticalAmplitude = 1;
+    independent.configure( config, referenceModes( 123 ) );
+    config.m_opticalAmplitude = 2;
+    twice.configure( config, referenceModes( 123 ) );
+    config.m_opticalSeed = 100;
+    reseeded.configure( config, referenceModes( 123 ) );
+    double cross = 0, power = 0, extra = 0;
+    for( size_t frame = 0; frame < 8000; ++frame )
+    {
+        const sample expected = baseline.step();
+        REQUIRE( unity.step().m_pointing == expected.m_pointing ); // Defaults are bitwise unchanged.
+        for( model *other : { &unity, &half, &independent, &twice, &reseeded } )
+        {
+            if( other != &unity )
+                other->step();
+            REQUIRE( other->m_sample.m_acceleration == expected.m_acceleration );
+            REQUIRE( other->m_sample.m_adc == expected.m_adc );
+            REQUIRE( other->m_sample.m_physicalPointing == expected.m_physicalPointing );
+        }
+        REQUIRE( unity.m_sample.m_wfsPointing == expected.m_wfsPointing );
+        REQUIRE( expected.m_physicalPointing == expected.m_pointing );
+        for( size_t axis = 0; axis < 2; ++axis )
+        {
+            const double residual = independent.m_sample.m_pointing[axis] - expected.m_pointing[axis];
+            REQUIRE( half.m_sample.m_pointing[axis] == Approx( .5 * expected.m_pointing[axis] ) );
+            REQUIRE( half.m_sample.m_wfsPointing[axis] == Approx( .5 * expected.m_wfsPointing[axis] ) );
+            REQUIRE( twice.m_sample.m_pointing[axis] - expected.m_pointing[axis] ==
+                     Approx( 2 * residual ).margin( 1e-15 ) );
+            cross += residual * expected.m_pointing[axis];
+            power += expected.m_pointing[axis] * expected.m_pointing[axis];
+            extra += residual * residual;
+        }
+        REQUIRE( reseeded.m_sample.m_pointing != twice.m_sample.m_pointing );
+    }
+    REQUIRE( extra > 0 );
+    REQUIRE( std::abs( cross ) < .99 * std::sqrt( power * extra ) ); // Not a copy of the sensed realization.
+}
+
+/** \brief The independent optical disturbance lowers ACC/WFS magnitude-squared coherence at shared mode peaks.
+ * The baseline is below 1 because the weak modes are fully sensed but only 1% WFS coupled. An equal-power independent
+ * realization (amplitude 1) roughly doubles WFS power at the prominent peaks, so coherence falls to about half.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim optical disturbance reduces ACC/WFS coherence", "[accelSim][model][optical]" )
+{
+    constexpr size_t            length = 800, segments = 80; // Hann-windowed 10-Hz bins at 8 kHz.
+    const std::array<double, 3> peaks{ 120, 220, 300 };      // Prominent modes with unity WFS coupling.
+    const auto                  coherence = [&]( double amplitude )
+    {
+        parameters config;
+        config.m_fps              = 8000;
+        config.m_opticalAmplitude = amplitude;
+        model simulation;
+        simulation.configure( config, referenceModes( 123 ) );
+        std::array<std::array<std::complex<double>, 2>, 3> cross{};
+        std::array<std::array<double, 2>, 3>               accel{}, wfs{}, result{};
+        std::vector<sample>                                record( length );
+        for( size_t segment = 0; segment < segments; ++segment )
+        {
+            for( auto &value : record )
+                value = simulation.step();
+            for( size_t f = 0; f < peaks.size(); ++f )
+                for( size_t axis = 0; axis < 2; ++axis )
+                {
+                    std::complex<double> a, w;
+                    for( size_t n = 0; n < length; ++n )
+                    {
+                        const auto basis = std::polar( .5 - .5 * std::cos( 2 * pi * n / length ),
+                                                       -2 * pi * peaks[f] * n / config.m_fps );
+                        a += basis * record[n].m_acceleration[axis];
+                        w += basis * record[n].m_wfsPointing[axis];
+                    }
+                    cross[f][axis] += a * std::conj( w );
+                    accel[f][axis] += std::norm( a );
+                    wfs[f][axis] += std::norm( w );
+                }
+        }
+        for( size_t f = 0; f < peaks.size(); ++f )
+            for( size_t axis = 0; axis < 2; ++axis )
+                result[f][axis] = std::norm( cross[f][axis] ) / ( accel[f][axis] * wfs[f][axis] );
+        return result;
+    };
+    const auto shared = coherence( 0 ), reduced = coherence( 1 );
+    for( size_t f = 0; f < peaks.size(); ++f )
+        for( size_t axis = 0; axis < 2; ++axis )
+        {
+            INFO( peaks[f] << " Hz axis " << axis << ": " << shared[f][axis] << " -> " << reduced[f][axis] );
+            REQUIRE( shared[f][axis] > .5 );
+            REQUIRE( reduced[f][axis] < .65 * shared[f][axis] );
+        }
 }
 
 /** \brief Known AR coefficients, stable innovation scaling, and stationary covariance invariance.
@@ -636,12 +760,13 @@ TEST_CASE( "accelSim export offline validation samples", "[.][accelSim-export]" 
               << '\n';
     model value;
     value.configure( config, specs );
-    samples << std::setprecision( 17 ) << "time,pointing_x,pointing_y,wfs_x,wfs_y,accel_x,accel_y,adc_x,adc_y\n";
+    samples << std::setprecision( 17 )
+            << "time,physical_x,physical_y,optical_x,optical_y,wfs_x,wfs_y,accel_x,accel_y,adc_x,adc_y\n";
     for( size_t n = 0; n < count; ++n )
     {
         const auto &s = value.step();
         samples << n / config.m_fps;
-        for( const auto &pair : { s.m_pointing, s.m_wfsPointing, s.m_acceleration } )
+        for( const auto &pair : { s.m_physicalPointing, s.m_pointing, s.m_wfsPointing, s.m_acceleration } )
             for( double x : pair )
                 samples << ',' << x;
         samples << ',' << s.m_adc[0] << ',' << s.m_adc[1] << '\n';

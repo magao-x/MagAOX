@@ -506,6 +506,34 @@ each mode contributes `-(2*pi*f)^2 * leverArm * theta_rad` to acceleration.
 Independent accelerometer noise is added after summing the modes. WFS-coupled
 pointing is retained internally without sensor noise or a separate output stream.
 
+### Optical coupling and independent optical disturbance (`[optical]`)
+
+`sample::m_pointing`, the pointing injected on the DM, is
+
+```text
+theta_DM = sum_k c_k * theta_k + optical.amplitude * theta_indep
+```
+
+where `theta_k` is mode k's pointing and `c_k` its optical coupling in [0,1].
+Acceleration and ADC counts still use every `theta_k` in full, so they are
+bitwise unchanged by these settings. `optical.coupling` is empty (all 1), one
+value for all modes, or 15 values: the 14 prominent modes in notebook order
+(11, 14, 17, 20, 25, 28, 54, 56, 58, 75, 85, 120, 220 and 300 Hz), then one
+value shared by the 200 weak modes. `theta_indep` is a second realization of
+the same 214-mode population, drawn from its own generator seeded by
+`optical.seed`, so the accelerometer does not see it. `sample::m_physicalPointing`
+keeps the uncoupled mechanical sum sensed by the accelerometer, and
+`sample::m_wfsPointing` applies the per-mode WFS couplings to the optical pointing
+(each mode's `c_k * theta_k` plus its independent term). Couplings below 1 or a
+nonzero amplitude make ACC/WFS coherence realistically less than 1; with
+`optical.amplitude=1` the measured ACC/WFS magnitude-squared coherence at 120,
+220 and 300 Hz falls from 0.61–0.83 to 0.33–0.46, about half (`[optical]` tests).
+The baseline is below 1 because the weak modes are fully sensed but 1% WFS coupled. The defaults
+(couplings 1, amplitude 0) reproduce the previous sequence exactly, and the
+independent realization uses no oscillators or random draws until it is enabled.
+These settings apply at startup only and do not change synchronization, DM
+calibration, or `dm.scale`, which still scales the whole DM disturbance.
+
 The ADC calculation is `zero + acceleration*sensitivity/voltsPerBit`, followed
 by `std::round`, floating-point clamping, and conversion to `uint16_t`. Defaults
 are 2048, 1.02, and 0.0083799 respectively. The three values and the sensor PSD
@@ -852,7 +880,8 @@ ACCELSIM_EXPORT_DIR=/tmp/accelSim-visual-validation \
 
 The normal full test binary also supports `[accelSim-export]`. Exported files:
 
-- `samples.csv`: nominal time [s]; physical and WFS pointing X/Y [arcsec];
+- `samples.csv`: nominal time [s]; physical (accelerometer), optical (DM) and
+  WFS pointing X/Y [arcsec];
   acceleration X/Y including sensor noise [m/s²]; raw ADC X/Y [counts].
 - `modes.csv`: resolved frequencies, per-axis acceleration RMS, pole radii,
   and X/Y WFS couplings used by this C++ realization.

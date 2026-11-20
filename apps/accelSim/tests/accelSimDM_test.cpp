@@ -134,6 +134,34 @@ TEST_CASE( "accelSim DM same sample and timing budget", "[accelSim][dm-runtime]"
               << " us (not a native stream/driver benchmark)\n";
 }
 
+/** \brief Each mode's optical coupling scales its DM contribution while the accelerometer still senses it fully.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim DM optical coupling", "[accelSim][dm-runtime]" )
+{
+    dmFixture   calibration;
+    dmInjection full, coupled;
+    full.prepare( calibration.m_x, calibration.m_y, calibration.m_weights, 1e-6 );
+    coupled.prepare( calibration.m_x, calibration.m_y, calibration.m_weights, 1e-6 );
+    parameters config;
+    config.m_fps = 8000;
+    model baseline, half, blind;
+    baseline.configure( config, referenceModes( 123 ) );
+    half.configure( config, referenceModes( 123, { .5 } ) );
+    blind.configure( config, referenceModes( 123, { 0 } ) );
+    for( size_t n = 0; n < 800; ++n )
+    {
+        const auto expected = full.synthesize( baseline.step(), 1 );
+        const auto command  = coupled.synthesize( half.step(), 1 );
+        REQUIRE( blind.step().m_adc == baseline.m_sample.m_adc );
+        REQUIRE( half.m_sample.m_adc == baseline.m_sample.m_adc );
+        for( size_t pixel = 0; pixel < command.size(); ++pixel )
+            REQUIRE( command[pixel] == Approx( .5 * expected[pixel] ).margin( 1e-9 ) );
+        const auto &zero = coupled.synthesize( blind.m_sample, 1 );
+        REQUIRE( std::all_of( zero.begin(), zero.end(), []( float v ) { return v == 0; } ) );
+    }
+}
+
 /// \cond ACCELSIM_DM_FIXTURE
 /// Modes nonzero on the whole grid: the fixture's rotated tilt inside the 48-pitch pupil, and outside it slaved-edge
 /// and corner values that are not on the tilt plane, as in a deployed DM mode cube.
@@ -323,6 +351,8 @@ struct dmAppTest : MagAOX::app::accelSim
     using accelSim::m_indiP_dmEnable;
     using accelSim::m_indiP_dmScale;
     using accelSim::m_indiP_dmStatus;
+    using accelSim::m_model;
+    using accelSim::m_parameters;
     using accelSim::prepareDMCalibration;
     using accelSim::setupProperties;
     using accelSim::updateDMINDI;
@@ -396,6 +426,51 @@ TEST_CASE( "accelSim DM simple operator controls", "[accelSim][dm-controls]" )
 #endif
 
 #ifndef ACCELSIM_MODEL_ONLY
+/** \brief Startup optical keys reach the model; defaults couple every mode fully with no independent disturbance.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim optical configuration", "[accelSim][dm-controls]" )
+{
+    dmAppTest defaults;
+    defaults.setupConfig();
+    REQUIRE( defaults.loadConfigImpl( defaults.config ) == 0 );
+    REQUIRE( defaults.m_parameters.m_opticalAmplitude == 0 );
+    for( const auto &mode : defaults.m_model.m_modes )
+        REQUIRE( mode.m_spec.m_opticalCoupling == 1 );
+
+    dmAppTest configured;
+    configured.setupConfig();
+    configured.config.m_values["optical.coupling"]  = ".1,.2,.3,.4,.5,.6,.7,.8,.9,1,1,1,1,1,.25";
+    configured.config.m_values["optical.amplitude"] = "0.5";
+    configured.config.m_values["optical.seed"]      = "11";
+    REQUIRE( configured.loadConfigImpl( configured.config ) == 0 );
+    REQUIRE( configured.m_parameters.m_opticalAmplitude == .5 );
+    REQUIRE( configured.m_parameters.m_opticalSeed == 11 );
+    REQUIRE( configured.m_model.m_modes.front().m_spec.m_opticalCoupling == .1 ); // 11 Hz
+    for( const auto &mode : configured.m_model.m_modes )
+        if( mode.m_spec.m_frequency == 300 )
+            REQUIRE( mode.m_spec.m_opticalCoupling == 1 );
+        else if( mode.m_spec.m_couplingX == .01 ) // Weak population.
+            REQUIRE( mode.m_spec.m_opticalCoupling == .25 );
+
+    for( const auto &[key, text] : { std::pair{ "optical.coupling", "1,1" },
+                                     { "optical.coupling", "1.5" },
+                                     { "optical.coupling", "x" },
+                                     { "optical.coupling", "0.5x" },
+                                     { "optical.amplitude", "-1" } } )
+    {
+        dmAppTest invalid;
+        invalid.setupConfig();
+        invalid.config.m_values[key] = text;
+        REQUIRE( invalid.loadConfigImpl( invalid.config ) < 0 );
+    }
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::loadConfigImpl;
+#endif
+    // clang-format on
+}
+
 /** \brief A full-grid mode cube without dm.mask: the default fit reports exactly why DM output is unavailable, and
  * dm.calibration=coefficients initializes from the cube alone, generating the masked calibration's commands.
  * \ingroup accelSim_unit_test

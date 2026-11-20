@@ -180,6 +180,7 @@ class accelSim : public MagAOXApp<true>,
     bool m_zeroOutput{ false }; ///< Startup-only override of published ADC counts, not physics or DM injection.
 
     accelSimDetail::parameters m_parameters;     ///< Startup-only physics/calibration configuration.
+    std::vector<double>        m_opticalCoupling; ///< Startup optical.coupling list; empty couples all modes fully.
     accelSimDetail::model      m_model;          ///< Acquisition-thread-owned physical state and RNG.
     accelSimDetail::timeline   m_timeline;       ///< Shared realization: acquisition generates, the DM thread reads.
     accelSimDetail::sample     m_acquiredSample; ///< Latest measurement, owned by the acquisition thread.
@@ -454,6 +455,12 @@ inline void accelSim::setupConfig()
     add( "sim", "seed", "uint64_t", "Numerical random seed, default 42." );
     add( "sim", "modeSeed", "uint64_t", "High-frequency parameter seed, default 123." );
     add( "sim", "leverArm", "double", "Effective lever arm [m], default 10." );
+    add( "optical",
+         "coupling",
+         "string",
+         "Optical TT coupling in [0,1]: empty (all 1), one value, or 14 prominent modes then one for weak modes." );
+    add( "optical", "amplitude", "double", "Independent optical-only disturbance scale (not sensed), default 0." );
+    add( "optical", "seed", "uint64_t", "Independent optical disturbance random seed, default 7." );
     add( "sensor", "noisePSD", "double", "One-sided acceleration noise PSD, default 1e-8." );
     add( "adc", "zero", "double", "ADC zero point [counts], default 2048." );
     add( "adc", "voltsPerBit", "double", "Empirical volts per count, default 0.0083799." );
@@ -522,6 +529,10 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_parameters.m_seed, "sim.seed" );
     config( m_parameters.m_modeSeed, "sim.modeSeed" );
     config( m_parameters.m_leverArm, "sim.leverArm" );
+    std::string coupling;
+    config( coupling, "optical.coupling" );
+    config( m_parameters.m_opticalAmplitude, "optical.amplitude" );
+    config( m_parameters.m_opticalSeed, "optical.seed" );
     config( m_parameters.m_noisePSD, "sensor.noisePSD" );
     config( m_parameters.m_zero, "adc.zero" );
     config( m_parameters.m_voltsPerBit, "adc.voltsPerBit" );
@@ -570,6 +581,16 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_dmThreadCpuset, "dm.cpuset" );
     try
     {
+        std::stringstream couplingInput( coupling );
+        std::string       couplingItem;
+        m_opticalCoupling.clear();
+        while( std::getline( couplingInput, couplingItem, ',' ) )
+        {
+            std::size_t used = 0;
+            m_opticalCoupling.push_back( std::stod( couplingItem, &used ) ); // Throws for a non-number.
+            if( couplingItem.find_first_not_of( " \t", used ) != std::string::npos )
+                throw std::invalid_argument( "optical.coupling must be comma-separated numbers" );
+        }
         if( m_dmThreadPrio < 0 || m_dmThreadPrio > 99 )
             throw std::invalid_argument( "dm.threadPrio must be in [0,99]" );
         if( m_dmStartupEnabled || !std::isfinite( dmScale ) || dmScale < 0 || dmScale > accelSimDetail::maxDMScale ||
@@ -625,7 +646,7 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
         }
         if( !std::isfinite( m_dtTransfer + m_wfsProcess + m_dtF + m_wfsRead ) )
             throw std::invalid_argument( "timing-model overflow" );
-        m_model.configure( m_parameters, accelSimDetail::referenceModes( m_parameters.m_modeSeed ) );
+        m_model.configure( m_parameters, accelSimDetail::referenceModes( m_parameters.m_modeSeed, m_opticalCoupling ) );
         m_maxFrequency = m_model.m_modes.back().m_spec.m_frequency;
     }
     catch( const std::exception &error )
