@@ -23,6 +23,18 @@ class counterOffload_test : public counterOffload
   public:
     using counterOffload::m_accum;
     using counterOffload::m_accumNonzero;
+    using counterOffload::m_bandCenterHz;
+    using counterOffload::m_bandHalfWidthHz;
+    using counterOffload::m_bandModes;
+    using counterOffload::m_bandValid;
+    using counterOffload::m_df;
+    using counterOffload::m_gainGrid;
+    using counterOffload::m_nAverage;
+    using counterOffload::m_psdAfterNs;
+    using counterOffload::m_psdNFreq;
+    using counterOffload::m_psdNModes;
+    using counterOffload::m_psdPowers;
+    using counterOffload::m_startGridUs;
     using counterOffload::m_channel;
     using counterOffload::m_command;
     using counterOffload::m_enabled;
@@ -359,12 +371,30 @@ TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
         REQUIRE( app.validateConfig() < 0 );
     }
 
-    SECTION( "leak and gain must be within 0 to 1" )
+    SECTION( "leak must be within 0 to 1 and gain within 0 to 2" )
     {
         app.m_leak = 1.5;
         REQUIRE( app.validateConfig() < 0 );
         app.m_leak = 0.5;
         app.m_gain = -0.1;
+        REQUIRE( app.validateConfig() < 0 );
+        app.m_gain = 1.5;
+        REQUIRE( app.validateConfig() == 0 );
+        app.m_gain = 2.5;
+        REQUIRE( app.validateConfig() < 0 );
+    }
+
+    SECTION( "calibration settings are checked" )
+    {
+        app.m_nAverage = 1; // a single PSD is never used for a score
+        REQUIRE( app.validateConfig() < 0 );
+        app.m_nAverage    = 6;
+        app.m_startGridUs = { 0, 400 }; // min, max, step required
+        REQUIRE( app.validateConfig() < 0 );
+        app.m_startGridUs = { 400, 0, 25 }; // max below min
+        REQUIRE( app.validateConfig() < 0 );
+        app.m_startGridUs = { 0, 400, 25 };
+        app.m_gainGrid    = { 0.5, 2.5, 0.1 }; // above the gain limit
         REQUIRE( app.validateConfig() < 0 );
     }
 
@@ -375,6 +405,185 @@ TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
         app.m_rampStartUs    = 120;
         app.m_rampDurationUs = 0;
         REQUIRE( app.validateConfig() < 0 );
+    }
+}
+
+/// Verify the PSD band integral used as the calibration figure of merit.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload integrates the PSD band", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::bandPower(nullptr,0,0,0,0,0,0);
+    #endif
+    // clang-format on
+
+    // 11 frequencies 0-50 Hz at 5 Hz, 3 modes; mode m has value (m+1) at every frequency, plus 100 at 25 Hz in mode 0.
+    constexpr uint32_t nf = 11, nm = 3;
+    std::vector<float> psd( nf * nm );
+    for( uint32_t m = 0; m < nm; ++m )
+    {
+        for( uint32_t n = 0; n < nf; ++n )
+        {
+            psd[n + m * nf] = m + 1;
+        }
+    }
+    psd[5] += 100;
+
+    SECTION( "the band includes its edges and is weighted by df" )
+    {
+        // 20, 25, 30 Hz in mode 0
+        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 25, 5, 1 ) == Approx( ( 3 + 100 ) * 5 ) );
+    }
+
+    SECTION( "only the first modeMax modes are summed" )
+    {
+        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 25, 0, 2 ) == Approx( ( 101 + 2 ) * 5 ) );
+        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 25, 0, 10 ) == Approx( ( 101 + 2 + 3 ) * 5 ) );
+    }
+
+    SECTION( "a band past the last frequency is clipped" )
+    {
+        // 45, 50 Hz in mode 0
+        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 50, 7, 1 ) == Approx( 2 * 5 ) );
+    }
+
+    SECTION( "an empty band or mode range returns -1" )
+    {
+        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 80, 5, 1 ) == -1 );
+        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 22, 1, 1 ) == -1 ); // between bins
+        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 25, 5, 0 ) == -1 );
+        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 0, 25, 5, 1 ) == -1 );
+    }
+}
+
+/// Verify the coordinate scan on a synthetic objective.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload coordinate scan finds the minimum", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::coordinateScan({},best,bestFom,nullptr);
+    #endif
+    // clang-format on
+
+    const std::array<std::vector<double>, 3> grids{
+        std::vector<double>{ 0, 400, 25 }, std::vector<double>{ 100, 600, 50 }, std::vector<double>{ 0.5, 1.5, 0.1 } };
+
+    // Separable quadratic with its minimum between grid points.
+    auto f = []( const counterOffload::calibParamsT &p )
+    {
+        return 0.2 + std::pow( ( p[0] - 210 ) / 100, 2 ) + std::pow( ( p[1] - 330 ) / 200, 2 ) +
+               std::pow( ( p[2] - 1.12 ) / 0.5, 2 );
+    };
+
+    counterOffload::calibParamsT best{ 120, 330, 1 };
+    double                       bestFom = f( best );
+    int                          nEval   = 0;
+
+    SECTION( "the scan converges near the true minimum" )
+    {
+        REQUIRE( counterOffload::coordinateScan( grids,
+                                                 best,
+                                                 bestFom,
+                                                 [&]( const counterOffload::calibParamsT &p, int, int, double &r )
+                                                 {
+                                                     ++nEval;
+                                                     r = f( p );
+                                                     return true;
+                                                 } ) );
+
+        REQUIRE( best[0] == Approx( 210 ).margin( 2 ) );
+        REQUIRE( best[1] == Approx( 330 ).margin( 5 ) );
+        REQUIRE( best[2] == Approx( 1.12 ).margin( 0.01 ) );
+        REQUIRE( bestFom == Approx( f( best ) ) );
+        REQUIRE( nEval < 70 );
+    }
+
+    SECTION( "the scan stays within the grid limits" )
+    {
+        auto edge = []( const counterOffload::calibParamsT &p ) { return -p[0] - p[1] - p[2]; }; // minimum at the maxima
+
+        bestFom = edge( best );
+        REQUIRE( counterOffload::coordinateScan( grids,
+                                                 best,
+                                                 bestFom,
+                                                 [&]( const counterOffload::calibParamsT &p, int, int, double &r )
+                                                 {
+                                                     REQUIRE( p[0] <= 400 + 1e-9 );
+                                                     REQUIRE( p[2] <= 1.5 + 1e-9 );
+                                                     r = edge( p );
+                                                     return true;
+                                                 } ) );
+        REQUIRE( best[0] == Approx( 400 ) );
+        REQUIRE( best[1] == Approx( 600 ) );
+        REQUIRE( best[2] == Approx( 1.5 ) );
+    }
+
+    SECTION( "an evaluator abort stops the scan and keeps the best so far" )
+    {
+        REQUIRE_FALSE( counterOffload::coordinateScan( grids,
+                                                       best,
+                                                       bestFom,
+                                                       [&]( const counterOffload::calibParamsT &p, int, int, double &r )
+                                                       {
+                                                           r = f( p );
+                                                           return ++nEval < 5;
+                                                       } ) );
+        REQUIRE( nEval == 5 );
+        REQUIRE( bestFom == Approx( f( best ) ) );
+    }
+}
+
+/// Verify that PSDs are collected only during an evaluation and after the settling time.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload collects PSD band powers after a change", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::processImage(nullptr, psdShmimT());
+    #endif
+    // clang-format on
+
+    counterOffload_test app;
+
+    std::vector<float> psd( 11 * 2, 1.0f );
+
+    app.m_psdNFreq        = 11;
+    app.m_psdNModes       = 2;
+    app.m_df              = 5;
+    app.m_bandCenterHz    = 25;
+    app.m_bandHalfWidthHz = 5;
+    app.m_bandModes       = 1;
+
+    SECTION( "nothing is collected without a band" )
+    {
+        app.processImage( psd.data(), psdShmimT() );
+        REQUIRE( app.m_psdPowers.empty() );
+    }
+
+    SECTION( "PSDs received before the settled time are ignored" )
+    {
+        app.m_bandValid  = true;
+        app.m_psdAfterNs = synco::monotonicNs() + 1000000000000LL;
+        app.processImage( psd.data(), psdShmimT() );
+        REQUIRE( app.m_psdPowers.empty() );
+    }
+
+    SECTION( "PSDs received after the settled time are collected" )
+    {
+        app.m_bandValid  = true;
+        app.m_psdAfterNs = 0;
+        app.processImage( psd.data(), psdShmimT() );
+        app.processImage( psd.data(), psdShmimT() );
+        REQUIRE( app.m_psdPowers.size() == 2 );
+        REQUIRE( app.m_psdPowers[0] == Approx( 3 * 5 ) );
     }
 }
 

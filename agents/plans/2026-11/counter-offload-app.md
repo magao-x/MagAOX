@@ -271,7 +271,7 @@ Checks for the first RTC build:
 - **Woofer actuator clipping (`actLim`)** in t2wOffloader is not reflected in Δ (Part 1 limitation).
 - **Possible later additions:** telemetry and a handbook page.
 
-## Calibrate Mode (planned 2026-11-19, questions answered, not implemented)
+## Calibrate Mode (implemented 2026-11-19, not yet built or tested)
 
 ### Request (user, 2026-11-19, condensed)
 Tune the ramp so that the wavefront error spikes caused by offloading are mitigated. The figure of merit comes from the WFS closed-loop PSDs, published in real time in `aol1_clpsds`. The spike sits at (or very near) `t2wOffloader.offloadRate`, so integrate the PSD around that frequency and compare it across ramp parameters and with counter-offloading off. Plan a new `calibrate` mode of counterOffload that optimizes the ramp parameters to minimize this PSD spike.
@@ -388,3 +388,43 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
   - Run calibrate at a small grid first, starting from the current defaults.
   - Confirm `fomOff` is repeatable, which sets the noise floor.
   - Then a full run. Check the CSV curves and compare the PSDs with the best parameters against gain 0.
+
+### Calibrate Implementation Log
+**2026-11-19: implemented** in `apps/counterOffload/counterOffload.hpp`, with tests, docs and the example config.
+
+- **PSD input.**
+  - A second `dev::shmimMonitor<counterOffload, psdShmimT>`, with config section `[psds]` and default `shmimName=aol1_raw_clpsds`.
+  - `allocate()` records the PSD geometry, nFreq × nModes. A reallocation during a run aborts the run.
+  - `processImage()` computes `bandPower()` only while a band is set and only for PSDs received after `m_psdAfterNs`.
+  - The frequency resolution `df` is read from `aol1_freq` (`calibrate.freqStream`) at the start of each run, and checked against the PSD length.
+- **Offloader values.** `t2wOffloader.fps` and `t2wOffloader.numModes` (`current`) come from SET subscriptions on `calibrate.offloadDevice`.
+- **Thread.** A non-RT calibration thread (priority 0, no cpuset) waits for the `calibrate` toggle.
+  - It sets the parameters through `setCalibParams()` under `m_stateMutex`.
+  - `appLogic` now republishes `rampStartUs`, `rampDurationUs` and `gain` each cycle, because calibration changes them outside the INDI callbacks.
+- **`measure()`.**
+  - It applies the parameters, then collects PSDs received after one window (1/df) plus `settleS`, and averages `nAverage` of them.
+  - It fails on: abort, the app being disabled, a change of more than 0.5 Hz in `fps`, a change in `numModes` (when `modeMax` is 0), or a timeout.
+- **Baseline.** Measured at gain 0 at the same ramp, at the start and before every `baselineEvery`-th evaluation. Each ratio uses the latest baseline, not an interpolation between baselines.
+- **`coordinateScan()`.** Static, so it can be unit tested.
+  - The refine pass covers ± one step at half the step: 5 points, not the ±2 steps written in the design.
+  - That is followed by one parabolic-vertex evaluation per parameter.
+  - About 57 scan evaluations, plus the initial point and baselines, so about 70 measurements, roughly 5 minutes.
+- **End.** On completion the best parameters are applied and logged at `LOG_INFO`, with a warning if the best ratio is ≥ 1. On abort the original parameters are restored and a warning is logged.
+- **CSV.** One file per run, `<configName>_calib_<UTC>.csv` in `calibrate.csvDir` (created if missing), flushed after each row.
+- **INDI.**
+  - `calibrate` toggle: On starts a run and needs the app enabled and OPERATING; Off aborts.
+  - `calibHalfWidthHz`, taken at the start of each run.
+  - Read-only `calibration`: `stage`, `point`, `fom`, `fomOff`, `ratio`, `bestStartUs`, `bestDurationUs`, `bestGain`, `bestRatio`.
+- **Gain limit.** Raised to 0–2 in config validation and over INDI (A-C3).
+- **Tests.**
+  - `bandPower`: edges, `df` weighting, mode limit, clipping, empty band.
+  - `coordinateScan`: convergence on a synthetic quadratic, grid limits, abort.
+  - PSD collection gating.
+  - Validation of the gain limit and the calibrate settings.
+  - The thread-level abort and restore paths are not unit tested; check them on the bench.
+  - `bandPower` and `coordinateScan` were also compiled standalone on the Mac with the test's inputs, and gave the expected values (57 evaluations).
+- **New edge case.** Changing `gain` scales the whole held contribution `A`. With leak 0 each gain step is a step on the tweeter, which the main loop removes during the settling time. This is documented in `doc/counterOffload.md`.
+- **Follow-ups.**
+  - Harmonics (A-C4).
+  - An interpolated baseline.
+  - Telemetry.

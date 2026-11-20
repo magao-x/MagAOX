@@ -7,8 +7,18 @@
 #ifndef counterOffload_hpp
 #define counterOffload_hpp
 
+#include <algorithm>
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iomanip>
+#include <limits>
 #include <vector>
 
 #include <mx/improc/eigenImage.hpp>
@@ -38,6 +48,25 @@ namespace MagAOX
 namespace app
 {
 
+/// Tag for the closed-loop PSD stream monitor used by calibrate mode.
+/**
+ * \ingroup counterOffload
+ */
+struct psdShmimT
+{
+    /// Config section of the PSD stream monitor.
+    static std::string configSection()
+    {
+        return "psds";
+    };
+
+    /// INDI prefix of the PSD stream monitor.
+    static std::string indiPrefix()
+    {
+        return "psds";
+    };
+};
+
 /// MagAO-X application publishing tweeter counter-offload commands as a dmSyncopation producer.
 /** Each update of the input stream (normally `aol0_tweeterOffload`) starts one ramp of that offload change.
  * For each scheduler slot the published command is `-gain * (A + sum_k delta_k * ramp(target - t0_k))`, where
@@ -45,19 +74,27 @@ namespace app
  * successful publication.  Disabling stops accepting new offloads and requests a zero, so the contribution is
  * cleared at the next slot.
  *
+ * Calibrate mode scans rampStartUs, rampDurationUs and gain to minimize the closed-loop WFS PSD power in a band around
+ * the offload rate, summed over the offloaded modes, relative to a gain-0 baseline, and applies the best values.
+ *
  * \ingroup counterOffload
  */
 class counterOffload : public MagAOXApp<true>,
                        public dev::shmimMonitor<counterOffload>,
+                       public dev::shmimMonitor<counterOffload, psdShmimT>,
                        public dev::dmSyncopationProducer<counterOffload>
 {
     typedef float realT; ///< Floating point type of the tweeter commands.
 
     typedef dev::shmimMonitor<counterOffload> shmimMonitorT; ///< The input stream monitor base.
 
+    typedef dev::shmimMonitor<counterOffload, psdShmimT> psdShmimMonitorT; ///< The PSD stream monitor base.
+
     typedef dev::dmSyncopationProducer<counterOffload> dmSyncopationProducerT; ///< The syncopation producer base.
 
     friend class dev::shmimMonitor<counterOffload>;
+
+    friend class dev::shmimMonitor<counterOffload, psdShmimT>;
 
     friend class dev::dmSyncopationProducer<counterOffload>;
 
@@ -78,6 +115,14 @@ class counterOffload : public MagAOXApp<true>,
 
     static constexpr realT m_zeroTol{ 1e-7 }; ///< A leaking contribution below this magnitude is set to zero.
 
+    /// Calibrated parameters, in order: rampStartUs, rampDurationUs, gain.
+    typedef std::array<double, 3> calibParamsT;
+
+    /// Calibration evaluator: parameters, axis (0-2), pass (0 coarse, 1 refine), and the ratio to fill in.
+    /** Returns false to abort the scan.
+     */
+    typedef std::function<bool( const calibParamsT &, int, int, double & )> calibEvalT;
+
   protected:
     /** \name Configurable Parameters - Data
      *@{
@@ -93,13 +138,45 @@ class counterOffload : public MagAOXApp<true>,
 
     double m_timeOffsetUs{ 0 }; ///< Offset added to the input receipt time to give the ramp reference, in us.
 
-    double m_gain{ 1 }; ///< Scale applied to the published command, 0 to 1.
+    double m_gain{ 1 }; ///< Scale applied to the published command, 0 to 2.
 
     double m_computeLeadUs{ 20 }; ///< Time reserved before the publish lead to compute the command, in us.
 
     int m_threadPrio{ 20 }; ///< Real-time priority of the producer thread.
 
     std::string m_threadCpuset; ///< The cpuset for the producer thread.
+
+    ///@}
+
+    /** \name Calibrate Parameters - Data
+     *@{
+     */
+
+    std::string m_freqStream{ "aol1_freq" }; ///< Stream holding the frequency axis of the PSD stream, Hz.
+
+    std::string m_offloadDevice{ "t2wOffloader" }; ///< INDI device providing the offload rate (fps) and numModes.
+
+    double m_halfWidthHz{ 10 }; ///< Half width of the band integrated around the offload rate, Hz.
+
+    int m_modeMax{ 0 }; ///< Number of PSD modes summed.  0 uses the offloader's numModes.
+
+    int m_nAverage{ 6 }; ///< Raw PSDs averaged for each evaluation, at least 2.
+
+    int m_baselineEvery{ 5 }; ///< Re-measure the gain-0 baseline before every this many evaluations.
+
+    double m_settleS{ 0.5 }; ///< Settling time after a change, in addition to one PSD window, s.
+
+    double m_timeoutS{ 15 }; ///< Longest wait for the PSDs of one evaluation, after settling, s.
+
+    double m_abortRatio{ 3 }; ///< Abort when an evaluation exceeds this multiple of the baseline.
+
+    std::vector<double> m_startGridUs{ 0, 400, 25 }; ///< rampStartUs scan: min, max, step, in us.
+
+    std::vector<double> m_durationGridUs{ 100, 600, 50 }; ///< rampDurationUs scan: min, max, step, in us.
+
+    std::vector<double> m_gainGrid{ 0.5, 1.5, 0.1 }; ///< gain scan: min, max, step.
+
+    std::string m_csvDir{ "/home/xsup/counterOffload" }; ///< Directory for the per-run calibration CSV files.
 
     ///@}
 
@@ -138,6 +215,62 @@ class counterOffload : public MagAOXApp<true>,
     uint64_t m_failed{ 0 }; ///< Commands not published by syncopationPublish.
 
     uint64_t m_overflows{ 0 }; ///< Offloads folded immediately because the ramp pool was full.
+
+    ///@}
+
+    /** \name Calibrate State - Data
+     *@{
+     */
+
+    std::mutex m_calibMutex; ///< Protects the band, collected PSD powers, offloader values and calibration readbacks.
+
+    std::condition_variable m_calibCond; ///< Signals that a PSD band power was collected.
+
+    std::atomic<bool> m_calibStart{ false }; ///< Request to start a run, consumed by the calibration thread.
+
+    std::atomic<bool> m_calibRunning{ false }; ///< Whether a calibration run is requested or in progress.
+
+    std::atomic<bool> m_calibAbort{ false }; ///< Request to abort the run and restore the original parameters.
+
+    float m_offloadFps{ 0 }; ///< Effective offload rate reported by the offloader, Hz.
+
+    uint32_t m_offloadModes{ 0 }; ///< Number of offloaded modes reported by the offloader.
+
+    uint32_t m_psdNFreq{ 0 }; ///< Number of frequencies in each PSD.
+
+    uint32_t m_psdNModes{ 0 }; ///< Number of modes in each PSD.
+
+    bool m_bandValid{ false }; ///< Whether a band is set and PSD band powers are collected.
+
+    double m_df{ 0 }; ///< PSD frequency resolution for the current run, Hz.
+
+    double m_bandCenterHz{ 0 }; ///< Band center for the current run: the offload rate, Hz.
+
+    double m_bandHalfWidthHz{ 0 }; ///< Band half width for the current run, Hz.
+
+    uint32_t m_bandModes{ 0 }; ///< Number of modes summed in the current run.
+
+    int64_t m_psdAfterNs{ 0 }; ///< Only PSDs received after this CLOCK_MONOTONIC time, in ns, are collected.
+
+    std::vector<double> m_psdPowers; ///< Band powers of the PSDs collected for the current evaluation.
+
+    double m_fomOff{ 0 }; ///< Latest gain-0 baseline band power.
+
+    int m_calibStage{ 0 }; ///< Stage of the latest evaluation, an index into calibStageName().
+
+    int m_calibPoint{ 0 }; ///< Evaluations completed in the current run.
+
+    double m_lastFom{ 0 }; ///< Band power of the latest evaluation.
+
+    double m_lastRatio{ 0 }; ///< Ratio to the baseline of the latest evaluation.
+
+    calibParamsT m_calibBest{ 0, 0, 0 }; ///< Best parameters so far in the current or last run.
+
+    double m_calibBestRatio{ 0 }; ///< Ratio to the baseline of m_calibBest.
+
+    int m_evalCount{ 0 }; ///< Evaluations in the current run, used to schedule baselines.  Calibration thread only.
+
+    std::ofstream m_csv; ///< The current run's CSV file.  Calibration thread only.
 
     ///@}
 
@@ -248,6 +381,57 @@ class counterOffload : public MagAOXApp<true>,
      */
     bool setEnabled( bool on /**< [in] true to accept new offloads */ );
 
+    /// Record the PSD stream geometry.  Aborts a running calibration, since its band no longer applies.
+    /**
+     * \returns 0 on success
+     * \returns -1 if the stream is not float
+     */
+    int allocate( const psdShmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
+
+    /// Collect the band power of a new raw PSD while a calibration evaluation is waiting for it.
+    /**
+     * \returns 0 always
+     */
+    int processImage( void            *curr_src, /**< [in] pointer to the start of the current PSD.*/
+                      const psdShmimT &dummy     /**< [in] tag to differentiate shmimMonitor parents.*/
+    );
+
+    /// Integrate a PSD over a band and the first modes.
+    /** The PSD is nFreq x nModes, frequency fastest, so element (n, m) is psd[n + m * nFreq] at frequency n * df.
+     *
+     * \returns sum of PSD * df over |f - centerHz| <= halfWidthHz and modes below min(modeMax, nModes)
+     * \returns -1 if the band or the mode range is empty
+     */
+    static double bandPower( const realT *psd /**< [in] the PSD */,
+                             uint32_t     nFreq /**< [in] number of frequencies */,
+                             uint32_t     nModes /**< [in] number of modes */,
+                             double       df /**< [in] frequency resolution, Hz */,
+                             double       centerHz /**< [in] band center, Hz */,
+                             double       halfWidthHz /**< [in] band half width, Hz */,
+                             uint32_t     modeMax /**< [in] number of modes to sum */ );
+
+    /// Coordinate scan minimizing an evaluator over the three calibrated parameters.
+    /** Pass 0 scans each parameter in turn over its grid, holding the others at the best so far.  Pass 1 rescans each
+     * over +/- one step at half the step, then evaluates the vertex of a parabola through the minimum and its
+     * neighbours.  best and bestFom must hold an evaluated starting point, and are updated as better points are found.
+     *
+     * \returns true if the scan finished
+     * \returns false if the evaluator aborted
+     */
+    static bool coordinateScan( const std::array<std::vector<double>, 3> &grids /**< [in] min, max, step per parameter */,
+                                calibParamsT                             &best /**< [in,out] best parameters */,
+                                double                                   &bestFom /**< [in,out] value at best */,
+                                const calibEvalT                         &eval /**< [in] the evaluator */ );
+
+    /// Get the current calibrated parameters.
+    calibParamsT calibParams();
+
+    /// Set the calibrated parameters.
+    void setCalibParams( const calibParamsT &p /**< [in] rampStartUs, rampDurationUs, gain */ );
+
+    /// Name of a calibration stage, for logs and the CSV.
+    static const char *calibStageName( int stage /**< [in] the stage index */ );
+
   protected:
     /** \name Producer Thread
      * Publishes counter-offload commands for each dmSyncopation slot.
@@ -271,6 +455,73 @@ class counterOffload : public MagAOXApp<true>,
 
     ///@}
 
+    /** \name Calibration Thread
+     * Runs calibrate mode, outside the real-time producer path.
+     *
+     * @{
+     */
+
+    std::thread m_calibThread; ///< The calibration thread.
+
+    bool m_calibThreadInit{ true }; ///< Synchronizer to ensure the thread initializes before doing dangerous things.
+
+    pid_t m_calibThreadID{ 0 }; ///< Calibration thread PID.
+
+    pcf::IndiProperty m_calibThreadProp; ///< The property to hold the calibration thread details.
+
+    /// Calibration thread starter function.
+    static void calibThreadStart( counterOffload *c /**< [in] pointer to this */ );
+
+    /// Calibration thread function.  Runs a calibration on each start request until m_shutdown is true.
+    void calibThreadExec();
+
+    /// Run one calibration, then apply the best parameters, or restore the originals on abort.
+    void runCalibration();
+
+    /// Set the band for a run from the frequency stream and the offloader's rate and numModes.
+    /**
+     * \returns true on success
+     */
+    bool setupBand();
+
+    /// Open the run's CSV file in m_csvDir and write the header.
+    /**
+     * \returns true on success
+     */
+    bool openCsv();
+
+    /// Apply parameters, wait for settled PSDs, and average their band powers.
+    /**
+     * \returns true on success
+     * \returns false on abort, disable, timeout or a change of the offloader's rate or numModes
+     */
+    bool measure( const calibParamsT &p /**< [in] parameters to apply */,
+                  double             &fom /**< [out] mean band power */,
+                  double             &fomStd /**< [out] standard deviation of the band powers */ );
+
+    /// Measure the gain-0 baseline at the given ramp, and record it.
+    /**
+     * \returns true on success
+     */
+    bool measureBaseline( const calibParamsT &p /**< [in] parameters; the gain is replaced by 0 */ );
+
+    /// Evaluate parameters as a ratio to the baseline, re-measuring the baseline when due.
+    /**
+     * \returns true on success
+     * \returns false to abort the scan
+     */
+    bool evaluate( const calibParamsT &p /**< [in] parameters */,
+                   int                 stage /**< [in] stage index, see calibStageName() */,
+                   double             &ratio /**< [out] band power over the baseline */ );
+
+    /// Write one CSV row.
+    void writeCsv( int                 stage /**< [in] stage index */,
+                   const calibParamsT &p /**< [in] parameters */,
+                   double              fom /**< [in] mean band power */,
+                   double              fomStd /**< [in] standard deviation of the band powers */ );
+
+    ///@}
+
     /** \name INDI Interface
      *
      * @{
@@ -291,6 +542,16 @@ class counterOffload : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_timeOffset; ///< Property to set the ramp reference time offset.
 
     pcf::IndiProperty m_indiP_stats; ///< Read-only counters.
+
+    pcf::IndiProperty m_indiP_calibrate; ///< Toggle switch: On starts a calibration run, Off aborts it.
+
+    pcf::IndiProperty m_indiP_halfWidth; ///< Property to set the calibration band half width.
+
+    pcf::IndiProperty m_indiP_calibration; ///< Read-only calibration progress and best parameters.
+
+    pcf::IndiProperty m_indiP_offloadFps; ///< The offloader's effective offload rate (SET).
+
+    pcf::IndiProperty m_indiP_offloadModes; ///< The offloader's numModes (SET).
 
     /// Update a numeric parameter from an INDI new-property request, within limits.
     /**
@@ -317,6 +578,14 @@ class counterOffload : public MagAOXApp<true>,
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_timeOffset );
 
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_calibrate );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_halfWidth );
+
+    INDI_SETCALLBACK_DECL( counterOffload, m_indiP_offloadFps );
+
+    INDI_SETCALLBACK_DECL( counterOffload, m_indiP_offloadModes );
+
     ///@}
 };
 
@@ -328,6 +597,8 @@ inline counterOffload::counterOffload() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX
 inline void counterOffload::setupConfig()
 {
     SHMIMMONITOR_SETUP_CONFIG( config );
+
+    SHMIMMONITORT_SETUP_CONFIG( psdShmimMonitorT, config );
 
     DMSYNCOPATIONPRODUCER_SETUP_CONFIG( config );
 
@@ -389,7 +660,7 @@ inline void counterOffload::setupConfig()
                 "gain",
                 false,
                 "real",
-                "Scale applied to the published command, 0 to 1.  Default is 1." );
+                "Scale applied to the published command, 0 to 2.  Default is 1." );
 
     config.add( "counterOffload.computeLeadUs",
                 "",
@@ -420,6 +691,136 @@ inline void counterOffload::setupConfig()
                 false,
                 "string",
                 "The cpuset for the producer thread." );
+
+    config.add( "calibrate.freqStream",
+                "",
+                "calibrate.freqStream",
+                argType::Required,
+                "calibrate",
+                "freqStream",
+                false,
+                "string",
+                "Stream holding the PSD frequency axis.  Default is aol1_freq." );
+
+    config.add( "calibrate.offloadDevice",
+                "",
+                "calibrate.offloadDevice",
+                argType::Required,
+                "calibrate",
+                "offloadDevice",
+                false,
+                "string",
+                "INDI device providing fps and numModes.  Default is t2wOffloader." );
+
+    config.add( "calibrate.halfWidthHz",
+                "",
+                "calibrate.halfWidthHz",
+                argType::Required,
+                "calibrate",
+                "halfWidthHz",
+                false,
+                "real",
+                "Half width of the band integrated around the offload rate, Hz.  Default is 10." );
+
+    config.add( "calibrate.modeMax",
+                "",
+                "calibrate.modeMax",
+                argType::Required,
+                "calibrate",
+                "modeMax",
+                false,
+                "int",
+                "Number of PSD modes summed.  0, the default, uses the offloader's numModes." );
+
+    config.add( "calibrate.nAverage",
+                "",
+                "calibrate.nAverage",
+                argType::Required,
+                "calibrate",
+                "nAverage",
+                false,
+                "int",
+                "Raw PSDs averaged for each evaluation, at least 2.  Default is 6." );
+
+    config.add( "calibrate.baselineEvery",
+                "",
+                "calibrate.baselineEvery",
+                argType::Required,
+                "calibrate",
+                "baselineEvery",
+                false,
+                "int",
+                "Re-measure the gain-0 baseline every this many evaluations.  Default is 5." );
+
+    config.add( "calibrate.settleS",
+                "",
+                "calibrate.settleS",
+                argType::Required,
+                "calibrate",
+                "settleS",
+                false,
+                "real",
+                "Settling time after a change, in addition to one PSD window, s.  Default is 0.5." );
+
+    config.add( "calibrate.timeoutS",
+                "",
+                "calibrate.timeoutS",
+                argType::Required,
+                "calibrate",
+                "timeoutS",
+                false,
+                "real",
+                "Longest wait for the PSDs of one evaluation after settling, s.  Default is 15." );
+
+    config.add( "calibrate.abortRatio",
+                "",
+                "calibrate.abortRatio",
+                argType::Required,
+                "calibrate",
+                "abortRatio",
+                false,
+                "real",
+                "Abort when an evaluation exceeds this multiple of the baseline.  Default is 3." );
+
+    config.add( "calibrate.startGridUs",
+                "",
+                "calibrate.startGridUs",
+                argType::Required,
+                "calibrate",
+                "startGridUs",
+                false,
+                "vector<double>",
+                "rampStartUs scan as min,max,step in us.  Default is 0,400,25." );
+
+    config.add( "calibrate.durationGridUs",
+                "",
+                "calibrate.durationGridUs",
+                argType::Required,
+                "calibrate",
+                "durationGridUs",
+                false,
+                "vector<double>",
+                "rampDurationUs scan as min,max,step in us.  Default is 100,600,50." );
+
+    config.add( "calibrate.gainGrid",
+                "",
+                "calibrate.gainGrid",
+                argType::Required,
+                "calibrate",
+                "gainGrid",
+                false,
+                "vector<double>",
+                "gain scan as min,max,step.  Default is 0.5,1.5,0.1." );
+
+    config.add( "calibrate.csvDir",
+                "",
+                "calibrate.csvDir",
+                argType::Required,
+                "calibrate",
+                "csvDir",
+                false,
+                "string",
+                "Directory for the per-run calibration CSV files.  Default is /home/xsup/counterOffload." );
 }
 
 inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -427,6 +828,10 @@ inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
     shmimMonitorT::m_shmimName = "aol0_tweeterOffload";
 
     SHMIMMONITOR_LOAD_CONFIG( _config );
+
+    psdShmimMonitorT::m_shmimName = "aol1_raw_clpsds";
+
+    SHMIMMONITORT_LOAD_CONFIG( psdShmimMonitorT, _config );
 
     DMSYNCOPATIONPRODUCER_LOAD_CONFIG( _config );
 
@@ -439,6 +844,20 @@ inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_computeLeadUs, "counterOffload.computeLeadUs" );
     _config( m_threadPrio, "counterOffload.threadPrio" );
     _config( m_threadCpuset, "counterOffload.cpuset" );
+
+    _config( m_freqStream, "calibrate.freqStream" );
+    _config( m_offloadDevice, "calibrate.offloadDevice" );
+    _config( m_halfWidthHz, "calibrate.halfWidthHz" );
+    _config( m_modeMax, "calibrate.modeMax" );
+    _config( m_nAverage, "calibrate.nAverage" );
+    _config( m_baselineEvery, "calibrate.baselineEvery" );
+    _config( m_settleS, "calibrate.settleS" );
+    _config( m_timeoutS, "calibrate.timeoutS" );
+    _config( m_abortRatio, "calibrate.abortRatio" );
+    _config( m_startGridUs, "calibrate.startGridUs" );
+    _config( m_durationGridUs, "calibrate.durationGridUs" );
+    _config( m_gainGrid, "calibrate.gainGrid" );
+    _config( m_csvDir, "calibrate.csvDir" );
 
     return validateConfig();
 }
@@ -461,11 +880,24 @@ inline int counterOffload::validateConfig()
         return mx::math::isFinite( v ) && v >= lo && v <= hi;
     };
 
+    // A scan grid is min, max, step within the parameter's limits.
+    auto gridOk = [&inRange]( const std::vector<double> &g, double lo, double hi )
+    {
+        return g.size() == 3 && inRange( g[0], lo, hi ) && inRange( g[1], g[0], hi ) && inRange( g[2], 1e-9, hi - lo );
+    };
+
     if( m_syncopationTiming.empty() || m_channel.size() <= suffixLength ||
         m_channel.compare( m_channel.size() - suffixLength, suffixLength, "_aux" ) != 0 ||
         m_syncopationTiming == m_channel || !inRange( m_rampStartUs, 0, 1e6 ) || !inRange( m_rampDurationUs, 1, 1e6 ) ||
-        !inRange( m_leak, 0, 1 ) || !inRange( m_timeOffsetUs, -1e6, 1e6 ) || !inRange( m_gain, 0, 1 ) ||
+        !inRange( m_leak, 0, 1 ) || !inRange( m_timeOffsetUs, -1e6, 1e6 ) || !inRange( m_gain, 0, 2 ) ||
         !inRange( m_computeLeadUs, 0, 1e6 ) )
+    {
+        return -1;
+    }
+
+    if( !inRange( m_halfWidthHz, 0, 1e6 ) || m_modeMax < 0 || m_nAverage < 2 || m_baselineEvery < 1 ||
+        !inRange( m_settleS, 0, 1e3 ) || !inRange( m_timeoutS, 1, 1e4 ) || !inRange( m_abortRatio, 1, 1e6 ) ||
+        !gridOk( m_startGridUs, 0, 1e6 ) || !gridOk( m_durationGridUs, 1, 1e6 ) || !gridOk( m_gainGrid, 0, 2 ) )
     {
         return -1;
     }
@@ -499,11 +931,12 @@ inline int counterOffload::appStartup()
     };
 
     numberT numbers[] = {
-        { m_indiP_gain, "gain", 0, 1, m_gain, INDI_NEWCALLBACK( m_indiP_gain ) },
+        { m_indiP_gain, "gain", 0, 2, m_gain, INDI_NEWCALLBACK( m_indiP_gain ) },
         { m_indiP_leak, "leak", 0, 1, m_leak, INDI_NEWCALLBACK( m_indiP_leak ) },
         { m_indiP_rampStart, "rampStartUs", 0, 1e6, m_rampStartUs, INDI_NEWCALLBACK( m_indiP_rampStart ) },
         { m_indiP_rampDuration, "rampDurationUs", 1, 1e6, m_rampDurationUs, INDI_NEWCALLBACK( m_indiP_rampDuration ) },
-        { m_indiP_timeOffset, "timeOffsetUs", -1e6, 1e6, m_timeOffsetUs, INDI_NEWCALLBACK( m_indiP_timeOffset ) } };
+        { m_indiP_timeOffset, "timeOffsetUs", -1e6, 1e6, m_timeOffsetUs, INDI_NEWCALLBACK( m_indiP_timeOffset ) },
+        { m_indiP_halfWidth, "calibHalfWidthHz", 0, 1e6, m_halfWidthHz, INDI_NEWCALLBACK( m_indiP_halfWidth ) } };
 
     for( auto &n : numbers )
     {
@@ -528,7 +961,31 @@ inline int counterOffload::appStartup()
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
+    createStandardIndiToggleSw( m_indiP_calibrate, "calibrate" );
+    if( registerIndiPropertyNew( m_indiP_calibrate, INDI_NEWCALLBACK( m_indiP_calibrate ) ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
+    createROIndiNumber( m_indiP_calibration, "calibration", "Calibration" );
+    for( const char *el : { "stage", "point", "fom", "fomOff", "ratio", "bestStartUs", "bestDurationUs", "bestGain",
+                            "bestRatio" } )
+    {
+        m_indiP_calibration.add( pcf::IndiElement( el ) );
+        m_indiP_calibration[el] = 0;
+    }
+    if( registerIndiPropertyReadOnly( m_indiP_calibration ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
+    REG_INDI_SETPROP( m_indiP_offloadFps, m_offloadDevice, std::string( "fps" ) );
+
+    REG_INDI_SETPROP( m_indiP_offloadModes, m_offloadDevice, std::string( "numModes" ) );
+
     SHMIMMONITOR_APP_STARTUP;
+
+    SHMIMMONITORT_APP_STARTUP( psdShmimMonitorT );
 
     if( threadStart( m_coThread,
                      m_coThreadInit,
@@ -539,6 +996,19 @@ inline int counterOffload::appStartup()
                      "producer",
                      this,
                      coThreadStart ) < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__ } );
+    }
+
+    if( threadStart( m_calibThread,
+                     m_calibThreadInit,
+                     m_calibThreadID,
+                     m_calibThreadProp,
+                     0,
+                     "",
+                     "calibrate",
+                     this,
+                     calibThreadStart ) < 0 )
     {
         return log<software_critical, -1>( { __FILE__, __LINE__ } );
     }
@@ -572,9 +1042,13 @@ inline int counterOffload::appLogic()
 
     SHMIMMONITOR_APP_LOGIC;
 
+    SHMIMMONITORT_APP_LOGIC( psdShmimMonitorT );
+
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
     SHMIMMONITOR_UPDATE_INDI;
+
+    SHMIMMONITORT_UPDATE_INDI( psdShmimMonitorT );
 
     std::vector<double> stats;
     { //mutex scope
@@ -592,23 +1066,64 @@ inline int counterOffload::appLogic()
     updateIfChanged(
         m_indiP_stats, std::vector<std::string>{ "events", "published", "failed", "overflows", "active" }, stats );
 
+    // Calibration changes the parameters from its own thread, so publish them here.
+    const calibParamsT p = calibParams();
+
+    updateIfChanged( m_indiP_rampStart, std::vector<std::string>{ "current", "target" }, std::vector<double>{ p[0], p[0] } );
+    updateIfChanged(
+        m_indiP_rampDuration, std::vector<std::string>{ "current", "target" }, std::vector<double>{ p[1], p[1] } );
+    updateIfChanged( m_indiP_gain, std::vector<std::string>{ "current", "target" }, std::vector<double>{ p[2], p[2] } );
+
+    std::vector<double> calib;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_calibMutex );
+
+        calib = { double( m_calibStage ), double( m_calibPoint ), m_lastFom,      m_fomOff,        m_lastRatio,
+                  m_calibBest[0],         m_calibBest[1],         m_calibBest[2], m_calibBestRatio };
+    }
+
+    updateIfChanged( m_indiP_calibration,
+                     std::vector<std::string>{ "stage",
+                                               "point",
+                                               "fom",
+                                               "fomOff",
+                                               "ratio",
+                                               "bestStartUs",
+                                               "bestDurationUs",
+                                               "bestGain",
+                                               "bestRatio" },
+                     calib );
+
+    updateSwitchIfChanged( m_indiP_calibrate,
+                           "toggle",
+                           m_calibRunning ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           m_calibRunning ? INDI_BUSY : INDI_IDLE );
+
     return 0;
 }
 
 inline int counterOffload::appShutdown()
 {
-    if( m_coThread.joinable() )
+    m_calibAbort = true;
+    m_calibCond.notify_all();
+
+    for( std::thread *t : { &m_coThread, &m_calibThread } )
     {
-        try
+        if( t->joinable() )
         {
-            m_coThread.join(); // this will throw if it was already joined
-        }
-        catch( ... )
-        {
+            try
+            {
+                t->join(); // this will throw if it was already joined
+            }
+            catch( ... )
+            {
+            }
         }
     }
 
     SHMIMMONITOR_APP_SHUTDOWN;
+
+    SHMIMMONITORT_APP_SHUTDOWN( psdShmimMonitorT );
 
     DMSYNCOPATIONPRODUCER_APP_SHUTDOWN;
 
@@ -830,6 +1345,544 @@ inline bool counterOffload::setEnabled( bool on )
     return true;
 }
 
+inline int counterOffload::allocate( const psdShmimT &dummy )
+{
+    static_cast<void>( dummy ); // be unused
+
+    if( psdShmimMonitorT::m_dataType != _DATATYPE_FLOAT )
+    {
+        return log<text_log, -1>( "PSD stream is not float", logPrio::LOG_ERROR );
+    }
+
+    std::lock_guard<std::mutex> lock( m_calibMutex );
+
+    if( m_bandValid )
+    {
+        m_calibAbort = true;
+        log<text_log>( "PSD stream changed during calibration", logPrio::LOG_WARNING );
+    }
+
+    m_psdNFreq  = psdShmimMonitorT::m_width;
+    m_psdNModes = psdShmimMonitorT::m_height;
+
+    return 0;
+}
+
+inline int counterOffload::processImage( void *curr_src, const psdShmimT &dummy )
+{
+    static_cast<void>( dummy ); // be unused
+
+    const int64_t received = synco::monotonicNs();
+
+    std::lock_guard<std::mutex> lock( m_calibMutex );
+
+    if( !m_bandValid || received < m_psdAfterNs ) // only PSDs whose window is entirely after the change
+    {
+        return 0;
+    }
+
+    const double p = bandPower( static_cast<const realT *>( curr_src ),
+                                m_psdNFreq,
+                                m_psdNModes,
+                                m_df,
+                                m_bandCenterHz,
+                                m_bandHalfWidthHz,
+                                m_bandModes );
+
+    if( p >= 0 )
+    {
+        m_psdPowers.push_back( p );
+        m_calibCond.notify_all();
+    }
+
+    return 0;
+}
+
+inline double counterOffload::bandPower( const realT *psd,
+                                         uint32_t     nFreq,
+                                         uint32_t     nModes,
+                                         double       df,
+                                         double       centerHz,
+                                         double       halfWidthHz,
+                                         uint32_t     modeMax )
+{
+    const uint32_t modes = std::min( nModes, modeMax );
+
+    if( !( df > 0 ) || modes == 0 || nFreq == 0 )
+    {
+        return -1;
+    }
+
+    const double lo = std::max( 0.0, std::ceil( ( centerHz - halfWidthHz ) / df - 1e-9 ) );
+    const double hi = std::min( double( nFreq - 1 ), std::floor( ( centerHz + halfWidthHz ) / df + 1e-9 ) );
+
+    if( hi < lo )
+    {
+        return -1;
+    }
+
+    double sum = 0;
+
+    const uint32_t n0 = static_cast<uint32_t>( lo );
+    const uint32_t n1 = static_cast<uint32_t>( hi );
+
+    for( uint32_t m = 0; m < modes; ++m )
+    {
+        for( uint32_t n = n0; n <= n1; ++n )
+        {
+            sum += psd[n + m * nFreq];
+        }
+    }
+
+    return sum * df;
+}
+
+inline bool counterOffload::coordinateScan( const std::array<std::vector<double>, 3> &grids,
+                                            calibParamsT                             &best,
+                                            double                                   &bestFom,
+                                            const calibEvalT                         &eval )
+{
+    for( int pass = 0; pass < 2; ++pass )
+    {
+        for( int a = 0; a < 3; ++a )
+        {
+            const double lo   = grids[a][0];
+            const double hi   = grids[a][1];
+            const double step = ( pass == 0 ) ? grids[a][2] : 0.5 * grids[a][2];
+
+            std::vector<double> xs;
+
+            if( pass == 0 )
+            {
+                const int n = static_cast<int>( std::floor( ( hi - lo ) / step + 1e-9 ) );
+                for( int i = 0; i <= n; ++i )
+                {
+                    xs.push_back( lo + i * step );
+                }
+            }
+            else
+            {
+                for( int k = -2; k <= 2; ++k )
+                {
+                    const double x = best[a] + k * step;
+                    if( x >= lo - 1e-9 && x <= hi + 1e-9 )
+                    {
+                        xs.push_back( x );
+                    }
+                }
+            }
+
+            std::vector<double> fs( xs.size() );
+
+            for( size_t i = 0; i < xs.size(); ++i )
+            {
+                calibParamsT p = best;
+                p[a]           = xs[i];
+
+                if( !eval( p, a, pass, fs[i] ) )
+                {
+                    return false;
+                }
+
+                if( fs[i] < bestFom )
+                {
+                    bestFom = fs[i];
+                    best    = p;
+                }
+            }
+
+            if( pass == 0 || xs.size() < 3 )
+            {
+                continue;
+            }
+
+            // Parabolic refinement through the scan minimum and its neighbours.
+            const size_t i = std::min_element( fs.begin(), fs.end() ) - fs.begin();
+
+            if( i == 0 || i + 1 == xs.size() )
+            {
+                continue;
+            }
+
+            const double denom = fs[i - 1] - 2 * fs[i] + fs[i + 1];
+
+            if( !( denom > 0 ) )
+            {
+                continue;
+            }
+
+            calibParamsT p = best;
+            p[a]           = std::clamp( xs[i] + 0.5 * step * ( fs[i - 1] - fs[i + 1] ) / denom, lo, hi );
+
+            double f;
+
+            if( !eval( p, a, pass, f ) )
+            {
+                return false;
+            }
+
+            if( f < bestFom )
+            {
+                bestFom = f;
+                best    = p;
+            }
+        }
+    }
+
+    return true;
+}
+
+inline counterOffload::calibParamsT counterOffload::calibParams()
+{
+    std::lock_guard<std::mutex> guard( m_stateMutex );
+
+    return { m_rampStartUs, m_rampDurationUs, m_gain };
+}
+
+inline void counterOffload::setCalibParams( const calibParamsT &p )
+{
+    std::lock_guard<std::mutex> guard( m_stateMutex );
+
+    m_rampStartUs    = p[0];
+    m_rampDurationUs = p[1];
+    m_gain           = p[2];
+}
+
+inline const char *counterOffload::calibStageName( int stage )
+{
+    static const char *names[] = {
+        "off", "initial", "start", "duration", "gain", "refine start", "refine duration", "refine gain" };
+
+    return ( stage >= 0 && stage < 8 ) ? names[stage] : "unknown";
+}
+
+inline void counterOffload::calibThreadStart( counterOffload *c )
+{
+    c->calibThreadExec();
+}
+
+inline void counterOffload::calibThreadExec()
+{
+    m_calibThreadID = syscall( SYS_gettid );
+
+    // Wait for the thread starter to finish initializing this thread.
+    while( m_calibThreadInit == true && m_shutdown == 0 )
+    {
+        sleep( 1 );
+    }
+
+    while( !m_shutdown )
+    {
+        if( !m_calibStart.exchange( false ) )
+        {
+            mx::sys::milliSleep( 100 );
+            continue;
+        }
+
+        runCalibration();
+    }
+}
+
+inline void counterOffload::runCalibration()
+{
+    const calibParamsT original = calibParams();
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_calibPoint     = 0;
+        m_calibStage     = 0;
+        m_calibBest      = original;
+        m_calibBestRatio = 0;
+    }
+
+    m_evalCount = 0;
+
+    calibParamsT best      = original;
+    double       bestRatio = 0;
+
+    bool ok = setupBand() && openCsv() && measureBaseline( original ) && evaluate( original, 1, bestRatio );
+
+    if( ok )
+    {
+        ok = coordinateScan( { m_startGridUs, m_durationGridUs, m_gainGrid },
+                             best,
+                             bestRatio,
+                             [this]( const calibParamsT &p, int axis, int pass, double &ratio )
+                             { return evaluate( p, 2 + axis + 3 * pass, ratio ); } );
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_bandValid = false;
+
+        if( ok )
+        {
+            m_calibBest      = best;
+            m_calibBestRatio = bestRatio;
+        }
+    }
+
+    if( ok )
+    {
+        setCalibParams( best );
+
+        log<text_log>( "calibration complete, applied rampStartUs=" + std::to_string( best[0] ) +
+                           " rampDurationUs=" + std::to_string( best[1] ) + " gain=" + std::to_string( best[2] ) +
+                           " ratio=" + std::to_string( bestRatio ),
+                       logPrio::LOG_INFO );
+
+        if( bestRatio >= 1 )
+        {
+            log<text_log>( "calibration found no improvement over the gain-0 baseline", logPrio::LOG_WARNING );
+        }
+    }
+    else
+    {
+        setCalibParams( original );
+
+        log<text_log>( "calibration aborted, restored rampStartUs=" + std::to_string( original[0] ) +
+                           " rampDurationUs=" + std::to_string( original[1] ) +
+                           " gain=" + std::to_string( original[2] ),
+                       logPrio::LOG_WARNING );
+    }
+
+    if( m_csv.is_open() )
+    {
+        m_csv.close();
+    }
+
+    m_calibRunning = false;
+}
+
+inline bool counterOffload::setupBand()
+{
+    double   df = 0;
+    uint64_t nf = 0;
+
+    IMAGE freq{};
+
+    if( ImageStreamIO_openIm( &freq, m_freqStream.c_str() ) != 0 )
+    {
+        log<text_log>( "calibration could not open " + m_freqStream, logPrio::LOG_ERROR );
+        return false;
+    }
+
+    if( freq.md->datatype == _DATATYPE_FLOAT && freq.md->nelement > 1 )
+    {
+        nf = freq.md->nelement;
+        df = freq.array.F[1] - freq.array.F[0];
+    }
+
+    ImageStreamIO_closeIm( &freq );
+
+    double halfWidth;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_stateMutex );
+        halfWidth = m_halfWidthHz;
+    }
+
+    std::lock_guard<std::mutex> lock( m_calibMutex );
+
+    const uint32_t modes = ( m_modeMax > 0 ) ? m_modeMax : m_offloadModes;
+
+    if( !( df > 0 ) || nf != m_psdNFreq || m_psdNModes == 0 )
+    {
+        log<text_log>( "calibration: PSD stream and " + m_freqStream + " do not match, or no PSDs yet",
+                       logPrio::LOG_ERROR );
+        return false;
+    }
+
+    if( !( m_offloadFps > 0 ) || modes == 0 || m_offloadFps - halfWidth > ( nf - 1 ) * df )
+    {
+        log<text_log>( "calibration: no offload rate or numModes from " + m_offloadDevice + ", or band above the PSDs",
+                       logPrio::LOG_ERROR );
+        return false;
+    }
+
+    m_df              = df;
+    m_bandCenterHz    = m_offloadFps;
+    m_bandHalfWidthHz = halfWidth;
+    m_bandModes       = modes;
+    m_psdAfterNs      = std::numeric_limits<int64_t>::max(); // nothing is collected until the first measure()
+    m_bandValid       = true;
+
+    return true;
+}
+
+inline bool counterOffload::openCsv()
+{
+    char      ts[32];
+    time_t    now = time( nullptr );
+    struct tm utc;
+
+    gmtime_r( &now, &utc );
+    strftime( ts, sizeof( ts ), "%Y%m%dT%H%M%SZ", &utc );
+
+    std::error_code ec;
+    std::filesystem::create_directories( m_csvDir, ec );
+
+    const std::string path = m_csvDir + "/" + m_configName + "_calib_" + ts + ".csv";
+
+    m_csv.open( path );
+
+    if( !m_csv )
+    {
+        log<text_log>( "calibration could not open " + path, logPrio::LOG_ERROR );
+        return false;
+    }
+
+    m_csv << "time,stage,rampStartUs,rampDurationUs,gain,offloadHz,numModes,halfWidthHz,nAverage,fom,fomStd,fomOff,"
+             "ratio\n";
+
+    log<text_log>( "calibration started at " + std::to_string( m_bandCenterHz ) + " Hz over " +
+                       std::to_string( m_bandModes ) + " modes, writing " + path,
+                   logPrio::LOG_INFO );
+
+    return true;
+}
+
+inline bool counterOffload::measure( const calibParamsT &p, double &fom, double &fomStd )
+{
+    setCalibParams( p );
+
+    std::unique_lock<std::mutex> lock( m_calibMutex );
+
+    m_psdPowers.clear();
+    m_psdAfterNs           = synco::monotonicNs() + static_cast<int64_t>( ( 1.0 / m_df + m_settleS ) * 1e9 );
+    const int64_t deadline = m_psdAfterNs + static_cast<int64_t>( m_timeoutS * 1e9 );
+
+    while( m_psdPowers.size() < static_cast<size_t>( m_nAverage ) )
+    {
+        std::string why;
+
+        if( m_calibAbort || m_shutdown )
+        {
+            why = "abort requested";
+        }
+        else if( !m_enabled )
+        {
+            why = "app disabled";
+        }
+        else if( std::fabs( m_offloadFps - m_bandCenterHz ) > 0.5 || ( m_modeMax == 0 && m_offloadModes != m_bandModes ) )
+        {
+            why = "offload rate or numModes changed";
+        }
+        else if( synco::monotonicNs() > deadline )
+        {
+            why = "timed out waiting for PSDs";
+        }
+
+        if( !why.empty() )
+        {
+            log<text_log>( "calibration: " + why, logPrio::LOG_WARNING );
+            return false;
+        }
+
+        m_calibCond.wait_for( lock, std::chrono::milliseconds( 100 ) );
+    }
+
+    double sum = 0, sum2 = 0;
+
+    for( double v : m_psdPowers )
+    {
+        sum += v;
+        sum2 += v * v;
+    }
+
+    const double n = m_psdPowers.size();
+
+    fom    = sum / n;
+    fomStd = std::sqrt( std::max( 0.0, ( sum2 - sum * sum / n ) / ( n - 1 ) ) );
+
+    return true;
+}
+
+inline bool counterOffload::measureBaseline( const calibParamsT &p )
+{
+    calibParamsT off = p;
+    off[2]           = 0;
+
+    double fom, fomStd;
+
+    if( !measure( off, fom, fomStd ) )
+    {
+        return false;
+    }
+
+    if( !( fom > 0 ) )
+    {
+        log<text_log>( "calibration: the gain-0 baseline has no power in the band", logPrio::LOG_WARNING );
+        return false;
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_fomOff = fom;
+    }
+
+    writeCsv( 0, off, fom, fomStd );
+
+    return true;
+}
+
+inline bool counterOffload::evaluate( const calibParamsT &p, int stage, double &ratio )
+{
+    if( m_evalCount > 0 && m_evalCount % m_baselineEvery == 0 && !measureBaseline( p ) )
+    {
+        return false;
+    }
+
+    ++m_evalCount;
+
+    double fom, fomStd;
+
+    if( !measure( p, fom, fomStd ) )
+    {
+        return false;
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        ratio        = fom / m_fomOff;
+        m_calibStage = stage;
+        ++m_calibPoint;
+        m_lastFom   = fom;
+        m_lastRatio = ratio;
+
+        if( stage == 1 || ratio < m_calibBestRatio )
+        {
+            m_calibBest      = p;
+            m_calibBestRatio = ratio;
+        }
+    }
+
+    writeCsv( stage, p, fom, fomStd );
+
+    if( ratio > m_abortRatio )
+    {
+        log<text_log>( "calibration: band power " + std::to_string( ratio ) + " times the baseline, aborting",
+                       logPrio::LOG_WARNING );
+        return false;
+    }
+
+    return true;
+}
+
+inline void counterOffload::writeCsv( int stage, const calibParamsT &p, double fom, double fomStd )
+{
+    timespec ts;
+    clock_gettime( CLOCK_REALTIME, &ts );
+
+    std::lock_guard<std::mutex> lock( m_calibMutex );
+
+    m_csv << std::fixed << ts.tv_sec << "." << std::setw( 9 ) << std::setfill( '0' ) << ts.tv_nsec << std::setfill( ' ' )
+          << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << "," << p[1] << "," << p[2] << ","
+          << m_bandCenterHz << "," << m_bandModes << "," << m_bandHalfWidthHz << "," << m_nAverage << "," << fom << ","
+          << fomStd << "," << m_fomOff << "," << fom / m_fomOff << "\n";
+
+    m_csv.flush();
+}
+
 inline void counterOffload::coThreadStart( counterOffload *c )
 {
     c->coThreadExec();
@@ -989,7 +2042,7 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_zero )( const pcf::IndiProperty &
 INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_gain )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_gain, ipRecv );
-    return setNumber( m_indiP_gain, ipRecv, m_gain, 0, 1 );
+    return setNumber( m_indiP_gain, ipRecv, m_gain, 0, 2 );
 }
 
 INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_leak )( const pcf::IndiProperty &ipRecv )
@@ -1014,6 +2067,77 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_timeOffset )( const pcf::IndiProp
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_timeOffset, ipRecv );
     return setNumber( m_indiP_timeOffset, ipRecv, m_timeOffsetUs, -1e6, 1e6 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_calibrate )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_calibrate, ipRecv );
+
+    if( !ipRecv.find( "toggle" ) )
+    {
+        return 0;
+    }
+
+    if( ipRecv["toggle"].getSwitchState() != pcf::IndiElement::On )
+    {
+        if( m_calibRunning )
+        {
+            m_calibAbort = true;
+            log<text_log>( "calibration abort requested", logPrio::LOG_NOTICE );
+        }
+
+        return 0;
+    }
+
+    if( m_calibRunning )
+    {
+        return 0;
+    }
+
+    if( !m_enabled || state() != stateCodes::OPERATING )
+    {
+        return log<text_log, 0>( "calibration needs the app enabled and OPERATING", logPrio::LOG_WARNING );
+    }
+
+    m_calibAbort   = false;
+    m_calibRunning = true;
+    m_calibStart   = true;
+
+    log<text_log>( "calibration requested", logPrio::LOG_NOTICE );
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_halfWidth )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_halfWidth, ipRecv );
+    return setNumber( m_indiP_halfWidth, ipRecv, m_halfWidthHz, 0, 1e6 );
+}
+
+INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_offloadFps )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadFps, ipRecv );
+
+    if( ipRecv.find( "current" ) )
+    {
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_offloadFps = ipRecv["current"].get<float>();
+    }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_offloadModes )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadModes, ipRecv );
+
+    if( ipRecv.find( "current" ) )
+    {
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_offloadModes = std::max( 0, ipRecv["current"].get<int>() );
+    }
+
+    return 0;
 }
 
 } // namespace app
