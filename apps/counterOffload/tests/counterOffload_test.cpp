@@ -46,10 +46,10 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_ramps;
     using counterOffload::m_rampStartUs;
     using counterOffload::m_settleS;
-    using counterOffload::m_timeoutS;
     using counterOffload::m_startGridUs;
     using counterOffload::m_syncopationTiming;
     using counterOffload::m_timeOffsetUs;
+    using counterOffload::m_timeoutS;
     using counterOffload::m_zeroRequested;
 
     /// Set up 2x2 buffers and a gain of 0.5.
@@ -106,7 +106,7 @@ mx::improc::eigenImage<float> delta( float value /**< [in] the pixel value */ )
  */
 TEST_CASE( "counterOffload ramp fraction is a raised cosine", "[counterOffload]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::rampFraction(0,0,0);
     #endif
@@ -134,7 +134,7 @@ TEST_CASE( "counterOffload ramp fraction is a raised cosine", "[counterOffload]"
  */
 TEST_CASE( "counterOffload commands a single ramped offload", "[counterOffload]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::addRamp(nullptr,0);
     counterOffload::buildCommand(0);
@@ -211,7 +211,7 @@ TEST_CASE( "counterOffload sums overlapping ramps", "[counterOffload]" )
  */
 TEST_CASE( "counterOffload leaks the completed contribution", "[counterOffload]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::afterPublish();
     #endif
@@ -277,7 +277,7 @@ TEST_CASE( "counterOffload leaks the completed contribution", "[counterOffload]"
  */
 TEST_CASE( "counterOffload state handling", "[counterOffload]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::clearState();
     counterOffload::processImage(nullptr, dev::shmimT());
@@ -347,7 +347,7 @@ TEST_CASE( "counterOffload state handling", "[counterOffload]" )
  */
 TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::validateConfig();
     #endif
@@ -423,7 +423,7 @@ TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
  */
 TEST_CASE( "counterOffload integrates the PSD band", "[counterOffload]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::bandPower(nullptr,0,0,0,0,0,0);
     #endif
@@ -474,7 +474,7 @@ TEST_CASE( "counterOffload integrates the PSD band", "[counterOffload]" )
  */
 TEST_CASE( "counterOffload coordinate scan finds the minimum", "[counterOffload]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::coordinateScan({},best,bestFom,nullptr);
     #endif
@@ -557,7 +557,7 @@ TEST_CASE( "counterOffload coordinate scan finds the minimum", "[counterOffload]
  */
 TEST_CASE( "counterOffload collects PSD band powers after a change", "[counterOffload]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::processImage(nullptr, psdShmimT());
     #endif
