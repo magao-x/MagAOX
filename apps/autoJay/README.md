@@ -22,12 +22,24 @@ sensor controller setting consistent. These examples are not installed by this
 change. The execution host, process list, INDI routes, and camera/DM shared-memory
 routes must be configured by the operator.
 
-Reserve `dm02disp02` for NCPC and `dm01disp02` for tweeter exclusively for this
-sensor. The corresponding `dm02disp` and `dm01disp` streams are observed combined
-commands. Do not run another alignment app on the reserved channels, or both
-camera instances at once. The app refuses nonzero channels and verifies its
-command contribution before collecting settled frames. Both DM combiners must
-continue processing these active channel writes with the AO loop open.
+Run the sensor on ICC with the camera and NCPC. Reserve `dm02disp02` for NCPC
+and `dm01disp02` for tweeter exclusively for this sensor. Relay the tweeter
+command from ICC to RTC. The local NCPC trigger `dm02disp` is required. Leave
+`[tweeter] trigger=` empty when only the command channel is visible on ICC, as
+in the examples. Set `trigger=dm01disp` to verify the tweeter contribution when
+its combined stream is available. Omitting the setting retains that default.
+
+For a relayed tweeter, `acquisition.dmSleep` starts at the local command write.
+Set it to cover ICC-to-RTC delivery and physical settling for both application
+and removal of the poke. NCPC still needs a verified combined update and its own
+settling interval. AutoJay discards `settleFrames` distinct camera frames after
+both conditions are met. The example delay is provisional. Confirm that the
+relay delivers commands and zeros with the AO loop open. A local write can
+succeed while the relay is offline.
+
+The app refuses nonzero owned channels at startup of a sequence. Both DM
+combiners must process these active writes with the AO loop open. Use the
+reserved channels from one alignment app or camera instance at a time.
 
 In each of `[ncpc]` and `[tweeter]`, set paired comma-separated `pokeX` and
 `pokeY` lists and one signed `pokeAmp` in DM command units, as in `dmPokeXCorr`.
@@ -145,8 +157,9 @@ Capture stages a complete bundle and publishes it atomically. Later edits to the
 original source pattern files do not change an installed calibration.
 
 Startup and `reload.request` select the newest complete valid bundle in the
-configured profile, logging skipped corrupt candidates. Its camera/stream/channel
-identities and current setup must still match before measurement. A setup mismatch
+configured profile, logging skipped corrupt candidates. Its camera, streams,
+trigger settings, and current setup must still match before measurement.
+Recapture after changing the relay setup or its settling delay. A setup mismatch
 does not cause silent fallback to an older optical setup. Recapture after changing
 the required setup or sampling; a bundle missing a newly configured setup binding
 is invalid. ROI size/origin changes alone are supported.
