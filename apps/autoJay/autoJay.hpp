@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <sys/stat.h>
 
@@ -109,8 +110,7 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     std::string m_actuator{ "ttmperi" };                  ///< Read-only correction voltage source.
     bool        m_controllerEnabled{
         false };             ///< Require guarded correction acknowledgments; false permits initial calibration.
-    double      m_propertyAge{ 5 }; ///< Maximum age of refreshed external properties and camera frames.
-    double      m_refreshInterval{ 1 };      ///< Explicit property refresh interval in seconds.
+    double      m_frameMaxAge{ 5 };          ///< Maximum time since a coherent camera frame was received, in seconds.
     double      m_controlSettle{ 0.2 };      ///< Quiet interval after acknowledged voltage readback.
     double      m_controlTimeout{ 5 };       ///< Bounded correction acknowledgment/readback wait.
     double      m_voltageTolerance{ 0.005 }; ///< Covers one 150/32767 V controller quantization step.
@@ -121,10 +121,9 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     /// One subscribed property and its most recent complete update.
     struct observed
     {
-        pcf::IndiProperty subscription;  ///< Stable registration object.
-        pcf::IndiProperty value;         ///< Most recent property value.
-        double            received{ 0 }; ///< Monotonic reception time; zero means unknown.
-        std::string       signature;     ///< Values/state excluding metadata such as labels.
+        pcf::IndiProperty                subscription; ///< Stable registration object.
+        std::optional<pcf::IndiProperty> value;        ///< Empty until the publisher supplies a value.
+        std::string                      signature;    ///< Values/state excluding metadata such as labels.
     };
 
     std::mutex                      m_mutex; ///< Protects frame accumulation, external state, and requested operations.
@@ -148,12 +147,11 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     bool              m_waitingControl{ false };   ///< Awaiting this sample's controller acknowledgment and settling.
     double            m_controlDeadline{ 0 };      ///< Monotonic correction deadline.
     double            m_quietSince{ 0 };           ///< Start of matching command/current readback interval.
-    double            m_lastRefresh{ 0 };          ///< Last outgoing property refresh.
     double            m_lastFrameTime{ 0 };        ///< Last coherent camera frame received.
     double            m_pixelTime{ 0 };            ///< Last camera acquisition timestamp, for diagnostics.
     uint64_t          m_cameraCounter{ 0 };        ///< Last coherent camera counter.
     uint32_t          m_streamWidth{ 0 }, m_streamHeight{ 0 };  ///< Camera dimensions copied under the state lock.
-    float ( *m_pixget )( void *, size_t ){ nullptr };           ///< Converts the monitored datatype to float.
+    void ( *m_copyFrame )( float *, const void *, size_t ){ nullptr }; ///< Copies and converts one frame to float.
     std::array<std::unique_ptr<autoJayDmStream>, 2> m_channels; ///< Exclusively owned additive channels.
     std::array<std::unique_ptr<autoJayDmStream>, 2> m_triggers; ///< Read-only combined streams.
     std::array<imageT, 2>      m_lastCommands;    ///< Last commanded channel values, used to detect another writer.
@@ -199,10 +197,9 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     /// Cache a received property and invalidate changed transaction state.
     int receive( const pcf::IndiProperty &property /**< [in] Received value. */ );
 
-    /// Return a fresh property; caller holds m_mutex.
+    /// Return the last published value, if known; caller holds m_mutex.
     const pcf::IndiProperty *property( const std::string &device, /**< [in] Publisher. */
-                                       const std::string &name,   /**< [in] Property name. */
-                                       double             now /**< [in] Monotonic seconds. */ ) const;
+                                       const std::string &name /**< [in] Property name. */ ) const;
 
     /// Validate external conditions and snapshot geometry; caller holds m_mutex.
     bool checkSetup( calibration &cal,     /**< [in/out] Capture rules may resolve wildcard values. */
@@ -426,12 +423,14 @@ inline void autoJay::setupConfig()
                              "control.settle",
                              "control.timeout",
                              "control.voltageTolerance",
-                             "acquisition.dmTolerance",
-                             "monitor.maxAge",
-                             "monitor.refreshInterval" } )
+                             "acquisition.dmTolerance" } )
+    {
         add( key,
              "double",
              "Acquisition, acceptance, or settling threshold; times are seconds and shifts detector pixels." );
+    }
+
+    add( "monitor.maxAge", "double", "Maximum time since a coherent camera frame was received, in seconds." );
 }
 
 inline int autoJay::loadPokeConfig( mx::app::appConfigurator &cfg, size_t dm )
@@ -524,8 +523,7 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
     cfg( m_controlTimeout, "control.timeout" );
     cfg( m_voltageTolerance, "control.voltageTolerance" );
     cfg( m_dmTolerance, "acquisition.dmTolerance" );
-    cfg( m_propertyAge, "monitor.maxAge" );
-    cfg( m_refreshInterval, "monitor.refreshInterval" );
+    cfg( m_frameMaxAge, "monitor.maxAge" );
     std::array<std::vector<std::string>, 6> fields;
     const std::array<std::string, 6> keys{ "devices", "properties", "elements", "values", "types", "tolerances" };
     for( size_t i = 0; i < keys.size(); ++i )
@@ -615,12 +613,20 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
     for( double value : { m_controlSettle, m_voltageTolerance, m_dmTolerance } )
         if( !mx::math::isFinite( value ) || value < 0 )
             return -1;
-    for( double value : { m_controlTimeout, m_propertyAge, m_refreshInterval, double( m_quality.maxShift ) } )
+    for( double value : { m_controlTimeout, m_frameMaxAge, double( m_quality.maxShift ) } )
+    {
         if( !mx::math::isFinite( value ) || value <= 0 )
+        {
             return -1;
-    if( m_refreshInterval >= m_propertyAge || m_controlSettle >= m_controlTimeout || m_controller.empty() ||
-        m_aoLoop.empty() || m_alignmentLoop.empty() || m_actuator.empty() || m_captureConfig.profile.empty() )
+        }
+    }
+
+    if( m_controlSettle >= m_controlTimeout || m_controller.empty() || m_aoLoop.empty() || m_alignmentLoop.empty() ||
+        m_actuator.empty() || m_captureConfig.profile.empty() )
+    {
         return -1;
+    }
+
     autoJayDetail::acquisition check;
     return check.start( m_captureConfig, 0 ) && autoJayDetail::registrationDetail::settingsValid( m_quality ) ? 0 : -1;
 }
@@ -670,17 +676,13 @@ inline int autoJay::receive( const pcf::IndiProperty &prop )
         ++m_generation;
     it->second.value     = prop;
     it->second.signature = signature.str();
-    it->second.received  = monotonic();
     return 0;
 }
 
-inline const pcf::IndiProperty *
-autoJay::property( const std::string &device, const std::string &name, double now ) const
+inline const pcf::IndiProperty *autoJay::property( const std::string &device, const std::string &name ) const
 {
     auto it = m_observed.find( device + "." + name );
-    if( it == m_observed.end() || it->second.received == 0 || now - it->second.received > m_propertyAge )
-        return nullptr;
-    return &it->second.value;
+    return it != m_observed.end() && it->second.value ? &*it->second.value : nullptr;
 }
 
 inline bool
@@ -692,9 +694,12 @@ autoJay::checkSetup( calibration &cal, geometry &geom, bool capture, std::string
         error = why;
         return false;
     };
-    if( now - m_lastFrameTime > m_propertyAge || m_lastFrameTime == 0 )
+    if( now - m_lastFrameTime > m_frameMaxAge || m_lastFrameTime == 0 )
+    {
         return reject( "camera stream is stale" );
-    const auto *region = property( cal.camera, "roi_region_state", now );
+    }
+
+    const auto *region = property( cal.camera, "roi_region_state" );
     if( !region || region->getState() != pcf::IndiProperty::Ok )
         return reject( "camera ROI is unavailable" );
     for( const auto &name : { "x", "y", "w", "h", "bin_x", "bin_y", "units" } )
@@ -728,8 +733,8 @@ autoJay::checkSetup( calibration &cal, geometry &geom, bool capture, std::string
             return reject( "calibration camera sampling/orientation differs" );
         for( auto &rule : cal.setup )
         {
-            const auto *p   = property( rule.device, rule.property, now );
-            const auto *fsm = property( rule.device, "fsm", now );
+            const auto *p   = property( rule.device, rule.property );
+            const auto *fsm = property( rule.device, "fsm" );
             if( !p || !p->find( rule.element ) || p->getState() == pcf::IndiProperty::Busy ||
                 p->getState() == pcf::IndiProperty::Alert )
                 return reject( "missing, moving, or invalid setup: " + rule.device + "." + rule.property );
@@ -761,24 +766,24 @@ autoJay::checkSetup( calibration &cal, geometry &geom, bool capture, std::string
         // These remain mandatory even if a loaded bundle has different optical setup rules.
         for( const auto &device : { m_aoLoop, m_alignmentLoop } )
         {
-            const auto *loop = property( device, "loop_state", now );
+            const auto *loop = property( device, "loop_state" );
             if( !loop || !loop->find( "toggle" ) || ( *loop )["toggle"].getSwitchState() != pcf::IndiElement::Off )
                 return reject( "loop must be open: " + device );
         }
         if( m_controllerEnabled )
         {
-            const auto *ctrl = property( m_controller, "loop_state", now );
+            const auto *ctrl = property( m_controller, "loop_state" );
             if( !ctrl || !ctrl->find( "toggle" ) )
                 return reject( "correction controller unavailable" );
             if( capture && ( *ctrl )["toggle"].getSwitchState() != pcf::IndiElement::Off )
                 return reject( "open the correction loop before capturing references" );
-            const auto *actuator = property( m_actuator, "fsm", now );
+            const auto *actuator = property( m_actuator, "fsm" );
             if( !actuator || !actuator->find( "state" ) || ( *actuator )["state"].get() != "OPERATING" )
                 return reject( "both correction axes must be enabled" );
         }
         for( const auto &axis : { "axis1_voltage", "axis2_voltage" } )
         {
-            const auto *p = property( m_actuator, axis, now );
+            const auto *p = property( m_actuator, axis );
             double      current, target;
             if( !p || !number( *p, "current", current ) || !number( *p, "target", target ) ||
                 p->getState() == pcf::IndiProperty::Alert ||
@@ -1222,7 +1227,7 @@ inline bool autoJay::controlSettled( std::string &error )
         error = "correction acknowledgment/readback timed out";
         return false;
     }
-    const auto *ack = property( m_controller, "processed", now );
+    const auto *ack = property( m_controller, "processed" );
     if( !ack )
         return false;
     for( const auto &name : { "counter", "session", "target0", "target1", "applied", "status" } )
@@ -1256,7 +1261,7 @@ inline bool autoJay::controlSettled( std::string &error )
         m_quietSince = 0;
         return true;
     }
-    const auto *fsm = property( m_actuator, "fsm", now );
+    const auto *fsm = property( m_actuator, "fsm" );
     if( !fsm || !fsm->find( "state" ) || ( *fsm )["state"].get() != "OPERATING" )
     {
         error = "correction actuator is not enabled";
@@ -1264,7 +1269,7 @@ inline bool autoJay::controlSettled( std::string &error )
     }
     for( size_t i = 0; i < 2; ++i )
     {
-        const auto  *axis   = property( m_actuator, i == 0 ? "axis1_voltage" : "axis2_voltage", now );
+        const auto  *axis   = property( m_actuator, i == 0 ? "axis1_voltage" : "axis2_voltage" );
         const double target = values[2 + i];
         double       current, commanded;
         if( !axis || !number( *axis, "current", current ) || !number( *axis, "target", commanded ) ||
@@ -1481,14 +1486,6 @@ inline int autoJay::appLogic()
     TELEMETER_APP_LOGIC;
     try
     {
-        const double now = monotonic();
-        if( now - m_lastRefresh >= m_refreshInterval )
-        {
-            for( auto &entry : m_observed )
-                if( m_indiDriver )
-                    m_indiDriver->sendGetProperties( entry.second.subscription );
-            m_lastRefresh = now;
-        }
         bool cancel, capture, start, reload;
         { //mutex scope
             std::lock_guard<std::mutex> lock( m_mutex );
@@ -1613,13 +1610,19 @@ inline int autoJay::allocate( const dev::shmimT &tag )
     m_lastFrameTime = 0;
     m_streamWidth   = shmimMonitorT::width();
     m_streamHeight  = shmimMonitorT::height();
-    m_pixget        = getPixPointer<float>( shmimMonitorT::dataType() );
+    m_copyFrame     = getPixFramePointer<float, false>( shmimMonitorT::dataType() );
     if( m_streamWidth == 0 || m_streamHeight == 0 ||
         uint64_t( m_streamWidth ) * m_streamHeight > autoJayDetail::calibrationIO::maxPixels )
-        m_pixget = nullptr;
+    {
+        m_copyFrame = nullptr;
+    }
+
     if( m_active )
+    {
         m_acquisition.fail( "camera stream allocated/recreated" );
-    return m_pixget ? 0 : -1;
+    }
+
+    return m_copyFrame ? 0 : -1;
 }
 
 inline int autoJay::processImage( void *source, const dev::shmimT &tag )
@@ -1627,21 +1630,30 @@ inline int autoJay::processImage( void *source, const dev::shmimT &tag )
     const double received = monotonic();
     static_cast<void>( tag );
     auto *metadata = shmimMonitorT::m_imageStream.md;
-    if( !metadata || metadata->write || !m_pixget )
+    if( !metadata || metadata->write || !m_copyFrame )
+    {
         return 0;
+    }
+
     uint64_t counter = metadata->cnt0, plane = metadata->cnt1;
     timespec acquired = metadata->atime;
     imageT   copy( shmimMonitorT::width(), shmimMonitorT::height() );
-    for( Eigen::Index i = 0; i < copy.size(); ++i )
-        copy.data()[i] = m_pixget( source, i );
+    m_copyFrame( copy.data(), source, copy.size() );
+
     if( metadata->write || metadata->cnt0 != counter || metadata->cnt1 != plane )
+    {
         return 0;
+    }
+
     std::lock_guard<std::mutex> lock( m_mutex );
     m_lastFrameTime = received;
     m_pixelTime     = acquired.tv_sec + acquired.tv_nsec * 1e-9;
     m_cameraCounter = counter;
     if( m_active )
+    {
         m_acquisition.frame( copy, counter, m_lastFrameTime );
+    }
+
     return 0;
 }
 

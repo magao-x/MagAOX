@@ -638,3 +638,23 @@ setup and select amplitudes before capture.
 On 2026-11-19, the optimized app build and the offline application suite passed
 (15 cases, 1,387 assertions). The suite covers capture and bundle reload with
 either pattern source, malformed input, and coordinates outside the DM stream.
+
+### Follow-up: INDI subscriptions and camera frame copying
+
+AutoJay registers its INDI subscriptions at startup and uses the framework's
+initial requests, retries, and recovery. A subscription is unknown until the
+first update. Later values replace the cache and still participate in setup
+validation and generation checks. Unchanged setup values have no receipt
+deadline. The existing `monitor.maxAge` now applies only to camera frames,
+and `monitor.refreshInterval` was removed. The controller sample identity,
+sample timestamp validation, and acknowledgment deadlines still apply.
+
+The camera callback uses `getPixFramePointer<float, false>` to convert the
+source directly into a private float image with one call per frame. The write
+flag and source counter/plane checks still gate the copied frame. Offline
+tests exercise silent setup subscriptions, invalid setup updates, and the
+conversion of a synthetic unsigned 16-bit frame through the acquisition path.
+Camera and shared-memory timing remain on-instrument measurements.
+
+On 2026-11-19 the optimized build and all four AutoJay suites passed on the
+merged branch (38 cases, 2,121 assertions).

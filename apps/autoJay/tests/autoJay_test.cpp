@@ -3,6 +3,9 @@
  * \ingroup autoJay_files
  */
 
+#include <chrono>
+#include <thread>
+
 #include "../../../tests/testXWC.hpp"
 #include "../autoJay.hpp"
 
@@ -33,6 +36,7 @@ class autoJayHarness : public MagAOX::app::autoJay
     using autoJay::controlSettled;
     using autoJay::finish;
     using autoJay::loadConfigImpl;
+    using autoJay::m_acquisition;
     using autoJay::m_active;
     using autoJay::m_calibration;
     using autoJay::m_captureConfig;
@@ -108,6 +112,13 @@ class autoJayHarness : public MagAOX::app::autoJay
     void liveGeometry( int width /**< [in] Sampled horizontal pixels */,
                        int height /**< [in] Sampled vertical pixels */,
                        int bin = 1 /**< [in] Detector binning on both axes */ );
+
+    /// Allocate the camera conversion for the fixture's stream dimensions.
+    int allocateCamera( uint8_t type /**< [in] Synthetic ImageStreamIO datatype */ );
+
+    /// Pass a synthetic frame and its metadata through the camera callback.
+    int cameraFrame( void           *source, /**< [in] Synthetic pixels */
+                     IMAGE_METADATA &metadata /**< [in] Metadata for the synthetic frame */ );
 
     /// Validate a copy of the capture or loaded configuration and return the resolved snapshot.
     bool setupValid( bool         capture /**< [in] Resolve capture wildcards */,
@@ -268,7 +279,7 @@ void autoJayHarness::deliver( const pcf::IndiProperty &value )
 
 pcf::IndiProperty autoJayHarness::observedProperty( const std::string &key ) const
 {
-    return m_observed.at( key ).value;
+    return m_observed.at( key ).value.value();
 }
 
 void autoJayHarness::numbers( const std::string                                    &device,
@@ -318,6 +329,21 @@ void autoJayHarness::liveGeometry( int width, int height, int bin )
                { "bin_y", bin },
                { "units", 0 } } );
     m_lastFrameTime = monotonic();
+}
+
+int autoJayHarness::allocateCamera( uint8_t type )
+{
+    MagAOX::app::dev::shmimMonitor<MagAOX::app::autoJay>::m_dataType = type;
+    return allocate( MagAOX::app::dev::shmimT{} );
+}
+
+int autoJayHarness::cameraFrame( void *source, IMAGE_METADATA &metadata )
+{
+    auto &stream = MagAOX::app::dev::shmimMonitor<MagAOX::app::autoJay>::m_imageStream;
+    stream.md    = &metadata;
+    int result   = processImage( source, MagAOX::app::dev::shmimT{} );
+    stream.md    = nullptr;
+    return result;
 }
 
 bool autoJayHarness::setupValid( bool capture, std::string &error, calibration *resolved, bool settling )
@@ -540,7 +566,7 @@ TEST_CASE( "autoJay monitors setup while an expected correction settles", "[auto
     REQUIRE( error.find( "loop" ) != std::string::npos );
 }
 
-/// Missing, moving, stale, mismatched, and malformed external states inhibit acquisition.
+/// Unknown, invalid, moving, or mismatched setup and a stale camera stream inhibit acquisition.
 /** \ingroup autoJay_unit_test */
 TEST_CASE( "autoJay rejects invalid setup before opening channels", "[autoJay][app]" )
 {
@@ -585,9 +611,15 @@ TEST_CASE( "autoJay rejects invalid setup before opening channels", "[autoJay][a
     {
         app.numbers( "stageflowfs", "position", { { "target", 32 } } );
     }
-    SECTION( "stale setup" )
+    SECTION( "setup subscription awaiting its initial value" )
     {
-        app.m_observed.at( "stageflowfs.position" ).received -= 10;
+        app.m_observed.at( "stageflowfs.position" ).value.reset();
+    }
+    SECTION( "setup explicitly reports an invalid state" )
+    {
+        auto value = app.observedProperty( "stageflowfs.position" );
+        value.setState( pcf::IndiProperty::Alert );
+        app.deliver( value );
     }
     SECTION( "stale camera" )
     {
@@ -625,6 +657,74 @@ TEST_CASE( "autoJay rejects invalid setup before opening channels", "[autoJay][a
     REQUIRE( app.m_openCount == 0 );
     REQUIRE_FALSE( app.m_active );
     REQUIRE( app.m_counter == 0 );
+}
+
+/// A stable INDI setup remains usable after the camera freshness interval passes.
+/** \ingroup autoJay_unit_test */
+TEST_CASE( "autoJay retains subscribed setup that has not changed", "[autoJay][app]" )
+{
+    // clang-format off
+    #ifdef AUTOJAY_TEST_DOXYGEN_REF
+    MagAOX::app::autoJay::receive;
+    MagAOX::app::autoJay::checkSetup;
+    #endif
+    // clang-format on
+    autoJayHarness app;
+    REQUIRE( app.configure( "[monitor]\nmaxAge=0.25\n" ) == 0 );
+    std::string error;
+
+    std::this_thread::sleep_for( std::chrono::milliseconds( 275 ) );
+    REQUIRE_FALSE( app.setupValid( false, error ) );
+    REQUIRE( error == "camera stream is stale" );
+
+    // Only the camera resumes publishing. The setup subscriptions stay quiet.
+    app.m_lastFrameTime = app.monotonic();
+    REQUIRE( app.setupValid( false, error ) );
+    app.numbers( "stageflowfs", "position", { { "current", 33 } } );
+    REQUIRE_FALSE( app.setupValid( false, error ) );
+    REQUIRE( error.find( "numeric setup mismatch" ) != std::string::npos );
+}
+
+/// The camera callback converts unsigned frames into the baseline stack and skips writes in progress.
+/** \ingroup autoJay_unit_test */
+TEST_CASE( "autoJay copies coherent camera pixels into the baseline stack", "[autoJay][app]" )
+{
+    // clang-format off
+    #ifdef AUTOJAY_TEST_DOXYGEN_REF
+    MagAOX::app::autoJay::allocate;
+    MagAOX::app::autoJay::processImage;
+    #endif
+    // clang-format on
+    autoJayHarness app;
+    REQUIRE( app.allocateCamera( IMAGESTRUCT_UINT16 ) == 0 );
+    std::vector<uint16_t> pixels( 44 * 40, 40000 );
+    pixels[44] = 65000;
+    IMAGE_METADATA metadata{};
+    metadata.cnt0 = 4;
+    REQUIRE( app.cameraFrame( pixels.data(), metadata ) == 0 );
+    REQUIRE( app.begin( false ) );
+
+    const auto  before = app.triggerCounters();
+    std::string error;
+    REQUIRE( app.writeChannels( app.m_acquisition.command(), error ) );
+    app.m_acquisition.commanded( before, app.monotonic() );
+    app.m_acquisition.poll( app.triggerCounters(), app.monotonic() );
+
+    metadata.cnt0  = 5;
+    metadata.write = 1;
+    REQUIRE( app.cameraFrame( pixels.data(), metadata ) == 0 );
+    const auto &baseline = app.m_acquisition.stacks()[0];
+    REQUIRE( baseline.count == 0 );
+
+    metadata.write = 0;
+    REQUIRE( app.cameraFrame( pixels.data(), metadata ) == 0 );
+    REQUIRE( baseline.count == 1 );
+    REQUIRE( baseline.firstCounter == 5 );
+    REQUIRE( baseline.mean.rows() == 44 );
+    REQUIRE( baseline.mean.cols() == 40 );
+    REQUIRE( baseline.mean( 0, 0 ) == 40000 );
+    REQUIRE( baseline.mean( 0, 1 ) == 65000 );
+    REQUIRE( baseline.mean( 43, 39 ) == 40000 );
 }
 
 /// Shared live ROI extents may differ from capture while the sampling and stream metadata remain consistent.
