@@ -122,8 +122,9 @@ lock qualifies it. A numerically invalid command publishes a zero, counted as a
 removal (not active), until the next valid synthesis. Ordinary missed slots,
 unavailable transport and discarded receipts are retried without a fault reset.
 
-Calibration requires a finite 50-by-50 TT pair, a full-rank physical projection
-and the configured residual tolerance; `dm.mask` is optional (see "Fitting support"). File identity
+Calibration requires a finite 50-by-50 TT pair and a rank-two mode-coefficient
+calibration: either a physical fit within the residual tolerance, or explicit
+coefficients (see "Calibration methods"). File identity
 is checked while loading; acquisition uses the validated in-memory calibration.
 The source must already be a compatible CPU float32 50-by-50 auxiliary image,
 with its scheduler and acknowledgement stream available. The base's cooperative
@@ -255,7 +256,8 @@ The current implementation decisions and test limits are recorded in
 [accelSim-simple-dm-output.md](../../agents/plans/2026-11/accelSim-simple-dm-output.md).
 The complete configuration template is [acc000.conf](acc000.conf). It names the
 deployed scheduler stream `dmtweeter_synco_timing`; fill in the absolute
-`dm.modeCube` path and, optionally, `dm.mask`. The timeline adds no configuration keys.
+`dm.modeCube` path and the calibration (`dm.calibration`, `dm.coefficients` or
+`dm.mask`). The timeline adds no configuration keys.
 Retain the deployed `synchro.shmimName` if WFS phase-reference acquisition is
 wanted; leaving it empty selects timer acquisition. The template preserves the
 8-kHz rate, seeds, ADC calibration, two-channel format and source depth 128.
@@ -374,31 +376,43 @@ pixels outside the mask in each mode; retaining
 the full supplied mode shapes is intentional. Unit tests use synthetic modes
 and explicitly registered coordinates independently of these local FITS files.
 
-### Fitting support (`dm.mask`)
+### Calibration methods (`dm.calibration`, `dm.mask`, `dm.coefficients`)
 
-The mask has one role: it weights the samples of the fit above. It does not mask
-the output, which is always the full first two planes of `dm.modeCube` times the
-fitted mapping, and it does not rescale the modes.
+The DM command is always `c0*mode0 + c1*mode1` over the full first two planes of
+`dm.modeCube`, with `c = K * theta` for simulated pointing `theta` in radians. No
+actuator value is masked, zeroed or renormalized. Calibration only determines the
+2x2 matrix `K` (rows modes, columns simulated X/Y):
 
-- **`dm.mask` set:** unchanged behavior. The FITS file is stat'ed, read (50x50,
-  one plane), checked for changes while loading, and its values are the weights.
-- **`dm.mask` empty (default):** the weights are 1 on the pixels of the nominal
-  entrance pupil (within 24 pitches of (24.5,24.5), the same geometry that sets the
-  physical scale) where either mode is nonzero, and 0 elsewhere. No mask file is
-  stat'ed or read.
+- **`dm.calibration=fit` (default):** fit `K` to the physical tilt surface as above.
+  With `dm.mask` set, its values are the fitting weights (unchanged behavior: the file
+  is stat'ed, read as one 50x50 plane, and checked for changes while loading).
+  Without `dm.mask`, every pixel has weight 1.0.
+- **`dm.calibration=coefficients`:** use `dm.coefficients = K00,K01,K10,K11` in mode
+  coefficient per radian. No tilt surface is fitted and no mask is read. `K` and the
+  two modes must be finite and rank two. `dm.mask` is rejected with this method.
 
-Uniform weights over the whole 50x50 grid are not appropriate. The fit would include
-pixels outside the pupil, where there is no physical tilt to match, and pixels where
-the modes are zero; both bias the mapping. The deployed `CMmodesDM.00` planes have
-244 nonzero pixels outside `dmmask`. The nominal pupil has 1,804 pixels and
-`dmmask` 1,715, so the two supports differ; how they differ has not been checked
-against the deployed files. Whichever support is used,
-`dm.maxRelativeResidual` must hold: if the modes are not the requested physical tilt
-over the nominal pupil, preparation fails with "TT modes cannot reconstruct the
-requested physical surface within tolerance" and DM output stays unavailable; then
-supply `dm.mask`. The startup log reports which support was used, its pixel count
-and both relative residuals; compare a masked and an unmasked start to confirm
-the mapping on the RTC.
+**Why the deployed cube fails without a mask.** The fit must reproduce the tilt
+surface within `dm.maxRelativeResidual` (1e-6) over the weighted pixels. The deployed
+planes are the tilt only over `dmmask` (1,715 pixels, residual about 8.5e-8). There
+are 244 nonzero pixels outside `dmmask`, and the remaining 541 pixels are zero, while
+the tilt target is nonzero there. With uniform weights (or any support beyond
+`dmmask`, such as the nominal 48-pitch pupil of 1,804 pixels), the zero and
+outside-pupil pixels enter the fit, and the relative residual cannot be expected to
+meet 1e-6. Preparation then fails, `dm_status.ready` stays 0 and `dm_enable` is
+refused. For a synthetic cube built that way, the uniform-weight residual is 0.58; the
+startup log and `dm_calibration.status` now report the deployed values.
+The residual check is correct: it reports that the whole grid is not a tilt plane,
+which is exactly what uniform weights ask the fit to assume. Raising the tolerance would
+accept a `K` biased by the outside-pupil values. The supported mask-free operation is
+`dm.calibration=coefficients` with the `K` measured by the `dmmask` fit (below).
+`acc000.conf` uses that `K`, so the commands, orientation, units and amplitude are
+the same as with `dm.mask`. If the cube changes, start once with
+`calibration=fit` and `mask` set, then copy `K` from the startup log.
+
+**Diagnostics.** The startup log reports the method, support, `K`, fit pixel count
+and residuals, or "DM injection unavailable: calibration ...: <reason>". The read-only
+`dm_calibration` property carries `status` (`ready`, or the same reason), `method`,
+`support`, `k00`..`k11` [coefficient/rad], `residual_x`, `residual_y` and `fit_pixels`.
 
 For these exact local modes, nominal geometry, and `dmmask`, the measured mapping
 is shown below for review; it is **not hardcoded** into the helper:

@@ -5,6 +5,8 @@
 #ifndef accelSimDisturbance_hpp
 #define accelSimDisturbance_hpp
 
+#include <cstdio>
+
 #include <Eigen/Dense>
 
 #include "accelSimModel.hpp"
@@ -142,6 +144,9 @@ class tipTiltProjection
 
     /// Return the weighted relative surface-fit errors, without treating them as optical validation.
     const std::array<double, 2> &relativeResidual() const;
+
+    /// Return the fitted mapping: rows are supplied modes, columns simulated X/Y [coefficient/rad].
+    const Eigen::Matrix2d &mapping() const;
     ///@}
 };
 
@@ -292,11 +297,21 @@ inline tipTiltProjection::tipTiltProjection( const std::vector<double> &mode0,
         throw std::invalid_argument( "rank-deficient TT modes or pupil coordinates" );
     const Eigen::Matrix2d normalized = fit.solve( target );
     for( size_t axis = 0; axis < 2; ++axis )
-    {
         m_relativeResidual[axis] = ( modes * normalized.col( axis ) - target.col( axis ) ).stableNorm();
+    for( size_t axis = 0; axis < 2; ++axis )
+    {
         if( !std::isfinite( m_relativeResidual[axis] ) || m_relativeResidual[axis] > maxRelativeResidual )
-            throw std::invalid_argument(
-                "TT modes cannot reconstruct the requested physical surface within tolerance" );
+        {
+            char text[200];
+            std::snprintf( text,
+                           sizeof( text ),
+                           "TT modes cannot reconstruct the requested physical surface within tolerance "
+                           "(relative residuals X %.3g, Y %.3g; tolerance %.3g)",
+                           m_relativeResidual[0],
+                           m_relativeResidual[1],
+                           maxRelativeResidual );
+            throw std::invalid_argument( text );
+        }
         for( size_t mode = 0; mode < 2; ++mode )
             m_mapping( mode, axis ) = normalized( mode, axis ) * targetNorm[axis] / modeNorm[mode];
     }
@@ -321,6 +336,11 @@ inline std::array<double, 2> tipTiltProjection::coefficients( const pointingDist
     if( !value.allFinite() )
         throw std::overflow_error( "TT modal coefficient overflow" );
     return { value[0], value[1] };
+}
+
+inline const Eigen::Matrix2d &tipTiltProjection::mapping() const
+{
+    return m_mapping;
 }
 
 inline const std::array<std::vector<double>, 2> &tipTiltProjection::response() const

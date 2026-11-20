@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <optional>
 
 #include "accelSimDisturbance.hpp"
@@ -29,44 +30,65 @@ enum class dmState
     streamFault
 };
 
+/// How the 2x2 mode-coefficient calibration of the DM injection was obtained.
+enum class dmCalibrationMethod
+{
+    none,        ///< Not prepared.
+    fit,         ///< Least-squares fit of the modes to the physical tilt surface over fitting weights.
+    coefficients ///< Explicitly configured coefficients; no tilt surface is fitted.
+};
+
+/// Return a stable name for a calibration method.
+const char *dmCalibrationName( dmCalibrationMethod method /**< [in] calibration method */ );
+
 /// Calibrated physical-pointing synthesis with an independent amplitude scale.
-/** One thread (accelSim's DM output thread) owns this helper; it never publishes or manages output state. */
+/** The command is always c0*mode0 + c1*mode1 over the full supplied planes, with modal coefficients c = K*theta for
+ * simulated pointing theta [rad]. Calibration only determines the 2x2 matrix K; no actuator value is masked, zeroed
+ * or renormalized. One thread (accelSim's DM output thread) owns this helper; it never publishes or manages output
+ * state.
+ */
 class dmInjection
 {
-    std::optional<tipTiltBasis> m_basis;          ///< Validated precomputed angular responses and reusable command.
-    std::vector<float>          m_command;        ///< Complete scaled contribution, allocated only during preparation.
-    std::array<double, 2>       m_residual{};     ///< Relative weighted fit residual of each simulated axis.
-    size_t                      m_fitPixels{ 0 }; ///< Pixels with nonzero fitting weight.
+    std::optional<tipTiltBasis> m_basis;   ///< Validated precomputed angular responses and reusable command.
+    std::vector<float>          m_command; ///< Complete scaled contribution, allocated only during preparation.
+    dmCalibrationMethod         m_method{ dmCalibrationMethod::none }; ///< Source of m_mapping.
+    Eigen::Matrix2d       m_mapping{ Eigen::Matrix2d::Zero() }; ///< K: rows modes, columns simulated X/Y [coef/rad].
+    std::array<double, 2> m_residual{ NAN, NAN }; ///< Relative weighted fit residual per axis; NaN when not fitted.
+    size_t                m_fitPixels{ 0 };       ///< Pixels with nonzero fitting weight; zero when not fitted.
 
   public:
     /// Construct uncalibrated, without stream access.
     dmInjection() = default;
 
-    /// Prepare fixed DM-pupil geometry and the existing validated projector before acquisition starts.
-    /** The mask only weights the 2x2 fit of mode coefficients to physical pointing; the output is always the full
-     * supplied modes times that mapping and is never spatially masked. An empty mask fits, with uniform weights, over
-     * the nominal entrance pupil of the simulation geometry (48-pitch diameter centered on (24.5,24.5)) where either
-     * mode is nonzero. Pixels outside that pupil have no physical tilt to match, and pixels where the modes are zero
-     * carry no modal surface; either would bias the fit. The unchanged residual tolerance rejects a support over
-     * which the modes are not the requested physical tilt.
+    /// Fit K to the physical tilt surface of the fixed DM-pupil geometry before acquisition starts.
+    /** The weights only select and weight the fit samples; the output is the full modes times K everywhere. An empty
+     * mask uses uniform weights of 1.0 over the entire 50x50 plane. The fit must reproduce the physical tilt surface
+     * within the residual tolerance over the weighted pixels; this is unchanged with or without a mask.
      */
     void prepare( const std::vector<double> &mode0 /**< [in] first surface-micron TT plane, native order */,
                   const std::vector<double> &mode1 /**< [in] second surface-micron TT plane */,
-                  const std::vector<double> &mask /**< [in] dmmask fitting weights, or empty for mode support */,
+                  const std::vector<double> &mask /**< [in] fitting weights, or empty for uniform weights */,
                   double                     residual /**< [in] accepted relative fit residual */ );
 
-    /// Return uniform fitting weights over the nominal pupil pixels where either 50x50 mode is nonzero.
-    static std::vector<double> pupilSupport( const std::vector<double> &mode0 /**< [in] first mode plane */,
-                                             const std::vector<double> &mode1 /**< [in] second mode plane */ );
-
-    /// Return the relative fit residual of each simulated axis from the latest successful preparation.
-    const std::array<double, 2> &residual() const;
-
-    /// Return the number of pixels with nonzero fitting weight in the latest successful preparation.
-    size_t fitPixels() const;
+    /// Use an explicitly configured K without fitting a tilt surface; the modes and K must both have rank two.
+    void prepareCoefficients( const std::vector<double> &mode0 /**< [in] first surface-micron TT plane */,
+                              const std::vector<double> &mode1 /**< [in] second surface-micron TT plane */,
+                              const Eigen::Matrix2d     &mapping /**< [in] K [mode coefficient/rad] */ );
 
     /// Return whether calibration has been successfully prepared.
     bool ready() const;
+
+    /// Return the calibration method of the latest successful preparation.
+    dmCalibrationMethod method() const;
+
+    /// Return K of the latest successful preparation [mode coefficient/rad].
+    const Eigen::Matrix2d &mapping() const;
+
+    /// Return the relative fit residual of each simulated axis; NaN for explicit coefficients.
+    const std::array<double, 2> &residual() const;
+
+    /// Return the number of pixels with nonzero fitting weight; zero for explicit coefficients.
+    size_t fitPixels() const;
 
     /// Return a complete finite scaled command; invalid input throws without publishing.
     const std::vector<float> &
@@ -80,14 +102,40 @@ class dmInjection
                      double        scale /**< [in] independent amplitude scale in [0,maxDMScale] */,
                      bool /**< [in] unused former timing qualification */,
                      publisherT &publish /**< [in,out] private command staging callback */ );
+
+  private:
+    /// Clear the previous calibration before a new preparation.
+    void clear();
 };
+
+inline const char *dmCalibrationName( dmCalibrationMethod method )
+{
+    switch( method )
+    {
+    case dmCalibrationMethod::fit:
+        return "fit";
+    case dmCalibrationMethod::coefficients:
+        return "coefficients";
+    default:
+        return "none";
+    }
+}
+
+inline void dmInjection::clear()
+{
+    m_basis.reset();
+    m_method    = dmCalibrationMethod::none;
+    m_mapping   = Eigen::Matrix2d::Zero();
+    m_residual  = { NAN, NAN };
+    m_fitPixels = 0;
+}
 
 inline void dmInjection::prepare( const std::vector<double> &mode0,
                                   const std::vector<double> &mode1,
                                   const std::vector<double> &mask,
                                   double                     residual )
 {
-    m_basis.reset();
+    clear();
     if( mode0.size() != 2500 || mode1.size() != 2500 || ( !mask.empty() && mask.size() != 2500 ) )
         throw std::invalid_argument( "invalid DM calibration geometry" );
     std::vector<double> x( 2500 ), y( 2500 );
@@ -96,24 +144,57 @@ inline void dmInjection::prepare( const std::vector<double> &mode0,
         x[n] = ( double( n % 50 ) - 24.5 ) * 6.5 / 48;
         y[n] = ( double( n / 50 ) - 24.5 ) * 6.5 / 48;
     }
-    const std::vector<double> weights = mask.empty() ? pupilSupport( mode0, mode1 ) : mask;
+    const std::vector<double> weights = mask.empty() ? std::vector<double>( 2500, 1. ) : mask;
     tipTiltProjection         projection( mode0, mode1, x, y, weights, residual );
     m_basis.emplace( 50, 50, projection.response()[0], projection.response()[1] );
+    m_command.assign( 2500, 0 );
+    m_method    = dmCalibrationMethod::fit;
+    m_mapping   = projection.mapping();
     m_residual  = projection.relativeResidual();
     m_fitPixels = size_t( std::count_if( weights.begin(), weights.end(), []( double w ) { return w > 0; } ) );
-    m_command.assign( 2500, 0 );
 }
 
-inline std::vector<double> dmInjection::pupilSupport( const std::vector<double> &mode0,
-                                                      const std::vector<double> &mode1 )
+inline void dmInjection::prepareCoefficients( const std::vector<double> &mode0,
+                                              const std::vector<double> &mode1,
+                                              const Eigen::Matrix2d     &mapping )
 {
+    clear();
     if( mode0.size() != 2500 || mode1.size() != 2500 )
         throw std::invalid_argument( "invalid DM calibration geometry" );
-    std::vector<double> weights( 2500 );
-    for( size_t n = 0; n < 2500; ++n ) // Same pupil center and 48-pitch diameter as the prepare() coordinates.
-        weights[n] =
-            std::hypot( double( n % 50 ) - 24.5, double( n / 50 ) - 24.5 ) <= 24 && ( mode0[n] != 0 || mode1[n] != 0 );
-    return weights;
+    if( !mapping.allFinite() || !( std::abs( mapping.determinant() ) > 1e-12 * mapping.squaredNorm() ) )
+        throw std::invalid_argument( "dm.coefficients must be a finite rank-two 2x2 matrix" );
+    Eigen::Matrix2d gram = Eigen::Matrix2d::Zero();
+    for( size_t n = 0; n < 2500; ++n )
+    {
+        if( !std::isfinite( mode0[n] ) || !std::isfinite( mode1[n] ) )
+            throw std::invalid_argument( "nonfinite TT modes" );
+        gram += Eigen::Vector2d( mode0[n], mode1[n] ) * Eigen::RowVector2d( mode0[n], mode1[n] );
+    }
+    if( !( std::abs( gram.determinant() ) > 1e-12 * gram.squaredNorm() ) )
+        throw std::invalid_argument( "rank-deficient TT modes" );
+    std::array<std::vector<double>, 2> response{ std::vector<double>( 2500 ), std::vector<double>( 2500 ) };
+    for( size_t axis = 0; axis < 2; ++axis )
+        for( size_t pixel = 0; pixel < 2500; ++pixel ) // The same expression as tipTiltProjection's response.
+            response[axis][pixel] = mode0[pixel] * mapping( 0, axis ) + mode1[pixel] * mapping( 1, axis );
+    m_basis.emplace( 50, 50, response[0], response[1] );
+    m_command.assign( 2500, 0 );
+    m_method  = dmCalibrationMethod::coefficients;
+    m_mapping = mapping;
+}
+
+inline bool dmInjection::ready() const
+{
+    return m_basis.has_value();
+}
+
+inline dmCalibrationMethod dmInjection::method() const
+{
+    return m_method;
+}
+
+inline const Eigen::Matrix2d &dmInjection::mapping() const
+{
+    return m_mapping;
 }
 
 inline const std::array<double, 2> &dmInjection::residual() const
@@ -124,11 +205,6 @@ inline const std::array<double, 2> &dmInjection::residual() const
 inline size_t dmInjection::fitPixels() const
 {
     return m_fitPixels;
-}
-
-inline bool dmInjection::ready() const
-{
-    return m_basis.has_value();
 }
 
 inline const std::vector<float> &dmInjection::synthesize( const sample &value, double scale )
