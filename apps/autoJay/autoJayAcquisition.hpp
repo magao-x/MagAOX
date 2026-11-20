@@ -36,8 +36,8 @@ class acquisition
   private:
     step                    m_step{ step::idle };      ///< Current command/acquisition phase.
     bool                    m_commandPending{ false }; ///< A channel write must precede trigger/frame acceptance.
-    bool                    m_triggered{ false };      ///< Required combined streams have advanced after the write.
-    bool                    m_verifyTweeter{ true }; ///< Require tweeter feedback when its combined stream is visible.
+    bool                    m_triggered{ false }; ///< The write is complete and any configured feedback has arrived.
+    std::array<bool, 2>     m_verifyTrigger{};    ///< Require feedback for each configured combined stream.
     std::array<uint64_t, 2> m_triggers{};              ///< Combined counters preceding the channel write.
     std::array<uint64_t, 2> m_latestTriggers{};        ///< Latest observed counters, including accumulation time.
     uint64_t                m_lastFrame{ 0 };          ///< Last observed source frame, including discarded frames.
@@ -108,13 +108,13 @@ inline bool acquisition::start( const calibration &cal, double now, double satur
 {
     if( cal.frames < 2 || cal.frames > 10000 || cal.settleFrames > 10000 || !mx::math::isFinite( cal.dmSleep ) ||
         cal.dmSleep < 0 || !mx::math::isFinite( cal.phaseTimeout ) || cal.phaseTimeout <= cal.dmSleep ||
-        cal.dm[0].trigger.empty() || ( cal.dm[1].trigger.empty() && cal.dmSleep == 0 ) ||
+        ( ( cal.dm[0].trigger.empty() || cal.dm[1].trigger.empty() ) && cal.dmSleep == 0 ) ||
         !mx::math::isFinite( saturation ) || saturation <= 0 )
     {
         fail( "invalid acquisition timing or frame counts" );
         return false;
     }
-    m_verifyTweeter = !cal.dm[1].trigger.empty();
+    m_verifyTrigger = { !cal.dm[0].trigger.empty(), !cal.dm[1].trigger.empty() };
     m_frames       = cal.frames;
     m_settleFrames = cal.settleFrames;
     m_delay        = cal.dmSleep;
@@ -150,6 +150,7 @@ inline void acquisition::commanded( const std::array<uint64_t, 2> &counters, dou
     m_triggers       = counters;
     m_latestTriggers = counters;
     m_commandPending = false;
+    m_triggered      = !m_verifyTrigger[0] && !m_verifyTrigger[1];
     m_acceptAfter    = now + m_delay;
     m_deadline       = now + m_timeout;
 }
@@ -164,17 +165,29 @@ inline void acquisition::poll( const std::array<uint64_t, 2> &counters, double n
         return;
     }
     if( m_commandPending )
-        return;
-    if( counters[0] < m_latestTriggers[0] || ( m_verifyTweeter && counters[1] < m_latestTriggers[1] ) )
     {
-        fail( "combined DM counter reset" );
         return;
     }
+
+    bool updated = applied;
+    for( size_t i = 0; i < counters.size(); ++i )
+    {
+        if( !m_verifyTrigger[i] )
+        {
+            continue;
+        }
+
+        if( counters[i] < m_latestTriggers[i] )
+        {
+            fail( "combined DM counter reset" );
+            return;
+        }
+
+        updated &= counters[i] > m_triggers[i];
+    }
+
     m_latestTriggers = counters;
-    if( m_triggered )
-        return;
-    // Wait for each available combined command. A relayed tweeter starts settling at the local write.
-    if( applied && counters[0] > m_triggers[0] && ( !m_verifyTweeter || counters[1] > m_triggers[1] ) )
+    if( !m_triggered && updated )
     {
         m_triggered   = true;
         m_acceptAfter = std::max( m_acceptAfter, now + m_delay );

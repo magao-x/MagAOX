@@ -153,7 +153,7 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     uint32_t          m_streamWidth{ 0 }, m_streamHeight{ 0 };  ///< Camera dimensions copied under the state lock.
     void ( *m_copyFrame )( float *, const void *, size_t ){ nullptr }; ///< Copies and converts one frame to float.
     std::array<std::unique_ptr<autoJayDmStream>, 2> m_channels; ///< Exclusively owned additive channels.
-    std::array<std::unique_ptr<autoJayDmStream>, 2> m_triggers; ///< Combined streams; empty slot for a relayed tweeter.
+    std::array<std::unique_ptr<autoJayDmStream>, 2> m_triggers; ///< Optional combined streams monitored for feedback.
     std::array<imageT, 2>      m_lastCommands;    ///< Last commanded channel values, used to detect another writer.
     std::array<imageT, 2>      m_combinedBefore;  ///< Coherent combined commands preceding a channel write.
     std::array<imageT, 2>      m_expectedChange;  ///< Change which must appear in the combined command before settling.
@@ -394,7 +394,7 @@ inline void autoJay::setupConfig()
             add( std::string( dm ) + "." + name, "string", "Owned additive channel or FITS pattern." );
         }
 
-        add( std::string( dm ) + ".trigger", "string", "Combined command stream; empty for a relayed tweeter." );
+        add( std::string( dm ) + ".trigger", "string", "Combined command stream; empty to time from the local write." );
         add( std::string( dm ) + ".amplitude", "float", "Signed nonzero command-map amplitude for reference capture." );
         add( std::string( dm ) + ".pokeX", "vector<int>", "Zero-based actuator x coordinates." );
         add( std::string( dm ) + ".pokeY", "vector<int>", "Zero-based actuator y coordinates paired with pokeX." );
@@ -843,12 +843,6 @@ inline bool autoJay::openChannels( calibration &cal, std::string &error )
     decltype( m_channels ) channels;
     decltype( m_triggers ) triggers;
 
-    if( cal.dm[0].trigger.empty() )
-    {
-        error = "NCPC combined trigger stream is required";
-        return false;
-    }
-
     for( size_t i = 0; i < 2; ++i )
     {
         if( cal.dm[i].channel.empty() || cal.dm[i].channel == cal.dm[0].trigger ||
@@ -975,7 +969,7 @@ inline bool autoJay::channelsValid( std::string &error ) const
 
 inline std::array<uint64_t, 2> autoJay::triggerCounters() const
 {
-    return { m_triggers[0]->cnt0(), m_triggers[1] ? m_triggers[1]->cnt0() : 0 };
+    return { m_triggers[0] ? m_triggers[0]->cnt0() : 0, m_triggers[1] ? m_triggers[1]->cnt0() : 0 };
 }
 
 inline bool autoJay::contributionApplied( std::array<uint64_t, 2> &counters ) const

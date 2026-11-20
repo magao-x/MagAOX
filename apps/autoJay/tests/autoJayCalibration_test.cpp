@@ -106,9 +106,10 @@ TEST_CASE( "autoJay calibration round trip preserves the complete pair", "[autoJ
 {
     calibrationDirectory directory;
     auto                 original = sampleCalibration();
-    if( GENERATE( false, true ) )
+    const auto           unmonitored = GENERATE( 0, 1, 2 );
+    for( int i = 0; i < unmonitored; ++i )
     {
-        original.dm[1].trigger.clear();
+        original.dm[i].trigger.clear();
     }
 
     std::string          error;

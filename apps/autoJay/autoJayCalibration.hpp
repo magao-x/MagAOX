@@ -372,21 +372,17 @@ inline bool validateCalibration( const calibration &value, std::string &error )
         return fail( error, "baseline does not match reference geometry" );
     if( value.frames < 2 || value.frames > 10000 || value.settleFrames > 10000 ||
         !mx::math::isFinite( value.dmSleep ) || value.dmSleep < 0 || value.dmSleep > 3600 ||
-        ( value.dm[1].trigger.empty() && value.dmSleep == 0 ) || !mx::math::isFinite( value.phaseTimeout ) ||
-        value.phaseTimeout <= value.dmSleep || value.phaseTimeout > 3600 )
+        ( ( value.dm[0].trigger.empty() || value.dm[1].trigger.empty() ) && value.dmSleep == 0 ) ||
+        !mx::math::isFinite( value.phaseTimeout ) || value.phaseTimeout <= value.dmSleep || value.phaseTimeout > 3600 )
     {
         return fail( error, "invalid calibration acquisition parameters" );
     }
-    if( !component( value.dm[0].trigger ) || ( !value.dm[1].trigger.empty() && !component( value.dm[1].trigger ) ) )
-    {
-        return fail( error, "invalid DM trigger identity" );
-    }
-
     for( const auto &dm : value.dm )
     {
-        if( !component( dm.name ) || !component( dm.channel ) || !mx::math::isFinite( dm.amplitude ) ||
-            dm.amplitude == 0 || !patternValid( dm.pattern ) || !imageValid( dm.reference, true ) ||
-            dm.reference.rows() != value.baseline.rows() || dm.reference.cols() != value.baseline.cols() )
+        if( !component( dm.name ) || !component( dm.channel ) || ( !dm.trigger.empty() && !component( dm.trigger ) ) ||
+            !mx::math::isFinite( dm.amplitude ) || dm.amplitude == 0 || !patternValid( dm.pattern ) ||
+            !imageValid( dm.reference, true ) || dm.reference.rows() != value.baseline.rows() ||
+            dm.reference.cols() != value.baseline.cols() )
         {
             return fail( error, "invalid DM identity, pattern, amplitude, or reference" );
         }
@@ -476,7 +472,7 @@ inline bool calibrationIO::read( calibration &value, const std::string &director
             auto  prefix = "dm" + std::to_string( i ) + ".";
             auto &dm     = candidate.dm[i];
             if( !take( prefix + "name", dm.name ) || !take( prefix + "channel", dm.channel ) ||
-                !take( prefix + "trigger", dm.trigger, i == 1 ) || !take( prefix + "amplitude", dm.amplitude ) )
+                !take( prefix + "trigger", dm.trigger, true ) || !take( prefix + "amplitude", dm.amplitude ) )
             {
                 return false;
             }

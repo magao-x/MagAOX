@@ -181,27 +181,31 @@ TEST_CASE( "autoJay aborts timeouts resets and invalid source frames", "[autoJay
     }
 }
 
-/// A relayed tweeter needs elapsed settling time, while NCPC still needs a verified update.
+/// A timed DM can settle without feedback while the other DM needs a verified update.
 /** \ingroup autoJay_unit_test */
-TEST_CASE( "autoJay times a relayed tweeter without combined feedback", "[autoJay][acquisition]" )
+TEST_CASE( "autoJay can verify only one DM", "[autoJay][acquisition]" )
 {
     calibration cal;
-    cal.dm[0].trigger = "dm02disp";
+    size_t      monitored     = GENERATE( 0, 1 );
+    cal.dm[monitored].trigger = "combined";
     cal.frames        = 2;
     cal.settleFrames  = 1;
     cal.dmSleep       = 0.25;
     acquisition seq;
     REQUIRE( seq.start( cal, 0 ) );
 
-    seq.commanded( { 10, 0 }, 0 );
+    std::array<uint64_t, 2> counters{};
+    counters[monitored] = 10;
+    seq.commanded( counters, 0 );
     const auto image = imageT::Ones( 3, 4 ).eval();
-    seq.poll( { 10, 0 }, 0.25 );
+    seq.poll( counters, 0.25 );
     seq.frame( image, 1, 0.25 );
-    seq.poll( { 11, 0 }, 0.375, false );
+    ++counters[monitored];
+    seq.poll( counters, 0.375, false );
     seq.frame( image, 2, 0.375 );
     REQUIRE( seq.stacks()[0].count == 0 );
 
-    seq.poll( { 11, 0 }, 0.5 );
+    seq.poll( counters, 0.5 );
     seq.frame( image, 3, 0.625 );
     seq.frame( image, 4, 0.75 );
     REQUIRE( seq.stacks()[0].count == 0 );
@@ -212,10 +216,43 @@ TEST_CASE( "autoJay times a relayed tweeter without combined feedback", "[autoJa
     REQUIRE( seq.stacks()[0].firstCounter == 5 );
     REQUIRE( seq.state() == acquisition::step::ncpc );
 
-    seq.commanded( { 11, 0 }, 1.0 );
-    seq.poll( { 12, 0 }, 1.0 );
-    seq.poll( { 11, 0 }, 1.125 );
+    seq.commanded( counters, 1.0 );
+    ++counters[monitored];
+    seq.poll( counters, 1.0 );
+    --counters[monitored];
+    seq.poll( counters, 1.125 );
     REQUIRE( seq.error() == "combined DM counter reset" );
+}
+
+/// Start settling with the successful write when neither DM has a configured trigger.
+/** \ingroup autoJay_unit_test */
+TEST_CASE( "autoJay times both DMs from the local writes", "[autoJay][acquisition]" )
+{
+    calibration cal;
+    cal.frames       = 2;
+    cal.settleFrames = 1;
+    cal.dmSleep      = 0.25;
+    cal.phaseTimeout = 1;
+    acquisition seq;
+    REQUIRE( seq.start( cal, 0 ) );
+
+    const auto image = imageT::Ones( 3, 4 ).eval();
+    seq.frame( image, 1, 0.25 );
+    seq.commanded( {}, 0.375 );
+    seq.frame( image, 2, 0.5 );
+    seq.poll( {}, 0.625, false );
+    seq.frame( image, 3, 0.625 ); // First settled frame is discarded.
+    REQUIRE( seq.stacks()[0].count == 0 );
+
+    seq.frame( image, 4, 0.75 );
+    seq.frame( image, 5, 0.875 );
+    REQUIRE( seq.stacks()[0].count == 2 );
+    REQUIRE( seq.stacks()[0].firstCounter == 4 );
+    REQUIRE( seq.state() == acquisition::step::ncpc );
+
+    seq.commanded( {}, 0.875 );
+    seq.poll( {}, 2.0, false );
+    REQUIRE( seq.error() == "acquisition phase timed out" );
 }
 
 /// Verify invalid timing cannot start a transaction and fresh starts clear prior statistics.
@@ -247,13 +284,9 @@ TEST_CASE( "autoJay validates acquisition settings", "[autoJay][acquisition]" )
     {
         cal.phaseTimeout = std::numeric_limits<double>::quiet_NaN();
     }
-    SECTION( "NCPC requires a combined trigger" )
+    SECTION( "a DM without feedback requires a positive delay" )
     {
-        cal.dm[0].trigger.clear();
-    }
-    SECTION( "relayed tweeter requires a positive delay" )
-    {
-        cal.dm[1].trigger.clear();
+        cal.dm[GENERATE( 0, 1 )].trigger.clear();
         cal.dmSleep = 0;
     }
     REQUIRE_FALSE( seq.start( cal, 0 ) );

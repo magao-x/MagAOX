@@ -677,3 +677,18 @@ open, and verify the camera has settled before averaging begins.
 On 2026-11-20 the optimized app build and all four offline AutoJay suites
 passed (39 cases, 2,194 assertions). Coverage includes relay capture and
 bundle recall, settling with no tweeter feedback, and required NCPC feedback.
+
+### Follow-up: write-time settling for both DMs
+
+The instrument profiles now leave both triggers empty. After both local
+channel writes complete, AutoJay waits `acquisition.dmSleep` and discards
+`settleFrames` before averaging. This applies to clearing a poke as well as
+applying one. The phase deadline and local channel ownership checks still
+apply. Named triggers remain available for profiles that use combined stream
+feedback. Calibration bundles support either setting independently for each
+DM and still require trigger settings to match at recall.
+
+On 2026-11-20 the optimized app build and all four offline AutoJay suites
+passed (40 cases, 2,259 assertions). Tests cover timing with both triggers
+empty, mixed feedback in either direction, and capture and reload without
+combined streams.

@@ -257,10 +257,12 @@ bool autoJayHarness::writeChannels( const std::array<float, 2> &scales, std::str
     if( !channelsValid( error ) )
         return false;
     m_commands.push_back( scales );
-    ++m_fakeCounters[0];
-    if( !m_cycle.dm[1].trigger.empty() )
+    for( size_t i = 0; i < m_fakeCounters.size(); ++i )
     {
-        ++m_fakeCounters[1];
+        if( !m_cycle.dm[i].trigger.empty() )
+        {
+            ++m_fakeCounters[i];
+        }
     }
 
     return true;
@@ -865,11 +867,12 @@ TEST_CASE( "autoJay captures its first reference without an existing calibration
     {
     }
 
-    SECTION( "Paired actuator coordinates with a relayed tweeter" )
+    SECTION( "Paired actuator coordinates with write-time settling on both DMs" )
     {
-        REQUIRE( app.configure( "[ncpc]\npokeX=0 , 3\npokeY=2, 1\npokeAmp=-0.25\n"
+        REQUIRE( app.configure( "[ncpc]\ntrigger=\npokeX=0 , 3\npokeY=2, 1\npokeAmp=-0.25\n"
                                 "[tweeter]\ntrigger=\npokeX=2\npokeY=0\npokeAmp=0.125\n"
                                 "[acquisition]\ndmSleep=0.05\n" ) == 0 );
+        REQUIRE( app.m_captureConfig.dm[0].trigger.empty() );
         REQUIRE( app.m_captureConfig.dm[1].trigger.empty() );
         ncpc.setZero();
         ncpc( 0, 2 ) = 1;
@@ -898,6 +901,7 @@ TEST_CASE( "autoJay captures its first reference without an existing calibration
     REQUIRE( ( saved.dm[1].pattern == tweeter ).all() );
     REQUIRE( saved.dm[0].amplitude == ncpcAmplitude );
     REQUIRE( saved.dm[1].amplitude == tweeterAmplitude );
+    REQUIRE( saved.dm[0].trigger == app.m_captureConfig.dm[0].trigger );
     REQUIRE( saved.dm[1].trigger == app.m_captureConfig.dm[1].trigger );
     REQUIRE( saved.dmSleep == app.m_captureConfig.dmSleep );
     REQUIRE( ( saved.dm[0].reference - app.response( 0 ) ).abs().maxCoeff() < 0.0001F );
