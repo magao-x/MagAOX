@@ -114,8 +114,17 @@ Timing fields include `training_seconds`, `replay_seconds`, `diagnostics_seconds
 `export_seconds` and `activation_seconds`. Training/replay timings describe the
 sampled diagnostic iteration, not the interval since the previous record; initial
 dynamics pretraining may therefore be absent. Diagnostic file writing is not
-included in `diagnostics_seconds`. Export and activation remain synchronous.
-Measure their overhead before changing `model_publish_interval` or export scheduling.
+included in `diagnostics_seconds`. The managed worker snapshots one eligible
+iteration to disk, then continues optimizing while its child builds the engine
+and the supervisor waits for reload. Later diagnostic iterations do not queue
+another candidate while that one is in flight. The worker follows the effective
+controller ID and binds it to the weights from the exported iteration. Pause
+cancels an unfinished build. An issued reload is settled by the supervisor.
+
+The export and activation timings are elapsed wall time that can overlap
+training. Diagnostic snapshots show the history as of capture. The final
+outcome is appended to `metrics.jsonl` under the source iteration, even if
+learning has since advanced or paused.
 
 ## Local tests
 
