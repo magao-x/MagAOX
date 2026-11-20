@@ -201,7 +201,7 @@ class qwpPupilTracker_test : public qwpPupilTracker
     {
         pcf::IndiProperty ip( pcf::IndiProperty::Number );
         ip.setDevice( m_ttmDevName );
-        ip.setName( "pos_" + std::to_string( n + 1 ) );
+        ip.setName( "axis" + std::to_string( n + 1 ) + "_voltage" );
         ip.add( pcf::IndiElement( "current" ) );
         ip.add( pcf::IndiElement( "target" ) );
         ip["current"].set( v );

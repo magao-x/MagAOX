@@ -57,7 +57,7 @@ QWP stage angles: `dv = -CM * (shift(phi) - shift(phi_ref))`.
 
 ## Requirements
 
-1. Subscribe to `stageqwprot1` / `stageqwprot2` `position` and `fsm`, and `ttmperi` `pos_1`, `pos_2`, `fsm`.
+1. Subscribe to `stageqwprot1` / `stageqwprot2` `position` and `fsm`, and `ttmperi` `axis1_voltage`, `axis2_voltage`, `fsm`.
 2. Evaluate `shift(phi1, phi2)` from the harmonic model in mechanical stage angles; `offset = shift(phi) -
    shift(phi_ref)`, with `phi_ref` the mechanical reference from config.
 3. On enable, capture `v0 = v_now + CM * offset(phi_now)`; while tracking, command `v = v0 - CM * offset(phi)` on
@@ -81,7 +81,7 @@ Findings from the codebase and research directories that drive the questions:
   instead cancels it with ttmperi. The optical intent needs pinning down.
 - No JSON library is used in the repo. Calib inputs are CSV with `#` comments (`calib/qwptrack/qwp_law_*.csv`) or
   FITS matrices (`alignLoop` reads its IM with `mx::fits`).
-- `ttmperi` is a `pi335Ctrl`, with `pos_1` / `pos_2` in volts.
+- `ttmperi` is a `kcubeCtrl`, with `axis1_voltage` / `axis2_voltage` (elements `current` / `target`) in volts, clamped to 0..150 V.
 - ttmperi hysteresis is 0.07-0.085 px (10-13% of full scale), larger than the 0.01 px model target.
 
 All questions were resolved in the design interview (2026-11-20).
@@ -109,8 +109,8 @@ All questions were resolved in the design interview (2026-11-20).
 4. **Command model: baseline captured at enable, then absolute.** When tracking is enabled, ttmperi is assumed
    aligned at the current QWP angles (the workflow is: insert QWP, J-test, enable tracking). The app backs out
    `v0 = v_now + CM * offset(phi_now)`, the voltage that would be aligned at the reference, then commands
-   `v = v0 - CM * offset(phi)`, with `offset(phi) = shift(phi) - shift(phi_ref)`. Subscribe to `ttmperi.pos_1` and
-   `pos_2` (`pi335Ctrl`, elements `current` / `target`, volts). If a `target` changes to something other than our
+   `v = v0 - CM * offset(phi)`, with `offset(phi) = shift(phi) - shift(phi_ref)`. Subscribe to `ttmperi.axis1_voltage` and
+   `axis2_voltage` (`kcubeCtrl`, elements `current` / `target`, volts). If a `target` changes to something other than our
    own last command (beyond a small tolerance), someone moved ttmperi externally (e.g. a J-test while tracking), and
    `v0` is re-based from the new target. Using `target` rather than `current` avoids re-basing on read-back noise.
 5. **Trigger: every stage position update.** Recompute and command ttmperi on each `position` update from either
@@ -119,7 +119,7 @@ All questions were resolved in the design interview (2026-11-20).
    values), and verify that `elliptecCtrl` actually publishes `position.current` during moves. If it publishes
    only on stop, this behaves like READY gating.
 6. **No extra guardrails.** No max-offset hold, validity-box checks, or branch handling in this app. Voltage limits
-   are left to `pi335Ctrl`. (For the record, the nominal-branch correction is at most 15 V over the operating box
+   are left to `kcubeCtrl`, which clamps to 0..150 V (a clamped command echoes off-target and re-bases that axis). (For the record, the nominal-branch correction is at most 15 V over the operating box
    and 10 V along the tracking law. A stage on the +180 branch can need 38-70 V.)
 7. **INDI properties.** `tracking` (new toggle; enabling captures `v0`) and read-only `offset` with elements
    `dx`, `dy` (camwfs px, `shift(phi) - shift(phi_ref)`) and `v1`, `v2` (V, `-CM * offset`, i.e. the commanded
@@ -150,7 +150,7 @@ All questions were resolved in the design interview (2026-11-20).
       resume when values return. Silence is not staleness (AGENTS.md rule 27). A ttmperi restart that returns a
       different `target` re-bases under decision 4.
     - ttmperi `fsm` not usable: hold, then send the latest command once usable. (Amended during implementation:
-      `pi335Ctrl` reports OPERATING when its flat is set and still accepts `pos_N` commands, so READY and
+      `kcubeCtrl` reports OPERATING when both axes are enabled and accepts `axisN_voltage` commands in READY or OPERATING, so READY and
       OPERATING are both usable, for the stages too, since positions during moves are applied.)
 11. **Tests: no research data copied into the repo.** Unit tests write a small synthetic model CSV and CM FITS to a
     temp dir and check against analytic values. Conformance of the real calib files to the research evaluator is
@@ -185,9 +185,9 @@ camwfs pupil-loop deltas stay flat.
    `shift()` in double precision.
 3. CM: `loadCM()` via `mx::fits`, validated 2x2.
 4. Config and reference conversion (`phi = (sign * (q - zero)) mod 360`), `shift(phi_ref)` cached at load.
-5. INDI: `REG_INDI_SETPROP` for stage `position` / `fsm` and ttmperi `pos_1` / `pos_2` / `fsm`;
+5. INDI: `REG_INDI_SETPROP` for stage `position` / `fsm` and ttmperi `axis1_voltage` / `axis2_voltage` / `fsm`;
    `CREATE_REG_INDI_NEW_TOGGLESWITCH` for `tracking`; read-only `offset`.
-6. Command logic: enable / re-base / compute / send (`sendNewProperty` on `pos_1.target`, `pos_2.target`), held
+6. Command logic: enable / re-base / compute / send (`sendNewProperty` on `axis1_voltage.target`, `axis2_voltage.target`), held
    while ttmperi not READY, skipping identical values.
 7. Telemetry: `TELEMETER_*` macros; a log type for offset and commanded voltages (check whether an existing
    telem type fits before adding a new one).
@@ -215,10 +215,10 @@ Implemented on `ml/qwp-pupil-tracker` (2026-11-20).
 - `apps/qwpPupilTracker/`: header-only app, `main` in the `.cpp`, Makefile; added to `apps_aoc` and
   `all_buildable_apps` in the top-level Makefile, tests added to `tests/tests.list`.
 - Telemetry: new `telem_qwppupil` (event code 20951: `tracking, dx, dy, v1, v2`), registered in `logCodes.dat`,
-  `telem.cpp`, `logMeta.cpp` and `logTypes_Accessor_test.cpp`. The ttmperi voltages themselves are already in
-  `telem_pi335`. `ml/qwpTracker` adds `telem_qwptrack` at 20950 on the adjacent line of `logCodes.dat`, so expect a
+  `telem.cpp`, `logMeta.cpp` and `logTypes_Accessor_test.cpp`. The ttmperi `kcubeCtrl` has no voltage telemetry, so the
+  commanded voltages are recorded only here. `ml/qwpTracker` adds `telem_qwptrack` at 20950 on the adjacent line of `logCodes.dat`, so expect a
   trivial merge conflict there.
-- Echo handling: each axis keeps its last 16 commands. A `pos_N.target` within `ttm.rebaseTol` (0.01 V) of any of
+- Echo handling: each axis keeps its last 16 commands. An `axisN_voltage.target` within `ttm.rebaseTol` (0.01 V) of any of
   them is an echo, so late echoes during fast stage updates do not re-base. Anything else re-bases that axis
   (`v0 = target - dv`). While ttmperi is not usable, target changes only set a pending re-base of both axes, applied
   once it is usable again, so a restart does not re-base on placeholder values.

@@ -116,7 +116,7 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
 
         int nSent{ 0 }; ///< The number of commands issued, for diagnostics and tests.
 
-        pcf::IndiProperty cmd; ///< The outbound `pos_N.target` command property.
+        pcf::IndiProperty cmd; ///< The outbound `axisN_voltage.target` command property.
     };
 
   protected:
@@ -306,7 +306,7 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
      */
     int ttmStateUpdate( const pcf::IndiProperty &ipRecv /**< [in] the received property */ );
 
-    /// Handle a ttmperi `pos_N` update.
+    /// Handle a ttmperi `axisN_voltage` update.
     /**
      * \returns 0 always
      */
@@ -339,9 +339,9 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
 
     pcf::IndiProperty m_indiP_qwp2Fsm; ///< The subscribed QWP2 stage `fsm` property.
 
-    pcf::IndiProperty m_indiP_ttmPos1; ///< The subscribed ttmperi `pos_1` property.
+    pcf::IndiProperty m_indiP_ttmPos1; ///< The subscribed ttmperi `axis1_voltage` property.
 
-    pcf::IndiProperty m_indiP_ttmPos2; ///< The subscribed ttmperi `pos_2` property.
+    pcf::IndiProperty m_indiP_ttmPos2; ///< The subscribed ttmperi `axis2_voltage` property.
 
     pcf::IndiProperty m_indiP_ttmFsm; ///< The subscribed ttmperi `fsm` property.
 
@@ -528,9 +528,9 @@ int qwpPupilTracker::appStartup()
 
     REG_INDI_SETPROP( m_indiP_qwp2Fsm, m_qwp[1].devName, "fsm" );
 
-    REG_INDI_SETPROP( m_indiP_ttmPos1, m_ttmDevName, "pos_1" );
+    REG_INDI_SETPROP( m_indiP_ttmPos1, m_ttmDevName, "axis1_voltage" );
 
-    REG_INDI_SETPROP( m_indiP_ttmPos2, m_ttmDevName, "pos_2" );
+    REG_INDI_SETPROP( m_indiP_ttmPos2, m_ttmDevName, "axis2_voltage" );
 
     REG_INDI_SETPROP( m_indiP_ttmFsm, m_ttmDevName, "fsm" );
 
@@ -538,7 +538,7 @@ int qwpPupilTracker::appStartup()
     {
         m_ttm[n].cmd = pcf::IndiProperty( pcf::IndiProperty::Number );
         m_ttm[n].cmd.setDevice( m_ttmDevName );
-        m_ttm[n].cmd.setName( "pos_" + std::to_string( n + 1 ) );
+        m_ttm[n].cmd.setName( "axis" + std::to_string( n + 1 ) + "_voltage" );
         m_ttm[n].cmd.add( pcf::IndiElement( "target" ) );
     }
 
@@ -987,7 +987,7 @@ int qwpPupilTracker::ttmPosUpdate( int n, const pcf::IndiProperty &ipRecv )
 
     if( external )
     {
-        log<text_log>( m_ttmDevName + " pos_" + std::to_string( n + 1 ) + " moved externally to " +
+        log<text_log>( m_ttmDevName + " axis" + std::to_string( n + 1 ) + "_voltage moved externally to " +
                        std::to_string( tgt ) + ", re-based" );
     }
 

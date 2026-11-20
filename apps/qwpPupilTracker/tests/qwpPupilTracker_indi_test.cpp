@@ -32,8 +32,8 @@ class qwpPupilTracker_test : public qwpPupilTracker
         XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_qwp1Fsm, stageqwprot1, fsm );
         XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_qwp2Position, stageqwprot2, position );
         XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_qwp2Fsm, stageqwprot2, fsm );
-        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ttmPos1, ttmperi, pos_1 );
-        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ttmPos2, ttmperi, pos_2 );
+        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ttmPos1, ttmperi, axis1_voltage );
+        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ttmPos2, ttmperi, axis2_voltage );
         XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_ttmFsm, ttmperi, fsm );
     }
 };
@@ -63,8 +63,8 @@ TEST_CASE( "qwpPupilTracker INDI callbacks validate device and property names", 
     XWCTEST_INDI_SET_CALLBACK( qwpPupilTracker, m_indiP_qwp1Fsm, stageqwprot1, fsm );
     XWCTEST_INDI_SET_CALLBACK( qwpPupilTracker, m_indiP_qwp2Position, stageqwprot2, position );
     XWCTEST_INDI_SET_CALLBACK( qwpPupilTracker, m_indiP_qwp2Fsm, stageqwprot2, fsm );
-    XWCTEST_INDI_SET_CALLBACK( qwpPupilTracker, m_indiP_ttmPos1, ttmperi, pos_1 );
-    XWCTEST_INDI_SET_CALLBACK( qwpPupilTracker, m_indiP_ttmPos2, ttmperi, pos_2 );
+    XWCTEST_INDI_SET_CALLBACK( qwpPupilTracker, m_indiP_ttmPos1, ttmperi, axis1_voltage );
+    XWCTEST_INDI_SET_CALLBACK( qwpPupilTracker, m_indiP_ttmPos2, ttmperi, axis2_voltage );
     XWCTEST_INDI_SET_CALLBACK( qwpPupilTracker, m_indiP_ttmFsm, ttmperi, fsm );
 }
 
