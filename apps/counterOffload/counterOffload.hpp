@@ -418,10 +418,11 @@ class counterOffload : public MagAOXApp<true>,
      * \returns true if the scan finished
      * \returns false if the evaluator aborted
      */
-    static bool coordinateScan( const std::array<std::vector<double>, 3> &grids /**< [in] min, max, step per parameter */,
-                                calibParamsT                             &best /**< [in,out] best parameters */,
-                                double                                   &bestFom /**< [in,out] value at best */,
-                                const calibEvalT                         &eval /**< [in] the evaluator */ );
+    static bool
+    coordinateScan( const std::array<std::vector<double>, 3> &grids /**< [in] min, max, step per parameter */,
+                    calibParamsT                             &best /**< [in,out] best parameters */,
+                    double                                   &bestFom /**< [in,out] value at best */,
+                    const calibEvalT                         &eval /**< [in] the evaluator */ );
 
     /// Get the current calibrated parameters.
     calibParamsT calibParams();
@@ -968,8 +969,8 @@ inline int counterOffload::appStartup()
     }
 
     createROIndiNumber( m_indiP_calibration, "calibration", "Calibration" );
-    for( const char *el : { "stage", "point", "fom", "fomOff", "ratio", "bestStartUs", "bestDurationUs", "bestGain",
-                            "bestRatio" } )
+    for( const char *el :
+         { "stage", "point", "fom", "fomOff", "ratio", "bestStartUs", "bestDurationUs", "bestGain", "bestRatio" } )
     {
         m_indiP_calibration.add( pcf::IndiElement( el ) );
         m_indiP_calibration[el] = 0;
@@ -1069,7 +1070,8 @@ inline int counterOffload::appLogic()
     // Calibration changes the parameters from its own thread, so publish them here.
     const calibParamsT p = calibParams();
 
-    updateIfChanged( m_indiP_rampStart, std::vector<std::string>{ "current", "target" }, std::vector<double>{ p[0], p[0] } );
+    updateIfChanged(
+        m_indiP_rampStart, std::vector<std::string>{ "current", "target" }, std::vector<double>{ p[0], p[0] } );
     updateIfChanged(
         m_indiP_rampDuration, std::vector<std::string>{ "current", "target" }, std::vector<double>{ p[1], p[1] } );
     updateIfChanged( m_indiP_gain, std::vector<std::string>{ "current", "target" }, std::vector<double>{ p[2], p[2] } );
@@ -1078,21 +1080,22 @@ inline int counterOffload::appLogic()
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_calibMutex );
 
-        calib = { double( m_calibStage ), double( m_calibPoint ), m_lastFom,      m_fomOff,        m_lastRatio,
-                  m_calibBest[0],         m_calibBest[1],         m_calibBest[2], m_calibBestRatio };
+        calib = { double( m_calibStage ),
+                  double( m_calibPoint ),
+                  m_lastFom,
+                  m_fomOff,
+                  m_lastRatio,
+                  m_calibBest[0],
+                  m_calibBest[1],
+                  m_calibBest[2],
+                  m_calibBestRatio };
     }
 
-    updateIfChanged( m_indiP_calibration,
-                     std::vector<std::string>{ "stage",
-                                               "point",
-                                               "fom",
-                                               "fomOff",
-                                               "ratio",
-                                               "bestStartUs",
-                                               "bestDurationUs",
-                                               "bestGain",
-                                               "bestRatio" },
-                     calib );
+    updateIfChanged(
+        m_indiP_calibration,
+        std::vector<std::string>{
+            "stage", "point", "fom", "fomOff", "ratio", "bestStartUs", "bestDurationUs", "bestGain", "bestRatio" },
+        calib );
 
     updateSwitchIfChanged( m_indiP_calibrate,
                            "toggle",
@@ -1608,7 +1611,9 @@ inline void counterOffload::runCalibration()
                              best,
                              bestRatio,
                              [this]( const calibParamsT &p, int axis, int pass, double &ratio )
-                             { return evaluate( p, 2 + axis + 3 * pass, ratio ); } );
+                             {
+                                 return evaluate( p, 2 + axis + 3 * pass, ratio );
+                             } );
     }
 
     { //mutex scope
@@ -1763,7 +1768,8 @@ inline bool counterOffload::measure( const calibParamsT &p, double &fom, double 
         {
             why = "app disabled";
         }
-        else if( std::fabs( m_offloadFps - m_bandCenterHz ) > 0.5 || ( m_modeMax == 0 && m_offloadModes != m_bandModes ) )
+        else if( std::fabs( m_offloadFps - m_bandCenterHz ) > 0.5 ||
+                 ( m_modeMax == 0 && m_offloadModes != m_bandModes ) )
         {
             why = "offload rate or numModes changed";
         }
@@ -1875,10 +1881,10 @@ inline void counterOffload::writeCsv( int stage, const calibParamsT &p, double f
 
     std::lock_guard<std::mutex> lock( m_calibMutex );
 
-    m_csv << std::fixed << ts.tv_sec << "." << std::setw( 9 ) << std::setfill( '0' ) << ts.tv_nsec << std::setfill( ' ' )
-          << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << "," << p[1] << "," << p[2] << ","
-          << m_bandCenterHz << "," << m_bandModes << "," << m_bandHalfWidthHz << "," << m_nAverage << "," << fom << ","
-          << fomStd << "," << m_fomOff << "," << fom / m_fomOff << "\n";
+    m_csv << std::fixed << ts.tv_sec << "." << std::setw( 9 ) << std::setfill( '0' ) << ts.tv_nsec
+          << std::setfill( ' ' ) << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << "," << p[1]
+          << "," << p[2] << "," << m_bandCenterHz << "," << m_bandModes << "," << m_bandHalfWidthHz << "," << m_nAverage
+          << "," << fom << "," << fomStd << "," << m_fomOff << "," << fom / m_fomOff << "\n";
 
     m_csv.flush();
 }

@@ -27,25 +27,25 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_bandHalfWidthHz;
     using counterOffload::m_bandModes;
     using counterOffload::m_bandValid;
-    using counterOffload::m_df;
-    using counterOffload::m_gainGrid;
-    using counterOffload::m_nAverage;
-    using counterOffload::m_psdAfterNs;
-    using counterOffload::m_psdNFreq;
-    using counterOffload::m_psdNModes;
-    using counterOffload::m_psdPowers;
-    using counterOffload::m_startGridUs;
     using counterOffload::m_channel;
     using counterOffload::m_command;
+    using counterOffload::m_df;
     using counterOffload::m_enabled;
     using counterOffload::m_events;
     using counterOffload::m_finalZero;
     using counterOffload::m_gain;
+    using counterOffload::m_gainGrid;
     using counterOffload::m_leak;
+    using counterOffload::m_nAverage;
     using counterOffload::m_overflows;
+    using counterOffload::m_psdAfterNs;
+    using counterOffload::m_psdNFreq;
+    using counterOffload::m_psdNModes;
+    using counterOffload::m_psdPowers;
     using counterOffload::m_rampDurationUs;
-    using counterOffload::m_rampStartUs;
     using counterOffload::m_ramps;
+    using counterOffload::m_rampStartUs;
+    using counterOffload::m_startGridUs;
     using counterOffload::m_syncopationTiming;
     using counterOffload::m_timeOffsetUs;
     using counterOffload::m_zeroRequested;
@@ -104,7 +104,7 @@ mx::improc::eigenImage<float> delta( float value /**< [in] the pixel value */ )
  */
 TEST_CASE( "counterOffload ramp fraction is a raised cosine", "[counterOffload]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::rampFraction(0,0,0);
     #endif
@@ -132,7 +132,7 @@ TEST_CASE( "counterOffload ramp fraction is a raised cosine", "[counterOffload]"
  */
 TEST_CASE( "counterOffload commands a single ramped offload", "[counterOffload]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::addRamp(nullptr,0);
     counterOffload::buildCommand(0);
@@ -209,7 +209,7 @@ TEST_CASE( "counterOffload sums overlapping ramps", "[counterOffload]" )
  */
 TEST_CASE( "counterOffload leaks the completed contribution", "[counterOffload]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::afterPublish();
     #endif
@@ -275,7 +275,7 @@ TEST_CASE( "counterOffload leaks the completed contribution", "[counterOffload]"
  */
 TEST_CASE( "counterOffload state handling", "[counterOffload]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::clearState();
     counterOffload::processImage(nullptr, dev::shmimT());
@@ -345,7 +345,7 @@ TEST_CASE( "counterOffload state handling", "[counterOffload]" )
  */
 TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::validateConfig();
     #endif
@@ -414,7 +414,7 @@ TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
  */
 TEST_CASE( "counterOffload integrates the PSD band", "[counterOffload]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::bandPower(nullptr,0,0,0,0,0,0);
     #endif
@@ -465,7 +465,7 @@ TEST_CASE( "counterOffload integrates the PSD band", "[counterOffload]" )
  */
 TEST_CASE( "counterOffload coordinate scan finds the minimum", "[counterOffload]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::coordinateScan({},best,bestFom,nullptr);
     #endif
@@ -506,7 +506,10 @@ TEST_CASE( "counterOffload coordinate scan finds the minimum", "[counterOffload]
 
     SECTION( "the scan stays within the grid limits" )
     {
-        auto edge = []( const counterOffload::calibParamsT &p ) { return -p[0] - p[1] - p[2]; }; // minimum at the maxima
+        auto edge = []( const counterOffload::calibParamsT &p )
+        {
+            return -p[0] - p[1] - p[2];
+        }; // minimum at the maxima
 
         bestFom = edge( best );
         REQUIRE( counterOffload::coordinateScan( grids,
@@ -545,7 +548,7 @@ TEST_CASE( "counterOffload coordinate scan finds the minimum", "[counterOffload]
  */
 TEST_CASE( "counterOffload collects PSD band powers after a change", "[counterOffload]" )
 {
-    // clang-format off
+// clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::processImage(nullptr, psdShmimT());
     #endif
