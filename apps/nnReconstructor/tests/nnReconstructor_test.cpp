@@ -143,6 +143,11 @@ inline nnReconstructor_test::nnReconstructor_test()
     std::filesystem::create_directories( engineDirs );
     nvinfer1::serializedTensors.clear();
     nnTest::allocation = nnTest::failAllocation = nnTest::copies = nnTest::failCopy = 0;
+    nnTest::streamCreations = nnTest::failStreamCreation = nnTest::syncCalls = nnTest::failSync = 0;
+    nnTest::bindingCalls = nnTest::failBinding = 0;
+    nnTest::syncFailure = nnTest::destroyFailure = false;
+    nnTest::graphFailure = nnTest::graphLaunches = nnTest::captures = nnTest::enqueueCalls = 0;
+    nnTest::duringCapture                                                                  = {};
     nnTest::runtimeFailure = nnTest::engineFailure = nnTest::contextFailure = nnTest::executeFailure = false;
     nnTest::duringExecute                                                                            = {};
     nnTest::duringDeserialize                                                                        = {};
@@ -501,7 +506,7 @@ TEST_CASE( "WFS reconnect reuses buffers and validates the attachment", "[nnReco
     REQUIRE_FALSE( app.pending() );
 }
 
-/** \brief Every failed CUDA transfer or execution prevents a fresh result notification. */
+/** \brief Failed graph replay or completion prevents a fresh result notification. */
 TEST_CASE( "failed inference never queues a result", "[nnReconstructor]" )
 {
     // clang-format off
@@ -511,21 +516,23 @@ TEST_CASE( "failed inference never queues a result", "[nnReconstructor]" )
 #endif
     // clang-format on
 
-    for( int failure = 0; failure < 3; ++failure )
+    for( int failure = 0; failure < 2; ++failure )
     {
         nnReconstructor_test app;
         app.prepare();
-        if( failure < 2 )
+        if( failure == 0 )
         {
-            nnTest::failCopy = failure + 1;
+            nnTest::graphFailure = 5;
         }
-        if( failure == 2 )
+        else
         {
-            nnTest::executeFailure = true;
+            nnTest::failSync = nnTest::syncCalls + 1;
         }
+
         app.frame();
         REQUIRE_FALSE( app.pending() );
         REQUIRE_FALSE( app.fault().empty() );
+        REQUIRE( nnTest::queuedWork == 0 );
     }
 }
 
@@ -588,7 +595,7 @@ TEST_CASE( "loading failures unwind every owned resource", "[nnReconstructor]" )
 #endif
     // clang-format on
 
-    for( int failure = 0; failure < 6; ++failure )
+    for( int failure = 0; failure < 11; ++failure )
     {
         {
             nnReconstructor_test app;
@@ -601,9 +608,17 @@ TEST_CASE( "loading failures unwind every owned resource", "[nnReconstructor]" )
                 nnTest::runtimeFailure = failure == 1;
                 nnTest::engineFailure  = failure == 2;
                 nnTest::contextFailure = failure == 3;
-                if( failure > 3 )
+                if( failure > 3 && failure < 8 )
                 {
                     nnTest::failAllocation = failure - 3;
+                }
+                if( failure == 8 || failure == 9 )
+                {
+                    nnTest::failBinding = failure - 7;
+                }
+                if( failure == 10 )
+                {
+                    nnTest::failStreamCreation = 1;
                 }
                 REQUIRE_THROWS( app.prepare() );
             }
@@ -611,6 +626,8 @@ TEST_CASE( "loading failures unwind every owned resource", "[nnReconstructor]" )
             app.appShutdown();
         }
         REQUIRE( nnTest::liveAllocations == 0 );
+        REQUIRE( nnTest::liveHostAllocations == 0 );
+        REQUIRE( nnTest::liveStreams == 0 );
         REQUIRE( nnTest::runtimes == 0 );
         REQUIRE( nnTest::engines == 0 );
         REQUIRE( nnTest::contexts == 0 );
@@ -658,12 +675,14 @@ TEST_CASE( "incompatible engine contracts fail before inference", "[nnReconstruc
     }
 }
 
-/** \brief Preserve the existing crop order, padding and FP32 scaling. */
+/** \brief Preserve crop values and zero padding across changing frames, reconnect and re-enable. */
 TEST_CASE( "preprocessing retains its exact tensor values", "[nnReconstructor]" )
 {
     // clang-format off
 #ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
     MagAOX::app::nnReconstructor::infer;
+    MagAOX::app::nnReconstructor::prepare_engine_memory;
+    MagAOX::app::nnReconstructor::cleanup_host_memory;
 #endif
     // clang-format on
 
@@ -683,6 +702,56 @@ TEST_CASE( "preprocessing retains its exact tensor values", "[nnReconstructor]" 
         }
     }
     REQUIRE( nnTest::uploaded == expected );
+
+    const auto input = app.input();
+    for( int pass = 0; pass < 3; ++pass )
+    {
+        if( pass == 1 )
+        {
+            app.reconnect();
+        }
+        if( pass == 2 )
+        {
+            REQUIRE( app.enable( false ) == 0 );
+            REQUIRE( app.claim() );
+            REQUIRE( app.copy() == std::vector<float>( 3, 0 ) );
+            app.complete();
+            REQUIRE( app.enable( true ) == 0 );
+        }
+
+        for( auto &pixel : app.m_frame )
+        {
+            pixel -= 0.25F;
+        }
+        for( int pupil = 0; pupil < 4; ++pupil )
+        {
+            for( int x = 0; x < 2; ++x )
+            {
+                for( int y = 0; y < 2; ++y )
+                {
+                    expected[pupil * 36 + ( x + 2 ) * 6 + y + 2] =
+                        2 * app.m_frame[( pupil / 2 ) * 2 + y + ( ( pupil % 2 ) * 2 + x ) * 4];
+                }
+            }
+        }
+
+        if( pass > 0 )
+        {
+            app.frame(); // Reattachment first establishes a counter; only a newer frame is admitted.
+            REQUIRE_FALSE( app.pending() );
+        }
+
+        app.frame();
+        REQUIRE( app.pending() );
+        REQUIRE( app.fault().empty() );
+        REQUIRE( nnTest::uploaded == expected );
+        REQUIRE( app.input() == input );
+        REQUIRE( nnTest::liveHostAllocations == 2 );
+    }
+
+    app.appShutdown();
+    app.appShutdown();
+    REQUIRE( nnTest::liveHostAllocations == 0 );
 }
 
 /** \brief A waiting publisher is woken by shutdown without publishing a stale result. */
@@ -884,13 +953,13 @@ TEST_CASE( "model replacement and fault recovery never activate a model", "[nnRe
     REQUIRE( app.enable( true ) == 0 );
     app.frame();
     app.frame();
-    nnTest::executeFailure = true;
+    nnTest::graphFailure = 5;
     app.frame();
     app.control();
     REQUIRE_FALSE( app.pending() );
     REQUIRE_FALSE( app.acknowledged() );
     REQUIRE( app.enable( true ) == -1 );
-    nnTest::executeFailure = false;
+    nnTest::graphFailure = 0;
     REQUIRE( app.select( 1 ) == 0 );
     REQUIRE( app.waitLoad() );
     REQUIRE( app.fault().empty() );
@@ -1189,8 +1258,8 @@ TEST_CASE( "inference failure cannot strand a disable transition", "[nnReconstru
         entered.set_value();
         gate.wait();
     };
-    nnTest::executeFailure = true;
-    auto producer          = std::async( std::launch::async,
+    nnTest::graphFailure = 5;
+    auto producer        = std::async( std::launch::async,
                                 [&]
                                 {
                                     app.frame();
@@ -1676,6 +1745,298 @@ TEST_CASE( "NN late activation cannot recreate disabled GPU resources", "[nnReco
     MagAOX::app::nnReconstructor::replaceModel;
 #endif
     // clang-format on
+}
+
+/** \brief Graph replay reads current buffers, waits once, and rebuilds only after resource replacement. */
+TEST_CASE( "graph replay completes each frame before publication", "[nnReconstructor][stream][graph]" )
+{
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::prepareExecution;
+    MagAOX::app::nnReconstructor::prepareGraph;
+    MagAOX::app::nnReconstructor::infer;
+    MagAOX::app::nnReconstructor::releaseStream;
+#endif
+    // clang-format on
+
+    nnReconstructor_test app;
+    app.prepare();
+    REQUIRE( nnTest::liveStreams == 1 );
+    REQUIRE( nnTest::liveGraphExecs == 1 );
+    REQUIRE( nnTest::liveGraphs == 0 );
+    REQUIRE_FALSE( app.pending() );
+    const int bindings = nnTest::bindingCalls, streams = nnTest::streamCreations;
+    const int captures = nnTest::captures, enqueues = nnTest::enqueueCalls, copies = nnTest::copies;
+    for( int frame = 0; frame < 3; ++frame )
+    {
+        const int waits = nnTest::syncCalls;
+        nnTest::result  = frame + 1;
+        app.frame();
+        REQUIRE( nnTest::syncCalls == waits + 1 );
+        REQUIRE( nnTest::queuedWork == 0 );
+        REQUIRE( nnTest::bindingCalls == bindings );
+        REQUIRE( nnTest::streamCreations == streams );
+        REQUIRE( nnTest::captures == captures );
+        REQUIRE( nnTest::enqueueCalls == enqueues );
+        REQUIRE( nnTest::copies == copies );
+        REQUIRE( app.claim() );
+        REQUIRE( app.copy() == std::vector<float>( 3, frame + 1 ) );
+        app.complete();
+    }
+
+    REQUIRE( app.enable( false ) == 0 );
+    REQUIRE( app.claim() );
+    app.copy();
+    app.complete();
+    REQUIRE( nnTest::liveStreams == 0 );
+    REQUIRE( nnTest::liveGraphExecs == 0 );
+    REQUIRE( app.enable( true ) == 0 );
+    REQUIRE( nnTest::liveStreams == 1 );
+    REQUIRE( nnTest::streamCreations == streams + 1 );
+    REQUIRE( nnTest::captures == captures + 1 );
+    REQUIRE( nnTest::liveGraphExecs == 1 );
+    app.appShutdown();
+    REQUIRE( nnTest::liveStreams == 0 );
+    REQUIRE( nnTest::liveGraphExecs == 0 );
+}
+
+/** \brief Failed candidate binding or stream creation cannot install or leak GPU ownership. */
+TEST_CASE( "stream preparation failure leaves activation disabled", "[nnReconstructor][stream]" )
+{
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::replaceModel;
+    MagAOX::app::nnReconstructor::prepareExecution;
+#endif
+    // clang-format on
+
+    for( int failure = 0; failure < 3; ++failure )
+    {
+        nnReconstructor_test app;
+        app.prepare( false );
+        if( failure < 2 )
+        {
+            nnTest::failBinding = nnTest::bindingCalls + failure + 1;
+        }
+        else
+        {
+            nnTest::failStreamCreation = nnTest::streamCreations + 1;
+        }
+
+        REQUIRE( app.enable( true ) == 0 ); // Accepted request, asynchronously failed preparation.
+        REQUIRE_FALSE( app.acknowledged() );
+        REQUIRE_FALSE( app.fault().empty() );
+        REQUIRE( nnTest::liveStreams == 0 );
+        REQUIRE( nnTest::liveAllocations == 0 );
+        REQUIRE( nnTest::contexts == 0 );
+    }
+}
+
+/** \brief An unconfirmed stream drain or destruction cannot free buffers or permit reactivation. */
+TEST_CASE( "persistent stream failures retain referenced resources", "[nnReconstructor][stream]" )
+{
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::infer;
+    MagAOX::app::nnReconstructor::releaseInference;
+    MagAOX::app::nnReconstructor::appShutdown;
+#endif
+    // clang-format on
+
+    nnReconstructor_test app;
+    app.prepare();
+    SECTION( "synchronization fails with outstanding work" )
+    {
+        nnTest::syncFailure = true;
+        app.frame();
+        REQUIRE_FALSE( app.pending() );
+        REQUIRE( nnTest::queuedWork == 3 );
+    }
+    SECTION( "stream destruction fails after draining" )
+    {
+        nnTest::graphFailure   = 5;
+        nnTest::destroyFailure = true;
+        app.frame();
+        REQUIRE( nnTest::queuedWork == 0 );
+    }
+    SECTION( "executable graph destruction fails after draining" )
+    {
+        nnTest::failSync     = nnTest::syncCalls + 1;
+        nnTest::graphFailure = 7;
+        app.frame();
+        REQUIRE( nnTest::queuedWork == 0 );
+    }
+
+    app.control();
+    REQUIRE( app.enable( true ) < 0 );
+    REQUIRE( nnTest::liveStreams == 1 );
+    REQUIRE( nnTest::liveAllocations == 2 );
+    REQUIRE( nnTest::liveHostAllocations == 2 );
+    REQUIRE( nnTest::contexts == 1 );
+    REQUIRE( app.appShutdown() < 0 );
+    REQUIRE( nnTest::liveAllocations == 2 );
+    REQUIRE( nnTest::liveHostAllocations == 2 );
+    // Clear only the fake failure so the fixture can prove safe eventual cleanup.
+    nnTest::syncFailure = nnTest::destroyFailure = false;
+    nnTest::graphFailure                         = 0;
+    REQUIRE( app.appShutdown() == 0 );
+    REQUIRE( nnTest::queuedWork == 0 );
+    REQUIRE( nnTest::liveStreams == 0 );
+    REQUIRE( nnTest::liveAllocations == 0 );
+    REQUIRE( nnTest::liveHostAllocations == 0 );
+    REQUIRE( nnTest::liveGraphExecs == 0 );
+}
+
+/** \brief Capture/API/transfer failures are explicit and cannot turn D into an uncaptured execution path. */
+TEST_CASE( "graph preparation failures never activate inference", "[nnReconstructor][graph]" )
+{
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::prepareGraph;
+    MagAOX::app::nnReconstructor::replaceModel;
+    MagAOX::app::nnReconstructor::appShutdown;
+#endif
+    // clang-format on
+
+    for( bool startup : { false, true } )
+    {
+        for( int failure = 1; failure <= 14; ++failure )
+        {
+            nnReconstructor_test app;
+            if( !startup )
+            {
+                app.prepare( false );
+                REQUIRE( nnTest::captures == 0 );
+                REQUIRE( nnTest::enqueueCalls == 0 );
+            }
+
+            if( failure <= 6 )
+            {
+                nnTest::graphFailure = failure;
+            }
+            else if( failure <= 10 )
+            {
+                nnTest::failCopy = nnTest::copies + failure - 6;
+            }
+            else if( failure <= 12 )
+            {
+                nnTest::failSync = nnTest::syncCalls + failure - 10;
+            }
+            else if( failure == 13 )
+            {
+                nnTest::executeFailure = true;
+            }
+            else
+            {
+                nnTest::duringCapture = []
+                {
+                    nnTest::executeFailure = true;
+                };
+            }
+
+            if( startup )
+            {
+                REQUIRE_THROWS( app.prepare() );
+            }
+            else
+            {
+                REQUIRE( app.enable( true ) == 0 );
+                REQUIRE_FALSE( app.acknowledged() );
+                REQUIRE_FALSE( app.fault().empty() );
+            }
+
+            REQUIRE_FALSE( app.pending() );
+            nnTest::graphFailure = 0; // Allow a failed graph-destroy API to succeed during final cleanup.
+            REQUIRE( app.appShutdown() == 0 );
+            REQUIRE( nnTest::queuedWork == 0 );
+            REQUIRE( nnTest::liveGraphExecs == 0 );
+            REQUIRE( nnTest::liveGraphs == 0 );
+            REQUIRE( nnTest::liveStreams == 0 );
+            REQUIRE( nnTest::liveAllocations == 0 );
+            REQUIRE( nnTest::liveHostAllocations == 0 );
+        }
+    }
+}
+
+/** \brief Warm-up failure retains all GPU-referenced resources until a checked drain succeeds. */
+TEST_CASE( "failed graph warmup retains resources until completion", "[nnReconstructor][graph]" )
+{
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::prepareGraph;
+    MagAOX::app::nnReconstructor::releaseStream;
+#endif
+    // clang-format on
+
+    for( bool afterCapture : { false, true } )
+    {
+        nnReconstructor_test app;
+        app.prepare( false );
+        if( afterCapture )
+        {
+            nnTest::duringCapture = []
+            {
+                nnTest::syncFailure = true;
+            };
+        }
+        else
+        {
+            nnTest::syncFailure = true;
+        }
+
+        REQUIRE( app.enable( true ) == 0 );
+        REQUIRE_FALSE( app.acknowledged() );
+        REQUIRE_FALSE( app.pending() );
+        REQUIRE( app.enable( true ) < 0 );
+        REQUIRE( app.appShutdown() < 0 );
+        REQUIRE( nnTest::queuedWork == ( afterCapture ? 4 : 3 ) );
+        REQUIRE( nnTest::liveAllocations == 2 );
+        REQUIRE( nnTest::liveHostAllocations == 2 );
+        REQUIRE( nnTest::contexts == 1 );
+        REQUIRE( nnTest::liveGraphExecs == ( afterCapture ? 1 : 0 ) );
+        nnTest::syncFailure = false;
+        REQUIRE( app.appShutdown() == 0 );
+        REQUIRE( nnTest::queuedWork == 0 );
+        REQUIRE( nnTest::liveGraphExecs == 0 );
+        REQUIRE( nnTest::liveAllocations == 0 );
+        REQUIRE( nnTest::liveHostAllocations == 0 );
+    }
+}
+
+/** \brief Cancellation during graph capture cannot admit a warm-up result or retain a late graph. */
+TEST_CASE( "cancelling graph preparation keeps NN disabled", "[nnReconstructor][graph]" )
+{
+    // clang-format off
+#ifdef NNRECONSTRUCTOR_TEST_DOXYGEN_REF
+    MagAOX::app::nnReconstructor::replaceModel;
+    MagAOX::app::nnReconstructor::requestEnabled;
+#endif
+    // clang-format on
+
+    nnReconstructor_test app;
+    app.prepare( false );
+    std::promise<void> entered, release;
+    auto               gate = release.get_future().share();
+    nnTest::duringCapture   = [&]
+    {
+        entered.set_value();
+        gate.wait();
+    };
+    REQUIRE( app.queueEnable() == 0 );
+    app.control();
+    entered.get_future().wait();
+    const auto disabled = app.enable( false );
+    release.set_value();
+    REQUIRE( disabled == 0 );
+    REQUIRE( app.waitLoad() );
+    REQUIRE_FALSE( app.pending() );
+    REQUIRE_FALSE( app.claim() ); // Admission never opened, so no result or disable-zero is owed.
+    REQUIRE_FALSE( app.acknowledged() );
+    REQUIRE( nnTest::captures == 1 );
+    REQUIRE( nnTest::queuedWork == 0 );
+    REQUIRE( nnTest::liveGraphExecs == 0 );
+    REQUIRE( nnTest::liveStreams == 0 );
+    REQUIRE( nnTest::liveAllocations == 0 );
 }
 
 } // namespace libXWCTest::nnReconstructorTest

@@ -22,6 +22,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 #include <sys/stat.h>
@@ -31,6 +32,43 @@ namespace nnTest
 {
 /// Allocation/copy ordinals inject one selected failure; live allocations verify cleanup.
 inline int allocation = 0, failAllocation = 0, copies = 0, failCopy = 0, liveAllocations = 0;
+/// Count pinned host allocations separately from resources released on disable.
+inline int liveHostAllocations = 0;
+/// Track stream lifetime, deferred GPU work and injected API failures.
+inline int liveStreams = 0, queuedWork = 0, streamCreations = 0, failStreamCreation = 0;
+inline int syncCalls = 0, failSync = 0, bindingCalls = 0, failBinding = 0;
+/// Persistent drain/destroy errors must prevent false release acknowledgement.
+inline bool syncFailure = false, destroyFailure = false;
+/// Fail a selected graph API stage and account for capture/replay ownership.
+inline int graphFailure = 0, liveGraphs = 0, liveGraphExecs = 0, graphLaunches = 0, captures = 0, enqueueCalls = 0;
+/// Pause graph preparation independently of the per-frame execution hook.
+inline std::function<void()> duringCapture;
+/// Captured operations retain buffer addresses, not a snapshot of their values.
+struct Graph
+{
+    std::vector<std::function<void()>> work; ///< Captured transfer and inference operations.
+};
+/// Deferred operations execute only when the caller explicitly waits for the stream.
+struct Stream
+{
+    std::vector<std::function<void()>> work;               ///< FIFO of transfers and fake inference.
+    std::vector<std::function<void()>> captured;           ///< Operations recorded without execution.
+    bool                               capturing{ false }; ///< Synchronization is forbidden until capture ends.
+};
+/// Record an operation during capture, otherwise queue it for stream completion.
+inline void submit( Stream               *stream /**< [in] Recording or executing stream. */,
+                    std::function<void()> operation /**< [in] Deferred operation. */ )
+{
+    if( stream->capturing )
+    {
+        stream->captured.push_back( std::move( operation ) );
+    }
+    else
+    {
+        stream->work.push_back( std::move( operation ) );
+        ++queuedWork;
+    }
+}
 /// Count live SDK objects to check partial loading and replacement cleanup.
 inline int runtimes = 0, engines = 0, contexts = 0;
 /// Independently inject failures at SDK construction and execution boundaries.
@@ -54,8 +92,193 @@ inline int nnTestClock( clockid_t clock /**< [in] Requested clock. */, timespec 
     return ::clock_gettime( clock, value );
 }
 #define clock_gettime nnTestClock
-using cudaError_t         = int;
-constexpr int cudaSuccess = 0, cudaMemcpyHostToDevice = 1, cudaMemcpyDeviceToHost = 2;
+using cudaError_t                  = int;
+using cudaStream_t                 = nnTest::Stream *;
+using cudaGraph_t                  = nnTest::Graph *;
+using cudaGraphExec_t              = nnTest::Graph *;
+constexpr int          cudaSuccess = 0, cudaMemcpyHostToDevice = 1, cudaMemcpyDeviceToHost = 2;
+constexpr unsigned int cudaStreamNonBlocking            = 1;
+constexpr int          cudaStreamCaptureModeThreadLocal = 1;
+
+/// Begin recording without executing the recorded operations.
+inline int cudaStreamBeginCapture( cudaStream_t stream /**< [in] Idle stream. */, int mode /**< [in] Capture mode. */ )
+{
+    if( nnTest::graphFailure == 1 )
+    {
+        return 1;
+    }
+
+    if( nnTest::duringCapture )
+    {
+        nnTest::duringCapture();
+    }
+
+    stream->capturing = true;
+    ++nnTest::captures;
+    return 0;
+}
+
+/// End capture even when invalidated; the caller owns any returned partial graph.
+inline int cudaStreamEndCapture( cudaStream_t stream /**< [in] Capturing stream. */,
+                                 cudaGraph_t *graph /**< [out] Captured operations, or null on invalidation. */ )
+{
+    stream->capturing = false;
+
+    if( nnTest::graphFailure == 2 )
+    {
+        stream->captured.clear();
+        *graph = nullptr;
+        return 1;
+    }
+
+    *graph = new nnTest::Graph{ std::move( stream->captured ) };
+    ++nnTest::liveGraphs;
+    return 0;
+}
+
+/// Instantiate an independent executable graph retaining the captured addresses.
+inline int cudaGraphInstantiateWithFlags( cudaGraphExec_t   *executable /**< [out] Owned executable. */,
+                                          cudaGraph_t        graph /**< [in] Source graph. */,
+                                          unsigned long long flags /**< [in] Instantiation flags. */ )
+{
+    if( nnTest::graphFailure == 3 )
+    {
+        return 1;
+    }
+
+    *executable = new nnTest::Graph{ graph->work };
+    ++nnTest::liveGraphExecs;
+    return 0;
+}
+
+/// Queue upload work so failure tests require it to be drained before releasing resources.
+inline int cudaGraphUpload( cudaGraphExec_t graph /**< [in] Executable to upload. */,
+                            cudaStream_t    stream /**< [in] Upload stream. */ )
+{
+    if( nnTest::graphFailure == 4 )
+    {
+        return 1;
+    }
+
+    nnTest::submit( stream,
+                    []
+                    {
+                    } );
+    return 0;
+}
+
+/// Replay the captured operations without making host output immediately available.
+inline int cudaGraphLaunch( cudaGraphExec_t graph /**< [in] Captured executable. */,
+                            cudaStream_t    stream /**< [in] Execution stream. */ )
+{
+    if( nnTest::duringExecute )
+    {
+        nnTest::duringExecute();
+    }
+
+    if( nnTest::graphFailure == 5 )
+    {
+        return 1;
+    }
+
+    if( !graph )
+    {
+        throw std::runtime_error( "graph replay without successful preparation" );
+    }
+
+    for( const auto &operation : graph->work )
+    {
+        nnTest::submit( stream, operation );
+    }
+
+    ++nnTest::graphLaunches;
+    return 0;
+}
+
+/// Free capture metadata independently of an instantiated executable.
+inline int cudaGraphDestroy( cudaGraph_t graph /**< [in] Owned capture. */ )
+{
+    if( nnTest::graphFailure == 6 )
+    {
+        return 1;
+    }
+
+    delete graph;
+    --nnTest::liveGraphs;
+    return 0;
+}
+
+/// Refuse destruction while replay work may reference its buffers.
+inline int cudaGraphExecDestroy( cudaGraphExec_t graph /**< [in] Drained executable. */ )
+{
+    if( nnTest::graphFailure == 7 )
+    {
+        return 1;
+    }
+
+    if( nnTest::queuedWork )
+    {
+        throw std::runtime_error( "destroyed executable before stream completion" );
+    }
+
+    delete graph;
+    --nnTest::liveGraphExecs;
+    return 0;
+}
+
+/// Create a nonblocking stream without submitting work.
+inline int cudaStreamCreateWithFlags( cudaStream_t *stream /**< [out] New owned stream. */,
+                                      unsigned int  flags /**< [in] Required nonblocking flag. */ )
+{
+    if( ++nnTest::streamCreations == nnTest::failStreamCreation || flags != cudaStreamNonBlocking )
+    {
+        return 1;
+    }
+
+    *stream = new nnTest::Stream;
+    ++nnTest::liveStreams;
+    return 0;
+}
+
+/// Finish queued operations in order, unless completion failure is injected.
+inline int cudaStreamSynchronize( cudaStream_t stream /**< [in] Stream to drain. */ )
+{
+    if( stream->capturing )
+    {
+        throw std::runtime_error( "synchronized a capturing stream" );
+    }
+
+    if( ++nnTest::syncCalls == nnTest::failSync || nnTest::syncFailure )
+    {
+        return 1;
+    }
+
+    for( auto &operation : stream->work )
+    {
+        operation();
+        --nnTest::queuedWork;
+    }
+
+    stream->work.clear();
+    return 0;
+}
+
+/// Reject unsafe stream destruction and account for completed cleanup.
+inline int cudaStreamDestroy( cudaStream_t stream /**< [in] Stream already drained by production code. */ )
+{
+    if( nnTest::destroyFailure )
+    {
+        return 1;
+    }
+    if( stream->capturing || !stream->work.empty() )
+    {
+        throw std::runtime_error( "destroyed stream with outstanding work" );
+    }
+
+    delete stream;
+    --nnTest::liveStreams;
+    return 0;
+}
 /// Provide a deterministic message for any injected CUDA error.
 inline const char *cudaGetErrorString( int status /**< [in] Ignored injected status. */ )
 {
@@ -76,6 +299,11 @@ inline int cudaMalloc( void **pointer /**< [out] Fake device allocation. */,
 /// Free a fake device allocation and update ownership accounting.
 inline int cudaFree( void *pointer /**< [in] Owned CPU allocation. */ )
 {
+    if( pointer && nnTest::queuedWork )
+    {
+        throw std::runtime_error( "freed device buffer before completion" );
+    }
+
     if( pointer )
     {
         --nnTest::liveAllocations;
@@ -83,17 +311,58 @@ inline int cudaFree( void *pointer /**< [in] Owned CPU allocation. */ )
     }
     return 0;
 }
-/// Copy exactly the requested bytes or inject failure before touching the destination.
-inline int cudaMemcpy( void       *dest /**< [out] Destination. */,
-                       const void *src /**< [in] Source. */,
-                       size_t      size /**< [in] Byte count. */,
-                       int         kind /**< [in] Unused transfer direction. */ )
+/// Allocate nonzero host storage so tests detect missing padding initialization.
+inline int cudaMallocHost( void **pointer /**< [out] Fake pinned allocation. */,
+                           size_t bytes /**< [in] Allocation size. */ )
+{
+    if( ++nnTest::allocation == nnTest::failAllocation )
+    {
+        return 1;
+    }
+
+    *pointer = std::malloc( bytes );
+    if( !*pointer )
+    {
+        return 1;
+    }
+
+    std::memset( *pointer, 0x7f, bytes );
+    ++nnTest::liveHostAllocations;
+    return 0;
+}
+
+/// Release pinned host storage independently of device-allocation accounting.
+inline int cudaFreeHost( void *pointer /**< [in] Owned pinned allocation. */ )
+{
+    if( pointer && nnTest::queuedWork )
+    {
+        throw std::runtime_error( "freed host buffer before completion" );
+    }
+
+    if( pointer )
+    {
+        --nnTest::liveHostAllocations;
+        std::free( pointer );
+    }
+
+    return 0;
+}
+/// Defer copying until synchronization, or fail this submission without queueing it.
+inline int cudaMemcpyAsync( void        *dest /**< [out] Destination. */,
+                            const void  *src /**< [in] Source. */,
+                            size_t       size /**< [in] Byte count. */,
+                            int          kind /**< [in] Unused transfer direction. */,
+                            cudaStream_t stream /**< [in] Stream owning this copy. */ )
 {
     if( ++nnTest::copies == nnTest::failCopy )
     {
         return 1;
     }
-    std::memcpy( dest, src, size );
+    nnTest::submit( stream,
+                    [=]
+                    {
+                        std::memcpy( dest, src, size );
+                    } );
     return 0;
 }
 namespace nvinfer1
@@ -156,9 +425,10 @@ struct ILogger
 struct IExecutionContext
 {
     std::vector<Tensor> m_tensors; ///< Copy of the creating engine contract.
+    std::vector<void *> m_buffers; ///< Addresses bound by tensor name before submission.
     /// Count ownership and retain the input/output contract.
     explicit IExecutionContext( std::vector<Tensor> values /**< [in] Tensor metadata. */ )
-        : m_tensors( std::move( values ) )
+        : m_tensors( std::move( values ) ), m_buffers( m_tensors.size(), nullptr )
     {
         ++nnTest::contexts;
     }
@@ -169,9 +439,36 @@ struct IExecutionContext
     }
     /// Capture inputs and write a constant output, with optional synchronization/failure injection.
     bool executeV2( void *const *buffers /**< [in/out] Actual production binding array. */ );
+
+    /// Store the validated buffer address for one named tensor.
+    bool setTensorAddress( const char *name /**< [in] Tensor name. */, void *address /**< [in] Buffer address. */ );
+
+    /// Queue fake inference without making downloaded results available to the CPU.
+    bool enqueueV3( cudaStream_t stream /**< [in] Explicit inference stream. */ );
 };
-inline bool IExecutionContext::executeV2( void *const *buffers )
+
+inline bool IExecutionContext::setTensorAddress( const char *name, void *address )
 {
+    if( ++nnTest::bindingCalls == nnTest::failBinding )
+    {
+        return false;
+    }
+
+    for( size_t i = 0; i < m_tensors.size(); ++i )
+    {
+        if( m_tensors[i].name == name )
+        {
+            m_buffers[i] = address;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+inline bool IExecutionContext::enqueueV3( cudaStream_t stream )
+{
+    ++nnTest::enqueueCalls;
     if( nnTest::duringExecute )
     {
         nnTest::duringExecute();
@@ -180,6 +477,21 @@ inline bool IExecutionContext::executeV2( void *const *buffers )
     {
         return false;
     }
+    if( std::find( m_buffers.begin(), m_buffers.end(), nullptr ) != m_buffers.end() )
+    {
+        return false;
+    }
+
+    nnTest::submit( stream,
+                    [this]
+                    {
+                        executeV2( m_buffers.data() );
+                    } );
+    return true;
+}
+
+inline bool IExecutionContext::executeV2( void *const *buffers )
+{
     for( size_t i = 0; i < m_tensors.size(); ++i )
     {
         auto  &t = m_tensors[i];

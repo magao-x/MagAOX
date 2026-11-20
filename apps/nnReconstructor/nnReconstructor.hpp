@@ -41,6 +41,7 @@
 #include <stdexcept>
 #include <vector>
 #include <thread>
+#include <type_traits>
 #include <chrono>
 #include <sys/stat.h>
 
@@ -169,9 +170,9 @@ class nnReconstructor : public MagAOXApp<true>,
 
     int Npup{ 4 }; ///< Four pupils in the existing channel order.
 
-    eigenImage<float> modeval; ///< Inference-owned download buffer; never read by the publisher.
+    float *m_modeval{ nullptr }; ///< Owned pinned download buffer; never read by the publisher.
 
-    float *pp_image{ nullptr }; ///< Owned CPU preprocessing buffer, reused on WFS reconnection.
+    float *pp_image{ nullptr }; ///< Owned pinned input; zero padding persists across frames and WFS reconnection.
 
     size_t m_pwfsWidth{ 0 }; ///< The width of the image
 
@@ -205,7 +206,11 @@ class nnReconstructor : public MagAOXApp<true>,
 
     std::string m_fault; ///< Latched runtime failure; no further inference is admitted.
 
-    std::array<void *, 2> m_bindings{}; ///< Device addresses in the engine's validated I/O order.
+    cudaStream_t m_stream{ nullptr }; ///< Owned nonblocking stream; drained before output use or resource release.
+
+    cudaGraph_t m_captureGraph{ nullptr }; ///< Owned capture until instantiation/cleanup completes.
+
+    cudaGraphExec_t m_graph{ nullptr }; ///< Executable tied to the resident context and fixed host/device buffers.
 
     bool m_smStarted{ false }; ///< Monitor startup was attempted and needs shutdown.
 
@@ -364,6 +369,17 @@ class nnReconstructor : public MagAOXApp<true>,
 
     /// Release owned GPU resources after inference, loading and publication have settled.
     void releaseInference();
+
+    /// Bind a validated candidate's buffers and create its stream before installation.
+    cudaStream_t prepareExecution( ICudaEngine                 *candidate /**< [in] Validated engine. */,
+                                   IExecutionContext           *execution /**< [in] Candidate context. */,
+                                   const std::array<void *, 2> &bindings /**< [in] Buffers in engine I/O order. */ );
+
+    /// Drain and destroy the installed stream, retaining resources if completion fails.
+    void releaseStream();
+
+    /// Warm and capture the owned transaction while admission is disabled; never publish preparation output.
+    void prepareGraph();
 
     /// Detect incompatible metadata or a replaced external output before claiming a publication.
     bool verifyOutput();
@@ -606,8 +622,16 @@ inline void nnReconstructor::create_engine_context()
         throw std::runtime_error( "createExecutionContext failed" );
     }
     prepare_engine_memory();
-    m_bindings[imageIndex]  = d_input;
-    m_bindings[outputIndex] = d_output;
+    std::array<void *, 2> bindings{};
+    bindings[imageIndex]  = d_input;
+    bindings[outputIndex] = d_output;
+    m_stream              = prepareExecution( engine, context, bindings );
+
+    if( m_startEnabled )
+    {
+        prepareGraph();
+    }
+
     log<text_log>( std::format( "Tensor input dimensions: {}x{}x{}; tensor output dimensions: {}; I/O precision: FP32",
                                 inputC,
                                 inputH,
@@ -761,6 +785,16 @@ inline void nnReconstructor::replaceModel( const std::string &name, bool activat
         }
     };
     std::unique_ptr<float, decltype( freeDevice )> nextInput( nullptr, freeDevice ), nextOutput( nullptr, freeDevice );
+    auto                                           freeStream = [this]( cudaStream_t stream )
+    {
+        // A rejected candidate has never submitted GPU work.
+        if( stream && cudaStreamDestroy( stream ) != cudaSuccess )
+        {
+            log<software_error>( { "unsubmitted candidate stream cleanup failed" } );
+        }
+    };
+    std::unique_ptr<std::remove_pointer_t<cudaStream_t>, decltype( freeStream )> nextStream( nullptr, freeStream );
+
     if( activate )
     {
         float *pointer = nullptr;
@@ -770,6 +804,10 @@ inline void nnReconstructor::replaceModel( const std::string &name, bool activat
         checkCuda( cudaMalloc( reinterpret_cast<void **>( &pointer ), outputSize * sizeof( float ) ),
                    "restore output" );
         nextOutput.reset( pointer );
+        std::array<void *, 2> bindings{};
+        bindings[indices[0]] = nextInput.get();
+        bindings[indices[1]] = nextOutput.get();
+        nextStream.reset( prepareExecution( nextEngine.get(), nextContext.get(), bindings ) );
     }
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_resultMutex );
@@ -785,17 +823,35 @@ inline void nnReconstructor::replaceModel( const std::string &name, bool activat
         }
         if( activate )
         {
-            runtime  = nextRuntime.release();
-            engine   = nextEngine.release();
-            context  = nextContext.release();
-            d_input  = nextInput.release();
-            d_output = nextOutput.release();
-            m_bindings.fill( nullptr );
-            m_bindings[indices[0]] = d_input;
-            m_bindings[indices[1]] = d_output;
-            m_gpuResident          = true;
-            m_enabled              = !m_prepareOnly;
-            m_sourceReady          = false;
+            runtime       = nextRuntime.release();
+            engine        = nextEngine.release();
+            context       = nextContext.release();
+            d_input       = nextInput.release();
+            d_output      = nextOutput.release();
+            m_stream      = nextStream.release();
+            m_gpuResident = true;
+        }
+    }
+
+    // Keep preparation resources owned on failure; cleanup must confirm GPU completion before freeing them.
+    if( activate )
+    {
+        prepareGraph();
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_resultMutex );
+        if( m_stopping || m_cancelLoad ||
+            std::chrono::duration<double>( std::chrono::steady_clock::now() - m_transitionStart ).count() >
+                m_transitionTimeout )
+        {
+            throw std::runtime_error( "model preparation cancelled or timed out before activation" );
+        }
+
+        if( activate )
+        {
+            m_enabled     = !m_prepareOnly;
+            m_sourceReady = false;
         }
         engineData.swap( data );
         m_loadedModel = name; // Validated host model; residency has its own readback.
@@ -808,6 +864,7 @@ inline void nnReconstructor::replaceModel( const std::string &name, bool activat
 
 inline void nnReconstructor::releaseInference()
 {
+    releaseStream();
     cleanup_engine_context();
     for( auto **pointer : { &d_input, &d_output } )
     {
@@ -817,7 +874,95 @@ inline void nnReconstructor::releaseInference()
         }
         *pointer = nullptr;
     }
-    m_bindings.fill( nullptr );
+}
+
+inline cudaStream_t nnReconstructor::prepareExecution( ICudaEngine                 *candidate,
+                                                       IExecutionContext           *execution,
+                                                       const std::array<void *, 2> &bindings )
+{
+    for( int i = 0; i < 2; ++i )
+    {
+        if( !execution->setTensorAddress( candidate->getIOTensorName( i ), bindings[i] ) )
+        {
+            throw std::runtime_error( "setTensorAddress failed" );
+        }
+    }
+
+    cudaStream_t stream = nullptr;
+    checkCuda( cudaStreamCreateWithFlags( &stream, cudaStreamNonBlocking ), "create inference stream" );
+    return stream;
+}
+
+inline void nnReconstructor::releaseStream()
+{
+    if( m_stream )
+    {
+        checkCuda( cudaStreamSynchronize( m_stream ), "drain inference stream; restart required if persistent" );
+
+        if( m_graph )
+        {
+            checkCuda( cudaGraphExecDestroy( m_graph ), "destroy inference graph" );
+            m_graph = nullptr;
+        }
+
+        if( m_captureGraph )
+        {
+            checkCuda( cudaGraphDestroy( m_captureGraph ), "destroy captured graph" );
+            m_captureGraph = nullptr;
+        }
+
+        checkCuda( cudaStreamDestroy( m_stream ), "destroy inference stream" );
+        m_stream = nullptr;
+    }
+}
+
+inline void nnReconstructor::prepareGraph()
+{
+    // A finite dummy input updates TensorRT state; its result is never validated or published as a frame.
+    std::fill_n( pp_image, inputSize, 0.F );
+    auto submit = [this]
+    {
+        checkCuda( cudaMemcpyAsync( d_input, pp_image, inputSize * sizeof( float ), cudaMemcpyHostToDevice, m_stream ),
+                   "prepare graph input" );
+
+        if( !context->enqueueV3( m_stream ) )
+        {
+            throw std::runtime_error( "graph preparation enqueueV3 failed" );
+        }
+
+        checkCuda(
+            cudaMemcpyAsync( m_modeval, d_output, outputSize * sizeof( float ), cudaMemcpyDeviceToHost, m_stream ),
+            "prepare graph output" );
+    };
+    bool capturing = false;
+
+    try
+    {
+        submit();
+        checkCuda( cudaStreamSynchronize( m_stream ), "warm TensorRT before capture" );
+        checkCuda( cudaStreamBeginCapture( m_stream, cudaStreamCaptureModeThreadLocal ), "begin inference capture" );
+        capturing = true;
+        submit();
+        const auto ended = cudaStreamEndCapture( m_stream, &m_captureGraph );
+        capturing        = false;
+        checkCuda( ended, "end inference capture" );
+        checkCuda( cudaGraphInstantiateWithFlags( &m_graph, m_captureGraph, 0 ), "instantiate inference graph" );
+        checkCuda( cudaGraphDestroy( m_captureGraph ), "release captured graph" );
+        m_captureGraph = nullptr;
+        checkCuda( cudaGraphUpload( m_graph, m_stream ), "upload inference graph" );
+        checkCuda( cudaGraphLaunch( m_graph, m_stream ), "warm inference graph" );
+        checkCuda( cudaStreamSynchronize( m_stream ), "complete graph preparation" );
+    }
+    catch( ... )
+    {
+        // End even an invalidated capture on its originating thread before cleanup can drain the stream.
+        if( capturing )
+        {
+            cudaStreamEndCapture( m_stream, &m_captureGraph );
+        }
+
+        throw; // The app retains graph, context and buffers until checked cleanup succeeds.
+    }
 }
 
 inline void nnReconstructor::checkCuda( cudaError_t result, const char *operation )
@@ -833,8 +978,9 @@ inline void nnReconstructor::prepare_engine_memory()
     constexpr size_t size = sizeof( float );
     checkCuda( cudaMalloc( reinterpret_cast<void **>( &d_input ), inputSize * size ), "allocate image input" );
     checkCuda( cudaMalloc( reinterpret_cast<void **>( &d_output ), outputSize * size ), "allocate modal output" );
-    pp_image = new float[inputSize]{};
-    modeval.resize( outputSize, 1 );
+    checkCuda( cudaMallocHost( reinterpret_cast<void **>( &pp_image ), inputSize * size ), "allocate pinned input" );
+    checkCuda( cudaMallocHost( reinterpret_cast<void **>( &m_modeval ), outputSize * size ), "allocate pinned output" );
+    std::fill_n( pp_image, inputSize, 0.F );
     m_pendingModes.resize( outputSize );
     m_publishModes.resize( outputSize );
 }
@@ -849,7 +995,6 @@ inline void nnReconstructor::cleanup_engine_memory()
         }
     }
     d_input = d_output = nullptr;
-    m_bindings.fill( nullptr );
 }
 
 inline void nnReconstructor::cleanup_engine_context()
@@ -864,8 +1009,15 @@ inline void nnReconstructor::cleanup_engine_context()
 
 inline void nnReconstructor::cleanup_host_memory()
 {
-    delete[] pp_image;
-    pp_image = nullptr;
+    for( auto pointer : { pp_image, m_modeval } )
+    {
+        if( pointer && cudaFreeHost( pointer ) != cudaSuccess )
+        {
+            log<software_error>( { "cudaFreeHost failed during cleanup" } );
+        }
+    }
+
+    pp_image = m_modeval = nullptr;
 }
 
 inline nnReconstructor::~nnReconstructor() noexcept
@@ -1256,6 +1408,16 @@ inline int nnReconstructor::appShutdown()
     {
         m_modelThread.join();
     }
+    try
+    {
+        releaseStream();
+    }
+    catch( const std::exception &error )
+    {
+        log<software_error>( { error.what() } );
+        return -1; // Do not free buffers or context while GPU completion is unconfirmed.
+    }
+
     cleanup_engine_context();
     cleanup_engine_memory();
     cleanup_host_memory();
@@ -1339,7 +1501,7 @@ inline int nnReconstructor::processImage( void *curr_src, const dev::shmimT &dum
             std::lock_guard<std::mutex> lock( m_resultMutex );
             if( !m_stopping && m_enabled && m_fault.empty() )
             {
-                std::copy( modeval.data(), modeval.data() + outputSize, m_pendingModes.begin() );
+                std::copy_n( m_modeval, outputSize, m_pendingModes.begin() );
                 m_pendingTime = timestamp;
                 m_updated     = true;
             }
@@ -1367,51 +1529,41 @@ inline void nnReconstructor::infer( void *curr_src )
 
     Eigen::Map<eigenImage<float>> pwfsIm( reinterpret_cast<float *>( curr_src ), m_pwfsHeight, m_pwfsWidth );
 
-    // Split up the four pupils for the Neural Network.
-    int ki = 0;
+    // Padding was zeroed at allocation; only the pupil interiors change each frame.
+    const int crop = m_pupPix - 2 * zeroPad;
 
-    for( int col_i = -zeroPad; col_i < ( m_pupPix - zeroPad ); ++col_i )
+    for( int col_i = 0; col_i < crop; ++col_i )
     {
-        for( int row_i = -zeroPad; row_i < ( m_pupPix - zeroPad ); ++row_i )
+        const int offset = ( col_i + zeroPad ) * m_pupPix + zeroPad;
+
+        for( int row_i = 0; row_i < crop; ++row_i )
         {
-            if( ( col_i < 0 ) or ( col_i >= ( m_pupPix - 2 * zeroPad ) ) or ( row_i < 0 ) or
-                ( row_i >= ( m_pupPix - 2 * zeroPad ) ) )
-            {
-                pp_image[ki]                           = 0;
-                pp_image[ki + pixels_per_quadrant]     = 0;
-                pp_image[ki + 2 * pixels_per_quadrant] = 0;
-                pp_image[ki + 3 * pixels_per_quadrant] = 0;
-            }
-            else
-            {
-                pp_image[ki] = imageNorm * (realT)pwfsIm( pup_offset1_y + row_i, pup_offset1_x + col_i );
-                pp_image[ki + pixels_per_quadrant] =
-                    imageNorm * (realT)pwfsIm( pup_offset1_y + row_i, pup_offset2_x + col_i );
-                pp_image[ki + 2 * pixels_per_quadrant] =
-                    imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset1_x + col_i );
-                pp_image[ki + 3 * pixels_per_quadrant] =
-                    imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset2_x + col_i );
-            }
-            ++ki;
+            const int ki = offset + row_i;
+            pp_image[ki] = imageNorm * (realT)pwfsIm( pup_offset1_y + row_i, pup_offset1_x + col_i );
+            pp_image[ki + pixels_per_quadrant] =
+                imageNorm * (realT)pwfsIm( pup_offset1_y + row_i, pup_offset2_x + col_i );
+            pp_image[ki + 2 * pixels_per_quadrant] =
+                imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset1_x + col_i );
+            pp_image[ki + 3 * pixels_per_quadrant] =
+                imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset2_x + col_i );
         }
     }
 
-    // Copy input data to device
-    checkCuda( cudaMemcpy( d_input, pp_image, inputSize * sizeof( float ), cudaMemcpyHostToDevice ), "cudaMemcpy" );
-
-    // Keep synchronous execution; tensor roles determine the binding slots.
-    if( !context->executeV2( m_bindings.data() ) )
+    try
     {
-        throw std::runtime_error( "executeV2 failed" );
+        checkCuda( cudaGraphLaunch( m_graph, m_stream ), "launch inference graph" );
+        checkCuda( cudaStreamSynchronize( m_stream ), "complete inference" );
     }
-
-    // Copy output data back to host
-    checkCuda( cudaMemcpy( modeval.data(), d_output, outputSize * sizeof( float ), cudaMemcpyDeviceToHost ),
-               "cudaMemcpy" );
+    catch( ... )
+    {
+        // A failed submission can leave earlier work queued against these buffers.
+        checkCuda( cudaStreamSynchronize( m_stream ), "drain failed inference; restart required if persistent" );
+        throw;
+    }
 
     for( uint32_t i = 0; i < outputSize; ++i )
     {
-        if( !isFinite( modeval.data()[i] ) )
+        if( !isFinite( m_modeval[i] ) )
         {
             throw std::runtime_error( "non-finite modal output" );
         }
@@ -1536,7 +1688,7 @@ inline int nnReconstructor::acquireAndCheckValid()
         {
             return 1;
         }
-        std::copy( m_pendingModes.begin(), m_pendingModes.end(), m_publishModes.begin() );
+        m_pendingModes.swap( m_publishModes );
         frameGrabberT::m_currImageTimestamp = m_pendingTime;
     }
     m_updated    = false;
