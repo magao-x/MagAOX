@@ -10,6 +10,9 @@
 #include <numeric>
 #include <random>
 #include <filesystem>
+#include <fstream>
+#include <functional>
+#include <thread>
 #include <unistd.h>
 
 namespace libXWCTest::loPredCtrlAccTest
@@ -23,36 +26,58 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
   public:
     using loPredCtrlAcc_operational::allocate;
     using loPredCtrlAcc_operational::appliedSlots;
+    using loPredCtrlAcc_operational::appLogic;
     using loPredCtrlAcc_operational::appShutdown;
     using loPredCtrlAcc_operational::appStartup;
-    using loPredCtrlAcc_operational::c_slots;
     using loPredCtrlAcc_operational::copied;
+    using loPredCtrlAcc_operational::fastSample;
     using loPredCtrlAcc_operational::loadCalibration;
     using loPredCtrlAcc_operational::m_accelEnabled;
+    using loPredCtrlAcc_operational::m_adcAnchor;
+    using loPredCtrlAcc_operational::m_adcSegment;
+    using loPredCtrlAcc_operational::m_assistedDiagnostic;
     using loPredCtrlAcc_operational::m_calibration;
     using loPredCtrlAcc_operational::m_commandKnown;
     using loPredCtrlAcc_operational::m_commandMutex;
     using loPredCtrlAcc_operational::m_decisionOrdinal;
     using loPredCtrlAcc_operational::m_exploration;
+    using loPredCtrlAcc_operational::m_fastPrefix;
+    using loPredCtrlAcc_operational::m_fastSamples;
+    using loPredCtrlAcc_operational::m_fastStats;
     using loPredCtrlAcc_operational::m_gain;
+    using loPredCtrlAcc_operational::m_gainFront;
+    using loPredCtrlAcc_operational::m_gainSets;
+    using loPredCtrlAcc_operational::m_indiP_control;
     using loPredCtrlAcc_operational::m_indiP_exploration;
     using loPredCtrlAcc_operational::m_indiP_gain;
     using loPredCtrlAcc_operational::m_indiP_learning;
     using loPredCtrlAcc_operational::m_indiP_mode;
+    using loPredCtrlAcc_operational::m_indiP_predicting;
+    using loPredCtrlAcc_operational::m_indiP_qualification;
     using loPredCtrlAcc_operational::m_indiP_reset;
+    using loPredCtrlAcc_operational::m_indiP_sync;
     using loPredCtrlAcc_operational::m_learning;
-    using loPredCtrlAcc_operational::m_matchedTargets;
+    using loPredCtrlAcc_operational::m_learnUs;
     using loPredCtrlAcc_operational::m_mode;
     using loPredCtrlAcc_operational::m_modeCube;
+    using loPredCtrlAcc_operational::m_modelMutex;
     using loPredCtrlAcc_operational::m_models;
+    using loPredCtrlAcc_operational::m_multirate;
     using loPredCtrlAcc_operational::m_outputThread;
     using loPredCtrlAcc_operational::m_planBase;
+    using loPredCtrlAcc_operational::m_predicting;
+    using loPredCtrlAcc_operational::m_ratio;
+    using loPredCtrlAcc_operational::m_renderLeadNs;
+    using loPredCtrlAcc_operational::m_ripple;
     using loPredCtrlAcc_operational::m_settings;
     using loPredCtrlAcc_operational::m_slotPlan;
+    using loPredCtrlAcc_operational::m_slots;
     using loPredCtrlAcc_operational::m_slotShifts;
     using loPredCtrlAcc_operational::m_syncLocked;
+    using loPredCtrlAcc_operational::m_unlockedTraining;
     using loPredCtrlAcc_operational::m_wfsCounter;
     using loPredCtrlAcc_operational::outputCandidate;
+    using loPredCtrlAcc_operational::outputValid;
     using loPredCtrlAcc_operational::parseExploration;
     using loPredCtrlAcc_operational::processImage;
     using loPredCtrlAcc_operational::resetModels;
@@ -71,12 +96,37 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
                            const DDSPC::Matrix &a /**< [in] Individual ACC history. */,
                            bool                 valid /**< [in] Upstream ACC validity. */ );
 
-    /// Render one scheduler slot through the actual candidate and report it copied.
-    DDSPC::Matrix slot( std::int64_t ordinal /**< [in] Slot ordinal, cycle*4+step. */,
-                        std::int64_t epoch = 1 /**< [in] Scheduler epoch. */ );
+    /// Render one scheduler slot through the actual candidate and report it copied unless skipped.
+    DDSPC::Matrix slot( std::int64_t ordinal /**< [in] Slot ordinal, cycle*q+step. */,
+                        std::int64_t epoch = 1 /**< [in] Scheduler epoch. */,
+                        bool         copy  = true /**< [in] Report the scheduler copy. */ );
 
-    /// Enable both fits and original-format Gaussian excitation on the actual WFS path.
-    void train();
+    /// Upstream ACC sample by counter, X/Y; it never depends on DM commands.
+    std::function<std::array<double, 2>( std::uint64_t )> m_source;
+
+    /// Next ACC counter to deliver.
+    std::uint64_t m_nextSample{ 0 };
+
+    /// ACC anchor of the latest assisted frame; -1 before the first.
+    std::int64_t m_frameAnchor{ -1 };
+
+    /// Deliver the r samples that arrive with the next WFS frame; return the frame's anchor.
+    std::uint64_t nextFrame();
+
+    /// Deliver ACC samples through the given counter to the DM worker's ring, as the upstream source would.
+    void deliver( std::uint64_t last /**< [in] Newest counter now available. */ );
+
+    /// Return the WFS-thread ACC base window ending at the newest delivered sample and set its anchor.
+    DDSPC::Matrix window();
+
+    /// Assisted frame: decision on the current window, then q slots, slot p after the samples of its phase.
+    /** Returns the copied modal commands, modes by q, oldest slot first. Slots listed in skip are not copied. */
+    DDSPC::Matrix advanceAssisted( const DDSPC::Matrix &y /**< [in] WFS residual. */,
+                                   int                  skip   = -1 /**< [in] Slot index not copied, or -1. */,
+                                   bool                 locked = true /**< [in] Upstream lock reported. */ );
+
+    /// Enable learning of the selected fit and original-format Gaussian excitation on the actual WFS path.
+    void train( const char *sequence = "3000,0.15,0.1" /**< [in] Exploration triples. */ );
 
     /// Freeze both independent fits without stopping correction.
     void freeze();
@@ -95,7 +145,7 @@ Controller::Controller( bool qr )
     m_calibration.m_shapes.topRows( 2 ).setIdentity();
     m_calibration.m_projection = m_calibration.m_shapes.transpose();
     m_copiedCommand            = DDSPC::Matrix::Zero( 2, 1 );
-    m_appliedSlots             = DDSPC::Matrix::Zero( 2, c_ring );
+    m_appliedSlots             = DDSPC::Matrix::Zero( 2, m_ring );
     m_commandKnown             = true;
     resetModels();
     setupINDI();
@@ -104,12 +154,72 @@ Controller::Controller( bool qr )
     m_output.configure( config, "private_aux", "private_timing", 50, 4 );
 }
 
-void Controller::train()
+void Controller::train( const char *sequence )
 {
     m_learning = m_predicting = true;
-    m_exploration             = parseExploration( "3000,0.15,0.1" );
-    for( auto mode : { DDSPC::ShadowMode::Standard, DDSPC::ShadowMode::AccelAssisted } )
-        m_models->training( mode, true );
+    m_exploration             = parseExploration( sequence );
+    applyTraining();
+}
+
+void Controller::deliver( std::uint64_t last )
+{
+    for( ; m_nextSample <= last; ++m_nextSample )
+    {
+        DDSPC::AdcSample sample;
+        sample.m_frame.m_counter = m_nextSample;
+        sample.m_generation = sample.m_segment = 1;
+        sample.m_acceleration                  = m_source( m_nextSample );
+        sample.m_acquiredNs                    = MagAOX::app::synco::monotonicNs();
+        fastSample( sample );
+    }
+}
+
+std::uint64_t Controller::nextFrame()
+{
+    m_frameAnchor = m_frameAnchor < 0 ? m_ratio - 1 : m_frameAnchor + m_ratio;
+    deliver( m_frameAnchor );
+    return m_frameAnchor;
+}
+
+DDSPC::Matrix Controller::window()
+{
+    const int length = m_settings.m_accelChannels / 2;
+    if( m_nextSample < std::uint64_t( length ) )
+        return {};
+    m_adcAnchor  = m_nextSample - 1;
+    m_adcSegment = ( std::uint64_t( 1 ) << 32 ) ^ 1;
+    DDSPC::Matrix features( 2 * length, 1 );
+    for( int j = 0; j < length; ++j )
+        for( int axis = 0; axis < 2; ++axis )
+            features( 2 * j + axis ) = m_source( m_adcAnchor - j )[axis];
+    return features;
+}
+
+DDSPC::Matrix Controller::advanceAssisted( const DDSPC::Matrix &y, int skip, bool locked )
+{
+    const auto anchor   = nextFrame();
+    const auto features = window();
+    m_windowValid       = features.size() > 0; // As acceleration() reports a complete window.
+    DDSPC::Matrix applied;
+    std::int64_t  ordinal;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_commandMutex );
+        ordinal = appliedSlots( applied );
+    }
+    REQUIRE( step( y,
+                   m_wfsCounter + 1,
+                   features,
+                   features.size() > 0 && locked,
+                   applied,
+                   ordinal,
+                   MagAOX::app::synco::monotonicNs() ) == 0 );
+    DDSPC::Matrix slots( 2, m_slots );
+    for( int p = 0; p < m_slots; ++p )
+    {
+        deliver( anchor + p * m_ratio / m_slots );
+        slots.col( p ) = slot( m_slot++, 1, p != skip );
+    }
+    return slots;
 }
 
 void Controller::freeze()
@@ -119,14 +229,16 @@ void Controller::freeze()
     REQUIRE( newCallBack_m_indiP_learning( property ) == 0 );
 }
 
-DDSPC::Matrix Controller::slot( std::int64_t ordinal, std::int64_t epoch )
+DDSPC::Matrix Controller::slot( std::int64_t ordinal, std::int64_t epoch, bool copy )
 {
     namespace synco = MagAOX::app::synco;
-    const synco::Request request{ epoch, 1, ordinal / 4, int( ordinal % 4 ), 0, 0 };
+    const synco::Request request{ epoch, 1, ordinal / m_slots, int( ordinal % m_slots ), 0, 0 };
     synco::Record        schedule{};
-    schedule[synco::steps] = 4;
+    schedule[synco::steps] = m_slots;
     std::array<float, 4> image{};
     REQUIRE( outputCandidate( request, schedule, image ) );
+    if( !copy )
+        return m_calibration.m_projection * Eigen::Map<const DDSPC::Matrix>( image.data(), 4, 1 );
     synco::CommitRecord commit{};
     commit[synco::cmdEpoch]      = epoch;
     commit[synco::cmdGeneration] = 1;
@@ -145,8 +257,8 @@ DDSPC::Matrix Controller::advance( const DDSPC::Matrix &y, const DDSPC::Matrix &
         ordinal = appliedSlots( applied );
     }
     REQUIRE( step( y, m_wfsCounter + 1, a, valid, applied, ordinal, MagAOX::app::synco::monotonicNs() ) == 0 );
-    DDSPC::Matrix slots( 2, c_slots );
-    for( int j = 0; j < c_slots; ++j )
+    DDSPC::Matrix slots( 2, m_slots );
+    for( int j = 0; j < m_slots; ++j )
         slots.col( j ) = slot( m_slot++ );
     return slots;
 }
@@ -403,64 +515,466 @@ TEST_CASE( "Operational standard DDSPC corrects without accelerometers", "[rtc-c
     REQUIRE( standard.m_updates == updates );
     REQUIRE( standard.m_ready );
     REQUIRE( assisted.m_updates == 0 );
-    REQUIRE( app.m_matchedTargets == 0 );
+    REQUIRE( app.m_multirate->status().m_updates == 0 ); // Only the selected mode learns.
     REQUIRE( residual < .25 * uncontrolled );
 }
 
-/** \brief Both independent fits train on matched WFS/request records; assisted correction uses all eight raw features.
+/// \cond RTC_TEST_SUPPORT
+namespace
+{
+/// 8-kHz plant: narrowband random vibrations the accelerometers see, a slow drift they do not, a WFS integrating q
+/// slots.
+/** Each vibration is a resonant AR(2) process driven by white noise, so its phase wanders and recent measurements carry
+ * new information. The residual of slot n is e_n = d_n + c_(n-1): the command calculated for slot n-1 acts during
+ * slot n. The accelerometers measure the vibrations' acceleration, -omega^2 x, never the DM, so their samples do not
+ * depend on commands. The true residual is used only for scoring, never by the controller.
  */
-TEST_CASE( "Operational assisted DDSPC corrects with upstream ACC features", "[rtc-controller]" )
+struct Plant
+{
+    /// One resonant vibration component.
+    struct Line
+    {
+        int    m_axis;                             ///< Mode it disturbs.
+        double m_hz;                               ///< Centre frequency.
+        double m_rms;                              ///< Stationary RMS.
+        double m_a1{ 0 }, m_a2{ 0 }, m_sigma{ 0 }; ///< AR(2) coefficients and drive.
+        double m_x1{ 0 }, m_x2{ 0 };               ///< Last two values.
+    };
+
+    double       m_accNoise; ///< ACC noise; -1 gives independent noise (no information), -2 a disconnected (zero) ACC.
+    std::mt19937 m_rng{ 17 };
+    std::normal_distribution<double>   m_unit{ 0, 1 };
+    std::vector<Line>                  m_lines{ { 0, 470, 1 }, { 0, 130, .5 }, { 1, 310, .8 } };
+    std::vector<std::array<double, 2>> m_vibration, m_acc; ///< By slot/counter, generated in order.
+    std::array<double, 2>              m_drift{};          ///< Slow WFS-only component.
+
+    /// Select the accelerometer information level.
+    explicit Plant( double accNoise /**< [in] Relative noise; negative for an independent ACC. */ )
+        : m_accNoise( accNoise )
+    {
+        const double rho = .99;
+        for( auto &line : m_lines )
+        {
+            const double w = 2 * M_PI * line.m_hz / 8000;
+            line.m_a1      = 2 * rho * std::cos( w );
+            line.m_a2      = -rho * rho;
+            const double variance =
+                ( 1 + rho * rho ) /
+                ( ( 1 - rho * rho ) * ( std::pow( 1 + rho * rho, 2 ) - 4 * rho * rho * std::pow( std::cos( w ), 2 ) ) );
+            line.m_sigma = line.m_rms / std::sqrt( variance );
+        }
+    }
+
+    /// Generate vibrations and ACC samples through slot n.
+    void generate( std::uint64_t n /**< [in] Slot/counter. */ )
+    {
+        const double reference = std::pow( 2 * M_PI * 300, 2 );
+        while( m_vibration.size() <= n )
+        {
+            std::array<double, 2> x{}, a{};
+            for( auto &line : m_lines )
+            {
+                const double value = line.m_a1 * line.m_x1 + line.m_a2 * line.m_x2 + line.m_sigma * m_unit( m_rng );
+                line.m_x2          = line.m_x1;
+                line.m_x1          = value;
+                x[line.m_axis] += value;
+                a[line.m_axis] -= std::pow( 2 * M_PI * line.m_hz, 2 ) / reference * value;
+            }
+            for( auto &axis : a )
+                axis = m_accNoise < -1.5 ? 0 : m_accNoise < 0 ? m_unit( m_rng ) : axis + m_accNoise * m_unit( m_rng );
+            m_vibration.push_back( x );
+            m_acc.push_back( a );
+        }
+    }
+
+    /// Vibration displacement at slot n.
+    std::array<double, 2> vibration( std::uint64_t n /**< [in] Slot. */ )
+    {
+        generate( n );
+        return m_vibration[n];
+    }
+
+    /// ACC sample n.
+    std::array<double, 2> acc( std::uint64_t n /**< [in] Counter. */ )
+    {
+        generate( n );
+        return m_acc[n];
+    }
+
+    /// Residual of slot n after the previous slot's command; advances the drift.
+    std::array<double, 2> residual( std::uint64_t        n /**< [in] Slot. */,
+                                    const DDSPC::Matrix &previous /**< [in] c_(n-1). */ )
+    {
+        const auto            vib = vibration( n );
+        std::array<double, 2> e;
+        for( int axis = 0; axis < 2; ++axis )
+        {
+            m_drift[axis] = .999 * m_drift[axis] + .01 * m_unit( m_rng );
+            e[axis]       = vib[axis] + m_drift[axis] + previous( axis ) + .01 * m_unit( m_rng );
+        }
+        return e;
+    }
+};
+
+/// Closed-loop result of one controller on one plant realization.
+struct Result
+{
+    double              m_residual{ 0 }, m_wfs{ 0 }, m_open{ 0 }; ///< True 8-kHz, WFS and uncontrolled variances.
+    double              m_rmse{ 0 };                              ///< Conditional future-WFS prediction RMSE.
+    std::vector<double> m_phaseRmse;                              ///< Assisted per-phase RMSE.
+    std::vector<float>  m_trace;                                  ///< Evaluation residuals, slot-major X/Y.
+};
+
+/// Train one mode on the plant, freeze it and score the evaluation frames.
+Result closedLoop( bool   assisted /**< [in] Accelerometer-assisted mode. */,
+                   double accNoise /**< [in] ACC information level. */,
+                   int    train    = 12500 /**< [in] Training frames. */,
+                   int    evaluate = 3000 /**< [in] Frozen evaluation frames. */ )
+{
+    Controller app( true );
+    app.m_settings.m_history       = 8;
+    app.m_settings.m_future        = 2;
+    app.m_settings.m_accelChannels = 16;
+    app.m_settings.m_lambda        = 100;
+    app.m_settings.m_prior         = 1e-5f;
+    app.m_mode.store( assisted ? DDSPC::ShadowMode::AccelAssisted : DDSPC::ShadowMode::Standard );
+    app.resetModels();
+    app.m_syncLocked = true;
+    Plant plant( accNoise );
+    app.m_source = [&]( std::uint64_t n ) { return plant.acc( n ); };
+    app.train( "4000,0.1,100,4000,0.1,3,4000,0.1,0.1" ); // loPredCtrl's sequence with four times the frames.
+    DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 ), y = DDSPC::Matrix::Zero( 2, 1 ), empty;
+    Result        result;
+    std::uint64_t n = 0;
+    for( int frame = 0; frame < train + evaluate; ++frame )
+    {
+        if( frame == train )
+            app.freeze();
+        const auto slots = assisted ? app.advanceAssisted( y ) : app.advance( y, empty, false );
+        y.setZero();
+        for( int p = 0; p < slots.cols(); ++p, ++n )
+        {
+            const auto e = plant.residual( n, command );
+            command      = slots.col( p );
+            for( int axis = 0; axis < 2; ++axis )
+                y( axis ) += e[axis] / slots.cols();
+            if( frame >= train )
+            {
+                const auto open = plant.vibration( n );
+                result.m_residual += e[0] * e[0] + e[1] * e[1];
+                result.m_open += open[0] * open[0] + open[1] * open[1];
+                result.m_trace.insert( result.m_trace.end(), { float( e[0] ), float( e[1] ) } );
+            }
+        }
+        if( frame >= train )
+            result.m_wfs += y.squaredNorm();
+    }
+    const auto slots = double( evaluate ) * app.m_slots;
+    result.m_residual /= slots;
+    result.m_open /= slots;
+    result.m_wfs /= evaluate;
+    if( assisted )
+    {
+        result.m_phaseRmse = app.m_multirate->status().m_rmse;
+        result.m_rmse      = result.m_phaseRmse.back();
+        REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates == 0 );
+    }
+    else
+    {
+        const auto status = app.m_models->status( DDSPC::ShadowMode::Standard );
+        REQUIRE( status.m_ready );
+        result.m_rmse = status.m_rmse;
+        REQUIRE( app.m_multirate->status().m_updates == 0 );
+    }
+    return result;
+}
+} // namespace
+/// \endcond
+
+/** \brief T9: with strong, weak, zero (independent noise) and disconnected ACC, 8-kHz assisted DDSPC is compared with
+ * standard DDSPC trained and evaluated on the same plant realization.
+ *
+ * Writes the evaluation residuals to $DDSPC_MULTIRATE_TRACE/<case>_<mode>.f32 when set, for
+ * tests/multirate_report.py (PSDs).
+ */
+TEST_CASE( "Assisted 8-kHz DDSPC against standard DDSPC by ACC information", "[rtc-controller][multirate-sim]" )
 {
     // clang-format off
 #ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
-    MagAOX::app::loPredCtrlAcc_operational::step;
-    DDSPC::ShadowController::training;
+    MagAOX::app::loPredCtrlAcc_operational::stepAssisted;
+    MagAOX::app::loPredCtrlAcc_operational::assistedCandidate;
 #endif
     // clang-format on
-    const bool qr = GENERATE( false, true );
-    Controller app( qr );
-    app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
-    app.train();
-    DDSPC::Matrix                   command = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), a( 8, 1 );
-    std::mt19937                    rng( 42 );
-    std::normal_distribution<float> noise( 0, .03 );
-    double                          residual = 0, uncontrolled = 0, spread = 0;
-    for( int n = 0; n < 6000; ++n )
+    const auto [name, noise] = GENERATE( std::pair<const char *, double>{ "strong", .02 },
+                                         std::pair<const char *, double>{ "weak", 1. },
+                                         std::pair<const char *, double>{ "zero", -1. },
+                                         std::pair<const char *, double>{ "disconnected", -2. } );
+    const auto standard = closedLoop( false, noise ), assisted = closedLoop( true, noise );
+    std::printf( "T9 %-6s: residual var standard %.4f assisted %.4f (open %.4f); WFS var %.4f / %.4f; "
+                 "prediction RMSE standard %.4f assisted phases",
+                 name,
+                 standard.m_residual,
+                 assisted.m_residual,
+                 standard.m_open,
+                 standard.m_wfs,
+                 assisted.m_wfs,
+                 standard.m_rmse );
+    for( auto rmse : assisted.m_phaseRmse )
+        std::printf( " %.4f", rmse );
+    std::printf( "\n" );
+    if( const char *directory = std::getenv( "DDSPC_MULTIRATE_TRACE" ) )
+        for( const auto *result : { &standard, &assisted } )
+            std::ofstream( std::string( directory ) + "/" + name + ( result == &standard ? "_standard" : "_assisted" ) +
+                               ".f32",
+                           std::ios::binary )
+                .write( reinterpret_cast<const char *>( result->m_trace.data() ), result->m_trace.size() * 4 );
+    REQUIRE( standard.m_residual < standard.m_open );
+    if( noise >= 0 && noise < .1 )
     {
-        for( int sample = 0; sample < 4; ++sample )
-        {
-            a( 2 * sample )     = std::sin( .09 * ( n + 1 - sample * .25 ) );
-            a( 2 * sample + 1 ) = std::cos( .13 * ( n + 1 - sample * .25 ) );
-        }
-        DDSPC::Matrix disturbance( 2, 1 );
-        disturbance << std::sin( .09 * n ) + noise( rng ), .8 * std::cos( .13 * n ) + noise( rng );
-        y = disturbance + .8f * command;
-        if( n == 3000 )
-            app.freeze();
-        const auto slots = app.advance( y, a, true );
-        REQUIRE( slots.allFinite() );
-        command = response( slots ) / .8f;
-        if( n >= 4000 )
-        {
-            residual += y.squaredNorm();
-            uncontrolled += disturbance.squaredNorm();
-            // Frozen, unprobed assisted plans still give each 8-kHz slot its own command.
-            spread += ( slots.colwise() - slots.rowwise().mean() ).squaredNorm();
-        }
+        REQUIRE( assisted.m_residual < .5 * standard.m_residual );
+        REQUIRE( assisted.m_rmse < .5 * standard.m_rmse );
+        REQUIRE( assisted.m_phaseRmse.back() < assisted.m_phaseRmse.front() ); // Later phases use newer samples.
     }
-    INFO( "assisted residual ratio " << std::sqrt( residual / uncontrolled ) << " slot spread " << spread );
-    REQUIRE( spread > 1e-3 * residual );
-    REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates > 2900 );
-    REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_updates > 2900 );
-    REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_ready );
-    REQUIRE( app.m_matchedTargets > 5000 );
-    REQUIRE( residual < .25 * uncontrolled );
-    const auto before = app.m_models->prediction_matrix( DDSPC::ShadowMode::Standard );
-    app.advance( y, {}, false );
-    REQUIRE( ( before - app.m_models->prediction_matrix( DDSPC::ShadowMode::Standard ) ).norm() == 0 );
+    else if( noise > 0 )
+        REQUIRE( assisted.m_residual < .8 * standard.m_residual );
+    else // No information: the extra regressors may cost estimation noise only.
+        REQUIRE( assisted.m_residual < 1.2 * standard.m_residual );
 }
 
-/** \brief Replay the supplied RTC dimensions, prior, gain and three calibration stages on both independent fits. */
+/** \brief T3/T4/T6/T7/T8: one RLS update per WFS frame, one calculation per slot, the newest ACC sample acts on the
+ * next slot, and executed (not planned) commands form the prefix.
+ */
+TEST_CASE( "Assisted DDSPC recalculates every DM slot from the newest ACC sample", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::assistedCandidate;
+    MagAOX::app::loPredCtrlAcc_operational::fastSamples;
+    DDSPC::MultirateDDSPC::command;
+#endif
+    // clang-format on
+    Controller app( true );
+    app.m_settings.m_history       = 6;
+    app.m_settings.m_accelChannels = 16;
+    app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
+    app.resetModels();
+    app.m_syncLocked = true;
+    Plant plant( .02 );
+    app.m_source = [&]( std::uint64_t n ) { return plant.acc( n ); };
+    app.train( "1500,0.1,0.1" );
+    DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 ), y = DDSPC::Matrix::Zero( 2, 1 );
+    std::uint64_t n     = 0;
+    auto          frame = [&]( int skip = -1 )
+    {
+        const auto slots = app.advanceAssisted( y, skip );
+        y.setZero();
+        for( int p = 0; p < slots.cols(); ++p, ++n )
+        {
+            const auto e = plant.residual( n, command );
+            command      = slots.col( p );
+            for( int axis = 0; axis < 2; ++axis )
+                y( axis ) += e[axis] / slots.cols();
+        }
+        return slots;
+    };
+    for( int i = 0; i < 1000; ++i )
+        frame();
+    // T3: one shared update per genuine WFS frame and one prediction per DM slot (four per frame).
+    const auto updates = app.m_multirate->status().m_updates, predictions = app.m_fastStats.m_predictions;
+    for( int i = 0; i < 100; ++i )
+        frame();
+    REQUIRE( app.m_multirate->status().m_ready );
+    REQUIRE( app.m_multirate->status().m_updates - updates == 100 );
+    REQUIRE( app.m_fastStats.m_predictions - predictions == 400 );
+    REQUIRE( app.m_fastStats.m_phase[0] > 0 );
+    REQUIRE( app.m_fastStats.m_phase[3] == app.m_fastStats.m_phase[0] ); // k = p on every slot.
+    app.freeze();
+    app.m_exploration.clear();
+    for( int i = 0; i < 20; ++i )
+    {
+        const auto slots = frame();
+        for( int p = 1; p < 4; ++p ) // Distinct calculations, not a held or replayed plan.
+            REQUIRE( ( slots.col( p ) - slots.col( p - 1 ) ).norm() > 1e-6 );
+    }
+
+    // T4: a sample arriving between WFS frames changes the next slot by exactly its learned gain.
+    namespace synco        = MagAOX::app::synco;
+    const auto    anchor   = app.nextFrame();
+    const auto    features = app.window();
+    DDSPC::Matrix applied;
+    std::int64_t  ordinal;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_commandMutex );
+        ordinal = app.appliedSlots( applied );
+    }
+    REQUIRE( app.step( y, app.m_wfsCounter + 1, features, true, applied, ordinal, 0 ) == 0 );
+    const auto slot0 = app.slot( app.m_slot++ );
+    app.deliver( anchor + 1 );
+    const auto slot1 = app.slot( app.m_slot++ );
+    app.deliver( anchor + 2 );
+    const auto before = app.slot( app.m_slot, 1, false );
+    auto      &sample = app.m_fastSamples[( anchor + 2 ) % app.m_fastSamples.size()];
+    REQUIRE( sample.m_frame.m_counter == anchor + 2 );
+    sample.m_acceleration[0] += .5;
+    const auto  after = app.slot( app.m_slot, 1, false );
+    const auto  s0    = app.m_multirate->config().state( 0 );
+    const auto &gain  = app.m_gainSets[app.m_gainFront].m_slot[2 * 4 + 2];
+    INFO( "slot 2 change " << ( after - before ).transpose() );
+    for( int mode = 0; mode < 2; ++mode )
+        REQUIRE( after( mode ) - before( mode ) == Approx( .5 * gain( mode, s0 + 2 ) ).margin( 1e-5 ) );
+    REQUIRE( ( after - before ).norm() > 1e-4 );
+    // Earlier slots of the frame were calculated before the sample existed (k = 0, 1): rendering is causal.
+    REQUIRE( ( slot1 - slot0 ).norm() > 0 );
+
+    // T6: slot 2 is not copied; slot 3's executed prefix holds the retained slot-1 copy, not the plan.
+    sample.m_acceleration[0] -= .5;
+    app.slot( app.m_slot++, 1, false ); // Rendered but never copied.
+    app.deliver( anchor + 3 );
+    app.slot( app.m_slot++ );
+    const auto &prefix = app.m_fastPrefix; // Newest first: slot 2 (retained slot-1 copy), slot 1, slot 0.
+    for( int mode = 0; mode < 2; ++mode )
+    {
+        REQUIRE( prefix[mode] == Approx( slot1( mode ) ).margin( 1e-6 ) );
+        REQUIRE( prefix[2 + mode] == Approx( slot1( mode ) ).margin( 1e-6 ) );
+        REQUIRE( prefix[4 + mode] == Approx( slot0( mode ) ).margin( 1e-6 ) );
+    }
+
+    // T7: a fifth slot before the next WFS frame holds the last command.
+    const auto holds = app.m_fastStats.m_holds;
+    const auto last  = app.slot( app.m_slot, 1, false );
+    REQUIRE( app.m_fastStats.m_holds == holds + 1 );
+
+    // T8: a late ACC sample (k < p) uses the matching gain and is counted.
+    frame();
+    const auto lagging = app.m_fastStats.m_lagging;
+    app.nextFrame();
+    const auto features2 = app.window();
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_commandMutex );
+        ordinal = app.appliedSlots( applied );
+    }
+    REQUIRE( app.step( y, app.m_wfsCounter + 1, features2, true, applied, ordinal, 0 ) == 0 );
+    app.slot( app.m_slot++ );
+    app.slot( app.m_slot++ ); // Sample anchor+1 has not arrived.
+    REQUIRE( app.m_fastStats.m_lagging == lagging + 1 );
+    REQUIRE( last.allFinite() );
+}
+
+/** \brief assisted_qualification names every failing condition and the upstream values behind it. */
+TEST_CASE( "Assisted qualification reports why assistance is blocked", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::setCallBack_m_indiP_sync;
+    MagAOX::app::loPredCtrlAcc_operational::appLogic;
+#endif
+    // clang-format on
+    Controller app( true );
+    app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
+    app.m_indiP_sync = pcf::IndiProperty( pcf::IndiProperty::Number );
+    app.m_indiP_sync.setDevice( "acc000" );
+    app.m_indiP_sync.setName( "timingDiag" );
+    auto report = app.m_indiP_sync;
+    for( const auto &[name, value] : std::vector<std::pair<const char *, double>>{
+             { "mode_code", 1 }, { "delay_lock", 0 }, { "delay_phase_error_us", 0 }, { "read_latency_error_us", 52 } } )
+        report.add( pcf::IndiElement( name, value ) );
+    REQUIRE( app.setCallBack_m_indiP_sync( report ) == 0 );
+    REQUIRE_FALSE( app.m_syncLocked );
+    REQUIRE( app.appLogic() == 0 );
+    const auto blockers = app.m_indiP_qualification["blockers"].get<std::string>();
+    INFO( blockers );
+    REQUIRE( blockers.find( "acc000.timingDiag.delay_lock=0" ) != std::string::npos );
+    REQUIRE( blockers.find( "mode_code" ) == std::string::npos );
+    REQUIRE( blockers.find( "adc_disabled" ) != std::string::npos );
+    REQUIRE( blockers.find( "model_untrained_0_of_" ) != std::string::npos );
+    REQUIRE( app.m_indiP_qualification["upstream_read_latency_error_us"].get<std::string>() == "52.0" );
+    REQUIRE( app.m_indiP_qualification["diagnostic_mode"].get<std::string>() == "off" );
+    REQUIRE( app.m_indiP_control["assisted_state"].get<std::string>() == blockers.substr( 0, blockers.find( ',' ) ) );
+    report["delay_lock"].set( 1 );
+    REQUIRE( app.setCallBack_m_indiP_sync( report ) == 0 );
+    REQUIRE( app.m_syncLocked );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_indiP_qualification["blockers"].get<std::string>().find( "delay_lock" ) == std::string::npos );
+}
+
+/** \brief The default-off diagnostic mode evaluates and trains the assisted fit without upstream lock, never qualifies
+ * output, and bars a fit trained without lock from prediction until reset.
+ */
+TEST_CASE( "Assisted diagnostic mode never qualifies output without upstream lock", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::stepAssisted;
+    MagAOX::app::loPredCtrlAcc_operational::sensorHistory;
+    MagAOX::app::loPredCtrlAcc_operational::outputValid;
+#endif
+    // clang-format on
+    Controller app( true );
+    app.m_settings.m_history       = 6;
+    app.m_settings.m_accelChannels = 16;
+    app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
+    app.resetModels();
+    Plant plant( .02 );
+    app.m_source          = [&]( std::uint64_t n ) { return plant.acc( n ); };
+    DDSPC::Matrix y       = DDSPC::Matrix::Zero( 2, 1 );
+    DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 );
+    std::uint64_t n       = 0;
+    auto          frame   = [&]( bool locked )
+    {
+        const auto slots = app.advanceAssisted( y, -1, locked );
+        y.setZero();
+        for( int p = 0; p < slots.cols(); ++p, ++n )
+        {
+            const auto e = plant.residual( n, command );
+            command      = slots.col( p );
+            for( int axis = 0; axis < 2; ++axis )
+                y( axis ) += e[axis] / slots.cols();
+        }
+    };
+    // Without the configuration, unlocked frames never reach the assisted learner.
+    app.train( "300,0.1,0.1" );
+    for( int i = 0; i < 200; ++i )
+        frame( false );
+    REQUIRE( app.m_multirate->status().m_updates == 0 );
+    REQUIRE_FALSE( app.m_unlockedTraining );
+
+    // Evaluation of a locked-trained, frozen fit continues without lock and without contaminating it.
+    app.m_syncLocked = true;
+    app.train( "1000,0.1,0.1" );
+    for( int i = 0; i < 1200; ++i )
+        frame( true );
+    REQUIRE( app.m_multirate->status().m_ready );
+    app.freeze();
+    app.m_syncLocked         = false;
+    app.m_assistedDiagnostic = true;
+    const auto scored        = app.m_multirate->status().m_scored.back();
+    for( int i = 0; i < 50; ++i )
+        frame( false );
+    REQUIRE( app.m_multirate->status().m_scored.back() > scored );
+    REQUIRE_FALSE( app.m_unlockedTraining );
+    REQUIRE_FALSE( app.outputValid() ); // Unlocked assisted output is never qualified.
+
+    // Learning without lock is allowed in the diagnostic mode, but the fit cannot then predict until reset.
+    const auto updates = app.m_multirate->status().m_updates;
+    auto       learn   = app.m_indiP_learning;
+    learn["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_learning( learn ) == 0 );
+    for( int i = 0; i < 20; ++i )
+        frame( false );
+    REQUIRE( app.m_multirate->status().m_updates > updates );
+    REQUIRE( app.m_unlockedTraining );
+    app.m_syncLocked = true;
+    frame( true );
+    REQUIRE_FALSE( app.outputValid() );
+    auto predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+    app.m_predicting = false;
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) < 0 );
+    app.resetModels();
+    REQUIRE_FALSE( app.m_unlockedTraining );
+}
+
+/** \brief The supplied RTC dimensions, prior, gain and calibration stages train each mode while it is selected. */
 TEST_CASE( "Operational RTC settings produce finite standard and assisted fits", "[rtc-controller]" )
 {
     // clang-format off
@@ -469,78 +983,205 @@ TEST_CASE( "Operational RTC settings produce finite standard and assisted fits",
     MagAOX::app::loPredCtrlAcc_operational::step;
 #endif
     // clang-format on
-    Controller app( true );
-    app.m_settings.m_history       = 15;
-    app.m_settings.m_future        = 3;
-    app.m_settings.m_accelChannels = 40;
-    app.m_settings.m_lambda        = 100;
-    app.m_settings.m_prior         = 1e-5f;
-    app.m_gain                     = .3f;
-    app.resetModels();
-    app.train();
-    app.m_exploration     = app.parseExploration( "1000,0.1,100,1000,0.1,3,1000,0.1,0.1" );
-    DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), a( 40, 1 );
-    for( int n = 0; n < 3100; ++n )
+    for( const bool assisted : { false, true } )
     {
-        for( int j = 0; j < 20; ++j )
+        Controller app( true );
+        app.m_settings.m_history       = 15;
+        app.m_settings.m_future        = 3;
+        app.m_settings.m_accelChannels = 40;
+        app.m_settings.m_lambda        = 100;
+        app.m_settings.m_prior         = 1e-5f;
+        app.m_gain                     = .3f;
+        app.m_mode.store( assisted ? DDSPC::ShadowMode::AccelAssisted : DDSPC::ShadowMode::Standard );
+        app.resetModels();
+        app.m_syncLocked = true;
+        Plant plant( .02 );
+        app.m_source = [&]( std::uint64_t n ) { return plant.acc( n ); };
+        app.train( "1000,0.1,100,1000,0.1,3,1000,0.1,0.1" );
+        DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), empty;
+        for( int n = 0; n < 3100; ++n )
         {
-            a( 2 * j )     = std::sin( .09 * ( n + 1 - j * .25 ) );
-            a( 2 * j + 1 ) = std::cos( .13 * ( n + 1 - j * .25 ) );
+            y << std::sin( .09 * n ), std::cos( .13 * n );
+            y += .8f * command;
+            command = response( assisted ? app.advanceAssisted( y ) : app.advance( y, empty, false ) ) / .8f;
         }
-        y << std::sin( .09 * n ), std::cos( .13 * n );
-        y += .8f * command;
-        command = response( app.advance( y, a, true ) ) / .8f;
+        REQUIRE( app.m_exploration.empty() );
+        if( assisted )
+        {
+            REQUIRE( app.m_multirate->status().m_ready );
+            REQUIRE( app.m_gainSets[app.m_gainFront].m_ready );
+        }
+        else
+            REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready );
     }
-    REQUIRE( app.m_exploration.empty() );
-    REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready );
-    REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_ready );
-    REQUIRE( app.m_matchedTargets > 10000 );
 }
 
-/** \brief Time WFS decisions at the RTC dimensions while learning and frozen (hidden benchmark). */
+/** \brief B1 (hidden benchmark): RTC dimensions, standard and assisted, learning and frozen; then the WFS thread
+ * learning at 2 kHz while the DM worker calculates every 125-us slot at cutoff minus the render lead.
+ */
 TEST_CASE( "Operational RTC decision time", "[.][rtc-benchmark]" )
 {
-    Controller app( true );
-    app.m_settings.m_history       = 15;
-    app.m_settings.m_future        = 3;
-    app.m_settings.m_accelChannels = 40;
-    app.m_settings.m_lambda        = 100;
-    app.m_settings.m_prior         = 1e-5f;
-    app.m_gain                     = .3f;
-    app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
-    app.resetModels();
-    app.train();
-    app.m_exploration           = app.parseExploration( "2000,0.1,100" );
-    DDSPC::Matrix       command = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), a( 40, 1 );
-    std::vector<double> learning, frozen;
-    for( int n = 0; n < 4000; ++n )
+    using clock    = std::chrono::steady_clock;
+    auto configure = []( Controller &app, bool assisted )
     {
-        for( int j = 0; j < 20; ++j )
+        app.m_settings.m_history       = 15;
+        app.m_settings.m_future        = 3;
+        app.m_settings.m_accelChannels = 40;
+        app.m_settings.m_lambda        = 100;
+        app.m_settings.m_prior         = 1e-5f;
+        app.m_gain                     = .3f;
+        app.m_mode.store( assisted ? DDSPC::ShadowMode::AccelAssisted : DDSPC::ShadowMode::Standard );
+        app.resetModels();
+        app.m_syncLocked = true;
+    };
+    auto report = []( const char *name, std::vector<double> &times )
+    {
+        std::sort( times.begin(), times.end() );
+        std::printf( "%-34s n %6zu mean %7.1f us p50 %7.1f p99 %7.1f max %7.1f\n",
+                     name,
+                     times.size(),
+                     std::accumulate( times.begin(), times.end(), 0.0 ) / times.size(),
+                     times[times.size() / 2],
+                     times[times.size() * 99 / 100],
+                     times.back() );
+    };
+    for( const bool assisted : { false, true } )
+    {
+        Controller app( true );
+        configure( app, assisted );
+        Plant plant( .02 );
+        app.m_source = [&]( std::uint64_t n ) { return plant.acc( n ); };
+        app.train( "2000,0.1,100" );
+        DDSPC::Matrix       command = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), empty;
+        std::vector<double> learning, frozen, slots;
+        for( int n = 0; n < 4000; ++n )
         {
-            a( 2 * j )     = std::sin( .09 * ( n + 1 - j * .25 ) );
-            a( 2 * j + 1 ) = std::cos( .13 * ( n + 1 - j * .25 ) );
+            y << std::sin( .09 * n ), std::cos( .13 * n );
+            y += .8f * command;
+            if( n == 3000 )
+                app.freeze();
+            const auto before = app.m_learnUs.m_count;
+            const auto start  = clock::now();
+            const auto out    = assisted ? app.advanceAssisted( y ) : app.advance( y, empty, false );
+            const auto us     = std::chrono::duration<double, std::micro>( clock::now() - start ).count();
+            command           = response( out ) / .8f;
+            if( n >= 500 )
+                ( n < 3000 ? learning : frozen ).push_back( assisted ? app.m_learnUs.m_max : us );
+            if( assisted && app.m_learnUs.m_count > before )
+                app.m_learnUs = {};
         }
-        y << std::sin( .09 * n ), std::cos( .13 * n );
-        y += .8f * command;
-        if( n == 3000 )
-            app.freeze();
-        const auto start = std::chrono::steady_clock::now();
-        const auto slots = app.advance( y, a, true );
-        const auto us = std::chrono::duration<double, std::micro>( std::chrono::steady_clock::now() - start ).count();
-        command       = response( slots ) / .8f;
-        if( n >= 500 )
-            ( n < 3000 ? learning : frozen ).push_back( us );
+        report( assisted ? "assisted WFS frame, learning" : "standard decision+4 slots, learning", learning );
+        report( assisted ? "assisted WFS frame, frozen" : "standard decision+4 slots, frozen", frozen );
+        if( assisted )
+        {
+            const auto &compute = app.m_fastStats.m_compute;
+            std::printf( "%-34s n %6llu mean %7.2f us p99 %7.1f max %7.1f\n",
+                         "assisted slot calculation",
+                         (unsigned long long)compute.m_count,
+                         compute.mean(),
+                         compute.quantile( .99 ),
+                         compute.m_max );
+        }
     }
-    for( auto *times : { &learning, &frozen } )
+
+    // Concurrent: WFS thread at 2 kHz with learning; DM worker on every 125-us slot with real cutoffs.
+    namespace synco = MagAOX::app::synco;
+    Controller app( true );
+    configure( app, true );
+    Plant plant( .02 );
+    for( std::uint64_t n = 0; n < 40000; ++n )
+        plant.acc( n ); // Pre-generated: both threads only read the samples.
+    app.m_source = [&]( std::uint64_t n ) { return plant.m_acc[n]; };
+    app.train( "6000,0.1,100" );
+    const int frames     = 8000;
+    auto      sleepUntil = []( std::int64_t ns )
     {
-        std::sort( times->begin(), times->end() );
-        std::printf( "%s decision+4 slots: mean %.1f us p99 %.1f us max %.1f us\n",
-                     times == &learning ? "learning" : "frozen  ",
-                     std::accumulate( times->begin(), times->end(), 0.0 ) / times->size(),
-                     ( *times )[times->size() * 99 / 100],
-                     times->back() );
+        if( const auto wait = ns - synco::monotonicNs(); wait > 100000 )
+            std::this_thread::sleep_for( std::chrono::nanoseconds( wait - 100000 ) );
+        while( synco::monotonicNs() < ns )
+        {
+        }
+    };
+    const std::int64_t  t0 = synco::monotonicNs() + 2000000;
+    std::atomic<bool>   failed{ false };
+    std::vector<double> learn, margin;
+    std::thread         wfs(
+        [&]
+        {
+            DDSPC::Matrix y( 2, 1 ), features( 40, 1 ), applied;
+            for( int i = 1; i < frames; ++i )
+            {
+                sleepUntil( t0 + i * 500000 );
+                const std::uint64_t anchor = 4 * i;
+                for( int j = 0; j < 20; ++j )
+                    for( int axis = 0; axis < 2; ++axis )
+                        features( 2 * j + axis ) = plant.m_acc[anchor - j][axis];
+                std::int64_t ordinal;
+                { //mutex scope
+                    std::lock_guard<std::mutex> lock( app.m_commandMutex );
+                    ordinal = app.appliedSlots( applied );
+                }
+                y << std::sin( .09 * i ), std::cos( .13 * i );
+                if( applied.cols() == 4 )
+                    y += response( applied ); // The previous frame's copied slots act on this measurement.
+                const auto start = synco::monotonicNs();
+                {
+                    std::lock_guard<std::mutex> lock( app.m_modelMutex ); // Serializes the anchor with step().
+                    app.m_adcAnchor  = anchor;
+                    app.m_adcSegment = ( std::uint64_t( 1 ) << 32 ) ^ 1;
+                }
+                if( app.step( y, i, features, true, applied, ordinal, start ) != 0 )
+                    failed = true;
+                learn.push_back( ( synco::monotonicNs() - start ) / 1000. );
+            }
+        } );
+    std::uint64_t missed = 0;
+    for( std::int64_t n = 4; n < 4 * frames; ++n )
+    {
+        const std::int64_t cutoff = t0 + n * 125000 + 55000;
+        app.deliver( n ); // ACC sample n is available at the start of slot n.
+        synco::Request request{ 1, 1, n / 4, int( n % 4 ), cutoff + 70000, cutoff };
+        synco::Record  schedule{};
+        schedule[synco::steps] = 4;
+        std::array<float, 4> image{};
+        app.outputCandidate( request, schedule, image );
+        const auto done = synco::monotonicNs();
+        margin.push_back( ( cutoff - done ) / 1000. );
+        missed += done > cutoff;
+        sleepUntil( cutoff );
+        synco::CommitRecord commit{};
+        commit[synco::cmdEpoch] = commit[synco::cmdGeneration] = 1;
+        commit[synco::cmdCycle]                                = n / 4;
+        commit[synco::cmdStep]                                 = n % 4;
+        app.copied( commit, image );
     }
-    REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_ready );
+    wfs.join();
+    REQUIRE_FALSE( failed );
+    report( "concurrent WFS frame (learning)", learn );
+    std::sort( margin.begin(), margin.end() );
+    std::printf( "concurrent slots %zu: missed cutoffs %llu, margin min %.1f us p1 %.1f us median %.1f us\n",
+                 margin.size(),
+                 (unsigned long long)missed,
+                 margin.front(),
+                 margin[margin.size() / 100],
+                 margin[margin.size() / 2] );
+    const auto &stats = app.m_fastStats;
+    std::printf( "concurrent predictions %llu holds %llu lagging %llu; slot calc mean %.2f us p99 %.1f max %.1f; "
+                 "ACC age at calc mean %.1f us, at application mean %.1f us; learning updates %llu\n",
+                 (unsigned long long)stats.m_predictions,
+                 (unsigned long long)stats.m_holds,
+                 (unsigned long long)stats.m_lagging,
+                 stats.m_compute.mean(),
+                 stats.m_compute.quantile( .99 ),
+                 stats.m_compute.m_max,
+                 stats.m_ageCalc.mean(),
+                 stats.m_ageApply.mean(),
+                 (unsigned long long)app.m_multirate->status().m_updates );
+    std::printf( "concurrent history breaks %llu, slot shifts %llu, ACC anomalies %llu\n",
+                 (unsigned long long)app.m_multirate->status().m_breaks,
+                 (unsigned long long)app.m_slotShifts,
+                 (unsigned long long)stats.m_anomalies );
+    REQUIRE( app.m_multirate->status().m_ready );
 }
 
 /** \brief Startup runs the producer loop on the framework DM worker; shutdown joins it after the bounded removal wait.

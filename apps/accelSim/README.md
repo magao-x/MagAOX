@@ -579,9 +579,12 @@ reflect a phase-referenced sampling clock rather than one ADC read per semaphore
 - `delay_applied_us` / `synchro_delay_us`: reference phase including the remaining
   offset error of the scheduled accelerometer clock, wrapped over a WFS period.
   `delay_phase_error_us` retains the positive half-period boundary. `delay_lock`
-  requires a fresh reference and the existing absolute/fractional phase thresholds;
-  excessive acquisition lateness also clears it. Lock is not an independent
-  measurement of hardware/WFS latency.
+  requires a fresh reference, and the existing absolute/fractional thresholds must
+  hold for both the phase error and the largest acquisition lateness over the
+  current and previous WFS periods. It is evaluated the same way at every reference
+  and acquisition, so a reference cannot re-assert lock over late samples, and one
+  complete on-time WFS period restores it. Lock is not an independent measurement
+  of hardware/WFS latency.
 - `delay_budget_us` / `delay_capped`: available per-accelerometer-interval phase
   correction and whether correction remains beyond that budget.
 - `avg_read_latency_us`: smoothed arrival-to-sample latency for selected WFS
@@ -597,7 +600,17 @@ reflect a phase-referenced sampling clock rather than one ADC read per semaphore
 
 The additional read-only `sim_diag` contains `skipped_publications`,
 `discontinuities`, `late_samples`, `max_lateness_us`, `source_period_ratio`, and
-`clip_x_low`, `clip_x_high`, `clip_y_low`, `clip_y_high`. Clipping counts actual
+`clip_x_low`, `clip_x_high`, `clip_y_low`, `clip_y_high`. It also explains
+`delay_lock`: `lateness_last_us`, `lateness_window_max_us` (the value the lock
+uses), `lock_phase_ok`, `lock_timing_ok`, and the acquisition thread's
+`acq_timer_slack_ns`, `acq_sched_policy` (1 is SCHED_FIFO) and `acq_priority`.
+
+Synchronized acquisition reaches each deadline through a `sem_timedwait` timeout.
+Futex timeouts carry the thread's timer slack, 50 us by default, and older kernels
+apply it to SCHED_FIFO threads too, so every sample was taken about 50 us late
+(`read_latency_error_us` about 52 us), just over the 50-us lock threshold. The
+acquisition thread now sets its timer slack to 1 ns at startup;
+`acq_timer_slack_ns` should read 1. Clipping counts actual
 clamps after rounding in published measurements, not nodes generated ahead;
 values rounding naturally onto a rail are not clamp events. Counters are retained
 over FPS changes. A shutdown log summarizes timing and clipping totals. A

@@ -30,6 +30,12 @@ class OperationalConfigTest(unittest.TestCase):
         self.assertEqual(config['dm']['channelName'], 'dm01disp09_aux')
         self.assertEqual(config.getint('dm', 'threadPrio'), 20)
         self.assertEqual(config.getfloat('syncopation', 'writeLeadUs'), 125)
+        # Assisted slots render at cutoff - renderLeadUs and publish at once; ratios match 8 kHz ACC/DM and 2 kHz WFS.
+        self.assertLessEqual(config.getfloat('dm', 'renderLeadUs'), config.getfloat('syncopation', 'writeLeadUs'))
+        self.assertEqual(config.getint('parameters', 'dm_slots'), 4)
+        self.assertEqual(config.getint('parameters', 'acc_ratio'), 4)
+        self.assertEqual(config.getfloat('parameters', 'ripple'), 10)
+        self.assertFalse(config.getboolean('parameters', 'assisted_diagnostic'))
         self.assertEqual(config['shmimMonitor']['shmimName'], 'aol1_modevalWFS')
         self.assertEqual(config['syncopation']['timingStream'], 'dmtweeter_synco_timing')
         simulator = configuration(ROOT / 'apps/accelSim/acc000.conf')

@@ -2,10 +2,10 @@
 
 The normal build runs closed-loop DDSPC on the existing WFS monitor (`aol1_modevalWFS`, 2 kHz). It publishes a full calibrated surface through the syncopation producer to its own auxiliary channel, `dm.channelName`.
 
-- **Standard mode** follows loPredCtrl. It is single-rate: one command per WFS frame, held on that frame's four DM slots. It does not use the accelerometers and runs with `adc.enabled=false`.
-- **Assisted mode** adds the upstream-synchronized 8 kHz X/Y samples available at each WFS decision. It plans four distinct slot commands per frame (`ShadowConfig::m_assistedCommandSlots = 4`), one per 8 kHz DM slot.
+- **Standard mode** follows loPredCtrl and is unchanged: one decision and RLS update per WFS frame on the WFS thread, held on that frame's four DM slots. It does not use the accelerometers and runs with `adc.enabled=false`.
+- **Assisted mode** recalculates every 8 kHz DM slot on the DM worker from the newest upstream ACC sample, the newest WFS frame and the commands the scheduler actually copied. Learning is one shared QR-RLS update per genuine WFS frame (2 kHz) on the WFS thread; the four phase predictors and their slot gains reach the worker through a triple buffer, so the worker never waits for learning. The formulation and its validation are in `agents/plans/2026-11/ddspc-multirate-8khz-assisted.md`.
 
-Both models learn only from genuine WFS measurements and from the commands the scheduler actually copied from this channel.
+Each model trains only while its mode is selected, so the standard and assisted fits are independent experiments. Both learn only from genuine WFS measurements and the commands the scheduler copied from this channel.
 
 ## DM channel, worker and timing
 
@@ -14,16 +14,29 @@ Both models learn only from genuine WFS measurements and from the commands the s
 | `dm.channelName` | `dm01disp09_aux` | One producer per scheduler destination. The `<aux>.producer` lock is exclusive, and synco copies the whole image. `acc000` owns `dm01disp10_aux`, so the disturbance and the correction must use different destinations; dmcomb sums them. The code accepts any `*_aux` name. |
 | `dm.threadPrio` | `20` | Dedicated producer worker started by `MagAOXApp::threadStart`, as in accelSim and dmSpeckle. It runs below the scheduler's priority 30. |
 | `dm.cpuset` | `spare29` | Dedicated development core (CPU 29). acc000 uses `spare30` and `spare31`. |
-| `shmimMonitor.cpuset` | `spare28` | Runs the WFS decision and RLS/QR learning, about 140 µs per frame while learning on a development Mac. |
-| `syncopation.writeLeadUs` | `125` | The worker renders a slot as soon as the slot is eligible. A 125 µs lead commits it at once, which maximizes the margin before the cutoff. |
+| `shmimMonitor.cpuset` | `spare28` | Runs the WFS decisions and all learning. Assisted learning takes about 160 µs per 500 µs frame on a development Mac (one 212-column QR update, four phase solutions, 16 slot gains). |
+| `dm.renderLeadUs` | `40` | Assisted only. Each slot is calculated at `cutoff - renderLeadUs` with the newest ACC sample; the calculation takes about 1 µs. Standard slots are still rendered on eligibility. |
+| `syncopation.writeLeadUs` | `125` | Publishes as soon as a slot is rendered. |
+| `parameters.dm_slots`, `acc_ratio` | `4`, `4` | DM slots and ACC samples per WFS frame. Other integer ratios are supported (1–16) when the scheduler and upstream sampling provide them. |
+| `parameters.ripple` | `10` | Assisted only; see below. |
 
 The worker polls every 10 µs and checks the next slot immediately after a commit. A slot that cannot be committed by its cutoff is counted in `ddspc_performance.transport_skipped`; synco then keeps the last copied contribution. Such a slot no longer latches output off.
 
 ### Slot mapping
 
-A slot ordinal is the scheduler `cycle*steps+step`. Each decision indexes its plan from the newest slot copied when its WFS frame arrived. Training takes the four slots copied since the previous decision, oldest first. A missed slot holds the retained copy. The assisted model receives the four values as a lift; the standard model receives their mean, which equals the held command in standard mode.
+A slot ordinal is the scheduler `cycle*steps+step`. A WFS frame owns the q slots after the newest slot copied when it arrived. Training takes the q slots copied since the previous decision, oldest first; a missed slot holds the retained copy. The standard model receives their mean, which equals its held command.
 
-`ddspc_performance.slot_shifts` counts decisions whose interval contained other than four new copies. Occasional shifts can occur when a WFS arrival coincides with a copy. A steadily rising count means the WFS and DM clocks are not locked 4:1.
+In assisted mode, slot p of a frame is calculated with:
+
+- the frame's WFS measurement and the WFS/command histories, published before learning starts;
+- the k ACC samples received since the frame's anchor (the newest ACC counter at the WFS decision; upstream owns the 4:1 lock), normally k = p, fewer if a sample is late (`acc_lagging`);
+- the p commands already executed in the frame: the scheduler's copies, or the retained copy for a slot that was not copied.
+
+A slot with no current frame (a late WFS frame) holds the last command (`fast_holds`). `ddspc_performance.slot_shifts` counts decisions whose interval contained other than q new copies; a steadily rising count means the WFS and DM clocks are not locked.
+
+### Within-frame ripple
+
+The DDSPC cost penalizes future WFS frames, which integrate q slots, so command variation within a frame is unobserved. In simulation the unmodified cost (`ripple=0`) added within-frame ripple that made assisted control worse than standard when the ACC carried no information. `ripple` penalizes each future frame's variation about its mean command, scaled like `regularization`; with `ripple=10` and no ACC information assisted stayed within 5–10% of standard, and with informative ACC it reduced the 8 kHz residual variance by 60–80%. Re-solving with fixed executed slots remains exact for this cost (test T5). Measure the WFS residual and, if available, an independent fast sensor when tuning it.
 
 ## Before installation (operator, on the RTC)
 
@@ -74,6 +87,27 @@ setINDI -n 'acc000.dm_scale.target=<approved scale>'
 setINDI -s 'acc000.dm_enable.toggle=On'
 ```
 
+## Assisted qualification
+
+`ddspc_control.assisted_state` reports the first failing condition. `assisted_qualification.blockers` lists all of them, for example `acc000.timingDiag.delay_lock=0,model_untrained_0_of_212_updates`; `none` means assisted mode is qualified. The other elements give the values behind them: `upstream_enabled` and `upstream_locked` (`mode_code` and `delay_lock`, or `enabled` and `valid` for `ddspcTiming`), `upstream_phase_error_us`, `upstream_read_latency_error_us`, `upstream_age_s`, `adc_state`, `acc_window` (the WFS thread's ACC window: `ok`, `history_filling`, `stale_sample`, `counter_gap`, ...), `model` (updates/needed) and `diagnostic_mode`.
+
+```bash
+getINDI 'loPredCtrlAcc.assisted_qualification.*'
+getINDI 'acc000.timingDiag.delay_lock' 'acc000.timingDiag.delay_phase_error_us' 'acc000.timingDiag.read_latency_error_us'
+getINDI 'acc000.sim_diag.lock_phase_ok' 'acc000.sim_diag.lock_timing_ok' 'acc000.sim_diag.lateness_window_max_us' \
+        'acc000.sim_diag.acq_timer_slack_ns' 'acc000.sim_diag.acq_sched_policy' 'acc000.sim_diag.acq_priority'
+```
+
+With accelSim, `delay_lock=0` while `delay_phase_error_us=0` means late acquisitions (`lock_timing_ok=0`); see the accelSim README. After installing the updated accelSim, `acq_timer_slack_ns` should read 1, and `read_latency_error_us` and `lateness_window_max_us` should fall well below 50.
+
+### Diagnostic mode (default off)
+
+`parameters.assisted_diagnostic=true` lets the assisted learner append, learn and score complete ACC windows while the upstream lock is down, so the ACC model can be evaluated during commissioning. It never publishes physical corrections: assisted output still requires the upstream lock, and nothing about the DM transport changes.
+
+- To evaluate an assisted fit trained with lock, keep learning off and read `rmse_phase0..3`.
+- With learning on, the fit learns without lock. `diagnostic_mode` then reads `on_learned_without_lock`, and prediction is refused until `reset_model`.
+- Exploration probes are physical commands, so they are not applied while unlocked; the learner sees the commands actually copied.
+
 ## Train and test standard
 
 ```bash
@@ -96,7 +130,7 @@ getINDI 'loPredCtrlAcc.safety.*'   # wait for zero_confirmed=true before changin
 
 ## Train and test assisted
 
-Train assisted with assisted selected. Its probes are then drawn independently for each of the four slots, which identifies the per-slot response. Learning updates both fits. The standard fit receives the frame mean of the same commands, which is valid single-rate data, so frozen A/B comparisons remain fair.
+Select assisted and train it; only the assisted fit learns, and the standard fit stays frozen. Probes are drawn independently for every slot, which identifies each slot's response.
 
 ```bash
 setINDI -s 'loPredCtrlAcc.ddspc_mode.standard=Off;accel_assisted=On'
@@ -110,16 +144,28 @@ setINDI -s 'loPredCtrlAcc.learn.toggle=Off'
 setINDI -s 'loPredCtrlAcc.predict.toggle=Off'
 ```
 
-For an A/B comparison, keep both fits frozen and the disturbance unchanged, and alternate modes. Switch modes only after `zero_confirmed=true`. No reset is needed. `matched_standard_rmse` and `matched_assisted_rmse` score identical forecast origins, targets, horizons and channels while `matched_targets` advances. Optical correction is judged from the WFS residual with prediction off and on.
+For an A/B comparison, train each mode while it is selected, keep the disturbance unchanged, then alternate the frozen fits. Switch modes only after `zero_confirmed=true`. No reset is needed. `standard_rmse` is the standard fit's origin forecast RMSE; `rmse_phase0..3` are the assisted phase predictors' a priori future-WFS RMSE (k = 0..3 new ACC samples) and should decrease with k when the ACC is informative. Optical correction is judged from the WFS residual with prediction off and on.
 
 ## 60 s publication check
 
 Take `getINDI 'loPredCtrlAcc.ddspc_performance.*'` and `getINDI 'dmtweeter-synco.production.*'` 60 s apart with prediction active. Expect:
 
-- `transport_published` and `transport_acks` to rise by about 480,000.
+- `transport_published` and `transport_acks` to rise by about 480,000, and `publish_rate_hz` near 8000.
 - `transport_skipped` and `slot_shifts` to stay near zero.
+- In assisted mode: `predict_rate_hz` near 8000 (a calculation for every slot, not a replayed plan); while learning, `update_rate_hz` and `refresh_rate_hz` near 2000 (one QR-RLS update per WFS frame); `fast_holds`, `acc_lagging`, `acc_anomalies`, `step_mismatch` and `learn_overruns` near zero; `acc_phase0..3` equal; `margin_us_min` positive; `learn_us_p99` well below 500.
+- `acc_age_calc_us_*` and `acc_age_apply_us_*` give the age of the newest ACC sample at each calculation and at the slot's DM target time. Lower `dm.renderLeadUs` while `margin_us_min` stays positive with headroom; raise it if `transport_skipped` rises.
 - `safety.output_state` to report `transport_acknowledged_not_physical_application`.
 - The scheduler's accepted count for the `dm01disp09` index (the third destination, `accepted2`) to rise by about 480,000, with `missing2` and `rejected2` near zero.
+
+## Benchmark on the RTC (optional, operator decision)
+
+The offline benchmark runs the operational code at RTC dimensions: sequential standard and assisted timing, then a WFS thread learning at 2 kHz concurrently with a DM worker calculating every 125 µs slot. It uses no instrument stream. Run it on a spare core only:
+
+```bash
+cd ~/source/MagAOX-DDSPC/apps/loPredCtrlAcc
+make -f tests/Makefile.offline check-rtc-controller
+taskset -c 28,29 build/offline/rtc-controller/ddspc_offline_test '[rtc-benchmark]'
+```
 
 ## Remove the contribution
 
