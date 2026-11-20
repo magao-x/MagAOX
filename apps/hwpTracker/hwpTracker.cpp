@@ -1,5 +1,5 @@
 /** \file hwpTracker.cpp
- * \brief The MagAO-X K-mirror rotation tracker main program source file.
+ * \brief The MagAO-X HWP rotation tracker main program source file.
  *
  * \ingroup hwpTracker_files
  */
