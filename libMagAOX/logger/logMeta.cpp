@@ -296,6 +296,9 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
     case eventCodes::TELEM_ADCTRACK:
         verified = telem_adctrack::verify( logBuff, len );
         break;
+    case eventCodes::TELEM_QWPPUPIL:
+        verified = telem_qwppupil::verify( logBuff, len );
+        break;
     default:
         DEBUG_CRUMB( "verifyLogEntry unknown ev=" + std::to_string( ev ) +
                      " actualEv=" + std::to_string( flatlogs::logHeader::eventCode( log ) ) + " logTs=" +
