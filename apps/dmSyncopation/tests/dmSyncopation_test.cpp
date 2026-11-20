@@ -118,6 +118,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_cameraTime;
     using dmSyncopation::m_clean;
     using dmSyncopation::m_combined;
+    using dmSyncopation::m_combinedName;
     using dmSyncopation::m_combinerCadence;
     using dmSyncopation::m_combinerDiagnostics;
     using dmSyncopation::m_consumed;
@@ -168,6 +169,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_simulationSteps;
     using dmSyncopation::m_indiP_simulationTrace;
     using dmSyncopation::m_indiP_status;
+    using dmSyncopation::m_indiP_zero;
     using dmSyncopation::m_indiP_zeroPhase;
     using dmSyncopation::m_indiP_zeroTest;
     using dmSyncopation::m_lastFaultNs;
@@ -10732,6 +10734,109 @@ TEST_CASE( "syncopation advertises the build-selected INDI interface", "[dmSynco
     MagAOX::app::dmSyncopation::setupINDI;
     MagAOX::app::dmSyncopation::updateZeroTest;
     MagAOX::app::MagAOXApp<true>::handleGetProperties;
+#endif
+    // clang-format on
+}
+
+/** \brief Check open-loop zero interlocks and one combined publication with idle primary fixtures.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "syncopation zeros configured channels and triggers dmcomb while open", "[dmSyncopation][indi]" )
+{
+    Streams streams;
+    Harness app;
+    app.m_productionEnabled = GENERATE( false, true );
+    app.m_shmimName         = "dm97disp03";
+    app.m_combinedName      = "dm97disp";
+    app.m_destinations      = { "dm97disp07", "dm97disp08" };
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+
+    auto request = app.m_indiP_zero;
+    request["request"].setSwitchState( pcf::IndiElement::On );
+    auto &primary             = streams.images[0];
+    auto &combined            = streams.images[1];
+    auto &trigger             = streams.images[2];
+    auto &other               = streams.images[3];
+    primary.array.F[0]        = 4.0F;
+    const auto primaryBefore  = primary.md->cnt0;
+    const auto combinedBefore = combined.md->cnt0;
+    const auto triggerBefore  = trigger.md->cnt0;
+    const auto otherBefore    = other.md->cnt0;
+
+    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
+    pcf::IndiProperty loop( pcf::IndiProperty::Switch );
+    loop.setDevice( "holoop" );
+    loop.setName( "loop_state" );
+    loop.setState( INDI_OK );
+    loop.add( pcf::IndiElement( "toggle" ) );
+    loop["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.setCallBack_m_indiP_loop( loop ) == 0 );
+    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
+
+    loop["toggle"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( app.setCallBack_m_indiP_loop( loop ) == 0 );
+    app.m_enabled = true;
+    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
+    app.m_enabled = false;
+
+    other.md->write = 1;
+    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
+    other.md->write = 0;
+    CHECK( app.m_indiP_zero.getState() == INDI_ALERT );
+    CHECK( trigger.md->cnt0 == triggerBefore );
+    CHECK( trigger.array.F[0] == 2.0F );
+    CHECK( other.array.F[0] == 3.0F );
+
+    ImageStreamIO_semflush( &trigger, 0 );
+    auto dmcomb =
+        std::async( std::launch::async,
+                    [&]()
+                    {
+                        timespec deadline{};
+                        clock_gettime( CLOCK_REALTIME, &deadline );
+                        ++deadline.tv_sec;
+
+                        if( ImageStreamIO_semtimedwait( &trigger, 0, &deadline ) != 0 || trigger.md->write ||
+                            other.md->write || trigger.md->cnt0 != triggerBefore + 1 || other.md->cnt0 != otherBefore )
+                        {
+                            return false;
+                        }
+
+                        for( size_t pixel = 0; pixel < 9; ++pixel )
+                        {
+                            if( trigger.array.F[pixel] != 0 || other.array.F[pixel] != 0 )
+                            {
+                                return false;
+                            }
+                        }
+
+                        combined.md->write = 1;
+                        std::copy_n( primary.array.F, 9, combined.array.F );
+                        return ImageStreamIO_UpdateIm( &combined ) == IMAGESTREAMIO_SUCCESS;
+                    } );
+
+    CHECK( app.newCallBack_m_indiP_zero( request ) == 0 );
+    REQUIRE( dmcomb.get() );
+    CHECK( app.m_indiP_zero.getState() == INDI_OK );
+    CHECK( app.m_indiP_zero["request"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( combined.md->cnt0 == combinedBefore + 1 );
+    CHECK( combined.array.F[0] == 4.0F );
+    CHECK( primary.md->cnt0 == primaryBefore );
+    CHECK( primary.array.F[0] == 4.0F );
+    CHECK_FALSE( app.m_enabled );
+
+    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
+    CHECK( app.m_indiP_zero.getState() == INDI_ALERT );
+    CHECK( trigger.md->cnt0 == triggerBefore + 2 );
+    CHECK( combined.md->cnt0 == combinedBefore + 1 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::setupINDI;
+    MagAOX::app::dmSyncopation::setCallBack_m_indiP_loop;
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_zero;
+    MagAOX::app::dmSyncopation::zeroDestinations;
 #endif
     // clang-format on
 }

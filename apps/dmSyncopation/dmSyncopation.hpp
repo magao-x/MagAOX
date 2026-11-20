@@ -10,11 +10,13 @@
 #endif
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <thread>
 #include <sys/random.h>
 
 #include <mx/improc/milkImage.hpp>
@@ -29,6 +31,7 @@
 #include "../../libMagAOX/app/dev/dmTiming.hpp"
 #include "../../libMagAOX/app/dev/dmTimingEventStream.hpp"
 #include "../../libMagAOX/common/latestSnapshot.hpp"
+#include "../../libMagAOX/common/streamCopy.hpp"
 #include "../../magaox_git_version.h"
 #include "syncoSchedule.hpp"
 #include "syncoSimulation.hpp"
@@ -236,6 +239,7 @@ class dmSyncopation : public MagAOXApp<true>,
     std::string              m_cameraDevice{ "camwfs" };      ///< Device publishing measured acquisition timing.
     std::string              m_cameraProperty{ "fg_timing" }; ///< Measured camera timing property.
     std::string              m_cameraElement{ "acq_fps" };    ///< Measured acquisition-rate element.
+    std::string              m_loopDevice{ "holoop" };        ///< AO loop readback for the open-loop zero request.
     int                      m_requested{ 3 };                ///< Fixed requested count, including passive step 0.
     int                      m_primarySemaphore{ 5 }; ///< Required reader semaphore; reject allocation fallback.
     unsigned                 m_lockFrames{ 32 };  ///< Clean main observations before preparing the first active cycle.
@@ -651,10 +655,13 @@ class dmSyncopation : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_enable;            ///< Enable request and acknowledged quiescence.
     pcf::IndiProperty m_indiP_reacquire;         ///< Request fresh synchronization.
+    pcf::IndiProperty m_indiP_zero;              ///< Request one open-loop zero publication.
     pcf::IndiProperty m_indiP_settings;          ///< Disabled-only essential numeric controls.
     pcf::IndiProperty m_indiP_status;            ///< Compact rates/counts/outcome summary.
     pcf::IndiProperty m_indiP_health;            ///< Scheduler phase, last fault and mode.
     pcf::IndiProperty m_indiP_camera;            ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_loop;              ///< External AO loop state subscription.
+    bool              m_loopOpen{ false };       ///< Affirmative Off readback, serialized with the zero request.
     pcf::IndiProperty m_indiP_simulation;        ///< Conditional grid, phase and collection-quality diagnostics.
     pcf::IndiProperty m_indiP_simulationCadence; ///< Long-baseline cadence state, coverage and independent freshness.
     pcf::IndiProperty
@@ -778,15 +785,25 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Request acquisition without clearing persistent contributions.
     INDI_NEWCALLBACK_DECL( dmSyncopation, m_indiP_reacquire );
 
+    /// Clear the configured destination channels while the AO loop is open and synco is disabled.
+    INDI_NEWCALLBACK_DECL( dmSyncopation, m_indiP_zero );
+
     /// Validate an atomic disabled-only timing/count setting update.
     INDI_NEWCALLBACK_DECL( dmSyncopation, m_indiP_settings );
 
     /// Accept measured camera FPS and optional acquisition statistics as one coherent report.
     INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_camera );
 
+    /// Track affirmative Off reports from the configured AO loop interface.
+    INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_loop );
+
   protected:
     /// Register the operator interface, camera subscription and build-selected diagnostic readbacks.
     int setupINDI();
+
+    /// Clear the numbered destinations, trigger dmcomb once and check the combined output.
+    /** \returns A failure message, or nullptr after dmcomb publishes the updated combination. */
+    const char *zeroDestinations();
 
     /// Configure/reset the shadow engine without opening or modifying any image.
     bool configureSimulation( double seedRate = 0 /**< [in] New acquisition seed, Hz; zero retains the reference. */ );
@@ -1187,6 +1204,7 @@ inline void dmSyncopation::setupConfig()
         { "streams.destinations", "Ordered numbered DM destinations; sources append _aux; first triggers." },
         { "streams.combined", "Combined output to observe." },
         { "streams.timing", "Same-host signed-int64 schedule stream." },
+        { "zero.loopDevice", "Device publishing loop_state.toggle for open-loop zero requests." },
         { "tracking.cameraDevice", "Camera device publishing measured acquisition timing." },
         { "tracking.cameraProperty", "Measured camera timing property." },
         { "tracking.cameraElement", "Measured camera FPS element." },
@@ -1281,6 +1299,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_destinations, "streams.destinations" );
     config( m_combinedName, "streams.combined" );
     config( m_timingName, "streams.timing" );
+    config( m_loopDevice, "zero.loopDevice" );
     config( m_cameraDevice, "tracking.cameraDevice" );
     config( m_cameraProperty, "tracking.cameraProperty" );
     config( m_cameraElement, "tracking.cameraElement" );
@@ -1729,6 +1748,160 @@ inline ino_t dmSyncopation::inode( const std::string &name )
     ImageStreamIO_filename( filename, sizeof( filename ), name.c_str() );
     struct stat info{};
     return stat( filename, &info ) == 0 ? info.st_ino : 0;
+}
+
+inline const char *dmSyncopation::zeroDestinations()
+{
+    auto closeImage = []( IMAGE *image )
+    {
+        ImageStreamIO_closeIm( image );
+        delete image;
+    };
+    using ImageHandle    = std::unique_ptr<IMAGE, decltype( closeImage )>;
+    const auto openImage = [&closeImage]( const std::string &name ) -> ImageHandle
+    {
+        auto image = std::make_unique<IMAGE>();
+
+        if( ImageStreamIO_openIm( image.get(), name.c_str() ) != IMAGESTREAMIO_SUCCESS )
+        {
+            return { nullptr, closeImage };
+        }
+
+        return { image.release(), closeImage };
+    };
+    const auto backingInode = []( const IMAGE &image ) -> ino_t
+    {
+        struct stat status{};
+        return fstat( image.shmfd, &status ) == 0 ? status.st_ino : 0;
+    };
+
+    ImageHandle combined( nullptr, closeImage );
+    ino_t       combinedFile{ 0 };
+    uint64_t    combinedCounter{ 0 };
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_cycleMutex );
+
+        if( !m_loopOpen || m_enabled || shutdown() )
+        {
+            return "zero requires an open AO loop and disabled synco";
+        }
+
+        combined = openImage( m_combinedName );
+
+        if( !combined || !combined->md )
+        {
+            return "combined DM stream unavailable";
+        }
+
+        const auto width       = combined->md->size[0];
+        const auto height      = combined->md->size[1];
+        const auto count       = uint64_t( width ) * height;
+        const auto bytes       = count * sizeof( float );
+        const auto validPixels = [width, height, count, bytes]( const IMAGE &image )
+        {
+            const auto *md = image.md;
+            return md && md->shared == 1 && md->location == -1 && md->naxis == 2 && md->datatype == _DATATYPE_FLOAT &&
+                   md->size[0] == width && md->size[1] == height && md->nelement == count &&
+                   md->imdatamemsize == bytes && image.array.F;
+        };
+        combinedFile           = backingInode( *combined );
+        combinedCounter        = combined->md->cnt0;
+        const auto primaryFile = inode( shmimMonitorT::m_shmimName );
+
+        if( m_destinations.empty() || !count || count > 1048576 || !validPixels( *combined ) || !combinedFile ||
+            combinedFile == primaryFile || combined->md->write || combinedCounter == UINT64_MAX )
+        {
+            return "combined DM stream busy or incompatible";
+        }
+
+        const std::vector<float> zeros( count, 0.0F );
+        std::vector<ImageHandle> destinations;
+        std::vector<ino_t>       identities{ combinedFile, primaryFile };
+        std::vector<uint64_t>    counters;
+
+        for( const auto &name : m_destinations )
+        {
+            auto       image = openImage( name );
+            const auto file  = image ? backingInode( *image ) : 0;
+
+            if( !image || !validPixels( *image ) || image->md->write || !file ||
+                std::find( identities.begin(), identities.end(), file ) != identities.end() )
+            {
+                return "a synco destination is missing, busy, aliased or incompatible";
+            }
+
+            identities.push_back( file );
+            counters.push_back( image->md->cnt0 );
+            destinations.push_back( std::move( image ) );
+        }
+
+        for( size_t j = 0; j < destinations.size(); ++j )
+        {
+            const auto *md = destinations[j]->md;
+
+            if( md->write || md->cnt0 != counters[j] || inode( m_destinations[j] ) != identities[j + 2] )
+            {
+                return "a synco destination changed during zero preflight";
+            }
+        }
+
+        auto      &trigger        = *destinations.front();
+        const auto triggerCounter = counters.front();
+        timespec   stamp{};
+
+        if( trigger.md->sem == 0 || triggerCounter == UINT64_MAX || inode( m_combinedName ) != combinedFile ||
+            combined->md->write || combined->md->cnt0 != combinedCounter || clock_gettime( CLOCK_ISIO, &stamp ) < 0 )
+        {
+            return "DM trigger or combined stream unavailable for zero publication";
+        }
+
+        for( auto &image : destinations )
+        {
+            image->md->write = 1;
+            MagAOX::streamCopy( image->array.F, zeros.data(), bytes );
+        }
+
+        // Finish the passive destinations before the first destination's counter can trigger dmcomb.
+        for( size_t j = 1; j < destinations.size(); ++j )
+        {
+            auto &md     = *destinations[j]->md;
+            md.writetime = md.atime = stamp;
+            md.write                = 0;
+        }
+
+        const bool published = ImageStreamIO_UpdateIm( &trigger ) == IMAGESTREAMIO_SUCCESS &&
+                               trigger.md->cnt0 == triggerCounter + 1 && !trigger.md->write;
+        trigger.md->write = 0;
+        invalidate( published ? "open-loop zero published" : "open-loop zero trigger failed" );
+        closeResources();
+        m_nextAttach = 0;
+
+        if( m_productionEnabled )
+        {
+            closeZeroTest();
+            m_zeroNextAttach = 0;
+        }
+
+        if( !published )
+        {
+            return "channels cleared; zero trigger publication failed";
+        }
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( 100 );
+    do
+    {
+        if( !combined->md->write && combined->md->cnt0 == combinedCounter + 1 &&
+            inode( m_combinedName ) == combinedFile )
+        {
+            return nullptr;
+        }
+
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    } while( !shutdown() && std::chrono::steady_clock::now() < deadline );
+
+    return "channels cleared and trigger published; dmcomb did not confirm a single combined update";
 }
 
 inline bool dmSyncopation::configureSimulation( double seedRate )
@@ -4767,6 +4940,18 @@ inline int dmSyncopation::setupINDI()
     {
         REG_INDI_SETPROP( m_indiP_camera, m_cameraDevice, m_cameraProperty );
     }
+
+    if( !m_diagnosticsOnly && !m_simulationEnabled && !m_zeroTestEnabled && !m_loopDevice.empty() )
+    {
+        if( createStandardIndiRequestSw( m_indiP_zero, "zero" ) < 0 ||
+            registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK( m_indiP_zero ) ) < 0 )
+        {
+            return -1;
+        }
+
+        REG_INDI_SETPROP( m_indiP_loop, m_loopDevice, "loop_state" );
+    }
+
     return 0;
 }
 
@@ -5436,6 +5621,45 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_reacquire )( const pcf::IndiProper
     return 0;
 }
 
+INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_zero )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_zero, ipRecv );
+
+    if( ipRecv.getType() != pcf::IndiProperty::Switch || !ipRecv.find( "request" ) || ipRecv.getElements().size() != 1 )
+    {
+        return -1;
+    }
+
+    if( ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+    {
+        return 0;
+    }
+
+    updateSwitchIfChanged( m_indiP_zero, "request", pcf::IndiElement::On, INDI_BUSY );
+    std::string failure;
+
+    try
+    {
+        if( const char *reason = zeroDestinations() )
+        {
+            failure = reason;
+        }
+    }
+    catch( const std::exception &error )
+    {
+        failure = error.what();
+    }
+
+    if( !failure.empty() )
+    {
+        updateSwitchIfChanged( m_indiP_zero, "request", pcf::IndiElement::Off, INDI_ALERT );
+        return log<text_log, -1>( "open-loop zero: " + failure, logPrio::LOG_ERROR );
+    }
+
+    updateSwitchIfChanged( m_indiP_zero, "request", pcf::IndiElement::Off, INDI_OK );
+    return log<text_log, 0>( "open-loop zero published by dmcomb", logPrio::LOG_NOTICE );
+}
+
 INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_settings, ipRecv );
@@ -5551,6 +5775,17 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
         updateIfChanged( m_indiP_settings, "durationSec", duration );
     }
 
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_loop )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loop, ipRecv );
+
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    m_loopOpen = ipRecv.getType() == pcf::IndiProperty::Switch && ipRecv.find( "toggle" ) &&
+                 ipRecv.getState() != INDI_ALERT && ipRecv.getState() != INDI_BUSY &&
+                 ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off;
     return 0;
 }
 

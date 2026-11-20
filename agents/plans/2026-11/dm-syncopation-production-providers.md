@@ -764,3 +764,21 @@ All 149 software test cases pass (4239 assertions).
 Applying the new mode requires rebuilding/installing and operator-controlled
 application restarts. The instrument measurements above precede that deployment;
 no post-change instrument latency or jitter measurement has been supplied.
+
+## 2026-11-20 Open-loop channel clearing
+
+The operator requested a way to clear the synco contribution with the loop open
+and explicitly required that the clear trigger a dmcomb write. The `zero`
+request uses the AO loop's startup INDI subscription, requires synco Off, and
+preflights the configured destination batch against the combined stream. It
+stages all zero payloads before publishing the first destination once. It then
+checks for one new combined frame, with a 100 ms timeout. The clear uses no
+primary callback, and reopening production mappings reloads the cleared
+destination values. Producers retain ownership of `_aux` payloads and sidecars.
+The operator procedure calls for quiescent channel writers and a running
+combiner and controller. [Operator procedure](../../../apps/dmSyncopation/doc/dmSyncopation.md#controller-clearing-and-maintenance)
+
+The workstation suite passed 163 cases. A local simulated combiner woke on the
+single trigger, observed both destinations cleared, and republished the sum
+with an unchanged primary contribution. Rejected requests left pixels and
+counters intact, and a missing combined publication returned Alert.
