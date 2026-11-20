@@ -86,7 +86,7 @@ class qwpPupilTracker_test : public qwpPupilTracker
         m_root = "/tmp/qwpPupilTracker_test/" + name;
         std::filesystem::remove_all( m_root );
         std::filesystem::create_directories( m_root + "/telem" );
-        std::filesystem::create_directories( m_root + "/calib/qwptrack" );
+        std::filesystem::create_directories( m_root + "/calib/qwppupil" );
 
         m_calibDir = m_root + "/calib";
         writeModel( g_model );
@@ -136,7 +136,7 @@ class qwpPupilTracker_test : public qwpPupilTracker
     /// Write the model table.
     void writeModel( const std::string &text /**< [in] table contents */ )
     {
-        std::ofstream( m_calibDir + "/qwptrack/qwp_pupil_model.csv" ) << text;
+        std::ofstream( m_calibDir + "/qwppupil/qwp_pupil_model.csv" ) << text;
     }
 
     /// Write a control matrix as python would, so that FITS axis 1 is the pixel index.
@@ -152,7 +152,7 @@ class qwpPupilTracker_test : public qwpPupilTracker
             }
         }
 
-        std::string path = m_calibDir + "/qwptrack/qwp_pupil_cm.fits";
+        std::string path = m_calibDir + "/qwppupil/qwp_pupil_cm.fits";
         std::filesystem::remove( path );
 
         mx::fits::fitsFile<double> ff;
@@ -162,7 +162,7 @@ class qwpPupilTracker_test : public qwpPupilTracker
     /// Write an arbitrary image as the control matrix.
     void writeCMImage( const mx::improc::eigenImage<double> &im /**< [in] the image */ )
     {
-        std::string path = m_calibDir + "/qwptrack/qwp_pupil_cm.fits";
+        std::string path = m_calibDir + "/qwppupil/qwp_pupil_cm.fits";
         std::filesystem::remove( path );
 
         mx::fits::fitsFile<double> ff;
@@ -281,7 +281,7 @@ TEST_CASE( "qwpPupilTracker evaluates the shift model", "[qwpPupilTracker]" )
     // clang-format on
 
     qwpPupilTracker_test app( "model" );
-    REQUIRE( app.loadModel( "/tmp/qwpPupilTracker_test/model/calib/qwptrack/qwp_pupil_model.csv" ) == 0 );
+    REQUIRE( app.loadModel( "/tmp/qwpPupilTracker_test/model/calib/qwppupil/qwp_pupil_model.csv" ) == 0 );
     REQUIRE( app.m_model.a.size() == 3 );
 
     double dx, dy;
@@ -388,7 +388,7 @@ TEST_CASE( "qwpPupilTracker rejects bad calibration files", "[qwpPupilTracker]" 
     SECTION( "missing model" )
     {
         qwpPupilTracker_test app( "bad_missing_model" );
-        app.m_modelFile = "qwptrack/nope.csv";
+        app.m_modelFile = "qwppupil/nope.csv";
         REQUIRE( app.startup() < 0 );
     }
 
@@ -416,7 +416,7 @@ TEST_CASE( "qwpPupilTracker rejects bad calibration files", "[qwpPupilTracker]" 
     SECTION( "missing control matrix" )
     {
         qwpPupilTracker_test app( "bad_missing_cm" );
-        app.m_cmFile = "qwptrack/nope.fits";
+        app.m_cmFile = "qwppupil/nope.fits";
         REQUIRE( app.startup() < 0 );
     }
 
@@ -451,8 +451,8 @@ TEST_CASE( "qwpPupilTracker configuration", "[qwpPupilTracker]" )
         REQUIRE( app.m_qwp[1].devName == "stageqwprot2" );
         REQUIRE( app.m_ttmDevName == "ttmperi" );
         REQUIRE( app.m_rebaseTol == Approx( 0.01 ) );
-        REQUIRE( app.m_modelFile == "qwptrack/qwp_pupil_model.csv" );
-        REQUIRE( app.m_cmFile == "qwptrack/qwp_pupil_cm.fits" );
+        REQUIRE( app.m_modelFile == "qwppupil/qwp_pupil_model.csv" );
+        REQUIRE( app.m_cmFile == "qwppupil/qwp_pupil_cm.fits" );
     }
 
     SECTION( "overrides" )

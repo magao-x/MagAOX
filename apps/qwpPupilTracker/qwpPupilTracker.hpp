@@ -132,9 +132,9 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
 
     double m_rebaseTol{ 0.01 }; ///< A ttmperi target farther than this from every recent command is external, in V.
 
-    std::string m_modelFile{ "qwptrack/qwp_pupil_model.csv" }; ///< The model table, relative to the calib dir.
+    std::string m_modelFile{ "qwppupil/qwp_pupil_model.csv" }; ///< The model table, relative to the calib dir.
 
-    std::string m_cmFile{ "qwptrack/qwp_pupil_cm.fits" }; ///< The control matrix FITS file, relative to the calib dir.
+    std::string m_cmFile{ "qwppupil/qwp_pupil_cm.fits" }; ///< The control matrix FITS file, relative to the calib dir.
 
     ///@}
 
@@ -462,7 +462,7 @@ void qwpPupilTracker::setupConfig()
                 false,
                 "string",
                 "The pupil-shift model table, relative to the calib directory.  "
-                "Default is 'qwptrack/qwp_pupil_model.csv'" );
+                "Default is 'qwppupil/qwp_pupil_model.csv'" );
 
     config.add( "calib.cm",
                 "",
@@ -473,7 +473,7 @@ void qwpPupilTracker::setupConfig()
                 false,
                 "string",
                 "The ttmperi control matrix FITS file, relative to the calib directory.  "
-                "Default is 'qwptrack/qwp_pupil_cm.fits'" );
+                "Default is 'qwppupil/qwp_pupil_cm.fits'" );
 
     TELEMETER_SETUP_CONFIG( config );
 }

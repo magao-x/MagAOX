@@ -133,7 +133,7 @@ All questions were resolved in the design interview (2026-11-20).
    `dx`, `dy` (camwfs px, `shift(phi) - shift(phi_ref)`) and `v1`, `v2` (V, `-CM * offset`, i.e. the commanded
    voltage relative to `v0`). Nothing else. Telemetry via `dev::telemeter` (`TELEMETER_*` macros) recording the
    offset and the commanded voltages (proposed; user did not object).
-8. **Calib files** in `calib/qwptrack/` (paths configurable relative to the calib dir):
+8. **Calib files** in `calib/qwppupil/` (paths configurable relative to the calib dir):
    - `qwp_pupil_model.csv`: one row per frequency, `a, b, dx_cos, dx_sin, dy_cos, dy_sin` (22 rows from the 44-term
      model), `#` comment header with provenance, formula and units. Read with
      `mx::ioutils::readColumns<readColCommaDelim>` as in qwpTracker.
@@ -145,9 +145,9 @@ All questions were resolved in the design interview (2026-11-20).
 9. **Naming and structure.** App `qwpPupilTracker` in `apps/qwpPupilTracker/`, header-only pattern, separate from
    `qwpTracker`. Base `MagAOXApp` + `dev::telemeter` (power-state template argument to match the template app /
    hwpTracker). Config device name `qwppupil`. Config keys: `stages.qwp1 = stageqwprot1`,
-   `stages.qwp2 = stageqwprot2`, `ttm.device = ttmperi`, `ttm.rebaseTol = 0.01`, `calib.model = qwptrack/qwp_pupil_model.csv`,
-   `calib.cm = qwptrack/qwp_pupil_cm.fits`. Exporter: `~/dev/magaox/scripts/export_qwp_pupil_calib.py`, writing
-   to `~/dev/magaox/calib/qwptrack/`.
+   `stages.qwp2 = stageqwprot2`, `ttm.device = ttmperi`, `ttm.rebaseTol = 0.01`, `calib.model = qwppupil/qwp_pupil_model.csv`,
+   `calib.cm = qwppupil/qwp_pupil_cm.fits`. Exporter: `~/dev/magaox/scripts/export_qwp_pupil_calib.py`, writing
+   to `~/dev/magaox/calib/qwppupil/`.
 10. **Edge behaviour.**
     - Tracking off: stop commanding, leave ttmperi where it is (no restore to `v0`).
     - Startup: tracking always off, never auto-enabled. Enabling is refused (logged) unless both stage positions
