@@ -207,33 +207,6 @@ inline bool WarmupCollection::published( uint64_t generation )
         expected, ( generation << 3 ) | static_cast<uint64_t>( CollectionPhase::ready ), std::memory_order_acq_rel );
 }
 
-/// Evaluate independent per-mode linear temporal filters without CUDA.
-inline bool applyLinearLocalPolicy( float       *output /**< [out] Controlled modal commands. */,
-                                    const float *input /**< [in] Feature-major modal input. */,
-                                    const float *weights /**< [in] Feature-major modal weights. */,
-                                    size_t       features /**< [in] Temporal feature count. */,
-                                    size_t       trainedModes /**< [in] Modal stride in input and weights. */,
-                                    size_t       controlledModes /**< [in] Leading modes to evaluate. */ )
-{
-    if( output == nullptr || input == nullptr || weights == nullptr || features == 0 || controlledModes == 0 ||
-        controlledModes > trainedModes )
-    {
-        return false;
-    }
-
-    for( size_t mode = 0; mode < controlledModes; ++mode )
-    {
-        float command = 0.F;
-        for( size_t feature = 0; feature < features; ++feature )
-        {
-            const size_t index = feature * trainedModes + mode;
-            command += input[index] * weights[index];
-        }
-        output[mode] = command;
-    }
-    return true;
-}
-
 /// Fixed-capacity float history used by one thread at a time.
 class CircularBuffer
 {

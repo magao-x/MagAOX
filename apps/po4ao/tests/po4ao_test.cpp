@@ -133,20 +133,6 @@ TEST_CASE( "PO4AO identifies duplicate source notifications", "[po4ao]" )
     REQUIRE_FALSE( sourceCounterIsDuplicate( 0, 100, true ) );
 }
 
-/// Verify CPU linear inference applies independent temporal weights per mode.
-/** \ingroup po4ao_unit_test
- */
-TEST_CASE( "PO4AO evaluates a linear local policy on the CPU", "[po4ao]" )
-{
-    const float input[]   = { 1.F, 2.F, 3.F, 4.F, 5.F, 6.F };
-    const float weights[] = { 1.F, 0.F, 0.F, 1.F, 2.F, 3.F };
-    float       output[]  = { 0.F, 0.F };
-
-    REQUIRE( applyLinearLocalPolicy( output, input, weights, 3, 2, 2 ) );
-    REQUIRE( output[0] == Approx( 11.F ) );
-    REQUIRE( output[1] == Approx( 22.F ) );
-}
-
 /// Verify policy blending has exact fallback and learned-policy endpoints.
 /** \ingroup po4ao_unit_test
  */
@@ -509,7 +495,6 @@ struct EngineBundle
 {
     uint64_t           generation{ 1 }, modelId{ 42 }; ///< Accepted reload and effective-policy identities.
     int                historyLength{ 2 };             ///< Temporal input width of the fixture policy.
-    std::vector<float> linearWeights{ 1 };             ///< Test policy uses the CPU boundary.
 };
 /// Boundary fixture declaring the state used by the included production method definitions.
 /** Model loading and device output are doubles; collection, frame processing, queue
@@ -576,6 +561,8 @@ class po4ao : public MagAOXApp<true>
     std::array<int, c_episodeSlots>              m_readyQueue{};       ///< Producer-consumer episode indices.
     std::atomic<uint64_t>                        m_readyRead{ 0 }, m_readyWrite{ 0 }; ///< Atomic queue positions.
     int                     m_activeEpisodeSlot{ 0 };          ///< Slot currently owned by the frame producer.
+    std::atomic<double>                          m_replayRmsNm{
+        -1.0 }; ///< Controlled-mode RMS of the published rolling replay, negative when unavailable.
     std::mutex              m_replayMutex, m_publicationMutex; ///< Publisher wait and stream-publication locks.
     std::condition_variable m_replayCondition;                 ///< Publisher wakeup condition.
     IMAGE                   m_replayStream, m_replayMetadataStream, m_warmupStream,
@@ -583,7 +570,6 @@ class po4ao : public MagAOXApp<true>
     bool m_outputOpened{ true }, m_replayOpened{ true },
         m_replayMetadataOpened{ true }; ///< Output and rolling replay availability.
     bool                      m_warmupOpened{ true }, m_warmupMetadataOpened{ true }; ///< Frozen replay availability.
-    std::atomic<uint32_t>     m_effectiveBackend{ 0 };                      ///< Backend of the emitted command.
     MagAOX::app::Po4aoSamples m_runtimeSamples;                             ///< Production telemetry sample ring.
     std::atomic<uint64_t>     m_deadlineMisses{ 0 }, m_missedFrames{ 0 };   ///< Latency and source-gap statistics.
     std::atomic<uint64_t>     m_inferenceFailures{ 0 }, m_replayDrops{ 0 }; ///< Inference and queue failure statistics.
@@ -598,7 +584,7 @@ class po4ao : public MagAOXApp<true>
     /// Model-loader boundary and acknowledged model identity.
     std::atomic<int>        m_reloadStatus{ 0 };
     std::atomic<uint64_t>   m_activeModelId{ 42 }, m_reloadGeneration{ 1 };
-    std::atomic<bool>       m_activeCpuInference{ true }, m_reloadRequested{ false };
+    std::atomic<bool>       m_reloadRequested{ false };
     std::mutex              m_reloadErrorMutex;
     std::condition_variable m_loaderCondition;
     std::string             m_reloadError, m_runtimeInstance{ "test" };
@@ -725,7 +711,8 @@ inline po4ao::po4ao() : MagAOXApp<true>( 0, 0 )
     createStandardIndiToggleSw( m_indiP_resetModel, "reset_model" );
     createStandardIndiToggleSw( m_indiP_controlToggle, "control_enable" );
     createStandardIndiToggleSw( m_indiP_recollectWarmup, "recollect_warmup" );
-    for( const char *name : { "state", "requested_generation", "generation", "frames", "target_frames" } )
+    for( const char *name :
+         { "state", "requested_generation", "generation", "frames", "target_frames", "residual_rms_nm" } )
     {
         m_indiP_collectionStatus.add( pcf::IndiElement( name ) );
     }
@@ -1305,6 +1292,39 @@ TEST_CASE( "PO4AO production leaves partial warmup unpublished", "[po4ao][contro
     REQUIRE( static_cast<uint32_t *>( app.m_replayMetadataStream.array.raw )[0] == 2 );
     REQUIRE( static_cast<uint32_t *>( app.m_warmupMetadataStream.array.raw )[0] == 0 );
     REQUIRE( WarmupCollection::phase( app.m_collection.token() ) == CollectionPhase::collecting );
+}
+
+/// Check the RMS of the populated observation plane and its lifetime during recollection.
+/** \ingroup po4ao_unit_test */
+TEST_CASE( "PO4AO reports controlled residual RMS from rolling replay", "[po4ao][control]" )
+{
+    // clang-format off
+#ifdef PO4AO_TEST_DOXYGEN_REF
+    MagAOX::app::po4ao::publishReplay;
+    MagAOX::app::po4ao::invalidateReplay;
+    MagAOX::app::po4ao::updateControlStatus;
+#endif
+    // clang-format on
+    po4aoControlHarness::po4ao app;
+    const float                first[]{ 0.003F, -0.004F, 99.F };
+    const float                second[]{ 0.F, 0.F, -99.F };
+    const float                command[]{ 8.F, 8.F, 8.F };
+    app.m_publishObservations->add( first );
+    app.m_publishObservations->add( second );
+    app.m_publishCommands->add( command );
+    app.m_publishCommands->add( command );
+
+    REQUIRE( app.publishReplay( app.m_replayStream, true, app.m_replayMetadataStream, true, 1, 0 ) == 0 );
+    app.updateControlStatus();
+    REQUIRE( std::stod( app.m_indiP_collectionStatus["residual_rms_nm"].get<std::string>() ) == Approx( 2.5 ) );
+
+    app.m_publishObservations->add( command );
+    REQUIRE( app.publishReplay( app.m_warmupStream, true, app.m_warmupMetadataStream, true, 1, 0 ) == 0 );
+    REQUIRE( app.invalidateReplay( app.m_warmupStream, true, app.m_warmupMetadataStream, true ) == 0 );
+    REQUIRE( app.m_replayRmsNm.load() == Approx( 2.5 ) );
+    REQUIRE( app.invalidateReplay( app.m_replayStream, true, app.m_replayMetadataStream, true ) == 0 );
+    app.updateControlStatus();
+    REQUIRE( app.m_indiP_collectionStatus["residual_rms_nm"].get<std::string>().empty() );
 }
 } // namespace po4aoTest
 } // namespace libXWCTest

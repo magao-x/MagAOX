@@ -58,32 +58,19 @@ inline void Logger::log( Severity severity, const char *msg ) noexcept
     }
 }
 
-/// Release either ordinary or CUDA-pinned host memory.
+/// Release CUDA-pinned host storage when its owning buffer is destroyed.
 struct HostBufferDeleter
 {
-    bool pinned{ false }; ///< Whether CUDA allocated the buffer.
-
-    /// Release one host buffer with its matching allocator.
-    void operator()( float *pointer /**< [in] Buffer to release. */ ) const;
+    /// Free a non-null pinned allocation.
+    void operator()( float *pointer /**< [in] CUDA-pinned buffer to release. */ ) const;
 };
 
 inline void HostBufferDeleter::operator()( float *pointer ) const
 {
-    if( pointer == nullptr )
-    {
-        return;
-    }
-    if( pinned )
-    {
-        cudaFreeHost( pointer );
-    }
-    else
-    {
-        delete[] pointer;
-    }
+    cudaFreeHost( pointer );
 }
 
-/// Validated CPU-linear or TensorRT policy and its tensor contract.
+/// Validated TensorRT policy and its tensor contract.
 struct EngineBundle
 {
     nvinfer1::IRuntime          *runtime{ nullptr };   ///< Runtime which deserialized the engine.
@@ -101,7 +88,6 @@ struct EngineBundle
     int                          historyLength{ 0 };   ///< Observation history inferred from the model.
     uint64_t                     modelId{ 0 };         ///< Stable FNV-1a hash of serialized engine bytes.
     uint64_t                     generation{ 0 };      ///< Reset generation in which this model was requested.
-    std::vector<float>           linearWeights;        ///< Optional feature-major CPU linear-policy weights.
 
     /// Destroy TensorRT objects outside the real-time thread.
     ~EngineBundle();
@@ -150,7 +136,6 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     std::string m_dataDirs;                      ///< Directory containing training artifacts.
     std::string m_engineName;                    ///< TensorRT engine filename.
     std::string m_engineDirs;                    ///< Directory containing the TensorRT engine.
-    std::string m_linearInferenceBackend;        ///< Linear-policy backend: auto, cpu, or tensorrt.
     std::string m_outputChannel;                 ///< Differential modal command stream consumed by mfilt.
     std::string m_bufferChannel;                 ///< Rolling replay-buffer stream.
     std::string m_bufferMetadataChannel;         ///< Rolling replay publication metadata stream.
@@ -199,8 +184,8 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     float                      *m_deviceOutput{ nullptr };       ///< Device policy-output storage.
     float                      *m_deviceWarmupInput{ nullptr };  ///< Loader-owned candidate input storage.
     float                      *m_deviceWarmupOutput{ nullptr }; ///< Loader-owned candidate output storage.
-    std::unique_ptr<float[], HostBufferDeleter> m_inputState{ nullptr, HostBufferDeleter{} }; ///< Host policy input.
-    std::unique_ptr<float[], HostBufferDeleter> m_output{ nullptr, HostBufferDeleter{} };     ///< Host policy output.
+    std::unique_ptr<float[], HostBufferDeleter> m_inputState;    ///< Host policy input.
+    std::unique_ptr<float[], HostBufferDeleter> m_output;        ///< Host policy output.
     std::unique_ptr<CircularBuffer>             m_commandHistory;            ///< Commands used for policy history.
     std::unique_ptr<CircularBuffer>             m_observationHistory;        ///< Observations used for policy history.
     std::vector<float>                          m_explorationNoise;          ///< Flattened exploration-noise table.
@@ -211,7 +196,6 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     std::atomic<uint64_t> m_appliedReset{ 1 };   ///< Model-reset generation acknowledged after command publication.
     std::atomic<int>      m_effectiveController{
         0 }; ///< Last emitted controller: unknown, integrator, policy, or pass-through.
-    std::atomic<uint32_t> m_effectiveBackend{ 0 }; ///< Backend used for the last emitted command.
     std::atomic<uint64_t> m_effectiveModelId{ 0 }; ///< Policy used for the last emitted command, zero for fallback.
     bool                  m_initialWarmupPending{ true }; ///< Start initial exploration on the first enabled frame.
     WarmupCollection      m_collection; ///< Collection lifecycle, independent of policy history and selection.
@@ -250,6 +234,8 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
      *@{
      */
     IMAGE m_outputStream{};                ///< Differential modal command stream.
+    std::atomic<double> m_replayRmsNm{
+        -1.0 }; ///< Controlled-mode RMS of the published rolling replay, negative when unavailable.
     IMAGE m_replayStream{};                ///< Rolling replay-buffer stream.
     IMAGE m_replayMetadataStream{};        ///< Rolling replay publication metadata stream.
     IMAGE m_warmupStream{};                ///< Frozen warm-up replay-buffer stream.
@@ -281,7 +267,6 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     std::atomic<uint64_t> m_inferenceFailures{ 0 };                ///< Inference or result-validation failures.
     std::atomic<uint64_t> m_replayDrops{ 0 };                      ///< Episodes dropped because the publisher lagged.
     std::atomic<uint64_t> m_activeModelId{ 0 };                    ///< Selected policy hash; zero reports fallback.
-    std::atomic<bool>     m_activeCpuInference{ false };           ///< Whether the active policy runs on CPU.
     uint64_t              m_lastInputCounter{ 0 };                 ///< Previous source cnt0 used for gap detection.
     bool                  m_haveInputCounter{ false };             ///< Whether the previous source counter is valid.
     std::optional<bool>   m_retryConsecutive; ///< Original continuity of a torn WFS frame, valid until it is consumed.
@@ -337,14 +322,9 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
     /// Publish the current differential modal command.
     int sendOutput();
 
-    /// Load a serialized model and validate its CPU sidecar or TensorRT tensor contract.
+    /// Load a serialized model and validate its TensorRT tensor contract.
     std::unique_ptr<EngineBundle> createEngineBundle( const std::string &filename /**< [in] Engine pathname. */,
                                                       std::string       &error /**< [out] Failure detail. */ );
-
-    /// Load an optional CPU linear-policy sidecar matching one TensorRT engine.
-    bool loadLinearPolicy( const std::string &filename /**< [in] Linear-policy sidecar pathname. */,
-                           EngineBundle      &bundle /**< [in,out] Bundle receiving validated weights. */,
-                           std::string       &error /**< [out] Failure detail. */ );
 
     /// Allocate CUDA inference buffers before activating a TensorRT candidate.
     int prepareEngineMemory();
@@ -401,7 +381,7 @@ class po4ao : public MagAOXApp<true>, public dev::shmimMonitor<po4ao>, public de
                                 uint64_t modelId /**< [in] Selected policy, or zero for integrator. */,
                                 uint64_t reset /**< [in] Model-reset generation captured at the frame boundary. */ );
 
-    /// Assemble modal history and run CPU-linear or dedicated-stream TensorRT inference.
+    /// Assemble modal history and run TensorRT inference on its dedicated stream.
     bool runInference( const float *observation /**< [in] Current full-sized modal observation. */ );
 
     /// Fill the controlled prefix with the proportional fallback, before noise and limiting.

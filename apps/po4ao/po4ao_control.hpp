@@ -17,6 +17,11 @@ inline void po4ao::makeIntegratorCommand( const float *observation )
 
 inline int po4ao::invalidateReplay( IMAGE &stream, bool opened, IMAGE &metadataStream, bool metadataOpened )
 {
+    if( &stream == &m_replayStream )
+    {
+        m_replayRmsNm.store( -1.0, std::memory_order_relaxed );
+    }
+
     if( !opened || !metadataOpened )
     {
         return -1;
@@ -76,6 +81,29 @@ inline int po4ao::publishReplay( IMAGE   &stream,
     metadataStream.md[0].write = 0;
     ImageStreamIO_sempost( &stream, -1 );
     ImageStreamIO_sempost( &metadataStream, -1 );
+
+    if( &stream == &m_replayStream )
+    {
+        double sumFrameRms = 0.0;
+        for( size_t sample = 0; sample < valid; ++sample )
+        {
+            const float *observation = destination + sample * m_nModes;
+            double       sumSquares  = 0.0;
+
+            for( int mode = 0; mode < m_nModesControlled; ++mode )
+            {
+                const double coefficient = observation[mode];
+                sumSquares += coefficient * coefficient;
+            }
+
+            sumFrameRms += std::sqrt( sumSquares );
+        }
+
+        // Mean per-frame modal norm in nm, using the CACAO 1000 nm/um convention.
+        const double rms = valid && std::isfinite( sumFrameRms ) ? 1000.0 * sumFrameRms / valid : -1.0;
+        m_replayRmsNm.store( rms, std::memory_order_relaxed );
+    }
+
     return 0;
 }
 
@@ -234,7 +262,7 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
         const uint32_t latency =
             static_cast<uint32_t>( std::min<int64_t>( elapsed.count(), std::numeric_limits<uint32_t>::max() ) );
         const auto     model   = m_effectiveModelId.load( std::memory_order_acquire );
-        const uint32_t backend = m_effectiveBackend.load( std::memory_order_acquire );
+        const uint32_t backend = model == 0 ? 0 : 2;
         const auto     time =
             std::chrono::duration_cast<std::chrono::nanoseconds>( std::chrono::steady_clock::now().time_since_epoch() )
                 .count();
@@ -407,8 +435,6 @@ inline int po4ao::processImage( void *curr_src, const dev::shmimT &dummy )
 
     const uint64_t emittedModel = inferenceOk ? expectedModel : 0;
     m_effectiveModelId.store( emittedModel, std::memory_order_release );
-    m_effectiveBackend.store( emittedModel == 0 ? 0 : ( !m_activeEngine->linearWeights.empty() ? 1 : 2 ),
-                              std::memory_order_release );
     m_effectiveController.store( effectiveController, std::memory_order_release );
     m_appliedControl.store( control, std::memory_order_release );
     if( resetGeneration != 0 )
@@ -493,7 +519,7 @@ inline void po4ao::updateControlStatus()
           "reset_request",
           "reset_applied" },
         { modelText( active ),
-          active == 0 ? "fallback" : ( m_activeCpuInference.load( std::memory_order_acquire ) ? "cpu" : "tensorrt" ),
+          active == 0 ? "fallback" : "tensorrt",
           controllers[static_cast<size_t>( m_effectiveController.load( std::memory_order_acquire ) )],
           modelText( m_effectiveModelId.load( std::memory_order_acquire ) ),
           reloadNames[static_cast<size_t>( reload )],
@@ -514,6 +540,9 @@ inline void po4ao::updateControlStatus()
     updateIfChanged( m_indiP_collectionStatus,
                      "target_frames",
                      std::to_string( static_cast<uint64_t>( m_warmupEpisodes ) * m_iterationsPerEpisode ) );
+
+    const double rms = m_replayRmsNm.load( std::memory_order_relaxed );
+    updateIfChanged( m_indiP_collectionStatus, "residual_rms_nm", rms >= 0.0 ? std::to_string( rms ) : std::string{} );
 
     // Publish observed state before terminal acknowledgements.
     updateSwitchIfChanged( m_indiP_controlToggle,

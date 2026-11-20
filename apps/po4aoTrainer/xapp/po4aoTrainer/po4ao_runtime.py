@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
-import struct
 import subprocess
 import time
 
@@ -14,9 +13,6 @@ import numpy as np
 
 from .library import engine_id
 
-LINEAR_POLICY_MAGIC = b"PO4AOLIN"
-LINEAR_POLICY_VERSION = 1
-CPU_LINEAR_ARTIFACT_MAGIC = b"PO4AOCPU"
 SYSTEM_CPUSET_FILE = Path("/opt/MagAOX/cpuset/system/cpuset.cpus")
 
 
@@ -317,21 +313,11 @@ def save_training_snapshot(path, policy, dynamics, model_id, metadata=None):
             json.dumps(snapshot_metadata, allow_nan=False, sort_keys=True)
         )
     }
-    if hasattr(policy, "raw_linear_weights"):
-        arrays["policy_raw_weights"] = (
-            policy.raw_linear_weights().detach().cpu().numpy()
-        )
-    else:
-        for name, value in policy.state_dict().items():
-            arrays[f"policy_state__{name}"] = value.detach().cpu().numpy()
+    for name, value in policy.state_dict().items():
+        arrays[f"policy_state__{name}"] = value.detach().cpu().numpy()
     for index, model in enumerate(dynamics.models):
-        if hasattr(model, "raw_linear_weights"):
-            arrays[f"dynamics_{index}_raw_weights"] = (
-                model.raw_linear_weights().detach().cpu().numpy()
-            )
-        else:
-            for name, value in model.state_dict().items():
-                arrays[f"dynamics_{index}_state__{name}"] = value.detach().cpu().numpy()
+        for name, value in model.state_dict().items():
+            arrays[f"dynamics_{index}_state__{name}"] = value.detach().cpu().numpy()
     try:
         with candidate.open("wb") as output:
             np.savez_compressed(output, **arrays)
@@ -356,47 +342,6 @@ def _trtexec_command(trtexec, onnx_path, candidate_path, timing_cache, build_dev
     ]
 
 
-def _write_linear_policy(path, weights, model_id):
-    """Write a versioned CPU linear-policy sidecar tied to one engine hash."""
-    weights = np.asarray(weights, dtype="<f4")
-    if weights.ndim != 2 or not weights.size or not np.isfinite(weights).all():
-        raise ValueError(
-            "Linear-policy weights must be a finite feature-by-mode matrix"
-        )
-    features, modes = weights.shape
-    header = struct.pack(
-        "<8sIIIQ",
-        LINEAR_POLICY_MAGIC,
-        LINEAR_POLICY_VERSION,
-        features,
-        modes,
-        int(model_id, 16),
-    )
-    with open(path, "wb") as output:
-        output.write(header)
-        output.write(np.ascontiguousarray(weights).tobytes())
-
-
-def _write_cpu_linear_artifact(path, weights):
-    """Write the hashable primary artifact for a CPU-only linear policy."""
-    weights = np.asarray(weights, dtype="<f4")
-    if weights.ndim != 2 or not weights.size or not np.isfinite(weights).all():
-        raise ValueError(
-            "Linear-policy weights must be a finite feature-by-mode matrix"
-        )
-    features, modes = weights.shape
-    header = struct.pack(
-        "<8sIII",
-        CPU_LINEAR_ARTIFACT_MAGIC,
-        LINEAR_POLICY_VERSION,
-        features,
-        modes,
-    )
-    with open(path, "wb") as output:
-        output.write(header)
-        output.write(np.ascontiguousarray(weights).tobytes())
-
-
 def publish_tensorrt_engine(
     policy,
     example_input,
@@ -409,59 +354,42 @@ def publish_tensorrt_engine(
     metadata=None,
     dynamics=None,
 ):
-    """Atomically publish a CPU-linear artifact or TensorRT engine."""
+    """Atomically publish a TensorRT engine."""
+    import torch
+
     engine_path = Path(engine_path)
     engine_path.parent.mkdir(parents=True, exist_ok=True)
     token = f"{os.getpid()}-{time.time_ns()}"
     onnx_path = engine_path.with_name(f".{engine_path.name}.{token}.onnx")
     candidate_path = engine_path.with_name(f".{engine_path.name}.{token}.candidate")
-    linear_path = engine_path.with_suffix(engine_path.suffix + ".linear")
-    linear_candidate = linear_path.with_name(f".{linear_path.name}.{token}")
 
     try:
         model_metadata = dict(metadata or {})
-        linear_policy = model_metadata.get("policy_architecture") == "linear_local"
-        if linear_policy:
-            if getattr(policy.output, "bias", None) is not None:
-                raise ValueError("CPU linear inference requires a bias-free policy")
-            try:
-                weights = policy.raw_linear_weights().detach().cpu().numpy()
-            except (AttributeError, IndexError) as error:
-                raise ValueError(
-                    "linear_local policy does not expose the expected output weights"
-                ) from error
-            _write_cpu_linear_artifact(candidate_path, weights)
-            model_id = engine_id(candidate_path)
-            _write_linear_policy(linear_candidate, weights, model_id)
-            os.replace(linear_candidate, linear_path)
-        else:
-            import torch
-
-            torch.onnx.export(policy, example_input, onnx_path, input_names=["input"])
-            command = _trtexec_command(
-                trtexec, onnx_path, candidate_path, timing_cache, build_device
+        torch.onnx.export(policy, example_input, onnx_path, input_names=["input"])
+        command = _trtexec_command(
+            trtexec, onnx_path, candidate_path, timing_cache, build_device
+        )
+        with open(log_path, "w", encoding="utf-8") as output:
+            subprocess.run(
+                command, check=True, stdout=output, stderr=subprocess.STDOUT
             )
-            with open(log_path, "w", encoding="utf-8") as output:
-                subprocess.run(
-                    command, check=True, stdout=output, stderr=subprocess.STDOUT
-                )
-            if not candidate_path.is_file() or candidate_path.stat().st_size == 0:
-                raise RuntimeError(
-                    "TensorRT reported success without creating an engine"
-                )
-            model_id = engine_id(candidate_path)
-            linear_path.unlink(missing_ok=True)
+        if not candidate_path.is_file() or candidate_path.stat().st_size == 0:
+            raise RuntimeError(
+                "TensorRT reported success without creating an engine"
+            )
+        model_id = engine_id(candidate_path)
+        # Older auto-mode runtimes inspect this sidecar before loading a TensorRT engine.
+        engine_path.with_suffix(engine_path.suffix + ".linear").unlink(missing_ok=True)
         os.replace(candidate_path, engine_path)
         model_metadata.update(
             {
                 "active_model_id": model_id,
-                "artifact_type": "cpu_linear" if linear_policy else "tensorrt",
+                "artifact_type": "tensorrt",
+                "engine_build_cuda_device": build_device,
                 "engine": str(engine_path),
                 "published_unix_ns": time.time_ns(),
             }
         )
-        if not linear_policy:
-            model_metadata["engine_build_cuda_device"] = build_device
         if dynamics is not None:
             save_training_snapshot(
                 engine_path.with_suffix(engine_path.suffix + ".training.npz"),
@@ -481,4 +409,3 @@ def publish_tensorrt_engine(
     finally:
         onnx_path.unlink(missing_ok=True)
         candidate_path.unlink(missing_ok=True)
-        linear_candidate.unlink(missing_ok=True)

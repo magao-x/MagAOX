@@ -25,24 +25,6 @@ class DiagnosticSnapshot:
         """Report elapsed wall-clock age without implying live attachment to a worker."""
         return max(0.0, time.time() - self.metadata["saved_unix_ns"] / 1e9)
 
-    def plot(self):
-        """Render the existing training and model-debug figures on explicit request."""
-        from .po4ao_diagnostics import (
-            plot_training_diagnostics,
-            plot_model_debug_diagnostics,
-        )
-
-        history = self.metadata["history"]
-        return (
-            plot_training_diagnostics(
-                history,
-                self.observations,
-                self.actions,
-                sample_rate_hz=self.metadata["config"]["diagnostics"]["sample_rate_hz"],
-            ),
-            plot_model_debug_diagnostics(history),
-        )
-
 
 def save_diagnostics(session, directory, *, keep=3, history_limit=1000):
     """Atomically write a completed diagnostic iteration into a caller-owned run directory.

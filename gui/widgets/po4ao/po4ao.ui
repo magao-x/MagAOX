@@ -327,6 +327,16 @@
         </layout>
       </item>
       <item>
+        <widget class="xqt::statusLabel" name="labelResidualRms">
+          <property name="text">
+            <string>Residual RMS: —</string>
+          </property>
+          <property name="toolTip">
+            <string>Mean per-frame quadrature sum of the controlled modal residuals in the rolling replay buffer (1 µm = 1000 nm).</string>
+          </property>
+        </widget>
+      </item>
+      <item>
         <widget class="xqt::statusLabel" name="labelStatus">
           <property name="text">
             <string>Status: —</string>

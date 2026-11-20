@@ -58,7 +58,7 @@ inline void po4ao::setupConfig()
                 "linear_inference_backend",
                 false,
                 "string",
-                "Linear-policy inference backend: auto, cpu, or tensorrt." );
+                "Legacy option. Both auto and tensorrt use TensorRT." );
     config.add( "parameters.channel",
                 "",
                 "parameters.channel",
@@ -266,7 +266,13 @@ inline int po4ao::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_dataDirs, "parameters.dataDirs" );
     _config( m_engineDirs, "parameters.engineDirs" );
     _config( m_engineName, "parameters.engineName" );
-    _config( m_linearInferenceBackend, "parameters.linear_inference_backend" );
+    std::string legacyBackend = "auto";
+    _config( legacyBackend, "parameters.linear_inference_backend" );
+    if( legacyBackend != "auto" && legacyBackend != "tensorrt" )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "PO4AO supports only TensorRT policy inference" } );
+    }
+
     _config( m_outputChannel, "parameters.channel" );
     _config( m_bufferChannel, "parameters.buffer_channel" );
     _config( m_bufferMetadataChannel, "parameters.buffer_metadata_channel" );
@@ -333,22 +339,6 @@ inline std::unique_ptr<EngineBundle> po4ao::createEngineBundle( const std::strin
         hash *= 1099511628211ULL;
     }
     bundle->modelId = hash;
-    if( m_linearInferenceBackend != "tensorrt" )
-    {
-        if( !loadLinearPolicy( filename + ".linear", *bundle, error ) )
-        {
-            return nullptr;
-        }
-        if( !bundle->linearWeights.empty() )
-        {
-            return bundle;
-        }
-        if( m_linearInferenceBackend == "cpu" )
-        {
-            error = "CPU linear inference requested but no matching sidecar is available";
-            return nullptr;
-        }
-    }
 
     if( cudaSetDevice( m_cudaDevice ) != cudaSuccess )
     {
@@ -442,68 +432,6 @@ inline std::unique_ptr<EngineBundle> po4ao::createEngineBundle( const std::strin
         return nullptr;
     }
     return bundle;
-}
-
-inline bool po4ao::loadLinearPolicy( const std::string &filename, EngineBundle &bundle, std::string &error )
-{
-    std::ifstream file( filename, std::ios::binary );
-    if( !file )
-    {
-        return true;
-    }
-
-    std::array<char, 8> magic{};
-    uint32_t            version  = 0;
-    uint32_t            features = 0;
-    uint32_t            modes    = 0;
-    uint64_t            modelId  = 0;
-    file.read( magic.data(), magic.size() );
-    file.read( reinterpret_cast<char *>( &version ), sizeof( version ) );
-    file.read( reinterpret_cast<char *>( &features ), sizeof( features ) );
-    file.read( reinterpret_cast<char *>( &modes ), sizeof( modes ) );
-    file.read( reinterpret_cast<char *>( &modelId ), sizeof( modelId ) );
-    const std::array<char, 8> expectedMagic{ 'P', 'O', '4', 'A', 'O', 'L', 'I', 'N' };
-    if( !file || magic != expectedMagic || version != 1 || features == 0 || features % 2 == 0 ||
-        modes < static_cast<uint32_t>( m_nModesControlled ) || modes > static_cast<uint32_t>( m_nModes ) ||
-        modelId != bundle.modelId )
-    {
-        error = "linear-policy sidecar has an invalid tensor contract or model ID";
-        return false;
-    }
-
-    const uint32_t historyLength = ( features + 1 ) / 2;
-    const uint64_t inputSize     = static_cast<uint64_t>( features ) * modes;
-    if( historyLength > static_cast<uint32_t>( m_historyCapacity ) ||
-        inputSize > static_cast<uint64_t>( std::numeric_limits<int>::max() ) )
-    {
-        error = "linear-policy tensor size exceeds the configured capacity";
-        return false;
-    }
-    bundle.inputChannels = static_cast<int>( features );
-    bundle.inputHeight   = 1;
-    bundle.inputWidth    = static_cast<int>( modes );
-    bundle.inputSize     = static_cast<int>( inputSize );
-    bundle.outputSize    = static_cast<int>( modes );
-    bundle.trainedModes  = static_cast<int>( modes );
-    bundle.historyLength = static_cast<int>( historyLength );
-
-    const size_t weightCount = static_cast<size_t>( features ) * modes;
-    bundle.linearWeights.resize( weightCount );
-    file.read( reinterpret_cast<char *>( bundle.linearWeights.data() ), weightCount * sizeof( float ) );
-    if( !file || file.peek() != std::ifstream::traits_type::eof() )
-    {
-        error = "linear-policy sidecar has an invalid size";
-        return false;
-    }
-    for( float weight : bundle.linearWeights )
-    {
-        if( !finiteFloat( weight ) )
-        {
-            error = "linear-policy sidecar contains a non-finite weight";
-            return false;
-        }
-    }
-    return true;
 }
 
 inline int po4ao::prepareEngineMemory()
@@ -734,18 +662,17 @@ inline void po4ao::modelLoaderLoop()
         const uint64_t requestGeneration = m_reloadGeneration.load( std::memory_order_acquire );
         std::string    error;
         auto           candidate = createEngineBundle( m_engineDirs + "/" + m_engineName, error );
-        if( candidate != nullptr && candidate->linearWeights.empty() && m_cudaStream == nullptr &&
-            prepareEngineMemory() < 0 )
+        if( candidate != nullptr && m_cudaStream == nullptr && prepareEngineMemory() < 0 )
         {
             error = "CUDA inference-buffer allocation failed";
             candidate.reset();
         }
-        if( candidate != nullptr && candidate->linearWeights.empty() &&
+        if( candidate != nullptr &&
             !warmEngineBundle( *candidate, m_engineWarmupStream, m_deviceWarmupInput, m_deviceWarmupOutput, error ) )
         {
             candidate.reset();
         }
-        if( candidate != nullptr && candidate->linearWeights.empty() && !captureEngineGraph( *candidate, error ) )
+        if( candidate != nullptr && !captureEngineGraph( *candidate, error ) )
         {
             candidate.reset();
         }
@@ -800,7 +727,6 @@ inline void po4ao::activatePendingEngine()
     EngineBundle *old = m_activeEngine;
     m_activeEngine    = candidate;
     m_activeModelId.store( candidate->modelId, std::memory_order_release );
-    m_activeCpuInference.store( !candidate->linearWeights.empty(), std::memory_order_release );
     m_useNeuralNetwork.store( true, std::memory_order_release );
     m_reloadStatus.store( 0, std::memory_order_release );
     m_retiredEngine.store( old, std::memory_order_release );
@@ -825,14 +751,12 @@ inline void po4ao::resetActiveModel( uint64_t generation )
     }
 
     m_activeModelId.store( 0, std::memory_order_release );
-    m_activeCpuInference.store( false, std::memory_order_release );
     m_useNeuralNetwork.store( false, std::memory_order_release );
 }
 
 inline bool po4ao::runInference( const float *observation )
 {
-    if( m_activeEngine == nullptr ||
-        ( m_activeEngine->linearWeights.empty() && m_activeEngine->graphExec == nullptr ) ||
+    if( m_activeEngine == nullptr || m_activeEngine->graphExec == nullptr ||
         !assemblePolicyInput( m_inputState.get(),
                               static_cast<size_t>( m_activeEngine->trainedModes ),
                               static_cast<size_t>( m_activeEngine->historyLength ),
@@ -842,20 +766,8 @@ inline bool po4ao::runInference( const float *observation )
         return false;
     }
 
-    if( !m_activeEngine->linearWeights.empty() )
-    {
-        if( !applyLinearLocalPolicy( m_output.get(),
-                                     m_inputState.get(),
-                                     m_activeEngine->linearWeights.data(),
-                                     static_cast<size_t>( m_activeEngine->inputChannels ),
-                                     static_cast<size_t>( m_activeEngine->trainedModes ),
-                                     static_cast<size_t>( m_nModesControlled ) ) )
-        {
-            return false;
-        }
-    }
-    else if( cudaGraphLaunch( m_activeEngine->graphExec, m_cudaStream ) != cudaSuccess ||
-             cudaStreamSynchronize( m_cudaStream ) != cudaSuccess )
+    if( cudaGraphLaunch( m_activeEngine->graphExec, m_cudaStream ) != cudaSuccess ||
+        cudaStreamSynchronize( m_cudaStream ) != cudaSuccess )
     {
         return false;
     }
@@ -994,6 +906,8 @@ inline int po4ao::openOutputStreams()
 
 inline void po4ao::closeOutputStreams()
 {
+    m_replayRmsNm.store( -1.0, std::memory_order_relaxed );
+
     if( m_outputOpened )
     {
         ImageStreamIO_closeIm( &m_outputStream );
@@ -1042,11 +956,8 @@ inline int po4ao::appStartup()
 {
     m_runtimeInstance = std::to_string( getpid() ) + "-" +
                         std::to_string( std::chrono::system_clock::now().time_since_epoch().count() );
-    if( m_configVersion != 2 ||
-        ( m_linearInferenceBackend != "auto" && m_linearInferenceBackend != "cpu" &&
-          m_linearInferenceBackend != "tensorrt" ) ||
-        m_nModes <= 0 || m_nModesControlled <= 0 || m_nModesControlled > m_nModes || m_historyCapacity <= 0 ||
-        m_iterationsPerEpisode == 0 || m_replayBufferSize <= 0 || m_warmupEpisodes == 0 ||
+    if( m_configVersion != 2 || m_nModes <= 0 || m_nModesControlled <= 0 || m_nModesControlled > m_nModes ||
+        m_historyCapacity <= 0 || m_iterationsPerEpisode == 0 || m_replayBufferSize <= 0 || m_warmupEpisodes == 0 ||
         static_cast<uint64_t>( m_warmupEpisodes ) * m_iterationsPerEpisode >
             static_cast<uint64_t>( m_replayBufferSize ) ||
         m_explorationSigmaEnd < 0.F || m_explorationSigmaStart < m_explorationSigmaEnd ||
@@ -1065,7 +976,6 @@ inline int po4ao::appStartup()
     }
 
     m_activeModelId.store( 0, std::memory_order_release );
-    m_activeCpuInference.store( false, std::memory_order_release );
     m_useNeuralNetwork.store( false, std::memory_order_release );
     log<text_log>( "PO4AO starting in fallback mode; waiting for an explicit model reload", logPrio::LOG_INFO );
 
@@ -1092,14 +1002,7 @@ inline int po4ao::appStartup()
     registerIndiPropertyNew( m_indiP_recollectWarmup, INDI_NEWCALLBACK( m_indiP_recollectWarmup ) );
 
     REG_INDI_NEWPROP_NOCB( m_indiP_runtimeStats, "runtime_stats", pcf::IndiProperty::Number );
-    for( const char *element : { "p50_us",
-                                 "p95_us",
-                                 "p99_us",
-                                 "max_us",
-                                 "missed_frames",
-                                 "deadline_misses",
-                                 "inference_failures",
-                                 "replay_drops" } )
+    for( const char *element : { "p50_us", "max_us", "missed_frames", "replay_drops" } )
     {
         m_indiP_runtimeStats.add( pcf::IndiElement( element ) );
     }
@@ -1121,7 +1024,8 @@ inline int po4ao::appStartup()
         m_indiP_modelStatus.add( pcf::IndiElement( element ) );
     }
     REG_INDI_NEWPROP_NOCB( m_indiP_collectionStatus, "collection_status", pcf::IndiProperty::Text );
-    for( const char *element : { "state", "requested_generation", "generation", "frames", "target_frames" } )
+    for( const char *element :
+         { "state", "requested_generation", "generation", "frames", "target_frames", "residual_rms_nm" } )
     {
         m_indiP_collectionStatus.add( pcf::IndiElement( element ) );
     }
@@ -1226,20 +1130,11 @@ inline void po4ao::updateRuntimeStatistics()
 
     const auto   statistics = m_runtimeSamples.snapshot( m_lastTelemSequence );
     checkInputNotifications( statistics.sequence );
-    const double p50 = statistics.p50, p95 = statistics.p95, p99 = statistics.p99, maximum = statistics.maximum;
-    updateIfChanged( m_indiP_runtimeStats, "p50_us", p50 );
-    updateIfChanged( m_indiP_runtimeStats, "p95_us", p95 );
-    updateIfChanged( m_indiP_runtimeStats, "p99_us", p99 );
-    updateIfChanged( m_indiP_runtimeStats, "max_us", maximum );
+    updateIfChanged( m_indiP_runtimeStats, "p50_us", statistics.p50 );
+    updateIfChanged( m_indiP_runtimeStats, "max_us", statistics.maximum );
     updateIfChanged( m_indiP_runtimeStats,
                      "missed_frames",
                      static_cast<double>( m_missedFrames.load( std::memory_order_relaxed ) ) );
-    updateIfChanged( m_indiP_runtimeStats,
-                     "deadline_misses",
-                     static_cast<double>( m_deadlineMisses.load( std::memory_order_relaxed ) ) );
-    updateIfChanged( m_indiP_runtimeStats,
-                     "inference_failures",
-                     static_cast<double>( m_inferenceFailures.load( std::memory_order_relaxed ) ) );
     updateIfChanged(
         m_indiP_runtimeStats, "replay_drops", static_cast<double>( m_replayDrops.load( std::memory_order_relaxed ) ) );
 
@@ -1330,37 +1225,27 @@ inline int po4ao::allocate( const dev::shmimT &dummy )
     const size_t inputCapacity = ( 2 * static_cast<size_t>( m_historyCapacity ) - 1 ) * static_cast<size_t>( m_nModes );
     if( !m_inputState || !m_output )
     {
-        if( m_linearInferenceBackend != "cpu" )
+        if( cudaSetDevice( m_cudaDevice ) != cudaSuccess )
         {
-            if( cudaSetDevice( m_cudaDevice ) != cudaSuccess )
-            {
-                return log<software_error, -1>( { __FILE__, __LINE__, "CUDA inference-device selection failed" } );
-            }
-            float *inputState = nullptr;
-            float *output     = nullptr;
-            if( cudaHostAlloc( reinterpret_cast<void **>( &inputState ),
-                               inputCapacity * sizeof( float ),
-                               cudaHostAllocDefault ) != cudaSuccess )
-            {
-                return log<software_error, -1>( { __FILE__, __LINE__, "pinned policy-input allocation failed" } );
-            }
-            std::unique_ptr<float[], HostBufferDeleter> pinnedInput( inputState, HostBufferDeleter{ true } );
-            if( cudaHostAlloc( reinterpret_cast<void **>( &output ),
-                               static_cast<size_t>( m_nModes ) * sizeof( float ),
-                               cudaHostAllocDefault ) != cudaSuccess )
-            {
-                return log<software_error, -1>( { __FILE__, __LINE__, "pinned policy-output allocation failed" } );
-            }
-            std::unique_ptr<float[], HostBufferDeleter> pinnedOutput( output, HostBufferDeleter{ true } );
-            m_inputState = std::move( pinnedInput );
-            m_output     = std::move( pinnedOutput );
+            return log<software_error, -1>( { __FILE__, __LINE__, "CUDA inference-device selection failed" } );
         }
-        else
+        float *inputState = nullptr;
+        float *output     = nullptr;
+        if( cudaHostAlloc( reinterpret_cast<void **>( &inputState ),
+                           inputCapacity * sizeof( float ),
+                           cudaHostAllocDefault ) != cudaSuccess )
         {
-            m_inputState = std::unique_ptr<float[], HostBufferDeleter>( new float[inputCapacity], HostBufferDeleter{} );
-            m_output     = std::unique_ptr<float[], HostBufferDeleter>( new float[static_cast<size_t>( m_nModes )],
-                                                                    HostBufferDeleter{} );
+            return log<software_error, -1>( { __FILE__, __LINE__, "pinned policy-input allocation failed" } );
         }
+        std::unique_ptr<float[], HostBufferDeleter> pinnedInput( inputState );
+        if( cudaHostAlloc( reinterpret_cast<void **>( &output ),
+                           static_cast<size_t>( m_nModes ) * sizeof( float ),
+                           cudaHostAllocDefault ) != cudaSuccess )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "pinned policy-output allocation failed" } );
+        }
+        m_inputState = std::move( pinnedInput );
+        m_output.reset( output );
     }
     memset( m_inputState.get(), 0, inputCapacity * sizeof( float ) );
     memset( m_output.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );

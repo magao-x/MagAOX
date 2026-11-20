@@ -755,6 +755,14 @@ TEST_CASE( "PO4AO inference is independent of the optional trainer", "[po4ao]" )
 {
     Fixture f( false );
     f.runtime();
+    auto *rms = f.control<QLabel>( "labelResidualRms" );
+    REQUIRE( rms->text() == "Residual RMS: —" );
+    f.m_publisher.handleSetProperty( text( "po4ao", "collection_status", { { "residual_rms_nm", "23.7" } } ) );
+    drain();
+    REQUIRE( rms->text() == "Residual RMS: 24 nm" );
+    f.m_publisher.handleSetProperty( text( "po4ao", "collection_status", { { "residual_rms_nm", "" } } ) );
+    drain();
+    REQUIRE( rms->text() == "Residual RMS: —" );
     REQUIRE( f.control<QPushButton>( "buttonPO4AO" )->isEnabled() );
     REQUIRE( f.control<QPushButton>( "buttonReset" )->isEnabled() );
     REQUIRE( f.control<QPushButton>( "buttonWarmup" )->isEnabled() );

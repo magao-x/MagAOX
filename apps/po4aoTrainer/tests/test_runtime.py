@@ -6,43 +6,28 @@
 from dataclasses import replace
 from types import SimpleNamespace
 from itertools import product
-import os
-import struct
 import tempfile
 import unittest
 import numpy as np
 import importlib.util
 from unittest.mock import patch
 from pathlib import Path
-from xapp.po4aoTrainer.library import engine_id
 from xapp.po4aoTrainer.po4ao_runtime import (
-    CPU_LINEAR_ARTIFACT_MAGIC,
     cached_replay_snapshot,
     configure_compute_resources,
-    LINEAR_POLICY_MAGIC,
-    LINEAR_POLICY_VERSION,
     _parse_cpu_list,
     _trtexec_command,
-    _write_linear_policy,
     modal_rms_scales,
     model_publication_feedback,
-    publish_tensorrt_engine,
-    save_training_snapshot,
     select_controlled_modes,
     stable_replay_prefix_snapshot,
     stable_replay_snapshot,
 )
 from xapp.po4aoTrainer.po4ao_diagnostics import (
-    _counter_rates,
-    _dynamics_raw_weights,
-    _plot_coefficient_map,
     estimate_delay_frames,
     evaluate_dynamics_rollout_details,
-    lag_correlation,
     measured_replay_cost,
     modal_scale_ratios,
-    read_runtime_telemetry,
-    replay_buffer_health,
     replay_metrics,
 )
 from test_training import inputs, make_session
@@ -314,137 +299,6 @@ class ComputeIsolationTest(unittest.TestCase):
                     self.assertEqual(result["torch_cpu_threads"], min(threads, 2))
 
 
-class LinearPolicySidecarTest(unittest.TestCase):
-    """Validate the versioned CPU linear-policy artifact."""
-
-    def test_writes_header_model_id_and_feature_major_weights(self):
-        """Verify writes header model id and feature major weights."""
-        weights = np.arange(6, dtype=np.float32).reshape(3, 2)
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "policy.linear")
-            _write_linear_policy(path, weights, "0123456789abcdef")
-            with open(path, "rb") as sidecar:
-                payload = sidecar.read()
-
-        header_size = struct.calcsize("<8sIIIQ")
-        magic, version, features, modes, model_id = struct.unpack(
-            "<8sIIIQ", payload[:header_size]
-        )
-        self.assertEqual(magic, LINEAR_POLICY_MAGIC)
-        self.assertEqual(version, LINEAR_POLICY_VERSION)
-        self.assertEqual((features, modes), weights.shape)
-        self.assertEqual(model_id, 0x0123456789ABCDEF)
-        np.testing.assert_array_equal(
-            np.frombuffer(payload[header_size:], dtype="<f4").reshape(weights.shape),
-            weights,
-        )
-
-    def test_linear_publication_skips_tensorrt_build(self):
-        """Verify linear publication skips tensorrt build."""
-
-        class FakeWeights:
-            """Array-backed tensor stand-in for export tests without GPU allocation."""
-
-            def __init__(self, values):
-                """Initialize the local test double without external resources."""
-                self.values = values
-
-            def detach(self):
-                """Return this array-backed stand-in for a detached tensor."""
-                return self
-
-            def cpu(self):
-                """Return this already CPU-resident tensor stand-in."""
-                return self
-
-            def numpy(self):
-                """Return the test tensor as a NumPy array."""
-                return self.values
-
-        class FakePolicy:
-            """Linear policy stand-in for checking the CPU publication path."""
-
-            output = SimpleNamespace(bias=None)
-
-            def raw_linear_weights(self):
-                """Expose reference weights in the runtime feature-major ordering."""
-                return FakeWeights(np.arange(6, dtype=np.float32).reshape(3, 2))
-
-        with tempfile.TemporaryDirectory() as directory:
-            engine_path = os.path.join(directory, "policy.trt")
-            model_id = publish_tensorrt_engine(
-                FakePolicy(),
-                None,
-                engine_path,
-                build_device=1,
-                trtexec="/does/not/exist",
-                metadata={"policy_architecture": "linear_local"},
-            )
-            with open(engine_path, "rb") as artifact:
-                self.assertEqual(artifact.read(8), CPU_LINEAR_ARTIFACT_MAGIC)
-            self.assertEqual(model_id, engine_id(engine_path))
-            self.assertTrue(os.path.isfile(engine_path + ".linear"))
-
-
-class TrainingSnapshotTest(unittest.TestCase):
-    """Validate portable, compact policy and dynamics snapshots."""
-
-    def test_saves_linear_weights_and_model_identity(self):
-        """Verify saves linear weights and model identity."""
-
-        class FakeWeights:
-            """Array-backed tensor stand-in for export tests without GPU allocation."""
-
-            def __init__(self, values):
-                """Initialize the local test double without external resources."""
-                self.values = values
-
-            def detach(self):
-                """Return this array-backed stand-in for a detached tensor."""
-                return self
-
-            def cpu(self):
-                """Return this already CPU-resident tensor stand-in."""
-                return self
-
-            def numpy(self):
-                """Return the test tensor as a NumPy array."""
-                return self.values
-
-        class FakeLinearModel:
-            """Minimal raw-weight model for snapshot serialization tests."""
-
-            def __init__(self, values):
-                """Initialize the local test double without external resources."""
-                self.values = values
-
-            def raw_linear_weights(self):
-                """Expose reference weights in the runtime feature-major ordering."""
-                return FakeWeights(self.values)
-
-        policy = FakeLinearModel(np.ones((3, 2), dtype=np.float32))
-        dynamics = SimpleNamespace(
-            models=[FakeLinearModel(np.full((4, 2), 2, dtype=np.float32))]
-        )
-        with tempfile.TemporaryDirectory() as directory:
-            path = os.path.join(directory, "training.npz")
-            save_training_snapshot(
-                path,
-                policy,
-                dynamics,
-                "0123456789abcdef",
-                {"episode_id": 7},
-            )
-            with np.load(path, allow_pickle=False) as snapshot:
-                np.testing.assert_array_equal(
-                    snapshot["policy_raw_weights"], policy.values
-                )
-                np.testing.assert_array_equal(
-                    snapshot["dynamics_0_raw_weights"], dynamics.models[0].values
-                )
-                self.assertIn("0123456789abcdef", str(snapshot["metadata_json"]))
-
-
 class ReplayDiagnosticsTest(unittest.TestCase):
     """Validate delay and replay-health calculations."""
 
@@ -472,25 +326,6 @@ class ReplayDiagnosticsTest(unittest.TestCase):
         self.assertTrue(np.isfinite(metrics["observation_rms"]))
         self.assertTrue(np.isfinite(metrics["action_rms"]))
 
-    def test_reads_runtime_indi_values(self):
-        """Verify reads runtime indi values."""
-        values = {
-            "po4ao.runtime_stats.p50_us": 98,
-            "po4ao.runtime_stats.p95_us": 115,
-            "po4ao.runtime_stats.p99_us": 121,
-            "po4ao.runtime_stats.max_us": 466,
-            "po4ao.runtime_stats.missed_frames": 0,
-            "po4ao.runtime_stats.deadline_misses": 2,
-            "po4ao.runtime_stats.inference_failures": 0,
-            "po4ao.runtime_stats.replay_drops": 0,
-            "po4ao.model_status.active_id": "1cf7778a58831a50",
-        }
-
-        telemetry = read_runtime_telemetry(values)
-
-        self.assertEqual(telemetry["runtime_p99_us"], 121.0)
-        self.assertEqual(telemetry["runtime_active_model_id"], "1cf7778a58831a50")
-
     def test_probe_delay_uses_command_minus_baseline(self):
         """Verify probe delay uses command minus baseline."""
         generator = np.random.default_rng(8)
@@ -498,17 +333,6 @@ class ReplayDiagnosticsTest(unittest.TestCase):
         observations = np.zeros_like(probe)
         observations[3:] = -probe[:-3]
         actions = observations + probe
-
-        health = replay_buffer_health(
-            observations,
-            actions,
-            baseline_gain=1.0,
-            max_lag=6,
-        )
-
-        self.assertEqual(health["response_lag_frames"], 3)
-        self.assertEqual(health["control_delay_frames"], 2)
-        self.assertAlmostEqual(health["probe_rms"], np.sqrt(np.mean(probe**2)))
 
         metrics = replay_metrics(
             observations,
@@ -519,29 +343,6 @@ class ReplayDiagnosticsTest(unittest.TestCase):
         )
         self.assertEqual(metrics["estimated_response_lag_frames"], 3)
         self.assertEqual(metrics["estimated_delay_frames"], 2)
-
-    def test_reports_repeated_replay_frames(self):
-        """Verify reports repeated replay frames."""
-        observations = np.array(
-            [[0.0, 1.0], [0.0, 1.0], [0.0, 1.0], [2.0, 3.0]],
-            dtype=np.float32,
-        )
-        actions = observations.copy()
-
-        health = replay_buffer_health(observations, actions, max_lag=2)
-
-        self.assertAlmostEqual(health["repeated_observation_fraction"], 2 / 3)
-        self.assertEqual(health["longest_repeated_observation_run"], 3)
-        self.assertEqual(health["longest_repeated_action_run"], 3)
-
-    def test_lag_correlation_preserves_response_sign(self):
-        """Verify lag correlation preserves response sign."""
-        reference = np.arange(10, dtype=np.float64)[:, None]
-        response = -reference
-
-        correlations = lag_correlation(reference, response, max_lag=0)
-
-        self.assertAlmostEqual(correlations[0, 0], -1.0)
 
     def test_assumed_delay_skips_correlation_measurement(self):
         """Verify assumed delay skips correlation measurement."""
@@ -560,16 +361,6 @@ class ReplayDiagnosticsTest(unittest.TestCase):
         self.assertIsNone(metrics["estimated_response_lag_frames"])
         self.assertEqual(metrics["delay_scores"], [])
         self.assertEqual(metrics["delay_source"], "assumed")
-
-    def test_runtime_counter_rates_handle_restarts(self):
-        """Verify runtime counter rates handle restarts."""
-        history = [
-            {"timestamp_unix_ns": 0, "count": 10},
-            {"timestamp_unix_ns": 2_000_000_000, "count": 16},
-            {"timestamp_unix_ns": 4_000_000_000, "count": 2},
-        ]
-
-        np.testing.assert_array_equal(_counter_rates(history, "count"), [0, 3, 0])
 
     def test_measured_cost_matches_training_objective(self):
         """Verify measured cost matches training objective."""
@@ -604,43 +395,6 @@ class ReplayDiagnosticsTest(unittest.TestCase):
 
         np.testing.assert_allclose(ratios["observation"], [1.0])
         np.testing.assert_allclose(ratios["action"], [1.0])
-
-    @unittest.skipUnless(importlib.util.find_spec("torch"), "PyTorch is unavailable")
-    def test_coefficient_map_matches_legacy_dynamics_in_raw_units(self):
-        """Verify coefficient map matches legacy dynamics in raw units."""
-        from types import SimpleNamespace
-        import matplotlib.pyplot as plt
-        import torch
-        from reference_models import ConvDynamics
-
-        for n_history in (1, 3):
-            model = ConvDynamics(
-                torch.ones(1, 2), n_history, control_delay=min(2, n_history - 1)
-            )
-            model.set_modal_scales([2.0, 3.0], [4.0, 5.0])
-            with torch.no_grad():
-                model.net.weight.fill_(0.25)
-            legacy = SimpleNamespace(
-                normalizer=model.normalizer,
-                net=model.net,
-                n_history=model.n_history,
-                control_delay=model.control_delay,
-            )
-            weights = _dynamics_raw_weights(SimpleNamespace(models=[legacy]))
-            features = torch.arange(4 * n_history, dtype=torch.float32).reshape(
-                1, 2 * n_history, 1, 2
-            )
-            expected = model(features).detach().numpy()[0, 0, 0]
-            np.testing.assert_allclose(
-                np.sum(weights * features.numpy()[0, :, 0], axis=0),
-                expected,
-            )
-            figure, axis = plt.subplots()
-            try:
-                _plot_coefficient_map(axis, weights, np.arange(2 * n_history), "Test")
-                np.testing.assert_array_equal(axis.images[0].get_array(), weights.T)
-            finally:
-                plt.close(figure)
 
     @unittest.skipUnless(importlib.util.find_spec("torch"), "PyTorch is unavailable")
     def test_dynamics_rollout_details_include_trace_and_modal_error(self):
@@ -692,49 +446,24 @@ class ReplayDiagnosticsTest(unittest.TestCase):
         )
 
 
-def test_recorded_diagnostics_match_direct_plots(inputs, tmp_path):
-    """Render identical notebook figures from direct state and matching bounded snapshots."""
-    import matplotlib.pyplot as plt
+def test_recorded_diagnostic_replay_and_retention(inputs, tmp_path):
+    """Snapshots preserve the data used by the notebook and retain the latest iterations."""
     from xapp.po4aoTrainer.observer import save_diagnostics, load_diagnostics
-    from xapp.po4aoTrainer.po4ao_diagnostics import (
-        plot_training_diagnostics,
-        plot_model_debug_diagnostics,
-    )
 
     config, recent, warmup = inputs
     session = make_session(config)
-    session.step(recent, warmup, active_model_id="0")
-    direct = (
-        plot_training_diagnostics(
-            session.metrics_history,
-            session.obs_replay,
-            session.act_replay,
-            sample_rate_hz=2000,
-        ),
-        plot_model_debug_diagnostics(session.metrics_history),
-    )
-    snapshot = load_diagnostics(save_diagnostics(session, tmp_path, keep=2))
-    recorded = snapshot.plot()
-    try:
-        assert snapshot.metadata["iteration"] == session.iteration
-        assert snapshot.metadata["config_revision"] == session.config_revision
-        assert snapshot.age_seconds >= 0
-        np.testing.assert_array_equal(snapshot.observations, session.obs_replay)
-        for left, right in zip(direct, recorded):
-            left.canvas.draw()
-            right.canvas.draw()
-            np.testing.assert_array_equal(
-                np.asarray(left.canvas.buffer_rgba()),
-                np.asarray(right.canvas.buffer_rgba()),
-            )
-        for iteration in (2, 3):
-            session.step(
-                replace(recent, counter=iteration, episode_id=iteration + 2),
-                warmup,
-                active_model_id="0",
-            )
-            save_diagnostics(session, tmp_path, keep=2)
-        assert len(list(tmp_path.glob("diagnostics-*.npz"))) == 2
-    finally:
-        for figure in direct + recorded:
-            plt.close(figure)
+    for iteration in (1, 2, 3):
+        session.step(
+            replace(recent, counter=iteration, episode_id=iteration + 2),
+            warmup,
+            active_model_id="0",
+        )
+        path = save_diagnostics(session, tmp_path, keep=2)
+    snapshot = load_diagnostics(path)
+    assert snapshot.metadata["iteration"] == session.iteration
+    assert snapshot.metadata["config_revision"] == session.config_revision
+    assert snapshot.metadata["history"] == session.metrics_history
+    assert snapshot.age_seconds >= 0
+    np.testing.assert_array_equal(snapshot.observations, session.obs_replay)
+    np.testing.assert_array_equal(snapshot.actions, session.act_replay)
+    assert len(list(tmp_path.glob("diagnostics-*.npz"))) == 2

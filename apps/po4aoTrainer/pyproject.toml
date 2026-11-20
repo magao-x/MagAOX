@@ -7,13 +7,12 @@ name = "xapp-po4aoTrainer"
 version = "2026.11.02"
 description = "PO4AO training supervisor and nonlinear notebook training core"
 requires-python = ">=3.11"
-dependencies = ["numpy", "torch", "scipy", "xconf", "purepyindi2", "psutil", "onnx", "onnxscript"]
+dependencies = ["numpy", "torch", "xconf", "purepyindi2", "psutil", "onnx", "onnxscript"]
 
 [project.scripts]
 po4aoTrainer = "xapp.po4aoTrainer.app:main"
 
 [project.optional-dependencies]
-plots = ["matplotlib"]
 test = ["pytest", "tomli-w"]
 
 [tool.setuptools.packages.find]

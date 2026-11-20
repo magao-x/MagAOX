@@ -958,6 +958,14 @@ inline void po4ao::updateGUI()
     }
     m_ui.labelModulation->setText( "Modulation: " + modulationText );
 
+    bool         rmsKnown = false;
+    const double rms      = QString::fromStdString( value( m_runtimeDevice, "collection_status", "residual_rms_nm" ) )
+                           .toDouble( &rmsKnown );
+    const bool runtimeFresh = m_connected && m_runtimeAge.isValid() && m_runtimeAge.elapsed() < 5000;
+    m_ui.labelResidualRms->setText( runtimeFresh && rmsKnown && std::isfinite( rms ) && rms >= 0.0
+                                        ? QString( "Residual RMS: %1 nm" ).arg( rms, 0, 'f', 0 )
+                                        : QString( "Residual RMS: —" ) );
+
     updateTrainingControls( ready );
     if( !ready )
     {
