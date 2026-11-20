@@ -25,6 +25,7 @@ gui/**/makefile.*
 
 #Agents:
 .codex
+**/*.gcov
 
 #Ignore any old folders
 **/old/

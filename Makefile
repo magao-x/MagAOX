@@ -91,6 +91,8 @@ pythonapps_rtc = \
 # Apps needed on ICC
 apps_icc = \
 	dmPokeCenter \
+	elliptecCtrl \
+	elliptecLowLevel \
 	filterWheelCtrl \
 	smc100ccCtrl \
 	usbtempMon \
@@ -137,6 +139,8 @@ all_buildable_apps = \
 	dmPokeXCorr \
 	dmSpeckle \
 	dmSyncopation \
+	elliptecCtrl \
+	elliptecLowLevel \
 	loopTimingMonitor \
 	filterWheelCtrl \
 	flipperCtrl \

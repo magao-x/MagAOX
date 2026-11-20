@@ -77,6 +77,9 @@
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_subscription_test
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_integration_test
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_synco_test
+../apps/elliptecCtrl/tests/elliptecCtrl_test
+../apps/elliptecLowLevel/tests/elliptecDevice_test
+../apps/elliptecLowLevel/tests/elliptecLowLevel_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_entrypoint_test
