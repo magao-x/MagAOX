@@ -492,3 +492,22 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
 - **Help text, docs and example config:** updated. The docs explain the 10.5 s figure, note that `fomStd` is a stability check, and say to change `settleS` if modalPSDs' `psdAvgTime` or `psdTime` changes.
 - **Test:** a new section checks the three defaults.
 - **Instance config on the RTC:** an instance config that copied the earlier example block sets the old values (`aol1_raw_clpsds`, 6, 0.5, 15). Remove those lines or update them.
+
+### Bench: First Averaged-PSD Calibration Run (2026-11-20)
+File: `counterOffload_calib_20261120T193905Z.csv`, copied to `~/Documents/MagAO-X/Data/counterOffload/`.
+
+- **Progress.** 19 rows from 19:39:18 to 19:42:59 UTC (221 s), 12.0–12.5 s per row as designed: 4 `off`, 1 `initial`, and 14 `start` rows covering 0–325 µs.
+  - The run stopped during the measurement after the 4th `off` row: `start` at 350 µs, gain 0.1. That is about 19 of about 70 measurements, so about a quarter of the run, inside the coarse `rampStartUs` scan.
+- **Cause not visible in the CSV.** Rows are written only for completed measurements, and the last row is a baseline at ratio 1. So the abort happened inside `measure()`, not on `abortRatio`. Candidates:
+  - (a) abort requested; this includes a reallocation of the PSD stream, for example modalPSDs restarting after a camera fps change, which sets the same flag;
+  - (b) the app was disabled;
+  - (c) `t2wOffloader.fps` or `numModes` changed;
+  - (d) no settled PSDs arrived within `timeoutS`, for example modalPSDs stalled;
+  - (e) the process exited.
+  - The counterOffload log distinguishes them: a "calibration: <reason>" warning, then "calibration aborted, restored …". Requested from the user.
+- **Starting gain was 0.1.** The `initial` row shows gain 0.1, so the whole `start` scan ran at a tenth of full amplitude. Even perfectly timed, gain 0.1 can only remove about 19% of the spike power ((1−0.1)² = 0.81). The scan is therefore nearly insensitive to timing.
+  - Observed `start` ratios: 0.887–1.038, mean 0.944, SD 0.048.
+- **Noise.** The four `off` levels are 7.92, 7.46, 8.10 and 7.30 ×10⁻⁸: 4.9% relative SD over 3.5 min.
+  - The `start` values scatter by 3.6%, about the same as the drift.
+  - `fomStd` is about 1% of `fom`, so it underestimates the real point-to-point noise by about 4–5×, as expected for overlapping averages.
+  - With this noise, no `rampStartUs` dependence can be seen at gain 0.1.
