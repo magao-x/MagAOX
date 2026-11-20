@@ -316,22 +316,39 @@ sure the toggle is disabled when the qwppupil FSM isn't ready (I think thats the
 - P-F5. The existing sliders use `lockSlider()` (input-transparent, not disabled, since a disabled
   `toggleSlider` draws as Off). `m_qwppupilFsmOk` defaults to false, so the slider starts locked.
 
-### Proposed design (to be confirmed)
+### Decisions
 
-- PD1. New `sliderQwpPupilTracking` (`qwppupil`, `tracking`, `toggle`, label "Pupil Tracking") and
-  `labelQwpPupilTracking` beside it, in a new row directly below the QWP tracking row
-  (`comboQwpLin` and later rows shift down by one). No `qwppupil` FSM display in the status grid.
+Grilled with the user on 2026-11-20.
+
+- PD1. New `sliderQwpPupilTracking` (`qwppupil`, `tracking`, `toggle`, label "QWP Pupil Tracking")
+  and `labelQwpPupilTracking` beside it, in a new row directly above the QWP Tracking row
+  (user: "this should be on first"; QWP Tracking and later rows shift down by one). No `qwppupil`
+  FSM display in the status grid.
 - PD2. Subscribe to `qwppupil.{fsm, tracking, offset}`; cache `m_qwppupilFsmOk`,
-  `m_qwppupilTracking`, `m_ttmV1`, `m_ttmV2`.
-- PD3. Label shows `v1`, `v2` only: `ΔV1 %+.2f V  ΔV2 %+.2f V`, padded with figure spaces for a
-  constant width. Visible only while tracking; `---` when `qwppupil` is not READY/OPERATING or on
-  disconnect.
-- PD4. Lock rule: locked when `qwppupil` is not READY/OPERATING, or while sequencing **and** tracking
-  is Off. So during a sequence it can be turned off but not on. Unlike QD5, the label is not greyed
-  while sequencing.
-- PD5. Tests extend `polarimetry_test`: subscriptions; label text/visibility; lock when not
-  READY; turn-off allowed while sequencing; turn-on locked while sequencing.
+  `m_qwppupilTracking`, `m_qwppupilV1`, `m_qwppupilV2`.
+- PD3. Label shows `v1`, `v2` only, 1 decimal, as `ΔV1: +1.2 V  ΔV2: −12.4 V`. Each value is padded
+  with leading figure spaces to the width of a sign and three integer digits, and uses `+` / U+2212
+  so the width stays constant. Visible only while tracking; `---` when `qwppupil` is not
+  READY/OPERATING or on disconnect.
+- PD4. Sequencing never locks the slider or greys the label (user: "Fully free"); it can be turned
+  on or off during a sequence. It is locked only when `qwppupil` is not READY/OPERATING, which is
+  the default until the app reports in.
+- PD4a. For consistency the user changed the QWP label (QD3) to `QWP1: %3.0f°  QWP2: %3.0f°`.
+- PD5. Tests extend `polarimetry_test`: subscriptions; label text/visibility; lock until READY;
+  unlocked while sequencing.
 
-### Open questions
+### Implementation
 
-See the grilling notes below; decisions will be recorded as PDn amendments.
+1. Functional: UI row; subscriptions; `qwppupil` state cache in `handleSetProperty`; slider and label
+   in `updateGUI`; static `pupilOffsetText()` for the label.
+2. Tests: `qwppupil` subscriptions; `pupilOffsetText` formatting (padding, sign, rounding to -0.0);
+   label visibility and text; lock until READY, unlocked while sequencing.
+3. `clang-format` on the touched sources.
+
+Status 2026-11-20: implemented. `polarimetry_test` built on macOS (Homebrew Qt 6.11, scratch tree)
+and run offscreen: 7 test cases, 176 assertions pass. A mutation check (re-adding the sequencing
+lock) failed 2 assertions as expected. Not built: the full `polarimetryGUI` app (needs mxlib).
+
+Manual check by the user (M6): with `qwppupil` running, the slider is locked until `qwppupil` is
+READY; enabling shows `ΔV1/ΔV2` that follow the QWP moves; the slider can be toggled during a
+sequence.
