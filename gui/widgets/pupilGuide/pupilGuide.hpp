@@ -6,6 +6,10 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
+#include <map>
+#include <set>
+#include <sstream>
 #include <unistd.h>
 
 #include <QTimer>
@@ -28,7 +32,10 @@ namespace xqt
 {
 
 /// Convert requested x/y offsets into woofer tip/tilt coordinates.
-void wooferTipTilt( double &tip, double &tilt, double x, double y )
+void wooferTipTilt( double &tip,  /**< [out] Woofer tip-mode offset. */
+                    double &tilt, /**< [out] Woofer tilt-mode offset. */
+                    double  x,    /**< [in] Requested horizontal offset. */
+                    double  y /**< [in] Requested vertical offset. */ )
 {
     double rot   = ( 180. + 29.0 ) * 3.14159 / 180.;
     double scale = -1.0;
@@ -38,10 +45,16 @@ void wooferTipTilt( double &tip, double &tilt, double x, double y )
 }
 
 /// Main pupil-guiding and alignment control panel.
+/** The shared INDI connection controls transport availability; individual devices and
+ * properties control only their dependent actions. Callbacks and command handlers
+ * run on the Qt widget thread. Fresh valid observations restore controls without
+ * replaying commands or requiring another connection callback.
+ */
 class pupilGuide : public xWidget
 {
     Q_OBJECT
 
+    /// Reference camera used for the pupil and periscope coordinate transforms.
     enum camera
     {
         FLOWFS,
@@ -50,147 +63,190 @@ class pupilGuide : public xWidget
     };
 
   protected:
-    std::string m_appState; ///< Cached top-level application state text when provided by INDI.
+    bool m_connected{ false }; ///< True while the shared INDI transport is connected.
+
+    std::string m_appState; ///< Legacy application-state cache, cleared on connection loss.
 
     // --- modttm
-    std::string m_modFsmState;
-    int         m_modState{ 0 };
+    std::string m_modFsmState; ///< Last observed modulator FSM state.
 
-    double m_modCh1{ 0 };
-    double m_modCh2{ 0 };
+    int m_modState{ 0 }; ///< Last observed modulator operating mode.
 
-    double m_camwfsFreq{ 0 };
+    double m_modCh1{ 0 }; ///< Legacy modulator channel-one cache.
 
-    double m_modRad{ 0 };
-    double m_modRad_tgt{ 0 };
+    double m_modCh2{ 0 }; ///< Legacy modulator channel-two cache.
 
-    float m_stepSize{ 0.1 };
+    double m_camwfsFreq{ 0 }; ///< Last received WFS camera frame rate.
 
-    int m_tipmovewhat{ MOVE_WOOF };
+    double m_modRad{ 0 }; ///< Legacy current modulation-radius cache.
 
-    float m_focusWooferStep{ 0.2 };
-    float m_focusTelStep{ 100 };
+    double m_modRad_tgt{ 0 }; ///< Legacy target modulation-radius cache.
+
+    float m_stepSize{ 0.1 }; ///< Local step size for tip/tilt nudges.
+
+    int m_tipmovewhat{ MOVE_WOOF }; ///< Selected tip/tilt actuator; preserved across device loss.
+
+    float m_focusWooferStep{ 0.2 }; ///< Conversion from the focus step multiplier to woofer mode amplitude.
+
+    float m_focusTelStep{ 100 }; ///< Conversion from the focus step multiplier to telescope focus offset.
 
     // --- TCS
 
-    std::string m_tcsiState;
+    std::string m_tcsiState; ///< Last observed TCS interface FSM state.
 
-    bool m_labMode{ true };
+    bool m_labMode{ true }; ///< Effective lab mode, true while TCS or its mode observation is unavailable.
+
+    bool m_reportedLabMode{ true }; ///< Last valid TCS mode, used only while TCS is available.
 
     // --- woofer
 
-    std::string m_dmWooferState;
-    std::string m_wooferModesState;
+    std::string m_dmWooferState; ///< Last observed woofer controller FSM state.
 
-    double m_tilt{ 0 };  ///< current value of tilt mode from wooferModes
-    double m_tip{ 0 };   ///< current value of tip mode from wooferModes
-    double m_focus{ 0 }; ///< current value of focus mode from wooferModes
+    std::string m_wooferModesState; ///< Last observed woofer modal-command FSM state.
 
-    float m_focusStepSize{ 0.1 };
+    double m_tilt{ 0 }; ///< Last valid woofer tilt amplitude; usable only while its observation remains valid.
+
+    double m_tip{ 0 }; ///< Last valid woofer tip amplitude; usable only while its observation remains valid.
+
+    double m_focus{ 0 }; ///< Last valid woofer focus amplitude, rounded to INDI command precision.
+
+    float m_focusStepSize{ 0.1 }; ///< Local step multiplier used by both focus actuators.
 
     // --- picoscix
-    std::string m_picoState{ "UNKNOWN" };
-    int         m_picoscixPos{ -1000000000 };
+    std::string m_picoState{ "UNKNOWN" }; ///< Last observed picomotor controller FSM state.
 
-    int         m_picoscix_stepSize{ 50 };
-    std::string m_picoscix_gotoSelection;
+    int m_picoscixPos{ -1000000000 }; ///< Last valid picoscix position; the initial sentinel cannot be used for motion.
+
+    int m_picoscix_stepSize{ 50 }; ///< Local picomotor nudge size in controller steps.
+
+    std::string m_picoscix_gotoSelection; ///< Legacy picomotor preset-selection cache.
 
     // --- camwfs-fit
-    std::string m_camwfsfitState;
-    double      m_med1{ 0 };
-    double      m_med2{ 0 };
-    double      m_med3{ 0 };
-    double      m_med4{ 0 };
+    std::string m_camwfsfitState; ///< Last observed pupil-fitting application FSM state.
 
-    double m_x1{ 0 };
-    double m_y1{ 0 };
-    double m_D1{ 0 };
+    double m_med1{ 0 }; ///< Last valid median flux in fitted quadrant 1.
 
-    double m_setx1{ 0 };
-    double m_sety1{ 0 };
-    double m_setD1{ 0 };
+    double m_med2{ 0 }; ///< Last valid median flux in fitted quadrant 2.
 
-    double m_x2{ 0 };
-    double m_y2{ 0 };
-    double m_D2{ 0 };
+    double m_med3{ 0 }; ///< Last valid median flux in fitted quadrant 3.
 
-    double m_setx2{ 0 };
-    double m_sety2{ 0 };
-    double m_setD2{ 0 };
+    double m_med4{ 0 }; ///< Last valid median flux in fitted quadrant 4.
 
-    double m_x3{ 0 };
-    double m_y3{ 0 };
-    double m_D3{ 0 };
+    double m_x1{ 0 }; ///< Last valid horizontal center of fitted quadrant 1.
 
-    double m_setx3{ 0 };
-    double m_sety3{ 0 };
-    double m_setD3{ 0 };
+    double m_y1{ 0 }; ///< Last valid vertical center of fitted quadrant 1.
 
-    double m_x4{ 0 };
-    double m_y4{ 0 };
-    double m_D4{ 0 };
+    double m_D1{ 0 }; ///< Last valid diameter of fitted quadrant 1.
 
-    double m_setx4{ 0 };
-    double m_sety4{ 0 };
-    double m_setD4{ 0 };
+    double m_setx1{ 0 }; ///< Last valid reference horizontal center for quadrant 1 deltas.
 
-    double m_threshold_current{ 0 };
-    double m_threshold_target{ 0 };
+    double m_sety1{ 0 }; ///< Last valid reference vertical center for quadrant 1 deltas.
+
+    double m_setD1{ 0 }; ///< Last valid reference diameter for quadrant 1 deltas.
+
+    double m_x2{ 0 }; ///< Last valid horizontal center of fitted quadrant 2.
+
+    double m_y2{ 0 }; ///< Last valid vertical center of fitted quadrant 2.
+
+    double m_D2{ 0 }; ///< Last valid diameter of fitted quadrant 2.
+
+    double m_setx2{ 0 }; ///< Last valid reference horizontal center for quadrant 2 deltas.
+
+    double m_sety2{ 0 }; ///< Last valid reference vertical center for quadrant 2 deltas.
+
+    double m_setD2{ 0 }; ///< Last valid reference diameter for quadrant 2 deltas.
+
+    double m_x3{ 0 }; ///< Last valid horizontal center of fitted quadrant 3.
+
+    double m_y3{ 0 }; ///< Last valid vertical center of fitted quadrant 3.
+
+    double m_D3{ 0 }; ///< Last valid diameter of fitted quadrant 3.
+
+    double m_setx3{ 0 }; ///< Last valid reference horizontal center for quadrant 3 deltas.
+
+    double m_sety3{ 0 }; ///< Last valid reference vertical center for quadrant 3 deltas.
+
+    double m_setD3{ 0 }; ///< Last valid reference diameter for quadrant 3 deltas.
+
+    double m_x4{ 0 }; ///< Last valid horizontal center of fitted quadrant 4.
+
+    double m_y4{ 0 }; ///< Last valid vertical center of fitted quadrant 4.
+
+    double m_D4{ 0 }; ///< Last valid diameter of fitted quadrant 4.
+
+    double m_setx4{ 0 }; ///< Last valid reference horizontal center for quadrant 4 deltas.
+
+    double m_sety4{ 0 }; ///< Last valid reference vertical center for quadrant 4 deltas.
+
+    double m_setD4{ 0 }; ///< Last valid reference diameter for quadrant 4 deltas.
+
+    double m_threshold_current{ 0 }; ///< Last received pupil-fit threshold.
+
+    double m_threshold_target{ 0 }; ///< Legacy target pupil-fit threshold cache.
 
     // -- camwfs-avg
-    std::string m_camwfsavgState;
-    unsigned    m_nAverage_current{ 0 };
-    unsigned    m_nAverage_target{ 0 };
+    std::string m_camwfsavgState; ///< Last observed WFS averaging application FSM state.
+
+    unsigned m_nAverage_current{ 0 }; ///< Last received WFS averaging count.
+
+    unsigned m_nAverage_target{ 0 }; ///< Legacy target WFS averaging count cache.
 
     // -- dmtweeter
-    std::string m_dmtweeterState;
-    bool        m_dmtweeterTestSet{ false };
+    std::string m_dmtweeterState; ///< Last observed tweeter controller FSM state.
+
+    bool m_dmtweeterTestSet{ false }; ///< Last known tweeter test-pattern switch; validity is tracked separately.
 
     // -- dmncpc
-    std::string m_dmncpcState;
-    bool        m_dmncpcTestSet{ false };
+    std::string m_dmncpcState; ///< Last observed NCPC controller FSM state.
+
+    bool m_dmncpcTestSet{ false }; ///< Last known NCPC test-pattern switch; validity is tracked separately.
 
     // -- ttmpupil
-    std::string m_pupFsmState;
-    double      m_pupCh1{ 0 };
-    double      m_pupCh2{ 0 };
+    std::string m_pupFsmState; ///< Last observed pupil TTM FSM state.
 
-    float m_pupStepSize{ 0.5 };
+    double m_pupCh1{ 0 }; ///< Last valid pupil TTM first-axis position.
 
-    int m_pupCam{ CAMSCIS };
+    double m_pupCh2{ 0 }; ///< Last valid pupil TTM second-axis position.
+
+    float m_pupStepSize{ 0.5 }; ///< Local pupil-steering nudge size.
+
+    int m_pupCam{ CAMSCIS }; ///< Camera coordinate transform selected for pupil and periscope nudges.
 
     // -- ttmperi
-    std::string m_ttmPeriFsmState;
-    double      m_ttmPeriCh1{ 0 };
-    double      m_ttmPeriCh2{ 0 };
+    std::string m_ttmPeriFsmState; ///< Last observed periscope TTM FSM state.
 
-    float m_ttmPeriStepSize{ 25 };
+    double m_ttmPeriCh1{ 0 }; ///< Last valid periscope first-axis voltage.
+
+    double m_ttmPeriCh2{ 0 }; ///< Last valid periscope second-axis voltage.
+
+    float m_ttmPeriStepSize{ 25 }; ///< Local periscope TTM voltage step.
 
     // -- Camera Lens
-    std::string m_camlensxFsmState;
-    std::string m_camlensyFsmState;
-    float       m_camlensx_pos{ 0 };
-    float       m_camlensy_pos{ 0 };
+    std::string m_camlensxFsmState; ///< Last observed camera-lens X-stage FSM state.
 
-    float m_camlensStepSize{ 0.01 };
+    std::string m_camlensyFsmState; ///< Last observed camera-lens Y-stage FSM state.
+
+    float m_camlensx_pos{ 0 }; ///< Last valid camera-lens X position used as the relative-motion baseline.
+
+    float m_camlensy_pos{ 0 }; ///< Last valid camera-lens Y position used as the relative-motion baseline.
+
+    float m_camlensStepSize{ 0.01 }; ///< Local camera-lens movement step in millimeters.
 
     // ****** Alignment ******** //
 
     // --- camwfs-align
-    std::string m_camwfs_align_fsmState;
-    bool        m_camwfsAlignLoopState{ false };
+    std::string m_camwfs_align_fsmState; ///< Last observed pupil-tracking controller FSM state.
 
     // --- twAlign-camwfs-ctrl
-    std::string m_twAlign_camwfs_ctrl_fsmState;
-    bool        m_twAlignLoopState{ false };
+    std::string m_twAlign_camwfs_ctrl_fsmState; ///< Last observed actuator-alignment controller FSM state.
 
     // --- twAlign-camwfs-wfs
-    std::string m_twAlign_camwfs_wfs_fsmState;
-    bool        m_twAlignSensorState{ false };
+    std::string m_twAlign_camwfs_wfs_fsmState; ///< Last observed actuator-alignment sensor FSM state.
 
   public:
     /// Construct the pupil-guide control widget.
-    pupilGuide( QWidget *Parent = 0, Qt::WindowFlags f = Qt::WindowFlags() );
+    pupilGuide( QWidget        *Parent = 0, /**< [in] Optional Qt parent owning this widget. */
+                Qt::WindowFlags f      = Qt::WindowFlags() /**< [in] Qt window flags. */ );
 
     /// Destroy the pupil-guide control widget.
     ~pupilGuide();
@@ -204,107 +260,252 @@ class pupilGuide : public xWidget
     /// Apply disconnected-state GUI initialization and clear cached connection state.
     virtual void onDisconnect();
 
-    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
-    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has been deleted*/ );
-    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the property which has changed*/ );
+    /// Replace the observed definition of a known property and refresh dependent controls.
+    void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Property definition or value update. */ );
 
-    void modGUISetEnable( bool enableModGUI, bool enableModArrows );
+    /// Invalidate only the deleted property or device and its dependent controls.
+    void handleDelProperty(
+        const pcf::IndiProperty &ipRecv /**< [in] Deleted property; an empty name means the entire device. */ );
 
-    void camwfsfitSetEnabled( bool enabled );
+    /// Merge a partial property update and refresh dependent controls.
+    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Property definition or value update. */ );
 
-    /// Enable or disable the cameralens GUI
-    /** IF whichcl is CAMLENS_BOTH, the action is applied to all components.
-     * If it's CAMLENS_X or CAMLENS_Y, it is only applied to that access.  The common components are then enabled.
-     */
-    void camlensSetEnabled( bool enabled,               ///< true for enabled, false for disabled
-                            int  whichcl = CAMLENS_BOTH ///< Which axis, or both.  CAMLENS_X, CAMLENS_Y, CAMLENS_BOTH
-    );
+    /// Apply modulator FSM availability to its controls and the selected motion buttons.
+    void modGUISetEnable( bool enableModGUI, /**< [in] Modulator section availability. */
+                          bool enableModArrows /**< [in] Selected tip/tilt actuator availability. */ );
 
-    void camwfs_align_setEnabled( bool enabled, bool all );
+    /// Set availability of the pupil-fitting readouts and related controls.
+    void camwfsfitSetEnabled( bool enabled /**< [in] Whether fitting readouts are available. */ );
 
-    void twAlign_camwfs_ctrl_setEnabled( bool enabled, bool all );
+    /// Set availability of camera-lens axes and their shared scale control.
+    void camlensSetEnabled( bool enabled, /**< [in] Whether the selected axes are available. */
+                            int  whichcl = CAMLENS_BOTH /**< [in] CAMLENS_X, CAMLENS_Y, or CAMLENS_BOTH. */ );
 
-    void twAlign_camwfs_wfs_setEnabled( bool enabled, bool all );
+    /// Set availability of the pupil-tracking section.
+    void camwfs_align_setEnabled( bool enabled, /**< [in] Whether the section controls are available. */
+                                  bool all /**< [in] Also update the section label. */ );
 
-    void alignment_buttons_setEnabled( bool enabled, bool all );
+    /// Set availability of the actuator-alignment controller section.
+    void twAlign_camwfs_ctrl_setEnabled( bool enabled, /**< [in] Whether the section controls are available. */
+                                         bool all /**< [in] Also update the section label. */ );
+
+    /// Set availability of the actuator-alignment sensor section.
+    void twAlign_camwfs_wfs_setEnabled( bool enabled, /**< [in] Whether the section controls are available. */
+                                        bool all /**< [in] Also update the section label. */ );
+
+    /// Initialize availability of the combined alignment controls.
+    void alignment_buttons_setEnabled( bool enabled, /**< [in] Whether the section controls are available. */
+                                       bool all /**< [in] Also update the section label. */ );
 
   public slots:
+    /// Refresh all controls from transport, FSM, and observed-property availability.
     void updateGUI();
 
     //----------- modttm
 
+    /// Request modulation when the modulator command is available.
     void on_buttonMod_mod_pressed();
+
+    /// Request the set position when the modulator command is available.
     void on_buttonMod_set_pressed();
+
+    /// Request the rest position when the modulator command is available.
     void on_buttonMod_rest_pressed();
 
+    /// Cycle the selected tip/tilt actuator, excluding the telescope in lab mode.
     void on_button_ttmtel_pressed();
 
+    /// Nudge the selected tip/tilt actuator upward when its inputs are available.
     void on_button_tip_u_pressed();
+
+    /// Nudge the selected tip/tilt actuator up and left when its inputs are available.
     void on_button_tip_ul_pressed();
+
+    /// Nudge the selected tip/tilt actuator left when its inputs are available.
     void on_button_tip_l_pressed();
+
+    /// Nudge the selected tip/tilt actuator down and left when its inputs are available.
     void on_button_tip_dl_pressed();
+
+    /// Nudge the selected tip/tilt actuator downward when its inputs are available.
     void on_button_tip_d_pressed();
+
+    /// Nudge the selected tip/tilt actuator down and right when its inputs are available.
     void on_button_tip_dr_pressed();
+
+    /// Nudge the selected tip/tilt actuator right when its inputs are available.
     void on_button_tip_r_pressed();
+
+    /// Nudge the selected tip/tilt actuator up and right when its inputs are available.
     void on_button_tip_ur_pressed();
+
+    /// Cycle the local tip/tilt step size.
     void on_button_tip_scale_pressed();
 
     //------------- focus
+    /// Increase focus on the selected actuator when its required inputs are available.
     void on_button_focus_p_pressed();
+
+    /// Decrease focus on the selected actuator when its required inputs are available.
     void on_button_focus_m_pressed();
+
+    /// Cycle the local focus step multiplier.
     void on_button_focus_scale_pressed();
 
     //------------- picoscix
-    void move_picoscix( int delta );
+    /// Move picoscix relative to a valid observed position without integer overflow.
+    void move_picoscix( int delta /**< [in] Signed relative movement in picomotor steps. */ );
+
+    /// Nudge picoscix in the positive direction by the selected step size.
     void on_picoscix_l_pressed();
+
+    /// Cycle the local picomotor step size.
     void on_picoscix_scale_pressed();
+
+    /// Nudge picoscix in the negative direction by the selected step size.
     void on_picoscix_r_pressed();
+
+    /// Apply the selected beamsplitter offset and clear the preset selection.
     void on_picoscix_go_pressed();
 
     //----------- dmtweeter
+    /// Toggle the tweeter test pattern from a known observed switch state.
     void on_buttonTweeterTest_set_pressed();
 
     //----------- dmncpc
+    /// Toggle the NCPC test pattern from a known observed switch state.
     void on_buttonNCPCTest_set_pressed();
 
     //----------- ttmpupil
+    /// Request release of the pupil TTM when that capability is available.
     void on_buttonPup_rest_pressed();
+
+    /// Request initialization of the pupil TTM when that capability is available.
     void on_buttonPup_set_pressed();
 
+    /// Cycle the camera used to choose pupil and periscope movement directions.
     void on_button_camera_pressed();
 
+    /// Nudge the pupil TTM up and left when its inputs are available.
     void on_button_pup_ul_pressed();
+
+    /// Nudge the pupil TTM down and left when its inputs are available.
     void on_button_pup_dl_pressed();
+
+    /// Nudge the pupil TTM down and right when its inputs are available.
     void on_button_pup_dr_pressed();
+
+    /// Nudge the pupil TTM up and right when its inputs are available.
     void on_button_pup_ur_pressed();
+
+    /// Cycle the local pupil-steering step size.
     void on_button_pup_scale_pressed();
 
     //---------- TTM Peri
+    /// Request the periscope TTM rest state when its switch is available.
     void on_button_ttmPeri_rest_pressed();
+
+    /// Request the periscope TTM set state when its switch is available.
     void on_button_ttmPeri_set_pressed();
 
+    /// Nudge the periscope TTM left when its inputs are available.
     void on_button_ttmPeri_l_pressed();
+
+    /// Nudge the periscope TTM right when its inputs are available.
     void on_button_ttmPeri_r_pressed();
+
+    /// Nudge the periscope TTM upward when its inputs are available.
     void on_button_ttmPeri_u_pressed();
+
+    /// Nudge the periscope TTM downward when its inputs are available.
     void on_button_ttmPeri_d_pressed();
+
+    /// Cycle the local periscope TTM step size.
     void on_button_ttmPeri_scale_pressed();
 
-    void toggleExpFit( bool visible );
+    /// Show or hide the individual pupil-fit coordinates.
+    void toggleExpFit( bool visible /**< [in] Whether to show the individual pupil-fit coordinates. */ );
+
+    /// Toggle the expanded pupil-fit coordinate display.
     void on_buttonExpFit_pressed();
 
+    /// Nudge the camera lens upward when its inputs are available.
     void on_button_camlens_u_pressed();
+
+    /// Nudge the camera lens left when its inputs are available.
     void on_button_camlens_l_pressed();
+
+    /// Nudge the camera lens downward when its inputs are available.
     void on_button_camlens_d_pressed();
+
+    /// Nudge the camera lens right when its inputs are available.
     void on_button_camlens_r_pressed();
+
+    /// Cycle the local camera-lens step size.
     void on_button_camlens_scale_pressed();
 
     // ******** alignment *********//
 
+    /// Start all three alignment participants only when every dependency is available.
     void on_button_startAlignment_pressed();
+
+    /// Stop each available alignment target, preserving the lab-mode routing rule.
     void on_button_stopAlignment_pressed();
 
   private:
-    /// Applies a callable to each child widget subscribed directly through this GUI.
+    /// Binding used to invalidate only the child belonging to a deleted device/property.
+    struct childSubscription
+    {
+        multiIndiSubscriber *subscriber; ///< Child owned by the Qt widget tree.
+
+        const char *device; ///< INDI device supplying the child.
+
+        const char *property; ///< INDI property supplying the child.
+
+        const char *element; ///< Required observed element for this child.
+    };
+
+    /// Observations for one of this panel's known INDI properties.
+    struct propertyState
+    {
+        pcf::IndiProperty::Type type; ///< Expected protocol type from the producer contract.
+
+        std::set<std::string> elements; ///< Observed element names, including empty command targets.
+
+        std::set<std::string> valid; ///< Elements with valid values since the last invalidation.
+    };
+
+    /// Device/property observations; numeric caches are usable only with corresponding valid elements.
+    std::map<std::pair<std::string, std::string>, propertyState> m_properties;
+
+    /// Populate the panel's subscription and availability inventory.
+    void initializeProperties();
+
+    /// Check all required elements for a known property on the current connection.
+    bool
+    propertyAvailable( const std::string                  &device,   /**< [in] INDI device. */
+                       const std::string                  &property, /**< [in] INDI property. */
+                       std::initializer_list<const char *> elements, /**< [in] Required elements. */
+                       bool values = true /**< [in] Require valid values, or just command element presence. */ ) const;
+
+    /// Validate observed elements before updating the existing value caches.
+    void receiveProperty( const pcf::IndiProperty &property, /**< [in] Incoming property. */
+                          bool definition /**< [in] True replaces the previous definition; false merges an update. */ );
+
+    /// Apply per-property constraints after the existing FSM-based GUI update.
+    void updateAvailability();
+
+    /// Refresh eligibility before a command handler uses its control.
+    bool commandEnabled( QWidget *control /**< [in] Control whose command is requested. */ );
+
+    /// Apply a callable to each cached device FSM.
+    template <typename funcT>
+    void forEachDeviceState( funcT &&func /**< [in] Callable receiving device name and state reference. */ );
+
+    /// Clear affected child displays and pending edits without altering subscriptions.
+    void resetChild( multiIndiSubscriber *sub /**< [in,out] Child to invalidate. */ );
+
+    /// Applies a callable to each child binding subscribed directly through this GUI.
     template <typename funcT>
     void forEachChildSubscriber( funcT &&func /**< [in] Callable applied to each direct child subscriber. */ );
 
@@ -584,6 +785,7 @@ pupilGuide::pupilGuide( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, 
     // Set the pupil fit boxes to invisible at startup
     toggleExpFit( false );
 
+    initializeProperties();
     onDisconnect();
 
     QTimer *timer = new QTimer( this );
@@ -598,47 +800,171 @@ pupilGuide::~pupilGuide()
 template <typename funcT>
 void pupilGuide::forEachChildSubscriber( funcT &&func )
 {
-    std::array<multiIndiSubscriber *, 30> subs{ {
-        ui.modwfs_fsm,
-        ui.modFreq_current,
-        ui.modRad_current,
-        ui.modCh1,
-        ui.modCh2,
-        ui.picoscix_pos,
-        ui.pupState,
-        ui.pupCh1,
-        ui.pupCh2,
-        ui.ttmPeriState,
-        ui.ttmPeriCh1,
-        ui.ttmPeriCh2,
-        ui.pupTrackLoop_deltaX,
-        ui.pupTrackLoop_deltaY,
-        ui.pupTrackLoop_slider,
-        ui.pupTrackLoop_gain,
-        ui.actAlignLoop_deltaX,
-        ui.actAlignLoop_deltaY,
-        ui.actAlignLoop_slider,
-        ui.actAlignLoop_gain,
-        ui.actAlignSensor_slider,
-        ui.actAlignSensor_nAverage,
-        ui.actAlignSensor_nImages,
-        ui.actAlignSensor_pokeAmp,
-        ui.fitThreshold,
-        ui.fitAvgTime,
-        ui.camlensX_fsm,
-        ui.camlensY_fsm,
-        ui.camlensX_pos,
-        ui.camlensY_pos,
+    std::array<childSubscription, 30> subs{ {
+        { ui.modwfs_fsm, "modwfs", "fsm", "state" },
+        { ui.modFreq_current, "modwfs", "modFrequency", "current" },
+        { ui.modRad_current, "modwfs", "modRadius", "current" },
+        { ui.modCh1, "fxngenmodwfs", "C1ofst", "value" },
+        { ui.modCh2, "fxngenmodwfs", "C2ofst", "value" },
+        { ui.picoscix_pos, "picomotors", "picoscix_pos", "current" },
+        { ui.pupState, "ttmpupil", "fsm", "state" },
+        { ui.pupCh1, "ttmpupil", "pos_1", "current" },
+        { ui.pupCh2, "ttmpupil", "pos_2", "current" },
+        { ui.ttmPeriState, "ttmperi", "fsm", "state" },
+        { ui.ttmPeriCh1, "ttmperi", "axis1_voltage", "current" },
+        { ui.ttmPeriCh2, "ttmperi", "axis2_voltage", "current" },
+        { ui.pupTrackLoop_deltaX, "camwfs-align", "deltas", "delta0" },
+        { ui.pupTrackLoop_deltaY, "camwfs-align", "deltas", "delta1" },
+        { ui.pupTrackLoop_slider, "camwfs-align", "loop_state", "toggle" },
+        { ui.pupTrackLoop_gain, "camwfs-align", "loop_gain", "current" },
+        { ui.actAlignLoop_deltaX, "twAlign-camwfs-ctrl", "deltas", "delta0" },
+        { ui.actAlignLoop_deltaY, "twAlign-camwfs-ctrl", "deltas", "delta1" },
+        { ui.actAlignLoop_slider, "twAlign-camwfs-ctrl", "loop_state", "toggle" },
+        { ui.actAlignLoop_gain, "twAlign-camwfs-ctrl", "loop_gain", "current" },
+        { ui.actAlignSensor_slider, "twAlign-camwfs-wfs", "continuous", "toggle" },
+        { ui.actAlignSensor_nAverage, "twAlign-camwfs-wfs", "nPokeAverage", "current" },
+        { ui.actAlignSensor_nImages, "twAlign-camwfs-wfs", "nPokeImages", "current" },
+        { ui.actAlignSensor_pokeAmp, "twAlign-camwfs-wfs", "poke_amp", "current" },
+        { ui.fitThreshold, "camwfs-fit", "threshold", "current" },
+        { ui.fitAvgTime, "camwfs-avg", "avgTime", "current" },
+        { ui.camlensX_fsm, "stagecamlensx", "fsm", "state" },
+        { ui.camlensY_fsm, "stagecamlensy", "fsm", "state" },
+        { ui.camlensX_pos, "stagecamlensx", "position", "current" },
+        { ui.camlensY_pos, "stagecamlensy", "position", "current" },
     } };
 
-    for( auto *sub : subs )
+    for( const auto &sub : subs )
     {
         func( sub );
     }
 }
 
+template <typename funcT>
+void pupilGuide::forEachDeviceState( funcT &&func )
+{
+    func( "modwfs", m_modFsmState );
+    func( "tcsi", m_tcsiState );
+    func( "dmwoofer", m_dmWooferState );
+    func( "wooferModes", m_wooferModesState );
+    func( "picomotors", m_picoState );
+    func( "camwfs-fit", m_camwfsfitState );
+    func( "camwfs-avg", m_camwfsavgState );
+    func( "dmtweeter", m_dmtweeterState );
+    func( "dmncpc", m_dmncpcState );
+    func( "ttmpupil", m_pupFsmState );
+    func( "ttmperi", m_ttmPeriFsmState );
+    func( "stagecamlensx", m_camlensxFsmState );
+    func( "stagecamlensy", m_camlensyFsmState );
+    func( "camwfs-align", m_camwfs_align_fsmState );
+    func( "twAlign-camwfs-ctrl", m_twAlign_camwfs_ctrl_fsmState );
+    func( "twAlign-camwfs-wfs", m_twAlign_camwfs_wfs_fsmState );
+}
+
+void pupilGuide::resetChild( multiIndiSubscriber *sub )
+{
+    if( auto *entry = dynamic_cast<statusEntry *>( sub ) )
+    {
+        entry->setEditText( "" );
+        entry->stopEditing();
+    }
+    sub->onDisconnect();
+}
+
+void pupilGuide::initializeProperties()
+{
+    const auto add = [this]( const char *device, const char *property, pcf::IndiProperty::Type type )
+    { m_properties.emplace( std::make_pair( device, property ), propertyState{ type, {}, {} } ); };
+    add( "modwfs", "fsm", pcf::IndiProperty::Text );
+    add( "modwfs", "modState", pcf::IndiProperty::Number );
+    add( "camwfs", "fps", pcf::IndiProperty::Number );
+    add( "tcsi", "fsm", pcf::IndiProperty::Text );
+    add( "tcsi", "labMode", pcf::IndiProperty::Switch );
+    add( "dmwoofer", "fsm", pcf::IndiProperty::Text );
+    add( "wooferModes", "fsm", pcf::IndiProperty::Text );
+    add( "wooferModes", "current_amps", pcf::IndiProperty::Number );
+    add( "picomotors", "fsm", pcf::IndiProperty::Text );
+    add( "picomotors", "picoscix_pos", pcf::IndiProperty::Number );
+    add( "camwfs-fit", "fsm", pcf::IndiProperty::Text );
+    add( "camwfs-fit", "quadrant1", pcf::IndiProperty::Number );
+    add( "camwfs-fit", "quadrant2", pcf::IndiProperty::Number );
+    add( "camwfs-fit", "quadrant3", pcf::IndiProperty::Number );
+    add( "camwfs-fit", "quadrant4", pcf::IndiProperty::Number );
+    add( "camwfs-fit", "threshold", pcf::IndiProperty::Number );
+    add( "camwfs-avg", "fsm", pcf::IndiProperty::Text );
+    add( "camwfs-avg", "nAverage", pcf::IndiProperty::Number );
+    add( "ttmpupil", "fsm", pcf::IndiProperty::Text );
+    add( "ttmpupil", "pos_1", pcf::IndiProperty::Number );
+    add( "ttmpupil", "pos_2", pcf::IndiProperty::Number );
+    add( "ttmperi", "fsm", pcf::IndiProperty::Text );
+    add( "ttmperi", "axis1_voltage", pcf::IndiProperty::Number );
+    add( "ttmperi", "axis2_voltage", pcf::IndiProperty::Number );
+    add( "dmtweeter", "fsm", pcf::IndiProperty::Text );
+    add( "dmtweeter", "test_set", pcf::IndiProperty::Switch );
+    add( "dmncpc", "fsm", pcf::IndiProperty::Text );
+    add( "dmncpc", "test_set", pcf::IndiProperty::Switch );
+    add( "camwfs-align", "fsm", pcf::IndiProperty::Text );
+    add( "camwfs-align", "loop_state", pcf::IndiProperty::Switch );
+    add( "twAlign-camwfs-ctrl", "fsm", pcf::IndiProperty::Text );
+    add( "twAlign-camwfs-ctrl", "loop_state", pcf::IndiProperty::Switch );
+    add( "twAlign-camwfs-wfs", "fsm", pcf::IndiProperty::Text );
+    add( "twAlign-camwfs-wfs", "continuous", pcf::IndiProperty::Switch );
+    add( "stagecamlensx", "fsm", pcf::IndiProperty::Text );
+    add( "stagecamlensy", "fsm", pcf::IndiProperty::Text );
+    add( "stagecamlensx", "position", pcf::IndiProperty::Number );
+    add( "stagecamlensy", "position", pcf::IndiProperty::Number );
+    add( "modwfs", "offset", pcf::IndiProperty::Number );
+    add( "wooferModes", "target_amps", pcf::IndiProperty::Number );
+    add( "tcsi", "pyrNudge", pcf::IndiProperty::Number );
+    add( "ttmpupil", "initDM", pcf::IndiProperty::Switch );
+    add( "ttmpupil", "releaseDM", pcf::IndiProperty::Switch );
+    add( "ttmperi", "set", pcf::IndiProperty::Switch );
+    forEachChildSubscriber(
+        [&add]( const childSubscription &sub )
+        {
+            const std::string element = sub.element;
+            add( sub.device,
+                 sub.property,
+                 element == "state"    ? pcf::IndiProperty::Text
+                 : element == "toggle" ? pcf::IndiProperty::Switch
+                                       : pcf::IndiProperty::Number );
+        } );
+}
+
+bool pupilGuide::propertyAvailable( const std::string                  &device,
+                                    const std::string                  &property,
+                                    std::initializer_list<const char *> elements,
+                                    bool                                values ) const
+{
+    if( !m_connected )
+        return false;
+    const auto found = m_properties.find( { device, property } );
+    if( found == m_properties.end() )
+        return false;
+    const auto &observed = values ? found->second.valid : found->second.elements;
+    for( const auto *element : elements )
+    {
+        if( observed.count( element ) == 0 )
+            return false;
+    }
+    return true;
+}
+
+bool pupilGuide::commandEnabled( QWidget *control )
+{
+    updateGUI();
+    return m_connected && control->isEnabled();
+}
+
 void pupilGuide::resetConnectionState()
 {
+    for( auto &property : m_properties )
+    {
+        property.second.elements.clear();
+        property.second.valid.clear();
+    }
+    m_reportedLabMode = true;
+    forEachChildSubscriber( [this]( const childSubscription &sub ) { resetChild( sub.subscriber ); } );
+    m_labMode                      = true;
     m_appState                     = "";
     m_modFsmState                  = "";
     m_modState                     = 0;
@@ -655,11 +981,8 @@ void pupilGuide::resetConnectionState()
     m_camlensxFsmState             = "";
     m_camlensyFsmState             = "";
     m_camwfs_align_fsmState        = "";
-    m_camwfsAlignLoopState         = false;
     m_twAlign_camwfs_ctrl_fsmState = "";
-    m_twAlignLoopState             = false;
     m_twAlign_camwfs_wfs_fsmState  = "";
-    m_twAlignSensorState           = false;
 }
 
 void pupilGuide::subscribe()
@@ -669,69 +992,20 @@ void pupilGuide::subscribe()
         return;
     }
 
-    forEachChildSubscriber( [this]( multiIndiSubscriber *sub ) { m_parent->addSubscriber( sub ); } );
+    forEachChildSubscriber( [this]( const childSubscription &sub ) { m_parent->addSubscriber( sub.subscriber ); } );
 
-    m_parent->addSubscriberProperty( this, "modwfs", "fsm" );
-    m_parent->addSubscriberProperty( this, "modwfs", "modState" );
-
-    m_parent->addSubscriberProperty( this, "camwfs", "fps" );
-
-    m_parent->addSubscriberProperty( this, "tcsi", "fsm" );
-    m_parent->addSubscriberProperty( this, "tcsi", "labMode" );
-
-    m_parent->addSubscriberProperty( this, "dmwoofer", "fsm" );
-    m_parent->addSubscriberProperty( this, "wooferModes", "fsm" );
-    m_parent->addSubscriberProperty( this, "wooferModes", "current_amps" );
-
-    m_parent->addSubscriberProperty( this, "picomotors", "fsm" );
-    m_parent->addSubscriberProperty( this, "picomotors", "picoscix_pos" );
-
-    m_parent->addSubscriberProperty( this, "camwfs-fit", "fsm" );
-    m_parent->addSubscriberProperty( this, "camwfs-fit", "quadrant1" );
-    m_parent->addSubscriberProperty( this, "camwfs-fit", "quadrant2" );
-    m_parent->addSubscriberProperty( this, "camwfs-fit", "quadrant3" );
-    m_parent->addSubscriberProperty( this, "camwfs-fit", "quadrant4" );
-    m_parent->addSubscriberProperty( this, "camwfs-fit", "threshold" );
-
-    m_parent->addSubscriberProperty( this, "camwfs-avg", "fsm" );
-    m_parent->addSubscriberProperty( this, "camwfs-avg", "nAverage" );
-
-    m_parent->addSubscriberProperty( this, "ttmpupil", "fsm" );
-    m_parent->addSubscriberProperty( this, "ttmpupil", "pos_1" );
-    m_parent->addSubscriberProperty( this, "ttmpupil", "pos_2" );
-
-    m_parent->addSubscriberProperty( this, "ttmperi", "fsm" );
-    m_parent->addSubscriberProperty( this, "ttmperi", "axis1_voltage" );
-    m_parent->addSubscriberProperty( this, "ttmperi", "axis2_voltage" );
-
-    m_parent->addSubscriberProperty( this, "dmtweeter", "fsm" );
-    m_parent->addSubscriberProperty( this, "dmtweeter", "test_set" );
-    m_parent->addSubscriberProperty( this, "dmtweeter", "test" );
-
-    m_parent->addSubscriberProperty( this, "dmncpc", "fsm" );
-    m_parent->addSubscriberProperty( this, "dmncpc", "test_set" );
-    m_parent->addSubscriberProperty( this, "dmncpc", "test" );
-
-    m_parent->addSubscriberProperty( this, "camwfs-align", "fsm" );
-    m_parent->addSubscriberProperty( this, "camwfs-align", "loop_state" );
-
-    m_parent->addSubscriberProperty( this, "twAlign-camwfs-ctrl", "fsm" );
-    m_parent->addSubscriberProperty( this, "twAlign-camwfs-ctrl", "loop_state" );
-
-    m_parent->addSubscriberProperty( this, "twAlign-camwfs-wfs", "fsm" );
-    m_parent->addSubscriberProperty( this, "twAlign-camwfs-wfs", "loop_state" );
-
-    /* Camera Lens */
-    m_parent->addSubscriberProperty( this, "stagecamlensx", "fsm" );
-    m_parent->addSubscriberProperty( this, "stagecamlensy", "fsm" );
-    m_parent->addSubscriberProperty( this, "stagecamlensx", "position" ); // we need these too
-    m_parent->addSubscriberProperty( this, "stagecamlensy", "position" );
+    for( const auto &property : m_properties )
+    {
+        m_parent->addSubscriberProperty( this, property.first.first, property.first.second );
+    }
 
     return;
 }
 
 void pupilGuide::onConnect()
 {
+    m_connected = true;
+    setEnabled( true );
     ui.label_modulation->setEnabled( true );
     ui.labelPupilFitting->setEnabled( true );
 
@@ -769,10 +1043,13 @@ void pupilGuide::onConnect()
     alignment_buttons_setEnabled( true, true );
 
     setWindowTitle( "Alignment" );
+    updateGUI();
 }
 
 void pupilGuide::onDisconnect()
 {
+    m_connected = false;
+    setEnabled( false );
     resetConnectionState();
 
     ui.label_modulation->setEnabled( false );
@@ -819,24 +1096,140 @@ void pupilGuide::onDisconnect()
 
 void pupilGuide::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
-    return handleSetProperty( ipRecv );
+    receiveProperty( ipRecv, true );
 }
 
 void pupilGuide::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
-    const std::string dev = ipRecv.getDevice();
-
-    if( dev == "modwfs" || dev == "camwfs" || dev == "tcsi" || dev == "dmwoofer" || dev == "wooferModes" ||
-        dev == "picomotors" || dev == "camwfs-fit" || dev == "camwfs-avg" || dev == "ttmpupil" || dev == "ttmperi" ||
-        dev == "dmtweeter" || dev == "dmncpc" || dev == "camwfs-align" || dev == "twAlign-camwfs-ctrl" ||
-        dev == "twAlign-camwfs-wfs" || dev == "stagecamlensx" || dev == "stagecamlensy" )
+    const std::string dev        = ipRecv.getDevice();
+    const std::string prop       = ipRecv.getName();
+    const bool        deviceLost = prop.empty() || prop == "fsm";
+    if( !deviceLost && m_properties.count( { dev, prop } ) == 0 )
+        return;
+    for( auto &property : m_properties )
     {
-        onDisconnect();
+        if( property.first.first == dev && ( deviceLost || property.first.second == prop ) )
+        {
+            property.second.elements.clear();
+            property.second.valid.clear();
+        }
     }
+
+    if( deviceLost )
+    {
+        forEachDeviceState(
+            [&dev]( const char *device, std::string &state )
+            {
+                if( dev == device )
+                    state.clear();
+            } );
+    }
+    if( dev == "modwfs" && ( deviceLost || prop == "modState" ) )
+        m_modState = 0;
+    if( dev == "tcsi" && ( deviceLost || prop == "labMode" ) )
+        m_labMode = true;
+    if( dev == "dmtweeter" && ( deviceLost || prop == "test_set" ) )
+        m_dmtweeterTestSet = false;
+    if( dev == "dmncpc" && ( deviceLost || prop == "test_set" ) )
+        m_dmncpcTestSet = false;
+
+    forEachChildSubscriber(
+        [this, &dev, &prop, deviceLost]( const childSubscription &sub )
+        {
+            if( dev == sub.device && ( deviceLost || prop == sub.property ) )
+                resetChild( sub.subscriber );
+        } );
+    updateGUI();
 }
 
 void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
+    receiveProperty( ipRecv, false );
+}
+
+void pupilGuide::receiveProperty( const pcf::IndiProperty &property, bool definition )
+{
+    if( !m_connected )
+        return;
+    const auto found = m_properties.find( { property.getDevice(), property.getName() } );
+    if( found == m_properties.end() )
+        return;
+    auto &observed = found->second;
+    if( definition || property.getType() != observed.type )
+    {
+        observed.elements.clear();
+        observed.valid.clear();
+    }
+    pcf::IndiProperty ipRecv( observed.type, property.getDevice(), property.getName() );
+    if( property.getType() == observed.type )
+    {
+        for( const auto &entry : property.getElements() )
+        {
+            const auto &name      = entry.first;
+            const auto &element   = entry.second;
+            auto        validated = element;
+            observed.elements.insert( name );
+            bool valid = false;
+            if( observed.type == pcf::IndiProperty::Number )
+            {
+                double             value = 0;
+                std::istringstream input( element.get() );
+                if( input >> value )
+                {
+                    input >> std::ws;
+                    valid            = input.eof() && std::isfinite( value );
+                    const auto &prop = property.getName();
+                    if( prop == "modState" || prop == "picoscix_pos" || prop == "nPokeImages" ||
+                        prop == "nPokeAverage" )
+                        valid = valid && std::trunc( value ) == value && value >= std::numeric_limits<int>::min() &&
+                                value <= std::numeric_limits<int>::max();
+                    if( prop == "nAverage" )
+                        valid = valid && std::trunc( value ) == value && value >= 0 &&
+                                value <= std::numeric_limits<unsigned>::max();
+                    if( property.getDevice() == "wooferModes" && prop == "current_amps" && name == "0002" )
+                        valid = valid && std::fabs( value ) <= std::numeric_limits<double>::max() / 1e5;
+                    if( prop == "position" )
+                        valid = valid && std::fabs( value ) <= std::numeric_limits<float>::max();
+                    // Normalize integer values before the legacy cache reads them with stream extraction.
+                    if( valid && ( prop == "modState" || prop == "picoscix_pos" || prop == "nPokeImages" ||
+                                   prop == "nPokeAverage" ) )
+                        validated.set( static_cast<int>( value ) );
+                    if( valid && prop == "nAverage" )
+                        validated.set( static_cast<unsigned>( value ) );
+                }
+            }
+            else if( observed.type == pcf::IndiProperty::Switch )
+                valid = element.getSwitchState() == pcf::IndiElement::On ||
+                        element.getSwitchState() == pcf::IndiElement::Off;
+            else if( observed.type == pcf::IndiProperty::Text )
+                valid = !element.get().empty();
+
+            if( valid )
+            {
+                observed.valid.insert( name );
+                ipRecv.add( validated );
+            }
+            else
+                observed.valid.erase( name );
+        }
+    }
+    const bool tcsWasConnected = m_tcsiState == "CONNECTED";
+    if( property.getName() == "fsm" && observed.valid.count( "state" ) == 0 )
+    {
+        forEachDeviceState(
+            [&property]( const char *device, std::string &state )
+            {
+                if( property.getDevice() == device )
+                    state.clear();
+            } );
+    }
+    forEachChildSubscriber(
+        [this, &property]( const childSubscription &sub )
+        {
+            if( property.getDevice() == sub.device && property.getName() == sub.property &&
+                !propertyAvailable( sub.device, sub.property, { sub.element } ) )
+                resetChild( sub.subscriber );
+        } );
     std::string dev = ipRecv.getDevice();
 
     if( dev == "modwfs" )
@@ -881,11 +1274,11 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
             {
                 if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
                 {
-                    m_labMode = true;
+                    m_reportedLabMode = true;
                 }
                 else
                 {
-                    m_labMode = false;
+                    m_reportedLabMode = false;
                 }
             }
         }
@@ -1257,20 +1650,6 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
                 m_camwfs_align_fsmState = ipRecv["state"].get<std::string>();
             }
         }
-        else if( ipRecv.getName() == "loop_state" )
-        {
-            if( ipRecv.find( "toggle" ) )
-            {
-                if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
-                {
-                    m_camwfsAlignLoopState = true;
-                }
-                else
-                {
-                    m_camwfsAlignLoopState = false;
-                }
-            }
-        }
     }
     else if( dev == "twAlign-camwfs-ctrl" )
     {
@@ -1279,20 +1658,6 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
             if( ipRecv.find( "state" ) )
             {
                 m_twAlign_camwfs_ctrl_fsmState = ipRecv["state"].get<std::string>();
-            }
-        }
-        else if( ipRecv.getName() == "loop_state" )
-        {
-            if( ipRecv.find( "toggle" ) )
-            {
-                if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
-                {
-                    m_twAlignLoopState = true;
-                }
-                else
-                {
-                    m_twAlignLoopState = false;
-                }
             }
         }
     }
@@ -1305,21 +1670,15 @@ void pupilGuide::handleSetProperty( const pcf::IndiProperty &ipRecv )
                 m_twAlign_camwfs_wfs_fsmState = ipRecv["state"].get<std::string>();
             }
         }
-        else if( ipRecv.getName() == "loop_state" )
-        {
-            if( ipRecv.find( "toggle" ) )
-            {
-                if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
-                {
-                    m_twAlignSensorState = true;
-                }
-                else
-                {
-                    m_twAlignSensorState = false;
-                }
-            }
-        }
     }
+    if( dev == "tcsi" && ipRecv.getName() == "fsm" && tcsWasConnected && m_tcsiState != "CONNECTED" )
+    {
+        auto &mode = m_properties.at( { "tcsi", "labMode" } );
+        mode.elements.clear();
+        mode.valid.clear();
+        m_reportedLabMode = true;
+    }
+    updateGUI();
     return;
 }
 
@@ -1570,8 +1929,161 @@ void pupilGuide::alignment_buttons_setEnabled( bool enabled, bool all )
     ui.button_stopAlignment->setEnabled( enabled );
 }
 
+void pupilGuide::updateAvailability()
+{
+    const auto limit = []( QWidget *control, bool available )
+    { control->setEnabled( control->isEnabled() && available ); };
+    m_labMode =
+        m_tcsiState != "CONNECTED" || !propertyAvailable( "tcsi", "labMode", { "toggle" } ) || m_reportedLabMode;
+
+    const bool woofer = m_dmWooferState == "OPERATING" && m_wooferModesState == "READY";
+    bool       tip    = false;
+    bool       focus  = false;
+    if( m_tipmovewhat == MOVE_WOOF )
+    {
+        tip = woofer && propertyAvailable( "wooferModes", "current_amps", { "0000", "0001" } ) &&
+              propertyAvailable( "wooferModes", "target_amps", { "0000", "0001" }, false );
+        focus = woofer && propertyAvailable( "wooferModes", "current_amps", { "0002" } ) &&
+                propertyAvailable( "wooferModes", "target_amps", { "0002" }, false );
+    }
+    else if( m_tipmovewhat == MOVE_TTM )
+    {
+        tip = ( m_modFsmState == "READY" || m_modFsmState == "OPERATING" ) &&
+              propertyAvailable( "modwfs", "offset", { "x", "y" }, false );
+    }
+    else if( m_tipmovewhat == MOVE_TEL )
+    {
+        tip   = !m_labMode && propertyAvailable( "tcsi", "pyrNudge", { "x", "y" }, false );
+        focus = !m_labMode && propertyAvailable( "tcsi", "pyrNudge", { "z" }, false );
+    }
+    for( auto *button : { ui.button_tip_ul,
+                          ui.button_tip_u,
+                          ui.button_tip_ur,
+                          ui.button_tip_l,
+                          ui.button_tip_scale,
+                          ui.button_tip_r,
+                          ui.button_tip_dl,
+                          ui.button_tip_d,
+                          ui.button_tip_dr } )
+        button->setEnabled( tip );
+    for( auto *button : { ui.button_focus_p, ui.button_focus_scale, ui.button_focus_m } )
+        button->setEnabled( focus );
+
+    const bool mod = propertyAvailable( "modwfs", "modState", { "current" } ) &&
+                     propertyAvailable( "modwfs", "modState", { "target" }, false );
+    for( auto *button : { ui.buttonMod_mod, ui.buttonMod_set, ui.buttonMod_rest } )
+        limit( button, mod );
+
+    const bool pico = propertyAvailable( "picomotors", "picoscix_pos", { "current" } ) &&
+                      propertyAvailable( "picomotors", "picoscix_pos", { "target" }, false );
+    for( QWidget *control : std::array<QWidget *, 5>{
+             ui.picoscix_l, ui.picoscix_r, ui.picoscix_scale, ui.picoscix_combo, ui.picoscix_go } )
+        limit( control, pico );
+    limit( ui.buttonTweeterTest_set, propertyAvailable( "dmtweeter", "test_set", { "toggle" } ) );
+    limit( ui.buttonNCPCTest_set, propertyAvailable( "dmncpc", "test_set", { "toggle" } ) );
+
+    const bool pupil = propertyAvailable( "ttmpupil", "pos_1", { "current" } ) &&
+                       propertyAvailable( "ttmpupil", "pos_2", { "current" } ) &&
+                       propertyAvailable( "ttmpupil", "pos_1", { "target" }, false ) &&
+                       propertyAvailable( "ttmpupil", "pos_2", { "target" }, false );
+    for( auto *button :
+         { ui.button_pup_ul, ui.button_pup_ur, ui.button_pup_dl, ui.button_pup_dr, ui.button_pup_scale } )
+        limit( button, pupil );
+    limit( ui.buttonPup_set, propertyAvailable( "ttmpupil", "initDM", { "request" } ) );
+    limit( ui.buttonPup_rest, propertyAvailable( "ttmpupil", "releaseDM", { "request" } ) );
+    limit( ui.button_ttmPeri_set, propertyAvailable( "ttmperi", "set", { "toggle" } ) );
+    limit( ui.button_ttmPeri_rest, propertyAvailable( "ttmperi", "set", { "toggle" } ) );
+    const bool periX = propertyAvailable( "ttmperi", "axis1_voltage", { "current" } ) &&
+                       propertyAvailable( "ttmperi", "axis1_voltage", { "target" }, false );
+    const bool periY = propertyAvailable( "ttmperi", "axis2_voltage", { "current" } ) &&
+                       propertyAvailable( "ttmperi", "axis2_voltage", { "target" }, false );
+    limit( ui.button_ttmPeri_l, periX );
+    limit( ui.button_ttmPeri_r, periX );
+    limit( ui.button_ttmPeri_u, periY );
+    limit( ui.button_ttmPeri_d, periY );
+    limit( ui.button_ttmPeri_scale, periX || periY );
+    const bool lensX = m_camlensxFsmState == "READY" &&
+                       propertyAvailable( "stagecamlensx", "position", { "current" } ) &&
+                       propertyAvailable( "stagecamlensx", "position", { "target" }, false );
+    const bool lensY = m_camlensyFsmState == "READY" &&
+                       propertyAvailable( "stagecamlensy", "position", { "current" } ) &&
+                       propertyAvailable( "stagecamlensy", "position", { "target" }, false );
+    limit( ui.button_camlens_l, lensX );
+    limit( ui.button_camlens_r, lensX );
+    limit( ui.button_camlens_u, lensY );
+    limit( ui.button_camlens_d, lensY );
+    ui.button_camlens_scale->setEnabled( lensX || lensY );
+
+    forEachChildSubscriber(
+        [this, &limit]( const childSubscription &sub )
+        {
+            auto *control   = dynamic_cast<QWidget *>( sub.subscriber );
+            bool  available = propertyAvailable( sub.device, sub.property, { sub.element } );
+            auto *entry     = dynamic_cast<statusEntry *>( sub.subscriber );
+            if( entry && !entry->readOnly() )
+                available =
+                    available && propertyAvailable( sub.device,
+                                                    sub.property,
+                                                    { std::string( sub.element ) == "value" ? "value" : "target" },
+                                                    false );
+            limit( control, available );
+            if( entry )
+                entry->updateGUI();
+            if( auto *slider = dynamic_cast<toggleSlider *>( sub.subscriber ) )
+                slider->guiUpdate();
+        } );
+
+    const bool sensor     = propertyAvailable( "twAlign-camwfs-wfs", "continuous", { "toggle" } );
+    const bool controller = propertyAvailable( "twAlign-camwfs-ctrl", "loop_state", { "toggle" } );
+    const bool tracking   = propertyAvailable( "camwfs-align", "loop_state", { "toggle" } );
+    const auto ready      = []( const std::string &state ) { return state == "READY" || state == "OPERATING"; };
+    ui.button_startAlignment->setEnabled( sensor && controller && tracking && ready( m_twAlign_camwfs_wfs_fsmState ) &&
+                                          ready( m_twAlign_camwfs_ctrl_fsmState ) && ready( m_camwfs_align_fsmState ) );
+    ui.button_stopAlignment->setEnabled( sensor || controller || ( m_labMode && tracking ) );
+
+    // Derived fit values are displays, but must not present missing observations as zero or stale data.
+    const std::array<QLineEdit *, 4>                medians{ ui.med1, ui.med2, ui.med3, ui.med4 };
+    const std::array<std::array<QLineEdit *, 4>, 3> coordinates{
+        { { ui.coordLL_x, ui.coordLR_x, ui.coordUL_x, ui.coordUR_x },
+          { ui.coordLL_y, ui.coordLR_y, ui.coordUL_y, ui.coordUR_y },
+          { ui.coordLL_D, ui.coordLR_D, ui.coordUL_D, ui.coordUR_D } } };
+    const std::array<QLineEdit *, 3>  averages{ ui.coordAvg_x, ui.coordAvg_y, ui.coordAvg_D };
+    const std::array<const char *, 3> axes{ "x", "y", "D" };
+    const auto                        display = [&limit]( QLineEdit *field, bool available )
+    {
+        limit( field, available );
+        if( !field->isEnabled() )
+            field->clear();
+    };
+    bool allMedians = true;
+    for( int q = 0; q < 4; ++q )
+        allMedians = allMedians && propertyAvailable( "camwfs-fit", "quadrant" + std::to_string( q + 1 ), { "med" } );
+    for( int q = 0; q < 4; ++q )
+        display( medians[q],
+                 ui.setDelta->isChecked()
+                     ? allMedians
+                     : propertyAvailable( "camwfs-fit", "quadrant" + std::to_string( q + 1 ), { "med" } ) );
+    for( int axis = 0; axis < 3; ++axis )
+    {
+        bool       all       = true;
+        const auto reference = std::string( "set-" ) + axes[axis];
+        for( int q = 0; q < 4; ++q )
+        {
+            const auto property = "quadrant" + std::to_string( q + 1 );
+            bool       available =
+                propertyAvailable( "camwfs-fit", property, { axes[axis] } ) &&
+                ( !ui.setDelta_pup->isChecked() || propertyAvailable( "camwfs-fit", property, { reference.c_str() } ) );
+            display( coordinates[axis][q], available );
+            all = all && available;
+        }
+        display( averages[axis], all );
+    }
+}
+
 void pupilGuide::updateGUI()
 {
+    if( !m_connected )
+        return;
 
     //--------- Modulation
 
@@ -1979,31 +2491,17 @@ void pupilGuide::updateGUI()
     {
         camlensSetEnabled( true, CAMLENS_X );
         camlensSetEnabled( false, CAMLENS_Y );
-        ui.camlensY_pos->onDisconnect();
     }
     else if( !( m_camlensxFsmState == "READY" || m_camlensxFsmState == "OPERATING" ) &&
              ( m_camlensyFsmState == "READY" || m_camlensyFsmState == "OPERATING" ) )
     {
         camlensSetEnabled( false, CAMLENS_X );
-        ui.camlensX_pos->onDisconnect();
 
         camlensSetEnabled( true, CAMLENS_Y );
     }
     else
     {
         camlensSetEnabled( false );
-        ui.camlensX_pos->onDisconnect();
-        ui.camlensY_pos->onDisconnect();
-    }
-
-    if( m_camlensxFsmState == "SHUTDOWN" )
-    {
-        ui.camlensX_pos->onDisconnect();
-    }
-
-    if( m_camlensyFsmState == "SHUTDOWN" )
-    {
-        ui.camlensY_pos->onDisconnect();
     }
 
     if( m_camwfs_align_fsmState != "READY" && m_camwfs_align_fsmState != "OPERATING" )
@@ -2033,12 +2531,15 @@ void pupilGuide::updateGUI()
         twAlign_camwfs_wfs_setEnabled( true, true );
     }
 
+    updateAvailability();
 } // updateGUI()
 
 // ------------- modttm
 
 void pupilGuide::on_buttonMod_mod_pressed()
 {
+    if( !commandEnabled( ui.buttonMod_mod ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "modwfs" );
@@ -2051,6 +2552,8 @@ void pupilGuide::on_buttonMod_mod_pressed()
 
 void pupilGuide::on_buttonMod_set_pressed()
 {
+    if( !commandEnabled( ui.buttonMod_set ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "modwfs" );
@@ -2062,6 +2565,8 @@ void pupilGuide::on_buttonMod_set_pressed()
 
 void pupilGuide::on_buttonMod_rest_pressed()
 {
+    if( !commandEnabled( ui.buttonMod_rest ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "modwfs" );
@@ -2093,6 +2598,8 @@ void pupilGuide::on_button_ttmtel_pressed()
 
 void pupilGuide::on_button_tip_u_pressed()
 {
+    if( !commandEnabled( ui.button_tip_u ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_tipmovewhat == MOVE_TTM )
@@ -2133,6 +2640,8 @@ void pupilGuide::on_button_tip_u_pressed()
 
 void pupilGuide::on_button_tip_ul_pressed()
 {
+    if( !commandEnabled( ui.button_tip_ul ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_tipmovewhat == MOVE_TTM )
@@ -2171,6 +2680,8 @@ void pupilGuide::on_button_tip_ul_pressed()
 
 void pupilGuide::on_button_tip_l_pressed()
 {
+    if( !commandEnabled( ui.button_tip_l ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_tipmovewhat == MOVE_TTM )
@@ -2209,6 +2720,8 @@ void pupilGuide::on_button_tip_l_pressed()
 
 void pupilGuide::on_button_tip_dl_pressed()
 {
+    if( !commandEnabled( ui.button_tip_dl ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_tipmovewhat == MOVE_TTM )
@@ -2247,6 +2760,8 @@ void pupilGuide::on_button_tip_dl_pressed()
 
 void pupilGuide::on_button_tip_d_pressed()
 {
+    if( !commandEnabled( ui.button_tip_d ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_tipmovewhat == MOVE_TTM )
@@ -2285,6 +2800,8 @@ void pupilGuide::on_button_tip_d_pressed()
 
 void pupilGuide::on_button_tip_dr_pressed()
 {
+    if( !commandEnabled( ui.button_tip_dr ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_tipmovewhat == MOVE_TTM )
@@ -2325,6 +2842,8 @@ void pupilGuide::on_button_tip_dr_pressed()
 
 void pupilGuide::on_button_tip_r_pressed()
 {
+    if( !commandEnabled( ui.button_tip_r ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_tipmovewhat == MOVE_TTM )
@@ -2365,6 +2884,8 @@ void pupilGuide::on_button_tip_r_pressed()
 
 void pupilGuide::on_button_tip_ur_pressed()
 {
+    if( !commandEnabled( ui.button_tip_ur ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_tipmovewhat == MOVE_TTM )
@@ -2433,6 +2954,8 @@ void pupilGuide::on_button_tip_scale_pressed()
 
 void pupilGuide::on_button_focus_p_pressed()
 {
+    if( !commandEnabled( ui.button_focus_p ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_tipmovewhat == MOVE_WOOF )
@@ -2460,6 +2983,8 @@ void pupilGuide::on_button_focus_p_pressed()
 
 void pupilGuide::on_button_focus_m_pressed()
 {
+    if( !commandEnabled( ui.button_focus_m ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     if( m_tipmovewhat == MOVE_WOOF )
@@ -2517,12 +3042,15 @@ void pupilGuide::on_button_focus_scale_pressed()
 
 void pupilGuide::move_picoscix( int delta )
 {
-    if( m_picoState != "READY" || m_picoscixPos < -1000000 )
+    if( !commandEnabled( ui.picoscix_l ) || m_picoscixPos < -1000000 )
     {
         return;
     }
 
-    int newpos = m_picoscixPos + delta;
+    const long long target = static_cast<long long>( m_picoscixPos ) + delta;
+    if( target < std::numeric_limits<int>::min() || target > std::numeric_limits<int>::max() )
+        return;
+    int newpos = static_cast<int>( target );
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
@@ -2590,6 +3118,8 @@ void pupilGuide::on_picoscix_go_pressed()
 
 void pupilGuide::on_buttonTweeterTest_set_pressed()
 {
+    if( !commandEnabled( ui.buttonTweeterTest_set ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
     ip.setDevice( "dmtweeter" );
@@ -2612,6 +3142,8 @@ void pupilGuide::on_buttonTweeterTest_set_pressed()
 
 void pupilGuide::on_buttonNCPCTest_set_pressed()
 {
+    if( !commandEnabled( ui.buttonNCPCTest_set ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
     ip.setDevice( "dmncpc" );
@@ -2634,6 +3166,8 @@ void pupilGuide::on_buttonNCPCTest_set_pressed()
 
 void pupilGuide::on_buttonPup_rest_pressed()
 {
+    if( !commandEnabled( ui.buttonPup_rest ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
     ip.setDevice( "ttmpupil" );
@@ -2646,6 +3180,8 @@ void pupilGuide::on_buttonPup_rest_pressed()
 
 void pupilGuide::on_buttonPup_set_pressed()
 {
+    if( !commandEnabled( ui.buttonPup_set ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
     ip.setDevice( "ttmpupil" );
@@ -2672,6 +3208,8 @@ void pupilGuide::on_button_camera_pressed()
 
 void pupilGuide::on_button_pup_ul_pressed()
 {
+    if( !commandEnabled( ui.button_pup_ul ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "ttmpupil" );
@@ -2715,6 +3253,8 @@ void pupilGuide::on_button_pup_ul_pressed()
 
 void pupilGuide::on_button_pup_dl_pressed()
 {
+    if( !commandEnabled( ui.button_pup_dl ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "ttmpupil" );
@@ -2758,6 +3298,8 @@ void pupilGuide::on_button_pup_dl_pressed()
 
 void pupilGuide::on_button_pup_dr_pressed()
 {
+    if( !commandEnabled( ui.button_pup_dr ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "ttmpupil" );
@@ -2801,6 +3343,8 @@ void pupilGuide::on_button_pup_dr_pressed()
 
 void pupilGuide::on_button_pup_ur_pressed()
 {
+    if( !commandEnabled( ui.button_pup_ur ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "ttmpupil" );
@@ -2871,6 +3415,8 @@ void pupilGuide::on_button_pup_scale_pressed()
 
 void pupilGuide::on_button_ttmPeri_rest_pressed()
 {
+    if( !commandEnabled( ui.button_ttmPeri_rest ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
     ip.setDevice( "ttmperi" );
@@ -2883,6 +3429,8 @@ void pupilGuide::on_button_ttmPeri_rest_pressed()
 
 void pupilGuide::on_button_ttmPeri_set_pressed()
 {
+    if( !commandEnabled( ui.button_ttmPeri_set ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
     ip.setDevice( "ttmperi" );
@@ -2895,6 +3443,8 @@ void pupilGuide::on_button_ttmPeri_set_pressed()
 
 void pupilGuide::on_button_ttmPeri_l_pressed()
 {
+    if( !commandEnabled( ui.button_ttmPeri_l ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "ttmperi" );
@@ -2918,6 +3468,8 @@ void pupilGuide::on_button_ttmPeri_l_pressed()
 
 void pupilGuide::on_button_ttmPeri_r_pressed()
 {
+    if( !commandEnabled( ui.button_ttmPeri_r ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "ttmperi" );
@@ -2941,6 +3493,8 @@ void pupilGuide::on_button_ttmPeri_r_pressed()
 
 void pupilGuide::on_button_ttmPeri_u_pressed()
 {
+    if( !commandEnabled( ui.button_ttmPeri_u ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "ttmperi" );
@@ -2964,6 +3518,8 @@ void pupilGuide::on_button_ttmPeri_u_pressed()
 
 void pupilGuide::on_button_ttmPeri_d_pressed()
 {
+    if( !commandEnabled( ui.button_ttmPeri_d ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
     ip.setDevice( "ttmperi" );
@@ -3054,6 +3610,8 @@ void pupilGuide::on_buttonExpFit_pressed()
 
 void pupilGuide::on_button_camlens_u_pressed()
 {
+    if( !commandEnabled( ui.button_camlens_u ) )
+        return;
     if( m_camlensyFsmState != "READY" )
         return;
 
@@ -3069,6 +3627,8 @@ void pupilGuide::on_button_camlens_u_pressed()
 
 void pupilGuide::on_button_camlens_l_pressed()
 {
+    if( !commandEnabled( ui.button_camlens_l ) )
+        return;
     if( m_camlensxFsmState != "READY" )
         return;
 
@@ -3084,6 +3644,8 @@ void pupilGuide::on_button_camlens_l_pressed()
 
 void pupilGuide::on_button_camlens_d_pressed()
 {
+    if( !commandEnabled( ui.button_camlens_d ) )
+        return;
     if( m_camlensyFsmState != "READY" )
     {
         return;
@@ -3101,6 +3663,8 @@ void pupilGuide::on_button_camlens_d_pressed()
 
 void pupilGuide::on_button_camlens_r_pressed()
 {
+    if( !commandEnabled( ui.button_camlens_r ) )
+        return;
     if( m_camlensxFsmState != "READY" )
     {
         return;
@@ -3141,6 +3705,8 @@ void pupilGuide::on_button_camlens_scale_pressed()
 
 void pupilGuide::on_button_startAlignment_pressed()
 {
+    if( !commandEnabled( ui.button_startAlignment ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
 
     ip.setDevice( "twAlign-camwfs-wfs" );
@@ -3165,27 +3731,21 @@ void pupilGuide::on_button_startAlignment_pressed()
 
 void pupilGuide::on_button_stopAlignment_pressed()
 {
+    if( !commandEnabled( ui.button_stopAlignment ) )
+        return;
     pcf::IndiProperty ip( pcf::IndiProperty::Switch );
-
-    ip.setDevice( "twAlign-camwfs-wfs" );
-    ip.setName( "continuous" );
     ip.add( pcf::IndiElement( "toggle" ) );
     ip["toggle"] = pcf::IndiElement::Off;
-
-    sendNewProperty( ip );
-
-    ip.setDevice( "twAlign-camwfs-ctrl" );
-    ip.setName( "loop_state" );
-    ip["toggle"] = pcf::IndiElement::Off;
-
-    sendNewProperty( ip );
-
-    if( m_labMode )
+    for( const auto &target : { std::make_pair( "twAlign-camwfs-wfs", "continuous" ),
+                                std::make_pair( "twAlign-camwfs-ctrl", "loop_state" ),
+                                std::make_pair( "camwfs-align", "loop_state" ) } )
     {
-        ip.setDevice( "camwfs-align" );
-        ip.setName( "loop_state" );
-        ip["toggle"] = pcf::IndiElement::Off;
-
+        if( std::string( target.first ) == "camwfs-align" && !m_labMode )
+            continue;
+        if( !propertyAvailable( target.first, target.second, { "toggle" } ) )
+            continue;
+        ip.setDevice( target.first );
+        ip.setName( target.second );
         sendNewProperty( ip );
     }
 }

@@ -1,8 +1,6 @@
 /** \file picamCtrl.hpp
  * \brief The MagAO-X Princeton Instruments EMCCD camera controller.
  *
- * \author Jared R. Males (jaredmales@gmail.com)
- *
  * \ingroup picamCtrl_files
  */
 
@@ -25,7 +23,9 @@
     #define BREADCRUMB
 #endif
 
-inline std::string PicamEnum2String( PicamEnumeratedType type, piint value )
+/// Convert a PICam enumerated value to its SDK description.
+inline std::string PicamEnum2String( PicamEnumeratedType type /**< [in] Enumeration type. */,
+                                     piint               value /**< [in] Enumerated value. */ )
 {
     const pichar *string;
     Picam_GetEnumerationString( type, value, &string );
@@ -40,7 +40,10 @@ namespace MagAOX
 namespace app
 {
 
-int readoutParams( piint &adcQual, piflt &adcSpeed, const std::string &rosn )
+/// Translate a configured readout-speed name to PICam ADC parameters.
+int readoutParams( piint             &adcQual /**< [out] ADC quality. */,
+                   piflt             &adcSpeed /**< [out] ADC speed, in MHz. */,
+                   const std::string &rosn /**< [in] Configured readout-speed name. */ )
 {
     if( rosn == "ccd_00_1MHz" )
     {
@@ -80,7 +83,9 @@ int readoutParams( piint &adcQual, piflt &adcSpeed, const std::string &rosn )
     return 0;
 }
 
-int vshiftParams( piflt &vss, const std::string &vsn )
+/// Translate a configured vertical-shift name to its PICam shift rate.
+int vshiftParams( piflt             &vss /**< [out] Vertical shift time, in microseconds. */,
+                  const std::string &vsn /**< [in] Configured vertical-shift name. */ )
 {
     if( vsn == "0_7us" )
     {
@@ -140,12 +145,17 @@ class picamCtrl : public MagAOXApp<>,
 
     typedef MagAOXApp<> MagAOXAppT;
 
+    typedef dev::stdCamera<picamCtrl> stdCameraT;
+
   public:
     /** \name app::dev Configurations
      *@{
      */
     static constexpr bool c_stdCamera_tempControl =
         true; ///< app::dev config to tell stdCamera to expose temperature controls
+
+    static constexpr bool c_stdCamera_tempLimits =
+        true; ///< app::dev config to enable configurable temperature limits and request validation
 
     static constexpr bool c_stdCamera_temp = true; ///< app::dev config to tell stdCamera to expose temperature
 
@@ -198,28 +208,28 @@ class picamCtrl : public MagAOXApp<>,
 
     ///@}
 
-    int m_depth{ 0 };
+    int m_depth{ 0 }; ///< Reserved pixel-depth bookkeeping.
 
-    piint  m_timeStampMask{ PicamTimeStampsMask_ExposureStarted }; // time stamp at end of exposure
-    pi64s  m_tsRes;                                                // time stamp resolution
-    piint  m_frameSize;
-    double m_camera_timestamp{ 0.0 };
-    piflt  m_FrameRateCalculation;
-    piflt  m_ReadOutTimeCalculation;
+    piint  m_timeStampMask{ PicamTimeStampsMask_ExposureStarted }; ///< Enabled camera timestamp fields.
+    pi64s  m_tsRes;                                                ///< Camera timestamp ticks per second.
+    piint  m_frameSize;                                            ///< Image bytes preceding each frame's metadata.
+    double m_camera_timestamp{ 0.0 }; ///< Previous camera timestamp, in seconds, for skipped-frame detection.
+    piflt  m_FrameRateCalculation;    ///< SDK-calculated acquisition frame rate, in Hz.
+    piflt  m_ReadOutTimeCalculation;  ///< SDK-calculated readout time, in milliseconds.
 
     std::string m_fxngenName{ "fxngensync" }; ///< Default fxngen device name
     std::string m_fxngenCh{ "C2" };           ///< Default fxngen channel
 
-    std::string m_otherCamName;
+    std::string m_otherCamName; ///< Camera whose exposure and synchronization settings are coupled to this app.
 
-    PicamHandle m_cameraHandle{ 0 };
-    PicamHandle m_modelHandle{ 0 };
+    PicamHandle m_cameraHandle{ 0 }; ///< Open device handle owned by this app.
+    PicamHandle m_modelHandle{ 0 };  ///< SDK model handle associated with the open camera.
 
-    PicamAcquisitionBuffer m_acqBuff;
-    PicamAvailableData     m_available;
+    PicamAcquisitionBuffer m_acqBuff;   ///< App-owned acquisition buffer, released on reconnect or destruction.
+    PicamAvailableData     m_available; ///< Most recently available SDK readout, borrowed from the acquisition buffer.
 
-    std::string m_cameraName;
-    std::string m_cameraModel;
+    std::string m_cameraName;            ///< Connected camera's sensor name.
+    std::string m_cameraModel;           ///< Connected camera's model description.
     bool m_fanControlSupported{ false }; ///< True when the camera exposes the DisableCoolingFan control parameter.
     bool m_fanStatusSupported{ false };  ///< True when the camera exposes readable cooling-fan status.
     bool m_fanForcedOn{ false };         ///< True while the camera reports the cooling fan is forced on for protection.
@@ -239,13 +249,16 @@ class picamCtrl : public MagAOXApp<>,
     /// load the configuration system results (called by MagAOXApp::setup())
     virtual void loadConfig();
 
+    /// Load and validate configuration, returning -1 on failure.
+    int loadConfigImpl();
+
     /// Startup functions
     /** Sets up the INDI vars.
      *
      */
     virtual int appStartup();
 
-    /// Implementation of the FSM for the Siglent SDG
+    /// Run the camera connection, thermal polling, and acquisition state machine.
     virtual int appLogic();
 
     /// Implementation of the on-power-off FSM logic
@@ -254,60 +267,116 @@ class picamCtrl : public MagAOXApp<>,
     /// Implementation of the while-powered-off FSM
     virtual int whilePowerOff();
 
-    /// Do any needed shutdown tasks.  Currently nothing in this app.
+    /// Stop dependent threads, close the camera, and uninitialize PICam.
     virtual int appShutdown();
 
   protected:
-    int getPicamParameter( piint &value, PicamParameter parameter );
+    /// Read an integer parameter from the camera device.
+    int getPicamParameter( piint         &value /**< [out] Parameter value. */,
+                           PicamParameter parameter /**< [in] Parameter to read. */ );
 
-    int getPicamParameter( piflt &value, PicamParameter parameter );
+    /// Read a floating-point parameter from the camera device.
+    int getPicamParameter( piflt         &value /**< [out] Parameter value. */,
+                           PicamParameter parameter /**< [in] Parameter to read. */ );
 
-    int setPicamParameter( PicamParameter parameter, pi64s value, bool commit = true );
+    /// Set a large integer parameter on the camera device.
+    int setPicamParameter( PicamParameter parameter /**< [in] Parameter to set. */,
+                           pi64s          value /**< [in] Requested value. */,
+                           bool           commit = true /**< [in] Whether to commit the parameter. */ );
 
-    int setPicamParameter( PicamParameter parameter, piint value, bool commit = true );
+    /// Set an integer parameter on the camera device.
+    int setPicamParameter( PicamParameter parameter /**< [in] Parameter to set. */,
+                           piint          value /**< [in] Requested value. */,
+                           bool           commit = true /**< [in] Whether to commit the parameter. */ );
 
-    int setPicamParameter( PicamHandle handle, PicamParameter parameter, piflt value, bool commit = true );
+    /// Set a floating-point parameter on a device or model.
+    int setPicamParameter( PicamHandle    handle /**< [in] Camera device or model handle. */,
+                           PicamParameter parameter /**< [in] Parameter to set. */,
+                           piflt          value /**< [in] Requested value. */,
+                           bool           commit = true /**< [in] Whether to commit the parameter. */ );
 
-    int setPicamParameter( PicamHandle handle, PicamParameter parameter, piint value, bool commit = true );
+    /// Set an integer parameter on a device or model.
+    int setPicamParameter( PicamHandle    handle /**< [in] Camera device or model handle. */,
+                           PicamParameter parameter /**< [in] Parameter to set. */,
+                           piint          value /**< [in] Requested value. */,
+                           bool           commit = true /**< [in] Whether to commit the parameter. */ );
 
-    int setPicamParameter( PicamParameter parameter, piflt value, bool commit = true );
+    /// Set a floating-point parameter on the camera device.
+    int setPicamParameter( PicamParameter parameter /**< [in] Parameter to set. */,
+                           piflt          value /**< [in] Requested value. */,
+                           bool           commit = true /**< [in] Whether to commit the parameter. */ );
 
-    int setPicamParameterOnline( PicamHandle handle, PicamParameter parameter, piflt value );
+    /// Set a floating-point parameter while acquisition is running.
+    int setPicamParameterOnline( PicamHandle    handle /**< [in] Camera device or model handle. */,
+                                 PicamParameter parameter /**< [in] Parameter to set. */,
+                                 piflt          value /**< [in] Requested value. */ );
 
-    int setPicamParameterOnline( PicamParameter parameter, piflt value );
+    /// Set a floating-point device parameter while acquisition is running.
+    int setPicamParameterOnline( PicamParameter parameter /**< [in] Parameter to set. */,
+                                 piflt          value /**< [in] Requested value. */ );
 
-    int setPicamParameterOnline( PicamHandle handle, PicamParameter parameter, piint value );
+    /// Set an integer parameter while acquisition is running.
+    int setPicamParameterOnline( PicamHandle    handle /**< [in] Camera device or model handle. */,
+                                 PicamParameter parameter /**< [in] Parameter to set. */,
+                                 piint          value /**< [in] Requested value. */ );
 
-    int setPicamParameterOnline( PicamParameter parameter, piint value );
+    /// Set an integer device parameter while acquisition is running.
+    int setPicamParameterOnline( PicamParameter parameter /**< [in] Parameter to set. */,
+                                 piint          value /**< [in] Requested value. */ );
 
+    /// Discover and open the configured camera and validate its temperature and fan capabilities.
     int connect();
 
+    /// Poll acquisition status and request recovery when acquisition has stopped.
     int getAcquisitionState();
 
     /// Get the current cooling-fan state from the camera.
     int getFanSpeed();
 
+    /// Read sensor temperature and temperature-control status.
     int getTemps();
+
+    /// Intersect the configured temperature limits with the camera's required range.
+    int getTempRange();
+
+    /// Validate a temperature target against the effective limits and PICam constraints.
+    int validateTempSetPt( float target /**< [in] Requested temperature setpoint, in C. */ );
 
     // stdCamera interface:
 
-    // This must set the power-on default values of
-    /* -- m_ccdTempSetpt
-     * -- m_currentROI
-     */
+    /// Reset the camera targets and fan capability state after power on.
     int powerOnDefaults();
 
+    /// Report the always-enabled temperature controller.
     int setTempControl();
+
+    /// Validate the requested temperature and queue reconfiguration.
     int setTempSetPt();
+
+    /// Queue reconfiguration to apply the requested readout speed.
     int setReadoutSpeed();
+
+    /// Queue reconfiguration to apply the requested vertical-shift speed.
     int setVShiftSpeed();
+
     /// Request a cooling-fan state change through the next reconfiguration.
-    int  setFanSpeed();
-    int  setEMGain();
-    int  setExpTime();
-    int  capExpTime( piflt &exptime );
-    int  setFPS();
-    int  setSynchro();
+    int setFanSpeed();
+    /// Apply and record the requested electron-multiplication gain.
+    int setEMGain();
+
+    /// Apply the requested exposure time and update synchronization.
+    int setExpTime();
+
+    /// Limit an exposure time to the permitted range.
+    int capExpTime( piflt &exptime /**< [in/out] Exposure time, in milliseconds. */ );
+
+    /// Provide the unused frame-rate setter required by stdCamera.
+    int setFPS();
+
+    /// Queue the requested synchronization mode and update the coupled camera.
+    int setSynchro();
+
+    /// Update the synchronization function generator for the current exposure time.
     void updateFxnGenSync();
 
     /// Check the next ROI
@@ -325,6 +394,7 @@ class picamCtrl : public MagAOXApp<>,
      */
     bool checkFocus();
 
+    /// Queue reconfiguration to apply the requested ROI.
     int setNextROI();
 
     /// Requests the configured focus preset. [stdCamera interface]
@@ -338,21 +408,32 @@ class picamCtrl : public MagAOXApp<>,
     /**
      * \returns 0 always
      */
-    int setShutter( int sh );
+    int setShutter( int sh /**< [in] Requested shutter state. */ );
 
     // Framegrabber interface:
-    int   configureAcquisition();
+    /// Configure camera parameters and allocate the acquisition buffer.
+    int configureAcquisition();
+
+    /// Return the current acquisition frame rate, in Hz.
     float fps();
-    int   startAcquisition();
-    int   acquireAndCheckValid();
-    int   loadImageIntoStream( void *dest );
-    int   reconfig();
+
+    /// Start camera acquisition.
+    int startAcquisition();
+
+    /// Wait for a readout and extract its camera timestamp.
+    int acquireAndCheckValid();
+
+    /// Copy the available image into the framegrabber's output stream.
+    int loadImageIntoStream( void *dest /**< [out] Destination image buffer. */ );
+
+    /// Stop acquisition and drain pending readouts before reconfiguration.
+    int reconfig();
 
     // INDI:
   protected:
-    pcf::IndiProperty m_indiP_readouttime;
+    pcf::IndiProperty m_indiP_readouttime;       ///< Published SDK-calculated readout time.
     pcf::IndiProperty m_indiP_fxngensync_freq;   ///< Property for setting fxngensync frequency
-    pcf::IndiProperty m_indiP_fxngensync_output; ///< Proprety for turning on fxngensync
+    pcf::IndiProperty m_indiP_fxngensync_output; ///< Property for turning on fxngensync
 
     pcf::IndiProperty m_indiP_receiveSynchro; ///< Synchro that can only be triggered from the otherCam
     pcf::IndiProperty m_indiP_receiveExptime; ///< Exptime that can only be triggered from the otherCam
@@ -361,19 +442,24 @@ class picamCtrl : public MagAOXApp<>,
     pcf::IndiProperty m_indiP_otherCamSynchro; ///< Property for setting otherCam synchro
 
   public:
+    /// Receive an ADC-quality change request.
     INDI_NEWCALLBACK_DECL( picamCtrl, m_indiP_adcquality );
 
+    /// Receive the coupled camera's synchronization request.
     INDI_NEWCALLBACK_DECL( picamCtrl, m_indiP_receiveSynchro );
 
+    /// Receive the coupled camera's exposure-time request.
     INDI_NEWCALLBACK_DECL( picamCtrl, m_indiP_receiveExptime );
 
     /** \name Telemeter Interface
      *
      * @{
      */
+    /// Check the camera telemetry recording deadline.
     int checkRecordTimes();
 
-    int recordTelem( const telem_stdcam * );
+    /// Record standard camera telemetry.
+    int recordTelem( const telem_stdcam *telem /**< [in] Telemetry type selector. */ );
 
     ///@}
 };
@@ -406,6 +492,9 @@ inline picamCtrl::picamCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODI
     m_full_h = 1024;
 
     m_maxEMGain = 1000;
+
+    m_startupTemp = -55;
+    setTempLimits( m_minTempCamera, m_maxTempCamera );
 
     return;
 }
@@ -492,7 +581,7 @@ inline void picamCtrl::setupConfig()
                 "string",
                 "The other camera (used for coupling exposure time while synchro'd)" );
 
-    dev::stdCamera<picamCtrl>::setupConfig( config );
+    STDCAMERA_SETUP_CONFIG( config );
     dev::frameGrabber<picamCtrl>::setupConfig( config );
     dev::dssShutter<picamCtrl>::setupConfig( config );
     dev::telemeter<picamCtrl>::setupConfig( config );
@@ -500,16 +589,28 @@ inline void picamCtrl::setupConfig()
 
 inline void picamCtrl::loadConfig()
 {
+    if( loadConfigImpl() < 0 )
+    {
+        log<software_critical>( { __FILE__, __LINE__, "Error loading configuration" } );
+        m_shutdown = true;
+    }
+}
 
+inline int picamCtrl::loadConfigImpl()
+{
     config( m_serialNumber, "camera.serialNumber" );
     config( m_fxngenName, "synchro.deviceName" );
     config( m_fxngenCh, "synchro.channel" );
     config( m_otherCamName, "synchro.otherCamName" );
 
-    dev::stdCamera<picamCtrl>::loadConfig( config );
+    STDCAMERA_LOAD_CONFIG( config );
+    // PICam always applies a temperature target, so its startup override cannot be disabled.
+    if( stdCameraT::validateTempSetPt( m_startupTemp ) < 0 )
+        return -1;
     dev::frameGrabber<picamCtrl>::loadConfig( config );
     dev::dssShutter<picamCtrl>::loadConfig( config );
     dev::telemeter<picamCtrl>::loadConfig( config );
+    return 0;
 }
 
 inline int picamCtrl::appStartup()
@@ -523,8 +624,6 @@ inline int picamCtrl::appStartup()
         m_indiP_readouttime, "value", 0.0, std::numeric_limits<float>::max(), 0.0, "%0.1f", "readout time" );
     registerIndiPropertyReadOnly( m_indiP_readouttime );
 
-    m_minTemp  = -55;
-    m_maxTemp  = 25;
     m_stepTemp = 0;
 
     m_minROIx  = 0;
@@ -1153,6 +1252,17 @@ inline int picamCtrl::connect()
                     }
                 }
 
+                if( getTempRange() < 0 || validateTempSetPt( m_ccdTempSetpt ) < 0 )
+                {
+                    Picam_DestroyCameraIDs( id_array );
+                    if( powerState() != 1 || powerStateTarget() != 1 )
+                        return 0;
+                    log<text_log>( "Temperature configuration is incompatible with the connected camera",
+                                   logPrio::LOG_ERROR );
+                    state( stateCodes::ERROR );
+                    return -1;
+                }
+
                 state( stateCodes::CONNECTED );
                 log<text_log>( "Connected to " + m_cameraName + " [S/N " + m_serialNumber + "]" );
 
@@ -1292,6 +1402,50 @@ inline int picamCtrl::getTemps()
     return 0;
 }
 
+inline int picamCtrl::getTempRange()
+{
+    const PicamRangeConstraint *constraint = nullptr;
+    PicamError                  error      = Picam_GetParameterRangeConstraint(
+        m_cameraHandle, PicamParameter_SensorTemperatureSetPoint, PicamConstraintCategory_Required, &constraint );
+    if( error != PicamError_None )
+    {
+        if( powerState() != 1 || powerStateTarget() != 1 )
+            return -1;
+        return log<software_error, -1>( { __FILE__, __LINE__, 0, error, "Error getting temperature setpoint range" } );
+    }
+
+    int rv = -1;
+    if( constraint && !constraint->empty_set )
+        rv = setTempLimits( constraint->minimum, constraint->maximum );
+    else
+        log<text_log>( "Camera reports no valid temperature setpoints", logPrio::LOG_ERROR );
+    Picam_DestroyRangeConstraints( constraint );
+    return rv;
+}
+
+inline int picamCtrl::validateTempSetPt( float target )
+{
+    if( stdCameraT::validateTempSetPt( target ) < 0 )
+        return -1;
+
+    if( m_cameraHandle )
+    {
+        pibln      settable = false;
+        PicamError error    = Picam_CanSetParameterFloatingPointValue(
+            m_cameraHandle, PicamParameter_SensorTemperatureSetPoint, target, &settable );
+        if( error != PicamError_None )
+        {
+            if( powerState() != 1 || powerStateTarget() != 1 )
+                return -1;
+            return log<software_error, -1>( { __FILE__, __LINE__, 0, error, "Error validating temperature setpoint" } );
+        }
+        if( !settable )
+            return log<text_log, -1>( "Temperature setpoint " + std::to_string( target ) + " rejected by PICam",
+                                      logPrio::LOG_ERROR );
+    }
+    return 0;
+}
+
 inline int picamCtrl::getFanSpeed()
 {
     if( !m_fanStatusSupported )
@@ -1348,8 +1502,6 @@ inline int picamCtrl::setFPS()
 
 inline int picamCtrl::powerOnDefaults()
 {
-    m_ccdTempSetpt = -55; // This is the power on setpoint
-
     /*m_currentROI.x = 511.5;
     m_currentROI.y = 511.5;
     m_currentROI.w = 1024;
@@ -1392,7 +1544,8 @@ inline int picamCtrl::setTempControl()
 
 inline int picamCtrl::setTempSetPt()
 {
-    ///\todo bounds check here.
+    if( validateTempSetPt( m_ccdTempSetpt ) < 0 )
+        return -1;
     recordCamera( true );
     m_reconfig = true;
     return 0;
@@ -1599,9 +1752,12 @@ inline int picamCtrl::configureAcquisition()
     // piint frameSize;
     piint pixelBitDepth;
 
-    m_camera_timestamp = 0; // reset tracked timestamp
-
     std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    if( validateTempSetPt( m_ccdTempSetpt ) < 0 )
+        return -1;
+
+    m_camera_timestamp = 0; // reset tracked timestamp
 
     // Time stamp handling
     if( Picam_SetParameterIntegerValue( m_modelHandle, PicamParameter_TimeStamps, m_timeStampMask ) < 0 )

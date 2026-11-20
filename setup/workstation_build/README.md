@@ -81,21 +81,21 @@ ___
 ___
 ## Running MagAOX system, assuming either installation procedure above is complete
 
-### Cache process list file for use by non-privileged user **xsup**; create Hexbeater FIFOs and INDI driver/server system directories (/opt/MagAOX/sys/.../); su to non-privileged user **xsup** to run MagAOX system
+### Register the proclist's apps as systemd services and create the INDI driver/server system directories (/opt/MagAOX/sys/.../); su to non-privileged user **xsup** to run MagAOX system
 
 * As sudo-capable user on both/either magaox01 and magaox02:
 ```
-resuctrl reset   ### Creation, provisioning are complete after this step
+sudo xctrl register   ### Creation, provisioning are complete after this step
 sudo su - xsup
 ```
 
-### Start INDI server and all INDI drivers under resurrector control
+### Start INDI server and all INDI drivers under sentinel (systemd) control
 ### Update maths_1 and maths_2 INDI drivers, view results
 
 * As user xsup:
 ```
-resuctrl startup
-resuctrl status --all
+xctrl startup
+xctrl status
 
 setINDI maths_1.val.value=1.1   ### on magaox01
 setINDI maths_2.val.value=1.2   ### on magaox02
@@ -106,19 +106,19 @@ getINDI -t 1
 ### Stop an INDI driver
 
 ```
-resuctrl stop maths_1           ### on magaox01
-resuctrl status                 ### --all is implied
+xctrl stop maths_1              ### on magaox01
+xctrl status                    ### all apps
 ```
 
 ### Start an INDI driver
 
 ```
-resuctrl start maths_1          ### on magaox01
-resuctrl status                 ### --all is implied
+xctrl start maths_1             ### on magaox01
+xctrl status                    ### all apps
 ```
 
 ### Stop everything
 
 ```
-resuctrl stop --all
+xctrl shutdown --all
 ```

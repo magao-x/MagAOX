@@ -35,12 +35,12 @@
 #include "../logger/logManager.hpp"
 
 #include "../sys/thSetuid.hpp"
+#include "../sys/sdNotify.hpp"
 
 #include "stateCodes.hpp"
 #include "indiDriver.hpp"
 #include "indiMacros.hpp"
 #include "indiUtils.hpp"
-#include "resurrectee.hpp"
 
 using namespace mx::app;
 
@@ -84,9 +84,10 @@ namespace XWCTEST_NAMESPACE
  * Through various optional CRTP base classes, many different standard functionalities can be included.
  * The following figure illustrates the facilities provided by a typical app.
  *
- * \image html xwcapp.png "Block diagram of a typical XWCApp. Note that ImageStreamIO (ISIO) is not included by default,
- * but there are several ways to interface with 'image streams' provided in XWCTk.  Many different hardware device
- * interfaces are similarly provided."
+ * \image html xwcapp.png "Block diagram of a typical XWCApp."
+ *
+ * Note that ImageStreamIO (ISIO) is not included by default, but there are several ways to interface with 'image
+ * streams' provided in XWCTk.  Many different hardware device interfaces are similarly provided.
  *
  * The following figure illustrates the logic of the XWCApp finite state machine (FSM).
  *
@@ -96,8 +97,7 @@ namespace XWCTEST_NAMESPACE
  * Many XWCApps can be connected across many computers.  Inter-process communication can be conducted with
  * INDI or ISIO.
  *
- * \image html xwcapps_connections.png "Connecting XWCApps across several machines, controlling various hardware"
- * width=1200
+ * \image html xwcapps_connections.png "XWCApp network connections." width=1200
  *
  * XWCApps are designed to be part of control loops. In the following diagram a camera at the focal plane of a
  * coronagraph is used as the wavefront sensor.  An XWCApp reads out the images and publishes them to shared memory with
@@ -105,6 +105,13 @@ namespace XWCTEST_NAMESPACE
  * the deformable mirror controller sends the resultant command to the hardware device.
  *
  * \image html xwcapp_loops.png "XWCApps controlling hardware in a control loop." width=1200
+ */
+
+ /** \page page_app_docs Adding an Application
+ *
+ * \subpage page_module_appadd
+ *
+ *
  */
 
 /// The base-class for XWCTk applications.
@@ -279,7 +286,6 @@ class MagAOXApp : public application
      * - signal handling installation by setSigTermHandler()
      * - appStartup() is called
      * - INDI communications started by startINDI()
-     * - Resurrectee started by startResurrectee()
      * - power state is checked, pausing if unknown (if being managed)
      *
      * Errors in the above steps will cause a process exit.
@@ -408,7 +414,7 @@ class MagAOXApp : public application
     );
 
     std::string m_indiserver_ctrl_fifo{
-        "" }; ///< INDI server control FIFO for starting and stopping comms with INDI drivers
+        "" }; ///< INDI server control FIFO this app announces itself on, default indiserver.ctrl with the driver FIFOs
 
     ///@} -- Signal Handling
 
@@ -507,7 +513,7 @@ class MagAOXApp : public application
 
     /** call mkdir("/opt/MagAOX/sys/<m_configName>/") with appropriate permissions and ownership
      *
-     * Called by lockPID() below; also called when --mkfifo-hexbeat is command-line argument
+     * Called by lockPID() below
      *
      * \returns 0 on success.
      * \returns -1 on any error
@@ -671,9 +677,6 @@ class MagAOXApp : public application
     /// Mutex for locking INDI communications.
     std::mutex m_indiMutex;
 
-    /// The resurrectee wrapper. //TBD: Constructed and initialized by execute
-    resurrectee<MagAOXApp> *m_resurrectee{ nullptr };
-
     /// A wrapper for the INDI server ctrl FIFO name; used by m_indiDriver
     const std::string &indiserver_ctrl_fifo() const
     {
@@ -739,8 +742,25 @@ class MagAOXApp : public application
     /// Full path name of the INDI driver output FIFO.
     std::string m_driverOutName;
 
-    /// Full path name of the resurrector/resurrectee FIFO.
-    std::string m_resurrecteeFifoName;
+    /// Seconds between "alive" announcements on the INDI server control FIFO, 0 disables them.
+    double m_indiAnnounceInterval{ 5 };
+
+    /// When this instance last announced itself on the INDI server control FIFO.
+    std::chrono::steady_clock::time_point m_indiAnnounceTime;
+
+    /// True if the last announcement on the INDI server control FIFO was written.
+    bool m_indiAnnounced{ false };
+
+    /// True from a written "start" announcement until indiserver greets this instance with a getProperties.
+    /** NewProperty requests are ignored meanwhile, they were sent to a previous instance.
+     */
+    std::atomic<bool> m_indiGated{ false };
+
+    /// When m_indiGated stops applying, in case indiserver never greets this instance.
+    std::chrono::steady_clock::time_point m_indiGateEnd;
+
+    /// INDI messages dropped as of the last check because indiserver was not reading the output FIFO.
+    uint64_t m_indiOutputDrops{ 0 };
 
   public:
     /// Create a standard R/W INDI Text property with target and current elements.
@@ -982,19 +1002,21 @@ class MagAOXApp : public application
      */
     int startINDI();
 
-    /// Create the resurrectee FIFOs
-    /**
-     * \returns 0 on success
-     * \returns -1 on error.  This is fatal.
+    /// Announce this instance to the INDI server on its control FIFO
+    /** Writes "verb configName pid" without blocking.  "start" is sent once by startINDI, after the input FIFO
+     * is emptied, so indiserver registers this driver or resets its session with a previous instance.  "alive" is
+     * sent every m_indiAnnounceInterval seconds so a restarted indiserver registers this driver again.
+     *
+     * \returns 0 if written
+     * \returns -1 if not, e.g. when no indiserver is reading the control FIFO
      */
-    int createResurrecteeFIFO();
+    int announceINDI( const std::string &verb /**< [in] "start" or "alive" */ );
 
-    /// Start the resurrectee communications
-    /**
-     * \returns 0 on success
-     * \returns -1 on error.  This is fatal.
+    /// Periodic INDI server upkeep, called from the main loop
+    /** Announces "alive" every m_indiAnnounceInterval seconds and logs any INDI messages dropped since the last
+     * call because indiserver was not reading the output FIFO.
      */
-    int startResurrectee();
+    void indiServerUpkeep();
 
   public:
     void sendGetPropertySetList( bool all = false );
@@ -1029,6 +1051,14 @@ class MagAOXApp : public application
      * \todo handle errors, are they FATAL?
      */
     void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] The property being changed. */ );
+
+    /// Handler for the del INDI property notification
+    /** Marks the registered SetProperty subscriptions for the deleted device, or only the named property if one is
+     * given, as not received, so the main loop re-requests them through sendGetPropertySetList.
+     *
+     * This is called by m_indiDriver's indiDriver::handleDelProperty.
+     */
+    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] The property being deleted. */ );
 
   protected:
     /// Update an INDI property element value if it has changed.
@@ -1185,6 +1215,50 @@ class MagAOXApp : public application
     int newCallBack_clearFSMAlert( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
                                                                              the new property request.*/ );
 
+    /// Indi property to request rotation of the process log file. The new file is created with the next log entry.
+    pcf::IndiProperty m_indiP_rotateLogs;
+
+    /// The static callback function to be registered for requesting log file rotation
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_rotateLogs( void *app,                      /**< [in] a pointer to this, will be
+                                                                                    static_cast-ed to MagAOXApp. */
+                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                    the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the log rotation request.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_rotateLogs( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                          the new property request.*/ );
+
+    /// indi Property to report and update the process log file time interval, in minutes.
+    pcf::IndiProperty m_indiP_maxLogTime;
+
+    /// The static callback function to be registered for setting the log file time interval
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    static int st_newCallBack_maxLogTime( void *app,                      /**< [in] a pointer to this, will be
+                                                                                    static_cast-ed to MagAOXApp. */
+                                          const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                                    the new property request. */
+    );
+
+    /// The callback called by the static version, to actually process the log interval change.
+    /**
+     * \returns 0 on success.
+     * \returns -1 on error.
+     */
+    int newCallBack_maxLogTime( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with
+                                                                          the new property request.*/ );
+
     ///@} --INDI Interface
 
     /** \name Power Management
@@ -1340,12 +1414,6 @@ class MagAOXApp : public application
      */
     std::string driverOutName();
 
-    /// Get the resurrectee FIFO file name
-    /**
-     * \returns the current value of m_resurrecteeFifoName
-     */
-    std::string resurrecteeFifoName();
-
     ///@} --Member Accessors
 };
 
@@ -1492,31 +1560,6 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
     config.parseCommandLine( argc, argv, "name" );
     config( m_configName, "name" );
 
-    // Special case check for --mkfifo-hexbeat
-    config.add("mkfifo-hexbeat", "", "mkfifo-hexbeat", argType::None
-              , "", "", false, "bool"
-              , "Create Hexbeat FIFO via mkfifo(2) and exit"
-              );
-
-    for (auto pparg = argv+1; pparg < (argv+argc); ++pparg)
-    {
-        if(::strcmp(*pparg, "--mkfifo-hexbeat")) { continue; }
-        std::cerr
-        << "Creating Hexbeat FIFO ["
-        << m_configName
-        << ".hb], status directory, and exiting ..."
-        << std::endl;
-        if ( createResurrecteeFIFO() ) { exit( -1 ); };
-        std::cerr
-        << "Hexbeat FIFO either already existed or was created successfully"
-        << std::endl;
-        if( mkStatusDir() ) { exit( -1 ); };
-        std::cerr
-        << "Status directory either already existed or was created successfully"
-        << std::endl;
-        exit( 0 );
-    }
-
     if( m_configName == "" )
     {
         m_configName = mx::ioutils::pathStem( invokedName );
@@ -1543,7 +1586,20 @@ void MagAOXApp<_useINDI>::setDefaults( int argc,
     createStandardIndiRequestSw( m_indiP_clearFSMAlert, "fsm_clear_alert", "Clear FSM Alert", "FSM" );
     if( registerIndiPropertyNew( m_indiP_clearFSMAlert, st_newCallBack_clearFSMAlert ) < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__, "failed to register new fsm_alert property" } );
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new fsm_alert property" } );
+    }
+
+    createStandardIndiRequestSw( m_indiP_rotateLogs, "logs_rotate", "New Log File", "Logging" );
+    if( registerIndiPropertyNew( m_indiP_rotateLogs, st_newCallBack_rotateLogs ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new logs_rotate property" } );
+    }
+
+    createStandardIndiNumber<unsigned>(
+        m_indiP_maxLogTime, "logs_maxtime", 0, MAGAOX_max_maxLogTime, 1, "", "Max Log Interval [minutes]", "Logging" );
+    if( registerIndiPropertyNew( m_indiP_maxLogTime, st_newCallBack_maxLogTime ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "Failed to register new logs_maxtime property" } );
     }
 
     return;
@@ -1588,13 +1644,23 @@ void MagAOXApp<_useINDI>::setupBasicConfig() // virtual
                 "indiserver_ctrl_fifo",
                 false,
                 "string",
-                "INDI drivers can send [start /opt/MagAOX/drivers/fifos/indi-driver-name] messages to this INDI server"
-                " ctrl FIFO ( typically [/opt/MagAOX/drivers/fifos/indiserver.ctrl] ) on startup; the value should"
-                " match that of [indiserver.f] in /.../is*.conf" );
+                "INDI server control FIFO this driver announces itself on with [start name pid] at startup and"
+                " [alive name pid] periodically.  Default is indiserver.ctrl in the driver FIFO directory, which is"
+                " also the indiserver default; if set it should match [indiserver.f] in is*.conf" );
+
+    config.add( "indiserver_announce_interval",
+                "",
+                "indiserver-announce-interval",
+                argType::Required,
+                "",
+                "indiserver_announce_interval",
+                false,
+                "double",
+                "Seconds between [alive name pid] announcements on the INDI server control FIFO, so a restarted"
+                " indiserver registers this driver again.  0 disables them.  Default is 5." );
+
     // Logger Stuff
     m_log.setupConfig( config );
-    // Resurrectee configuration setup - static
-    resurrectee<MagAOXApp>::_setupConfig( config );
 
     if( m_powerMgtEnabled )
     {
@@ -1666,13 +1732,8 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
     bool ig{ false };
     config( ig, "ignore_git" );
 
-    {
-    //--------- Check for, and ignore, mkfifo-hexbeat --------//
-    bool mh{ false };
-    config( mh, "mkfifo-hexbeat" );
-    }
-
     config( m_indiserver_ctrl_fifo, "indiserver_ctrl_fifo" );
+    config( m_indiAnnounceInterval, "indiserver_announce_interval" );
 
     if( !ig && m_gitAlert )
     {
@@ -1687,10 +1748,21 @@ void MagAOXApp<_useINDI>::loadBasicConfig() // virtual
 
     //---------- Setup the logger ----------//
     m_log.logName( m_configName );
-    m_log.loadConfig( config );
+    // An invalid setting is not applied and the default is used instead
+    std::string logConfigErr;
+    if( m_log.loadConfig( config, &logConfigErr ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, logConfigErr } );
+    }
 
-    //-- Configure the resurrectee - static --//
-    resurrectee<MagAOXApp>::_loadConfig( config );
+    // Set the INDI property to the configured interval.
+    // The elements are created by setDefaults, which is not called in all contexts (e.g. unit tests),
+    // so check before assigning.
+    if( m_indiP_maxLogTime.find( "current" ) && m_indiP_maxLogTime.find( "target" ) )
+    {
+        m_indiP_maxLogTime["current"] = m_log.maxLogTime();
+        m_indiP_maxLogTime["target"]  = m_log.maxLogTime();
+    }
 
     //--------- Loop Pause Time --------//
     config( m_loopPause, "loopPause" );
@@ -1757,7 +1829,8 @@ void MagAOXApp<_useINDI>::checkConfig() // virtual
     {
         for( auto it = config.m_unusedConfigs.begin(); it != config.m_unusedConfigs.end(); ++it )
         {
-            if( it->second.used == true )
+            // [systemd] is for xctrl, which checks it; the app ignores the whole section
+            if( it->second.used == true || it->second.section == "systemd" )
             {
                 continue;
             }
@@ -1909,17 +1982,6 @@ int MagAOXApp<_useINDI>::execute() // virtual
         }
     }
 
-    //====Begin Resurrectee
-    if( m_shutdown == 0 ) // if we're not already dead, that is
-    {
-        if( startResurrectee() < 0 )
-        {
-            state( stateCodes::FAILURE );
-            return -1;
-        }
-    }
-
-
     /* ***************************** */
     /*         appStartup()          */
     /* ***************************** */
@@ -1970,14 +2032,26 @@ int MagAOXApp<_useINDI>::execute() // virtual
         }
     }
 
+    // Tell systemd, if it started us, that startup is complete; the watchdog applies from here on
+    if( m_shutdown == 0 )
+    {
+        sys::sdNotify( "READY=1" );
+    }
+
     // We have to wait for power status to become available
     if( m_powerMgtEnabled && m_shutdown == 0 )
     {
         int nwaits = 0;
         while( m_powerState < 0 && !m_shutdown )
         {
-            // send a heartbeat
-            m_resurrectee->execute();
+            // notify the systemd watchdog
+            sys::sdNotify( "WATCHDOG=1" );
+
+            // the power state comes through indiserver, which must know us
+            if( m_useINDI )
+            {
+                indiServerUpkeep();
+            }
 
             sleep( 1 );
             if( m_powerState < 0 )
@@ -2102,8 +2176,8 @@ int MagAOXApp<_useINDI>::execute() // virtual
             #endif // clang-format on
         }
 
-        // send a heartbeat
-        m_resurrectee->execute();
+        // notify the systemd watchdog
+        sys::sdNotify( "WATCHDOG=1" );
 
         if( m_useINDI )
         {
@@ -2112,6 +2186,9 @@ int MagAOXApp<_useINDI>::execute() // virtual
             // And handles cases where we miss a Def becuase the other driver wasn't started up
             // when we sent our Get.
             sendGetPropertySetList( false ); // Only does anything if it needs to be done.
+
+            // Keep indiserver aware of us, and note any messages it was too slow to take.
+            indiServerUpkeep();
         }
 
         // This is purely to make sure INDI is up to date in case
@@ -2129,6 +2206,9 @@ int MagAOXApp<_useINDI>::execute() // virtual
              ++testTimesThrough; // LCOV_EXCL_LINE
         #endif // clang-format on
     }
+
+    // Tell systemd, if it started us, that we are shutting down on purpose
+    sys::sdNotify( "STOPPING=1" );
 
     if( appShutdown() < 0 )
     {
@@ -3356,6 +3436,11 @@ int MagAOXApp<_useINDI>::createINDIFIFOS()
     m_driverInName = driverFIFOPath + "/" + configName() + ".in";
     m_driverOutName = driverFIFOPath + "/" + configName() + ".out";
 
+    if( m_indiserver_ctrl_fifo == "" )
+    {
+        m_indiserver_ctrl_fifo = driverFIFOPath + "/indiserver.ctrl";
+    }
+
     // Get max permissions
     elevatedPrivileges elPriv( this );
 
@@ -3440,6 +3525,13 @@ int MagAOXApp<_useINDI>::startINDI()
         return -1;
     }
 
+    //======= Tell indiserver this is a new instance, it greets us with a getProperties
+    if( announceINDI( "start" ) == 0 )
+    {
+        m_indiGateEnd = std::chrono::steady_clock::now() + std::chrono::seconds( 10 );
+        m_indiGated = true;
+    }
+
     //======= Now we start talkin'
     m_indiDriver->activate();
     log<indidriver_start>();
@@ -3450,96 +3542,63 @@ int MagAOXApp<_useINDI>::startINDI()
 }
 
 template <bool _useINDI>
-int MagAOXApp<_useINDI>::createResurrecteeFIFO()
+int MagAOXApp<_useINDI>::announceINDI( const std::string &verb )
 {
-    ///Need non-empty drivername
-    if ( m_configName.empty() ) { return -1; }
+    std::string msg = verb + " " + m_configName + " " + std::to_string( getpid() ) + "\n";
 
-    ///\todo make driver FIFO path full configurable.
-    std::string driverFIFOPath = MAGAOX_path;
-    driverFIFOPath += "/";
-    driverFIFOPath += MAGAOX_driverFIFORelPath;
+    m_indiAnnounceTime = std::chrono::steady_clock::now();
 
-    m_resurrecteeFifoName = driverFIFOPath + "/" + configName() + ".hb";
-
-    // Get max permissions
-    elevatedPrivileges elPriv( this );
-
-    mode_t prev = umask( 0 );
-
-    errno = 0;
-    if( mkfifo( m_resurrecteeFifoName.c_str(), S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP ) != 0 )
+    errno  = 0;
+    int fd = open( m_indiserver_ctrl_fifo.c_str(), O_WRONLY | O_NONBLOCK );
+    bool ok = fd >= 0 && write( fd, msg.c_str(), msg.size() ) == (ssize_t)msg.size();
+    int  en = errno;
+    if( fd >= 0 )
     {
-        if( errno != EEXIST )
-        {
-            umask( prev );
-            // euidReal();
-            log<software_critical>( { __FILE__, __LINE__, errno, 0, "mkfifo failed" } );
-            log<text_log>( "Failed to create resurrector/resurrectee FIFO.", logPrio::LOG_CRITICAL );
-            return -1;
-        }
+        close( fd );
     }
 
-    umask( prev );
-    // euidReal();
-    return 0;
+    // Log only changes, a missing indiserver would otherwise be logged every time.
+    if( ok != m_indiAnnounced || verb == "start" )
+    {
+        if( ok )
+        {
+            log<text_log>( "announced " + verb + " on INDI server control FIFO " + m_indiserver_ctrl_fifo );
+        }
+        else
+        {
+            log<text_log>( "could not announce " + verb + " on INDI server control FIFO " + m_indiserver_ctrl_fifo +
+                               ": " + strerror( en ),
+                           logPrio::LOG_NOTICE );
+        }
+    }
+    m_indiAnnounced = ok;
+
+    return ok ? 0 : -1;
 }
 
 template <bool _useINDI>
-int MagAOXApp<_useINDI>::startResurrectee()
+void MagAOXApp<_useINDI>::indiServerUpkeep()
 {
-
-    //===== Create the FIFOs for INDI communications ====
-    if( createResurrecteeFIFO() < 0 )
+    if( !m_useINDI || m_indiDriver == nullptr )
     {
-        return -1;
+        return;
     }
 
-    //======= Instantiate the resurrectee
-    try
+    if( m_indiAnnounceInterval > 0 &&
+        std::chrono::steady_clock::now() - m_indiAnnounceTime >=
+            std::chrono::duration<double>( m_indiAnnounceInterval ) )
     {
-        if( m_resurrectee != nullptr )
+        announceINDI( "alive" );
+
+        uint64_t drops = m_indiDriver->outputDrops();
+        if( drops != m_indiOutputDrops )
         {
-            delete m_resurrectee;
-            m_resurrectee = nullptr;
+            log<text_log>( "dropped " + std::to_string( drops - m_indiOutputDrops ) +
+                               " INDI messages because indiserver was not reading " + m_driverOutName,
+                           logPrio::LOG_WARNING );
+            m_indiOutputDrops = drops;
         }
-
-        m_resurrectee = new resurrectee<MagAOXApp>( this, _handlerSigTerm );
     }
-    catch( ... )
-    {
-        log<software_critical>( { __FILE__, __LINE__, 0, 0, "Resurrectee construction exception." } );
-        return -1;
-    }
-
-    // Check for resurrectee failure
-    if( m_resurrectee == nullptr )
-    {
-        log<software_critical>( { __FILE__, __LINE__, 0, 0, "Resurrectee construction failed." } );
-        return -1;
-    }
-
-    // Check for resurrectee to open the FIFOs
-    if( m_resurrectee->good() == false )
-    {
-        log<software_critical>( { __FILE__, __LINE__, 0, 0, "Resurrectee failed to open FIFOs." } );
-        delete m_resurrectee;
-        m_resurrectee = nullptr;
-        return -1;
-    }
-
-    // Send a hexbeat using 2nd* time offset if that offset was configured
-    // *** Hexbeat sent only if 2nd vector element is present and positive
-    // * m_resurrectee->m_time_offset[1]
-    m_resurrectee->execute_1();
-
-    return 0;
-}
-
-template <bool _useINDI>
-std::string MagAOXApp<_useINDI>::resurrecteeFifoName()
-{
-    return m_resurrecteeFifoName;
 }
 
 template <bool _useINDI>
@@ -3655,6 +3714,9 @@ void MagAOXApp<_useINDI>::handleGetProperties( const pcf::IndiProperty &ipRecv )
     // Send all properties if requested.
     if( !ipRecv.hasValidName() )
     {
+        // indiserver has greeted this instance, what follows is meant for it
+        m_indiGated = false;
+
         std::vector<pcf::IndiProperty *> propsToSend;
 
         { //mutex scope
@@ -3728,6 +3790,14 @@ void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
     if( m_indiDriver == nullptr )
         return;
 
+    // Ignore requests sent to a previous instance, until indiserver greets this one
+    if( m_indiGated && std::chrono::steady_clock::now() < m_indiGateEnd )
+    {
+        log<text_log>( "ignoring NewProperty " + ipRecv.createUniqueKey() + " sent before indiserver greeted this instance",
+                       logPrio::LOG_NOTICE );
+        return;
+    }
+
     int ( *callBack )( void *, const pcf::IndiProperty & ) = nullptr;
     {
         std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
@@ -3750,6 +3820,34 @@ void MagAOXApp<_useINDI>::handleNewProperty( const pcf::IndiProperty &ipRecv )
     log<software_debug>( { __FILE__, __LINE__, "NewProperty callback null for " + ipRecv.createUniqueKey() } );
 
     return;
+}
+
+template <bool _useINDI>
+void MagAOXApp<_useINDI>::handleDelProperty( const pcf::IndiProperty &ipRecv )
+{
+    if( !m_useINDI || !ipRecv.hasValidDevice() )
+    {
+        return;
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiCallBackMutex );
+
+        for( auto &cb : m_indiSetCallBacks )
+        {
+            pcf::IndiProperty *prop = cb.second.property;
+
+            if( prop == nullptr || prop->getDevice() != ipRecv.getDevice() ||
+                ( ipRecv.hasValidName() && prop->getName() != ipRecv.getName() ) )
+            {
+                continue;
+            }
+
+            cb.second.m_defReceived = false;
+            resetIndiSetPropertyRetry( cb.second );
+            m_allDefsReceived = false;
+        }
+    } //mutex scope
 }
 
 template <bool _useINDI>
@@ -4066,6 +4164,89 @@ int MagAOXApp<_useINDI>::newCallBack_clearFSMAlert( const pcf::IndiProperty &ipR
         }
 
     }
+    return 0;
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::st_newCallBack_rotateLogs( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<MagAOXApp<_useINDI> *>( app )->newCallBack_rotateLogs( ipRecv );
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::newCallBack_rotateLogs( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.createUniqueKey() != m_indiP_rotateLogs.createUniqueKey() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "wrong indi property received" } );
+    }
+
+    if( ipRecv.find( "request" ) )
+    {
+        if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+        {
+            // This only sets a flag. The new file is created by the log thread on the next entry.
+            m_log.requestRotation();
+            updateSwitchIfChanged( m_indiP_rotateLogs, "request", pcf::IndiElement::Off, INDI_IDLE );
+        }
+    }
+
+    return 0;
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::st_newCallBack_maxLogTime( void *app, const pcf::IndiProperty &ipRecv )
+{
+    return static_cast<MagAOXApp<_useINDI> *>( app )->newCallBack_maxLogTime( ipRecv );
+}
+
+template <bool _useINDI>
+int MagAOXApp<_useINDI>::newCallBack_maxLogTime( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.createUniqueKey() != m_indiP_maxLogTime.createUniqueKey() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "wrong indi property received" } );
+    }
+
+    // Parse the raw string, as the typed element accessor cannot detect invalid input
+    std::string str;
+    if( ipRecv.find( "target" ) )
+    {
+        str = ipRecv["target"].get();
+    }
+    else if( ipRecv.find( "current" ) )
+    {
+        str = ipRecv["current"].get();
+    }
+    else
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "no target or current element in INDI property" } );
+    }
+
+    unsigned target = 0;
+    if( m_log.parseMaxLogTime( target, str ) != mx::error_t::noerror )
+    {
+        log<software_error>( { __FILE__,
+                               __LINE__,
+                               "rejected log file interval \"" + str + "\": must be a number from 0 to " +
+                                   std::to_string( MAGAOX_max_maxLogTime ) } );
+
+        // Send back the unchanged value. The alert state ensures it is sent, as updateIfChanged only sends
+        // when the value or state changes.
+        updateIfChanged( m_indiP_maxLogTime, "target", m_log.maxLogTime(), INDI_ALERT );
+
+        return -1;
+    }
+
+    m_log.maxLogTime( target ); // cannot fail, as the range was checked by parseMaxLogTime
+
+    log<software_info>( { __FILE__, __LINE__, "Set log file interval to " + std::to_string( target ) + " minutes" } );
+
+    updateIfChanged( m_indiP_maxLogTime,
+                     std::vector<std::string>{ "current", "target" },
+                     std::vector<unsigned>{ target, target },
+                     INDI_IDLE );
+
     return 0;
 }
 

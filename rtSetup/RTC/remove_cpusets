@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+## \file remove_cpusets
+## \brief Remove empty RTC real-time cpusets before rebuilding their names.
+#
+# Stop instrument workloads before running. The initial preflight changes nothing
+# if any owned cpuset is occupied. A concurrent restart can still interrupt an
+# applied cleanup after some removals; stop the new threads, then rerun.
+
+import argparse
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+# Include retired names so an installed replacement make_cpusets can remove them.
+LEGACY_NAMES = {
+    "camwfs_sw", "camwfs", "camwfs2", "spare35", "spare36", "dm00comb",
+    "woofer", "dm01comb", "tweeter", "t2w", "spare42", "spare43", "spare44",
+    "acqu_mvm", "mfilt", "tweeterSpeck", "mlat", "RTmon", "spare50", "spare51",
+    "spare52", "spare53", "camtip", "camtip_sw", "camacq", "camacq_sw",
+    "shmimTCP", "spare59", "spare60", "spare61", "spare62", "spare63",
+}
+
+
+def allowed_names(setup_script):
+    """Read literal cpuset directory names from the sibling setup script."""
+    names = set()
+    directory = re.compile(
+        r'^\s*mkdir\s+-p\s+(?:"\$cpusetMount/([\w.-]+)"|\$cpusetMount/([\w.-]+))\s*$'
+    )
+
+    for line in setup_script.read_text().splitlines():
+        if "mkdir" not in line or "$cpusetMount/" not in line:
+            continue
+
+        match = directory.fullmatch(line)
+
+        if match is None:
+            raise RuntimeError(f"Unrecognized cpuset declaration in {setup_script}: {line}")
+
+        names.add(match.group(1) or match.group(2))
+
+    if "system" not in names or len(names) < 2:
+        raise RuntimeError(f"No complete RTC cpuset declarations found in {setup_script}")
+
+    return (names | LEGACY_NAMES) - {"system"}
+
+
+def configured_mountpoint():
+    """Read the same installed mountpoint configuration as make_cpusets."""
+    result = subprocess.run(
+        ["/bin/bash", "-eu", "-c",
+         'source /etc/profile.d/cgroups1_cpuset_mountpoint.sh; '
+         'printf "%s" "$CGROUPS1_CPUSET_MOUNTPOINT"'],
+        check=True, stdout=subprocess.PIPE, text=True,
+    )
+
+    if not result.stdout or not Path(result.stdout).is_absolute():
+        raise RuntimeError("The configured cpuset mountpoint must be an absolute path")
+
+    return Path(result.stdout).resolve(strict=True)
+
+
+def mount_records():
+    """Read mountinfo, decoding its escaped mountpoint paths."""
+    records = []
+
+    for line in Path("/proc/self/mountinfo").read_text().splitlines():
+        fields, filesystem = line.split(" - ", 1)
+        fields = fields.split()
+        filesystem = filesystem.split()
+        mountpoint = re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), fields[4])
+        records.append((Path(mountpoint), fields[3], filesystem[0],
+                        set(fields[5].split(",")) | set(filesystem[2].split(","))))
+
+    return records
+
+
+def removal_plan(mountpoint, names, mounts):
+    """Validate the cpuset mount and collect owned directories deepest first."""
+    records = [record for record in mounts if record[0] == mountpoint]
+
+    if len(records) != 1 or records[0][1:3] != ("/", "cgroup") or "cpuset" not in records[0][3]:
+        raise RuntimeError(f"{mountpoint} is not a complete cgroup-v1 cpuset mount")
+
+    mounted_paths = {record[0] for record in mounts}
+    directories = []
+    device = mountpoint.stat().st_dev
+
+    def collect(directory):
+        """Check one owned cpuset and its descendants before scheduling removal."""
+        if directory.is_symlink() or directory.stat().st_dev != device or directory in mounted_paths:
+            raise RuntimeError(f"Refusing symlink or nested mount: {directory}")
+
+        for control in ("tasks", "cpuset.cpus", "cpuset.mems"):
+            if not (directory / control).is_file() or (directory / control).is_symlink():
+                raise RuntimeError(f"Missing or unsafe cpuset control: {directory / control}")
+
+        for child in sorted(directory.iterdir()):
+            if child.is_symlink():
+                raise RuntimeError(f"Refusing symlink: {child}")
+
+            if child.is_dir():
+                collect(child)
+
+        directories.append(directory)
+
+    for control in ("tasks", "cpuset.cpus", "cpuset.mems"):
+        if not (mountpoint / control).is_file():
+            raise RuntimeError(f"Missing cpuset root control: {mountpoint / control}")
+
+    for child in sorted(mountpoint.iterdir()):
+        if child.name == "system":
+            if child.is_symlink() or not child.is_dir():
+                raise RuntimeError(f"Unsafe system cpuset: {child}")
+
+            continue
+
+        if child.is_symlink():
+            raise RuntimeError(f"Refusing symlink: {child}")
+
+        if child.is_dir():
+            if child.name not in names:
+                raise RuntimeError(f"Unknown cpuset {child}; leave it intact and review its ownership")
+
+            collect(child)
+
+    return directories
+
+
+def require_empty(directories):
+    """Report occupied task lists without migrating or stopping any thread."""
+    occupied = []
+
+    for directory in directories:
+        tasks = (directory / "tasks").read_text().split()
+
+        if tasks:
+            descriptions = []
+
+            for task in tasks[:20]:
+                if not task.isdecimal():
+                    raise RuntimeError(f"Invalid task ID in {directory / 'tasks'}")
+
+                try:
+                    command = Path(f"/proc/{task}/comm").read_text().strip()
+                except OSError:
+                    command = "exited or unreadable"
+
+                descriptions.append(f"{task} ({command})")
+
+            suffix = f"; {len(tasks) - 20} more" if len(tasks) > 20 else ""
+            occupied.append(f"  {directory}: {', '.join(descriptions)}{suffix}")
+
+    if occupied:
+        raise RuntimeError("Occupied cpusets; stop the listed threads and rerun. No tasks moved.\n"
+                           + "\n".join(occupied))
+
+
+def main():
+    """Preview removals, or apply them only after a complete empty-tree preflight."""
+    parser = argparse.ArgumentParser(
+        description="Remove empty RTC cpusets after stopping instrument processes. "
+                    "Preserve the root and system cpuset. Default: dry run."
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true", help="remove the verified empty cpusets (requires root)")
+    mode.add_argument("--dry-run", action="store_true", help="only report planned removals (the default)")
+    arguments = parser.parse_args()
+
+    if arguments.apply and os.geteuid() != 0:
+        raise RuntimeError("--apply requires root")
+
+    names = allowed_names(Path(__file__).resolve().with_name("make_cpusets"))
+    mountpoint = configured_mountpoint()
+    directories = removal_plan(mountpoint, names, mount_records())
+    require_empty(directories)
+    print(f"Preserving {mountpoint} and {mountpoint / 'system'}")
+
+    for directory in directories:
+        if arguments.apply:
+            require_empty([directory])
+            directory.rmdir()
+            print(f"Removed {directory}")
+        else:
+            print(f"Would remove {directory}")
+
+    print(f"{'Removed' if arguments.apply else 'Would remove'} {len(directories)} cpuset directories."
+          + (" Run make_cpusets to rebuild them." if arguments.apply else " Rerun with --apply to remove them."))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        print(f"remove_cpusets: {error}", file=sys.stderr)
+        sys.exit(1)
