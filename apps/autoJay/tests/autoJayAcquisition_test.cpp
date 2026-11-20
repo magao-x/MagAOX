@@ -16,6 +16,8 @@ using namespace MagAOX::app::autoJayDetail;
 TEST_CASE( "autoJay sequences distinct baseline and DM stacks", "[autoJay][acquisition]" )
 {
     calibration cal;
+    cal.dm[0].trigger = "dm02disp";
+    cal.dm[1].trigger = "dm01disp";
     cal.frames       = 2;
     cal.settleFrames = 1;
     cal.dmSleep      = 0.1;
@@ -70,6 +72,8 @@ TEST_CASE( "autoJay sequences distinct baseline and DM stacks", "[autoJay][acqui
 TEST_CASE( "autoJay aborts timeouts resets and invalid source frames", "[autoJay][acquisition]" )
 {
     calibration cal;
+    cal.dm[0].trigger = "dm02disp";
+    cal.dm[1].trigger = "dm01disp";
     cal.frames       = 2;
     cal.settleFrames = 0;
     cal.dmSleep      = 0;
@@ -177,11 +181,51 @@ TEST_CASE( "autoJay aborts timeouts resets and invalid source frames", "[autoJay
     }
 }
 
+/// A relayed tweeter needs elapsed settling time, while NCPC still needs a verified update.
+/** \ingroup autoJay_unit_test */
+TEST_CASE( "autoJay times a relayed tweeter without combined feedback", "[autoJay][acquisition]" )
+{
+    calibration cal;
+    cal.dm[0].trigger = "dm02disp";
+    cal.frames        = 2;
+    cal.settleFrames  = 1;
+    cal.dmSleep       = 0.25;
+    acquisition seq;
+    REQUIRE( seq.start( cal, 0 ) );
+
+    seq.commanded( { 10, 0 }, 0 );
+    const auto image = imageT::Ones( 3, 4 ).eval();
+    seq.poll( { 10, 0 }, 0.25 );
+    seq.frame( image, 1, 0.25 );
+    seq.poll( { 11, 0 }, 0.375, false );
+    seq.frame( image, 2, 0.375 );
+    REQUIRE( seq.stacks()[0].count == 0 );
+
+    seq.poll( { 11, 0 }, 0.5 );
+    seq.frame( image, 3, 0.625 );
+    seq.frame( image, 4, 0.75 );
+    REQUIRE( seq.stacks()[0].count == 0 );
+
+    seq.frame( image, 5, 0.875 );
+    seq.frame( image, 6, 1.0 );
+    REQUIRE( seq.stacks()[0].count == 2 );
+    REQUIRE( seq.stacks()[0].firstCounter == 5 );
+    REQUIRE( seq.state() == acquisition::step::ncpc );
+
+    seq.commanded( { 11, 0 }, 1.0 );
+    seq.poll( { 12, 0 }, 1.0 );
+    seq.poll( { 11, 0 }, 1.125 );
+    REQUIRE( seq.error() == "combined DM counter reset" );
+}
+
 /// Verify invalid timing cannot start a transaction and fresh starts clear prior statistics.
 /** \ingroup autoJay_unit_test */
 TEST_CASE( "autoJay validates acquisition settings", "[autoJay][acquisition]" )
 {
-    calibration cal;
+    calibration valid;
+    valid.dm[0].trigger = "dm02disp";
+    valid.dm[1].trigger = "dm01disp";
+    calibration cal     = valid;
     acquisition seq;
     SECTION( "one frame cannot estimate variance" )
     {
@@ -203,9 +247,18 @@ TEST_CASE( "autoJay validates acquisition settings", "[autoJay][acquisition]" )
     {
         cal.phaseTimeout = std::numeric_limits<double>::quiet_NaN();
     }
+    SECTION( "NCPC requires a combined trigger" )
+    {
+        cal.dm[0].trigger.clear();
+    }
+    SECTION( "relayed tweeter requires a positive delay" )
+    {
+        cal.dm[1].trigger.clear();
+        cal.dmSleep = 0;
+    }
     REQUIRE_FALSE( seq.start( cal, 0 ) );
     REQUIRE( seq.state() == acquisition::step::failed );
-    REQUIRE( seq.start( calibration{}, 0 ) );
+    REQUIRE( seq.start( valid, 0 ) );
     REQUIRE( seq.state() == acquisition::step::baseline );
     REQUIRE( seq.error().empty() );
     REQUIRE( seq.stacks()[0].count == 0 );

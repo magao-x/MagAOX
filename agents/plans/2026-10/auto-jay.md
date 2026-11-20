@@ -658,3 +658,22 @@ Camera and shared-memory timing remain on-instrument measurements.
 
 On 2026-11-19 the optimized build and all four AutoJay suites passed on the
 merged branch (38 cases, 2,121 assertions).
+
+### Follow-up: tweeter relay from ICC to RTC
+
+Run AutoJay next to the camera and NCPC on ICC. Relay the tweeter's command
+stream from ICC to RTC. An explicitly empty `tweeter.trigger` uses the ICC
+write time and `acquisition.dmSleep` for tweeter settling on every transition,
+including removal. NCPC still verifies its combined stream and settles from
+that update. Frame discard and averaging begin after both conditions are met.
+A named tweeter trigger retains the verified behavior. Saved bundles record
+the trigger setting and timing, including an empty trigger for relay mode.
+
+Commission the relay and delay on the instrument with corrections disabled.
+The local write does not establish RTC receipt or prove that the mirror
+settled. Check that both applied and zero commands arrive with the AO loop
+open, and verify the camera has settled before averaging begins.
+
+On 2026-11-20 the optimized app build and all four offline AutoJay suites
+passed (39 cases, 2,194 assertions). Coverage includes relay capture and
+bundle recall, settling with no tweeter feedback, and required NCPC feedback.

@@ -59,7 +59,7 @@ struct dmCalibration
 {
     std::string name;           ///< Physical DM identity.
     std::string channel;        ///< Dedicated additive command channel.
-    std::string trigger;        ///< Combined DM stream used to observe updates.
+    std::string trigger;        ///< Combined DM stream used to verify writes; empty for a relayed tweeter.
     imageT      pattern;        ///< Full DM-sized command map before amplitude scaling.
     imageT      reference;      ///< Illuminated-baseline-subtracted aligned response.
     float       amplitude{ 0 }; ///< Command-map scaling in DM command units.
@@ -78,7 +78,7 @@ struct calibration
     std::vector<setupRule>       setup;             ///< Optical, camera, and loop conditions during capture.
     unsigned                     frames{ 5 };       ///< Distinct frames averaged in each phase.
     unsigned                     settleFrames{ 2 }; ///< Distinct frames discarded after a settled DM update.
-    double                       dmSleep{ 0.01 };   ///< Additional command settling interval in seconds.
+    double                       dmSleep{ 0.01 };   ///< Settling seconds after a combined update or relayed write.
     double                       phaseTimeout{ 5 }; ///< Maximum wait per acquisition phase in seconds.
 };
 

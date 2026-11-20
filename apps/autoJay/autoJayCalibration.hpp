@@ -372,15 +372,24 @@ inline bool validateCalibration( const calibration &value, std::string &error )
         return fail( error, "baseline does not match reference geometry" );
     if( value.frames < 2 || value.frames > 10000 || value.settleFrames > 10000 ||
         !mx::math::isFinite( value.dmSleep ) || value.dmSleep < 0 || value.dmSleep > 3600 ||
-        !mx::math::isFinite( value.phaseTimeout ) || value.phaseTimeout <= value.dmSleep || value.phaseTimeout > 3600 )
+        ( value.dm[1].trigger.empty() && value.dmSleep == 0 ) || !mx::math::isFinite( value.phaseTimeout ) ||
+        value.phaseTimeout <= value.dmSleep || value.phaseTimeout > 3600 )
+    {
         return fail( error, "invalid calibration acquisition parameters" );
+    }
+    if( !component( value.dm[0].trigger ) || ( !value.dm[1].trigger.empty() && !component( value.dm[1].trigger ) ) )
+    {
+        return fail( error, "invalid DM trigger identity" );
+    }
+
     for( const auto &dm : value.dm )
     {
-        if( !component( dm.name ) || !component( dm.channel ) || !component( dm.trigger ) ||
-            !mx::math::isFinite( dm.amplitude ) || dm.amplitude == 0 || !patternValid( dm.pattern ) ||
-            !imageValid( dm.reference, true ) || dm.reference.rows() != value.baseline.rows() ||
-            dm.reference.cols() != value.baseline.cols() )
+        if( !component( dm.name ) || !component( dm.channel ) || !mx::math::isFinite( dm.amplitude ) ||
+            dm.amplitude == 0 || !patternValid( dm.pattern ) || !imageValid( dm.reference, true ) ||
+            dm.reference.rows() != value.baseline.rows() || dm.reference.cols() != value.baseline.cols() )
+        {
             return fail( error, "invalid DM identity, pattern, amplitude, or reference" );
+        }
         for( Eigen::Index i = 0; i < dm.pattern.size(); ++i )
             if( !mx::math::isFinite( dm.pattern.data()[i] * dm.amplitude ) )
                 return fail( error, "scaled DM pattern overflows" );
@@ -421,7 +430,7 @@ inline bool calibrationIO::read( calibration &value, const std::string &director
         std::map<std::string, std::string> fields;
         if( ini_parse( ( path / "calibration.conf" ).c_str(), parseEntry, &fields ) != 0 )
             return fail( error, "malformed or duplicate calibration manifest fields" );
-        auto take = [&]( const std::string &key, auto &destination )
+        auto take = [&]( const std::string &key, auto &destination, bool allowEmpty = false )
         {
             auto found = fields.find( key );
             if( found == fields.end() )
@@ -431,7 +440,7 @@ inline bool calibrationIO::read( calibration &value, const std::string &director
             if constexpr( std::is_same_v<T, std::string> )
             {
                 destination = found->second;
-                ok          = textValue( destination );
+                ok          = ( allowEmpty && destination.empty() ) || textValue( destination );
             }
             else
                 ok = number( destination, found->second );
@@ -467,8 +476,10 @@ inline bool calibrationIO::read( calibration &value, const std::string &director
             auto  prefix = "dm" + std::to_string( i ) + ".";
             auto &dm     = candidate.dm[i];
             if( !take( prefix + "name", dm.name ) || !take( prefix + "channel", dm.channel ) ||
-                !take( prefix + "trigger", dm.trigger ) || !take( prefix + "amplitude", dm.amplitude ) )
+                !take( prefix + "trigger", dm.trigger, i == 1 ) || !take( prefix + "amplitude", dm.amplitude ) )
+            {
                 return false;
+            }
         }
         candidate.setup.resize( setupCount );
         for( size_t i = 0; i < candidate.setup.size(); ++i )

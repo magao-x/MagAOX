@@ -106,6 +106,11 @@ TEST_CASE( "autoJay calibration round trip preserves the complete pair", "[autoJ
 {
     calibrationDirectory directory;
     auto                 original = sampleCalibration();
+    if( GENERATE( false, true ) )
+    {
+        original.dm[1].trigger.clear();
+    }
+
     std::string          error;
     REQUIRE( validateCalibration( original, error ) );
     REQUIRE( saveCalibration( original, directory.m_path, error ) );

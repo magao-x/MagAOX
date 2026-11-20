@@ -153,7 +153,7 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     uint32_t          m_streamWidth{ 0 }, m_streamHeight{ 0 };  ///< Camera dimensions copied under the state lock.
     void ( *m_copyFrame )( float *, const void *, size_t ){ nullptr }; ///< Copies and converts one frame to float.
     std::array<std::unique_ptr<autoJayDmStream>, 2> m_channels; ///< Exclusively owned additive channels.
-    std::array<std::unique_ptr<autoJayDmStream>, 2> m_triggers; ///< Read-only combined streams.
+    std::array<std::unique_ptr<autoJayDmStream>, 2> m_triggers; ///< Combined streams; empty slot for a relayed tweeter.
     std::array<imageT, 2>      m_lastCommands;    ///< Last commanded channel values, used to detect another writer.
     std::array<imageT, 2>      m_combinedBefore;  ///< Coherent combined commands preceding a channel write.
     std::array<imageT, 2>      m_expectedChange;  ///< Change which must appear in the combined command before settling.
@@ -226,10 +226,10 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     /// Verify streams and channel contents before reading or writing them.
     virtual bool channelsValid( std::string &error /**< [out] Failure reason. */ ) const;
 
-    /// Read both combined-stream counters after checking identities.
+    /// Read monitored combined-stream counters after checking identities.
     virtual std::array<uint64_t, 2> triggerCounters() const;
 
-    /// Verify the commanded contribution, not only an unrelated combined-stream event.
+    /// Verify the commanded contribution on each monitored combined stream.
     virtual bool
     contributionApplied( std::array<uint64_t, 2> &counters /**< [out] Verified combined counters. */ ) const;
 
@@ -389,13 +389,12 @@ inline void autoJay::setupConfig()
         add( key, "string", "Camera/profile/control identity or diagnostic path." );
     for( const auto &dm : { "ncpc", "tweeter" } )
     {
-        for( const auto &name : { "channel", "trigger", "pattern" } )
+        for( const auto &name : { "channel", "pattern" } )
         {
-            add( std::string( dm ) + "." + name,
-                 "string",
-                 "Owned additive channel, combined trigger, or FITS pattern." );
+            add( std::string( dm ) + "." + name, "string", "Owned additive channel or FITS pattern." );
         }
 
+        add( std::string( dm ) + ".trigger", "string", "Combined command stream; empty for a relayed tweeter." );
         add( std::string( dm ) + ".amplitude", "float", "Signed nonzero command-map amplitude for reference capture." );
         add( std::string( dm ) + ".pokeX", "vector<int>", "Zero-based actuator x coordinates." );
         add( std::string( dm ) + ".pokeY", "vector<int>", "Zero-based actuator y coordinates paired with pokeX." );
@@ -844,6 +843,12 @@ inline bool autoJay::openChannels( calibration &cal, std::string &error )
     decltype( m_channels ) channels;
     decltype( m_triggers ) triggers;
 
+    if( cal.dm[0].trigger.empty() )
+    {
+        error = "NCPC combined trigger stream is required";
+        return false;
+    }
+
     for( size_t i = 0; i < 2; ++i )
     {
         if( cal.dm[i].channel.empty() || cal.dm[i].channel == cal.dm[0].trigger ||
@@ -853,12 +858,21 @@ inline bool autoJay::openChannels( calibration &cal, std::string &error )
             return false;
         }
         auto channel = std::make_unique<autoJayDmStream>( cal.dm[i].channel );
-        auto trigger = std::make_unique<autoJayDmStream>( cal.dm[i].trigger );
-        if( !channel->plane() || !trigger->plane() || trigger->rows() != channel->rows() ||
-            trigger->cols() != channel->cols() )
+        if( !channel->plane() )
         {
-            error = "DM stream geometry mismatch";
+            error = "DM command stream is unavailable or is not a plane: " + cal.dm[i].channel;
             return false;
+        }
+
+        std::unique_ptr<autoJayDmStream> trigger;
+        if( !cal.dm[i].trigger.empty() )
+        {
+            trigger = std::make_unique<autoJayDmStream>( cal.dm[i].trigger );
+            if( !trigger->plane() || trigger->rows() != channel->rows() || trigger->cols() != channel->cols() )
+            {
+                error = "DM combined stream geometry mismatch: " + cal.dm[i].trigger;
+                return false;
+            }
         }
 
         if( !resolvePattern( cal, i, channel->rows(), channel->cols(), error ) )
@@ -867,16 +881,23 @@ inline bool autoJay::openChannels( calibration &cal, std::string &error )
         }
 
         for( size_t p = 0; p < channel->rows() * channel->cols(); ++p )
+        {
             if( ( *channel )[p] != 0 || !mx::math::isFinite( ( *channel )[p] ) )
             {
                 error = "reserved channel is not zero: " + cal.dm[i].channel;
                 return false;
             }
-        channel->passive( false ); // AO is off, so this write must itself trigger dmcomb.
-        m_creationTimes[2 * i]     = channel->creationtime();
-        m_creationTimes[2 * i + 1] = trigger->creationtime();
+        }
+
+        channel->passive( false ); // Notify the combiner or relay even when AO is off.
         for( size_t j = 0; j < 2; ++j )
         {
+            const auto &stream = j == 0 ? channel : trigger;
+            if( !stream )
+            {
+                continue;
+            }
+
             char        path[4096];
             struct stat info;
             const auto &name = j == 0 ? cal.dm[i].channel : cal.dm[i].trigger;
@@ -889,7 +910,9 @@ inline bool autoJay::openChannels( calibration &cal, std::string &error )
             m_streamPaths[2 * i + j]  = path;
             m_streamInodes[2 * i + j] = info.st_ino;
             m_streamBytes[2 * i + j]  = info.st_size;
+            m_creationTimes[2 * i + j] = stream->creationtime();
         }
+
         m_lastCommands[i] = imageT::Zero( channel->rows(), channel->cols() );
         channels[i]       = std::move( channel );
         triggers[i]       = std::move( trigger );
@@ -906,6 +929,18 @@ inline bool autoJay::channelsValid( std::string &error ) const
     {
         for( size_t j = 0; j < 2; ++j )
         {
+            if( j == 1 && m_cycle.dm[i].trigger.empty() )
+            {
+                continue;
+            }
+
+            const auto &stream = j == 0 ? m_channels[i] : m_triggers[i];
+            if( !stream )
+            {
+                error = "DM stream unavailable";
+                return false;
+            }
+
             struct stat info;
             if( stat( m_streamPaths[2 * i + j].c_str(), &info ) || info.st_ino != m_streamInodes[2 * i + j] ||
                 info.st_size != m_streamBytes[2 * i + j] )
@@ -913,15 +948,14 @@ inline bool autoJay::channelsValid( std::string &error ) const
                 error = "DM stream file replaced or truncated";
                 return false;
             }
-        }
-        if( !m_channels[i] || !m_triggers[i] || !m_channels[i]->plane() || !m_triggers[i]->plane() )
-        {
-            error = "DM stream unavailable";
-            return false;
-        }
-        for( size_t j = 0; j < 2; ++j )
-        {
-            const auto &t   = j == 0 ? m_channels[i]->creationtime() : m_triggers[i]->creationtime();
+
+            if( !stream->plane() )
+            {
+                error = "DM stream unavailable";
+                return false;
+            }
+
+            const auto &t   = stream->creationtime();
             const auto &old = m_creationTimes[2 * i + j];
             if( t.tv_sec != old.tv_sec || t.tv_nsec != old.tv_nsec )
             {
@@ -929,6 +963,7 @@ inline bool autoJay::channelsValid( std::string &error ) const
                 return false;
             }
         }
+
         if( !( m_channels[i]->operator()() == m_lastCommands[i] ).all() )
         {
             error = "another writer changed an owned poke channel";
@@ -940,13 +975,18 @@ inline bool autoJay::channelsValid( std::string &error ) const
 
 inline std::array<uint64_t, 2> autoJay::triggerCounters() const
 {
-    return { m_triggers[0]->cnt0(), m_triggers[1]->cnt0() };
+    return { m_triggers[0]->cnt0(), m_triggers[1] ? m_triggers[1]->cnt0() : 0 };
 }
 
 inline bool autoJay::contributionApplied( std::array<uint64_t, 2> &counters ) const
 {
     for( size_t i = 0; i < 2; ++i )
     {
+        if( !m_triggers[i] )
+        {
+            continue;
+        }
+
         imageT combined;
         if( !m_triggers[i]->snapshot( combined, counters[i] ) )
             return false;
@@ -968,9 +1008,17 @@ inline bool autoJay::contributionApplied( std::array<uint64_t, 2> &counters ) co
 inline bool autoJay::writeChannels( const std::array<float, 2> &scales, std::string &error )
 {
     if( !channelsValid( error ) )
+    {
         return false;
+    }
+
     for( size_t i = 0; i < 2; ++i )
     {
+        if( !m_triggers[i] )
+        {
+            continue;
+        }
+
         uint64_t counter;
         if( !m_triggers[i]->snapshot( m_combinedBefore[i], counter ) )
         {
