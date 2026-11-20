@@ -326,7 +326,9 @@ def test_set_policy_requires_fresh_warmup_preserves_control_and_library(
     with pytest.raises(RuntimeError, match="Fresh warmup"):
         supervisor.submit("learning", {"run": True})
     supervisor.submit("recollect", {"request": True})
-    finish(supervisor)
+    assert finish(supervisor) == [("recollect", "Ok", "")]
+    # A recollection can finish after this tick has already read the runtime generation.
+    supervisor.tick()
     assert supervisor.status["warmup_required"] == "no"
     assert supervisor.worker.state == "paused"
     supervisor.submit("reset", {"request": True})

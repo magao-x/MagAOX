@@ -11,7 +11,7 @@ all: test
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fno-fast-math $(OPENSSL_CFLAGS) -DCATCH_CONFIG_MAIN $< $(INDI_LIBS) $(LDFLAGS) $(OPENSSL_LIBS) -o $@
 
 # Reuse the existing monitor mapping declarations; link the repository's built INDI value types.
-.build/dlDataCollection_monitor_test: dlDataCollection_monitor_test.cpp ../dlDataCollection.hpp ../dlCollection.hpp ../dlObservation.hpp ../../../libMagAOX/app/dev/shmimMonitor.hpp ../../po4ao/tests/stubs/ImageStreamIO/ImageStreamIO.h $(INDI_LIBS)
+.build/dlDataCollection_monitor_test: dlDataCollection_monitor_test.cpp ../dlDataCollection.hpp ../dlCollection.hpp ../dlObservation.hpp ../../../libMagAOX/app/dev/shmimMonitor.hpp $(wildcard ../../../libMagAOX/app/framePoll.hpp ../../po4ao/tests/stubs/ImageStreamIO/*.h) $(INDI_LIBS)
 	mkdir -p .build
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -fno-fast-math $(OPENSSL_CFLAGS) -I../../po4ao/tests/stubs -I../../../libMagAOX/app $< $(INDI_LIBS) $(LDFLAGS) $(OPENSSL_LIBS) -o $@
 

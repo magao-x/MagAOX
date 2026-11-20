@@ -35,6 +35,20 @@ inline int pthread_tryjoin_np( pthread_t /**< [in] Thread. */, void ** /**< [out
 {
     return EBUSY;
 }
+
+/// Handle the relative monotonic waits used by shmimMonitor on platforms with only nanosleep().
+inline int clock_nanosleep( clockid_t       clock /**< [in] Clock for the wait. */,
+                            int             flags /**< [in] Zero for a relative wait. */,
+                            const timespec *duration /**< [in] Requested duration. */,
+                            timespec       *remaining /**< [out] Time left if interrupted. */ )
+{
+    if( clock != CLOCK_MONOTONIC || flags != 0 )
+    {
+        return EINVAL;
+    }
+
+    return nanosleep( duration, remaining ) == 0 ? 0 : errno;
+}
 #endif
 namespace mx::app
 {
@@ -91,7 +105,7 @@ struct text_log
 };
 namespace logPrio
 {
-constexpr int LOG_NOTICE = 0, LOG_INFO = 0;
+constexpr int LOG_NOTICE = 0, LOG_INFO = 0, LOG_WARNING = 0;
 }
 /// No signal-driven teardown is needed; the fixture joins the monitor thread.
 inline void
