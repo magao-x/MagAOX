@@ -7,6 +7,7 @@
 #include <map>
 #include <sstream>
 #include <mutex>
+#include <thread>
 #include <vector>
 #include <semaphore.h>
 #include <ImageStreamIO/ImageStreamIO.h>
@@ -228,7 +229,38 @@ class MagAOXApp
                           std::string             &value /**< [out] Target. */,
                           const pcf::IndiProperty &request /**< [in] Request. */,
                           bool /**< [in] Target required. */ );
+
+    /// Start a worker like MagAOXApp::threadStart, without privileges, priority, cpuset or INDI registration.
+    template <class thisPtr, class Function>
+    int threadStart( std::thread       &thrd /**< [out] Started worker. */,
+                     bool              &thrdInit /**< [out] Cleared once setup is complete. */,
+                     pid_t             &tpid /**< [out] Reset; the worker fills it. */,
+                     pcf::IndiProperty &thProp /**< [in] Unused thread property. */,
+                     int                thrdPrio /**< [in] Unused priority. */,
+                     const std::string &cpuset /**< [in] Unused cpuset. */,
+                     const std::string &thrdName /**< [in] Unused name. */,
+                     thisPtr           *thrdThis /**< [in] Worker argument. */,
+                     Function         &&thrdStart /**< [in] Static worker entry point. */ );
 };
+
+template <bool useIndi>
+template <class thisPtr, class Function>
+inline int MagAOXApp<useIndi>::threadStart( std::thread &thrd,
+                                            bool        &thrdInit,
+                                            pid_t       &tpid,
+                                            pcf::IndiProperty &,
+                                            int,
+                                            const std::string &,
+                                            const std::string &,
+                                            thisPtr   *thrdThis,
+                                            Function &&thrdStart )
+{
+    // Nothing to configure, so setup is complete before the worker starts and reads thrdInit.
+    tpid     = 0;
+    thrdInit = false;
+    thrd     = std::thread( thrdStart, thrdThis );
+    return 0;
+}
 
 template <bool useIndi>
 inline MagAOXApp<useIndi>::MagAOXApp( const char * /**< [in] Version. */, int /**< [in] Modified flag. */ )

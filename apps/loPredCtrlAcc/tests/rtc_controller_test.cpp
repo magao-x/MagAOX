@@ -5,6 +5,9 @@
 #include "../../../tests/testXWC.hpp"
 #include "app_test_support.hpp"
 #include "../loPredCtrlAcc_operational.hpp"
+#include <chrono>
+#include <cstdio>
+#include <numeric>
 #include <random>
 #include <filesystem>
 #include <unistd.h>
@@ -19,10 +22,17 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
 {
   public:
     using loPredCtrlAcc_operational::allocate;
+    using loPredCtrlAcc_operational::appliedSlots;
+    using loPredCtrlAcc_operational::appShutdown;
+    using loPredCtrlAcc_operational::appStartup;
+    using loPredCtrlAcc_operational::c_slots;
     using loPredCtrlAcc_operational::copied;
     using loPredCtrlAcc_operational::loadCalibration;
+    using loPredCtrlAcc_operational::m_accelEnabled;
     using loPredCtrlAcc_operational::m_calibration;
     using loPredCtrlAcc_operational::m_commandKnown;
+    using loPredCtrlAcc_operational::m_commandMutex;
+    using loPredCtrlAcc_operational::m_decisionOrdinal;
     using loPredCtrlAcc_operational::m_exploration;
     using loPredCtrlAcc_operational::m_gain;
     using loPredCtrlAcc_operational::m_indiP_exploration;
@@ -35,7 +45,11 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_mode;
     using loPredCtrlAcc_operational::m_modeCube;
     using loPredCtrlAcc_operational::m_models;
+    using loPredCtrlAcc_operational::m_outputThread;
+    using loPredCtrlAcc_operational::m_planBase;
     using loPredCtrlAcc_operational::m_settings;
+    using loPredCtrlAcc_operational::m_slotPlan;
+    using loPredCtrlAcc_operational::m_slotShifts;
     using loPredCtrlAcc_operational::m_syncLocked;
     using loPredCtrlAcc_operational::m_wfsCounter;
     using loPredCtrlAcc_operational::outputCandidate;
@@ -43,14 +57,23 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::processImage;
     using loPredCtrlAcc_operational::resetModels;
     using loPredCtrlAcc_operational::sensorHistory;
+    using loPredCtrlAcc_operational::step;
 
     /// Allocate private synthetic calibration and configure the actual existing producer state without starting it.
     explicit Controller( bool qr /**< [in] Select the real QR or covariance RLS implementation. */ );
 
-    /// Advance one real model decision and explicitly acknowledge its private output for this synthetic plant.
+    /// Next scheduler slot ordinal (cycle*4+step) rendered by advance().
+    std::int64_t m_slot{ 8 };
+
+    /// Advance one real decision, then render and copy the four following slots as the scheduler would.
+    /** Returns the copied modal commands, modes by four, oldest slot first. */
     DDSPC::Matrix advance( const DDSPC::Matrix &y /**< [in] WFS residual. */,
                            const DDSPC::Matrix &a /**< [in] Individual ACC history. */,
                            bool                 valid /**< [in] Upstream ACC validity. */ );
+
+    /// Render one scheduler slot through the actual candidate and report it copied.
+    DDSPC::Matrix slot( std::int64_t ordinal /**< [in] Slot ordinal, cycle*4+step. */,
+                        std::int64_t epoch = 1 /**< [in] Scheduler epoch. */ );
 
     /// Enable both fits and original-format Gaussian excitation on the actual WFS path.
     void train();
@@ -71,9 +94,9 @@ Controller::Controller( bool qr )
     m_calibration.m_shapes     = DDSPC::Matrix::Zero( 4, 2 );
     m_calibration.m_shapes.topRows( 2 ).setIdentity();
     m_calibration.m_projection = m_calibration.m_shapes.transpose();
-    m_pixels.assign( 4, 0 );
-    m_copiedCommand = DDSPC::Matrix::Zero( 2, 1 );
-    m_commandKnown  = true;
+    m_copiedCommand            = DDSPC::Matrix::Zero( 2, 1 );
+    m_appliedSlots             = DDSPC::Matrix::Zero( 2, c_ring );
+    m_commandKnown             = true;
     resetModels();
     setupINDI();
     MagAOX::app::SyncoOutputConfig config;
@@ -96,14 +119,42 @@ void Controller::freeze()
     REQUIRE( newCallBack_m_indiP_learning( property ) == 0 );
 }
 
+DDSPC::Matrix Controller::slot( std::int64_t ordinal, std::int64_t epoch )
+{
+    namespace synco = MagAOX::app::synco;
+    const synco::Request request{ epoch, 1, ordinal / 4, int( ordinal % 4 ), 0, 0 };
+    synco::Record        schedule{};
+    schedule[synco::steps] = 4;
+    std::array<float, 4> image{};
+    REQUIRE( outputCandidate( request, schedule, image ) );
+    synco::CommitRecord commit{};
+    commit[synco::cmdEpoch]      = epoch;
+    commit[synco::cmdGeneration] = 1;
+    commit[synco::cmdCycle]      = request.cycle;
+    commit[synco::cmdStep]       = request.step;
+    copied( commit, image );
+    return m_calibration.m_projection * Eigen::Map<const DDSPC::Matrix>( image.data(), 4, 1 );
+}
+
 DDSPC::Matrix Controller::advance( const DDSPC::Matrix &y, const DDSPC::Matrix &a, bool valid )
 {
-    const auto counter = m_wfsCounter + 1;
-    REQUIRE( step( y, counter, a, valid, m_copiedCommand, MagAOX::app::synco::monotonicNs() ) == 0 );
-    std::array<float, 4> image{};
-    REQUIRE( outputCandidate( image ) );
-    copied( image );
-    return m_calibration.m_projection * Eigen::Map<const DDSPC::Matrix>( image.data(), 4, 1 );
+    DDSPC::Matrix applied;
+    std::int64_t  ordinal;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_commandMutex );
+        ordinal = appliedSlots( applied );
+    }
+    REQUIRE( step( y, m_wfsCounter + 1, a, valid, applied, ordinal, MagAOX::app::synco::monotonicNs() ) == 0 );
+    DDSPC::Matrix slots( 2, c_slots );
+    for( int j = 0; j < c_slots; ++j )
+        slots.col( j ) = slot( m_slot++ );
+    return slots;
+}
+
+/// Synthetic WFS response to one frame of slot commands; earlier slots act longer before the next measurement.
+DDSPC::Matrix response( const DDSPC::Matrix &slots /**< [in] Copied modal commands, oldest slot first. */ )
+{
+    return .35f * slots.col( 0 ) + .25f * slots.col( 1 ) + .15f * slots.col( 2 ) + .05f * slots.col( 3 );
 }
 } // namespace
 /// \endcond
@@ -145,18 +196,105 @@ TEST_CASE( "Standard WFS monitor trains from copied modal commands", "[rtc-contr
         REQUIRE( app.m_wfsCounter == n - 1 );
         REQUIRE( app.processImage( frame, {} ) == 0 );
         REQUIRE( app.m_wfsCounter == n );
-        REQUIRE( app.outputCandidate( surface ) );
         if( n < 30 )
         {
+            MagAOX::app::synco::Record schedule{};
+            schedule[MagAOX::app::synco::steps] = 4;
+            REQUIRE( app.outputCandidate( { 1, 1, 0, 1, 0, 0 }, schedule, surface ) );
             REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates == 0 );
             REQUIRE( surface[0] == Approx( .2f * frame[0] ) );
         }
         if( n >= 30 )
-            app.copied( surface );
+            for( int j = 0; j < 4; ++j )
+                app.slot( app.m_slot++ );
     }
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates > 100 );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_updates == 0 );
+}
+
+/** \brief Copied scheduler slots form the training lift; missed slots and idle frames hold the retained copy. */
+TEST_CASE( "Operational slot history follows scheduler copies", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::appliedSlots;
+    MagAOX::app::loPredCtrlAcc_operational::copied;
+    MagAOX::app::loPredCtrlAcc_operational::outputCandidate;
+#endif
+    // clang-format on
+    namespace synco = MagAOX::app::synco;
+    Controller app( true );
+    auto       copy = [&]( std::int64_t ordinal, float value, std::int64_t epoch = 1 )
+    {
+        synco::CommitRecord commit{};
+        commit[synco::cmdEpoch]      = epoch;
+        commit[synco::cmdGeneration] = 1;
+        commit[synco::cmdCycle]      = ordinal / 4;
+        commit[synco::cmdStep]       = ordinal % 4;
+        const std::array<float, 4> image{ value, -value, 0, 0 };
+        app.copied( commit, image );
+    };
+    auto lift = [&]( std::int64_t &ordinal )
+    {
+        DDSPC::Matrix               applied;
+        std::lock_guard<std::mutex> lock( app.m_commandMutex );
+        ordinal = app.appliedSlots( applied );
+        return applied;
+    };
+    std::int64_t ordinal;
+    copy( 12, 1 );
+    REQUIRE( lift( ordinal ).cols() == 4 ); // First copy: no decision anchor yet, the retained copy is held.
+    REQUIRE( ordinal == 12 );
+    app.m_decisionOrdinal = 12;
+    copy( 13, 2 );
+    copy( 14, 3 );
+    copy( 16, 5 ); // Ordinal 15 was missed: the destination retained 3.
+    auto applied = lift( ordinal );
+    REQUIRE( ordinal == 16 );
+    REQUIRE( applied.row( 0 ) == ( DDSPC::Matrix( 1, 4 ) << 2, 3, 3, 5 ).finished() );
+    REQUIRE( applied.row( 1 ) == -applied.row( 0 ) );
+    app.m_decisionOrdinal = 16;
+    copy( 17, 6 );
+    copy( 18, 7 );
+    applied = lift( ordinal ); // Two new copies: earlier positions retain the previous frame's last copy.
+    REQUIRE( applied.row( 0 ) == ( DDSPC::Matrix( 1, 4 ) << 5, 5, 6, 7 ).finished() );
+    app.m_decisionOrdinal = 18;
+    applied               = lift( ordinal ); // Idle output: no copies, the retained command is held for the frame.
+    REQUIRE( applied.row( 0 ) == ( DDSPC::Matrix( 1, 4 ) << 7, 7, 7, 7 ).finished() );
+    copy( 3, 9, 2 ); // Scheduler reset: ordinals restart and the plan base is revoked.
+    REQUIRE( app.m_decisionOrdinal == -1 );
+    REQUIRE( app.m_planBase == -1 );
+    REQUIRE( lift( ordinal ).row( 0 ) == ( DDSPC::Matrix( 1, 4 ) << 9, 9, 9, 9 ).finished() );
+
+    // Each Request renders the plan column of its ordinal after the decision; later slots hold the last column.
+    app.m_slotPlan = DDSPC::Matrix::Zero( 2, 8 );
+    for( int c = 0; c < 8; ++c )
+        app.m_slotPlan( 0, c ) = c + 1;
+    app.m_planBase = 3;
+    synco::Record schedule{};
+    schedule[synco::steps] = 4;
+    std::array<float, 4> image{};
+    for( const auto &[cycle, step, column] :
+         std::vector<std::array<int, 3>>{ { 1, 0, 0 }, { 1, 1, 1 }, { 1, 3, 3 }, { 2, 0, 4 }, { 9, 0, 7 } } )
+    {
+        REQUIRE( app.outputCandidate( { 2, 1, cycle, step, 0, 0 }, schedule, image ) );
+        REQUIRE( image[0] == column + 1 );
+    }
+    REQUIRE( app.outputCandidate( { 1, 1, 1, 1, 0, 0 }, schedule, image ) ); // Other epoch: first column.
+    REQUIRE( image[0] == 1 );
+
+    // The reset above makes the next decision re-anchor; afterwards an interval with other than four new copies is
+    // counted, not rejected.
+    const DDSPC::Matrix y = DDSPC::Matrix::Zero( 2, 1 ), held = DDSPC::Matrix::Zero( 2, 4 );
+    REQUIRE( app.step( y, 1, {}, false, held, 3, 0 ) == 0 );
+    REQUIRE( app.m_decisionOrdinal == -1 );
+    REQUIRE( app.step( y, 2, {}, false, held, 3, 0 ) == 0 );
+    REQUIRE( app.step( y, 3, {}, false, held, 6, 0 ) == 0 );
+    REQUIRE( app.m_slotShifts == 1 );
+    REQUIRE( app.step( y, 4, {}, false, held, 10, 0 ) == 0 );
+    REQUIRE( app.m_slotShifts == 1 );
+    REQUIRE( app.m_planBase == 10 );
 }
 
 /** \brief The operational ACC vector retains four original upstream pairs in order and rejects incomplete recovery. */
@@ -246,8 +384,12 @@ TEST_CASE( "Operational standard DDSPC corrects without accelerometers", "[rtc-c
             app.freeze();
             updates = app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates;
         }
-        command = app.advance( y, empty, false );
-        REQUIRE( command.allFinite() );
+        const auto slots = app.advance( y, empty, false );
+        REQUIRE( slots.allFinite() );
+        // Standard DDSPC is single-rate: one held command per WFS frame, as in loPredCtrl.
+        for( int j = 1; j < 4; ++j )
+            REQUIRE( slots.col( j ) == slots.col( 0 ) );
+        command = response( slots ) / .8f;
         if( n >= 4000 )
         {
             residual += y.squaredNorm();
@@ -282,7 +424,7 @@ TEST_CASE( "Operational assisted DDSPC corrects with upstream ACC features", "[r
     DDSPC::Matrix                   command = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), a( 8, 1 );
     std::mt19937                    rng( 42 );
     std::normal_distribution<float> noise( 0, .03 );
-    double                          residual = 0, uncontrolled = 0;
+    double                          residual = 0, uncontrolled = 0, spread = 0;
     for( int n = 0; n < 6000; ++n )
     {
         for( int sample = 0; sample < 4; ++sample )
@@ -295,15 +437,19 @@ TEST_CASE( "Operational assisted DDSPC corrects with upstream ACC features", "[r
         y = disturbance + .8f * command;
         if( n == 3000 )
             app.freeze();
-        command = app.advance( y, a, true );
-        REQUIRE( command.allFinite() );
+        const auto slots = app.advance( y, a, true );
+        REQUIRE( slots.allFinite() );
+        command = response( slots ) / .8f;
         if( n >= 4000 )
         {
             residual += y.squaredNorm();
             uncontrolled += disturbance.squaredNorm();
+            // Frozen, unprobed assisted plans still give each 8-kHz slot its own command.
+            spread += ( slots.colwise() - slots.rowwise().mean() ).squaredNorm();
         }
     }
-    INFO( "assisted residual ratio " << std::sqrt( residual / uncontrolled ) );
+    INFO( "assisted residual ratio " << std::sqrt( residual / uncontrolled ) << " slot spread " << spread );
+    REQUIRE( spread > 1e-3 * residual );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates > 2900 );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_updates > 2900 );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_ready );
@@ -343,12 +489,79 @@ TEST_CASE( "Operational RTC settings produce finite standard and assisted fits",
         }
         y << std::sin( .09 * n ), std::cos( .13 * n );
         y += .8f * command;
-        command = app.advance( y, a, true );
+        command = response( app.advance( y, a, true ) ) / .8f;
     }
     REQUIRE( app.m_exploration.empty() );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_ready );
     REQUIRE( app.m_matchedTargets > 10000 );
+}
+
+/** \brief Time WFS decisions at the RTC dimensions while learning and frozen (hidden benchmark). */
+TEST_CASE( "Operational RTC decision time", "[.][rtc-benchmark]" )
+{
+    Controller app( true );
+    app.m_settings.m_history       = 15;
+    app.m_settings.m_future        = 3;
+    app.m_settings.m_accelChannels = 40;
+    app.m_settings.m_lambda        = 100;
+    app.m_settings.m_prior         = 1e-5f;
+    app.m_gain                     = .3f;
+    app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
+    app.resetModels();
+    app.train();
+    app.m_exploration           = app.parseExploration( "2000,0.1,100" );
+    DDSPC::Matrix       command = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), a( 40, 1 );
+    std::vector<double> learning, frozen;
+    for( int n = 0; n < 4000; ++n )
+    {
+        for( int j = 0; j < 20; ++j )
+        {
+            a( 2 * j )     = std::sin( .09 * ( n + 1 - j * .25 ) );
+            a( 2 * j + 1 ) = std::cos( .13 * ( n + 1 - j * .25 ) );
+        }
+        y << std::sin( .09 * n ), std::cos( .13 * n );
+        y += .8f * command;
+        if( n == 3000 )
+            app.freeze();
+        const auto start = std::chrono::steady_clock::now();
+        const auto slots = app.advance( y, a, true );
+        const auto us = std::chrono::duration<double, std::micro>( std::chrono::steady_clock::now() - start ).count();
+        command       = response( slots ) / .8f;
+        if( n >= 500 )
+            ( n < 3000 ? learning : frozen ).push_back( us );
+    }
+    for( auto *times : { &learning, &frozen } )
+    {
+        std::sort( times->begin(), times->end() );
+        std::printf( "%s decision+4 slots: mean %.1f us p99 %.1f us max %.1f us\n",
+                     times == &learning ? "learning" : "frozen  ",
+                     std::accumulate( times->begin(), times->end(), 0.0 ) / times->size(),
+                     ( *times )[times->size() * 99 / 100],
+                     times->back() );
+    }
+    REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_ready );
+}
+
+/** \brief Startup runs the producer loop on the framework DM worker; shutdown joins it after the bounded removal wait.
+ */
+TEST_CASE( "Operational startup runs the DM worker through threadStart", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::appStartup;
+    MagAOX::app::loPredCtrlAcc_operational::outputThreadStart;
+    MagAOX::app::loPredCtrlAcc_operational::stopOutput;
+#endif
+    // clang-format on
+    Controller app( true );
+    app.m_accelEnabled = false;
+    REQUIRE( app.appStartup() == 0 );
+    REQUIRE( app.m_outputThread.joinable() );
+    const auto start = std::chrono::steady_clock::now();
+    REQUIRE( app.appShutdown() == -1 ); // No auxiliary or consumer here, so removal cannot be confirmed.
+    REQUIRE_FALSE( app.m_outputThread.joinable() );
+    REQUIRE( std::chrono::steady_clock::now() - start < std::chrono::seconds( 2 ) );
 }
 
 /** \brief Original control names and exploration triples work without custom authorization or timing anchors. */

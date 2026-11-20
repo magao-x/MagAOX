@@ -264,3 +264,52 @@ build and measure actual optical response and RTC timing on the laboratory syste
 The workstation's native build stops at the missing flatlogcodes prerequisite.
 The deployed WFS-to-DM sign, scale and optional mask, and the physical ADC
 calibration if using AD7689, require the installed instrument configuration.
+
+## RTC preparation: 8-kHz assisted slots, own DM worker and channel
+
+Review for operational testing beside accelSim, which now publishes its disturbance at 8 kHz from a dedicated worker.
+
+Findings:
+
+- Standard DDSPC was already a loPredCtrl-style single-rate law using only WFS and copied command history.
+- Both modes held one 2-kHz decision on all four DM slots, so assisted mode produced no distinct 8-kHz corrections.
+- The output loop was a plain `std::thread` sleeping 20 µs (50 µs while idle) between polls. That is the SCHED_OTHER wake pattern that limited accelSim to about 6 kHz. Any expired or late slot latched a fault, which turned prediction off.
+- The hard-coded `dm10disp10_aux` is not a production-scheduler destination. `dm01disp10_aux` is owned by acc000: the producer lock is exclusive, and synco copies the whole aux image. Two producers therefore cannot share it.
+  - The scheduler documentation says to configure different destinations for different producers, and dmcomb sums them.
+  - With approval, the channel is now configurable: any `*_aux` name, default `dm01disp10_aux`. The shipped configuration selects `dm01disp09_aux`, which must be verified on the RTC.
+
+Decisions (approved):
+
+1. **Assisted lift.** The assisted model uses the existing `ShadowConfig::m_assistedCommandSlots = 4` lift.
+   - Each WFS decision plans four slot commands per future frame.
+   - Slot ordinals are `cycle*steps+step`. A plan is indexed from the newest slot copied at decision time, so a late decision continues the previous plan's next frame.
+   - Training uses the four slots copied since the previous decision. Missed or discarded slots hold the retained copy, as synco does.
+   - Standard stays single-rate. Its input is the frame mean of the four slots, equal to the held command in standard mode.
+   - Probes are held per frame in standard mode, as in loPredCtrl, and independent per slot in assisted mode.
+2. **Worker and missed slots.** `syncoOutput.hpp` (used only by loPredCtrlAcc) gains `start(..., ownThread=false)` and `work()`, so the app runs the loop on a `threadStart` worker with `dm.threadPrio` and `dm.cpuset`.
+   - The worker polls every 10 µs and continues immediately after a commit.
+   - A late or unavailable slot increments `m_skipped` instead of faulting.
+   - The copy callback also passes the commit record, for slot identity.
+   - The producer base, timing header and scheduler are unchanged.
+3. **Configuration.** `dm.channelName` must end in `_aux`. Recommended settings:
+   - `[dm] threadPrio=20`, `cpuset=spare29`;
+   - `[shmimMonitor] cpuset=spare28`;
+   - `[syncopation] writeLeadUs=125`. The candidate is rendered when the slot becomes eligible, so a longer lead gains margin without losing freshness.
+
+New diagnostics: `ddspc_performance.transport_skipped` and `slot_shifts`, plus the framework `th-dm` thread property.
+
+Workstation decision time at the RTC dimensions (H=15, F=3, 40 ACC features, four slots, QR-RLS; hidden `[rtc-benchmark]` case):
+
+| State | Mean | p99 | Max |
+| --- | --- | --- | --- |
+| Learning | 137 µs | 154 µs | 278 µs |
+| Frozen | 3.2 µs | 4.0 µs | 9.1 µs |
+
+The times include rendering and copying four slots. RLS runs before the decision, unlike loPredCtrl, which posts its command first. While learning, the first one or two slots of a frame therefore use the previous plan.
+
+Remaining RTC items:
+
+- Verify the destination, aux geometry and cpusets.
+- Do a native Linux build.
+- Confirm the WFS-mode/DM-plane sign and scale.
+- Measure the WFS-gap rate: a counter gap breaks the model history and the qualification gate turns prediction off.

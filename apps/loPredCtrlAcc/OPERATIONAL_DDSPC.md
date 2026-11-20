@@ -1,4 +1,4 @@
-> **Current RTC procedure:** Use [RTC_TESTING.md](RTC_TESTING.md) for the operational controller, configuration, install commands and INDI sequence. The report below describes the earlier commissioning build.
+> **Current RTC procedure:** Use [RTC_TESTING.md](RTC_TESTING.md) for the operational controller, configuration, install commands and INDI sequence. The report below describes the earlier commissioning build; its `dm10disp10_aux` channel is replaced by a configurable scheduler `*_aux` destination, and assisted mode now plans four 8-kHz slots per WFS frame.
 
 # Operational-capable DDSPC experiment
 
