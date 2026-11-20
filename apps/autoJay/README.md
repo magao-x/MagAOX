@@ -29,10 +29,17 @@ camera instances at once. The app refuses nonzero channels and verifies its
 command contribution before collecting settled frames. Both DM combiners must
 continue processing these active channel writes with the AO loop open.
 
-Supply finite, nonzero, full-DM-sized two-dimensional FITS maps and signed scalar
-amplitudes. Pattern design is external to this app. The example zero amplitudes
-and nonexistent paths deliberately prevent capture until they are supplied.
-The scaled maps must remain within the commissioned command range of each DM.
+In each of `[ncpc]` and `[tweeter]`, set paired comma-separated `pokeX` and
+`pokeY` lists and one signed `pokeAmp` in DM command units, as in `dmPokeXCorr`.
+Coordinates start at zero and are checked against that DM's stream dimensions.
+Each listed actuator receives `pokeAmp`. The rest receive zero. Verify the
+candidate coordinates in the flowfs example with the bump mask in and replace
+the zero amplitudes with commissioned values before capture.
+
+For a weighted pattern, use `pattern` (a finite, nonzero, full-DM-sized 2-D FITS
+map) and a signed scalar `amplitude` in that DM section. Choose one input form
+per DM. Capture saves the generated or supplied maps and their amplitudes in the
+same calibration bundle.
 
 For `camflowfs`, require `stagelosel.presetName.pupil` On and
 `stageflowfs.position.current` at 32.0, initially with a 0.01 tolerance. The local
@@ -55,7 +62,7 @@ stream datatype alone does not identify the saturation level.
 
 [config/camsci1.conf](config/camsci1.conf) is intentionally incomplete and refuses
 loading until its numeric TODOs are resolved. Supply the calibrated `fwscind`,
-`stagebs`, and `stagesci1` settings, mask/filter requirements, and patterns. PICam
+`stagebs`, and `stagesci1` settings, mask/filter requirements, and pokes. PICam
 uses `exptime.current`, `emgain.current`, and the `readout_speed`/`vshift_speed`
 selection switches named in the template. Confirm the deployed image orientation;
 the local camera configuration uses `flipLR`. `autoJay.orientation` is a configured
