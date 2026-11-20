@@ -53,8 +53,9 @@ any other slot it skips publishing and dmSyncopation keeps the last contribution
 4. Check that synco's `production` property shows the `dm01disp08` mapping being accepted, and that the
    counterOffload `stats` counters `events` and `published` increase while offloading.
 
-Turning `enable` off stops accepting new offloads. Active ramps and any leak still finish. To remove the contribution,
-send a zero request while dmSyncopation is still enabled:
+Turning `enable` off stops accepting new offloads and zeros the contribution at the next dmSyncopation slot: active
+ramps and the accumulated contribution are dropped, with no decay. If dmSyncopation is not producing, the zero is
+published when it resumes. To remove the contribution while staying enabled, send a zero request:
 
 ```bash
 setINDI -s <instance>.zero.request=On
