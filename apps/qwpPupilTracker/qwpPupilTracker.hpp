@@ -44,13 +44,15 @@ namespace app
  * \f[
  *  s_{x,y}(\phi_1,\phi_2) = \sum_j c_j \cos(a_j\phi_1 + b_j\phi_2) + s_j \sin(a_j\phi_1 + b_j\phi_2),
  * \f]
- * in camwfs pixels.  The offset is \f$\Delta(\phi) = s(\phi) - s(\phi_{ref})\f$, with the reference given as
- * mechanical stage angles.  The default reference is the calibration's fast-axis pair (90, 115), which the
- * calibration script placed at stage angles (157.42, 165.80).
+ * in camwfs pixels.  The offset is \f$\Delta(\phi) = s(\phi) - s(\phi_{ref})\f$, where the reference
+ * \f$\phi_{ref}\f$ is the pair of stage angles at which tracking was enabled.
  *
- * When tracking is enabled ttmperi is assumed aligned at the current QWP angles, and the app captures the baseline
- * \f$v_0 = v_{now} + CM\,\Delta(\phi_{now})\f$, the voltage that would be aligned at the reference.  While tracking,
- * every stage position update commands \f$v = v_0 - CM\,\Delta(\phi)\f$.  A ttmperi target that is not one of this
+ * The intended procedure is: J-test, insert the QWPs (e.g. fast axes at 90, 115), realign the pupil with ttmperi,
+ * then enable tracking.  On enable ttmperi is assumed aligned, so the app captures \f$\phi_{ref} = \phi_{now}\f$ and
+ * the baseline \f$v_0 = v_{now}\f$.  While tracking, every stage position update commands
+ * \f$v = v_0 - CM\,\Delta(\phi)\f$.  While not tracking the reference follows the stages, so the offset reads zero.
+ * A QWP is 180 degree periodic but the two stage angles of one fast-axis angle shift the pupil differently, so the
+ * reference is the mechanical stage angle, not the fast-axis angle.  A ttmperi target that is not one of this
  * app's own recent commands means ttmperi was moved externally (e.g. a J-test), and the baseline is re-based so the
  * new target is kept.  Commands are only sent while both stages and ttmperi report READY or OPERATING.
  *
@@ -106,7 +108,7 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
 
         double tgt{ 0 }; ///< The last target reported by ttmperi, in V.
 
-        double v0{ 0 }; ///< The baseline: the voltage that would be aligned at the reference, in V.
+        double v0{ 0 }; ///< The baseline: the voltage aligned at the reference, in V.
 
         bool haveSent{ false }; ///< True when `lastSent` holds a command that need not be repeated.
 
@@ -126,8 +128,6 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
 
     qwpStage m_qwp[2]; ///< QWP1 and QWP2 stage names and state.
 
-    double m_phiRef[2]{ 157.42, 165.8 }; ///< The reference QWP1 and QWP2 mechanical stage angles, in degrees.
-
     std::string m_ttmDevName{ "ttmperi" }; ///< The device name of the tip/tilt mirror.
 
     double m_rebaseTol{ 0.01 }; ///< A ttmperi target farther than this from every recent command is external, in V.
@@ -141,6 +141,8 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
     shiftModel m_model; ///< The pupil-shift model loaded at startup.
 
     double m_cm[2][2]{ { 0, 0 }, { 0, 0 } }; ///< The control matrix, V/px, `m_cm[v][px]`.
+
+    double m_phiRef[2]{ 0, 0 }; ///< The QWP1 and QWP2 stage angles at which tracking was enabled, in degrees.
 
     double m_shiftRef[2]{ 0, 0 }; ///< The model shift at the reference, in pixels.
 
@@ -202,7 +204,7 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
      *@{
      */
 
-    /// Load and validate the model table and the control matrix, and compute the reference.
+    /// Load and validate the model table and the control matrix.
     /**
      * \returns 0 on success
      * \returns -1 if a file cannot be read or is invalid
@@ -264,6 +266,8 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
     bool ttmUsable();
 
     /// Compute `m_offset` and `m_dv` from the current stage positions.  The caller must hold `m_indiMutex`.
+    /** While not tracking the reference is set to the current stage angles, so the offset is zero.
+     */
     void computeOffset();
 
     /// Re-base one ttmperi axis so that its current target is kept.  The caller must hold `m_indiMutex`.
@@ -313,7 +317,7 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
     int ttmPosUpdate( int                      n, /**< [in] the axis index, 0 or 1 */
                       const pcf::IndiProperty &ipRecv /**< [in] the received property */ );
 
-    /// Start tracking, capturing the baseline.
+    /// Start tracking, capturing the current stage angles as the reference and the ttmperi targets as the baseline.
     /**
      * \returns 0 on success or refusal
      * \returns -1 if a command could not be sent
@@ -426,17 +430,6 @@ void qwpPupilTracker::setupConfig()
                     false,
                     "string",
                     "The device name of the " + q + " rotation stage.  Default is '" + m_qwp[n].devName + "'" );
-
-        config.add( "reference." + q,
-                    "",
-                    "reference." + q,
-                    argType::Required,
-                    "reference",
-                    q,
-                    false,
-                    "float",
-                    "The " + q + " mechanical stage angle of the reference state, in degrees.  Default is " +
-                        std::to_string( m_phiRef[n] ) );
     }
 
     config.add( "ttm.device",
@@ -492,7 +485,6 @@ int qwpPupilTracker::loadConfigImpl( mx::app::appConfigurator &_config )
         std::string q = "qwp" + std::to_string( n + 1 );
 
         _config( m_qwp[n].devName, "stages." + q );
-        _config( m_phiRef[n], "reference." + q );
     }
 
     _config( m_ttmDevName, "ttm.device" );
@@ -589,11 +581,6 @@ int qwpPupilTracker::loadCalib()
     {
         return -1;
     }
-
-    shift( m_shiftRef[0], m_shiftRef[1], m_model, m_phiRef[0], m_phiRef[1] );
-
-    log<text_log>( "reference stage angles " + std::to_string( m_phiRef[0] ) + ", " + std::to_string( m_phiRef[1] ) +
-                   ", shift " + std::to_string( m_shiftRef[0] ) + ", " + std::to_string( m_shiftRef[1] ) + " px" );
 
     return 0;
 }
@@ -810,6 +797,15 @@ void qwpPupilTracker::computeOffset()
 {
     shift( m_offset[0], m_offset[1], m_model, m_qwp[0].pos, m_qwp[1].pos );
 
+    // until tracking is enabled the reference follows the stages, and enabling freezes it
+    if( !m_tracking )
+    {
+        m_phiRef[0]   = m_qwp[0].pos;
+        m_phiRef[1]   = m_qwp[1].pos;
+        m_shiftRef[0] = m_offset[0];
+        m_shiftRef[1] = m_offset[1];
+    }
+
     m_offset[0] -= m_shiftRef[0];
     m_offset[1] -= m_shiftRef[1];
 
@@ -1010,9 +1006,10 @@ int qwpPupilTracker::startTracking()
 
         updateSwitchIfChanged( m_indiP_tracking, "toggle", pcf::IndiElement::On, INDI_IDLE );
 
+        // not yet tracking, so this captures the current stage angles as the reference and a zero offset
         computeOffset();
 
-        // ttmperi is aligned now, so its targets are the commands for the current offset
+        // ttmperi is aligned now, so its targets are the baseline
         rebase( 0 );
         rebase( 1 );
 
@@ -1020,7 +1017,8 @@ int qwpPupilTracker::startTracking()
         m_rebasePending = false;
     } // mutex scope
 
-    log<text_log>( "started QWP pupil tracking, baseline " + std::to_string( m_ttm[0].v0 ) + ", " +
+    log<text_log>( "started QWP pupil tracking, reference stage angles " + std::to_string( m_phiRef[0] ) + ", " +
+                   std::to_string( m_phiRef[1] ) + " deg, baseline " + std::to_string( m_ttm[0].v0 ) + ", " +
                    std::to_string( m_ttm[1].v0 ) + " V" );
 
     return update();

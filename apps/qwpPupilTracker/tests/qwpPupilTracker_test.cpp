@@ -313,29 +313,49 @@ TEST_CASE( "qwpPupilTracker evaluates the shift model", "[qwpPupilTracker]" )
     }
 }
 
-/// The reference shift is the model evaluated at the configured mechanical reference angles.
+/// Enabling freezes the current stage angles as the reference, so offsets are relative to the aligned position.
 /**
+ * Uses QWP2 on the +180 branch (345.8 rather than 165.8), where the model shift differs from the other branch, to
+ * check that the offset is zero at enable regardless of branch.
+ *
  * \ingroup qwpPupilTracker_unit_test
  */
-TEST_CASE( "qwpPupilTracker evaluates the reference shift at startup", "[qwpPupilTracker]" )
+TEST_CASE( "qwpPupilTracker captures the reference at enable", "[qwpPupilTracker]" )
 {
     // clang-format off
     #ifdef QWPPUPILTRACKER_TEST_DOXYGEN_REF
-    qwpPupilTracker::loadCalib();
+    qwpPupilTracker::loadCalib(); qwpPupilTracker::computeOffset(); qwpPupilTracker::startTracking();
     #endif
     // clang-format on
 
     qwpPupilTracker_test app( "reference" );
     REQUIRE( app.startup() == 0 );
 
+    app.allReady( 157.42, 345.8, 10, 20 );
+
     REQUIRE( app.m_phiRef[0] == Approx( 157.42 ) );
-    REQUIRE( app.m_phiRef[1] == Approx( 165.8 ) );
+    REQUIRE( app.m_phiRef[1] == Approx( 345.8 ) );
+    REQUIRE( app.m_offset[0] == Approx( 0 ).margin( 1e-12 ) );
+    REQUIRE( app.m_offset[1] == Approx( 0 ).margin( 1e-12 ) );
 
-    double rx, ry;
-    synthShift( rx, ry, 157.42, 165.8 );
+    app.track( true );
 
-    REQUIRE( app.m_shiftRef[0] == Approx( rx ) );
-    REQUIRE( app.m_shiftRef[1] == Approx( ry ) );
+    REQUIRE( app.m_tracking );
+    REQUIRE( app.m_offset[0] == Approx( 0 ).margin( 1e-12 ) );
+    REQUIRE( app.m_offset[1] == Approx( 0 ).margin( 1e-12 ) );
+    REQUIRE( app.m_ttm[0].v0 == Approx( 10 ) );
+    REQUIRE( app.m_ttm[1].v0 == Approx( 20 ) );
+
+    app.stagePos( 0, 167.42 );
+
+    double dx, dy, rx, ry;
+    synthShift( dx, dy, 167.42, 345.8 );
+    synthShift( rx, ry, 157.42, 345.8 );
+
+    REQUIRE( app.m_phiRef[0] == Approx( 157.42 ) );
+    REQUIRE( app.m_phiRef[1] == Approx( 345.8 ) );
+    REQUIRE( app.m_offset[0] == Approx( dx - rx ) );
+    REQUIRE( app.m_offset[1] == Approx( dy - ry ) );
 }
 
 /// The control matrix FITS written from python as `CM[v][px]` loads without being transposed.
@@ -429,8 +449,6 @@ TEST_CASE( "qwpPupilTracker configuration", "[qwpPupilTracker]" )
 
         REQUIRE( app.m_qwp[0].devName == "stageqwprot1" );
         REQUIRE( app.m_qwp[1].devName == "stageqwprot2" );
-        REQUIRE( app.m_phiRef[0] == Approx( 157.42 ) );
-        REQUIRE( app.m_phiRef[1] == Approx( 165.8 ) );
         REQUIRE( app.m_ttmDevName == "ttmperi" );
         REQUIRE( app.m_rebaseTol == Approx( 0.01 ) );
         REQUIRE( app.m_modelFile == "qwptrack/qwp_pupil_model.csv" );
@@ -441,14 +459,11 @@ TEST_CASE( "qwpPupilTracker configuration", "[qwpPupilTracker]" )
     {
         qwpPupilTracker_test app( "config_overrides" );
         REQUIRE( app.loadConfigFile( "[stages]\nqwp1=q1\nqwp2=q2\n"
-                                     "[reference]\nqwp1=10\nqwp2=20\n"
                                      "[ttm]\ndevice=ttm\nrebaseTol=0.5\n"
                                      "[calib]\nmodel=m.csv\ncm=c.fits\n" ) == 0 );
 
         REQUIRE( app.m_qwp[0].devName == "q1" );
         REQUIRE( app.m_qwp[1].devName == "q2" );
-        REQUIRE( app.m_phiRef[0] == Approx( 10 ) );
-        REQUIRE( app.m_phiRef[1] == Approx( 20 ) );
         REQUIRE( app.m_ttmDevName == "ttm" );
         REQUIRE( app.m_rebaseTol == Approx( 0.5 ) );
         REQUIRE( app.m_modelFile == "m.csv" );
@@ -456,7 +471,7 @@ TEST_CASE( "qwpPupilTracker configuration", "[qwpPupilTracker]" )
     }
 }
 
-/// The offset property follows the stages whether or not tracking is on.
+/// While not tracking the reference follows the stages, so the offset and correction read zero.
 /**
  * \ingroup qwpPupilTracker_unit_test
  */
@@ -478,16 +493,14 @@ TEST_CASE( "qwpPupilTracker publishes the offset in pixels and volts", "[qwpPupi
     app.stagePos( 0, 200 );
     app.stagePos( 1, 100 );
 
-    double dx, dy, rx, ry, dv1, dv2;
-    synthShift( dx, dy, 200, 100 );
-    synthShift( rx, ry, 157.42, 165.8 );
-    app.expectedDv( dv1, dv2, 200, 100 );
-
-    // the property itself only updates with an INDI driver, so check the values it is set from
-    REQUIRE( app.m_offset[0] == Approx( dx - rx ) );
-    REQUIRE( app.m_offset[1] == Approx( dy - ry ) );
-    REQUIRE( app.m_dv[0] == Approx( dv1 ) );
-    REQUIRE( app.m_dv[1] == Approx( dv2 ) );
+    // while not tracking the reference follows the stages; the property itself only updates with an INDI driver,
+    // so check the values it is set from
+    REQUIRE( app.m_phiRef[0] == Approx( 200 ) );
+    REQUIRE( app.m_phiRef[1] == Approx( 100 ) );
+    REQUIRE( app.m_offset[0] == Approx( 0 ).margin( 1e-12 ) );
+    REQUIRE( app.m_offset[1] == Approx( 0 ).margin( 1e-12 ) );
+    REQUIRE( app.m_dv[0] == Approx( 0 ).margin( 1e-12 ) );
+    REQUIRE( app.m_dv[1] == Approx( 0 ).margin( 1e-12 ) );
 
     REQUIRE_FALSE( app.m_tracking );
     REQUIRE( app.m_ttm[0].nSent == 0 );
@@ -551,12 +564,10 @@ TEST_CASE( "qwpPupilTracker tracks the QWPs with ttmperi", "[qwpPupilTracker]" )
         app.track( true );
         app.logic();
 
-        app.expectedDv( dv1, dv2, 200, 100 );
-
         REQUIRE( app.m_tracking );
         REQUIRE( app.state() == stateCodes::OPERATING );
-        REQUIRE( app.m_ttm[0].v0 == Approx( 10 - dv1 ) );
-        REQUIRE( app.m_ttm[1].v0 == Approx( 20 - dv2 ) );
+        REQUIRE( app.m_ttm[0].v0 == Approx( 10 ) );
+        REQUIRE( app.m_ttm[1].v0 == Approx( 20 ) );
         REQUIRE( app.m_ttm[0].nSent == 0 );
         REQUIRE( app.m_ttm[1].nSent == 0 );
     }
