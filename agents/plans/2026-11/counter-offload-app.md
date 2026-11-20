@@ -462,3 +462,22 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
 - **Q-D2. Samples per evaluation.** Is one fully propagated `aol1_clpsds` sample per measurement acceptable? Or do you want several, for example 2–3 taken 0.5 s apart, or spaced a full `psdAvgTime` apart so they are independent? Spacing them out would add about 10 s each.
 - **Q-D3. Run length.** Keep the current grids (about 13–14 min), or coarsen the coarse pass? For example `rampStartUs` step 50, `rampDurationUs` step 100 and `gain` step 0.2 give about 45 measurements, about 9 min. The refine pass then works at half those steps.
 - **Q-D4. Baseline cadence.** At 11.5 s per measurement, a baseline every 5 measurements is about one per minute. Keep 5?
+
+- A-D1: use a fixed settle time of 11s
+- A-D2: 3 taken 0.5 s apart
+- A-D3: keep the current grid for now
+- A-D4: keep 5
+### Resolved Design (from A-D1–A-D4)
+- **Stream:** the `psds.shmimName` default becomes `aol1_clpsds`.
+- **Settling (A-D1):** a fixed `settleS`, default 11 s, counted from the parameter change. It replaces "one window + `settleS`", and the `1/df` term is dropped from the wait. Only PSDs published after `change + settleS` are collected.
+- **Samples (A-D2):** `nAverage` default 3: the first three averaged PSDs published after settling, 0.5 s apart.
+  - The minimum stays 2, so the A-C1 rule and validation are unchanged.
+  - `fomStd` is the spread of those three correlated samples, documented as a stability check, not an independent noise estimate.
+- **Grids (A-D3):** unchanged. The run is about 70 measurements at about 12 s (11 s settle + 1 s for 3 samples), so about 14 minutes.
+- **Baseline (A-D4):** unchanged, every 5 measurements.
+- **Timeout:** the `timeoutS` default drops from 15 s to 5 s after settling. Three samples arrive in about 1 s, so 5 s still allows for a slow modalPSDs.
+- **Code changes:**
+  - In `measure()`: `m_psdAfterNs = now + settleS`.
+  - The defaults and help text for `psds.shmimName`, `settleS`, `nAverage` and `timeoutS`.
+  - Docs, example config and the CSV description.
+  - Tests: the existing gating test still applies; check the default values.
