@@ -338,38 +338,46 @@
                             <widget class="xqt::statusCombo" name="comboHwpLin"/>
                         </item>
                         <item row="3" column="0">
-                            <widget class="xqt::toggleSlider" name="sliderQwpTracking">
+                            <widget class="xqt::toggleSlider" name="sliderQwpPupilTracking">
                             </widget>
-                        </item><item row="3" column="1">
-                            <widget class="QLabel" name="labelQwpTracking"/>
+                        </item>
+                        <item row="3" column="1">
+                            <widget class="QLabel" name="labelQwpPupilTracking"/>
                         </item>
                         <item row="4" column="0">
-                            <widget class="xqt::statusCombo" name="comboQwpLin"/>
+                            <widget class="xqt::toggleSlider" name="sliderQwpTracking">
+                            </widget>
+                        </item>
+                        <item row="4" column="1">
+                            <widget class="QLabel" name="labelQwpTracking"/>
                         </item>
                         <item row="5" column="0">
+                            <widget class="xqt::statusCombo" name="comboQwpLin"/>
+                        </item>
+                        <item row="6" column="0">
                             <widget class="xqt::statusEntry" name="entryNumCycles"/>
                         </item>
-                        <item row="5" column="1" alignment="Qt::AlignLeft">
+                        <item row="6" column="1" alignment="Qt::AlignLeft">
                             <widget class="QLabel" name="labelNumCyclesHint">
                                 <property name="text">
                                     <string>(0 for infinite)</string>
                                 </property>
                             </widget>
                         </item>
-                        <item row="6" column="0">
+                        <item row="7" column="0">
                             <widget class="xqt::statusEntry" name="entryFramesPerPos"/>
                         </item>
-                        <item row="6" column="1" alignment="Qt::AlignLeft">
+                        <item row="7" column="1" alignment="Qt::AlignLeft">
                             <widget class="QLabel" name="labelFramesHint">
                                 <property name="text">
                                     <string>(0 = use time)</string>
                                 </property>
                             </widget>
                         </item>
-                        <item row="7" column="0">
+                        <item row="8" column="0">
                             <widget class="xqt::statusEntry" name="entryTimePerPos"/>
                         </item>
-                        <item row="7" column="1" alignment="Qt::AlignLeft">
+                        <item row="8" column="1" alignment="Qt::AlignLeft">
                             <widget class="QLabel" name="labelTimeHint">
                                 <property name="text">
                                     <string>(if frames = 0)</string>

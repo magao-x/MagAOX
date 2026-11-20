@@ -1,9 +1,11 @@
 /** \file polarimetry.hpp
- * \brief Polarimetry control widget: HWP/QWP tracking, linear stages, and the hwpSequencer.
+ * \brief Polarimetry control widget: HWP/QWP tracking, QWP pupil tracking, linear stages, and the hwpSequencer.
  */
 
 #ifndef polarimetry_hpp
 #define polarimetry_hpp
+
+#include <cmath>
 
 #include <QStringList>
 #include <QStyle>
@@ -15,12 +17,14 @@
 namespace xqt
 {
 
-/// Polarimetry panel for `hwptrack`, `qwptrack`, the polarimetry stages, and `hwpsequence`.
+/// Polarimetry panel for `hwptrack`, `qwptrack`, `qwppupil`, the polarimetry stages, and `hwpsequence`.
 /**
  * Shows the HWP angles and the hwpSequencer status, and sends start, stop, last-cycle and
  * abort requests to `hwpsequence`. While `qwptrack` is tracking, the QWP fast-axis angles are shown
- * beside the QWP tracking slider. Sequence parameters other than `num_cycles` are locked
- * while sequencing, and `time_per_pos` is disabled in frames mode (`frames_per_pos` > 0).
+ * beside the QWP tracking slider. While `qwppupil` is tracking, the ttmperi voltage offsets it applies
+ * are shown beside the QWP pupil tracking slider, which may be toggled during a sequence. Sequence
+ * parameters other than `num_cycles` are locked while sequencing, and `time_per_pos` is disabled in
+ * frames mode (`frames_per_pos` > 0).
  */
 class polarimetry : public xWidget
 {
@@ -102,6 +106,24 @@ class polarimetry : public xWidget
 
     ///@}
 
+    /** \name qwppupil State
+     * @{
+     */
+
+    /// Whether `qwppupil.tracking` is On.
+    bool m_qwppupilTracking{ false };
+
+    /// Whether `qwppupil` is READY or OPERATING.
+    bool m_qwppupilFsmOk{ false };
+
+    /// Last `qwppupil.offset.v1`, the ttmperi axis 1 voltage applied relative to the baseline [V].
+    float m_qwppupilV1{ 0 };
+
+    /// Last `qwppupil.offset.v2`, the ttmperi axis 2 voltage applied relative to the baseline [V].
+    float m_qwppupilV2{ 0 };
+
+    ///@}
+
     /// Set or clear the bold font on a label.
     void setBold( QLabel *label, /**< [in] the label to change */
                   bool    onoff  /**< [in] true for bold */
@@ -125,6 +147,17 @@ class polarimetry : public xWidget
      * \returns the number of positions, or 0 if the list is empty or any entry is not a number.
      */
     static int countPositions( const std::string &positions /**< [in] the `hwpsequence.positions` text */ );
+
+    /// Format the ttmperi voltage offsets applied by `qwppupil` for the label beside its slider.
+    /**
+     * Each value has one decimal and an explicit sign (`+` or U+2212), and is left-padded with figure
+     * spaces to the width of a sign and three integer digits, so the text width stays constant.
+     *
+     * \returns the text, e.g. `ΔV1:   +1.2 V  ΔV2:  −12.4 V`
+     */
+    static QString pupilOffsetText( float v1, /**< [in] the ttmperi axis 1 offset [V] */
+                                    float v2  /**< [in] the ttmperi axis 2 offset [V] */
+    );
 
     /// Construct the panel and configure its child widgets.
     explicit polarimetry( QWidget        *Parent = 0,                /**< [in] the parent widget */
@@ -199,6 +232,7 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
     setXwFont( ui.hwpTrackingOffset );
     setXwFont( ui.labelHwpTracking );
     setXwFont( ui.labelQwpTracking );
+    setXwFont( ui.labelQwpPupilTracking );
     setXwFont( ui.hwpActualAngle );
     setXwFont( ui.hwpAngleName );
 
@@ -242,6 +276,9 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
     ui.labelQwpTracking->setVisible( false );
     ui.labelQwpTracking->setText( QString( "---" ) );
 
+    ui.labelQwpPupilTracking->setVisible( false );
+    ui.labelQwpPupilTracking->setText( QString( "---" ) );
+
     ui.labelQwpTrack->setText( QString( "qwptrack" ) );
     ui.qwpTrackFsm->device( "qwptrack" );
 
@@ -264,6 +301,9 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
 
     ui.comboHwpLin->setup( "stagepollin", "presetName", "", "HWP lin. stage", "" );
     ui.comboHwpLin->ctrlWidget( nullptr );
+
+    ui.sliderQwpPupilTracking->setup( "qwppupil", "tracking", "toggle", "QWP Pupil Tracking" );
+    ui.sliderQwpPupilTracking->setStretch( 0, 1, 3, true, false );
 
     ui.sliderQwpTracking->setup( "qwptrack", "tracking", "toggle", "QWP Tracking" );
     ui.sliderQwpTracking->setStretch( 0, 1, 3, true, false );
@@ -322,6 +362,10 @@ void polarimetry::subscribe()
     m_parent->addSubscriberProperty( this, "qwptrack", "qwp1" );
     m_parent->addSubscriberProperty( this, "qwptrack", "qwp2" );
 
+    m_parent->addSubscriberProperty( this, "qwppupil", "fsm" );
+    m_parent->addSubscriberProperty( this, "qwppupil", "tracking" );
+    m_parent->addSubscriberProperty( this, "qwppupil", "offset" );
+
     m_parent->addSubscriber( ui.hwptrackFsm );
     m_parent->addSubscriber( ui.hwpseqFsm );
     m_parent->addSubscriber( ui.stagePolRotFsm );
@@ -331,6 +375,7 @@ void polarimetry::subscribe()
     m_parent->addSubscriber( ui.entryHwpAngle );
     m_parent->addSubscriber( ui.sliderHwpTracking );
     m_parent->addSubscriber( ui.comboHwpLin );
+    m_parent->addSubscriber( ui.sliderQwpPupilTracking );
     m_parent->addSubscriber( ui.sliderQwpTracking );
     m_parent->addSubscriber( ui.comboQwpLin );
     m_parent->addSubscriber( ui.entryNumCycles );
@@ -359,6 +404,7 @@ void polarimetry::onConnect()
     ui.entryHwpAngle->onConnect();
     ui.sliderHwpTracking->onConnect();
     ui.comboHwpLin->onConnect();
+    ui.sliderQwpPupilTracking->onConnect();
     ui.sliderQwpTracking->onConnect();
     ui.comboQwpLin->onConnect();
     ui.entryNumCycles->onConnect();
@@ -368,6 +414,7 @@ void polarimetry::onConnect()
     ui.entryHwpAngle->setEnabled( true );
     ui.sliderHwpTracking->setEnabled( true );
     ui.comboHwpLin->setEnabled( true );
+    ui.sliderQwpPupilTracking->setEnabled( true );
     ui.sliderQwpTracking->setEnabled( true );
     ui.comboQwpLin->setEnabled( true );
     ui.entryNumCycles->setEnabled( true );
@@ -404,6 +451,7 @@ void polarimetry::onDisconnect()
     setBold( ui.hwpAngleName, false );
 
     ui.labelQwpTracking->setText( QString( "---" ) );
+    ui.labelQwpPupilTracking->setText( QString( "---" ) );
 
     ui.hwpPosIndex->setText( QString( "---" ) );
     ui.cycleNumStatus->setText( QString( "---" ) );
@@ -416,6 +464,7 @@ void polarimetry::onDisconnect()
     ui.entryHwpAngle->onDisconnect();
     ui.sliderHwpTracking->onDisconnect();
     ui.comboHwpLin->onDisconnect();
+    ui.sliderQwpPupilTracking->onDisconnect();
     ui.sliderQwpTracking->onDisconnect();
     ui.comboQwpLin->onDisconnect();
     ui.entryNumCycles->onDisconnect();
@@ -425,6 +474,7 @@ void polarimetry::onDisconnect()
     ui.entryHwpAngle->setEnabled( false );
     ui.sliderHwpTracking->setEnabled( false );
     ui.comboHwpLin->setEnabled( false );
+    ui.sliderQwpPupilTracking->setEnabled( false );
     ui.sliderQwpTracking->setEnabled( false );
     ui.comboQwpLin->setEnabled( false );
     ui.entryNumCycles->setEnabled( false );
@@ -598,6 +648,36 @@ void polarimetry::handleSetProperty( const pcf::IndiProperty &ipRecv )
             }
         }
     }
+    else if( ipRecv.getDevice() == "qwppupil" )
+    {
+        if( ipRecv.getName() == "fsm" )
+        {
+            if( ipRecv.find( "state" ) )
+            {
+                std::string fsmString = ipRecv["state"].get<std::string>();
+                m_qwppupilFsmOk       = fsmString == "READY" || fsmString == "OPERATING";
+            }
+        }
+        else if( ipRecv.getName() == "tracking" )
+        {
+            if( ipRecv.find( "toggle" ) )
+            {
+                m_qwppupilTracking = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+            }
+        }
+        else if( ipRecv.getName() == "offset" )
+        {
+            if( ipRecv.find( "v1" ) )
+            {
+                m_qwppupilV1 = ipRecv["v1"].get<float>();
+            }
+
+            if( ipRecv.find( "v2" ) )
+            {
+                m_qwppupilV2 = ipRecv["v2"].get<float>();
+            }
+        }
+    }
     else
     {
         return;
@@ -633,6 +713,9 @@ void polarimetry::updateGUI()
     lockSlider( ui.sliderHwpTracking, m_sequencing || !m_hwptrackFsmOk );
     lockSlider( ui.sliderQwpTracking, m_sequencing || !m_qwptrackFsmOk );
 
+    // pupil tracking may be toggled while sequencing
+    lockSlider( ui.sliderQwpPupilTracking, !m_qwppupilFsmOk );
+
     ui.sliderHwpTracking->setLabelEnabled( !m_sequencing && m_hwptrackFsmOk );
     ui.labelHwpTracking->setVisible( m_hwpTracking );
     ui.labelHwpTracking->setEnabled( !m_sequencing && m_hwptrackFsmOk );
@@ -643,7 +726,7 @@ void polarimetry::updateGUI()
     if( m_qwptrackFsmOk )
     {
         // pad with figure spaces (digit width) so the label width is constant for angles in [0, 180)
-        ui.labelQwpTracking->setText( QString( "QWP1 %1°  QWP2 %2°" )
+        ui.labelQwpTracking->setText( QString( "QWP1: %1°  QWP2: %2°" )
                                           .arg( m_qwp1Angle, 3, 'f', 0, QChar( 0x2007 ) )
                                           .arg( m_qwp2Angle, 3, 'f', 0, QChar( 0x2007 ) ) );
     }
@@ -656,6 +739,19 @@ void polarimetry::updateGUI()
     ui.labelQwpTracking->setEnabled( !m_sequencing && m_qwptrackFsmOk );
 
     ui.comboQwpLin->setEnabled( !m_sequencing );
+
+    ui.sliderQwpPupilTracking->setLabelEnabled( m_qwppupilFsmOk );
+
+    if( m_qwppupilFsmOk )
+    {
+        ui.labelQwpPupilTracking->setText( pupilOffsetText( m_qwppupilV1, m_qwppupilV2 ) );
+    }
+    else
+    {
+        ui.labelQwpPupilTracking->setText( QString( "---" ) );
+    }
+
+    ui.labelQwpPupilTracking->setVisible( m_qwppupilTracking );
 
     // num_cycles may be changed during a sequence, it is checked at the end of each cycle
     ui.entryNumCycles->setEnabled( m_hwpseqFsmOk );
@@ -831,6 +927,21 @@ int polarimetry::countPositions( const std::string &positions )
     }
 
     return n;
+}
+
+QString polarimetry::pupilOffsetText( float v1, float v2 )
+{
+    auto fmt = []( float v )
+    {
+        QString num = QString::number( std::fabs( v ), 'f', 1 );
+
+        // a value that rounds to zero is shown as +0.0, not -0.0
+        QChar sign = ( v < 0 && num.toDouble() != 0 ) ? QChar( 0x2212 ) : QChar( '+' );
+
+        return ( sign + num ).rightJustified( 6, QChar( 0x2007 ) );
+    };
+
+    return QString( "ΔV1: %1 V  ΔV2: %2 V" ).arg( fmt( v1 ) ).arg( fmt( v2 ) );
 }
 
 } //namespace xqt
