@@ -1,5 +1,6 @@
 /** \file qwpTracker_test.cpp
- * \brief Catch2 tests for the qwpTracker app: angle mapping, tracking law, modes, gating and FSM.
+ * \brief Catch2 tests for the qwpTracker app: angle mapping, tracking-law tables, filter selection, modes, gating and
+ * FSM.
  *
  * \ingroup qwpTracker_files
  */
@@ -30,18 +31,30 @@ using MagAOX::app::stateCodes;
 class qwpTracker_test : public qwpTracker
 {
   public:
+    using qwpTracker::computeTargets;
+    using qwpTracker::m_filter;
+    using qwpTracker::m_filterDevName;
     using qwpTracker::m_haveK;
+    using qwpTracker::m_indiP_law;
     using qwpTracker::m_k;
     using qwpTracker::m_kDevName;
+    using qwpTracker::m_lawDir;
+    using qwpTracker::m_laws;
     using qwpTracker::m_qwp;
     using qwpTracker::m_tracking;
 
-    /// Construct with a scratch directory for telemetry.
+    /// Construct with a scratch directory for telemetry and the law tables.
+    /** Writes a law for filter `r` that interpolates to `qwp1 = 2k`, `qwp2 = -2k` over K-mirror -90 to 90.
+     */
     explicit qwpTracker_test( const std::string &name /**< [in] app name and scratch directory */ )
     {
         m_root = "/tmp/qwpTracker_test/" + name;
         std::filesystem::remove_all( m_root );
         std::filesystem::create_directories( m_root + "/telem" );
+        std::filesystem::create_directories( m_root + "/calib/qwptrack" );
+
+        m_calibDir = m_root + "/calib";
+        writeLaw( "r", "# linear law\n-90,-180,180\n90,180,-180\n" );
 
         m_configName = name;
         m_basePath   = m_root;
@@ -82,6 +95,37 @@ class qwpTracker_test : public qwpTracker
         config.readConfig( path );
 
         return loadConfigImpl( config );
+    }
+
+    /// Write a law table for a filter into the calib directory.
+    void writeLaw( const std::string &filter, /**< [in] filter name */
+                   const std::string &text /**< [in] table contents */ )
+    {
+        std::ofstream( m_calibDir + "/qwptrack/qwp_law_" + filter + ".csv" ) << text;
+    }
+
+    /// Remove all law tables.
+    void clearLaws()
+    {
+        std::filesystem::remove_all( m_calibDir + "/qwptrack" );
+        std::filesystem::create_directories( m_calibDir + "/qwptrack" );
+    }
+
+    /// Report the filter wheel selection.
+    int filter( const std::string &sel,   /**< [in] the selected filter, or "" for none */
+                bool               busy = false /**< [in] whether the wheel is moving */ )
+    {
+        pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+        ip.setDevice( m_filterDevName );
+        ip.setName( "filterName" );
+        ip.setState( busy ? pcf::IndiProperty::Busy : pcf::IndiProperty::Idle );
+
+        for( const std::string f : { "r", "i", "z", "open" } )
+        {
+            ip.add( pcf::IndiElement( f, ( f == sel ) ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+        }
+
+        return setCallBack_m_indiP_filterName( ip );
     }
 
     /// Report a K-mirror position.
@@ -212,20 +256,134 @@ TEST_CASE( "qwpTracker chooses the short way across 0/360", "[qwpTracker]" )
     REQUIRE( qwpTracker::fastToStage( 20, 10, -1, 180 ) == Approx( 170 ) );
 }
 
-/// The placeholder tracking law is pinned so a change to it is deliberate.
+/// Law tables are loaded from the calib directory, named by filter, and validated.
+/** A missing directory or no tables starts with no laws; a malformed table fails startup.
+ *
+ * \ingroup qwpTracker_unit_test
+ */
+TEST_CASE( "qwpTracker loads tracking-law tables", "[qwpTracker]" )
+{
+    // clang-format off
+    #ifdef QWPTRACKER_TEST_DOXYGEN_REF
+    qwpTracker::loadLaws(); qwpTracker::appStartup();
+    #endif
+    // clang-format on
+
+    qwpTracker_test app( "laws" );
+
+    SECTION( "valid tables load, keyed by filter, ignoring other files" )
+    {
+        app.writeLaw( "i", "-10,170,0\n0,190,10\n" );
+        std::ofstream( app.calibDir() + "/qwptrack/notes.txt" ) << "x";
+
+        REQUIRE( app.startup() == 0 );
+        REQUIRE( app.m_laws.size() == 2 );
+        REQUIRE( app.m_laws.count( "r" ) == 1 );
+        REQUIRE( app.m_laws.at( "i" ).imr.size() == 2 );
+        REQUIRE( app.m_laws.at( "i" ).qwp[0][1] == Approx( 190 ) );
+    }
+
+    SECTION( "no tables starts with no laws" )
+    {
+        app.clearLaws();
+        REQUIRE( app.startup() == 0 );
+        REQUIRE( app.m_laws.empty() );
+    }
+
+    SECTION( "no directory starts with no laws" )
+    {
+        app.m_lawDir = "missing";
+        REQUIRE( app.startup() == 0 );
+        REQUIRE( app.m_laws.empty() );
+    }
+
+    SECTION( "a single row fails" )
+    {
+        app.writeLaw( "i", "0,1,2\n" );
+        REQUIRE( app.startup() < 0 );
+    }
+
+    SECTION( "non-increasing K-mirror angles fail" )
+    {
+        app.writeLaw( "i", "0,1,2\n0,2,3\n" );
+        REQUIRE( app.startup() < 0 );
+    }
+}
+
+/// The law interpolates linearly in the unwrapped QWP angles and refuses K-mirror angles outside the table.
 /**
  * \ingroup qwpTracker_unit_test
  */
-TEST_CASE( "qwpTracker dummy tracking law", "[qwpTracker]" )
+TEST_CASE( "qwpTracker interpolates the tracking law", "[qwpTracker]" )
 {
-    float k = GENERATE( 0.0f, 12.5f, -40.0f );
+    // clang-format off
+    #ifdef QWPTRACKER_TEST_DOXYGEN_REF
+    qwpTracker::computeTargets(); qwpTracker::filterUpdate();
+    #endif
+    // clang-format on
 
-    float q1;
-    float q2;
-    qwpTracker::computeTargets( k, q1, q2 );
+    qwpTracker_test app( "interp" );
+    app.writeLaw( "i", "-10,170,0\n0,190,10\n10,200,-20\n" );
+    REQUIRE( app.startup() == 0 );
 
-    REQUIRE( q1 == Approx( 2 * k ) );
-    REQUIRE( q2 == Approx( -2 * k ) );
+    float q1 = -1;
+    float q2 = -1;
+
+    // no filter selected
+    REQUIRE_FALSE( app.computeTargets( 0, q1, q2 ) );
+
+    app.filter( "i" );
+
+    // grid points
+    REQUIRE( app.computeTargets( -10, q1, q2 ) );
+    REQUIRE( q1 == Approx( 170 ) );
+    REQUIRE( q2 == Approx( 0 ) );
+
+    REQUIRE( app.computeTargets( 10, q1, q2 ) );
+    REQUIRE( q1 == Approx( 200 ) );
+    REQUIRE( q2 == Approx( -20 ) );
+
+    // midpoints, continuous across 180 (QWP1) and 0 (QWP2)
+    REQUIRE( app.computeTargets( -5, q1, q2 ) );
+    REQUIRE( q1 == Approx( 180 ) );
+    REQUIRE( q2 == Approx( 5 ) );
+
+    REQUIRE( app.computeTargets( 7.5, q1, q2 ) );
+    REQUIRE( q1 == Approx( 197.5 ) );
+    REQUIRE( q2 == Approx( -12.5 ) );
+
+    // outside the table
+    REQUIRE_FALSE( app.computeTargets( -10.01, q1, q2 ) );
+    REQUIRE_FALSE( app.computeTargets( 10.01, q1, q2 ) );
+}
+
+/// The selected filter follows the wheel: one `On` element while not moving, otherwise none.
+/**
+ * \ingroup qwpTracker_unit_test
+ */
+TEST_CASE( "qwpTracker follows the filter wheel", "[qwpTracker]" )
+{
+    // clang-format off
+    #ifdef QWPTRACKER_TEST_DOXYGEN_REF
+    qwpTracker::setCallBack_m_indiP_filterName(pcf::IndiProperty()); qwpTracker::filterUpdate();
+    #endif
+    // clang-format on
+
+    qwpTracker_test app( "filter" );
+    REQUIRE( app.startup() == 0 );
+    REQUIRE( app.m_indiP_law["current"].get() == "none" );
+
+    app.filter( "r" );
+    REQUIRE( app.m_filter == "r" );
+
+    app.filter( "r", true );
+    REQUIRE( app.m_filter.empty() );
+
+    app.filter( "open" );
+    REQUIRE( app.m_filter == "open" );
+
+    app.filter( "" );
+    REQUIRE( app.m_filter.empty() );
 }
 
 /// The tracker FSM state derived from tracking and the two stage states.
@@ -271,6 +429,8 @@ TEST_CASE( "qwpTracker configuration", "[qwpTracker]" )
         REQUIRE( app.m_qwp[0].sign == 1 );
         REQUIRE( app.m_qwp[1].sign == -1 );
         REQUIRE( app.m_kDevName == "stagek" );
+        REQUIRE( app.m_filterDevName == "fwsci1" );
+        REQUIRE( app.m_lawDir == "qwptrack" );
     }
 
     SECTION( "overrides" )
@@ -278,7 +438,9 @@ TEST_CASE( "qwpTracker configuration", "[qwpTracker]" )
         qwpTracker_test app( "config_overrides" );
         REQUIRE( app.loadConfigFile( "[qwp1]\nzero=12.5\nsign=-1\ndevName=q1\n"
                                      "[qwp2]\nzero=200\nsign=1\ndevName=q2\n"
-                                     "[k]\ndevName=kk\n" ) == 0 );
+                                     "[k]\ndevName=kk\n"
+                                     "[filter]\ndevName=fw\n"
+                                     "[law]\ndir=laws\n" ) == 0 );
 
         REQUIRE( app.m_qwp[0].zero == Approx( 12.5 ) );
         REQUIRE( app.m_qwp[0].sign == -1 );
@@ -287,6 +449,8 @@ TEST_CASE( "qwpTracker configuration", "[qwpTracker]" )
         REQUIRE( app.m_qwp[1].sign == 1 );
         REQUIRE( app.m_qwp[1].devName == "q2" );
         REQUIRE( app.m_kDevName == "kk" );
+        REQUIRE( app.m_filterDevName == "fw" );
+        REQUIRE( app.m_lawDir == "laws" );
     }
 
     SECTION( "invalid sign" )
@@ -354,6 +518,7 @@ TEST_CASE( "qwpTracker tracks the K-mirror", "[qwpTracker]" )
 
     qwpTracker_test app( "tracking" );
     REQUIRE( app.startup() == 0 );
+    app.filter( "r" );
 
     SECTION( "startup sends nothing and tracking is off" )
     {
@@ -425,6 +590,46 @@ TEST_CASE( "qwpTracker tracks the K-mirror", "[qwpTracker]" )
         REQUIRE( app.m_qwp[1].lastSent == Approx( 10 ) );
     }
 
+    SECTION( "a filter without a law holds, and a law becoming available re-targets without a K update" )
+    {
+        app.stagesReady( 0, 0 );
+        app.kPos( 5 );
+        app.track( true );
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+
+        app.filter( "open" );
+        app.kPos( 6 );
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+        REQUIRE( app.m_qwp[0].fastTgt == Approx( 10 ) );
+
+        // moving wheel also holds
+        app.filter( "r", true );
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+
+        app.filter( "r" );
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 2 );
+        REQUIRE( app.m_qwp[0].lastSent == Approx( 12 ) );
+    }
+
+    SECTION( "a K-mirror angle outside the table holds" )
+    {
+        app.stagesReady( 0, 0 );
+        app.kPos( 5 );
+        app.track( true );
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+
+        app.kPos( 95 );
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+
+        app.kPos( 6 );
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 2 );
+    }
+
     SECTION( "stopping tracking does not move the stages" )
     {
         app.stagesReady( 0, 0 );
@@ -442,6 +647,27 @@ TEST_CASE( "qwpTracker tracks the K-mirror", "[qwpTracker]" )
         REQUIRE( app.state() == stateCodes::READY );
     }
 }
+
+/// A law table whose unwrapped QWP angles cross 180 is tracked through the fold.
+/**
+ * \ingroup qwpTracker_unit_test
+ */
+TEST_CASE( "qwpTracker tracks a wrapped law through 180", "[qwpTracker]" )
+{
+        qwpTracker_test app( "tracking_wrapped" );
+        app.writeLaw( "i", "-10,170,0\n0,190,10\n" );
+        REQUIRE( app.startup() == 0 );
+        app.filter( "i" );
+        app.stagesReady( 175, 0 );
+        app.kPos( -5 );
+        app.track( true );
+
+        // qwp1 = 180 -> fast 0, stage 0 or 180, nearest to 175 is 180.  qwp2 = 5, sign -1 -> 355 or 175, nearest 355.
+        REQUIRE( app.m_qwp[0].fastTgt == Approx( 0 ) );
+        REQUIRE( app.m_qwp[0].lastSent == Approx( 180 ) );
+        REQUIRE( app.m_qwp[1].fastTgt == Approx( 5 ) );
+        REQUIRE( app.m_qwp[1].lastSent == Approx( 355 ) );
+    }
 
 /// Manual targets are rejected while tracking and sent immediately otherwise.
 /**

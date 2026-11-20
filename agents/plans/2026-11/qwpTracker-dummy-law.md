@@ -157,7 +157,7 @@ Branch `ml/qwpTracker` (exists, follows `<username>/<feature>`). Header-only app
 8. Provide an example `qwptrack.conf` to the user (not committed here; config repo).
 
 ## Follow-up and Edge Cases
-- Real tracking law replaces `computeTargets` body (and may need telescope inputs, e.g. `tcsi.teldata`).
+- Real tracking law replaces `computeTargets` body: done in `agents/plans/2026-11/qwpTracker-tracking-law.md`.
 - Handbook page `handbook/operating/software/apps/qwpTracker.html` lives outside this repo.
 - If the two halves of a mount turn out not to be equivalent, switch decision 6 to a single-half wrap.
 - External direct stage moves are not corrected until the next `stagek` change (decision 10).

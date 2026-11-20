@@ -35,6 +35,7 @@ class qwpTracker_test : public qwpTracker
         XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_qwp1Fsm, stageqwprot1, fsm );
         XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_qwp2Position, stageqwprot2, position );
         XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_qwp2Fsm, stageqwprot2, fsm );
+        XWCTEST_SETUP_INDI_ARB_PROP( m_indiP_filterName, fwsci1, filterName );
     }
 };
 /// \endcond
@@ -55,6 +56,7 @@ TEST_CASE( "qwpTracker INDI callbacks validate device and property names", "[qwp
     qwpTracker::setCallBack_m_indiP_qwp1Fsm( pcf::IndiProperty() );
     qwpTracker::setCallBack_m_indiP_qwp2Position( pcf::IndiProperty() );
     qwpTracker::setCallBack_m_indiP_qwp2Fsm( pcf::IndiProperty() );
+    qwpTracker::setCallBack_m_indiP_filterName( pcf::IndiProperty() );
     #endif
     // clang-format on
 
@@ -66,6 +68,7 @@ TEST_CASE( "qwpTracker INDI callbacks validate device and property names", "[qwp
     XWCTEST_INDI_SET_CALLBACK( qwpTracker, m_indiP_qwp1Fsm, stageqwprot1, fsm );
     XWCTEST_INDI_SET_CALLBACK( qwpTracker, m_indiP_qwp2Position, stageqwprot2, position );
     XWCTEST_INDI_SET_CALLBACK( qwpTracker, m_indiP_qwp2Fsm, stageqwprot2, fsm );
+    XWCTEST_INDI_SET_CALLBACK( qwpTracker, m_indiP_filterName, fwsci1, filterName );
 }
 
 } // namespace qwpTrackerTest

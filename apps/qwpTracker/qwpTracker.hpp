@@ -11,6 +11,12 @@
 #include "../../magaox_git_version.h"
 
 #include <cmath>
+#include <filesystem>
+#include <map>
+
+#include <mx/ioutils/fileUtils.hpp>
+#include <mx/ioutils/readColumns.hpp>
+#include <mx/math/gslInterpolator.hpp>
 
 /** \defgroup qwpTracker
  * \brief The MagAO-X application to track pupil rotation with the dual rotating QWP compensator.
@@ -40,6 +46,13 @@ namespace app
  *
  * While tracking, targets follow `computeTargets()` on every K-mirror update.  When not tracking, targets are set
  * manually through the `qwp1` and `qwp2` properties.
+ *
+ * The tracking law is a per-filter lookup table of fast-axis angles against K-mirror angle, read at startup from
+ * `<calib>/<law.dir>/qwp_law_<filter>.csv`, one file per filter named after the filter wheel's (default `fwsci1`)
+ * filter names.  Each file has comma-separated columns `imr, qwp1, qwp2` in degrees, with `imr` the K-mirror
+ * `position.current` (strictly increasing) and the QWP angles unwrapped so they can be linearly interpolated; lines
+ * starting with `#` are comments.  The tables are produced from the polarimetric calibration and kept in the calib
+ * repo.  While the filter has no law, the wheel is moving, or the K-mirror is outside the table, tracking holds.
  *
  * \ingroup qwpTracker
  */
@@ -84,6 +97,28 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
         pcf::IndiProperty cmd; ///< The outbound `position.target` command property for the stage.
     };
 
+    /// The tracking law for one filter, loaded from the calib directory.
+    /** The interpolators keep pointers into the vectors, so a law is built in place and never copied or moved.
+     */
+    struct qwpLaw
+    {
+        std::vector<double> imr; ///< The K-mirror angles of the table rows, strictly increasing, in degrees.
+
+        std::vector<double> qwp[2]; ///< The QWP1 and QWP2 fast-axis angles at each `imr`, unwrapped, in degrees.
+
+        /// Linear interpolators of `qwp[n]` against `imr`.
+        mx::math::gslInterpolator<mx::math::gsl_interp_linear<double>> terp[2];
+
+        /// Default c'tor.
+        qwpLaw() = default;
+
+        /// Deleted copy c'tor, since the interpolators hold pointers into the vectors.
+        qwpLaw( const qwpLaw & ) = delete;
+
+        /// Deleted assignment, since the interpolators hold pointers into the vectors.
+        qwpLaw &operator=( const qwpLaw & ) = delete;
+    };
+
   protected:
     /** \name Configurable Parameters
      *@{
@@ -93,7 +128,17 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
 
     std::string m_kDevName{ "stagek" }; ///< The device name of the K-mirror stage providing `position.current`.
 
+    std::string m_filterDevName{ "fwsci1" }; ///< The device name of the filter wheel selecting the tracking law.
+
+    std::string m_lawDir{ "qwptrack" }; ///< The directory, relative to the calib directory, of the law tables.
+
     ///@}
+
+    std::map<std::string, qwpLaw> m_laws; ///< The tracking laws loaded at startup, keyed by filter name.
+
+    std::string m_filter; ///< The filter selected on the filter wheel, empty while moving or unknown.
+
+    bool m_lawOK{ true }; ///< Whether the last tracking update had a law, so holds are logged once.
 
     bool m_tracking{ false }; ///< True when the QWPs follow the tracking law.
 
@@ -101,7 +146,7 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
 
     bool m_haveK{ false }; ///< True once at least one K-mirror angle has been received.
 
-    bool m_kUpdated{ false }; ///< True when a K-mirror angle has arrived that the tracking law has not yet used.
+    bool m_recompute{ false }; ///< True when a K-mirror angle or filter change has not yet been applied by the law.
 
     float m_telemQwp1{ 0 }; ///< The QWP1 fast-axis angle in the last telemetry record.
 
@@ -150,12 +195,23 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
      *@{
      */
 
-    /// The tracking law: compute the QWP fast-axis targets from the K-mirror angle.
-    /** This is a placeholder law, `qwp1 = 2k` and `qwp2 = -2k`, to be replaced by the real law.
+    /// Load and validate every `qwp_law_<filter>.csv` table in the law directory.
+    /** A missing directory or no tables is not an error: tracking then holds.
+     *
+     * \returns 0 on success, including when no tables are found
+     * \returns -1 if a table cannot be read or is invalid
      */
-    static void computeTargets( float  k,    /**< [in] the K-mirror angle, in degrees */
-                                float &qwp1, /**< [out] the QWP1 fast-axis target, in degrees */
-                                float &qwp2 /**< [out] the QWP2 fast-axis target, in degrees */ );
+    int loadLaws();
+
+    /// The tracking law: interpolate the QWP fast-axis targets for the selected filter at a K-mirror angle.
+    /** The caller must hold `m_indiMutex`.
+     *
+     * \returns true if the targets were computed
+     * \returns false if the selected filter has no law or `k` is outside its table
+     */
+    bool computeTargets( float  k,    /**< [in] the K-mirror angle, in degrees */
+                         float &qwp1, /**< [out] the QWP1 fast-axis target, unwrapped, in degrees */
+                         float &qwp2 /**< [out] the QWP2 fast-axis target, unwrapped, in degrees */ );
 
     /// Wrap an angle to [0, 360).
     /**
@@ -236,6 +292,13 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
     int stageStateUpdate( int                      n, /**< [in] the QWP index, 0 or 1 */
                           const pcf::IndiProperty &ipRecv /**< [in] the received property */ );
 
+    /// Handle a filter wheel `filterName` update.
+    /** The selected filter is the single `On` element while the property is not busy, otherwise none.
+     *
+     * \returns 0 always
+     */
+    int filterUpdate( const pcf::IndiProperty &ipRecv /**< [in] the received property */ );
+
     /// Handle a manual fast-axis target request.
     /** Rejected while tracking.
      *
@@ -260,6 +323,10 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
 
     pcf::IndiProperty m_indiP_qwp2Fsm; ///< The subscribed QWP2 stage `fsm` property.
 
+    pcf::IndiProperty m_indiP_filterName; ///< The subscribed filter wheel `filterName` property.
+
+    pcf::IndiProperty m_indiP_law; ///< The filter name of the active tracking law, or `none`.
+
     pcf::IndiProperty m_indiP_tracking; ///< The INDI toggle used to enable or disable tracking.
 
     pcf::IndiProperty m_indiP_qwp1; ///< The QWP1 fast-axis angle, `current` and `target`, in degrees.
@@ -281,6 +348,9 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
 
     /// Handle QWP2 stage state updates.
     INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_qwp2Fsm );
+
+    /// Handle filter wheel selection updates.
+    INDI_SETCALLBACK_DECL( qwpTracker, m_indiP_filterName );
 
     /// Handle tracking toggle requests.
     INDI_NEWCALLBACK_DECL( qwpTracker, m_indiP_tracking );
@@ -376,6 +446,27 @@ void qwpTracker::setupConfig()
                 "string",
                 "The device name of the K-mirror stage.  Default is 'stagek'" );
 
+    config.add( "filter.devName",
+                "",
+                "filter.devName",
+                argType::Required,
+                "filter",
+                "devName",
+                false,
+                "string",
+                "The device name of the filter wheel selecting the tracking law.  Default is 'fwsci1'" );
+
+    config.add( "law.dir",
+                "",
+                "law.dir",
+                argType::Required,
+                "law",
+                "dir",
+                false,
+                "string",
+                "The directory, relative to the calib directory, holding the qwp_law_<filter>.csv tracking law "
+                "tables.  Default is 'qwptrack'" );
+
     TELEMETER_SETUP_CONFIG( config );
 }
 
@@ -396,6 +487,8 @@ int qwpTracker::loadConfigImpl( mx::app::appConfigurator &_config )
     }
 
     _config( m_kDevName, "k.devName" );
+    _config( m_filterDevName, "filter.devName" );
+    _config( m_lawDir, "law.dir" );
 
     TELEMETER_LOAD_CONFIG( _config );
 
@@ -412,6 +505,11 @@ void qwpTracker::loadConfig()
 
 int qwpTracker::appStartup()
 {
+    if( loadLaws() < 0 )
+    {
+        return -1;
+    }
+
     REG_INDI_SETPROP( m_indiP_stagek, m_kDevName, "position" );
 
     REG_INDI_SETPROP( m_indiP_qwp1Position, m_qwp[0].devName, "position" );
@@ -421,6 +519,8 @@ int qwpTracker::appStartup()
     REG_INDI_SETPROP( m_indiP_qwp2Position, m_qwp[1].devName, "position" );
 
     REG_INDI_SETPROP( m_indiP_qwp2Fsm, m_qwp[1].devName, "fsm" );
+
+    REG_INDI_SETPROP( m_indiP_filterName, m_filterDevName, "filterName" );
 
     for( auto &q : m_qwp )
     {
@@ -435,6 +535,18 @@ int qwpTracker::appStartup()
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_qwp1, "qwp1", -360, 360, 1e-3, "%g", "QWP1 fast axis", "" );
 
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_qwp2, "qwp2", -360, 360, 1e-3, "%g", "QWP2 fast axis", "" );
+
+    if( createROIndiText( m_indiP_law, "law", "current", "Tracking Law", "", "Filter" ) < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__ } );
+    }
+
+    m_indiP_law["current"].set( "none" );
+
+    if( registerIndiPropertyReadOnly( m_indiP_law ) < 0 )
+    {
+        return log<software_critical, -1>( { __FILE__, __LINE__ } );
+    }
 
     TELEMETER_APP_STARTUP;
 
@@ -459,10 +571,93 @@ int qwpTracker::appShutdown()
     return 0;
 }
 
-void qwpTracker::computeTargets( float k, float &qwp1, float &qwp2 )
+int qwpTracker::loadLaws()
 {
-    qwp1 = 2 * k;
-    qwp2 = -2 * k;
+    m_laws.clear();
+
+    std::string dir = m_calibDir + "/" + m_lawDir;
+
+    std::vector<std::string> files;
+
+    if( std::filesystem::is_directory( dir ) &&
+        mx::ioutils::getFileNames( files, dir, "qwp_law_", "", ".csv" ) != mx::error_t::noerror )
+    {
+        return log<software_critical, -1>( "error listing tracking laws in " + dir );
+    }
+
+    for( const auto &file : files )
+    {
+        std::string filter = std::filesystem::path( file ).stem().string().substr( std::string( "qwp_law_" ).size() );
+
+        qwpLaw &law = m_laws[filter];
+
+        if( mx::ioutils::readColumns<mx::ioutils::readColCommaDelim>( file, law.imr, law.qwp[0], law.qwp[1] ) !=
+            mx::error_t::noerror )
+        {
+            return log<software_critical, -1>( "error reading tracking law " + file );
+        }
+
+        if( law.imr.size() != law.qwp[0].size() || law.imr.size() != law.qwp[1].size() || law.imr.size() < 2 )
+        {
+            return log<software_critical, -1>( "tracking law needs at least two complete rows in " + file );
+        }
+
+        for( size_t n = 0; n < law.imr.size(); ++n )
+        {
+            if( !std::isfinite( law.imr[n] ) || !std::isfinite( law.qwp[0][n] ) || !std::isfinite( law.qwp[1][n] ) )
+            {
+                return log<software_critical, -1>( "non-finite value at row " + std::to_string( n ) + " in " + file );
+            }
+
+            if( n > 0 && law.imr[n] <= law.imr[n - 1] )
+            {
+                return log<software_critical, -1>( "K-mirror angles must be strictly increasing in " + file );
+            }
+        }
+
+        try
+        {
+            law.terp[0].setup( law.imr, law.qwp[0] );
+            law.terp[1].setup( law.imr, law.qwp[1] );
+        }
+        catch( const std::exception &e )
+        {
+            return log<software_critical, -1>( "exception setting up interpolators for " + file + ": " + e.what() );
+        }
+
+        log<text_log>( "read tracking law for filter " + filter + " from " + file + ": " +
+                       std::to_string( law.imr.size() ) + " rows, K-mirror " + std::to_string( law.imr.front() ) +
+                       " to " + std::to_string( law.imr.back() ) );
+    }
+
+    if( m_laws.empty() )
+    {
+        log<text_log>( "no tracking laws found in " + dir + ", tracking will hold", logPrio::LOG_WARNING );
+    }
+
+    return 0;
+}
+
+bool qwpTracker::computeTargets( float k, float &qwp1, float &qwp2 )
+{
+    auto it = m_laws.find( m_filter );
+
+    if( it == m_laws.end() )
+    {
+        return false;
+    }
+
+    qwpLaw &law = it->second;
+
+    if( k < law.imr.front() || k > law.imr.back() )
+    {
+        return false;
+    }
+
+    qwp1 = law.terp[0]( k );
+    qwp2 = law.terp[1]( k );
+
+    return true;
 }
 
 float qwpTracker::wrap360( float deg )
@@ -568,13 +763,35 @@ int qwpTracker::updateStages()
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
-        if( m_tracking && m_kUpdated )
+        if( m_tracking && m_recompute )
         {
-            float law[2];
-            computeTargets( m_k, law[0], law[1] );
-            m_kUpdated = false;
+            m_recompute = false;
 
-            for( int n = 0; n < 2; ++n )
+            float law[2];
+            bool  ok = computeTargets( m_k, law[0], law[1] );
+
+            if( ok != m_lawOK )
+            {
+                m_lawOK = ok;
+
+                if( !ok && m_laws.count( m_filter ) == 0 )
+                {
+                    log<text_log>( "holding QWPs: no tracking law for filter '" + m_filter + "'",
+                                   logPrio::LOG_WARNING );
+                }
+                else if( !ok )
+                {
+                    log<text_log>( "holding QWPs: K-mirror " + std::to_string( m_k ) + " outside the tracking law for " +
+                                       m_filter,
+                                   logPrio::LOG_WARNING );
+                }
+                else
+                {
+                    log<text_log>( "resumed QWP tracking with the law for filter " + m_filter );
+                }
+            }
+
+            for( int n = 0; ok && n < 2; ++n )
             {
                 m_qwp[n].fastTgt = fold180( law[n] );
                 m_qwp[n].pending = true;
@@ -705,6 +922,52 @@ int qwpTracker::stageStateUpdate( int n, const pcf::IndiProperty &ipRecv )
     return 0;
 }
 
+int qwpTracker::filterUpdate( const pcf::IndiProperty &ipRecv )
+{
+    std::string filter;
+
+    if( ipRecv.getState() != pcf::IndiProperty::Busy )
+    {
+        int nOn = 0;
+
+        for( const auto &el : ipRecv.getElements() )
+        {
+            if( el.second.getSwitchState() == pcf::IndiElement::On )
+            {
+                filter = el.first;
+                ++nOn;
+            }
+        }
+
+        if( nOn != 1 )
+        {
+            filter.clear();
+        }
+    }
+
+    std::string law;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        if( filter == m_filter )
+        {
+            return 0;
+        }
+
+        m_filter    = filter;
+        m_recompute = m_haveK;
+
+        law = ( m_laws.count( filter ) > 0 ) ? filter : "none";
+
+        updateIfChanged( m_indiP_law, "current", law );
+    } // mutex scope
+
+    log<text_log>( m_filterDevName + " filter " + ( filter.empty() ? "unknown" : filter ) + ", tracking law " + law );
+
+    return 0;
+}
+
 int qwpTracker::manualTarget( int n, const pcf::IndiProperty &ipRecv )
 {
     if( !ipRecv.find( "target" ) )
@@ -761,9 +1024,9 @@ INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_stagek )( const pcf::IndiProperty &ip
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    m_k        = k;
-    m_haveK    = true;
-    m_kUpdated = true;
+    m_k         = k;
+    m_haveK     = true;
+    m_recompute = true;
 
     return 0;
 }
@@ -796,6 +1059,13 @@ INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_qwp2Fsm )( const pcf::IndiProperty &i
     return stageStateUpdate( 1, ipRecv );
 }
 
+INDI_SETCALLBACK_DEFN( qwpTracker, m_indiP_filterName )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_filterName, ipRecv );
+
+    return filterUpdate( ipRecv );
+}
+
 INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_qwp1 )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_qwp1, ipRecv );
@@ -826,8 +1096,9 @@ INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_tracking )( const pcf::IndiProperty &
 
             updateSwitchIfChanged( m_indiP_tracking, "toggle", pcf::IndiElement::On, INDI_IDLE );
 
-            m_tracking = true;
-            m_kUpdated = m_haveK;
+            m_tracking  = true;
+            m_recompute = m_haveK;
+            m_lawOK     = true; // log a hold again on each start
 
             for( auto &q : m_qwp )
             {
@@ -845,8 +1116,8 @@ INDI_NEWCALLBACK_DEFN( qwpTracker, m_indiP_tracking )( const pcf::IndiProperty &
 
         updateSwitchIfChanged( m_indiP_tracking, "toggle", pcf::IndiElement::Off, INDI_IDLE );
 
-        m_tracking = false;
-        m_kUpdated = false;
+        m_tracking  = false;
+        m_recompute = false;
 
         for( int n = 0; n < 2; ++n )
         {
