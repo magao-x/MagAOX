@@ -44,8 +44,9 @@ namespace app
  * \f[
  *  s_{x,y}(\phi_1,\phi_2) = \sum_j c_j \cos(a_j\phi_1 + b_j\phi_2) + s_j \sin(a_j\phi_1 + b_j\phi_2),
  * \f]
- * in camwfs pixels.  The offset is \f$\Delta(\phi) = s(\phi) - s(\phi_{ref})\f$, where the reference is given as
- * fast-axis angles and converted with the calibration convention `phi = (sign * (q - zero)) mod 360`.
+ * in camwfs pixels.  The offset is \f$\Delta(\phi) = s(\phi) - s(\phi_{ref})\f$, with the reference given as
+ * mechanical stage angles.  The default reference is the calibration's fast-axis pair (90, 115), which the
+ * calibration script placed at stage angles (157.42, 165.80).
  *
  * When tracking is enabled ttmperi is assumed aligned at the current QWP angles, and the app captures the baseline
  * \f$v_0 = v_{now} + CM\,\Delta(\phi_{now})\f$, the voltage that would be aligned at the reference.  While tracking,
@@ -125,11 +126,7 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
 
     qwpStage m_qwp[2]; ///< QWP1 and QWP2 stage names and state.
 
-    double m_refFast[2]{ 90, 115 }; ///< The reference QWP1 and QWP2 fast-axis angles, in degrees.
-
-    double m_zero[2]{ -67.42, 280.8 }; ///< The calibration fast-axis zero for each QWP, in degrees.
-
-    int m_sign[2]{ 1, -1 }; ///< The calibration sign relating fast-axis to stage angle for each QWP, +1 or -1.
+    double m_phiRef[2]{ 157.42, 165.8 }; ///< The reference QWP1 and QWP2 mechanical stage angles, in degrees.
 
     std::string m_ttmDevName{ "ttmperi" }; ///< The device name of the tip/tilt mirror.
 
@@ -144,8 +141,6 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
     shiftModel m_model; ///< The pupil-shift model loaded at startup.
 
     double m_cm[2][2]{ { 0, 0 }, { 0, 0 } }; ///< The control matrix, V/px, `m_cm[v][px]`.
-
-    double m_phiRef[2]{ 0, 0 }; ///< The reference mechanical stage angles, in degrees.
 
     double m_shiftRef[2]{ 0, 0 }; ///< The model shift at the reference, in pixels.
 
@@ -183,7 +178,6 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
     /** This is called by loadConfig().
      *
      * \returns 0 on success
-     * \returns -1 if a sign is not +1 or -1
      */
     int loadConfigImpl(
         mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
@@ -238,14 +232,6 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
                        double            phi1,  /**< [in] the QWP1 stage angle, in degrees */
                        double            phi2 /**< [in] the QWP2 stage angle, in degrees */ );
 
-    /// Convert a fast-axis angle to a stage angle with the calibration convention.
-    /**
-     * \returns `(sign * (q - zero)) mod 360`, in [0, 360)
-     */
-    static double fastToStage( double q,    /**< [in] the fast-axis angle, in degrees */
-                               double zero, /**< [in] the calibration zero, in degrees */
-                               int    sign /**< [in] the calibration sign, +1 or -1 */ );
-
     /// Whether a device state allows tracking: READY or OPERATING.
     /**
      * \returns true if `st` is READY or OPERATING
@@ -257,7 +243,8 @@ class qwpPupilTracker : public MagAOXApp<true>, public dev::telemeter<qwpPupilTr
   protected:
     /// Compute the offset and, while tracking, command ttmperi.
     /** Takes `m_indiMutex`; the caller must not hold it.  Commands are sent after the mutex is released.  Nothing is
-     * sent unless both stages and ttmperi are usable, and an axis is not sent a voltage equal to its last command.
+     * sent unless both stages and ttmperi are usable, and an axis is not sent a voltage within 1 uV of its last
+     * command.
      *
      * \returns 0 on success
      * \returns -1 if a command could not be sent
@@ -448,29 +435,8 @@ void qwpPupilTracker::setupConfig()
                     q,
                     false,
                     "float",
-                    "The " + q + " fast-axis angle of the reference state, in degrees.  Default is " +
-                        std::to_string( m_refFast[n] ) );
-
-        config.add( "convention." + q + "Zero",
-                    "",
-                    "convention." + q + "Zero",
-                    argType::Required,
-                    "convention",
-                    q + "Zero",
-                    false,
-                    "float",
-                    "The " + q + " calibration zero in phi = (sign*(q - zero)) mod 360, in degrees.  Default is " +
-                        std::to_string( m_zero[n] ) );
-
-        config.add( "convention." + q + "Sign",
-                    "",
-                    "convention." + q + "Sign",
-                    argType::Required,
-                    "convention",
-                    q + "Sign",
-                    false,
-                    "int",
-                    "The " + q + " calibration sign, +1 or -1.  Default is " + std::to_string( m_sign[n] ) );
+                    "The " + q + " mechanical stage angle of the reference state, in degrees.  Default is " +
+                        std::to_string( m_phiRef[n] ) );
     }
 
     config.add( "ttm.device",
@@ -526,14 +492,7 @@ int qwpPupilTracker::loadConfigImpl( mx::app::appConfigurator &_config )
         std::string q = "qwp" + std::to_string( n + 1 );
 
         _config( m_qwp[n].devName, "stages." + q );
-        _config( m_refFast[n], "reference." + q );
-        _config( m_zero[n], "convention." + q + "Zero" );
-        _config( m_sign[n], "convention." + q + "Sign" );
-
-        if( m_sign[n] != 1 && m_sign[n] != -1 )
-        {
-            return log<text_log, -1>( "convention." + q + "Sign must be +1 or -1", logPrio::LOG_CRITICAL );
-        }
+        _config( m_phiRef[n], "reference." + q );
     }
 
     _config( m_ttmDevName, "ttm.device" );
@@ -631,16 +590,10 @@ int qwpPupilTracker::loadCalib()
         return -1;
     }
 
-    for( int n = 0; n < 2; ++n )
-    {
-        m_phiRef[n] = fastToStage( m_refFast[n], m_zero[n], m_sign[n] );
-    }
-
     shift( m_shiftRef[0], m_shiftRef[1], m_model, m_phiRef[0], m_phiRef[1] );
 
-    log<text_log>( "reference qwp1 " + std::to_string( m_refFast[0] ) + " qwp2 " + std::to_string( m_refFast[1] ) +
-                   " (stage " + std::to_string( m_phiRef[0] ) + ", " + std::to_string( m_phiRef[1] ) + "), shift " +
-                   std::to_string( m_shiftRef[0] ) + ", " + std::to_string( m_shiftRef[1] ) + " px" );
+    log<text_log>( "reference stage angles " + std::to_string( m_phiRef[0] ) + ", " + std::to_string( m_phiRef[1] ) +
+                   ", shift " + std::to_string( m_shiftRef[0] ) + ", " + std::to_string( m_shiftRef[1] ) + " px" );
 
     return 0;
 }
@@ -762,18 +715,6 @@ void qwpPupilTracker::shift( double &dx, double &dy, const shiftModel &model, do
     }
 }
 
-double qwpPupilTracker::fastToStage( double q, double zero, int sign )
-{
-    double phi = std::fmod( sign * ( q - zero ), 360.0 );
-
-    if( phi < 0 )
-    {
-        phi += 360.0;
-    }
-
-    return phi;
-}
-
 bool qwpPupilTracker::usable( stateCodes::stateCodeT st )
 {
     return st == stateCodes::READY || st == stateCodes::OPERATING;
@@ -811,7 +752,8 @@ int qwpPupilTracker::update()
 
             v[n] = ax.v0 + m_dv[n];
 
-            if( ax.haveSent && v[n] == ax.lastSent )
+            // v0 + dv need not round back to exactly the last command, so compare with a tolerance
+            if( ax.haveSent && std::fabs( v[n] - ax.lastSent ) <= 1e-6 )
             {
                 continue;
             }

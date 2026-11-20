@@ -59,7 +59,7 @@ QWP stage angles: `dv = -CM * (shift(phi) - shift(phi_ref))`.
 
 1. Subscribe to `stageqwprot1` / `stageqwprot2` `position` and `fsm`, and `ttmperi` `pos_1`, `pos_2`, `fsm`.
 2. Evaluate `shift(phi1, phi2)` from the harmonic model in mechanical stage angles; `offset = shift(phi) -
-   shift(phi_ref)`, with `phi_ref` from the fast-axis reference and convention in config.
+   shift(phi_ref)`, with `phi_ref` the mechanical reference from config.
 3. On enable, capture `v0 = v_now + CM * offset(phi_now)`; while tracking, command `v = v0 - CM * offset(phi)` on
    every stage position update; re-base `v0` on external ttmperi target changes.
 4. INDI: `tracking` toggle and read-only `offset` (`dx`, `dy`, `v1`, `v2`) only.
@@ -100,8 +100,9 @@ All questions were resolved in the design interview (2026-11-20).
    with `stage = (sign * (q - zero)) mod 360`, `QWP1_ZERO = -67.42, QWP1_SIGN = +1`, `QWP2_ZERO = 280.8,
    QWP2_SIGN = -1`. That gives a unique mechanical reference `phi_ref = (157.42, 165.80)`, confirmed by the
    reference rows of `20261114_qwp_wfs.csv` (`qwp1_stage = 157.40`, `qwp2_stage = 165.79`). The model shift there is
-   `(+0.359, -0.520)` px. The harmonic calib file stores the reference as fast-axis angles plus the zero/sign
-   convention, and the app converts it to mechanical once at load. Live inputs stay mechanical, so a stage sitting
+   `(+0.359, -0.520)` px. (Amended after implementation: the app config stores the reference directly as mechanical
+   stage angles, default `(157.42, 165.80)`, with no zero/sign convention keys. This avoids confusion with
+   qwpTracker's differently-defined `zero` / `sign`.) Live inputs stay mechanical, so a stage sitting
    on the other 180-degree branch (qwpTracker picks the nearest equivalent) is handled by the model.
    Note: qwpTracker's own convention is `stage = zero + sign * fast`, which differs in form from the script's for
    QWP1 (equivalent zero = +67.42). The calib file states its own convention explicitly to avoid confusion.
@@ -131,15 +132,14 @@ All questions were resolved in the design interview (2026-11-20).
    - `qwp_pupil_cm.fits`: 2x2 CM (V/px, rows `v1, v2`, cols `dx, dy`), read with `mx::fits` as in `alignLoop`.
      Provenance (source JSON, input sha256, date) goes in FITS header cards. The IM is not needed by the app; it can
      be kept as header cards for the record. Matrix orientation through `mx::fits` / Eigen must be verified by test.
-   - The reference (`qwp1 = 90`, `qwp2 = 115` fast-axis) and the calibration zero/sign convention go in the app
-     config, with those values as defaults; `shift(phi_ref)` is computed at load.
+   - The reference goes in the app config as mechanical stage angles (default `157.42`, `165.80`, the calibration
+     script's placement of fast-axis `90`, `115`); `shift(phi_ref)` is computed at load.
    - An exporter script writes both files from the research JSON outputs, for reproducibility.
 9. **Naming and structure.** App `qwpPupilTracker` in `apps/qwpPupilTracker/`, header-only pattern, separate from
    `qwpTracker`. Base `MagAOXApp` + `dev::telemeter` (power-state template argument to match the template app /
    hwpTracker). Config device name `qwppupil`. Config keys: `stages.qwp1 = stageqwprot1`,
-   `stages.qwp2 = stageqwprot2`, `ttm.device = ttmperi`, `reference.qwp1 = 90`, `reference.qwp2 = 115`,
-   `convention.qwp1Zero = -67.42`, `convention.qwp1Sign = 1`, `convention.qwp2Zero = 280.8`,
-   `convention.qwp2Sign = -1`, `calib.model = qwptrack/qwp_pupil_model.csv`,
+   `stages.qwp2 = stageqwprot2`, `ttm.device = ttmperi`, `ttm.rebaseTol = 0.01`, `reference.qwp1 = 157.42`,
+   `reference.qwp2 = 165.8` (mechanical), `calib.model = qwptrack/qwp_pupil_model.csv`,
    `calib.cm = qwptrack/qwp_pupil_cm.fits`. Exporter: `~/dev/magaox/scripts/export_qwp_pupil_calib.py`, writing
    to `~/dev/magaox/calib/qwptrack/`.
 10. **Edge behaviour.**
@@ -222,6 +222,8 @@ Implemented on `ml/qwp-pupil-tracker` (2026-11-20).
   them is an echo, so late echoes during fast stage updates do not re-base. Anything else re-bases that axis
   (`v0 = target - dv`). While ttmperi is not usable, target changes only set a pending re-base of both axes, applied
   once it is usable again, so a restart does not re-base on placeholder values.
+- Repeat suppression compares with a 1 uV tolerance: after a re-base, `(target - dv) + dv` need not round back to
+  exactly the target, and an exact comparison sent a spurious command.
 - The `offset` property is also updated while not tracking, so the predicted correction can be checked before
   enabling.
 - Calib files: CSV model rows are checked for exactly six columns (`readColumns` silently fills a short row with

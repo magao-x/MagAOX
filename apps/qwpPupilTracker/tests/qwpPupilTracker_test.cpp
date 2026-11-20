@@ -75,13 +75,10 @@ class qwpPupilTracker_test : public qwpPupilTracker
     using qwpPupilTracker::m_qwp;
     using qwpPupilTracker::m_rebasePending;
     using qwpPupilTracker::m_rebaseTol;
-    using qwpPupilTracker::m_refFast;
     using qwpPupilTracker::m_shiftRef;
-    using qwpPupilTracker::m_sign;
     using qwpPupilTracker::m_tracking;
     using qwpPupilTracker::m_ttm;
     using qwpPupilTracker::m_ttmDevName;
-    using qwpPupilTracker::m_zero;
 
     /// Construct with a scratch directory holding telemetry and the synthetic calibration.
     explicit qwpPupilTracker_test( const std::string &name /**< [in] app name and scratch directory */ )
@@ -316,22 +313,17 @@ TEST_CASE( "qwpPupilTracker evaluates the shift model", "[qwpPupilTracker]" )
     }
 }
 
-/// Fast-axis angles convert to stage angles with `phi = (sign * (q - zero)) mod 360`.
+/// The reference shift is the model evaluated at the configured mechanical reference angles.
 /**
  * \ingroup qwpPupilTracker_unit_test
  */
-TEST_CASE( "qwpPupilTracker converts the reference to stage angles", "[qwpPupilTracker]" )
+TEST_CASE( "qwpPupilTracker evaluates the reference shift at startup", "[qwpPupilTracker]" )
 {
     // clang-format off
     #ifdef QWPPUPILTRACKER_TEST_DOXYGEN_REF
-    qwpPupilTracker::fastToStage(); qwpPupilTracker::loadCalib();
+    qwpPupilTracker::loadCalib();
     #endif
     // clang-format on
-
-    REQUIRE( qwpPupilTracker::fastToStage( 90, -67.42, 1 ) == Approx( 157.42 ) );
-    REQUIRE( qwpPupilTracker::fastToStage( 115, 280.8, -1 ) == Approx( 165.8 ) );
-    REQUIRE( qwpPupilTracker::fastToStage( 0, 10, 1 ) == Approx( 350 ) );
-    REQUIRE( qwpPupilTracker::fastToStage( 370, 0, 1 ) == Approx( 10 ) );
 
     qwpPupilTracker_test app( "reference" );
     REQUIRE( app.startup() == 0 );
@@ -418,7 +410,7 @@ TEST_CASE( "qwpPupilTracker rejects bad calibration files", "[qwpPupilTracker]" 
     }
 }
 
-/// Configuration defaults, overrides, and rejection of an invalid sign.
+/// Configuration defaults and overrides.
 /**
  * \ingroup qwpPupilTracker_unit_test
  */
@@ -437,12 +429,8 @@ TEST_CASE( "qwpPupilTracker configuration", "[qwpPupilTracker]" )
 
         REQUIRE( app.m_qwp[0].devName == "stageqwprot1" );
         REQUIRE( app.m_qwp[1].devName == "stageqwprot2" );
-        REQUIRE( app.m_refFast[0] == Approx( 90 ) );
-        REQUIRE( app.m_refFast[1] == Approx( 115 ) );
-        REQUIRE( app.m_zero[0] == Approx( -67.42 ) );
-        REQUIRE( app.m_zero[1] == Approx( 280.8 ) );
-        REQUIRE( app.m_sign[0] == 1 );
-        REQUIRE( app.m_sign[1] == -1 );
+        REQUIRE( app.m_phiRef[0] == Approx( 157.42 ) );
+        REQUIRE( app.m_phiRef[1] == Approx( 165.8 ) );
         REQUIRE( app.m_ttmDevName == "ttmperi" );
         REQUIRE( app.m_rebaseTol == Approx( 0.01 ) );
         REQUIRE( app.m_modelFile == "qwptrack/qwp_pupil_model.csv" );
@@ -454,28 +442,17 @@ TEST_CASE( "qwpPupilTracker configuration", "[qwpPupilTracker]" )
         qwpPupilTracker_test app( "config_overrides" );
         REQUIRE( app.loadConfigFile( "[stages]\nqwp1=q1\nqwp2=q2\n"
                                      "[reference]\nqwp1=10\nqwp2=20\n"
-                                     "[convention]\nqwp1Zero=1\nqwp1Sign=-1\nqwp2Zero=2\nqwp2Sign=1\n"
                                      "[ttm]\ndevice=ttm\nrebaseTol=0.5\n"
                                      "[calib]\nmodel=m.csv\ncm=c.fits\n" ) == 0 );
 
         REQUIRE( app.m_qwp[0].devName == "q1" );
         REQUIRE( app.m_qwp[1].devName == "q2" );
-        REQUIRE( app.m_refFast[0] == Approx( 10 ) );
-        REQUIRE( app.m_refFast[1] == Approx( 20 ) );
-        REQUIRE( app.m_zero[0] == Approx( 1 ) );
-        REQUIRE( app.m_sign[0] == -1 );
-        REQUIRE( app.m_zero[1] == Approx( 2 ) );
-        REQUIRE( app.m_sign[1] == 1 );
+        REQUIRE( app.m_phiRef[0] == Approx( 10 ) );
+        REQUIRE( app.m_phiRef[1] == Approx( 20 ) );
         REQUIRE( app.m_ttmDevName == "ttm" );
         REQUIRE( app.m_rebaseTol == Approx( 0.5 ) );
         REQUIRE( app.m_modelFile == "m.csv" );
         REQUIRE( app.m_cmFile == "c.fits" );
-    }
-
-    SECTION( "invalid sign" )
-    {
-        qwpPupilTracker_test app( "config_badsign" );
-        REQUIRE( app.loadConfigFile( "[convention]\nqwp2Sign=2\n" ) < 0 );
     }
 }
 
