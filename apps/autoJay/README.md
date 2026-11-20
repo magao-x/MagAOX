@@ -51,7 +51,10 @@ The six `setup` arrays have one entry per requirement in matching order. Types
 are `0` for a number, `1` for text, and `2` for a switch; switch values are `0`/`1`.
 `*` records a property's current value during capture and requires that saved
 value during measurement. Numeric tolerances are absolute and use the property's
-units. Missing, stale, Busy, or Alert properties block acquisition.
+units. Missing, Busy, or Alert setup properties block acquisition. AutoJay
+retains each subscribed value until it receives an update. `monitor.maxAge`
+applies to camera frames only. Remove `monitor.refreshInterval` from any copied
+configuration.
 
 The local `camflowfs` mapping uses `pvcamCtrl`: the example captures
 `exptime.current` and all four `readout_speed` switches (`sensitivity`, `speed`,
@@ -164,8 +167,9 @@ restore valid streams/setup. Never clear a combined stream as a substitute.
 ## Development and offline tests
 
 The app's main thread owns acquisition transitions, DM streams, calibration I/O,
-and processing; the image monitor supplies distinct coherent frames. Registration
-and persistence run outside the frame/state lock. The acquisition, calibration,
+and processing. The image monitor converts each camera frame into a private
+float buffer and checks its counters before using it. Registration and
+persistence run outside the frame/state lock. The acquisition, calibration,
 and registration helpers can be tested without launching the application or
 connecting to instrument resources.
 
