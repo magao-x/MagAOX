@@ -292,3 +292,46 @@ Grilled with the user on 2026-11-19.
 
 Manual check by the user (M5): with `qwptrack` running, toggle tracking from the GUI;
 angles appear and follow the stages; slider is locked during a sequence.
+
+## QWP pupil tracking slider (2026-11-20)
+
+User request: "we need to add another slider to this gui based off the new qwpPupilTracker in the
+ml/qwp-pupil-tracker branch. The slider should toggle the qwppupil tracking toggle. when it's on, the
+right side should show the ttmperi offsets applied. we don't need to add the FSM to the top, but make
+sure the toggle is disabled when the qwppupil FSM isn't ready (I think thats the default)". Follow-up:
+"also, allow this slider to be turned off regardless if we're sequencing or not".
+
+### Findings
+
+- P-F1. `qwpPupilTracker` (device `qwppupil`, `ml/qwp-pupil-tracker`, plan
+  `qwp-pupil-tracker.md`) publishes `tracking.toggle` (standard toggle switch) and read-only
+  `offset` with elements `dx`, `dy` (camwfs px) and `v1`, `v2` (V, `-CM * offset`, the ttmperi
+  voltage relative to the baseline `v0` captured at enable). These are the "ttmperi offsets applied".
+- P-F2. `qwppupil` state: NOTCONNECTED until both stages and ttmperi are usable, READY then,
+  OPERATING while tracking. It refuses to enable unless READY, so a GUI lock on
+  "not READY/OPERATING" matches the app. Tracking stays On (OPERATING) if an input drops out.
+- P-F3. `offset` reads zero while not tracking (the reference follows the stages).
+- P-F4. As with `qwptrack` (QD1), the GUI couples to the app only through INDI names, so no rebase
+  onto `ml/qwp-pupil-tracker` is needed.
+- P-F5. The existing sliders use `lockSlider()` (input-transparent, not disabled, since a disabled
+  `toggleSlider` draws as Off). `m_qwppupilFsmOk` defaults to false, so the slider starts locked.
+
+### Proposed design (to be confirmed)
+
+- PD1. New `sliderQwpPupilTracking` (`qwppupil`, `tracking`, `toggle`, label "Pupil Tracking") and
+  `labelQwpPupilTracking` beside it, in a new row directly below the QWP tracking row
+  (`comboQwpLin` and later rows shift down by one). No `qwppupil` FSM display in the status grid.
+- PD2. Subscribe to `qwppupil.{fsm, tracking, offset}`; cache `m_qwppupilFsmOk`,
+  `m_qwppupilTracking`, `m_ttmV1`, `m_ttmV2`.
+- PD3. Label shows `v1`, `v2` only: `ΔV1 %+.2f V  ΔV2 %+.2f V`, padded with figure spaces for a
+  constant width. Visible only while tracking; `---` when `qwppupil` is not READY/OPERATING or on
+  disconnect.
+- PD4. Lock rule: locked when `qwppupil` is not READY/OPERATING, or while sequencing **and** tracking
+  is Off. So during a sequence it can be turned off but not on. Unlike QD5, the label is not greyed
+  while sequencing.
+- PD5. Tests extend `polarimetry_test`: subscriptions; label text/visibility; lock when not
+  READY; turn-off allowed while sequencing; turn-on locked while sequencing.
+
+### Open questions
+
+See the grilling notes below; decisions will be recorded as PDn amendments.
