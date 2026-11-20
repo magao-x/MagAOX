@@ -998,8 +998,9 @@ inline void po4ao::updateGUI()
     const bool running = learning == "running" || learning == "waiting";
     const bool paused  = learning == "paused" || learning == "completed";
     m_ui.buttonLearning->setText( running ? "Pause learning" : paused ? "Resume learning" : "Start learning" );
+    const bool pauseDuringPublish = running && !runtimePending && phase == "publishing";
     m_ui.buttonLearning->setEnabled(
-        trainingReady && ( running || paused || learning == "idle" ) &&
+        ( trainingReady || pauseDuringPublish ) && ( running || paused || learning == "idle" ) &&
         ( running || ( status( "warmup_required" ) != "yes" && status( "initialization_required" ) != "yes" ) ) &&
         commandAvailable( "learning", pcf::IndiProperty::Switch, { "run", "pause" }, m_device, true ) );
     m_ui.labelLearning->setText( status( "initialization_required" ) == "yes" ? "Set policy or Reset required"

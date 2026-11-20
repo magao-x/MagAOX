@@ -664,13 +664,17 @@ class TrainingSession:
         requesting reload. Calling this method never performs export or INDI I/O.
         """
         record = None if self.last_result is None else self.last_result["record"]
+        self.stage_candidate(model_id, self.policy_copy, record)
+
+    def stage_candidate(self, model_id, policy, record):
+        """Bind the exported weights, cost and source iteration to the issued model ID."""
         if record is None or record["publication_status"] != "ready":
             raise RuntimeError("The current iteration has no eligible publication")
-        self.policy_update.stage_publication(self.policy_copy, model_id)
+        self.policy_update.stage_publication(policy, model_id)
         model_id = PolicyUpdatePenalty._model_id(model_id)
         record["published_model_id"] = model_id
         record["publication_status"] = "published (awaiting activation)"
         self.published_cost_by_model[model_id] = record[
             "predicted_candidate_cost_per_step"
         ]
-        self.last_publish_iteration = self.iteration
+        self.last_publish_iteration = record["training_iteration"]

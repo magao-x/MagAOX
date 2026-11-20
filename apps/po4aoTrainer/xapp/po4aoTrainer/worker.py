@@ -2,6 +2,7 @@
 # \brief Managed numerical session with cooperative pause, config boundaries and staged export.
 """The worker never publishes to the live engine path or sends instrument commands."""
 
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -109,6 +110,7 @@ def run(directory):
     buffer = b""
     session = None
     last_state = None
+    publication = None
     build = None
     build_identity = None
 
@@ -126,7 +128,7 @@ def run(directory):
 
     def pump():
         """Read available control records and stop on loss of the supervisor."""
-        nonlocal buffer, last_heartbeat
+        nonlocal buffer, last_heartbeat, publication
         while select.select([sys.stdin], [], [], 0)[0]:
             data = os.read(sys.stdin.fileno(), 65536)
             if not data:
@@ -143,6 +145,12 @@ def run(directory):
                     session.acknowledge_restore(control.pop("restore_id"))
         if time.monotonic() - last_heartbeat > launch.get("heartbeat_timeout", 10):
             raise SystemExit("Supervisor heartbeat lost")
+
+        if publication is not None:
+            try:
+                next(publication)
+            except StopIteration:
+                publication = None
 
     class ReplayChanged(Exception):
         """Unwind an old-data iteration while retaining completed optimizer updates."""
@@ -188,6 +196,71 @@ def run(directory):
             pass
         build.wait(timeout=3)
         build = None
+
+    def publish(record, replay_generation):
+        """Poll export, reload issuance and outcome without blocking the optimizer."""
+        nonlocal build, build_identity
+        import psutil
+
+        started = time.monotonic()
+        candidate = write_candidate(session, directory, launch)
+        frozen_policy = deepcopy(session.policy_copy).requires_grad_(False)
+        with (candidate / "export.log").open("wb") as log:
+            build = subprocess.Popen(
+                [sys.executable, "-m", "xapp.po4aoTrainer.worker", "--export", str(candidate)],
+                stdout=log,
+                stderr=log,
+            )
+        build_identity = psutil.Process(build.pid)
+        build_identity.create_time()
+        emit("build", pid=build.pid)
+        deadline = time.monotonic() + launch["build_timeout"]
+        while True:
+            if (
+                not control["run"]
+                or control["generation"] != replay_generation
+                or control["collection"] != "ready"
+            ):
+                stop_build()
+                record["publication_status"] = "export cancelled"
+                append_metrics(directory / "metrics.jsonl", record)
+                return
+            code = build.poll()
+            if code is not None:
+                build = None
+                break
+            if time.monotonic() > deadline:
+                stop_build()
+                raise TimeoutError("Engine export exceeded build_timeout")
+            yield
+        if code != 0:
+            raise RuntimeError(f"Engine export failed; see {candidate / 'export.log'}")
+
+        offered = time.monotonic()
+        record["export_seconds"] = offered - started
+        path = str(candidate)
+        emit("candidate", path=path, generation=launch["generation"])
+        while control.get("candidate_path") != path:
+            yield
+        control.pop("candidate_path")
+        model_id = control.pop("candidate_id")
+        if model_id:
+            session.stage_candidate(model_id, frozen_policy, record)
+            del frozen_policy
+            append_metrics(directory / "metrics.jsonl", record)
+            while control.get("candidate_outcome_path") != path:
+                yield
+            control.pop("candidate_outcome_path")
+            outcome = control.pop("candidate_outcome")
+            if outcome != "loaded":
+                session.policy_update.pending = None
+            record["publication_status"] = "activated" if outcome == "loaded" else outcome
+        else:
+            outcome = "rejected"
+            record["publication_status"] = "rejected before reload"
+        record["publication_outcome"] = outcome
+        record["activation_seconds"] = time.monotonic() - offered
+        append_metrics(directory / "metrics.jsonl", record)
 
     def terminate(signum, frame):
         """Allow normal reset to clean up an outstanding export child."""
@@ -275,6 +348,7 @@ def run(directory):
             pump()
             if before != control["generation"] or control["collection"] != "ready":
                 continue
+            can_publish = publication is None
             try:
                 result = session.step(
                     replay,
@@ -294,89 +368,16 @@ def run(directory):
                 continue
             record["source_revision"] = launch.get("source_revision", "unrecorded")
             record["replay_seconds"] = replay_seconds
+            if not can_publish and record["publication_status"] == "ready":
+                record["publication_status"] = "waiting"
+                record["publication_reasons"].append(
+                    "Previous candidate in flight during this iteration"
+                )
             append_metrics(directory / "metrics.jsonl", record)
-            if record["publication_status"] != "ready":
-                save_diagnostics(session, directory / "diagnostics")
-                continue
-            export_start = time.monotonic()
-            candidate = write_candidate(session, directory, launch)
-            with (candidate / "export.log").open("wb") as log:
-                build = subprocess.Popen(
-                    [
-                        sys.executable,
-                        "-m",
-                        "xapp.po4aoTrainer.worker",
-                        "--export",
-                        str(candidate),
-                    ],
-                    stdout=log,
-                    stderr=log,
-                )
-                import psutil
-
-                build_identity = psutil.Process(build.pid)
-                build_identity.create_time()
-                emit("build", pid=build.pid)
-                deadline = time.monotonic() + launch["build_timeout"]
-                while build.poll() is None:
-                    pump()
-                    if (
-                        not control["run"]
-                        or control["generation"] != generation
-                        or control["collection"] != "ready"
-                    ):
-                        stop_build()
-                        break
-                    if time.monotonic() > deadline:
-                        stop_build()
-                        raise TimeoutError("Engine export exceeded build_timeout")
-                    time.sleep(0.1)
-                if build is None:
-                    record["publication_status"] = "export cancelled"
-                    append_metrics(directory / "metrics.jsonl", record)
-                    save_diagnostics(session, directory / "diagnostics")
-                    continue
-                code = build.wait()
-                build = None
-            if code != 0:
-                raise RuntimeError(
-                    "Engine export failed; see " + str(candidate / "export.log")
-                )
-            record["export_seconds"] = time.monotonic() - export_start
-            checkpoint()
-            if control["generation"] != generation or control["collection"] != "ready":
-                continue
-            emit("candidate", path=str(candidate), generation=launch["generation"])
-            activation_start = time.monotonic()
-            # Continue pumping acknowledgements while paused; no optimizer/model changes occur here.
-            while control.get("candidate_path") != str(candidate):
+            if record["publication_status"] == "ready":
+                publication = publish(record, generation)
                 pump()
-                state("paused" if not control["run"] else "waiting")
-                time.sleep(0.05)
-            model_id = control.pop("candidate_id", "")
-            if model_id:
-                session.stage_publication(model_id)
-                append_metrics(directory / "metrics.jsonl", record)
-                while control.get("candidate_outcome_path") != str(candidate):
-                    pump()
-                    state("paused" if not control["run"] else "waiting")
-                    time.sleep(0.05)
-                outcome = control.pop("candidate_outcome")
-                control.pop("candidate_outcome_path", None)
-                if outcome != "loaded":
-                    session.policy_update.pending = None
-                record["publication_status"] = (
-                    "activated" if outcome == "loaded" else outcome
-                )
-                record["publication_outcome"] = outcome
-            else:
-                record["publication_status"] = "rejected before reload"
-                record["publication_outcome"] = "rejected"
-            record["activation_seconds"] = time.monotonic() - activation_start
-            # JSONL is append-only: later records for the same session/iteration replace the earlier status.
-            append_metrics(directory / "metrics.jsonl", record)
             save_diagnostics(session, directory / "diagnostics")
-            control.pop("candidate_path", None)
     except Exception as error:
         emit("error", error=str(error))
         raise

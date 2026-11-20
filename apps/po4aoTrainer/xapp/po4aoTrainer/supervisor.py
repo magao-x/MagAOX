@@ -293,6 +293,12 @@ class Supervisor:
                 and not values["toggle"]
                 and operation["command"] != "reset"
             )
+            if (
+                command == "learning"
+                and not values["run"]
+                and operation["command"] == "publish"
+            ):
+                supersede = True
             if busy and not supersede:
                 raise RuntimeError(domain + " operation is already in progress")
             if busy and supersede:

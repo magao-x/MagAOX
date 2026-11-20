@@ -231,7 +231,7 @@ time.sleep(60)
         unrelated.wait(timeout=5)
 
 
-@pytest.mark.parametrize("outcome", [None, "loaded", "failed"])
+@pytest.mark.parametrize("outcome", [None, "loaded", "failed", "rejected", "recollect"])
 def test_export_pause_and_publication_outcome(tmp_path, monkeypatch, outcome):
     """Exercise real worker cancellation, delayed issuance and persisted final publication outcomes."""
     import psutil
@@ -241,19 +241,14 @@ def test_export_pause_and_publication_outcome(tmp_path, monkeypatch, outcome):
     )
     config["compute"] = dict(inference_device=0, training_device=1, build_device=1)
     config["training"].update(training_iterations=1000, diagnostics_interval=1)
-    export_boundary = """
+    export_boundary = r"""
+import torch
 import xapp.po4aoTrainer.worker as managed
-import xapp.po4aoTrainer.observer as observer
-actual_save=observer.save_diagnostics
-def save(*args, **kwargs):
-    result=actual_save(*args, **kwargs)
-    with Path(sys.argv[1]).joinpath("snapshots.log").open("a") as output:
-        output.write(str(result) + "\\n")
-    return result
-observer.save_diagnostics=save
 actual_popen=managed.subprocess.Popen
 def fake_export(command, **kwargs):
-    return actual_popen([sys.executable, '-c', 'import time;time.sleep(60)'], **kwargs)
+    gate = str(Path(sys.argv[1]) / "finish-export")
+    wait = "import os,sys,time\nwhile not os.path.exists(sys.argv[1]): time.sleep(.01)"
+    return actual_popen([sys.executable, "-c", wait, gate], **kwargs)
 managed.subprocess.Popen=fake_export
 actual_session=training.TrainingSession
 def ready_session(config, device):
@@ -261,10 +256,19 @@ def ready_session(config, device):
     actual_step=session.step
     def step(*args, **kwargs):
         result=actual_step(*args, **kwargs)
-        if result is not None and result['record'] is not None:
+        if result is not None and result['record'] is not None and not session.last_publish_iteration:
             result['record']['publication_status']='ready'
         return result
     session.step=step
+    stage=session.stage_candidate
+    def check_export(model_id, policy, record):
+        root=Path(sys.argv[1])
+        saved=torch.load(next(root.glob("candidate-*/weights.pt")), weights_only=True)["policy"]
+        stage(model_id, policy, record)
+        frozen=session.policy_update.pending[1].state_dict()
+        assert all(torch.equal(t, frozen[k]) for k, t in saved.items())
+        assert session.iteration > record["training_iteration"] == session.last_publish_iteration
+    session.stage_candidate=check_export
     return session
 training.TrainingSession=ready_session
 managed.run(sys.argv[1])
@@ -272,8 +276,6 @@ managed.run(sys.argv[1])
     bootstrap = BOOTSTRAP.replace(
         "from xapp.po4aoTrainer.worker import run\nrun(sys.argv[1])", export_boundary
     )
-    if outcome is not None:
-        bootstrap = bootstrap.replace("import time;time.sleep(60)", "pass")
     original = subprocess.Popen
 
     def launch(command, **kwargs):
@@ -296,28 +298,41 @@ managed.run(sys.argv[1])
     try:
         deadline = time.monotonic() + 20
         candidates = []
-        while not worker.children and not (outcome is not None and candidates):
-            worker.send(dict(collection="ready", generation="1"))
-            candidates.extend(
-                event for event in worker.events() if event["event"] == "candidate"
-            )
-            assert worker.process.poll() is None, (
-                worker.run / "worker.log"
-            ).read_text()
-            assert time.monotonic() < deadline
-            time.sleep(0.03)
-        build = worker.children[0] if worker.children else None
-        if outcome is not None:
-            while not candidates:
+
+        def wait_until(predicate):
+            """Drive the heartbeat while observing actual worker progress."""
+            while not predicate():
                 worker.send(dict(collection="ready", generation="1"))
-                candidates.extend(
-                    event for event in worker.events() if event["event"] == "candidate"
-                )
+                candidates.extend(e for e in worker.events() if e["event"] == "candidate")
                 assert not worker.error, (worker.run / "worker.log").read_text()
                 assert time.monotonic() < deadline
-                time.sleep(0.03)
+                time.sleep(0.01)
+
+        wait_until(lambda: worker.children and worker.iteration >= 4)
+        build = worker.children[0]
+        assert build.is_running() and not candidates
+        if outcome == "recollect":
+            worker.send(dict(collection="collecting", generation="2"))
+            while worker.state != "waiting" or build.is_running():
+                candidates.extend(e for e in worker.events() if e["event"] == "candidate")
+                assert not worker.error, (worker.run / "worker.log").read_text()
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+            candidates.extend(e for e in worker.events() if e["event"] == "candidate")
+            assert not candidates
+            assert "export cancelled" in (worker.run / "metrics.jsonl").read_text()
+            return
+        if outcome is not None:
+            (worker.run / "finish-export").touch()
+            wait_until(lambda: candidates)
             path = candidates[0]["path"]
-            worker.send({"candidate_path": path, "candidate_id": "a" * 16})
+            offered_at = worker.iteration
+            wait_until(lambda: worker.iteration >= offered_at + 2)
+            if outcome != "rejected":
+                worker.send({"candidate_path": path, "candidate_id": "a" * 16})
+                issued_at = worker.iteration
+                wait_until(lambda: worker.iteration >= issued_at + 2)
+        assert len(list(worker.run.glob("candidate-*"))) == 1
         worker.send({"run": False})
         while worker.state != "paused":
             worker.events()
@@ -331,7 +346,10 @@ managed.run(sys.argv[1])
             or build.status() == psutil.STATUS_ZOMBIE
         )
         if outcome is not None:
-            worker.send({"candidate_outcome_path": path, "candidate_outcome": outcome})
+            if outcome == "rejected":
+                worker.send({"candidate_path": path, "candidate_id": ""})
+            else:
+                worker.send({"candidate_outcome_path": path, "candidate_outcome": outcome})
             records = []
             while not any(
                 record.get("publication_outcome") == outcome for record in records
@@ -351,18 +369,24 @@ managed.run(sys.argv[1])
                 for record in records
                 if record.get("publication_outcome") == outcome
             )
-            # The outcome log is visible before compression of the final snapshot completes.
-            while not (worker.run / "snapshots.log").exists():
-                worker.events()
-                assert not worker.error
-                assert time.monotonic() < deadline
-                time.sleep(0.03)
-            snapshot = load_diagnostics(
-                next((worker.run / "diagnostics").glob("*.npz"))
+            assert matching["published_model_id"] == (None if outcome == "rejected" else "a" * 16)
+            assert matching["training_iteration"] == json.loads(
+                (Path(path) / "request.json").read_text()
+            )["iteration"]
+            paused_at = worker.iteration
+            active_id = "a" * 16 if outcome == "loaded" else "0" * 16
+            worker.send({"active_id": active_id, "run": True})
+            wait_until(lambda: worker.iteration >= paused_at + 2)
+            worker.send({"run": False})
+            wait_until(lambda: worker.state == "paused")
+            snapshot = load_diagnostics(sorted((worker.run / "diagnostics").glob("*.npz"))[-1])
+            history = snapshot.metadata["history"]
+            history_by_iteration = {r["training_iteration"]: r for r in history}
+            assert history_by_iteration[matching["training_iteration"]] == matching
+            assert all(
+                check["policy_update_reference_id"] == active_id
+                for check in history[-1]["policy_update"]
             )
-            assert matching["published_model_id"] == "a" * 16
-            assert snapshot.metadata["history"][-1] == matching
-            assert len((worker.run / "snapshots.log").read_text().splitlines()) == 1
             assert matching["export_seconds"] >= 0
             assert matching["activation_seconds"] >= 0
             assert worker.process.poll() is None and worker.state == "paused"

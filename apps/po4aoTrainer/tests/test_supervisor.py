@@ -1086,6 +1086,35 @@ def test_external_disable_pauses_and_external_reset_invalidates_session(config):
     rig.close()
 
 
+def test_pause_during_issued_publication(config):
+    """Pause stops the worker while the original reload ticket awaits its outcome."""
+    rig = Rig(2)
+    supervisor = Supervisor(rig.runtime, config)
+    worker = NumericalWorker(supervisor.desired)
+    supervisor.worker = worker
+    path, model = bundle(supervisor, session=worker.session)
+    rig.auto_load = False
+    try:
+        supervisor.tick()
+        supervisor.submit("publish", {"path": str(path)})
+        until = time.monotonic() + 2
+        while rig.loading is None:
+            assert time.monotonic() < until
+            time.sleep(0.005)
+        supervisor.submit("learning", {"run": False, "pause": True})
+        while worker.state != "paused":
+            assert time.monotonic() < until
+            time.sleep(0.005)
+        assert supervisor.record["pending"]["model_id"] == model
+        rig.complete_load()
+        assert finish(supervisor)[-1][:2] == ("learning", "Ok")
+        assert supervisor.record["eligible"]["model_id"] == model
+        assert worker.state == "paused"
+    finally:
+        supervisor.close()
+        rig.close()
+
+
 def test_external_disable_supersedes_an_enable_wait(config):
     """An external Off request cancels an in-flight Enable, not just a publication/recollection."""
     rig = Rig(0.5)

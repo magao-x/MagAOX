@@ -464,6 +464,10 @@ TEST_CASE( "Waiting learning can be paused during collection", "[po4ao][learning
     REQUIRE( f.control<QLabel>( "labelLearning" )->text() == "Waiting" );
     f.m_widget.on_buttonLearning_clicked();
     REQUIRE( f.m_publisher.m_commands.back()["pause"].getSwitchState() == pcf::IndiElement::On );
+    f.status( { { "training_phase", "publishing" } } );
+    REQUIRE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
+    f.control<QPushButton>( "buttonLearning" )->click();
+    REQUIRE( f.m_publisher.m_commands.back()["pause"].getSwitchState() == pcf::IndiElement::On );
     f.status( { { "training_phase", "recollecting" } } );
     REQUIRE_FALSE( f.control<QPushButton>( "buttonLearning" )->isEnabled() );
     // clang-format off
