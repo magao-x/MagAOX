@@ -247,6 +247,18 @@ Checks for the first RTC build:
 - `createStandardIndiNumber<double>` with `"%g"` formatting.
 - `M_PI` from `<cmath>`.
 
+**2026-11-19: bench.** counterOffload writes to the DM successfully through synco.
+
+**2026-11-19: proposed change (not yet implemented): zero on disable.**
+- Request: turning `enable` off should zero the DM stream automatically.
+- Current behaviour (R6): disabling only stops accepting offloads. The contribution is kept (leak 0) or decays (leak > 0), and a zero is published only through the `zero` request.
+- Change: in the `enable` NEW callback, when the toggle goes On→Off, also set `m_zeroRequested = true`.
+  - The existing zero path clears the ramps and accumulator and publishes one all-zero command. `needPublish()` is already true while a zero is requested, so the producer thread does not go idle before publishing it.
+  - Offloads that arrive after the disable are already ignored in `processImage()`.
+  - If synco is not producing, the zero is published at the next slot after it resumes. That is the same as for the `zero` request today.
+- Docs: update R6 and `doc/counterOffload.md` (disabling now zeros the output immediately; there is no decay on disable).
+- Test: a unit test that disabling with a nonzero accumulator and active ramps gives an all-zero command at the next slot.
+
 ## Follow-up and Edge Cases
 <!-- The agent should list any planned follow up and any edge cases that are not addressed -->
 
