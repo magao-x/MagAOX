@@ -271,7 +271,7 @@ Checks for the first RTC build:
 - **Woofer actuator clipping (`actLim`)** in t2wOffloader is not reflected in Δ (Part 1 limitation).
 - **Possible later additions:** telemetry and a handbook page.
 
-## Calibrate Mode (implemented 2026-11-19, not yet built or tested)
+## Calibrate Mode (implemented 2026-11-19, built and unit tested on the RTC; bench test pending)
 
 ### Request (user, 2026-11-19, condensed)
 Tune the ramp so that the wavefront error spikes caused by offloading are mitigated. The figure of merit comes from the WFS closed-loop PSDs, published in real time in `aol1_clpsds`. The spike sits at (or very near) `t2wOffloader.offloadRate`, so integrate the PSD around that frequency and compare it across ramp parameters and with counter-offloading off. Plan a new `calibrate` mode of counterOffload that optimizes the ramp parameters to minimize this PSD spike.
@@ -428,3 +428,5 @@ Tune the ramp so that the wavefront error spikes caused by offloading are mitiga
   - Harmonics (A-C4).
   - An interpolated baseline.
   - Telemetry.
+
+**2026-11-19: RTC build.** The user built it on the RTC; it compiles and all unit test cases pass. The bench run is next.
