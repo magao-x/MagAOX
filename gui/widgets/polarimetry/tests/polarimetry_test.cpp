@@ -217,7 +217,10 @@ TEST_CASE( "Polarimetry subscribes to current property names", "[polarimetryGUI]
                              "qwptrack.fsm",
                              "qwptrack.tracking",
                              "qwptrack.qwp1",
-                             "qwptrack.qwp2" } )
+                             "qwptrack.qwp2",
+                             "qwppupil.fsm",
+                             "qwppupil.tracking",
+                             "qwppupil.offset" } )
     {
         INFO( key );
         CHECK( widget.m_publisher.count( key ) >= 1 );
@@ -409,12 +412,12 @@ TEST_CASE( "Polarimetry QWP tracking", "[polarimetryGUI]" )
     CHECK( label->isEnabled() );
 
     // current, not target, padded to three digits with a figure space
-    CHECK( label->text() == QString::fromUtf8( "QWP1 \u2007"
-                                               "12°  QWP2 135°" ) );
+    CHECK( label->text() == QString::fromUtf8( "QWP1: \u2007"
+                                               "12°  QWP2: 135°" ) );
 
     widget.number( "qwptrack", "qwp1", { { "current", 5.0 } } );
-    CHECK( label->text() == QString::fromUtf8( "QWP1 \u2007\u2007"
-                                               "5°  QWP2 135°" ) );
+    CHECK( label->text() == QString::fromUtf8( "QWP1: \u2007\u2007"
+                                               "5°  QWP2: 135°" ) );
 
     widget.toggle( "hwpsequence", "sequence", true );
 
@@ -435,6 +438,68 @@ TEST_CASE( "Polarimetry QWP tracking", "[polarimetryGUI]" )
     widget.toggle( "qwptrack", "tracking", false );
 
     CHECK( label->isHidden() );
+}
+
+/** \brief The ttmperi offsets show beside the QWP pupil tracking slider only while tracking, and the
+ * slider locks only when `qwppupil` is not READY/OPERATING, not while sequencing.
+ * \ingroup polarimetryGUI_unit_test
+ */
+TEST_CASE( "Polarimetry QWP pupil tracking", "[polarimetryGUI]" )
+{
+    // clang-format off
+#ifdef POLARIMETRY_GUI_TEST_DOXYGEN_REF
+    xqt::polarimetry::handleSetProperty; xqt::polarimetry::updateGUI; xqt::polarimetry::pupilOffsetText;
+#endif
+    // clang-format on
+    // one decimal, explicit sign, padded with figure spaces to a sign and three digits
+    CHECK( xqt::polarimetry::pupilOffsetText( 1.23, -12.45 ) == QString::fromUtf8( "ΔV1:   +1.2 V  ΔV2:  −12.4 V" ) );
+    CHECK( xqt::polarimetry::pupilOffsetText( -123.4, 0 ) == QString::fromUtf8( "ΔV1: −123.4 V  ΔV2:   +0.0 V" ) );
+    CHECK( xqt::polarimetry::pupilOffsetText( -0.04, 0.04 ) == QString::fromUtf8( "ΔV1:   +0.0 V  ΔV2:   +0.0 V" ) );
+
+    Widget widget;
+    widget.ready();
+
+    QLabel  *label  = widget.label( "labelQwpPupilTracking" );
+    QWidget *slider = widget.control( "sliderQwpPupilTracking" );
+
+    // qwppupil not yet READY
+    CHECK( slider->isEnabled() );
+    CHECK( slider->testAttribute( Qt::WA_TransparentForMouseEvents ) );
+    CHECK( label->isHidden() );
+
+    widget.state( "qwppupil", "READY" );
+    widget.number( "qwppupil", "offset", { { "dx", 0.0 }, { "dy", 0.0 }, { "v1", 0.0 }, { "v2", 0.0 } } );
+
+    CHECK_FALSE( slider->testAttribute( Qt::WA_TransparentForMouseEvents ) );
+    CHECK( label->isHidden() );
+
+    widget.toggle( "qwppupil", "tracking", true );
+    widget.state( "qwppupil", "OPERATING" );
+    widget.number( "qwppupil", "offset", { { "dx", 0.02 }, { "dy", -0.2 }, { "v1", 2.5 }, { "v2", -12.0 } } );
+
+    CHECK_FALSE( label->isHidden() );
+    CHECK( label->text() == xqt::polarimetry::pupilOffsetText( 2.5, -12.0 ) );
+
+    // sequencing neither locks the slider nor greys the label
+    widget.toggle( "hwpsequence", "sequence", true );
+
+    CHECK_FALSE( slider->testAttribute( Qt::WA_TransparentForMouseEvents ) );
+    CHECK( label->isEnabled() );
+
+    widget.toggle( "qwppupil", "tracking", false );
+    widget.state( "qwppupil", "READY" );
+
+    CHECK( label->isHidden() );
+    CHECK_FALSE( slider->testAttribute( Qt::WA_TransparentForMouseEvents ) );
+
+    widget.toggle( "hwpsequence", "sequence", false );
+    widget.state( "qwppupil", "NOTCONNECTED" );
+
+    CHECK( slider->testAttribute( Qt::WA_TransparentForMouseEvents ) );
+
+    widget.toggle( "qwppupil", "tracking", true );
+
+    CHECK( label->text() == "---" );
 }
 
 /** \brief Buttons send the current hwpSequencer property names.
