@@ -102,13 +102,20 @@ The GUI label "Waiting" also covers publication acknowledgements, not just data.
 
 Snapshots contain float32 `[stream modes, samples, 2]` data in newest-first order,
 with observation/command planes and coherent counter, valid-length, episode and
-model identities. `session.invalidate_replay()` marks a recollection boundary.
+model identities. The GUI's Residual RMS is the mean over valid rolling replay
+frames of the quadrature sum of the controlled modal residuals. It uses the CACAO
+modal scale of 1000 nm/µm and updates on replay publication, including when the
+trainer is paused. Recollection clears the display until the next rolling publication.
+`session.invalidate_replay()` marks a recollection boundary.
+Learned policies load as TensorRT engines. Existing PO4AO configurations may omit
+`parameters.linear_inference_backend` or retain `auto` or `tensorrt`. The old
+CPU-only notebook artifacts require re-export as TensorRT engines for use with this runtime.
 The synchronous `po4ao_runtime.publish_tensorrt_engine` helper remains available
 for explicitly operator-managed export; it does not confer managed eligibility.
 
 `observer.save_diagnostics` and `load_diagnostics` write/read bounded portable
-snapshots; loaded snapshots expose `plot()`. Direct plotting functions remain in
-`po4ao_diagnostics`. Matplotlib is optional. Metrics JSONL can contain revised
+snapshots. Observing notebooks can plot the saved observations, actions and metrics history.
+Metrics JSONL can contain revised
 publication outcomes: the last record for each session/iteration is authoritative.
 Timing fields include `training_seconds`, `replay_seconds`, `diagnostics_seconds`,
 `export_seconds` and `activation_seconds`. Training/replay timings describe the
@@ -131,8 +138,8 @@ learning has since advanced or paused.
 With the actual framework dependencies installed in a workstation environment:
 
 ```sh
-python -m pip install './apps/po4aoTrainer[test,plots]'
-MPLBACKEND=Agg python -m pytest apps/po4aoTrainer/tests
+python -m pip install './apps/po4aoTrainer[test]'
+python -m pytest apps/po4aoTrainer/tests
 ```
 
 Tests use synthetic CPU inputs, offline INDI boundaries and owned local child
