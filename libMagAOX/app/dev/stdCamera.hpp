@@ -3276,7 +3276,7 @@ int stdCamera<derivedT>::appLogic()
                         derived().updateIfChanged( m_indiP_shutterStatus, "status", m_shutterStatus, INDI_IDLE );
                     }
 
-                    if( m_shutterState == 1 )
+                    if( m_shutterState == 0 )
                     {
                         derived().updateSwitchIfChanged( m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK );
                     }
