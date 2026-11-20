@@ -24,18 +24,18 @@ routes must be configured by the operator.
 
 Run the sensor on ICC with the camera and NCPC. Reserve `dm02disp02` for NCPC
 and `dm01disp02` for tweeter exclusively for this sensor. Relay the tweeter
-command from ICC to RTC. The local NCPC trigger `dm02disp` is required. Leave
-`[tweeter] trigger=` empty when only the command channel is visible on ICC, as
-in the examples. Set `trigger=dm01disp` to verify the tweeter contribution when
-its combined stream is available. Omitting the setting retains that default.
+command from ICC to RTC. Both examples set `trigger=` in `[ncpc]` and
+`[tweeter]`. AutoJay starts `acquisition.dmSleep` after both local writes
+complete, then discards `settleFrames` distinct camera frames before averaging.
+Set the delay to cover ICC-to-RTC delivery and both mirrors settling when
+applying and removing pokes. The example delay is provisional. Confirm that
+the relay delivers commands and zeros with the AO loop open. A local write
+can succeed while the relay is offline.
 
-For a relayed tweeter, `acquisition.dmSleep` starts at the local command write.
-Set it to cover ICC-to-RTC delivery and physical settling for both application
-and removal of the poke. NCPC still needs a verified combined update and its own
-settling interval. AutoJay discards `settleFrames` distinct camera frames after
-both conditions are met. The example delay is provisional. Confirm that the
-relay delivers commands and zeros with the AO loop open. A local write can
-succeed while the relay is offline.
+To verify a contribution on the combined stream, set a DM's `trigger` to
+`dm02disp` for NCPC or `dm01disp` for tweeter. Omitting the key retains these
+defaults. A named trigger must be visible to AutoJay, and its settling delay
+starts when the combined update is verified.
 
 The app refuses nonzero owned channels at startup of a sequence. Both DM
 combiners must process these active writes with the AO loop open. Use the
