@@ -622,3 +622,19 @@ routes, resolve mask/stage profile settings and tolerances, measure the control
 matrix, and validate physical settling and image-quality thresholds. The science
 camera example intentionally has unresolved optical settings. Existing unrelated
 `tests/tmp.drawio` and `tests/xlog/` content is left untouched.
+
+### Follow-up: actuator list input
+
+For commissioning, use the same `pokeX`, `pokeY`, and `pokeAmp` convention as
+`dmPokeXCorr` in each DM section. The operator chooses the coordinates and
+amplitudes. AutoJay validates the coordinate lists, checks bounds against the
+actual DM streams, and expands them to full command maps at reference capture.
+The existing FITS input supports weighted patterns. Both input forms produce the
+same calibration bundle format, and recall uses the saved maps and amplitudes.
+The flowfs example uses candidate lists from the local NCPC bump-alignment and
+tweeter WFS alignment configs. Verify those coordinates in the intended optical
+setup and select amplitudes before capture.
+
+On 2026-11-19, the optimized app build and the offline application suite passed
+(15 cases, 1,387 assertions). The suite covers capture and bundle reload with
+either pattern source, malformed input, and coordinates outside the DM stream.

@@ -65,8 +65,8 @@ class autoJayHarness : public MagAOX::app::autoJay
     ~autoJayHarness();
 
     /// Implement a channel open using only fixture state.
-    bool openChannels( const calibration &cal /**< [in] Frozen channel configuration */,
-                       std::string       &error /**< [out] Failure reason */ ) override;
+    bool openChannels( calibration &cal /**< [in,out] Frozen channel configuration and effective maps */,
+                       std::string &error /**< [out] Failure reason */ ) override;
 
     /// Report fake ownership without inspecting shared memory.
     bool channelsValid( std::string &error /**< [out] Failure reason */ ) const override;
@@ -208,14 +208,24 @@ autoJayHarness::~autoJayHarness()
     std::filesystem::remove_all( m_directory, ignored );
 }
 
-bool autoJayHarness::openChannels( const calibration &cal, std::string &error )
+bool autoJayHarness::openChannels( calibration &cal, std::string &error )
 {
-    static_cast<void>( cal );
-    static_cast<void>( error );
     ++m_openCount;
+
+    for( size_t dm = 0; dm < cal.dm.size(); ++dm )
+    {
+        if( !resolvePattern( cal, dm, 4, 4, error ) )
+        {
+            return false;
+        }
+    }
+
     m_open = true;
     if( m_changeOnOpen )
+    {
         ++m_generation;
+    }
+
     return true;
 }
 
@@ -727,7 +737,7 @@ TEST_CASE( "autoJay publishes only a complete current measurement", "[autoJay][a
         REQUIRE_FALSE( app.m_continuous );
 }
 
-/// First-reference capture records a bundle and installs both references without publishing a correction sample.
+/// First-reference capture saves the effective maps and references without producing a correction sample.
 /** \ingroup autoJay_unit_test */
 TEST_CASE( "autoJay captures its first reference without an existing calibration", "[autoJay][app]" )
 {
@@ -735,10 +745,34 @@ TEST_CASE( "autoJay captures its first reference without an existing calibration
     #ifdef AUTOJAY_TEST_DOXYGEN_REF
     MagAOX::app::autoJay::begin;
     MagAOX::app::autoJay::finish;
+    MagAOX::app::autoJay::loadPokeConfig;
+    MagAOX::app::autoJay::resolvePattern;
     #endif
     // clang-format on
     autoJayHarness app;
     app.m_calibration.reset();
+    autoJayHarness::imageT ncpc             = app.m_captureConfig.dm[0].pattern;
+    autoJayHarness::imageT tweeter          = app.m_captureConfig.dm[1].pattern;
+    float                  ncpcAmplitude    = 0.1F;
+    float                  tweeterAmplitude = 0.1F;
+
+    SECTION( "FITS maps" )
+    {
+    }
+
+    SECTION( "Paired actuator coordinates" )
+    {
+        REQUIRE( app.configure( "[ncpc]\npokeX=0 , 3\npokeY=2, 1\npokeAmp=-0.25\n"
+                                "[tweeter]\npokeX=2\npokeY=0\npokeAmp=0.125\n" ) == 0 );
+        ncpc.setZero();
+        ncpc( 0, 2 ) = 1;
+        ncpc( 3, 1 ) = 1;
+        tweeter.setZero();
+        tweeter( 2, 0 )  = 1;
+        ncpcAmplitude    = -0.25F;
+        tweeterAmplitude = 0.125F;
+    }
+
     REQUIRE( app.begin( true ) );
     app.completeSequence();
     app.finish();
@@ -753,7 +787,49 @@ TEST_CASE( "autoJay captures its first reference without an existing calibration
     REQUIRE( MagAOX::app::autoJayDetail::latestCalibration(
         saved, app.calibrationRoot(), app.m_captureConfig.profile, error ) );
     REQUIRE( saved.id == app.m_calibration->id );
+    REQUIRE( ( saved.dm[0].pattern == ncpc ).all() );
+    REQUIRE( ( saved.dm[1].pattern == tweeter ).all() );
+    REQUIRE( saved.dm[0].amplitude == ncpcAmplitude );
+    REQUIRE( saved.dm[1].amplitude == tweeterAmplitude );
     REQUIRE( ( saved.dm[0].reference - app.response( 0 ) ).abs().maxCoeff() < 0.0001F );
+}
+
+/// Reject ambiguous or malformed indexed capture settings before starting acquisition.
+/** \ingroup autoJay_unit_test */
+TEST_CASE( "autoJay rejects invalid actuator list configuration", "[autoJay][app]" )
+{
+    // clang-format off
+    #ifdef AUTOJAY_TEST_DOXYGEN_REF
+    MagAOX::app::autoJay::loadPokeConfig;
+    #endif
+    // clang-format on
+    autoJayHarness    app;
+    const std::string settings = GENERATE( "pokeX=1,2\npokeY=1\npokeAmp=0.25\n",
+                                           "pokeX=1\npokeAmp=0.25\n",
+                                           "pokeX=1\npokeY=1\n",
+                                           "pokeX=1junk\npokeY=1\npokeAmp=0.25\n",
+                                           "pokeX=1\npokeY=-1\npokeAmp=0.25\n",
+                                           "pokeX=1\npokeY=1\npokeAmp=nan\n",
+                                           "pokeX=1\npokeY=1\npokeAmp=0.25\npattern=other.fits\n" );
+    REQUIRE( app.configure( "[ncpc]\n" + settings ) < 0 );
+}
+
+/// A capture with an out-of-range actuator must fail before any commands are sent.
+/** \ingroup autoJay_unit_test */
+TEST_CASE( "autoJay checks actuator coordinates against the DM stream", "[autoJay][app]" )
+{
+    // clang-format off
+    #ifdef AUTOJAY_TEST_DOXYGEN_REF
+    MagAOX::app::autoJay::begin;
+    MagAOX::app::autoJay::resolvePattern;
+    #endif
+    // clang-format on
+    autoJayHarness app;
+    REQUIRE( app.configure( "[ncpc]\npokeX=1\npokeY=4\npokeAmp=0.25\n" ) == 0 );
+    REQUIRE_FALSE( app.begin( true ) );
+    REQUIRE( app.m_status.find( "outside DM stream geometry" ) != std::string::npos );
+    REQUIRE_FALSE( app.m_active );
+    REQUIRE( app.m_commands.empty() );
 }
 
 /// An explicitly failed recall cannot leave an older calibration available for a subsequent measurement.

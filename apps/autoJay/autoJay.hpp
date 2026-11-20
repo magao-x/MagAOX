@@ -100,7 +100,8 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     /** \name Configuration - Data
      * @{ */
     calibration                         m_captureConfig; ///< Bootstrap pattern identities and required setup.
-    std::array<std::string, 2>          m_patternFiles;  ///< Source patterns used only for explicit capture.
+    std::array<std::string, 2>                     m_patternFiles; ///< Optional FITS source maps for reference capture.
+    std::array<std::vector<std::array<int, 2>>, 2> m_pokeActuators; ///< Zero-based (x, y) pairs for each DM.
     autoJayDetail::registrationSettings m_quality;       ///< Registration acceptance thresholds.
     std::string                         m_controller{ "autoJay-ctrl" }; ///< Guarded closedLoopIndi device.
     std::string                         m_aoLoop{ "holoop" };           ///< Main AO loop which must remain open.
@@ -210,9 +211,20 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
                      std::string &error,   /**< [out] Failure reason. */
                      bool settling = false /**< [in] Permit the acknowledged correction to be moving. */ ) const;
 
-    /// Open only reserved, zeroed additive channels and compatible trigger streams.
-    virtual bool openChannels( const calibration &cal, /**< [in] Channel identities and maps. */
-                               std::string       &error /**< [out] Failure reason. */ );
+    /// Load the capture input for one DM from FITS or paired actuator coordinates.
+    int loadPokeConfig( mx::app::appConfigurator &cfg, /**< [in] Parsed application settings. */
+                        size_t                    dm /**< [in] Index of the NCPC or tweeter. */ );
+
+    /// Check a saved map or expand configured coordinates using the actual stream dimensions.
+    bool resolvePattern( calibration &cal,    /**< [in,out] Transaction with loaded or pending maps. */
+                         size_t       dm,     /**< [in] Index of the NCPC or tweeter. */
+                         size_t       width,  /**< [in] DM stream width. */
+                         size_t       height, /**< [in] DM stream height. */
+                         std::string &error /**< [out] Failure reason. */ ) const;
+
+    /// Open only reserved, zeroed channels with compatible streams and maps.
+    virtual bool openChannels( calibration &cal, /**< [in,out] Channel identities and effective maps. */
+                               std::string &error /**< [out] Failure reason. */ );
 
     /// Verify streams and channel contents before reading or writing them.
     virtual bool channelsValid( std::string &error /**< [out] Failure reason. */ ) const;
@@ -381,10 +393,16 @@ inline void autoJay::setupConfig()
     for( const auto &dm : { "ncpc", "tweeter" } )
     {
         for( const auto &name : { "channel", "trigger", "pattern" } )
+        {
             add( std::string( dm ) + "." + name,
                  "string",
                  "Owned additive channel, combined trigger, or FITS pattern." );
+        }
+
         add( std::string( dm ) + ".amplitude", "float", "Signed nonzero command-map amplitude for reference capture." );
+        add( std::string( dm ) + ".pokeX", "vector<int>", "Zero-based actuator x coordinates." );
+        add( std::string( dm ) + ".pokeY", "vector<int>", "Zero-based actuator y coordinates paired with pokeX." );
+        add( std::string( dm ) + ".pokeAmp", "float", "Signed command amplitude applied to each listed actuator." );
     }
     for( const auto &name : { "devices", "properties", "elements", "values", "types", "tolerances" } )
         add( std::string( "setup." ) + name,
@@ -416,6 +434,59 @@ inline void autoJay::setupConfig()
              "Acquisition, acceptance, or settling threshold; times are seconds and shifts detector pixels." );
 }
 
+inline int autoJay::loadPokeConfig( mx::app::appConfigurator &cfg, size_t dm )
+{
+    const std::string prefix = dm == 0 ? "ncpc." : "tweeter.";
+    cfg( m_captureConfig.dm[dm].channel, prefix + "channel" );
+    cfg( m_captureConfig.dm[dm].trigger, prefix + "trigger" );
+    cfg( m_patternFiles[dm], prefix + "pattern" );
+    cfg( m_captureConfig.dm[dm].amplitude, prefix + "amplitude" );
+
+    std::array<std::vector<std::string>, 2> coordinates;
+    std::string                             amplitude;
+    cfg( coordinates[0], prefix + "pokeX" );
+    cfg( coordinates[1], prefix + "pokeY" );
+    cfg( amplitude, prefix + "pokeAmp" );
+
+    auto &actuators = m_pokeActuators[dm];
+    actuators.clear();
+    if( !cfg.isSet( prefix + "pokeX" ) && !cfg.isSet( prefix + "pokeY" ) && !cfg.isSet( prefix + "pokeAmp" ) )
+    {
+        return 0;
+    }
+
+    if( cfg.isSet( prefix + "pattern" ) || cfg.isSet( prefix + "amplitude" ) || coordinates[0].empty() ||
+        coordinates[0].size() != coordinates[1].size() ||
+        !autoJayDetail::calibrationIO::number( m_captureConfig.dm[dm].amplitude, amplitude ) )
+    {
+        log<text_log>( prefix + "configure paired pokeX/pokeY and a finite pokeAmp, or pattern and amplitude",
+                       logPrio::LOG_ERROR );
+        return -1;
+    }
+
+    for( size_t i = 0; i < coordinates[0].size(); ++i )
+    {
+        std::array<int, 2> point;
+        for( size_t axis = 0; axis < point.size(); ++axis )
+        {
+            auto &value = coordinates[axis][i];
+            auto  last  = value.find_last_not_of( " \t" );
+            value.erase( last == std::string::npos ? 0 : last + 1 );
+
+            if( !autoJayDetail::calibrationIO::number( point[axis], value ) || point[axis] < 0 )
+            {
+                log<text_log>( prefix + "pokeX and pokeY must contain nonnegative integer coordinates",
+                               logPrio::LOG_ERROR );
+                return -1;
+            }
+        }
+
+        actuators.push_back( point );
+    }
+
+    return 0;
+}
+
 inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
 {
     SHMIMMONITOR_LOAD_CONFIG( cfg );
@@ -430,11 +501,10 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
     cfg( m_diagnosticsDir, "autoJay.diagnosticsDir" );
     for( size_t i = 0; i < 2; ++i )
     {
-        std::string prefix = i == 0 ? "ncpc." : "tweeter.";
-        cfg( m_captureConfig.dm[i].channel, prefix + "channel" );
-        cfg( m_captureConfig.dm[i].trigger, prefix + "trigger" );
-        cfg( m_patternFiles[i], prefix + "pattern" );
-        cfg( m_captureConfig.dm[i].amplitude, prefix + "amplitude" );
+        if( loadPokeConfig( cfg, i ) < 0 )
+        {
+            return -1;
+        }
     }
     cfg( m_captureConfig.frames, "acquisition.frames" );
     cfg( m_captureConfig.settleFrames, "acquisition.settleFrames" );
@@ -724,8 +794,51 @@ autoJay::checkSetup( calibration &cal, geometry &geom, bool capture, std::string
     return true;
 }
 
-inline bool autoJay::openChannels( const calibration &cal, std::string &error )
+inline bool
+autoJay::resolvePattern( calibration &cal, size_t dm, size_t width, size_t height, std::string &error ) const
 {
+    auto &pattern = cal.dm[dm].pattern;
+    if( pattern.size() != 0 )
+    {
+        if( size_t( pattern.rows() ) == width && size_t( pattern.cols() ) == height )
+        {
+            return true;
+        }
+
+        error = "DM pattern geometry mismatch: " + cal.dm[dm].channel;
+        return false;
+    }
+
+    if( width == 0 || height == 0 || width > autoJayDetail::calibrationIO::maxPixels / height ||
+        m_pokeActuators[dm].empty() )
+    {
+        error = "invalid DM geometry or missing actuator coordinates: " + cal.dm[dm].channel;
+        return false;
+    }
+
+    for( const auto &point : m_pokeActuators[dm] )
+    {
+        if( size_t( point[0] ) >= width || size_t( point[1] ) >= height )
+        {
+            error = "poke coordinate outside DM stream geometry: " + cal.dm[dm].channel;
+            return false;
+        }
+    }
+
+    pattern.setZero( width, height );
+    for( const auto &point : m_pokeActuators[dm] )
+    {
+        pattern( point[0], point[1] ) = 1;
+    }
+
+    return true;
+}
+
+inline bool autoJay::openChannels( calibration &cal, std::string &error )
+{
+    decltype( m_channels ) channels;
+    decltype( m_triggers ) triggers;
+
     for( size_t i = 0; i < 2; ++i )
     {
         if( cal.dm[i].channel.empty() || cal.dm[i].channel == cal.dm[0].trigger ||
@@ -736,13 +849,18 @@ inline bool autoJay::openChannels( const calibration &cal, std::string &error )
         }
         auto channel = std::make_unique<autoJayDmStream>( cal.dm[i].channel );
         auto trigger = std::make_unique<autoJayDmStream>( cal.dm[i].trigger );
-        if( !channel->plane() || !trigger->plane() || channel->rows() != cal.dm[i].pattern.rows() ||
-            channel->cols() != cal.dm[i].pattern.cols() || trigger->rows() != channel->rows() ||
+        if( !channel->plane() || !trigger->plane() || trigger->rows() != channel->rows() ||
             trigger->cols() != channel->cols() )
         {
             error = "DM stream geometry mismatch";
             return false;
         }
+
+        if( !resolvePattern( cal, i, channel->rows(), channel->cols(), error ) )
+        {
+            return false;
+        }
+
         for( size_t p = 0; p < channel->rows() * channel->cols(); ++p )
             if( ( *channel )[p] != 0 || !mx::math::isFinite( ( *channel )[p] ) )
             {
@@ -768,9 +886,12 @@ inline bool autoJay::openChannels( const calibration &cal, std::string &error )
             m_streamBytes[2 * i + j]  = info.st_size;
         }
         m_lastCommands[i] = imageT::Zero( channel->rows(), channel->cols() );
-        m_channels[i]     = std::move( channel );
-        m_triggers[i]     = std::move( trigger );
+        channels[i]       = std::move( channel );
+        triggers[i]       = std::move( trigger );
     }
+
+    m_channels = std::move( channels );
+    m_triggers = std::move( triggers );
     return true;
 }
 
@@ -938,12 +1059,25 @@ inline bool autoJay::begin( bool capture )
     if( capture )
     {
         for( size_t i = 0; i < 2; ++i )
-            if( !autoJayDetail::loadPattern( cycle.dm[i].pattern, m_patternFiles[i], error ) ||
-                !mx::math::isFinite( cycle.dm[i].amplitude ) || cycle.dm[i].amplitude == 0 )
+        {
+            auto &dm = cycle.dm[i];
+            if( !mx::math::isFinite( dm.amplitude ) || dm.amplitude == 0 )
             {
-                m_status = "capture pattern/amplitude invalid: " + error;
+                m_status = "capture requires a finite nonzero poke amplitude: " + dm.channel;
                 return false;
             }
+
+            if( !m_pokeActuators[i].empty() )
+            {
+                dm.pattern.resize( 0, 0 );
+            }
+            else if( !autoJayDetail::loadPattern( dm.pattern, m_patternFiles[i], error ) )
+            {
+                m_status = "capture pattern invalid for " + dm.channel + ": " + error;
+                return false;
+            }
+        }
+
         cycle.cameraGeometry = geom;
     }
     for( const auto &dm : cycle.dm )
