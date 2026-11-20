@@ -511,3 +511,41 @@ File: `counterOffload_calib_20261120T193905Z.csv`, copied to `~/Documents/MagAO-
   - The `start` values scatter by 3.6%, about the same as the drift.
   - `fomStd` is about 1% of `fom`, so it underestimates the real point-to-point noise by about 4–5×, as expected for overlapping averages.
   - With this noise, no `rampStartUs` dependence can be seen at gain 0.1.
+
+### Bench: Instability at Gain ≥ 0.4 (2026-11-20), Analysis and Proposed Fix (not implemented)
+**Observation (user).** The loop goes unstable once the gain reaches about 0.4. The tweeter display shows windup, with commands up to about 2×10⁶ against a real limit of about ±1.5. "The coarse search is too extreme."
+
+**Most likely cause: the gain scales the whole held contribution.**
+- The command is `−gain·(A + Σ ramps)`. With `leak` 0, `A` is the sum of every offload since the app was enabled. It telescopes to the total change in `aol0_modevalDM` over that time, projected onto the tweeter: potentially most of the low-order shape the woofer holds, which is large, because the woofer is the high-stroke DM.
+- The main loop must hold `+gain·A` on its own channel to cancel it. When `gain·|A|` exceeds the tweeter range (±1.5), the tweeter saturates.
+  - The loop can no longer null the residual, so its integrator winds up. That is the 2×10⁶ on the display.
+  - At 0.1, `0.1·|A|` fitted. At about 0.4 it no longer did.
+- A gain step also applies `Δgain·A` to the tweeter in one slot. So during a calibration every gain change, and the gain-0 baselines, steps the tweeter by up to `|A|`.
+- This also explains the earlier finding "Why the leak matters": with leak 0, counter-offloading moves woofer stroke back onto the tweeter instead of only cancelling the transient.
+
+**Bench check that would confirm this.** Before raising the gain, look at the peak |value| of `dm01disp08_aux` at gain 0.1. If 4 × that peak exceeds about 1.5, the saturation explanation holds.
+
+**Proposed fix:**
+1. **Gain applies at ramp creation, not to the held sum.**
+   - Store each ramp as `gain·Δ` when the offload arrives, and fold completed ramps into `A` already scaled. The command becomes `−(A + Σ gain_k·Δ_k·ramp)`.
+   - A gain change then affects only new offloads; it never steps the held contribution.
+   - The "off" measurement then means "stop countering new offloads", which is what a baseline should be.
+2. **Calibration needs `A` to stay small.** A run refuses to start unless `leak` > 0, or it runs with its own `calibrate.leak`, restored at the end (see Q-E2).
+   - At 8 kHz, leak 0.0025 per slot is a 50 ms time constant, so `A` holds only the last ~50 ms of offloads, a few offload steps.
+3. **Output clamp and abort.**
+   - New `counterOffload.maxCommand` (default 0.5): any pixel of the counter command beyond ±`maxCommand` is clipped.
+   - Calibration aborts and restores if clipping happens during a run.
+   - Normal operation logs a warning, rate-limited.
+4. **Gentler gain scan** ("coarse search too extreme"): default `gainGrid` 0.1, 1.0, 0.1. After fixes 1–2, gain ≤ 1 cannot hand stroke to the tweeter. Above 1 over-corrects and is left to manual testing.
+
+**Band question (user): is `halfWidthHz` an FWHM?**
+- No. It is the half width of the integration window. At 10 Hz the figure of merit is the PSD power summed over 240–260 Hz.
+- `ratio` compares that same 240–260 Hz power with the 240–260 Hz power at gain 0. `fom` is the raw 240–260 Hz power for each parameter set, so comparing `fom` across rows is exactly "the 240–260 Hz power compared with itself". Nothing compares 250 Hz alone with the band.
+- With a ~10 Hz-wide spike, ±10 Hz contains essentially all of it plus some background. ±5 Hz (245–255) would cut background but also part of the spike wings.
+
+**Questions:**
+- **Q-E1.** Fix 1 (gain at ramp creation): OK?
+- **Q-E2.** Calibration leak: refuse to start when `leak` = 0, or apply a separate `calibrate.leak` (default 0.0025) during the run and restore it afterwards?
+- **Q-E3.** Clamp: default `maxCommand` 0.5? Clip and warn in normal operation, abort during calibration?
+- **Q-E4.** New default gain grid 0.1–1.0 in 0.1 steps? Or a different range?
+- **Q-E5.** Which stream showed the 2×10⁶: `dm01disp08_aux` (counter), the main loop channel, or the total `dm01disp`? It confirms where the windup is.
