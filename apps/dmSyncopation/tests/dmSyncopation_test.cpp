@@ -145,6 +145,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_combinerQuality;
     using dmSyncopation::m_indiP_combinerTiming;
     using dmSyncopation::m_indiP_enable;
+    using dmSyncopation::m_indiP_health;
     using dmSyncopation::m_indiP_logicTiming;
     using dmSyncopation::m_indiP_pipelineBoundary;
     using dmSyncopation::m_indiP_pipelineQuality;
@@ -166,6 +167,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_simulationStatus;
     using dmSyncopation::m_indiP_simulationSteps;
     using dmSyncopation::m_indiP_simulationTrace;
+    using dmSyncopation::m_indiP_status;
     using dmSyncopation::m_indiP_zeroPhase;
     using dmSyncopation::m_indiP_zeroTest;
     using dmSyncopation::m_lastFaultNs;
@@ -201,6 +203,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_primaryTiming;
     using dmSyncopation::m_primaryTraceInode;
     using dmSyncopation::m_primed;
+    using dmSyncopation::m_productionEnabled;
     using dmSyncopation::m_publicationNow;
     using dmSyncopation::m_rateFrames;
     using dmSyncopation::m_readerReleaseTiming;
@@ -274,6 +277,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::recordLogicStage;
     using dmSyncopation::setupCadenceINDI;
     using dmSyncopation::setupCombinerCadenceINDI;
+    using dmSyncopation::setupINDI;
     using dmSyncopation::setupLogicTimingINDI;
     using dmSyncopation::setupMainTimingINDI;
     using dmSyncopation::setupPipelineINDI;
@@ -10661,6 +10665,73 @@ TEST_CASE( "syncopation main export reuses existing qualified active acknowledge
     MagAOX::app::dmSyncopation::processImage;
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
     MagAOX::app::synco::MainTiming::capture;
+#endif
+    // clang-format on
+}
+
+/** \brief Exercise startup property discovery and finite-trial enable readback in both interface builds.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "syncopation advertises the build-selected INDI interface", "[dmSyncopation][indi]" )
+{
+    Streams    streams;
+    Harness    app;
+    const bool production   = GENERATE( false, true );
+    app.m_productionEnabled = production;
+    app.m_zeroTestEnabled   = !production;
+    app.m_mainTimingName    = "unpublished-local-main-timing";
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+
+    const auto definitions = app.propertyDefinitions();
+    for( const auto *name : { "enable", "reacquire", "settings", "timing", "health" } )
+    {
+        CHECK( definitions.find( std::string( "name=\"" ) + name + "\"" ) != std::string::npos );
+    }
+
+    for( const auto *name : { "main_timing",
+                              "logic_timing",
+                              "zero_test",
+                              "zero_phase",
+                              "zero_publication",
+                              "zero_clock",
+                              "primary_timing",
+                              "combiner_timing",
+                              "camera_timing",
+                              "pipeline_timing_quality",
+                              "reader_release_timing" } )
+    {
+        CHECK( ( definitions.find( std::string( "name=\"" ) + name + "\"" ) != std::string::npos ) ==
+               bool( DMSYNCOPATION_DIAGNOSTIC_INDI ) );
+    }
+
+    CHECK( ( definitions.find( "<defNumberVector device=\"synco_test\" name=\"production\"" ) != std::string::npos ) ==
+           ( production && DMSYNCOPATION_DIAGNOSTIC_INDI ) );
+    CHECK( app.m_indiP_status.getElements().size() == ( DMSYNCOPATION_DIAGNOSTIC_INDI ? 44 : 8 ) );
+    CHECK( app.m_indiP_health.getElements().size() == ( DMSYNCOPATION_DIAGNOSTIC_INDI ? 8 : 3 ) );
+
+    if( !production )
+    {
+        app.m_now = []
+        {
+            return int64_t{ 1000000000 };
+        };
+        app.m_zeroDurationSec     = 0.5;
+        app.m_zeroStats.startedNs = 1;
+        app.m_enabled             = true;
+        app.m_indiP_enable["toggle"].setSwitchState( pcf::IndiElement::On );
+        app.updateZeroTest( false );
+
+        CHECK_FALSE( app.m_enabled );
+        CHECK( app.m_indiP_enable["toggle"].getSwitchState() == pcf::IndiElement::Off );
+        CHECK( app.m_indiP_settings["durationSec"].get<double>() == 0.5 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::setupINDI;
+    MagAOX::app::dmSyncopation::updateZeroTest;
+    MagAOX::app::MagAOXApp<true>::handleGetProperties;
 #endif
     // clang-format on
 }
