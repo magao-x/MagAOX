@@ -240,6 +240,13 @@ struct diagnostics
     double                  m_maxLateUs{ 0 };       ///< Largest measured monotonic lateness.
     double                  m_cadenceRatio{ 0 };    ///< Measured source period divided by the nominal model period.
     std::array<uint64_t, 2> m_low{}, m_high{};      ///< ADC rail clamps in published accelerometer measurements.
+    double                  m_lastLateUs{ 0 };      ///< Lateness of the latest synchronized acquisition [us].
+    double                  m_windowLateUs{ 0 };    ///< Largest lateness since the latest WFS reference [us].
+    double                  m_previousLateUs{ 0 };  ///< Largest lateness over the previous complete WFS period [us].
+    bool                    m_lockPhase{ false };   ///< Phase criterion of delay_lock.
+    bool                    m_lockTiming{ false };  ///< Acquisition-timing criterion of delay_lock.
+    double m_timerSlackNs{ -1 };            ///< Effective timer slack of the acquisition thread; -1 when unavailable.
+    int    m_policy{ -1 }, m_priority{ 0 }; ///< Scheduling policy and priority of the acquisition thread.
 
     /// Wrap the signed applied/model phase difference to the hardware interval (-T/2,T/2].
     void updatePhaseError();
@@ -250,6 +257,17 @@ struct diagnostics
 
     /// Clear synchronization measurements on outage without erasing lifetime accounting.
     void invalidateSync( double postDelay /**< [in] configured phase offset in microseconds */ );
+
+    /// Record the lateness of one synchronized acquisition in the current WFS-period window.
+    void acquisitionLate( double us /**< [in] acquisition time minus its deadline [us] */ );
+
+    /// Close the lateness window at a WFS reference; the completed window qualifies the following period.
+    void closeLateWindow();
+
+    /// Evaluate delay_lock: the phase thresholds applied to the clock phase error and, coherently, to the largest
+    /// acquisition lateness of the current and previous WFS periods.
+    void updateLock( double absolute /**< [in] absolute threshold [us] */,
+                     double fraction /**< [in] fraction of the WFS period */ );
 };
 
 inline void diagnostics::updatePhaseError()
@@ -293,6 +311,29 @@ inline void diagnostics::invalidateSync( double postDelay )
     m_timing[delayTarget]   = postDelay;
     m_timing[producerDelta] = 0;
     m_cadenceRatio          = 0;
+    m_windowLateUs = m_previousLateUs = 0;
+    m_lockPhase = m_lockTiming = false;
+}
+
+inline void diagnostics::acquisitionLate( double us )
+{
+    m_lastLateUs   = us;
+    m_windowLateUs = std::max( m_windowLateUs, us );
+}
+
+inline void diagnostics::closeLateWindow()
+{
+    m_previousLateUs = m_windowLateUs;
+    m_windowLateUs   = 0;
+}
+
+inline void diagnostics::updateLock( double absolute, double fraction )
+{
+    const double period = m_timing[semaphorePeriod];
+    auto         within = [&]( double value ) { return value <= absolute && value <= fraction * period; };
+    m_lockPhase         = within( std::abs( m_timing[phaseError] ) );
+    m_lockTiming        = within( std::max( m_windowLateUs, m_previousLateUs ) );
+    m_timing[lock]      = m_lockPhase && m_lockTiming ? 1 : 0;
 }
 
 inline void oscillator::configure( double frequency, double r, double fps, double rms )

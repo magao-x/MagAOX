@@ -730,6 +730,45 @@ TEST_CASE( "accelSim trigger history requires measured timing", "[accelSim][mode
     REQUIRE( t[triggerInterval] == 0 );
 }
 
+/** \brief delay_lock applies the unchanged phase thresholds to the phase error and to the largest acquisition lateness
+ * over the current and previous WFS periods, independently of which event evaluates it.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim delay lock window", "[model][sync-regression]" )
+{
+    using namespace MagAOX::app::accelSimDetail;
+    diagnostics d;
+    d.m_timing[semaphorePeriod] = 500;
+    d.updateLock( 50, .1 );
+    REQUIRE( d.m_timing[lock] == 1 );
+    d.acquisitionLate( 52 ); // ~50-us futex timer slack plus service time.
+    d.updateLock( 50, .1 );
+    REQUIRE( d.m_timing[lock] == 0 );
+    REQUIRE( d.m_lockPhase );
+    REQUIRE_FALSE( d.m_lockTiming );
+    d.closeLateWindow(); // A WFS reference does not re-assert lock over the late period.
+    d.updateLock( 50, .1 );
+    REQUIRE( d.m_timing[lock] == 0 );
+    d.acquisitionLate( 4 );
+    d.closeLateWindow(); // One complete on-time period restores it.
+    d.updateLock( 50, .1 );
+    REQUIRE( d.m_timing[lock] == 1 );
+    d.m_timing[phaseError] = 51; // The phase criterion is unchanged.
+    d.updateLock( 50, .1 );
+    REQUIRE( d.m_timing[lock] == 0 );
+    REQUIRE_FALSE( d.m_lockPhase );
+    d.invalidateSync( 0 );
+    REQUIRE( d.m_windowLateUs == 0 );
+    REQUIRE( d.m_previousLateUs == 0 );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSimDetail::diagnostics::updateLock;
+    MagAOX::app::accelSimDetail::diagnostics::acquisitionLate;
+    MagAOX::app::accelSimDetail::diagnostics::closeLateWindow;
+#endif
+    // clang-format on
+}
+
 #ifndef ACCELSIM_MODEL_ONLY
 /// \cond TEST_HARNESS
 /// Record real INDI serialization without a server or an activated input thread.
@@ -1298,6 +1337,57 @@ TEST_CASE( "accelSim synchronized delay model", "[accelSim][app][sync-regression
     MagAOX::app::accelSim::syncTiming;
     MagAOX::app::accelSim::updateSyncDiagnostics;
     MagAOX::app::accelSim::invalidateSync;
+#endif
+    // clang-format on
+}
+
+/** \brief delay_lock applies the phase thresholds to the clock phase error and, over whole WFS periods, to the
+ * acquisition lateness, so a reference cannot re-assert lock over late samples and one clean period restores it.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim delay lock qualifies phase and acquisition lateness coherently",
+           "[accelSim][app][sync-regression]" )
+{
+    appTest app;
+    app.m_syncName = "accelSim-test-source";
+    app.m_phaseClock.reset( 1000000000, 8000 );
+    app.m_alpha = 1;
+    app.syncTiming( 1, 1000000000 );
+    app.syncTiming( 2, 1000500000 );
+    for( int n = 0; n < 40; ++n )
+        app.m_phaseClock.consume( app.m_phaseClock.deadline(), .05, 105000 );
+    const auto &d       = app.m_diagnostics;
+    const auto &t       = d.m_timing;
+    auto        acquire = [&]( double late )
+    {
+        app.m_diagnostics.acquisitionLate( late );
+        app.updateSyncDiagnostics();
+    };
+    acquire( 5 );
+    REQUIRE( t[phaseError] == Approx( 0 ).margin( 1e-9 ) );
+    REQUIRE( t[lock] == 1 );
+    // A systematic 52-us lateness exceeds the 50-us threshold: the phase criterion still holds, timing does not.
+    acquire( 52 );
+    REQUIRE( t[lock] == 0 );
+    REQUIRE( d.m_lockPhase );
+    REQUIRE_FALSE( d.m_lockTiming );
+    // Previously each WFS reference re-asserted lock from the phase alone; the late period now still disqualifies it.
+    app.syncTiming( 3, 1001000000 );
+    REQUIRE( t[lock] == 0 );
+    for( int n = 0; n < 4; ++n )
+        acquire( 3 );
+    REQUIRE( t[lock] == 0 );
+    // One complete on-time WFS period restores lock with unchanged thresholds.
+    app.syncTiming( 4, 1001500000 );
+    REQUIRE( t[lock] == 1 );
+    REQUIRE( d.m_lockTiming );
+    app.invalidateSync();
+    REQUIRE( t[lock] == 0 );
+    REQUIRE( d.m_windowLateUs == 0 );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSimDetail::diagnostics::updateLock;
+    MagAOX::app::accelSim::updateSyncDiagnostics;
 #endif
     // clang-format on
 }

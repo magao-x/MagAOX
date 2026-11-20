@@ -9,8 +9,12 @@
 #include <chrono>
 #include <cstring>
 #include <mutex>
+#include <sched.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#ifdef __linux__
+    #include <sys/prctl.h>
+#endif
 #include <thread>
 #include <unistd.h>
 
@@ -340,6 +344,9 @@ class accelSim : public MagAOXApp<true>,
     void prepareDM();
     /// Check calibration identity while loading; acquisition uses the validated in-memory calibration.
     bool calibrationUnchanged() const;
+
+    /// Read and validate the mode cube and optional mask, then prepare the physical projection; throws on failure.
+    void loadDMCalibration();
     /// Report controls/status without acquiring the DM writer or publishing images.
     void updateDMINDI();
     /// Service the existing tagged producer once; returns whether a payload was committed.
@@ -473,7 +480,10 @@ inline void accelSim::setupConfig()
          "string",
          "Existing exclusively owned channel; experiment uses dm01disp10_aux; empty disables access." );
     add( "dm", "modeCube", "string", "Approved surface-micron TT FITS cube; first two planes are used." );
-    add( "dm", "mask", "string", "Deployed dmmask FITS fitting support, not the offloader actuator mask." );
+    add( "dm",
+         "mask",
+         "string",
+         "Optional dmmask FITS fitting weights; empty (default) fits over the mode cube's nonzero support." );
     add( "dm", "enabled", "bool", "Must be false; use the runtime dm_enable control." );
     add( "dm", "scale", "double", "Independent DM-only linear scale [0,100], default 0." );
     add( "dm", "maxRelativeResidual", "double", "Maximum calibrated physical fit residual, default 1e-6." );
@@ -644,7 +654,14 @@ inline int accelSim::setupProperties()
                               "clip_x_low",
                               "clip_x_high",
                               "clip_y_low",
-                              "clip_y_high" } )
+                              "clip_y_high",
+                              "lateness_last_us",
+                              "lateness_window_max_us",
+                              "lock_phase_ok",
+                              "lock_timing_ok",
+                              "acq_timer_slack_ns",
+                              "acq_sched_policy",
+                              "acq_priority" } )
         m_indiP_simDiag.add( pcf::IndiElement( name ) );
     if( !m_fpsDevice.empty() )
     {
@@ -674,7 +691,28 @@ inline bool accelSim::calibrationUnchanged() const
                current.st_ctim.tv_nsec == original.st_ctim.tv_nsec;
 #endif
     };
-    return same( m_dmModes, m_dmModesStat ) && same( m_dmMask, m_dmMaskStat );
+    return same( m_dmModes, m_dmModesStat ) && ( m_dmMask.empty() || same( m_dmMask, m_dmMaskStat ) );
+}
+
+inline void accelSim::loadDMCalibration()
+{
+    if( stat( m_dmModes.c_str(), &m_dmModesStat ) != 0 ||
+        ( !m_dmMask.empty() && stat( m_dmMask.c_str(), &m_dmMaskStat ) != 0 ) )
+        throw std::invalid_argument( "DM calibration paths must identify the approved TT cube and optional dmmask" );
+    mx::fits::fitsFile<double>    ff;
+    mx::improc::eigenCube<double> modes, mask;
+    if( ff.read( modes, m_dmModes ) != mx::error_t::noerror || modes.rows() != 50 || modes.cols() != 50 ||
+        modes.planes() < 2 ||
+        ( !m_dmMask.empty() && ( ff.read( mask, m_dmMask ) != mx::error_t::noerror || mask.rows() != 50 ||
+                                 mask.cols() != 50 || mask.planes() != 1 ) ) ||
+        !calibrationUnchanged() )
+        throw std::invalid_argument( "invalid or changed DM calibration geometry" );
+    const std::vector<double> mode0( modes.image( 0 ).data(), modes.image( 0 ).data() + 2500 );
+    const std::vector<double> mode1( modes.image( 1 ).data(), modes.image( 1 ).data() + 2500 );
+    // No mask: the fit uses the cube's own support; the output is the full modes either way.
+    const std::vector<double> weights =
+        m_dmMask.empty() ? std::vector<double>() : std::vector<double>( mask.data(), mask.data() + 2500 );
+    m_dmInjection.prepare( mode0, mode1, weights, m_dmResidual );
 }
 
 inline void accelSim::prepareDM()
@@ -683,18 +721,7 @@ inline void accelSim::prepareDM()
         return;
     try
     {
-        if( stat( m_dmModes.c_str(), &m_dmModesStat ) != 0 || stat( m_dmMask.c_str(), &m_dmMaskStat ) != 0 )
-            throw std::invalid_argument( "DM calibration paths must identify the approved TT cube and dmmask" );
-        mx::fits::fitsFile<double>    ff;
-        mx::improc::eigenCube<double> modes, mask;
-        if( ff.read( modes, m_dmModes ) != mx::error_t::noerror || modes.rows() != 50 || modes.cols() != 50 ||
-            modes.planes() < 2 || ff.read( mask, m_dmMask ) != mx::error_t::noerror || mask.rows() != 50 ||
-            mask.cols() != 50 || mask.planes() != 1 || !calibrationUnchanged() )
-            throw std::invalid_argument( "invalid or changed DM calibration geometry" );
-        const std::vector<double> mode0( modes.image( 0 ).data(), modes.image( 0 ).data() + 2500 );
-        const std::vector<double> mode1( modes.image( 1 ).data(), modes.image( 1 ).data() + 2500 );
-        const std::vector<double> weights( mask.data(), mask.data() + 2500 );
-        m_dmInjection.prepare( mode0, mode1, weights, m_dmResidual );
+        loadDMCalibration();
         m_dmReady = true;
         // The dmSpeckle worker pattern: framework thread with configured real-time priority and cpuset.
         if( threadStart( m_dmThread,
@@ -1142,7 +1169,14 @@ inline void accelSim::updateINDI( const diagnostics &snapshot )
                                     "clip_x_low",
                                     "clip_x_high",
                                     "clip_y_low",
-                                    "clip_y_high" },
+                                    "clip_y_high",
+                                    "lateness_last_us",
+                                    "lateness_window_max_us",
+                                    "lock_phase_ok",
+                                    "lock_timing_ok",
+                                    "acq_timer_slack_ns",
+                                    "acq_sched_policy",
+                                    "acq_priority" },
                                   { double( snapshot.m_skipped ),
                                     double( snapshot.m_discontinuities ),
                                     double( snapshot.m_late ),
@@ -1151,7 +1185,14 @@ inline void accelSim::updateINDI( const diagnostics &snapshot )
                                     double( snapshot.m_low[0] ),
                                     double( snapshot.m_high[0] ),
                                     double( snapshot.m_low[1] ),
-                                    double( snapshot.m_high[1] ) } );
+                                    double( snapshot.m_high[1] ),
+                                    snapshot.m_lastLateUs,
+                                    std::max( snapshot.m_windowLateUs, snapshot.m_previousLateUs ),
+                                    double( snapshot.m_lockPhase ),
+                                    double( snapshot.m_lockTiming ),
+                                    snapshot.m_timerSlackNs,
+                                    double( snapshot.m_policy ),
+                                    double( snapshot.m_priority ) } );
     }
 }
 
@@ -1218,15 +1259,28 @@ inline float accelSim::fps()
 
 inline int accelSim::startAcquisition()
 {
+    // In synchronized mode this worker reaches each deadline through a sem_timedwait timeout. Futex timeouts carry
+    // the thread's timer slack (50 us by default), and older kernels apply it to SCHED_FIFO threads as well, which
+    // makes every synchronized sample ~50 us late. Timer mode's clock_nanosleep is exempt for real-time threads.
+    // 1 ns is the minimum slack; 0 would restore the default. sim_diag reports the effective value.
+#ifdef __linux__
+    prctl( PR_SET_TIMERSLACK, 1UL, 0UL, 0UL, 0UL );
+    const int slack              = prctl( PR_GET_TIMERSLACK, 0UL, 0UL, 0UL, 0UL );
+    m_diagnostics.m_timerSlackNs = slack >= 0 ? slack : -1;
+    sched_param parameter{};
+    m_diagnostics.m_policy   = sched_getscheduler( 0 );
+    m_diagnostics.m_priority = sched_getparam( 0, &parameter ) == 0 ? parameter.sched_priority : 0;
+#endif
     m_schedule.reset( monotonicNow(), m_activeFps.load() );
     m_timeline.reset( m_schedule.m_epoch, m_model ); // Node k is the nominal time of accelerometer tick k.
     m_lastAcquisition = m_triggerPrediction = 0;
     if( !m_syncName.empty() )
         m_phaseClock.reset( m_schedule.m_epoch, m_activeFps.load() );
-    m_nextSyncProbe                     = 0;
-    m_measureReference                  = false;
-    m_fresh                             = false;
-    m_diagnostics.m_timing              = {};
+    m_nextSyncProbe        = 0;
+    m_measureReference     = false;
+    m_fresh                = false;
+    m_diagnostics.m_timing = {};
+    m_diagnostics.invalidateSync( m_postDelay.load() );
     m_diagnostics.m_timing[modeCode]    = m_syncName.empty() ? 0 : 1;
     m_diagnostics.m_timing[delayTarget] = m_postDelay.load();
     if( m_syncOpen )
@@ -1321,6 +1375,7 @@ inline void accelSim::syncTiming( uint64_t producer, int64_t arrival )
         m_latencyPrediction = m_triggerPrediction;
     }
     m_diagnostics.m_cadenceRatio = m_phaseClock.m_sourcePeriod * m_activeFps.load() / 1e9;
+    m_diagnostics.closeLateWindow();
     updateSyncDiagnostics();
 }
 
@@ -1329,7 +1384,9 @@ inline void accelSim::updateSyncDiagnostics()
     auto &t = m_diagnostics.m_timing;
     if( !m_phaseClock.m_valid )
     {
-        t[lock] = 0;
+        t[lock]                    = 0;
+        m_diagnostics.m_lockPhase  = false;
+        m_diagnostics.m_lockTiming = false;
         return;
     }
     const double residual = ( m_phaseClock.m_applied - m_phaseClock.m_target ) / 1000;
@@ -1340,10 +1397,7 @@ inline void accelSim::updateSyncDiagnostics()
     t[delayBudget] = m_phaseClock.m_budget / 1000;
     t[capped]      = std::abs( residual ) > t[delayBudget] ? 1 : 0;
     m_diagnostics.updatePhaseError();
-    t[lock] = std::abs( t[phaseError] ) <= m_lockAbsolute / 1000 &&
-                      std::abs( t[phaseError] ) <= m_lockFraction * t[semaphorePeriod]
-                  ? 1
-                  : 0;
+    m_diagnostics.updateLock( m_lockAbsolute / 1000, m_lockFraction );
 }
 
 inline void accelSim::invalidateSync()
@@ -1510,9 +1564,9 @@ inline int accelSim::acquireAndCheckValid()
                 t[latencyError]      = ( acquired - m_latencyPrediction ) / 1000.0;
                 m_measureReference   = false;
             }
+            // Lateness and phase qualify lock together over whole WFS periods, whichever event updates it last.
+            m_diagnostics.acquisitionLate( late );
             updateSyncDiagnostics();
-            if( late > m_lockAbsolute / 1000 || late > m_lockFraction * t[semaphorePeriod] )
-                t[lock] = 0;
         }
         m_lastAcquisition = acquired;
         m_fresh           = true;
@@ -1648,7 +1702,7 @@ inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_dmEnable )( const pcf::IndiPrope
     const bool enable = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
     if( enable && !m_dmReady )
         return propertyState( m_indiP_dmEnable, false );
-    {                                                     // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> dmGuard( m_dmMutex ); // Lock order: control, then DM.
         m_dmEnabled = enable;
         if( !enable && m_dmReady )

@@ -259,6 +259,6 @@ check-rtc-controller:
 	  DDSPC_MINIMAL_APP_TESTS=yes CXXFLAGS='$(CXXFLAGS) -DDDSPC_OPERATIONAL_BUILD' \
 	  LDFLAGS='$(LDFLAGS) -Wl,-rpath,$(shell pkg-config --variable=libdir mxlib)' \
 	  LDLIBS='-pthread $(shell pkg-config --libs-only-L --libs-only-l mxlib)' \
-	  SOURCES='$(filter-out $(TEST_DIR)/ddspc_app_test.cpp $(TEST_DIR)/ddspc_shadow_pipeline_test.cpp,$(SHADOW_TEST_SOURCES)) $(TEST_DIR)/rtc_controller_test.cpp $(TEST_DIR)/operational_platform.cpp' \
+	  SOURCES='$(filter-out $(TEST_DIR)/ddspc_app_test.cpp $(TEST_DIR)/ddspc_shadow_pipeline_test.cpp,$(SHADOW_TEST_SOURCES)) $(APP_DIR)/multirate_ddspc.cpp $(TEST_DIR)/multirate_ddspc_test.cpp $(TEST_DIR)/rtc_controller_test.cpp $(TEST_DIR)/operational_platform.cpp' \
 	  $(BUILD_DIR)/rtc-controller/ddspc_offline_test
-	$(BUILD_DIR)/rtc-controller/ddspc_offline_test '[rtc-controller]'
+	$(BUILD_DIR)/rtc-controller/ddspc_offline_test '[rtc-controller],[multirate]'

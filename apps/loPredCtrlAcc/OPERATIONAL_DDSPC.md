@@ -1,4 +1,4 @@
-> **Current RTC procedure:** Use [RTC_TESTING.md](RTC_TESTING.md) for the operational controller, configuration, install commands and INDI sequence. The report below describes the earlier commissioning build; its `dm10disp10_aux` channel is replaced by a configurable scheduler `*_aux` destination, and assisted mode now plans four 8-kHz slots per WFS frame.
+> **Current RTC procedure:** Use [RTC_TESTING.md](RTC_TESTING.md) for the operational controller, configuration, install commands and INDI sequence. The report below describes the earlier commissioning build; its `dm10disp10_aux` channel is replaced by a configurable scheduler `*_aux` destination. Assisted mode now recalculates every 8-kHz DM slot from the newest ACC sample with one shared QR-RLS updated per WFS frame ([derivation and results](../../agents/plans/2026-11/ddspc-multirate-8khz-assisted.md)), and each mode trains only while selected.
 
 # Operational-capable DDSPC experiment
 
