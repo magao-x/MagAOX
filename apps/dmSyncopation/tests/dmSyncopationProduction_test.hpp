@@ -746,10 +746,11 @@ TEST_CASE( "production copy overruns do not latch later slots off", "[dmSyncopat
     // clang-format on
 }
 
-/// Both diagnostic modes preserve real receipt handling, tagged deliveries, passive preparation and continuous
-/// lifetime.
+/** \brief Both diagnostic modes retain receipt handling, qualified main labels and production scheduling.
+ * \ingroup dmSyncopation_unit_test
+ */
 TEST_CASE( "production common scheduler continuously publishes tagged contributions",
-           "[dmSyncopation][production][integration]" )
+           "[dmSyncopation][production][integration][mainTiming]" )
 {
     Streams            streams;
     ProductionSidecars sidecars;
@@ -760,8 +761,20 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
     ZeroClock::connect( app, streams, steps );
     app.m_primaryCadenceWindow    = detailed ? 2 : 0;
     app.m_primaryCadenceMaxEvents = 256;
+    app.m_mainTimingName          = "unpublished-production-main-timing";
+    ZeroClock::mainTimingTrace    = true;
     app.configureDiagnostics();
-    const auto next         = ZeroClock::warm();
+    const auto next = ZeroClock::warm();
+
+    // Startup/acquisition mode markers precede the two enabled production cycles under test.
+    MagAOX::dmTimingEvents::Record mainRecord;
+
+    while( app.m_mainTiming.pop( mainRecord ) )
+    {
+        REQUIRE( mainRecord.kind == MagAOX::dmTimingEvents::Kind::mode );
+        REQUIRE_FALSE( mainRecord.enabled );
+    }
+
     app.m_productionEnabled = true;
     app.m_zeroTestEnabled   = false;
     app.m_zeroLateUs        = 6;
@@ -814,11 +827,44 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
     CHECK( app.m_enabled );
     CHECK_FALSE( app.m_zeroStats.finished );
 
+    uint64_t mainCount = 0, previousCombined = 0, mainGeneration = 0;
+
+    while( app.m_mainTiming.pop( mainRecord ) )
+    {
+        REQUIRE( MagAOX::dmTimingEvents::valid( mainRecord ) );
+        CHECK( mainRecord.enabled );
+        CHECK( mainRecord.steps == uint64_t( steps ) );
+
+        if( mainRecord.kind == MagAOX::dmTimingEvents::Kind::mode )
+        {
+            mainGeneration = mainRecord.generation;
+            continue;
+        }
+
+        REQUIRE( mainRecord.kind == MagAOX::dmTimingEvents::Kind::main );
+        ++mainCount;
+        CHECK( mainRecord.generation == mainGeneration );
+        CHECK( mainRecord.primaryInode == streams.images[0].md->inode );
+        CHECK( mainRecord.primaryCounter == primaryBefore + mainCount );
+        CHECK( mainRecord.key.inode == streams.images[1].md->inode );
+
+        if( previousCombined )
+        {
+            CHECK( mainRecord.key.counter == previousCombined + uint64_t( steps ) );
+        }
+
+        previousCombined = mainRecord.key.counter;
+    }
+
+    CHECK( mainCount == 2 );
+    CHECK( app.m_mainTiming.dropped() == 0 );
+
     if( detailed )
     {
         CHECK( app.m_zeroEvents.queued() > 0 );
         CHECK( app.m_zeroPhase.summary().observed > 0 );
         CHECK( app.m_zeroPublicationTiming.summary().mainObserved > 0 );
+        CHECK( app.m_zeroTiming.summary().classified == 2 );
     }
     else
     {
@@ -840,6 +886,7 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
     MagAOX::app::dmSyncopation::configureDiagnostics;
     MagAOX::app::dmSyncopation::shmimMonitorTiming;
     MagAOX::app::dmSyncopation::processImage;
+    MagAOX::app::synco::MainTiming::capture;
 #endif
     // clang-format on
 }

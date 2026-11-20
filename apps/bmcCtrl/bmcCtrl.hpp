@@ -22,6 +22,8 @@ Test:
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 #include "../../libMagAOX/app/dev/telemeter.hpp"
+#include "../../libMagAOX/app/dev/dmSdkTimingStream.hpp"
+#include "../../libMagAOX/app/dev/dmTimingEventStream.hpp"
 
 #include <array>
 #include <condition_variable>
@@ -233,6 +235,12 @@ class bmcCtrl : public MagAOXApp<true>,
 
     std::string m_pipelineResultStream; ///< Optional dedicated actual SDK-result stream.
 
+    std::string m_sdkStartTimeStreamName; ///< Optional post-processing-only SDK entry timestamp stream.
+
+    std::string m_sdkTimingEventStreamName; ///< Optional post-processing provenance history for main-command joins.
+
+    size_t m_sdkTimingEventCapacity{ 32768 }; ///< Fixed number of retained SDK provenance records.
+
     /// One bounded immutable command, retained until preparation, SDK execution and post-processing all retire.
     struct PipelineJob
     {
@@ -313,6 +321,19 @@ class bmcCtrl : public MagAOXApp<true>,
     int m_pipelineAllowedCpus{ 0 }; ///< Verified post-worker affinity population.
 
     dev::dmCompletion m_pipelineResult; ///< SDK-thread-only actual submission-result publisher.
+
+    dev::dmSdkTimingStream m_sdkStartTimeStream; ///< Sole post-owner publisher, attached while that owner is stopped.
+
+    std::atomic<uint64_t> m_sdkStartTimeFailures{ 0 }; ///< Diagnostic publication failures, independent of DM faults.
+
+    dev::dmTimingEventStream
+        m_sdkTimingEventStream; ///< Post-owner provenance publisher, attached before that owner runs.
+
+    uint64_t m_sdkTimingEventSequence{
+        0 }; ///< Post-only logical attempt sequence, reset only for a new publisher incarnation.
+
+    std::atomic<uint64_t> m_sdkTimingEventFailures{
+        0 }; ///< Optional provenance failures, independent of native SDK outcomes.
 
     /// @}
 
@@ -703,6 +724,33 @@ void bmcCtrl::setupConfig()
                 false,
                 "string",
                 "Optional distinct stream containing actual SDK results only." );
+    config.add( "sdk.startTimeStream",
+                "",
+                "sdk.startTimeStream",
+                argType::Required,
+                "sdk",
+                "startTimeStream",
+                false,
+                "string",
+                "Optional semaphore-free SDK-entry timestamp stream; requires pipelineEnabled and restart." );
+    config.add( "sdk.timingEventStream",
+                "",
+                "sdk.timingEventStream",
+                argType::Required,
+                "sdk",
+                "timingEventStream",
+                false,
+                "string",
+                "Optional post-processing SDK provenance history; requires pipelineEnabled and restart." );
+    config.add( "sdk.timingEventCapacity",
+                "",
+                "sdk.timingEventCapacity",
+                argType::Required,
+                "sdk",
+                "timingEventCapacity",
+                false,
+                "unsigned",
+                "Retained SDK provenance records; default 32768, range 4 through 1048576." );
 
     DM_SETUP_CONFIG( config );
 
@@ -722,6 +770,9 @@ int bmcCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_pipelineThreadPrio, "sdk.pipelineThreadPrio" );
     _config( m_pipelineCpuset, "sdk.pipelineCpuset" );
     _config( m_pipelineResultStream, "sdk.pipelineResultStream" );
+    _config( m_sdkStartTimeStreamName, "sdk.startTimeStream" );
+    _config( m_sdkTimingEventStreamName, "sdk.timingEventStream" );
+    _config( m_sdkTimingEventCapacity, "sdk.timingEventCapacity" );
 
     if( m_sdkThreadPrio < 0 || m_sdkThreadPrio > 99 || !mx::math::isFinite( m_sdkTimeoutSec ) || m_sdkTimeoutSec <= 0 )
     {
@@ -729,7 +780,10 @@ int bmcCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
     }
 
     if( ( m_pipelineEnabled && !m_sdkWorkerEnabled ) || m_pipelineThreadPrio < 0 || m_pipelineThreadPrio > 99 ||
-        ( !m_pipelineEnabled && !m_pipelineResultStream.empty() ) )
+        ( !m_pipelineEnabled && ( !m_pipelineResultStream.empty() || !m_sdkStartTimeStreamName.empty() ||
+                                  !m_sdkTimingEventStreamName.empty() ) ) ||
+        m_sdkTimingEventCapacity < dev::dmTimingEventStream::minCapacity ||
+        m_sdkTimingEventCapacity > dev::dmTimingEventStream::maxCapacity )
     {
         return -1;
     }
@@ -755,6 +809,42 @@ int bmcCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
             std::find( m_deltaChannels.begin(), m_deltaChannels.end(), m_pipelineResultStream ) !=
                 m_deltaChannels.end() ||
             m_pipelineResultStream.starts_with( m_shmimName ) )
+        {
+            return -1;
+        }
+    }
+
+    if( !m_sdkTimingEventStreamName.empty() && m_sdkTimingEventStreamName == m_sdkStartTimeStreamName )
+    {
+        return -1;
+    }
+
+    for( const auto *name : { &m_sdkStartTimeStreamName, &m_sdkTimingEventStreamName } )
+    {
+        if( name->empty() )
+        {
+            continue;
+        }
+
+        const std::vector<std::string> reserved{ m_pipelineResultStream,
+                                                 m_completionStreamName,
+                                                 m_readerReleaseStreamName,
+                                                 m_shmimName,
+                                                 m_shmimFlat,
+                                                 m_shmimTest,
+                                                 m_shmimSat,
+                                                 m_shmimSatPerc,
+                                                 m_shmimShape,
+                                                 m_shmimDelta,
+                                                 m_shmimDiff,
+                                                 m_shmimName + "_actmask" };
+
+        if( *name == "." || *name == ".." || name->size() >= STRINGMAXLEN_IMAGE_NAME ||
+            name->find_first_not_of( "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" ) !=
+                std::string::npos ||
+            std::find( reserved.begin(), reserved.end(), *name ) != reserved.end() ||
+            std::find( m_deltaChannels.begin(), m_deltaChannels.end(), *name ) != m_deltaChannels.end() ||
+            ( !m_shmimName.empty() && name->starts_with( m_shmimName ) ) )
         {
             return -1;
         }
@@ -1997,7 +2087,7 @@ void bmcCtrl::updateSdkWorkerINDI()
         return;
     }
 
-    std::array<double, 18> pipeline{};
+    std::array<double, 22> pipeline{};
 
     if( m_pipelineEnabled )
     {
@@ -2028,7 +2118,11 @@ void bmcCtrl::updateSdkWorkerINDI()
                      double( m_pipelinePreparationFailures ),
                      double( m_pipelinePolicy ),
                      double( m_pipelineActualPrio ),
-                     double( m_pipelineAllowedCpus ) };
+                     double( m_pipelineAllowedCpus ),
+                     m_sdkStartTimeStream.enabled() ? 1.0 : 0.0,
+                     double( m_sdkStartTimeFailures.load( std::memory_order_relaxed ) ),
+                     m_sdkTimingEventStream.enabled() ? 1.0 : 0.0,
+                     double( m_sdkTimingEventFailures.load( std::memory_order_relaxed ) ) };
     }
 
     bool     active, closed, fault;
@@ -2095,7 +2189,11 @@ void bmcCtrl::updateSdkWorkerINDI()
                                    "preparationFailures",
                                    "policy",
                                    "priority",
-                                   "allowedCpus" },
+                                   "allowedCpus",
+                                   "startTimeEnabled",
+                                   "startTimeFailures",
+                                   "timingEventEnabled",
+                                   "timingEventFailures" },
                                  std::vector<double>( pipeline.begin(), pipeline.end() ),
                                  fault ? pcf::IndiProperty::Alert : pcf::IndiProperty::Ok );
     }

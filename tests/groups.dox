@@ -72,6 +72,41 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup sysMonitor_unit_test sysMonitor Unit Tests
+ * \brief Offline system diagnostic collectors, publication, and lifecycle tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup boundedCommand_unit_test Bounded Command Unit Tests
+ * \brief Offline process deadlines, capture, and cleanup tests.
+ * \ingroup unit_test
+ */
+
+/** \defgroup runCommand_unit_test Command Capture Unit Tests
+ * \brief Verify legacy command capture preserves ownership of unrelated children.
+ * \ingroup unit_test
+ */
+
+/** \defgroup cpuList_unit_test CPU List Unit Tests
+ * \brief Strict normalization and validation of CPU affinity lists.
+ * \ingroup unit_test
+ */
+
+/** \defgroup gpuTelemetry_unit_test GPU Telemetry Unit Tests
+ * \brief Identified GPU payload, validity, and metadata tests.
+ * \ingroup unit_test
+ */
+
+/** \defgroup irqTelemetry_unit_test IRQ Telemetry Unit Tests
+ * \brief IRQ placement payload, verification, and metadata tests.
+ * \ingroup unit_test
+ */
+
+/** \defgroup raidTelemetry_unit_test RAID Telemetry Unit Tests
+ * \brief Compact MD array health, counts, and metadata tests.
+ * \ingroup unit_test
+ */
+
 /** \defgroup logdump_unit_test Logdump Unit Tests
  * \brief Complete-record decoding, live partial appends, filtering, and log rotation tests.
  * \ingroup application_unit_test
@@ -79,6 +114,11 @@ $ less tests/results/latest/run.log
 
 /** \defgroup dmSyncopation_unit_test DM Syncopation Unit Tests
  * \brief Deterministic scheduling, control and local shared-memory publication tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup loopTimingMonitor_unit_test Loop Timing Monitor Unit Tests
+ * \brief Offline timestamp association, polling, operating gates and persistent fgtimes telemetry.
  * \ingroup application_unit_test
  */
 
@@ -149,6 +189,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup hwpSequencer_unit_test hwpSequencer Unit Tests
+ * \brief Offline tests of the HWP sequencer callbacks, configuration, bounded waits, and sequence logic.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup filterWheelCtrl_unit_test Filter Wheel Controller Unit Tests
  * \brief Offline communication recovery, homing, and power-transition tests.
  * \ingroup application_unit_test
@@ -209,6 +254,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup valueDisplay_unit_test rtimv Value Display Plugin Unit Tests
+ * \brief Offline numeric display, INDI availability, and overlay placement tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup gui_publisher_unit_test GUI Publisher Unit Tests
  * \brief Socket-free discovery retry, routing, and subscription lifecycle tests.
  * \ingroup unit_test
@@ -226,6 +276,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
 
 /** \defgroup common_unit_test Common Library Unit Tests
  * \brief Unit tests for shared low-level library helpers.
+ * \ingroup unit_test
+ */
+
+/** \defgroup pixaccess_unit_test ImageStreamIO Pixel Access Unit Tests
+ * \brief Conversion of ImageStreamIO pixel data to other types.
  * \ingroup unit_test
  */
 
@@ -276,6 +331,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
 
 /** \defgroup ocam2KCtrl_emgain_unit_test OCAM EM Gain Unit Tests
  * \brief Offline camera-specific gain-off commands and protection behavior.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup ocam2KCtrl_descramble_unit_test OCAM Descramble Unit Tests
+ * \brief Real-SDK pixel equivalence and offline frame-boundary implementation selection.
  * \ingroup application_unit_test
  */
 

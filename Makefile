@@ -29,6 +29,7 @@ apps_aoc = \
 	xt1121DCDU \
 	tcsInterface \
 	adcTracker \
+	hwpSequencer \
 	hwpTracker \
 	kTracker \
 	koolanceCtrl \
@@ -75,6 +76,7 @@ apps_rtc = \
 	t2wOffloader \
 	dmSpeckle \
 	dmSyncopation \
+	loopTimingMonitor \
 	w2tcsOffloader \
 	pwfsSlopeCalc \
     kcubeCtrl \
@@ -90,6 +92,8 @@ pythonapps_rtc = \
 # Apps needed on ICC
 apps_icc = \
 	dmPokeCenter \
+	elliptecCtrl \
+	elliptecLowLevel \
 	filterWheelCtrl \
 	smc100ccCtrl \
 	usbtempMon \
@@ -136,6 +140,9 @@ all_buildable_apps = \
 	dmPokeXCorr \
 	dmSpeckle \
 	dmSyncopation \
+	elliptecCtrl \
+	elliptecLowLevel \
+	loopTimingMonitor \
 	filterWheelCtrl \
 	flipperCtrl \
 	flowRPM \
@@ -267,7 +274,8 @@ all_rtimv_plugins = \
 	pwfsAlignment \
 	dmStatus \
 	warnings \
-	acquisition
+	acquisition \
+	valueDisplay
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -312,7 +320,8 @@ scripts_to_install = \
 	inventory_files \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
-	cyverse_replicate 
+	cyverse_replicate \
+	xnormconfig
 
 ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup

@@ -926,10 +926,11 @@ class MagAOXApp : public application
     );
 
     /// Register an INDI property which is monitored for updates from others.
-    /**
+    /** An empty device or property name is rejected.  Neither can match a received property, and indiserver would
+     * fan a getProperties without a device out to every device, each of which replies with all of its properties.
      *
      * \returns 0 on success.
-     * \returns -1 on error.
+     * \returns -1 on error, including an empty device or property name.
      *
      */
     int registerIndiPropertySet(
@@ -3222,6 +3223,15 @@ int MagAOXApp<_useINDI>::registerIndiPropertySet( pcf::IndiProperty &prop,
     if( !m_useINDI )
     {
         return 0;
+    }
+
+    if( devName.empty() || propName.empty() )
+    {
+        return log<software_error, -1>( { __FILE__,
+                                           __LINE__,
+                                           "refusing INDI set-property subscription with an empty device or property "
+                                           "name: '" +
+                                               devName + "." + propName + "'" } );
     }
 
     try

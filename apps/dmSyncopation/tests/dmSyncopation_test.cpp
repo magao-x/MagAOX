@@ -29,8 +29,10 @@ class SimulationDriver : public indiDriver<MagAOXApp<true>>
     /// Close the unactivated input descriptor; the shared driver closes its output descriptor.
     ~SimulationDriver();
 
-    /// Discard serialized publications without writing a pipe or opening a client connection.
+    /// Optionally capture serialized publications without writing a pipe or opening a client connection.
     void sendXml( const std::string &xml /**< [in] Production-formatted local property publication. */ ) const override;
+
+    std::string *m_capture{ nullptr }; ///< Optional borrowed output for synchronous discovery tests.
 
   private:
     int m_input{ -1 }; ///< Private input descriptor not released by an unactivated production driver.
@@ -71,7 +73,10 @@ SimulationDriver::~SimulationDriver()
 
 void SimulationDriver::sendXml( const std::string &xml ) const
 {
-    static_cast<void>( xml );
+    if( m_capture )
+    {
+        *m_capture += xml;
+    }
 }
 
 /// Scheduler access and cleanup without starting app, hardware, INDI or monitor threads.
@@ -84,6 +89,7 @@ class Harness : public dmSyncopation
     using CompletionMonitor    = dev::shmimMonitor<dmSyncopation, syncoCompletionT>;
 
     using dmSyncopation::allocate;
+    using dmSyncopation::capturePassiveMainTiming;
     using dmSyncopation::configureReaderTiming;
     using dmSyncopation::configureSimulation;
     using dmSyncopation::configureZeroTest;
@@ -167,6 +173,11 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_lastMain;
     using dmSyncopation::m_lockFrames;
     using dmSyncopation::m_logicTiming;
+    using dmSyncopation::m_mainTiming;
+    using dmSyncopation::m_mainTimingCombined;
+    using dmSyncopation::m_mainTimingName;
+    using dmSyncopation::m_mainTimingPublishFailures;
+    using dmSyncopation::m_mainTimingStream;
     using dmSyncopation::m_mappings;
     using dmSyncopation::m_maxCadence;
     using dmSyncopation::m_measuredPeriod;
@@ -264,6 +275,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::setupCadenceINDI;
     using dmSyncopation::setupCombinerCadenceINDI;
     using dmSyncopation::setupLogicTimingINDI;
+    using dmSyncopation::setupMainTimingINDI;
     using dmSyncopation::setupPipelineINDI;
     using dmSyncopation::setupPrimaryCadenceINDI;
     using dmSyncopation::setupReaderTimingINDI;
@@ -273,6 +285,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::updateCadenceINDI;
     using dmSyncopation::updateCombinerCadenceINDI;
     using dmSyncopation::updateLogicTimingINDI;
+    using dmSyncopation::updateMainTiming;
     using dmSyncopation::updatePairsINDI;
     using dmSyncopation::updatePeriod;
     using dmSyncopation::updatePipelineINDI;
@@ -401,6 +414,9 @@ class Harness : public dmSyncopation
 
     /// Install a threadless INDI driver using private local FIFOs to exercise property publication.
     void localDriver( const std::string &directory /**< [in] Fixture-owned temporary directory. */ );
+
+    /// Collect the real framework's response to local INDI property discovery.
+    std::string propertyDefinitions();
 };
 
 Harness::Harness()
@@ -678,6 +694,16 @@ void Harness::localDriver( const std::string &directory )
 
     m_indiDriver = new SimulationDriver( this );
     REQUIRE( m_indiDriver->good() );
+}
+
+std::string Harness::propertyDefinitions()
+{
+    std::string definitions;
+    auto       &driver = *static_cast<SimulationDriver *>( m_indiDriver );
+    driver.m_capture   = &definitions;
+    handleGetProperties( pcf::IndiProperty{} );
+    driver.m_capture = nullptr;
+    return definitions;
 }
 
 /// Owned files and images under a unique MILK_SHM_DIR; never attaches an instrument stream.
@@ -6709,15 +6735,16 @@ TEST_CASE( "syncopation readiness drains only one fixed raw event batch", "[dmSy
 /// Emulate only fixture-owned combined/read-release events on the app's monotonic adapters.
 struct ZeroClock
 {
-    static inline int64_t  time{ 1000000000 };   ///< Current private virtual execution time.
-    static inline Harness *app{ nullptr };       ///< Unstarted app under test.
-    static inline Streams *streams{ nullptr };   ///< Private primary, combined and auxiliary pixels.
-    static inline uint64_t targetCounter{ 0 };   ///< Last auxiliary counter acknowledged by the fake combiner.
-    static inline uint64_t sequence{ 0 };        ///< Fake controller attempt sequence.
-    static inline bool     release{ true };      ///< Supply exact actual-reader clearance when requested.
-    static inline bool     combine{ true };      ///< Acknowledge auxiliary updates in the fake combiner.
-    static inline bool     earlyMain{ false };   ///< Advance the genuine primary during the next timed wait.
-    static inline bool     cancel{ false };      ///< Cancel the finite trial during its next timed wait.
+    static inline int64_t  time{ 1000000000 };       ///< Current private virtual execution time.
+    static inline Harness *app{ nullptr };           ///< Unstarted app under test.
+    static inline Streams *streams{ nullptr };       ///< Private primary, combined and auxiliary pixels.
+    static inline uint64_t targetCounter{ 0 };       ///< Last auxiliary counter acknowledged by the fake combiner.
+    static inline uint64_t sequence{ 0 };            ///< Fake controller attempt sequence.
+    static inline bool     release{ true };          ///< Supply exact actual-reader clearance when requested.
+    static inline bool     mainTimingTrace{ false }; ///< Supply positive process linkage only for main-export tests.
+    static inline bool     combine{ true };          ///< Acknowledge auxiliary updates in the fake combiner.
+    static inline bool     earlyMain{ false };       ///< Advance the genuine primary during the next timed wait.
+    static inline bool     cancel{ false };          ///< Cancel the finite trial during its next timed wait.
     static inline bool primaryWriting{ false };  ///< Inject an in-progress primary write without changing its counter.
     static inline bool targetIntrusion{ false }; ///< Inject a competing auxiliary publication during a timed wait.
     static inline bool revokeRelease{ false };   ///< Invalidate exact reader evidence after early staging.
@@ -6798,7 +6825,17 @@ void ZeroClock::combined( const timespec *stamp )
     image.md->write = 1;
     ++image.md->cnt0;
     image.md->writetime = stamp ? *stamp : synco::toTimespec( 2000000000000000000LL + publicationClockStep + time );
-    image.md->write     = 0;
+    if( mainTimingTrace )
+    {
+        auto &trace           = image.streamproctrace[0];
+        trace.procwrite_PID   = 4242;
+        trace.trigger_inode   = streams->images[0].md->inode;
+        trace.cnt0            = streams->images[0].md->cnt0;
+        trace.ts_procstart    = image.md->writetime;
+        trace.ts_streamupdate = image.md->writetime;
+    }
+
+    image.md->write = 0;
 
     if( release )
     {
@@ -7083,6 +7120,7 @@ void ZeroClock::connect( Harness &scheduler, Streams &images, int steps )
     time     = 999999000; // Leave room for the configuration snapshot before the first fixed-grid main.
     sequence = 0;
     release = combine = true;
+    mainTimingTrace   = false;
     earlyMain = cancel = false;
     primaryWriting = targetIntrusion = false;
     revokeRelease                    = false;
@@ -10558,6 +10596,158 @@ TEST_CASE( "coordinated zero trial telemetry preserves the text wire protocol", 
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::syncoZeroLog::messageT;
+#endif
+    // clang-format on
+}
+
+/** \brief Capture every already-qualified active main independently of sampled event logging.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "syncopation main export reuses existing qualified active acknowledgements",
+           "[dmSyncopation][mainTiming][zeroTest]" )
+{
+    Streams streams;
+    Harness app;
+    ZeroClock::connect( app, streams, 4 );
+    const auto next      = ZeroClock::warm();
+    app.m_mainTimingName = "unpublished-local-main-timing";
+    app.m_mainTiming.configure( 32 );
+    app.m_zeroEventStride      = 1024;
+    ZeroClock::mainTimingTrace = true;
+    app.m_enabled              = true;
+
+    for( int cycle = 0; cycle < 4; ++cycle )
+    {
+        ZeroClock::primary( next + int64_t( cycle ) * 500000 );
+    }
+
+    REQUIRE( app.m_zeroStats.mainMatched == 4 );
+    REQUIRE( app.m_zeroStats.mainImpactUnclassified == 0 );
+    CHECK( app.m_zeroStats.posted == 12 );
+    MagAOX::dmTimingEvents::Record record;
+    uint64_t                       count = 0, priorPrimary = 0, priorCombined = 0, generation = 0;
+
+    while( app.m_mainTiming.pop( record ) )
+    {
+        REQUIRE( MagAOX::dmTimingEvents::valid( record ) );
+        CHECK( record.enabled );
+
+        if( record.kind == MagAOX::dmTimingEvents::Kind::mode )
+        {
+            generation = record.generation;
+            continue;
+        }
+
+        REQUIRE( record.kind == MagAOX::dmTimingEvents::Kind::main );
+        CHECK( record.generation == generation );
+        CHECK( record.primaryInode == streams.images[0].md->inode );
+        CHECK( record.key.inode == streams.images[1].md->inode );
+
+        if( count )
+        {
+            CHECK( record.primaryCounter == priorPrimary + 1 );
+            CHECK( record.key.counter == priorCombined + 4 );
+        }
+
+        priorPrimary  = record.primaryCounter;
+        priorCombined = record.key.counter;
+        ++count;
+    }
+
+    CHECK( count == 4 );
+    CHECK( app.m_mainTiming.dropped() == 0 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processImage;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::synco::MainTiming::capture;
+#endif
+    // clang-format on
+}
+
+/** \brief INDI discovery advertises every main-status element only when the optional exporter is configured.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "syncopation main diagnostics register their INDI definition", "[dmSyncopation][mainTiming][indi]" )
+{
+    Streams    streams;
+    Harness    app;
+    const bool enabled   = GENERATE( false, true );
+    app.m_mainTimingName = enabled ? "unpublished-local-main-timing" : "";
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupMainTimingINDI() == 0 );
+    const auto definitions = app.propertyDefinitions();
+
+    if( enabled )
+    {
+        CHECK( definitions.find( "<defNumberVector" ) != std::string::npos );
+        CHECK( definitions.find( "name=\"main_timing\"" ) != std::string::npos );
+        CHECK( definitions.find( "perm=\"ro\"" ) != std::string::npos );
+
+        for( const auto *name : { "enabled", "generation", "dropped", "publishFailures", "queued" } )
+        {
+            CHECK( definitions.find( std::string( "name=\"" ) + name + "\"" ) != std::string::npos );
+        }
+    }
+    else
+    {
+        CHECK( definitions.empty() );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::setupMainTimingINDI;
+    MagAOX::app::MagAOXApp<true>::handleGetProperties;
+#endif
+    // clang-format on
+}
+
+/** \brief Attach and publish only from ordinary logic, with exact passive labels preserved by the real ring.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "syncopation main diagnostics attach and publish from ordinary logic", "[dmSyncopation][mainTiming]" )
+{
+    Streams streams;
+    Harness app;
+    app.attachPrimaryOnly();
+    app.m_mainTimingName = "dm97_main_timing_test";
+    app.m_mainTiming.configure( 32 );
+    REQUIRE( app.m_mainTimingStream.open( app.m_mainTimingName, 32 ) == 0 );
+    MagAOX::app::dev::dmTimingEventStream::Reader reader;
+    REQUIRE( reader.open( app.m_mainTimingName ) == 0 );
+    app.updateMainTiming( 1000000000 );
+    REQUIRE( app.m_mainTimingCombined.md != nullptr );
+    MagAOX::dmTimingEvents::Record record;
+    REQUIRE( reader.poll( record ) == MagAOX::app::dev::dmTimingEventStream::Result::updated );
+    REQUIRE( record.kind == MagAOX::dmTimingEvents::Kind::mode );
+    CHECK_FALSE( record.enabled );
+
+    for( uint64_t counter = 1; counter <= 2; ++counter )
+    {
+        const auto publication          = 1000000000 + int64_t( counter ) * 500000;
+        streams.images[0].md->cnt0      = counter;
+        streams.images[0].md->writetime = synco::toTimespec( publication );
+        combinedTrace( streams.images[1], publication, counter, streams.images[0].md->inode );
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( app.m_cycleMutex );
+            app.capturePassiveMainTiming();
+        }
+    }
+
+    REQUIRE( reader.poll( record ) == MagAOX::app::dev::dmTimingEventStream::Result::unchanged );
+    app.updateMainTiming( 1000000100 );
+    REQUIRE( reader.poll( record ) == MagAOX::app::dev::dmTimingEventStream::Result::updated );
+    CHECK( record.kind == MagAOX::dmTimingEvents::Kind::main );
+    CHECK_FALSE( record.enabled );
+    CHECK( record.primaryCounter == 2 );
+    CHECK( record.key.counter == 2 );
+    CHECK( record.key.inode == streams.images[1].md->inode );
+    CHECK( app.m_mainTimingPublishFailures == 0 );
+    CHECK( app.m_mainTiming.dropped() == 0 );
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::updateMainTiming;
+    MagAOX::app::dmSyncopation::capturePassiveMainTiming;
 #endif
     // clang-format on
 }

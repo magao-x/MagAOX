@@ -1,0 +1,254 @@
+RTC:
+[jrmales@exao2 MagAOX]$ python3 /home/jrmales/Source/MagAOX/agents/plans/2026-11/indiserver-chained-loop-files/indi_traffic.py 7624 30
+sec  def   set   del  msg  top def devices this second
+  0  1378    29    0    0  hogopt:86, hogainctrl:65, dmtweeter-synco:50, camwfs:46
+  1    74    31    0    0  camflowfs:50, stagecamlensy:12, stagecamlensx:11, ttmperi:1
+  2    16    27    0    0  sysMonRTC:14, stagecamlensy:1, ttmperi:1
+  3     6    28    0    0  stagecamlensx:3, camwfs:1, stagecamlensy:1, ttmperi:1
+  4   144    49    0    0  camsci2:90, camsci1:51, stagecamlensy:1, stagecamlensx:1
+  5     1    29    0    0  camsci2:1
+  6    39    31    0    0  camflowfs:38, ttmperi:1
+  7     2    30    0    0  ttmperi:1, loloop:1
+  8     2    26    0    0  ttmperi:1, loloop:1
+  9    29    44    0    0  stagebs:28, loloop:1
+ 10    14    31    0    0  camflowfs:11, camsci1:2, ttmperi:1
+ 11     4    37    0    0  ttmperi:2, camflowfs:1, camwfs:1
+ 12     0    26    0    0  
+ 13   137    30    0    0  camsci1:98, camflowfs:38, ttmperi:1
+ 14     1    33    0    0  ttmperi:1
+ 15     1    31    0    0  ttmperi:1
+ 16    40    26    0    0  camflowfs:38, loloop:1, ttmperi:1
+ 17    32    44    0    0  stagebs:30, loloop:1, ttmperi:1
+ 18     3    29    0    0  camsci2:2, ttmperi:1
+ 19     0    39    0    0  
+ 20    52    22    0    0  camsci1:51, ttmperi:1
+ 21     2    36    0    0  camsci1:1, ttmperi:1
+ 22     2    26    0    0  ttmperi:1, camflowfs:1
+ 23     6    42    0    0  camsci2:5, loloop:1
+ 24    21    25    0    0  stagebs:17, ttmperi:2, loloop:2
+ 25     4    43    0    0  camflowfs:3, ttmperi:1
+ 26     0    24    0    0  
+ 27   101    53    0    0  camsci1:51, camflowfs:40, camsci2:8, ttmperi:1
+ 28    54    27    0    0  camsci2:52, ttmperi:2
+ 29     0    34    0    0  
+ 30     0     1    0    0  
+getINDI-style quiet exit (2 s without def): never
+
+t>=3s defs by device (defs, distinct props, ~dumps):
+  camsci1                      254    51     5.0
+  camflowfs                    170    38     4.5
+  camsci2                      158    51     3.1
+  stagebs                       75    16     4.7
+  ttmperi                       23     3     7.7
+  loloop                         8     3     2.7
+  stagecamlensx                  4     2     2.0
+  camwfs                         3     1     3.0
+  stagecamlensy                  2     2     1.0
+
+t>=3s top def keys: [('stagebs.presetName', 18), ('camsci1.fsm', 13), ('camflowfs.shutter', 10), ('camflowfs.shutter_status', 10), ('camflowfs.fsm', 10), ('camsci1.emgain_temp_ready', 9), ('camsci1.shutter_status', 9), ('ttmperi.axis2_voltage', 8), ('ttmperi.fsm', 8), ('camsci1.shutter', 8), ('camsci1.synchro', 8), ('camsci2.fsm', 8), ('camsci2.fps', 7), ('ttmperi.axis1_voltage', 7), ('camsci2.shutter_status', 6)]
+
+t>=3s top set keys: [('dmtweeter-synco.zero_test', 81), ('camtip-avg.fg_timing', 27), ('dmtweeter-synco.timing', 27), ('dmtweeter.dm_completion', 27), ('acc000-cbuff.fg_timing', 27), ('camwfs-avg.fg_timing', 27), ('acc000.fg_timing', 27), ('acc000.timingDiag', 27), ('acc000.sim_diag', 27), ('acc000.dm_status', 27), ('camwfs-refsub-avg.fg_timing', 27), ('camwfs-refrms.refrms', 27), ('aol1_modevalWFS_cbuff.fg_timing', 27), ('camtip.fg_timing', 27), ('camwfs-fit.fg_timing', 27)]
+[jrmales@exao2 MagAOX]$ 
+
+
+AOC: 
+(getINDI not currently responding though isAOC is up)
+jrmales@exao1:~/Source/MagAOX$ python3 /home/jrmales/Source/MagAOX/agents/plans/2026-11/indiserver-chained-loop-files/indi_traffic.py 7624 30
+sec  def   set   del  msg  top def devices this second
+getINDI-style quiet exit (2 s without def): 2.0 s
+
+t>=3s defs by device (defs, distinct props, ~dumps):
+
+t>=3s top def keys: []
+
+t>=3s top set keys: []
+
+after restarting isAOC:
+jrmales@exao1:~/Source/MagAOX$ python3 /home/jrmales/Source/MagAOX/agents/plans/2026-11/indiserver-chained-loop-files/indi_traffic.py 7624 30
+sec  def   set   del  msg  top def devices this second
+  0  1969    43    0    0  hogopt:86, hogainctrl:65, camwfs:53, dmtweeter-synco:50
+  1  3782    86    0    0  hogopt:172, hogainctrl:130, camwfs:107, dmtweeter-synco:100
+  2   210    41    0    0  camsci2:51, camsci2-dark:24, dmncpc:21, observers:21
+  3  3719    71    0    0  hogopt:171, hogainctrl:130, camwfs:106, dmtweeter-synco:100
+  4   306    49    0    0  camflowfs:50, picomotors:28, camllowfs-avg:24, camflowfs-dark:24
+  5  1151    44    0    0  tcsi:78, xt1121_1:72, pdu2:63, pdu1:54
+  6  2784    53    0    0  hogopt:155, hogainctrl:130, camwfs:106, dmtweeter-synco:100
+  7   149    44    0    0  camsci1-dark:24, camflowfs-dark:24, usbdu1:18, sysMonICC:14
+  8  3688    47    0    0  hogopt:172, hogainctrl:130, camwfs:106, dmtweeter-synco:100
+  9   136    50    0    0  camsci1-avg:24, camflowfs-avg:24, usbdu1:18, zaberLowLevelBinary:18
+ 10  3681    46    0    0  hogopt:172, hogainctrl:130, camwfs:107, dmtweeter-synco:100
+ 11   110    48    0    0  zaberLowLevel:27, dmncpc:21, stagecamlensx:12, stagepickoff:11
+ 12  3717    51    0    0  hogopt:172, hogainctrl:130, camwfs:108, dmtweeter-synco:100
+ 13   113    68    0    0  camllowfs-avg-fit:28, camflowfs-fit:28, stagecamlensy:13, stageadc1:11
+ 14  3747    45    0    0  hogopt:172, hogainctrl:130, camwfs:111, dmtweeter-synco:100
+ 15    90    47    0    0  zaberLLPol:19, stagesci2:16, stagepollin:16, camsci2-sw:10
+ 16  3706    57    0    0  hogopt:172, hogainctrl:130, camwfs:106, dmtweeter-synco:100
+ 17    71    51    0    0  observers:21, holoop:17, tcsi:4, camllowfs:3
+ 18  3580    49    0    0  hogainctrl:130, camwfs:106, dmtweeter-synco:100, hogopt:86
+ 19   353    51    0    0  hogopt:86, camflowfs-avg:25, dmncpc-avg:24, camsci2-avg:24
+ 20  3305    45    0    0  hogainctrl:130, dmtweeter-synco:100, hogopt:86, tcsi:81
+ 21   451    49    0    1  hogopt:86, camwfs:77, stageff:24, camsci1-avg:24
+ 22   129    43    0    0  camllowfs-fit:28, dmncpc:21, stagecamlensy:13, stagecamlensx:12
+ 23  3847    53    0    0  hogopt:172, hogainctrl:130, camwfs:106, dmtweeter-synco:100
+ 24   166    41    0    0  zaberLowLevel:25, zaberLowLevelBinary:22, ncpcAlign-pupil-wfs:19, ncpcAlign-bump-wfs:19
+ 25  3679    64    0    0  hogopt:172, hogainctrl:130, camwfs:107, dmtweeter-synco:100
+ 26    66    42    0    0  camflowfs-avg:24, fwsci2:13, fwpupil:12, usbdu1:2
+ 27  3741    70    0    0  hogopt:172, hogainctrl:130, camwfs:107, dmtweeter-synco:100
+ 28    96    72    0    0  stageflowfs:29, stagek:19, fwlyot:11, lopredctrl:9
+ 29  3712    72    0    0  hogopt:172, hogainctrl:130, camwfs:111, dmtweeter-synco:100
+ 30     1     0    0    0  dmncpc:1
+getINDI-style quiet exit (2 s without def): never
+
+t>=3s defs by device (defs, distinct props, ~dumps):
+  hogopt                      2236    86    26.0
+  hogainctrl                  1690    65    26.0
+  camwfs                      1400    31    45.2
+  dmtweeter-synco             1300    50    26.0
+  tcsi                        1119    28    40.0
+  fxngenmodwfs                1015    29    35.0
+  camacq                       963    34    28.3
+  camtip                       962    34    28.3
+  xt1121_1                     936    20    46.8
+  pdu1                         874    20    43.7
+  pdu2                         850    21    40.5
+  observers                    846    21    40.3
+  fxngensync                   840    29    29.0
+  dmtweeter                    780    29    26.9
+  holoop                       772    14    55.1
+  dcdu1                        713    18    39.6
+  usbdu0                       709    18    39.4
+  camwfs-fit                   702    27    26.0
+  pdu0                         676    19    35.6
+  zaberLLRTC                   657    18    36.5
+  camtip-dark                  650    25    26.0
+  camacq-dark                  650    25    26.0
+  twAlign-camwfs-wfs           650    25    26.0
+  dmtweeter-avg                650    24    27.1
+  camacq-avg                   650    24    27.1
+
+t>=3s top def keys: [('camwfs.fps', 322), ('holoop.loop_state', 211), ('tcsi.teldata', 196), ('pdu0.dcpwr', 130), ('pdu1.ttmmod', 107), ('pdu1.camwfs', 105), ('tcsi.labMode', 91), ('flipwfsf.presetName', 81), ('pdu2.camsci1', 80), ('pdu2.camsci2', 80), ('usbdu0.flipacq', 80), ('usbdu0.fwtelsim', 80), ('camwfs.emgain', 80), ('pdu1.dmtweeter', 79), ('dcdu1.shwfs', 79)]
+
+t>=3s top set keys: [('dmtweeter-synco.zero_test', 81), ('labCool.status', 59), ('stageff.temp', 53), ('instCool.status', 37), ('camtip-avg.fg_timing', 27), ('camtip.fg_timing', 27), ('aol1_imWFS2_cbuff.fg_timing', 27), ('acc000-cbuff.fg_timing', 27), ('camwfs-avg.fg_timing', 27), ('dmtweeter.dm_completion', 27), ('dmtweeter-synco.timing', 27), ('camwfs-refsub-avg.fg_timing', 27), ('acc000.fg_timing', 27), ('acc000.timingDiag', 27), ('acc000.sim_diag', 27)]
+jrmales@exao1:~/Source/MagAOX$ 
+
+
+ICC:
+[jrmales@exao3 MagAOX]$ python3 /home/jrmales/Source/MagAOX/agents/plans/2026-11/indiserver-chained-loop-files/indi_traffic.py 7624 30
+sec  def   set   del  msg  top def devices this second
+  0  1287    47    0    0  camsci2:54, fxngenmodwfs:39, camngws:34, fxngensync:31
+  1    65    14    0    0  stagevp:16, fwfpm:11, fwlyot:11, fwsci1:11
+  2   126    51    0    0  stagebs:41, loloop:14, stagepickoff:11, fwsci2:11
+  3    55    18    0    0  zaberLowLevel:19, stageadc2:12, fwsci1:11, ttmpupil:1
+  4    60    22    0    0  stagescibs:16, fwlyot:12, zaberLowLevel:10, zaberLowLevelBinary:2
+  5    81    23    0    0  usbdu1:18, stagesci1:16, fwlowfs:12, zaberLowLevel:6
+  6   167    33    0    0  camsci1:59, stageqwplin:20, usbdu1:19, fwsci1:11
+  7    69    28    0    0  stagepolrot:16, fwlowfs:11, zaberLowLevel:8, fwlyot:4
+  8   122    26    0    0  camflowfs:47, stagepollin:20, zaberLowLevel:11, stageadc2:11
+  9   213    84    0    0  camsci2:51, camllowfs:46, stagepiaa:36, stagesci2:35
+ 10   198    82    0    0  stageipiaa:36, stagelosel:35, camwfs:20, stageflowfs:18
+ 11    65    34    0    0  stagebs:23, zaberLowLevel:8, fwsci2:4, stagepickoff:2
+ 12   213    49    0    0  logopt:50, camflowfs:38, stagevp:36, fwpupil:11
+ 13   109    29    0    0  camllowfs:38, stagepolrot:24, zaberLowLevel:11, coralignControl:10
+ 14    95    28    0    1  stagepollin:16, stageqwplin:16, zaberLowLevel:11, fwsci1:11
+ 15   164    39    0    0  camsci1:56, stagesci1:24, stagelosel:16, zaberLowLevel:13
+ 16   150    34    0    0  camllowfs:47, stagescibs:27, zaberLowLevel:12, fwlyot:11
+ 17    99    58    0    2  stageflowfs:33, stagesci2:16, zaberLowLevel:14, fwlowfs:11
+ 18   129    29    0    2  camflowfs:43, stagevp:16, fwsci2:11, fwlowfs:11
+ 19   101    29    0    0  stageipiaa:16, stagebs:16, stageadc2:11, fwsci2:11
+ 20    73    14    0    0  stagepollin:17, stagepiaa:16, zaberLowLevel:12, zaberLowLevelBinary:2
+ 21   133    58    0    0  stagesci1:31, stageqwplin:20, usbdu1:19, zaberLowLevel:12
+ 22   189    35    0    0  camllowfs:38, logopt:34, usbdu1:18, zaberLowLevel:13
+ 23   170    86    0    0  camsci2:66, stagescibs:35, stagelosel:16, fwlyot:11
+ 24   173    15    0    0  camsci1:87, zaberLowLevel:12, fwfpm:12, stagek:11
+ 25   115    27    0    0  camllowfs:47, fwfpm:11, fwlowfs:11, zaberLowLevel:10
+ 26    81    32    0    0  stagevp:18, stagek:11, stageadc1:11, coralignControl:10
+ 27   175    66    0    0  camllowfs:45, stagebs:27, stageipiaa:25, stageflowfs:16
+ 28   228    34    0    0  logopt:86, camflowfs:38, stagesci2:22, fwsci2:13
+ 29   143    60    0    0  stagelosel:35, stagebs:17, stagepollin:16, stagepickoff:11
+ 30     1     0    0    0  zaberLowLevel:1
+getINDI-style quiet exit (2 s without def): never
+
+t>=3s defs by device (defs, distinct props, ~dumps):
+  zaberLowLevel                289     8    36.1
+  camllowfs                    263    38     6.9
+  camsci1                      202    51     4.0
+  camflowfs                    182    38     4.8
+  logopt                       172    86     2.0
+  stageadc2                    132    11    12.0
+  camsci2                      127    51     2.5
+  stagelosel                   103    16     6.4
+  usbdu1                       100    18     5.6
+  stageadc1                     88    11     8.0
+  fwlowfs                       88    11     8.0
+  stagebs                       85    16     5.3
+  fwlyot                        84    11     7.6
+  stagescibs                    78    16     4.9
+  stageipiaa                    78    16     4.9
+  stagesci2                     75    16     4.7
+  stagesci1                     72    16     4.5
+  stageqwplin                   72    16     4.5
+  stagepollin                   72    16     4.5
+  fwsci2                        71    11     6.5
+  stagevp                       71    16     4.4
+  fwpupil                       70    11     6.4
+  stageflowfs                   68    16     4.2
+  fwscind                       67    10     6.7
+  stagek                        67    11     6.1
+
+t>=3s top def keys: [('zaberLowLevel.last_homed', 47), ('zaberLowLevel.temp', 42), ('zaberLowLevel.parked', 42), ('zaberLowLevel.curr_state', 40), ('zaberLowLevel.tgt_pos', 40), ('zaberLowLevel.max_pos', 38), ('zaberLowLevel.curr_pos', 37), ('pdu1.stagesmc', 20), ('stagebs.presetName', 20), ('stageadc2.position', 18), ('camsci1.fps', 18), ('stageadc2.presetName', 17), ('stageadc2.fsm', 17), ('stagescibs.presetName', 17), ('fwscind.filterName', 17)]
+
+t>=3s top set keys: [('stagelosel.temp', 59), ('labCool.status', 51), ('stageipiaa.temp', 44), ('stagebs.temp', 43), ('stagesci2.temp', 41), ('stagesci1.temp', 37), ('stagevp.temp', 36), ('camsci2.fan_speed', 34), ('stagescibs.temp', 31), ('stagepiaa.temp', 30), ('stageflowfs.temp', 30), ('camflowfs-fit.fg_timing', 29), ('camflowfs-avg-fit.fg_timing', 29), ('camflowfs-avg.fg_timing', 28), ('camllowfs-fit.fg_timing', 28)]
+[jrmales@exao3 MagAOX]$ 
+
+
+Then acc000 only:
+
+[jrmales@exao2 MagAOX]$ python3 /home/jrmales/Source/MagAOX/agents/plans/2026-11/indiserver-chained-loop-files/indi_traffic.py 7624 30 acc000
+sec  def   set   del  msg  top def devices this second
+  0    19     4    0    0  acc000:19
+  1    42     4    0    0  acc000:42
+  2     0     4    0    0  
+  3    42     4    0    0  acc000:42
+  4     0     4    0    0  
+  5    42     4    0    0  acc000:42
+  6     0     4    0    0  
+  7    42     4    0    0  acc000:42
+  8     0     4    0    0  
+  9    42     4    0    0  acc000:42
+ 10     0     4    0    0  
+ 11    42     4    0    0  acc000:42
+ 12     0     4    0    0  
+ 13    19     4    0    0  acc000:19
+ 14    23     4    0    0  acc000:23
+ 15     0     4    0    0  
+ 16    42     4    0    0  acc000:42
+ 17     0     4    0    0  
+ 18    42     4    0    0  acc000:42
+ 19     0     4    0    0  
+ 20    42     4    0    0  acc000:42
+ 21     0     4    0    0  
+ 22    42     4    0    0  acc000:42
+ 23     0     4    0    0  
+ 24    42     4    0    0  acc000:42
+ 25     0     4    0    0  
+ 26    42     4    0    0  acc000:42
+ 27     0     4    0    0  
+ 28    40     4    0    0  acc000:40
+ 29     2     4    0    0  acc000:2
+getINDI-style quiet exit (2 s without def): 3.2 s
+
+t>=3s defs by device (defs, distinct props, ~dumps):
+  acc000                       546    19    28.7
+
+t>=3s top def keys: [('acc000.fps', 78), ('acc000.th-framegrabber', 26), ('acc000.fg_frameSize', 26), ('acc000.telem_maxtime', 26), ('acc000.fg_timing', 26), ('acc000.telem_rotate', 26), ('acc000.fsm', 26), ('acc000.dm_scale', 26), ('acc000.fsm_clear_alert', 26), ('acc000.synchroDelay', 26), ('acc000.logs_rotate', 26), ('acc000.fg_shmimName', 26), ('acc000.logs_maxtime', 26), ('acc000.sim_diag', 26), ('acc000.dm_enable', 26)]
+
+t>=3s top set keys: [('acc000.fg_timing', 27), ('acc000.timingDiag', 27), ('acc000.sim_diag', 27), ('acc000.dm_status', 27)]
+[jrmales@exao2 MagAOX]$ 
+
+
+The config for acc000 was already:
+[fps]
+device=
+property=fps
+element=current
+tol=0

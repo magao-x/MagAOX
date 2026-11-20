@@ -7,6 +7,8 @@
 
 #include "logMeta.hpp"
 
+#include <type_traits>
+
 // #include "generated/logTypes.hpp"
 
 #include "generated/logMemberAccessor.hpp"
@@ -219,6 +221,15 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
     case eventCodes::TELEM_USAGE:
         verified = telem_usage::verify( logBuff, len );
         break;
+    case eventCodes::TELEM_GPU:
+        verified = telem_gpu::verify( logBuff, len );
+        break;
+    case eventCodes::TELEM_IRQ:
+        verified = telem_irq::verify( logBuff, len );
+        break;
+    case eventCodes::TELEM_RAID:
+        verified = telem_raid::verify( logBuff, len );
+        break;
     case eventCodes::TELEM_COOLER:
         verified = telem_cooler::verify( logBuff, len );
         break;
@@ -422,6 +433,15 @@ int logMeta::setLog( const logMetaSpec &lms )
         case valTypes::Vector_Float:
             m_spec.format = "%G";
             break;
+        case valTypes::Vector_Double:
+            m_spec.format = "%.17G";
+            break;
+        case valTypes::Vector_UInt:
+            m_spec.format = "%u";
+            break;
+        case valTypes::Vector_String:
+            m_spec.format = "%s";
+            break;
         default:
             std::cerr << "Unrecognised value type for " + m_spec.device + " " + m_spec.keyword +
                              ".  Using format %d/\n";
@@ -471,8 +491,56 @@ std::string logMeta::valueNumber( logMap<verboseT>          &lm,
 
     if( m_detail.metaType == metaTypes::State )
     {
+        // Newly supported vector types share the existing state lookup and comma-separated FITS representation.
+        auto vectorState = [&]<typename valueT>() -> std::string
+        {
+            std::vector<valueT> values;
+
+            if( getLogStateVal( values,
+                                lm,
+                                m_spec.device,
+                                m_spec.eventCode,
+                                stime,
+                                atime,
+                                reinterpret_cast<std::vector<valueT> ( * )( void * )>( m_detail.accessor ),
+                                &m_hint,
+                                maxGap,
+                                &m_unavailableReason ) != 0 )
+            {
+                return m_invalidValue;
+            }
+
+            std::string result;
+
+            for( size_t n = 0; n < values.size(); ++n )
+            {
+                if( n > 0 )
+                {
+                    result += ',';
+                }
+
+                if constexpr( std::is_same_v<valueT, std::string> )
+                {
+                    result += values[n];
+                }
+                else
+                {
+                    snprintf( str, sizeof( str ), m_spec.format.c_str(), values[n] );
+                    result += str;
+                }
+            }
+
+            return result;
+        };
+
         switch( m_detail.valType )
         {
+        case valTypes::Vector_String:
+            return vectorState.template operator()<std::string>();
+        case valTypes::Vector_UInt:
+            return vectorState.template operator()<unsigned>();
+        case valTypes::Vector_Double:
+            return vectorState.template operator()<double>();
         case valTypes::Bool:
         {
             bool val;
@@ -1205,7 +1273,8 @@ logMeta::card( logMap<verboseT> &lm, const flatlogs::timespecX &stime, const fla
     }
 
     if( m_detail.valType == valTypes::String || m_detail.valType == valTypes::Vector_Bool ||
-        m_detail.valType == valTypes::Vector_Float )
+        m_detail.valType == valTypes::Vector_Float || m_detail.valType == valTypes::Vector_String ||
+        m_detail.valType == valTypes::Vector_UInt || m_detail.valType == valTypes::Vector_Double )
     {
         return mx::fits::fitsHeaderCard<verboseT>( keyw, vstr, m_spec.comment );
     }

@@ -36,7 +36,7 @@ BASENAME=$(basename $(TARGET))
 PATHNAME=$(dir $(TARGET))
 OBJNAME = $(PATHNAME)$(notdir $(BASENAME)).o
 TESTNAME = $(PATHNAME)$(notdir $(BASENAME))
-EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_emgain_test ocam2KCtrl_lifecycle_test ocam2KCtrl_temperature_test ocam2KCtrl_housekeeping_test ocam2KCtrl_reconfig_test cred2Ctrl_test cred2Ctrl_lifecycle_test
+EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_emgain_test ocam2KCtrl_lifecycle_test ocam2KCtrl_temperature_test ocam2KCtrl_housekeeping_test ocam2KCtrl_reconfig_test ocam2KCtrl_descramble_test cred2Ctrl_test cred2Ctrl_lifecycle_test
 
 # add extra libraries for special cases
 
@@ -59,7 +59,7 @@ else ifeq ($(notdir $(TESTNAME)),logstream_test)
 	LDLIBS = -lmxlib -lflatbuffers
 else ifeq ($(notdir $(TESTNAME)),logsurgeon_test)
 	LDLIBS = -lmxlib -lflatbuffers
-else ifneq ($(filter $(notdir $(TESTNAME)),pupilFit_test frameGrabberTelemetry_test frameGrabberTraceTelemetry_test dmTimingTelemetry_test dmSyncoTelemetry_test dmPipelineTelemetry_test),)
+else ifneq ($(filter $(notdir $(TESTNAME)),pupilFit_test frameGrabberTelemetry_test frameGrabberTraceTelemetry_test dmTimingTelemetry_test dmSyncoTelemetry_test dmPipelineTelemetry_test gpuTelemetry_test irqTelemetry_test raidTelemetry_test sysMonitorDiagnostics_test),)
 	LDLIBS += -lflatbuffers
 else ifneq ($(filter $(notdir $(TESTNAME)),bmcCtrl_test alpaoCtrl_test irisaoCtrl_test),)
 	# Offline DM tests use their local SDK declarations and software function stubs.
@@ -92,10 +92,25 @@ else ifneq ($(filter pvcam%_test,$(notdir $(TESTNAME))),)
 else ifeq ($(notdir $(TESTNAME)),picamCtrl_test)
 	# PICam SDK stubs; the tests define the library functions.
 	CPPFLAGS += -I$(TESTS_DIR)/picam
+else ifeq ($(notdir $(TESTNAME)),ocamDescrambler_test)
+    # Pixel equivalence needs the real SDK, isolated from app-test function stubs.
+    OCAM_DESCRAMBLE_SDK = $(PATHNAME)ocamDescrambler_sdk.o
+    EXTRA_TEST_OBJS += $(OCAM_DESCRAMBLE_SDK)
+    $(OBJNAME): $(PATHNAME)../ocamDescrambler.hpp $(PATHNAME)ocamDescrambleFixture.hpp
+    $(OCAM_DESCRAMBLE_SDK): $(PATHNAME)../fli/ocam2_sdk.c $(PATHNAME)../fli/ocam2_sdk.h $(PATHNAME)../fli/ocam2_pvt.h
+	$(CC) $(CPPFLAGS) $(CFLAGS) -DOCAMSDK_VERSION=\"2\" -DOCAMSDK_BUILD=\"0\" -c $< -o $@
 else ifneq ($(filter $(notdir $(TESTNAME)),$(EDT_TESTS)),)
 	CXXFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CXXFLAGS))
 	CFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CFLAGS))
 	CPPFLAGS := $(filter-out -DMAGAOX_NOEDT,$(CPPFLAGS))
+endif
+
+ifeq ($(notdir $(TESTNAME)),ocam2KCtrl_descramble_test)
+    $(OBJNAME): $(PATHNAME)../ocam2KCtrl.hpp $(PATHNAME)../ocamDescrambler.hpp $(PATHNAME)../ocamDescrambleParallel.hpp $(PATHNAME)../ocamDescramblePlacement.hpp $(PATHNAME)ocam2KCtrl_test.cpp $(PATHNAME)ocamDescrambleFixture.hpp
+endif
+
+ifeq ($(notdir $(TESTNAME)),ocamDescramblePlacement_test)
+    $(OBJNAME): $(PATHNAME)../ocamDescramblePlacement.hpp
 endif
 
 LDLIBS+=$(TESTLIBS)
@@ -124,8 +139,8 @@ entrypoint_app:
 	MAKEFLAGS= $(MAKE) -C $(TESTS_DIR)/../apps/$(ENTRYPOINT_APP) -W $(ENTRYPOINT_APP).cpp COVERAGE=$(COVERAGE)
 endif
 
-$(TESTNAME): $(OBJNAME) testMain.o
-	$(LINK.o) -o $(TESTNAME) testMain.o $(OBJNAME) $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.a) $(LDFLAGS) $(LDLIBS)
+$(TESTNAME): $(OBJNAME) testMain.o $(EXTRA_TEST_OBJS)
+	$(LINK.o) -o $(TESTNAME) testMain.o $(OBJNAME) $(EXTRA_TEST_OBJS) $(abspath $(SELF_DIR)/../libMagAOX/libMagAOX.a) $(LDFLAGS) $(LDLIBS)
 	$(SETUID)
 
 ##################################################
@@ -151,6 +166,7 @@ magaox_git_version.h:
 clean:
 	@echo cleaning $(TESTNAME)
 	@rm -f $(OBJNAME)
+	@rm -f $(EXTRA_TEST_OBJS)
 	@rm -f $(TESTNAME)
 	@rm -f *.binlog
 

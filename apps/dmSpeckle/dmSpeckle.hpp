@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <mutex>
 
 #include <mx/math/floatUtils.hpp>
 #include <mx/improc/eigenCube.hpp>
@@ -98,11 +99,16 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
 
     int m_opMode{ SPARKLE }; ///< Generated sparkle, file cube, or time-based tip/tilt waveform.
 
-    std::string m_fileName; ///< Input cube for arbitrary-cube modulation.
+    std::string m_fileName; ///< Full filesystem path to the arbcube FITS file, settable at runtime via INDI.
 
     ///@}
 
     mx::improc::eigenCube<realT> m_shapes; ///< Prepared legacy shapes or arbitrary provider cube.
+
+    std::mutex m_shapesMutex; ///< Guards m_shapes during reload. Held only by callers that resize/repopulate the cube.
+
+    std::atomic<bool> m_reloadFile{
+        false }; ///< Set by the load_file.request callback; consumed by the modulator thread.
 
     IMAGE    m_imageStream{}; ///< The only writable channel; an auxiliary source in managed mode.
     uint32_t m_width{ 0 };    ///< The width of the image
@@ -165,7 +171,42 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
     virtual int appShutdown();
 
   protected:
+    /// Read m_fileName into m_shapes and scale by m_amp.
+    /** Reads the FITS cube at m_fileName into m_shapes under m_shapesMutex.
+     *  Any I/O or dimension errors are logged and returned; m_fileName is
+     *  treated as an opaque filesystem path and not otherwise validated.
+     *
+     *  The caller must hold m_indiMutex, which guards m_fileName and m_amp
+     *  against concurrent INDI callbacks.
+     *
+     *  \returns 0 on success
+     *  \returns -1 on error
+     */
+    int loadArbcubeFile();
+
+    /// Service a pending load_file request from the modulator thread.
+    /** Clears m_reloadFile, calls loadArbcubeFile(), and publishes the result
+     *  as the state of the file property. Must only be called from the thread
+     *  that reads m_shapes so the reload does not race with modulation.
+     *  Takes m_indiMutex, so the caller must not already hold it.
+     */
+    void handleFileReload();
+
+    /// Name of an operating mode as used in configuration and the mode INDI property.
+    static std::string opModeName( int opMode /**< [in] SPARKLE, ARBCUBE, or TIPTILT. */ );
+
     /// Prepare shape storage for the configured legacy or managed modulation.
+    /** In SPARKLE mode, computes Fourier-mode speckle patterns from
+     *  m_separation / m_angle / m_amp. In ARBCUBE mode, delegates to
+     *  loadArbcubeFile(). In TIPTILT mode, only sizes m_shapes since the
+     *  waveform is generated per command.
+     *
+     *  The caller must hold m_indiMutex, which guards the modulation
+     *  parameters against concurrent INDI callbacks.
+     *
+     *  \returns 0 on success
+     *  \returns -1 on error
+     */
     int generateSpeckles();
 
     /// Validate the optional provider mode without changing legacy channel semantics.
@@ -240,6 +281,13 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
 
     pcf::IndiProperty m_indiP_zero; ///< INDI zero control/status.
 
+    pcf::IndiProperty m_indiP_mode; ///< Selection switch for SPARKLE / ARBCUBE, plus TIPTILT when syncopated.
+
+    pcf::IndiProperty m_indiP_file; ///< Text property with current/target arbcube leaf filenames.
+
+    pcf::IndiProperty m_indiP_loadFile; ///< Request switch that triggers an arbcube reload.
+    pcf::IndiProperty m_indiP_nFrames;  ///< Read-only count of frames currently in the buffer.
+
   public:
     /// Handle changes to the trigger property.
     INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_trigger );
@@ -273,6 +321,9 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
 
     /// Handle changes to the zero property.
     INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_zero );
+    INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_mode );
+    INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_file );
+    INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_loadFile );
 
     /** \name Telemeter Interface
      *
@@ -449,7 +500,8 @@ void dmSpeckle::setupConfig()
                 "fileName",
                 false,
                 "string",
-                "File name containing the FITS cube to modulate the DM with.  Only valid if opMode==arbcube." );
+                "Full filesystem path to the FITS cube to modulate the DM with.  "
+                "Only used if opMode==arbcube; can be changed at runtime via the file INDI property." );
 }
 
 int dmSpeckle::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -594,6 +646,12 @@ void dmSpeckle::syncopationThreadExec()
 
     while( !m_shutdown )
     {
+        // Reload here, on the only thread that reads m_shapes in syncopation mode.
+        if( m_reloadFile )
+        {
+            handleFileReload();
+        }
+
         if( !m_modulating && !m_syncopationZeroRequested )
         {
             mx::sys::milliSleep( 1 );
@@ -661,32 +719,31 @@ int dmSpeckle::appStartup()
     m_indiP_delay["target"]  = m_triggerDelay;
     registerIndiPropertyNew( m_indiP_delay, INDI_NEWCALLBACK( m_indiP_delay ) );
 
-    if( m_opMode == SPARKLE )
+    // The sparkle-specific properties are always registered so users can set them while in
+    // arbcube mode; they take effect when mode switches back to sparkle.
+    createStandardIndiNumber<float>( m_indiP_separation, "separation", 0, 0, 100, "%f" );
+    m_indiP_separation["current"] = m_separation;
+    m_indiP_separation["target"]  = m_separation;
+    registerIndiPropertyNew( m_indiP_separation, INDI_NEWCALLBACK( m_indiP_separation ) );
+
+    createStandardIndiNumber<float>( m_indiP_angle, "angle", 0, 0, 100, "%f" );
+    m_indiP_angle["current"] = m_angle;
+    m_indiP_angle["target"]  = m_angle;
+    registerIndiPropertyNew( m_indiP_angle, INDI_NEWCALLBACK( m_indiP_angle ) );
+
+    createStandardIndiToggleSw( m_indiP_cross, "cross" );
+    if( registerIndiPropertyNew( m_indiP_cross, INDI_NEWCALLBACK( m_indiP_cross ) ) < 0 )
     {
-        createStandardIndiNumber<float>( m_indiP_separation, "separation", 0, 0, 100, "%f" );
-        m_indiP_separation["current"] = m_separation;
-        m_indiP_separation["target"]  = m_separation;
-        registerIndiPropertyNew( m_indiP_separation, INDI_NEWCALLBACK( m_indiP_separation ) );
-
-        createStandardIndiNumber<float>( m_indiP_angle, "angle", 0, 0, 100, "%f" );
-        m_indiP_angle["current"] = m_angle;
-        m_indiP_angle["target"]  = m_angle;
-        registerIndiPropertyNew( m_indiP_angle, INDI_NEWCALLBACK( m_indiP_angle ) );
-
-        createStandardIndiToggleSw( m_indiP_cross, "cross" );
-        if( registerIndiPropertyNew( m_indiP_cross, INDI_NEWCALLBACK( m_indiP_cross ) ) < 0 )
-        {
-            log<software_error>( { __FILE__, __LINE__ } );
-            return -1;
-        }
-        if( m_cross )
-        {
-            m_indiP_cross["toggle"] = pcf::IndiElement::On;
-        }
-        else
-        {
-            m_indiP_cross["toggle"] = pcf::IndiElement::Off;
-        }
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+    if( m_cross )
+    {
+        m_indiP_cross["toggle"] = pcf::IndiElement::On;
+    }
+    else
+    {
+        m_indiP_cross["toggle"] = pcf::IndiElement::Off;
     }
 
     createStandardIndiNumber<float>( m_indiP_amp, "amp", -1, 0, 1, "%f" );
@@ -737,6 +794,51 @@ int dmSpeckle::appStartup()
         log<software_error>( { __FILE__, __LINE__ } );
         return -1;
     }
+
+    // tiptilt is only valid with a syncopation timing source, see validateSyncopationConfig().
+    std::vector<std::string> modeNames = { opModeName( SPARKLE ), opModeName( ARBCUBE ) };
+    if( !m_syncopationTiming.empty() )
+    {
+        modeNames.push_back( opModeName( TIPTILT ) );
+    }
+    if( createStandardIndiSelectionSw( m_indiP_mode, "mode", modeNames ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+    for( const auto &modeName : modeNames )
+    {
+        m_indiP_mode[modeName] = ( modeName == opModeName( m_opMode ) ) ? pcf::IndiElement::On : pcf::IndiElement::Off;
+    }
+    if( registerIndiPropertyNew( m_indiP_mode, INDI_NEWCALLBACK( m_indiP_mode ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    if( createStandardIndiText( m_indiP_file, "file" ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+    m_indiP_file["current"] = m_fileName;
+    m_indiP_file["target"]  = m_fileName;
+    if( registerIndiPropertyNew( m_indiP_file, INDI_NEWCALLBACK( m_indiP_file ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    createStandardIndiRequestSw( m_indiP_loadFile, "load_file" );
+    if( registerIndiPropertyNew( m_indiP_loadFile, INDI_NEWCALLBACK( m_indiP_loadFile ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_nFrames, "n_frames", pcf::IndiProperty::Number );
+    m_indiP_nFrames.add( pcf::IndiElement( "current" ) );
+    m_indiP_nFrames["current"] = 0;
 
     if( threadStart( m_modThread,
                      m_modThreadInit,
@@ -861,6 +963,76 @@ int dmSpeckle::appShutdown()
     return 0;
 }
 
+int dmSpeckle::loadArbcubeFile()
+{
+    if( m_fileName.empty() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "arbcube file name is empty; nothing to load" } );
+    }
+
+    std::lock_guard<std::mutex> shapesLock( m_shapesMutex ); //mutex scope
+
+    mx::fits::fitsFile<float> ff;
+    mx::error_t               errc = ff.read( m_shapes, m_fileName );
+    if( errc != mx::error_t::noerror )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "could not read arbcube FITS file: " + m_fileName } );
+    }
+
+    if( m_shapes.rows() != m_width || m_shapes.cols() != m_height )
+    {
+        return log<software_error, -1>( { __FILE__,
+                                          __LINE__,
+                                          "arbcube dimensions do not match DM channel size: expected " +
+                                              std::to_string( m_width ) + "x" + std::to_string( m_height ) +
+                                              ", loaded " + std::to_string( m_shapes.rows() ) + "x" +
+                                              std::to_string( m_shapes.cols() ) + " from " + m_fileName } );
+    }
+
+    for( int p = 0; p < m_shapes.planes(); ++p )
+    {
+        m_shapes.image( p ) *= (float)m_amp;
+    }
+
+    log<text_log>( "loaded arbcube FITS file: " + m_fileName + " (" + std::to_string( m_shapes.planes() ) + " planes)",
+                   logPrio::LOG_NOTICE );
+
+    return 0;
+}
+
+void dmSpeckle::handleFileReload()
+{
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+
+    m_reloadFile = false;
+
+    int                                  rv       = loadArbcubeFile();
+    pcf::IndiProperty::PropertyStateType newState = ( rv < 0 ) ? pcf::IndiProperty::Alert : pcf::IndiProperty::Ok;
+    if( m_indiDriver )
+    {
+        m_indiP_file.setState( newState );
+        m_indiP_file.setTimeStamp( pcf::TimeStamp() );
+        m_indiDriver->sendSetProperty( m_indiP_file );
+    }
+    if( rv == 0 )
+    {
+        updateIfChanged( m_indiP_nFrames, "current", (int)m_shapes.planes() );
+    }
+}
+
+std::string dmSpeckle::opModeName( int opMode )
+{
+    if( opMode == ARBCUBE )
+    {
+        return "arbcube";
+    }
+    if( opMode == TIPTILT )
+    {
+        return "tiptilt";
+    }
+    return "sparkle";
+}
+
 int dmSpeckle::generateSpeckles()
 {
     if( m_opMode == TIPTILT )
@@ -869,21 +1041,9 @@ int dmSpeckle::generateSpeckles()
     }
     else if( m_opMode == ARBCUBE )
     {
-        mx::fits::fitsFile<float> ff;
-        mx::error_t               errc = ff.read( m_shapes, m_fileName );
-        if( errc != mx::error_t::noerror )
+        if( loadArbcubeFile() < 0 )
         {
-            return log<software_critical, -1>( { __FILE__, __LINE__, "no file with that name" } );
-        }
-
-        if( m_shapes.rows() != m_width || m_shapes.cols() != m_height )
-        {
-            return log<software_critical, -1>( { __FILE__, __LINE__, "shape cube is not the right size" } );
-        }
-
-        for( int p = 0; p < m_shapes.planes(); ++p )
-        {
-            m_shapes.image( p ) *= (float)m_amp;
+            return -1;
         }
     }
     else
@@ -937,6 +1097,7 @@ int dmSpeckle::generateSpeckles()
         updateIfChanged( m_indiP_separation, "current", m_separation );
         updateIfChanged( m_indiP_angle, "current", m_angle );
     }
+    updateIfChanged( m_indiP_nFrames, "current", (int)m_shapes.planes() );
     updateIfChanged( m_indiP_delay, "current", m_triggerDelay );
     updateIfChanged( m_indiP_amp, "current", m_amp );
     updateIfChanged( m_indiP_frequency, "current", m_frequency );
@@ -969,6 +1130,14 @@ inline void dmSpeckle::modThreadExec()
 
     while( m_shutdown == 0 )
     {
+        // Handle any pending file reload. If we are currently modulating the load_file.request
+        // callback also sets m_restartSp = true so the inner loop has already exited; m_shapes
+        // is therefore safe to rewrite here.
+        if( m_reloadFile && !m_shutdown )
+        {
+            handleFileReload();
+        }
+
         if( !m_modulating && !m_shutdown ) // If we aren't modulating we sleep for 1/2 a second
         {
             mx::sys::milliSleep( 500 );
@@ -977,7 +1146,14 @@ inline void dmSpeckle::modThreadExec()
         if( m_modulating && !m_shutdown )
         {
             m_restartSp = false;
-            if( generateSpeckles() < 0 )
+
+            int rv;
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( m_indiMutex );
+                rv = generateSpeckles();
+            }
+
+            if( rv < 0 )
             {
                 m_modulating = false;
                 continue;
@@ -1554,6 +1730,105 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_zero )
         log<text_log>( "zeroed" );
     }
 
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_mode )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_mode, ipRecv );
+
+    // Iterate received elements to find the one newly switched On.
+    // We skip elements already On in the device property because the pcf library merges
+    // current device state into ipRecv when the client sends only the changed element,
+    // which would otherwise cause the already-selected element to fire first.
+    int newMode = -1;
+    for( auto elit = ipRecv.getElements().begin(); elit != ipRecv.getElements().end(); ++elit )
+    {
+        if( elit->second.getSwitchState() != pcf::IndiElement::On )
+        {
+            continue;
+        }
+        if( m_indiP_mode.find( elit->first ) && m_indiP_mode[elit->first].getSwitchState() == pcf::IndiElement::On )
+        {
+            continue;
+        }
+        if( elit->first == opModeName( SPARKLE ) )
+        {
+            newMode = SPARKLE;
+        }
+        else if( elit->first == opModeName( ARBCUBE ) )
+        {
+            newMode = ARBCUBE;
+        }
+        else if( elit->first == opModeName( TIPTILT ) && !m_syncopationTiming.empty() )
+        {
+            newMode = TIPTILT;
+        }
+    }
+    if( newMode == -1 )
+    {
+        return 0;
+    }
+
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    if( newMode != m_opMode )
+    {
+        m_opMode = newMode;
+        log<text_log>( "mode set to " + opModeName( newMode ), logPrio::LOG_NOTICE );
+        m_restartSp = true;
+    }
+
+    indi::updateSelectionSwitchIfChanged( m_indiP_mode, opModeName( newMode ), m_indiDriver, pcf::IndiProperty::Ok );
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_file )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_file, ipRecv );
+
+    if( !ipRecv.find( "target" ) )
+    {
+        return 0;
+    }
+
+    std::string target = ipRecv["target"].get<std::string>();
+
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+    m_fileName = target;
+    updateIfChanged( m_indiP_file, "target", m_fileName );
+    updateIfChanged( m_indiP_file, "current", m_fileName );
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_loadFile )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loadFile, ipRecv );
+
+    if( !ipRecv.find( "request" ) )
+    {
+        return 0;
+    }
+
+    if( ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+    {
+        return 0;
+    }
+
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    m_reloadFile = true;
+    m_restartSp  = true;
+    if( m_indiDriver )
+    {
+        m_indiP_file.setState( pcf::IndiProperty::Busy );
+        m_indiP_file.setTimeStamp( pcf::TimeStamp() );
+        m_indiDriver->sendSetProperty( m_indiP_file );
+    }
     return 0;
 }
 

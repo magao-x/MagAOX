@@ -1333,3 +1333,52 @@ Programmatic dmMode integration is deferred. Disable dmSyncopation before indepe
 6. Disable before changing timing controls or performing independent maintenance. Mapping/topology changes require restart. Controller clearing does not stop active writers.
 
 An arbitrarily early main publication can race a multi-channel memcpy or follow an auxiliary submission too soon. This observer-based app can detect and recover from such a violation but cannot block the genuine main publisher. A hard gating/pipelining guarantee requires a separate change to the cooperating loop/controller path.
+
+## Main identities for automatic loop timing
+
+`diagnostics.mainTimingStream` optionally exports a complete, bounded history of
+qualified main commands for `loopTimingMonitor`. It is empty by default. A
+suggested name is `dmtweeter_synco_main_timing`. This explicit export is independent
+of `diagnostics.windowSec`: it remains active with minimal diagnostics
+(`windowSec=0`) without enabling the optional timing populations, event logs or
+monitor threads. Leave `mainTimingStream` empty to keep the export disabled.
+`diagnostics.mainTimingCapacity` defaults to 32768 records (range 4–1048576) and
+sizes both the capture queue and shared ring. This requires production-provider
+or coordinated-zero mode; the legacy scheduler has no equivalent main
+qualification hook.
+
+While enabled, the existing exact main acknowledgement and process-trace
+qualification capture one immutable combined key and primary identity. The new
+capture performs no clock reads, waits, allocation, formatting, logging or shared
+stream publication. The ordinary application loop publishes queued records to
+the diagnostic ring, without semaphore operations. `zeroTest.eventStride` and
+text-log sampling do not affect this history.
+
+While disabled, an independent read-only combined attachment supplies one
+metadata/trace snapshot per primary callback. The classifier requires stable
+primary and combined identities, consecutive progression, a matching named
+primary trace, and ordered producer process timestamps. It can retain one
+pending primary until the next callback. It never waits for completion, reads
+provider readiness, requires auxiliary resources, or writes commands. Ambiguous,
+overwritten, malformed and discontinuous snapshots are skipped; a transition
+may therefore need several observations before labels resume. The ordinary
+thread handles attachment retries and file replacement checks.
+
+Main records freeze the scheduler enable state, subdivision count and diagnostic
+generation with the primary observation. Mode records also report changes when
+frames stop. Both enable edges, scheduler reset, source discontinuity and queue
+loss establish new generations. Capture sequences include dropped records so a
+consumer can detect loss before shared-ring publication. The read-only
+`main_timing` INDI property reports diagnostic `enabled`, `generation`, queued
+records, capture `dropped`, and `publishFailures` totals. Exhausted 64-bit
+sequences or generations stop capture rather than reusing an identity. These diagnostics do
+not change the meaning or timing of the existing INDI enable acknowledgement.
+
+A configured loop timing monitor joins each positive main label to the SDK
+record's exact combined-stream inode, counter and raw publication timestamp in
+both modes. It must not reinterpret delayed SDK publications using their arrival
+time or the latest INDI switch. In particular, Off acknowledges scheduler
+quiescence, not drainage of already-published auxiliary commands through the
+combiner/controller. Missing labels make measurements unavailable; they do not
+permit arbitrary SDK commands to be counted as main frames. INDI remains passive
+publish/subscribe, with the last received state retained until changed.

@@ -1,0 +1,6 @@
+#!/bin/bash
+
+echo "homing zaber stages"
+
+setINDI "zaberLowLevel.home_all.request=On"
+setINDI "zaberLowLevelBinary.home_all.request=On"

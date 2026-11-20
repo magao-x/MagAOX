@@ -1,5 +1,9 @@
 # RTC cpuset inventory and restructuring plan
 
+Current allocation update: see the
+[2026-11-18 camwfs descramble migration](#2026-11-18-camwfs-descramble-migration).
+Earlier inventory and migration tables retain their historical CPU31/32 names.
+
 Status: baseline inventory prepared 2026-10-26 and refreshed from the operator's
 synced configs for `po4ao`, `nnReconstructor`, `dmtweeter-synco` and the newly
 listed `dlDataCollection`. Remaining deployed/runtime differences await operator
@@ -700,6 +704,64 @@ Jitter is < 4e-6 (with usual variation). Haven't had to shut anything down."
 This is the reported post-migration timing result; the operator requests a PR.
 No new raw timing capture or thread-affinity readback accompanies this report.
 
+## Publish-copy migration: imWFS2 cbuff on CPU42, mfilt on acqu_mvm
+
+Requested by the operator on 2026-11-14, after the publish copies in
+[shmim-monitor-speedups](../2026-11/shmim-monitor-speedups.md) (acquWFS
+`aol1_imWFS2pub`, wfs2cmodeval `aol1_modevalWFSpub`) removed the cbuffs'
+cost to the loop, and mfilt tested well on the `acqu_mvm` core.
+
+| CPU | Previous cpuset | Updated cpuset | Purpose |
+| --- | --- | --- | --- |
+| 26 | `aol1_imWFS2_cbuff` | `spare26` | Reserve |
+| 42 | `spare42` | `aol1_imWFS2_cbuff` | Reads `aol1_imWFS2pub` in acquWFS's L3 domain |
+| 46 | `mfilt` | `spare46` | Reserve in the MVM's L3 domain |
+
+`mfilt-1` runs on `acqu_mvm` (CPU45) with acquWFS, wfs2cmodeval and mvalC2dm,
+at RTprio 48 between wfs2cmodeval (47) and mvalC2dm (49). The woofer-vispyr and
+ncpc loops' mfilt also move to `acqu_mvm` / taskset 45 (operator decision; the
+loops run independently, so this adds no work beside another loop).
+`remove_cpusets` already lists `mfilt` and `spare42` as legacy names.
+
+Config repository branch `jrmales/loop-pub-copies`:
+`aol1_imWFS2_cbuff.conf` returns from the temporary `spare42` to
+`cpuset=aol1_imWFS2_cbuff`; the tweeter-vispyr `fpssetup.setval` turns on
+`.comp.WFSpub` and `.option.outpub`; woofer-vispyr and ncpc mfilt use
+`acqu_mvm`. Deploy the config and the new map together, with the stop /
+`remove_cpusets` / `make_cpusets` procedure above: under the old map `mfilt`
+still exists and `aol1_imWFS2_cbuff` is CPU26, and under the new map `mfilt`
+no longer exists.
+
+## NVIDIA IRQs on the system CPUs (2026-11-15)
+
+`move_irqs` no longer routes the NVIDIA IRQs to `acqu_mvm` (CPU45), and
+`irqbalance_policyscript` no longer bans them. They take the ordinary IRQ
+affinity (`0-23,64-87`) and irqbalance keeps them there
+(`IRQBALANCE_BANNED_CPULIST=24-63,88-127`).
+
+- The loop does not use them: milk's MVM waits for the GPU by spinning
+  (CUDA's default schedule with 128 logical CPUs), not by interrupt.
+- On CPU45 any GPU interrupt, e.g. from management queries (`nvidia-smi`,
+  NVML), dmRecon on the shared GPU, or planned GPU monitoring in sysMonitor,
+  would preempt the whole acquWFS -> MVM -> mfilt -> mvalC2dm chain.
+- The 2026-11-15 event capture saw no device IRQs on any loop-L3 CPU in
+  30 min, so this is a guard against future GPU users, not a measured fix.
+
+Deploy: install the policy script
+(`sudo install -m 0755 rtSetup/RTC/irqbalance_policyscript /usr/local/bin/`;
+`make rtscripts_install` does not install it), install `move_irqs`
+(`make rtscripts_install MAGAOX_ROLE=RTC`), then run `sudo move_irqs`. It
+resets every IRQ to the system CPUs before routing the device IRQs, so no
+reboot is needed. Check each NVIDIA IRQ's `effective_affinity_list` is in
+`0-23,64-87`.
+
+The ICC gets the same change in `rtSetup/ICC/move_irqs` and
+`rtSetup/ICC/irqbalance_policyscript`: its NVIDIA IRQs stay on its system CPUs
+(`0-31,64-95`; irqbalance excludes `32-63,96-127`). Deploy the same way with
+`MAGAOX_ROLE=ICC`. The ICC policy script's comments had the two pvcam IRQs
+swapped relative to `move_irqs` (`pvcamPCIE_0` -> `camllowfs`,
+`pvcamPCIE_1` -> `camflowfs`); the comments now match `move_irqs`.
+
 ## Implementation dependencies and sequence
 
 1. **Complete the operator inventory.** Record deployed/uncommitted configs,
@@ -816,3 +878,37 @@ independent of the RTC rollout.
 - Implementation and local verification: Complete for this migration; see checks above.
 - Operator deployment: Successful on first attempt; closed-loop operation reported.
 - Runtime placement readback and post-migration timing results: Pending.
+
+## 2026-11-18 camwfs descramble migration
+
+Following the [OCAM descramble trials](../2026-11/ocam_descramble.md), the
+operator tested `camwfs-sw` on CPU31 using `spare31` and reported no impact.
+The operator authorized making parallel descrambling the default and retaining
+the following allocation. Earlier tables in this record describe the previous
+maps; this section supersedes their CPU31/32 assignments.
+
+| CPU | Previous cpuset | Current cpuset | Workload |
+| --- | --- | --- | --- |
+| 31 | `spare31` | `camwfs_sw` | `camwfs-sw` software writer, tested by the operator |
+| 32 | `camwfs_sw` | `camwfs_descramble` | OCAM parallel descramble worker |
+| 33 | `camwfs` | Unchanged | Camera framegrabber |
+| 34 | `camwfs_irq` | Unchanged | EDT IRQ |
+
+CPU32 and CPU33 share L3 domain 32–39; CPU31 remains in domain 24–31.
+The `dmtweeter-post` worker stays on CPU44. Historical post-worker experiments
+on `spare31` do not reserve CPU31 for new comparisons.
+
+The workstation `make_cpusets` changes implement these names. Cleanup retains
+retired `spare31` as an accepted RTC name, alongside the current names, so the
+operator can remove the old empty exclusive sets before rebuilding. Occupied
+sets still prevent cleanup. The operator must stop workloads, run the existing
+cleanup/rebuild procedure, and restart with matching configuration; no live
+cpuset or external configuration changes were made by agents.
+
+The software writer selects `[framegrabber] cpuset=camwfs_sw`; replace any
+temporary `spare31` override. The camera's `[descramble] cpuset` selects
+`camwfs_descramble`; replace an explicit old `camwfs_sw` worker override or
+remove it to use the new application default. Verify the software writer on
+CPU31, the descramble worker on CPU32, the framegrabber on CPU33 and EDT IRQ
+on CPU34 after the operator migration. The reported CPU31 trial is evidence
+for the workload move, not confirmation that the renamed map has been deployed.

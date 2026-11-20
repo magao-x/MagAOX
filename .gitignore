@@ -25,6 +25,7 @@ gui/**/makefile.*
 
 #Agents:
 .codex
+**/*.gcov
 
 #Ignore any old folders
 **/old/
@@ -89,6 +90,7 @@ gui/rtimv/plugins/acquisition/makefile.acquisition
 #h
 apps/hoPredCtrl/hoPredCtrl
 apps/hsfwCtrl/hsfwCtrl
+apps/hwpSequencer/hwpSequencer
 apps/hwpTracker/hwpTracker
 
 #i
@@ -106,6 +108,7 @@ apps/koolanceCtrl/koolanceCtrl
 
 #l
 apps/loPredCtrl/loPredCtrl
+apps/loopTimingMonitor/loopTimingMonitor
 
 #m
 apps/mcp3008Ctrl/mcp3008Ctrl
