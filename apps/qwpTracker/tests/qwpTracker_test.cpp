@@ -112,7 +112,7 @@ class qwpTracker_test : public qwpTracker
     }
 
     /// Report the filter wheel selection.
-    int filter( const std::string &sel,   /**< [in] the selected filter, or "" for none */
+    int filter( const std::string &sel, /**< [in] the selected filter, or "" for none */
                 bool               busy = false /**< [in] whether the wheel is moving */ )
     {
         pcf::IndiProperty ip( pcf::IndiProperty::Switch );
@@ -654,20 +654,20 @@ TEST_CASE( "qwpTracker tracks the K-mirror", "[qwpTracker]" )
  */
 TEST_CASE( "qwpTracker tracks a wrapped law through 180", "[qwpTracker]" )
 {
-        qwpTracker_test app( "tracking_wrapped" );
-        app.writeLaw( "i", "-10,170,0\n0,190,10\n" );
-        REQUIRE( app.startup() == 0 );
-        app.filter( "i" );
-        app.stagesReady( 175, 0 );
-        app.kPos( -5 );
-        app.track( true );
+    qwpTracker_test app( "tracking_wrapped" );
+    app.writeLaw( "i", "-10,170,0\n0,190,10\n" );
+    REQUIRE( app.startup() == 0 );
+    app.filter( "i" );
+    app.stagesReady( 175, 0 );
+    app.kPos( -5 );
+    app.track( true );
 
-        // qwp1 = 180 -> fast 0, stage 0 or 180, nearest to 175 is 180.  qwp2 = 5, sign -1 -> 355 or 175, nearest 355.
-        REQUIRE( app.m_qwp[0].fastTgt == Approx( 0 ) );
-        REQUIRE( app.m_qwp[0].lastSent == Approx( 180 ) );
-        REQUIRE( app.m_qwp[1].fastTgt == Approx( 5 ) );
-        REQUIRE( app.m_qwp[1].lastSent == Approx( 355 ) );
-    }
+    // qwp1 = 180 -> fast 0, stage 0 or 180, nearest to 175 is 180.  qwp2 = 5, sign -1 -> 355 or 175, nearest 355.
+    REQUIRE( app.m_qwp[0].fastTgt == Approx( 0 ) );
+    REQUIRE( app.m_qwp[0].lastSent == Approx( 180 ) );
+    REQUIRE( app.m_qwp[1].fastTgt == Approx( 5 ) );
+    REQUIRE( app.m_qwp[1].lastSent == Approx( 355 ) );
+}
 
 /// Manual targets are rejected while tracking and sent immediately otherwise.
 /**

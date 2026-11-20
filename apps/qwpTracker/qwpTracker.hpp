@@ -781,8 +781,8 @@ int qwpTracker::updateStages()
                 }
                 else if( !ok )
                 {
-                    log<text_log>( "holding QWPs: K-mirror " + std::to_string( m_k ) + " outside the tracking law for " +
-                                       m_filter,
+                    log<text_log>( "holding QWPs: K-mirror " + std::to_string( m_k ) +
+                                       " outside the tracking law for " + m_filter,
                                    logPrio::LOG_WARNING );
                 }
                 else
