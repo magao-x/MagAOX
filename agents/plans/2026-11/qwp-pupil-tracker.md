@@ -149,7 +149,9 @@ All questions were resolved in the design interview (2026-11-20).
     - Input invalidated while tracking (device restart, disconnect): stop commanding, keep tracking on and `v0`,
       resume when values return. Silence is not staleness (AGENTS.md rule 27). A ttmperi restart that returns a
       different `target` re-bases under decision 4.
-    - ttmperi `fsm` not READY: hold, then send the latest command once READY (qwpTracker pattern).
+    - ttmperi `fsm` not usable: hold, then send the latest command once usable. (Amended during implementation:
+      `pi335Ctrl` reports OPERATING when its flat is set and still accepts `pos_N` commands, so READY and
+      OPERATING are both usable, for the stages too, since positions during moves are applied.)
 11. **Tests: no research data copied into the repo.** Unit tests write a small synthetic model CSV and CM FITS to a
     temp dir and check against analytic values. Conformance of the real calib files to the research evaluator is
     checked by the exporter script (it re-evaluates the written CSV against `evaluator.py` on the research test
@@ -205,3 +207,30 @@ Out of scope: handbook updates; the instrument config file (user writes it on th
 - ttmperi hysteresis (~0.08 px) exceeds the model target.
 - A ttmperi move during the J-test while tracking re-bases `v0`; a J-test done while the QWPs are moving will mix
   the two.
+
+## Implementation Notes
+
+Implemented on `ml/qwp-pupil-tracker` (2026-11-20).
+
+- `apps/qwpPupilTracker/`: header-only app, `main` in the `.cpp`, Makefile; added to `apps_aoc` and
+  `all_buildable_apps` in the top-level Makefile, tests added to `tests/tests.list`.
+- Telemetry: new `telem_qwppupil` (event code 20951: `tracking, dx, dy, v1, v2`), registered in `logCodes.dat`,
+  `telem.cpp`, `logMeta.cpp` and `logTypes_Accessor_test.cpp`. The ttmperi voltages themselves are already in
+  `telem_pi335`. `ml/qwpTracker` adds `telem_qwptrack` at 20950 on the adjacent line of `logCodes.dat`, so expect a
+  trivial merge conflict there.
+- Echo handling: each axis keeps its last 16 commands. A `pos_N.target` within `ttm.rebaseTol` (0.01 V) of any of
+  them is an echo, so late echoes during fast stage updates do not re-base. Anything else re-bases that axis
+  (`v0 = target - dv`). While ttmperi is not usable, target changes only set a pending re-base of both axes, applied
+  once it is usable again, so a restart does not re-base on placeholder values.
+- The `offset` property is also updated while not tracking, so the predicted correction can be checked before
+  enabling.
+- Calib files: CSV model rows are checked for exactly six columns (`readColumns` silently fills a short row with
+  -99) and integer `a`, `b`. The FITS CM is read in python orientation: `im(px, v) == CM[v][px]`.
+- Exporter: `~/dev/magaox/scripts/export_qwp_pupil_calib.py` (PEP 723, `uv run`). Verified: 22 frequencies, max
+  error 3.6e-15 px against the 93 research test vectors. The CM header carries the IM and provenance.
+- Verification: unit tests pass in the `magao-x-setup:cli` container with gcc-toolset-14 (144 assertions, plus the
+  INDI validation test). A one-off check (not committed) loaded the real exported files through the app's loaders:
+  max error 4e-15 px against the research vectors, `phi_ref = (157.42, 165.80)`, `shift(phi_ref) = (0.359, -0.520)`
+  px, and the CM loaded un-transposed (`[[63.43, -5.37], [-6.94, 60.57]]`).
+- Not done (instrument side, user): commit the exported files to the calib repo, write `qwppupil.conf`, verify
+  that `elliptecCtrl` publishes `position.current` during moves, and run the closed-loop check.

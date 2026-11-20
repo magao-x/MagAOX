@@ -30,6 +30,7 @@ apps_aoc = \
 	tcsInterface \
 	adcTracker \
 	hwpTracker \
+	qwpPupilTracker \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
@@ -158,6 +159,7 @@ all_buildable_apps = \
 	psfFit \
 	pupilFit \
 	pwfsSlopeCalc \
+	qwpPupilTracker \
 	refRMS \
 	rhusbMon \
 	shmimIntegrator \

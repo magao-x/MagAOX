@@ -52,6 +52,7 @@ timespec telem_sparkleclock::lastRecord   = { 0, 0 };
 timespec telem_stage::lastRecord          = { 0, 0 };
 timespec telem_stdcam::lastRecord         = { 0, 0 };
 timespec telem_adctrack::lastRecord       = { 0, 0 };
+timespec telem_qwppupil::lastRecord       = { 0, 0 };
 timespec telem_telcat::lastRecord         = { 0, 0 };
 timespec telem_teldata::lastRecord        = { 0, 0 };
 timespec telem_tcsi_focus::lastRecord     = { 0, 0 };
