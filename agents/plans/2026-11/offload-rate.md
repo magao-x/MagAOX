@@ -12,7 +12,7 @@ Review AGENTS.md.  Do not alter any text above the "Agent Findings and Plan" bel
 # Agent Findings and Plan
 <!-- This section will be filled out by the agent -->
 
-*Status (2026-11-19): implemented on `ktwitchell/counter-offload` (see Implementation Log). Not yet built or tested; the user builds and tests on the RTC and on a GUI machine.*
+*Status (2026-11-19): implemented, installed and checked on the bench (see Implementation Log).*
 
 ## Task Summary
 <!-- The agent should summarize the task as they understand it -->
@@ -145,6 +145,15 @@ Per A1 (Q1 = a):
 **2026-11-19: no config setting for the rate.** The user asked that switching between this branch and `dev` should need no config changes. The `offload.rate` setting was therefore removed: the 250 Hz default is now built into the INDI `offloadRate` property, and the rate can only be changed over INDI (0 = unmanaged). This supersedes the A4 implementation note above. The `integrator.syncoSource` setting was also removed: the dmSyncopation device name is fixed in code as `dmtweeter-synco`. This feature now needs no config changes at all.
 
 **2026-11-19: NaN check under fast-math.** The first RTC unit-test run failed `navgForRate( 2000, NaN ) == 0` (it returned 1). MagAOX builds with fast-math flags, which let the compiler remove `std::isfinite` and NaN-sensitive comparisons. The fix uses mxlib's bitwise `mx::math::isFinite`, as the dmSyncopation producer helper and counterOffload already do, both in `navgForRate` and in the `offloadRate` INDI callback.
+
+**2026-11-19: build and bench results (run by the user).**
+- **Unit tests.** The first unit-test rerun after the NaN fix still failed, because `tests/Makefile.one` doesn't track app header dependencies, so the test object wasn't rebuilt. After `make -f Makefile.one t=... clean` and a rebuild, all tests passed.
+- **Formatting.** `clang-format` on the touched files also reformatted `gui/widgets/offloadCtrl/offloadCtrl.hpp`.
+- **First synco-on check.** Turning synco on did not change `dmtweeter-avg.nAverage` at first. The user resolved it without code changes; the cause was not recorded. Revisit if it recurs.
+- **GUI build.** `offloadCtrlGUI` was built and installed from a clone on exao1. That clone first needed the INDI client libraries: `make -C INDI/liblilxml` and `make -C INDI/libcommon`.
+- **GUI check.** The input box reads "Offload Rate (Hz)".
+- **Bench result.** With synco on, `dmtweeter-avg.nAverage` changed from 8 to 32, and `t2wOffloader.fps` stayed at 250 Hz (8000 Hz DM rate / 32), as intended.
+- **Not yet recorded:** a direct rate measurement of `aol0_tweeterOffload` with synco on, and the switch back to synco off (`nAverage` returning to 8).
 
 **Checks for the first build:**
 - `sendNewProperty` with a `uint32_t` value;
