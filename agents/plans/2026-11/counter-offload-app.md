@@ -643,3 +643,32 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
 
 **Recommendation:** C1 for the next run, plus C2. C3 is optional.
 
+
+### Proposed: Calibration Settings as INDI Properties (not implemented)
+**Request (2026-11-20).** Make the calibration settings INDI properties and delete them from the config, so that changing them doesn't require editing the config.
+
+**Design.**
+- **INDI only, config keys removed.** Each setting gets a code default and an INDI property:
+  - `halfWidthHz`, which already exists as `calibHalfWidthHz`; only its config key is dropped;
+  - `modeMax`, `nAverage`, `baselineEvery`, `settleS`, `timeoutS`, `abortRatio`;
+  - `leak` (calibration leak);
+  - `startGridUs`, `durationGridUs`, `gainGrid`. Each grid is one number vector with elements `min`, `max` and `step`.
+- **Kept in config.** These are deployment settings that rarely change:
+  - `calibrate.freqStream`, `calibrate.offloadDevice`, `calibrate.csvDir`;
+  - `psds.shmimName`.
+- **New defaults**, from run 202219Z:
+  - `startGridUs` 0,150,25;
+  - `durationGridUs` 200,600,100;
+  - `gainGrid` 0.3,1.0,0.1.
+- **Validation.** A new value is checked as `validateConfig` checks it now: grid min ≤ max, step > 0, within limits; leak > 0; nAverage ≥ 2. An invalid value is rejected and logged, and the property is republished unchanged.
+- **Changes during a run.** Rejected while a calibration is running. The calibration thread copies the settings under the mutex when the run starts.
+- **Lifetime.** Values are not persistent: a restart returns them to the code defaults. Changing a default permanently requires a code change.
+- **Other changes.**
+  - Remove the `[calibrate]` tuning keys from `dmtweeter_counteroffload.conf`.
+  - Update the doc's settings tables to list INDI properties instead.
+  - Unit tests: the defaults; validation of each new setter, accepted and rejected.
+- **Operator step.** Remove the same keys from the RTC instance config. The app warns about unknown keys, if the config framework does.
+
+**Open questions.**
+- **I-Q1.** The operational settings (`gain`, `rampStartUs`, `rampDurationUs`, `maxCommand`, `leak`, `timeOffsetUs`) are already INDI properties, but they also have config keys. Proposal: keep the config keys, since they are the only way the calibrated values survive a restart. Change the defaults to gain 0.5, rampStartUs 25 and maxCommand 1.0, and leave them out of the example config.
+- **I-Q2.** Include the clip handling C2, with C3 optional, in the same change?
