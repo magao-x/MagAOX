@@ -692,3 +692,24 @@ On 2026-11-20 the optimized app build and all four offline AutoJay suites
 passed (40 cases, 2,259 assertions). Tests cover timing with both triggers
 empty, mixed feedback in either direction, and capture and reload without
 combined streams.
+
+### Follow-up: idle camera monitor and capture diagnostics
+
+During commissioning, a capture returned `camera stream is stale` before
+opening the poke channels. AutoJay previously set its idle FSM state to
+`READY`, while its camera monitor only attaches and reads in
+`OPERATING`. Keep the FSM in the monitor's operating state by default,
+including between transactions. The INDI acquisition status still reports
+which request or transaction is in progress.
+
+Capture requests, local poke writes, failures, and saved diagnostic file
+prefixes are now logged. `save_diagnostics.toggle` retains completed
+sequences until turned off. Rejected completed sequences still retain
+diagnostics with the toggle off.
+
+On 2026-11-21 the optimized build and offline app suite passed
+(19 cases, 1,687 assertions).
+It uses a private synthetic ImageStreamIO camera to verify idle startup
+through the normal monitor and acquisition entry points. The suite also
+checks that a blocked capture logs its reason and that diagnostic retention
+survives multiple captures until turned off.

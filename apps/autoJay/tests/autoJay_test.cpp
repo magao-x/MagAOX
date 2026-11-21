@@ -4,6 +4,8 @@
  */
 
 #include <chrono>
+#include <iostream>
+#include <sstream>
 #include <thread>
 
 #include "../../../tests/testXWC.hpp"
@@ -15,6 +17,66 @@ namespace autoJayTest
 {
 
 /// \cond AUTOJAY_APP_TEST_HELPERS
+/// Private camera stream for exercising the monitor thread without instrument streams.
+class syntheticCamera
+{
+  public:
+    std::string m_name; ///< Unique stream name used by the fixture.
+
+    /// Create a camera image in a private ImageStreamIO directory.
+    syntheticCamera();
+
+    /// Destroy the test stream and restore the caller's environment.
+    ~syntheticCamera();
+
+    /// Publish the next frame of the synthetic camera.
+    void publish();
+
+  private:
+    std::filesystem::path      m_directory; ///< Scratch stream directory.
+    std::optional<std::string> m_previous;  ///< Prior ImageStreamIO directory setting.
+    IMAGE                      m_image{};   ///< Owned synthetic shared-memory image.
+};
+
+syntheticCamera::syntheticCamera()
+{
+    char path[] = "/tmp/autoJay-camera-XXXXXX";
+    REQUIRE( ::mkdtemp( path ) != nullptr );
+    m_directory = path;
+    m_name      = m_directory.filename().string();
+    if( const auto *previous = getenv( "MILK_SHM_DIR" ) )
+    {
+        m_previous = previous;
+    }
+
+    REQUIRE( setenv( "MILK_SHM_DIR", path, 1 ) == 0 );
+    uint32_t size[2]{ 44, 40 };
+    REQUIRE( ImageStreamIO_createIm_gpu( &m_image, m_name.c_str(), 2, size, _DATATYPE_UINT16, -1, 1, 10, 0, 0, 0 ) ==
+             IMAGESTREAMIO_SUCCESS );
+}
+
+syntheticCamera::~syntheticCamera()
+{
+    ImageStreamIO_destroyIm( &m_image );
+    if( m_previous )
+    {
+        setenv( "MILK_SHM_DIR", m_previous->c_str(), 1 );
+    }
+    else
+    {
+        unsetenv( "MILK_SHM_DIR" );
+    }
+
+    std::error_code ignored;
+    std::filesystem::remove_all( m_directory, ignored );
+}
+
+void syntheticCamera::publish()
+{
+    ++m_image.md->cnt0;
+    REQUIRE( ImageStreamIO_sempost( &m_image, -1 ) == IMAGESTREAMIO_SUCCESS );
+}
+
 /// An application fixture whose channel interface has no live-stream implementation.
 class autoJayHarness : public MagAOX::app::autoJay
 {
@@ -22,6 +84,7 @@ class autoJayHarness : public MagAOX::app::autoJay
     using imageT      = MagAOX::app::autoJayDetail::imageT;
     using calibration = MagAOX::app::autoJayDetail::calibration;
     using geometry    = MagAOX::app::autoJayDetail::geometry;
+    using cameraMonitor = MagAOX::app::dev::shmimMonitor<MagAOX::app::autoJay>;
 
     std::filesystem::path m_directory;             ///< Owned scratch files for patterns and calibration bundles.
     unsigned              m_openCount{ 0 };        ///< Calls into the fake channel-open interface.
@@ -142,6 +205,12 @@ class autoJayHarness : public MagAOX::app::autoJay
 
     /// Return this fixture's application calibration directory.
     std::string calibrationRoot() const;
+
+    /// Drain queued logs synchronously and return the operator-visible messages.
+    std::string loggedMessages();
+
+    /// Start the normal application workers on a synthetic stream with ordinary scheduling.
+    int startMonitoring( const std::string &stream /**< [in] Private camera stream name. */ );
 };
 
 autoJayHarness::autoJayHarness()
@@ -215,6 +284,12 @@ autoJayHarness::autoJayHarness()
 autoJayHarness::~autoJayHarness()
 {
     m_open = false;
+    if( cameraMonitor::m_smThread.joinable() )
+    {
+        m_shutdown = 1;
+        appShutdown();
+    }
+
     std::error_code ignored;
     std::filesystem::remove_all( m_directory, ignored );
 }
@@ -354,6 +429,7 @@ int autoJayHarness::cameraFrame( void *source, IMAGE_METADATA &metadata )
 
 bool autoJayHarness::setupValid( bool capture, std::string &error, calibration *resolved, bool settling )
 {
+    std::lock_guard<std::mutex> lock( m_mutex );
     calibration candidate = capture ? m_captureConfig : *m_calibration;
     geometry    geom;
     bool        result = checkSetup( candidate, geom, capture, error, settling );
@@ -436,6 +512,30 @@ void autoJayHarness::acknowledgment( double session, double counter, int status 
 std::string autoJayHarness::calibrationRoot() const
 {
     return m_calibDir + "/" + m_configName;
+}
+
+std::string autoJayHarness::loggedMessages()
+{
+    std::filesystem::create_directories( m_log.logPath() );
+    m_log.logName( m_configName );
+
+    std::ostringstream messages;
+    auto              *previous = std::cerr.rdbuf( messages.rdbuf() );
+    m_log.logShutdown( true );
+    m_log.logThreadExec();
+    std::cerr.rdbuf( previous );
+    return messages.str();
+}
+
+int autoJayHarness::startMonitoring( const std::string &stream )
+{
+    cameraMonitor::m_smThreadPrio = 0;
+    cameraMonitor::m_shmimName    = stream;
+    m_captureConfig.stream        = stream;
+    m_controllerEnabled           = false;
+    m_lastFrameTime               = 0;
+    std::filesystem::create_directories( m_tel.logPath() );
+    return appStartup();
 }
 /// \endcond
 
@@ -842,6 +942,80 @@ TEST_CASE( "autoJay publishes only a complete current measurement", "[autoJay][a
     REQUIRE( app.m_clearCount >= 1 );
     if( !accepted )
         REQUIRE_FALSE( app.m_continuous );
+}
+
+/// The normal startup and idle loop receive camera frames before a capture request can open the DMs.
+/** \ingroup autoJay_unit_test */
+TEST_CASE( "autoJay can start a first capture after monitoring while idle", "[autoJay][app]" )
+{
+    // clang-format off
+    #ifdef AUTOJAY_TEST_DOXYGEN_REF
+    MagAOX::app::autoJay::appStartup;
+    MagAOX::app::autoJay::appLogic;
+    MagAOX::app::autoJay::newCallBack_m_indiP_capture;
+    #endif
+    // clang-format on
+    syntheticCamera camera;
+    autoJayHarness  app;
+    REQUIRE( app.startMonitoring( camera.m_name ) == 0 );
+    REQUIRE_FALSE( app.m_calibration );
+    pcf::IndiProperty capture( pcf::IndiProperty::Switch, "autoJay-test", "capture" );
+    capture.add( pcf::IndiElement( "request" ) );
+    capture["request"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_capture( capture ) == 0 );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_status == "camera stream is stale" );
+    REQUIRE( app.m_openCount == 0 );
+    REQUIRE( app.loggedMessages().find( app.m_status ) != std::string::npos );
+
+    std::string error;
+    const auto  deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 3 );
+    while( !app.setupValid( true, error ) && std::chrono::steady_clock::now() < deadline )
+    {
+        camera.publish();
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    }
+
+    REQUIRE( app.setupValid( true, error ) );
+    REQUIRE( app.newCallBack_m_indiP_capture( capture ) == 0 );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_active );
+    REQUIRE( app.m_openCount == 1 );
+    REQUIRE( app.m_commands.size() == 1 );
+}
+
+/// Retain every completed capture while enabled and stop retaining successful captures when disabled.
+/** \ingroup autoJay_unit_test */
+TEST_CASE( "autoJay saves diagnostics across captures while the toggle is on", "[autoJay][app]" )
+{
+    // clang-format off
+    #ifdef AUTOJAY_TEST_DOXYGEN_REF
+    MagAOX::app::autoJay::newCallBack_m_indiP_diagnostics;
+    MagAOX::app::autoJay::finish;
+    #endif
+    // clang-format on
+    autoJayHarness    app;
+    pcf::IndiProperty toggle( pcf::IndiProperty::Switch, "autoJay-test", "save_diagnostics" );
+    toggle.add( pcf::IndiElement( "toggle" ) );
+    toggle["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_diagnostics( toggle ) == 0 );
+
+    const auto directory = app.m_directory / "diagnostics";
+    for( int i = 1; i <= 3; ++i )
+    {
+        if( i == 3 )
+        {
+            toggle["toggle"].setSwitchState( pcf::IndiElement::Off );
+            REQUIRE( app.newCallBack_m_indiP_diagnostics( toggle ) == 0 );
+        }
+
+        REQUIRE( app.begin( true ) );
+        app.completeSequence();
+        app.finish();
+        REQUIRE( app.m_status.starts_with( "aligned reference calibration saved" ) );
+        REQUIRE( std::distance( std::filesystem::directory_iterator( directory ),
+                                std::filesystem::directory_iterator() ) == 3 * std::min( i, 2 ) );
+    }
 }
 
 /// First-reference capture saves the effective maps and references without producing a correction sample.
