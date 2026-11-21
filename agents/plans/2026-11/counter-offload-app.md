@@ -593,3 +593,9 @@ File: `counterOffload_calib_20261120T193905Z.csv`, copied to `~/Documents/MagAO-
 - With the gain-at-arrival and clip fix installed, the tweeter no longer winds up at gain 1. Before the fix it wound up at about 0.4.
 - Clipping still occurs (`stats.clipped` 47697 at gain 0.8, leak 0.001), but the clip now bounds the counter as intended.
 - **Open item:** calibration aborts on any clipping during a run. Check the clip rate at the calibration leak (0.0025) before starting a run.
+
+**2026-11-20: dev merge check (`a537e3c6`).** Nothing in t2wOffloader or counterOffload needs to change.
+- **dmSyncopation:** only two docs changed (`delivery-preparation-test.md`, `zero-aux-rate-test.md`; the post worker moved from `spare31` to `dmtweeter-post`/CPU44). There are no code changes to dmSyncopation, the producer helper, timing, shmimMonitor or the dm base.
+- **ocam2KCtrl:** the descramble work does not change the camwfs `fps` property or its stream names, which t2wOffloader reads.
+- **RTC cpusets:** `spare31` is retired and CPU31 is now `camwfs_sw`; `camwfs_descramble` is on CPU32. `spare26` (counterOffload's producer) is unchanged. It now shares L3 domain 24–31 with `camwfs_sw`; the two share no streams, so this is only a cache-capacity neighbour, but watch it if counterOffload's `failed` rate rises.
+- **`tests/Makefile.one`:** the changes add ocam-only header dependencies. Still clean before rebuilding the counterOffload test.
