@@ -210,10 +210,12 @@ only; no new unit tests since the sanitizer helper was removed.
 ## 2026-11-20 arbcube playback correction
 
 The frequency and amplitude INDI definitions passed their intended maxima as
-step sizes. The worker also reread and rescaled the whole FITS cube under
-`m_indiMutex` on start and parameter changes, even after a successful
-`load_file` request. These paths can prevent usable settings from reaching a
-client and delay playback and INDI commands for large cubes.
+step sizes. Server-side validation uses the received values independently of
+those definitions. The callbacks published `target` on acceptance, while
+`current` waited for shape preparation. In managed mode that preparation
+required a usable slot. The worker also reread and rescaled the whole FITS
+cube under `m_indiMutex` on start and parameter changes, even after a successful
+`load_file` request. That I/O could delay playback and block INDI callbacks.
 
 - The worker caches the unscaled cube by path. An explicit `load_file` request
   refreshes it, including after an on-disk change at the same path. Starting
@@ -223,6 +225,9 @@ client and delay playback and INDI commands for large cubes.
 - The amp and frequency callbacks publish accepted settings immediately.
   Playback scales one private frame at a time and reuses its existing stream
   copy. Legacy triggered playback takes its cadence from the trigger stream.
+- Managed playback forces `dm.trigger=off`. For nominal 8 kHz cube playback,
+  set `dm.frequency=8000` and `dm.dwell=1` and supply an 8 kHz syncopation
+  schedule. See the [production provider setup](../../../apps/dmSyncopation/doc/production-providers.md#configuration).
 - Failed loads publish `file` Alert with zero available cube frames. If
   arbitrary-cube playback was requested, its switch returns to Off with Alert.
 
