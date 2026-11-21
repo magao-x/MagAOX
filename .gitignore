@@ -79,5 +79,8 @@ coverage_report/
 # Valgrind logs
 tests/valgrind/logs/*
 
+# emacs temp files
+*~
+
 # Per-component build products live in .gitignore files beside each app/util,
 # in gui/, INDI/, and flatlogs/.
