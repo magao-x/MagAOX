@@ -19,6 +19,7 @@
 #include <functional>
 #include <iomanip>
 #include <limits>
+#include <type_traits>
 #include <vector>
 
 #include <mx/improc/eigenImage.hpp>
@@ -131,7 +132,7 @@ class counterOffload : public MagAOXApp<true>,
 
     std::string m_channel{ "dm01disp08_aux" }; ///< The dmSyncopation auxiliary source this app writes.
 
-    double m_rampStartUs{ 120 }; ///< Ramp start after the woofer command, in us.
+    double m_rampStartUs{ 25 }; ///< Ramp start after the woofer command, in us.
 
     double m_rampDurationUs{ 330 }; ///< Ramp duration, in us.
 
@@ -139,9 +140,9 @@ class counterOffload : public MagAOXApp<true>,
 
     double m_timeOffsetUs{ 0 }; ///< Offset added to the input receipt time to give the ramp reference, in us.
 
-    double m_gain{ 1 }; ///< Scale applied to each new offload when it arrives, 0 to 2.
+    double m_gain{ 0.5 }; ///< Scale applied to each new offload when it arrives, 0 to 2.
 
-    double m_maxCommand{ 0.5 }; ///< Largest magnitude of any pixel of the command and of the accumulator.
+    double m_maxCommand{ 1.0 }; ///< Largest magnitude of any pixel of the command and of the accumulator.
 
     double m_computeLeadUs{ 20 }; ///< Time reserved before the publish lead to compute the command, in us.
 
@@ -152,12 +153,16 @@ class counterOffload : public MagAOXApp<true>,
     ///@}
 
     /** \name Calibrate Parameters - Data
+     * The stream, device and directory are configurable.  The rest are set over INDI only, and are reset to these
+     * defaults on restart.  They cannot be changed while a calibration runs.
      *@{
      */
 
     std::string m_freqStream{ "aol1_freq" }; ///< Stream holding the frequency axis of the PSD stream, Hz.
 
     std::string m_offloadDevice{ "t2wOffloader" }; ///< INDI device providing the offload rate (fps) and numModes.
+
+    std::string m_csvDir{ "/home/xsup/counterOffload" }; ///< Directory for the per-run calibration CSV files.
 
     double m_halfWidthHz{ 10 }; ///< Half width of the band integrated around the offload rate, Hz.
 
@@ -175,13 +180,11 @@ class counterOffload : public MagAOXApp<true>,
 
     double m_calibLeak{ 0.0025 }; ///< Leak used during a calibration run, restored afterwards; must be > 0.
 
-    std::vector<double> m_startGridUs{ 0, 400, 25 }; ///< rampStartUs scan: min, max, step, in us.
+    std::vector<double> m_startGridUs{ 0, 150, 25 }; ///< rampStartUs scan: min, max, step, in us.
 
-    std::vector<double> m_durationGridUs{ 100, 600, 50 }; ///< rampDurationUs scan: min, max, step, in us.
+    std::vector<double> m_durationGridUs{ 200, 600, 100 }; ///< rampDurationUs scan: min, max, step, in us.
 
-    std::vector<double> m_gainGrid{ 0.1, 1.0, 0.1 }; ///< gain scan: min, max, step.
-
-    std::string m_csvDir{ "/home/xsup/counterOffload" }; ///< Directory for the per-run calibration CSV files.
+    std::vector<double> m_gainGrid{ 0.3, 1.0, 0.1 }; ///< gain scan: min, max, step.
 
     ///@}
 
@@ -444,6 +447,33 @@ class counterOffload : public MagAOXApp<true>,
     /// Name of a calibration stage, for logs and the CSV.
     static const char *calibStageName( int stage /**< [in] the stage index */ );
 
+    /// Whether a scan grid is min, max, step with min <= max, both within limits, and 0 < step <= hi - lo.
+    static bool gridValid( const std::vector<double> &grid /**< [in] the grid */,
+                           double                     lo /**< [in] smallest allowed value */,
+                           double                     hi /**< [in] largest allowed value */ );
+
+    /// Set a calibration setting, unless a calibration is running.
+    /**
+     * \returns 0 on success
+     * \returns -1 if a calibration is running, or the value is nonfinite, out of range, or not integral for an
+     *          integer setting
+     */
+    template <typename T>
+    int applyCalibSetting( T     &setting /**< [out] the setting */,
+                           double value /**< [in] the new value */,
+                           double lo /**< [in] smallest allowed value */,
+                           double hi /**< [in] largest allowed value */ );
+
+    /// Set a calibration scan grid, unless a calibration is running.
+    /**
+     * \returns 0 on success
+     * \returns -1 if a calibration is running or the grid is not valid, see gridValid()
+     */
+    int applyCalibGrid( std::vector<double>       &grid /**< [out] the grid setting */,
+                        const std::vector<double> &value /**< [in] the new min, max, step */,
+                        double                     lo /**< [in] smallest allowed value */,
+                        double                     hi /**< [in] largest allowed value */ );
+
   protected:
     /** \name Producer Thread
      * Publishes counter-offload commands for each dmSyncopation slot.
@@ -561,6 +591,26 @@ class counterOffload : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_halfWidth; ///< Property to set the calibration band half width.
 
+    pcf::IndiProperty m_indiP_modeMax; ///< Property to set the number of PSD modes summed.
+
+    pcf::IndiProperty m_indiP_nAverage; ///< Property to set the PSDs averaged per evaluation.
+
+    pcf::IndiProperty m_indiP_baselineEvery; ///< Property to set the evaluations between baselines.
+
+    pcf::IndiProperty m_indiP_settle; ///< Property to set the settling wait.
+
+    pcf::IndiProperty m_indiP_timeout; ///< Property to set the PSD timeout.
+
+    pcf::IndiProperty m_indiP_abortRatio; ///< Property to set the abort ratio.
+
+    pcf::IndiProperty m_indiP_calibLeak; ///< Property to set the leak used during a run.
+
+    pcf::IndiProperty m_indiP_startGrid; ///< Property to set the rampStartUs scan grid: min, max, step.
+
+    pcf::IndiProperty m_indiP_durationGrid; ///< Property to set the rampDurationUs scan grid: min, max, step.
+
+    pcf::IndiProperty m_indiP_gainGrid; ///< Property to set the gain scan grid: min, max, step.
+
     pcf::IndiProperty m_indiP_calibration; ///< Read-only calibration progress and best parameters.
 
     pcf::IndiProperty m_indiP_offloadFps; ///< The offloader's effective offload rate (SET).
@@ -577,6 +627,40 @@ class counterOffload : public MagAOXApp<true>,
                    double                  &value /**< [out] the parameter to set */,
                    double                   minVal /**< [in] smallest allowed value */,
                    double                   maxVal /**< [in] largest allowed value */ );
+
+    /// Update a calibration setting from an INDI new-property request, see applyCalibSetting().
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    template <typename T>
+    int setCalibNumber( pcf::IndiProperty       &prop /**< [in,out] the property being changed */,
+                        const pcf::IndiProperty &ipRecv /**< [in] the received request */,
+                        T                       &setting /**< [out] the setting */,
+                        double                   lo /**< [in] smallest allowed value */,
+                        double                   hi /**< [in] largest allowed value */ );
+
+    /// Create and register a calibration grid property with min, max and step elements.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int registerGrid( pcf::IndiProperty         &prop /**< [out] the property */,
+                      const std::string         &name /**< [in] the property name */,
+                      const std::vector<double> &grid /**< [in] the initial grid */,
+                      int ( *callback )( void *, const pcf::IndiProperty & ) /**< [in] the new-property callback */ );
+
+    /// Update a calibration grid from an INDI new-property request, see applyCalibGrid().
+    /** Elements missing from the request keep their current values.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int setCalibGrid( pcf::IndiProperty       &prop /**< [in,out] the property being changed */,
+                      const pcf::IndiProperty &ipRecv /**< [in] the received request */,
+                      std::vector<double>     &grid /**< [out] the grid setting */,
+                      double                   lo /**< [in] smallest allowed value */,
+                      double                   hi /**< [in] largest allowed value */ );
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_enable );
 
@@ -597,6 +681,26 @@ class counterOffload : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_calibrate );
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_halfWidth );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_modeMax );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_nAverage );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_baselineEvery );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_settle );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_timeout );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_abortRatio );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_calibLeak );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_startGrid );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_durationGrid );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_gainGrid );
 
     INDI_SETCALLBACK_DECL( counterOffload, m_indiP_offloadFps );
 
@@ -636,7 +740,7 @@ inline void counterOffload::setupConfig()
                 "rampStartUs",
                 false,
                 "real",
-                "Ramp start after the woofer command, in us.  Default is 120." );
+                "Ramp start after the woofer command, in us.  Default is 25." );
 
     config.add( "counterOffload.rampDurationUs",
                 "",
@@ -676,7 +780,7 @@ inline void counterOffload::setupConfig()
                 "gain",
                 false,
                 "real",
-                "Scale applied to each new offload when it arrives, 0 to 2.  Default is 1." );
+                "Scale applied to each new offload when it arrives, 0 to 2.  Default is 0.5." );
 
     config.add( "counterOffload.maxCommand",
                 "",
@@ -687,7 +791,7 @@ inline void counterOffload::setupConfig()
                 false,
                 "real",
                 "Largest magnitude of any pixel of the command and of the held contribution; larger values are clipped.  "
-                "Default is 0.5." );
+                "Default is 1.0." );
 
     config.add( "counterOffload.computeLeadUs",
                 "",
@@ -739,117 +843,6 @@ inline void counterOffload::setupConfig()
                 "string",
                 "INDI device providing fps and numModes.  Default is t2wOffloader." );
 
-    config.add( "calibrate.halfWidthHz",
-                "",
-                "calibrate.halfWidthHz",
-                argType::Required,
-                "calibrate",
-                "halfWidthHz",
-                false,
-                "real",
-                "Half width of the band integrated around the offload rate, Hz.  Default is 10." );
-
-    config.add( "calibrate.modeMax",
-                "",
-                "calibrate.modeMax",
-                argType::Required,
-                "calibrate",
-                "modeMax",
-                false,
-                "int",
-                "Number of PSD modes summed.  0, the default, uses the offloader's numModes." );
-
-    config.add( "calibrate.nAverage",
-                "",
-                "calibrate.nAverage",
-                argType::Required,
-                "calibrate",
-                "nAverage",
-                false,
-                "int",
-                "Settled averaged PSDs averaged for each evaluation, at least 2.  Default is 3." );
-
-    config.add( "calibrate.baselineEvery",
-                "",
-                "calibrate.baselineEvery",
-                argType::Required,
-                "calibrate",
-                "baselineEvery",
-                false,
-                "int",
-                "Re-measure the gain-0 baseline every this many evaluations.  Default is 5." );
-
-    config.add( "calibrate.settleS",
-                "",
-                "calibrate.settleS",
-                argType::Required,
-                "calibrate",
-                "settleS",
-                false,
-                "real",
-                "Wait after a change before PSDs are collected, s.  Must cover the modalPSDs average (psdAvgTime + "
-                "psdTime, 10.5 s by default).  Default is 11." );
-
-    config.add( "calibrate.timeoutS",
-                "",
-                "calibrate.timeoutS",
-                argType::Required,
-                "calibrate",
-                "timeoutS",
-                false,
-                "real",
-                "Longest wait for the PSDs of one evaluation after settling, s.  Default is 5." );
-
-    config.add( "calibrate.abortRatio",
-                "",
-                "calibrate.abortRatio",
-                argType::Required,
-                "calibrate",
-                "abortRatio",
-                false,
-                "real",
-                "Abort when an evaluation exceeds this multiple of the baseline.  Default is 3." );
-
-    config.add( "calibrate.leak",
-                "",
-                "calibrate.leak",
-                argType::Required,
-                "calibrate",
-                "leak",
-                false,
-                "real",
-                "Leak used during a calibration run and restored afterwards, above 0.  Default is 0.0025." );
-
-    config.add( "calibrate.startGridUs",
-                "",
-                "calibrate.startGridUs",
-                argType::Required,
-                "calibrate",
-                "startGridUs",
-                false,
-                "vector<double>",
-                "rampStartUs scan as min,max,step in us.  Default is 0,400,25." );
-
-    config.add( "calibrate.durationGridUs",
-                "",
-                "calibrate.durationGridUs",
-                argType::Required,
-                "calibrate",
-                "durationGridUs",
-                false,
-                "vector<double>",
-                "rampDurationUs scan as min,max,step in us.  Default is 100,600,50." );
-
-    config.add( "calibrate.gainGrid",
-                "",
-                "calibrate.gainGrid",
-                argType::Required,
-                "calibrate",
-                "gainGrid",
-                false,
-                "vector<double>",
-                "gain scan as min,max,step.  Default is 0.1,1.0,0.1." );
-
     config.add( "calibrate.csvDir",
                 "",
                 "calibrate.csvDir",
@@ -886,17 +879,6 @@ inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
 
     _config( m_freqStream, "calibrate.freqStream" );
     _config( m_offloadDevice, "calibrate.offloadDevice" );
-    _config( m_halfWidthHz, "calibrate.halfWidthHz" );
-    _config( m_modeMax, "calibrate.modeMax" );
-    _config( m_nAverage, "calibrate.nAverage" );
-    _config( m_baselineEvery, "calibrate.baselineEvery" );
-    _config( m_settleS, "calibrate.settleS" );
-    _config( m_timeoutS, "calibrate.timeoutS" );
-    _config( m_abortRatio, "calibrate.abortRatio" );
-    _config( m_calibLeak, "calibrate.leak" );
-    _config( m_startGridUs, "calibrate.startGridUs" );
-    _config( m_durationGridUs, "calibrate.durationGridUs" );
-    _config( m_gainGrid, "calibrate.gainGrid" );
     _config( m_csvDir, "calibrate.csvDir" );
 
     return validateConfig();
@@ -920,25 +902,11 @@ inline int counterOffload::validateConfig()
         return mx::math::isFinite( v ) && v >= lo && v <= hi;
     };
 
-    // A scan grid is min, max, step within the parameter's limits.
-    auto gridOk = [&inRange]( const std::vector<double> &g, double lo, double hi )
-    {
-        return g.size() == 3 && inRange( g[0], lo, hi ) && inRange( g[1], g[0], hi ) && inRange( g[2], 1e-9, hi - lo );
-    };
-
     if( m_syncopationTiming.empty() || m_channel.size() <= suffixLength ||
         m_channel.compare( m_channel.size() - suffixLength, suffixLength, "_aux" ) != 0 ||
         m_syncopationTiming == m_channel || !inRange( m_rampStartUs, 0, 1e6 ) || !inRange( m_rampDurationUs, 1, 1e6 ) ||
         !inRange( m_leak, 0, 1 ) || !inRange( m_timeOffsetUs, -1e6, 1e6 ) || !inRange( m_gain, 0, 2 ) ||
         !inRange( m_computeLeadUs, 0, 1e6 ) || !inRange( m_maxCommand, 1e-6, 1e3 ) )
-    {
-        return -1;
-    }
-
-    if( !inRange( m_halfWidthHz, 0, 1e6 ) || m_modeMax < 0 || m_nAverage < 2 || m_baselineEvery < 1 ||
-        !inRange( m_settleS, 0, 1e3 ) || !inRange( m_timeoutS, 1, 1e4 ) || !inRange( m_abortRatio, 1, 1e6 ) ||
-        !inRange( m_calibLeak, 1e-9, 1 ) ||
-        !gridOk( m_startGridUs, 0, 1e6 ) || !gridOk( m_durationGridUs, 1, 1e6 ) || !gridOk( m_gainGrid, 0, 2 ) )
     {
         return -1;
     }
@@ -978,7 +946,19 @@ inline int counterOffload::appStartup()
         { m_indiP_rampStart, "rampStartUs", 0, 1e6, m_rampStartUs, INDI_NEWCALLBACK( m_indiP_rampStart ) },
         { m_indiP_rampDuration, "rampDurationUs", 1, 1e6, m_rampDurationUs, INDI_NEWCALLBACK( m_indiP_rampDuration ) },
         { m_indiP_timeOffset, "timeOffsetUs", -1e6, 1e6, m_timeOffsetUs, INDI_NEWCALLBACK( m_indiP_timeOffset ) },
-        { m_indiP_halfWidth, "calibHalfWidthHz", 0, 1e6, m_halfWidthHz, INDI_NEWCALLBACK( m_indiP_halfWidth ) } };
+        { m_indiP_halfWidth, "calibHalfWidthHz", 0, 1e6, m_halfWidthHz, INDI_NEWCALLBACK( m_indiP_halfWidth ) },
+        { m_indiP_modeMax, "calibModeMax", 0, 1e6, double( m_modeMax ), INDI_NEWCALLBACK( m_indiP_modeMax ) },
+        { m_indiP_nAverage, "calibNAverage", 2, 1000, double( m_nAverage ), INDI_NEWCALLBACK( m_indiP_nAverage ) },
+        { m_indiP_baselineEvery,
+          "calibBaselineEvery",
+          1,
+          1e6,
+          double( m_baselineEvery ),
+          INDI_NEWCALLBACK( m_indiP_baselineEvery ) },
+        { m_indiP_settle, "calibSettleS", 0, 1e3, m_settleS, INDI_NEWCALLBACK( m_indiP_settle ) },
+        { m_indiP_timeout, "calibTimeoutS", 1, 1e4, m_timeoutS, INDI_NEWCALLBACK( m_indiP_timeout ) },
+        { m_indiP_abortRatio, "calibAbortRatio", 1, 1e6, m_abortRatio, INDI_NEWCALLBACK( m_indiP_abortRatio ) },
+        { m_indiP_calibLeak, "calibLeak", 1e-9, 1, m_calibLeak, INDI_NEWCALLBACK( m_indiP_calibLeak ) } };
 
     for( auto &n : numbers )
     {
@@ -990,6 +970,17 @@ inline int counterOffload::appStartup()
         {
             return log<software_error, -1>( { __FILE__, __LINE__ } );
         }
+    }
+
+    if( registerGrid( m_indiP_startGrid, "calibStartGridUs", m_startGridUs, INDI_NEWCALLBACK( m_indiP_startGrid ) ) <
+            0 ||
+        registerGrid( m_indiP_durationGrid,
+                      "calibDurationGridUs",
+                      m_durationGridUs,
+                      INDI_NEWCALLBACK( m_indiP_durationGrid ) ) < 0 ||
+        registerGrid( m_indiP_gainGrid, "calibGainGrid", m_gainGrid, INDI_NEWCALLBACK( m_indiP_gainGrid ) ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
     createROIndiNumber( m_indiP_stats, "stats", "Counters" );
@@ -1641,6 +1632,46 @@ inline const char *counterOffload::calibStageName( int stage )
     return ( stage >= 0 && stage < 8 ) ? names[stage] : "unknown";
 }
 
+inline bool counterOffload::gridValid( const std::vector<double> &grid, double lo, double hi )
+{
+    auto inRange = []( double v, double a, double b )
+    {
+        return mx::math::isFinite( v ) && v >= a && v <= b;
+    };
+
+    return grid.size() == 3 && inRange( grid[0], lo, hi ) && inRange( grid[1], grid[0], hi ) &&
+           inRange( grid[2], 1e-9, hi - lo );
+}
+
+template <typename T>
+inline int counterOffload::applyCalibSetting( T &setting, double value, double lo, double hi )
+{
+    if( m_calibRunning || !mx::math::isFinite( value ) || value < lo || value > hi ||
+        ( std::is_integral_v<T> && value != std::round( value ) ) )
+    {
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> guard( m_stateMutex );
+    setting = static_cast<T>( value );
+
+    return 0;
+}
+
+inline int
+counterOffload::applyCalibGrid( std::vector<double> &grid, const std::vector<double> &value, double lo, double hi )
+{
+    if( m_calibRunning || !gridValid( value, lo, hi ) )
+    {
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> guard( m_stateMutex );
+    grid = value;
+
+    return 0;
+}
+
 inline void counterOffload::calibThreadStart( counterOffload *c )
 {
     c->calibThreadExec();
@@ -2110,6 +2141,76 @@ inline int counterOffload::setNumber(
     return 0;
 }
 
+template <typename T>
+inline int counterOffload::setCalibNumber(
+    pcf::IndiProperty &prop, const pcf::IndiProperty &ipRecv, T &setting, double lo, double hi )
+{
+    double target;
+
+    if( indiTargetUpdate( prop, target, ipRecv, true ) < 0 || applyCalibSetting( setting, target, lo, hi ) < 0 )
+    {
+        return log<text_log, -1>( "rejected " + prop.getName() + ": invalid, or a calibration is running",
+                                  logPrio::LOG_ERROR );
+    }
+
+    updateIfChanged( prop, "current", double( setting ) );
+    updateIfChanged( prop, "target", double( setting ) );
+
+    log<text_log>( "set " + prop.getName() + " to " + std::to_string( setting ), logPrio::LOG_NOTICE );
+
+    return 0;
+}
+
+inline int counterOffload::registerGrid( pcf::IndiProperty         &prop,
+                                         const std::string         &name,
+                                         const std::vector<double> &grid,
+                                         int ( *callback )( void *, const pcf::IndiProperty & ) )
+{
+    createROIndiNumber( prop, name, name );
+    prop.setPerm( pcf::IndiProperty::ReadWrite );
+
+    const char *els[] = { "min", "max", "step" };
+
+    for( size_t i = 0; i < 3; ++i )
+    {
+        indi::addNumberElement<double>( prop, els[i], 0, 1e6, 0, "%g" );
+        prop[els[i]] = grid[i];
+    }
+
+    return registerIndiPropertyNew( prop, callback );
+}
+
+inline int counterOffload::setCalibGrid(
+    pcf::IndiProperty &prop, const pcf::IndiProperty &ipRecv, std::vector<double> &grid, double lo, double hi )
+{
+    const std::vector<std::string> els{ "min", "max", "step" };
+
+    std::vector<double> value = grid;
+
+    for( size_t i = 0; i < els.size(); ++i )
+    {
+        if( ipRecv.find( els[i] ) )
+        {
+            value[i] = ipRecv[els[i]].get<double>();
+        }
+    }
+
+    if( applyCalibGrid( grid, value, lo, hi ) < 0 )
+    {
+        return log<text_log, -1>( "rejected " + prop.getName() + ": need min <= max within " + std::to_string( lo ) +
+                                      " to " + std::to_string( hi ) + " and step > 0, and no calibration running",
+                                  logPrio::LOG_ERROR );
+    }
+
+    updateIfChanged( prop, els, grid );
+
+    log<text_log>( "set " + prop.getName() + " to " + std::to_string( grid[0] ) + "," + std::to_string( grid[1] ) +
+                       "," + std::to_string( grid[2] ),
+                   logPrio::LOG_NOTICE );
+
+    return 0;
+}
+
 INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_enable )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_enable, ipRecv );
@@ -2223,7 +2324,67 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_calibrate )( const pcf::IndiPrope
 INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_halfWidth )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_halfWidth, ipRecv );
-    return setNumber( m_indiP_halfWidth, ipRecv, m_halfWidthHz, 0, 1e6 );
+    return setCalibNumber( m_indiP_halfWidth, ipRecv, m_halfWidthHz, 0, 1e6 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_modeMax )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_modeMax, ipRecv );
+    return setCalibNumber( m_indiP_modeMax, ipRecv, m_modeMax, 0, 1e6 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_nAverage )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_nAverage, ipRecv );
+    return setCalibNumber( m_indiP_nAverage, ipRecv, m_nAverage, 2, 1000 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_baselineEvery )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_baselineEvery, ipRecv );
+    return setCalibNumber( m_indiP_baselineEvery, ipRecv, m_baselineEvery, 1, 1e6 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_settle )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_settle, ipRecv );
+    return setCalibNumber( m_indiP_settle, ipRecv, m_settleS, 0, 1e3 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_timeout )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_timeout, ipRecv );
+    return setCalibNumber( m_indiP_timeout, ipRecv, m_timeoutS, 1, 1e4 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_abortRatio )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_abortRatio, ipRecv );
+    return setCalibNumber( m_indiP_abortRatio, ipRecv, m_abortRatio, 1, 1e6 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_calibLeak )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_calibLeak, ipRecv );
+    return setCalibNumber( m_indiP_calibLeak, ipRecv, m_calibLeak, 1e-9, 1 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_startGrid )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_startGrid, ipRecv );
+    return setCalibGrid( m_indiP_startGrid, ipRecv, m_startGridUs, 0, 1e6 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_durationGrid )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_durationGrid, ipRecv );
+    return setCalibGrid( m_indiP_durationGrid, ipRecv, m_durationGridUs, 1, 1e6 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_gainGrid )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_gainGrid, ipRecv );
+    return setCalibGrid( m_indiP_gainGrid, ipRecv, m_gainGrid, 0, 2 );
 }
 
 INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_offloadFps )( const pcf::IndiProperty &ipRecv )

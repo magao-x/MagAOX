@@ -627,7 +627,7 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
   - The coordinate scan keeps the single lowest noisy value as "best" (0.395 at start 25). Later stages must beat that lucky value, so the duration scan changed nothing ("winner's curse"). Only gain 0.5 (0.394) beat it, by 0.001.
 - **Visualization.** `~/Documents/MagAO-X/simulations/DM_dynamics/offloading/counter_offload/calibration_run_analysis.ipynb` (not in this repo) plots this run and the 193905Z run.
 
-### Proposed: Clip Handling During Calibration (not implemented)
+### Clip Handling During Calibration (C2 and C3 implemented 2026-11-20, not yet built)
 **Current behaviour.**
 - `measure()` fails the whole run if `m_clipped` has changed since the run started.
 - `runCalibration()` then restores the original parameters, so a scan that reaches a too-large gain discards everything it found.
@@ -644,7 +644,7 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
 **Recommendation:** C1 for the next run, plus C2. C3 is optional.
 
 
-### Proposed: Calibration Settings as INDI Properties (not implemented)
+### Calibration Settings as INDI Properties (implemented 2026-11-20, not yet built)
 **Request (2026-11-20).** Make the calibration settings INDI properties and delete them from the config, so that changing them doesn't require editing the config.
 
 **Design.**
@@ -672,3 +672,22 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
 **Open questions.**
 - **I-Q1.** The operational settings (`gain`, `rampStartUs`, `rampDurationUs`, `maxCommand`, `leak`, `timeOffsetUs`) are already INDI properties, but they also have config keys. Proposal: keep the config keys, since they are the only way the calibrated values survive a restart. Change the defaults to gain 0.5, rampStartUs 25 and maxCommand 1.0, and leave them out of the example config.
 - **I-Q2.** Include the clip handling C2, with C3 optional, in the same change?
+
+**Answers (2026-11-20).**
+- **I-Q1:** keep the config keys for the operational settings.
+- **I-Q2:** implement C2 and C3, each as a separate commit.
+
+**Implementation log.**
+- **Settings over INDI.** The calibration tuning settings are INDI properties only:
+  - `calibHalfWidthHz`, `calibModeMax`, `calibNAverage`, `calibBaselineEvery`;
+  - `calibSettleS`, `calibTimeoutS`, `calibAbortRatio`, `calibLeak`;
+  - the grids `calibStartGridUs`, `calibDurationGridUs` and `calibGainGrid`, each with elements `min`, `max` and `step`.
+- **How a change is applied.**
+  - `applyCalibSetting()` and `applyCalibGrid()` check the range (and that integer settings are whole numbers) and refuse while `m_calibRunning`.
+  - The INDI callbacks are thin wrappers around them (`setCalibNumber`, `setCalibGrid`).
+  - Calibration checks moved out of `validateConfig()`. The defaults are checked in a unit test.
+- **New defaults.**
+  - Grids: start 0,150,25; duration 200,600,100; gain 0.3,1.0,0.1.
+  - Operational: `rampStartUs` 25, `gain` 0.5, `maxCommand` 1.0. Their config keys are kept.
+- **Removed config keys.** The `calibrate.*` tuning keys are gone. **An instance config that still sets them is "Unrecognized" and the app will not start.** Remove them from the RTC config before installing.
+

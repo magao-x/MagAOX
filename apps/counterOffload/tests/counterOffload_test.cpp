@@ -28,10 +28,12 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_bandModes;
     using counterOffload::m_bandValid;
     using counterOffload::m_calibLeak;
+    using counterOffload::m_calibRunning;
     using counterOffload::m_channel;
     using counterOffload::m_clipped;
     using counterOffload::m_command;
     using counterOffload::m_df;
+    using counterOffload::m_durationGridUs;
     using counterOffload::m_enabled;
     using counterOffload::m_events;
     using counterOffload::m_finalZero;
@@ -39,6 +41,7 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_gainGrid;
     using counterOffload::m_leak;
     using counterOffload::m_maxCommand;
+    using counterOffload::m_modeMax;
     using counterOffload::m_nAverage;
     using counterOffload::m_overflows;
     using counterOffload::m_psdAfterNs;
@@ -55,12 +58,13 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_timeoutS;
     using counterOffload::m_zeroRequested;
 
-    /// Set up 2x2 buffers, a gain of 0.5, and a clip level high enough not to act.
+    /// Set up 2x2 buffers, a ramp from 120 to 450 us, a gain of 0.5, and a clip level high enough not to act.
     counterOffload_test()
     {
         setupBuffers( 2, 2 );
-        m_gain       = 0.5;
-        m_maxCommand = 100;
+        m_rampStartUs = 120;
+        m_gain        = 0.5;
+        m_maxCommand  = 100;
     }
 
     /// Number of unfinished ramps.
@@ -477,31 +481,8 @@ TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
         REQUIRE( app.validateConfig() < 0 );
     }
 
-    SECTION( "calibration defaults wait out the 10.5 s modalPSDs average and take 3 samples" )
+    SECTION( "the clip level must be positive" )
     {
-        REQUIRE( app.m_settleS == 11 );
-        REQUIRE( app.m_nAverage == 3 );
-        REQUIRE( app.m_timeoutS == 5 );
-        REQUIRE( app.m_gainGrid == std::vector<double>{ 0.1, 1.0, 0.1 } );
-        REQUIRE( app.m_calibLeak > 0 );
-    }
-
-    SECTION( "calibration settings are checked" )
-    {
-        app.m_nAverage = 1; // a single PSD is never used for a score
-        REQUIRE( app.validateConfig() < 0 );
-        app.m_nAverage    = 6;
-        app.m_startGridUs = { 0, 400 }; // min, max, step required
-        REQUIRE( app.validateConfig() < 0 );
-        app.m_startGridUs = { 400, 0, 25 }; // max below min
-        REQUIRE( app.validateConfig() < 0 );
-        app.m_startGridUs = { 0, 400, 25 };
-        app.m_gainGrid    = { 0.5, 2.5, 0.1 }; // above the gain limit
-        REQUIRE( app.validateConfig() < 0 );
-        app.m_gainGrid  = { 0.1, 1.0, 0.1 };
-        app.m_calibLeak = 0; // calibration must leak the held contribution
-        REQUIRE( app.validateConfig() < 0 );
-        app.m_calibLeak  = 0.0025;
         app.m_maxCommand = 0;
         REQUIRE( app.validateConfig() < 0 );
     }
@@ -513,6 +494,83 @@ TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
         app.m_rampStartUs    = 120;
         app.m_rampDurationUs = 0;
         REQUIRE( app.validateConfig() < 0 );
+    }
+}
+
+/// Verify the calibration setting defaults and the checks applied when they are set over INDI.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::gridValid({},0,0);
+    counterOffload::applyCalibSetting(m_nAverage,0,0,0);
+    counterOffload::applyCalibGrid(m_gainGrid,{},0,0);
+    #endif
+    // clang-format on
+
+    counterOffload_test app;
+
+    SECTION( "the defaults wait out the 10.5 s modalPSDs average, take 3 samples, and use valid grids" )
+    {
+        REQUIRE( app.m_settleS == 11 );
+        REQUIRE( app.m_nAverage == 3 );
+        REQUIRE( app.m_timeoutS == 5 );
+        REQUIRE( app.m_calibLeak > 0 );
+        REQUIRE( app.m_startGridUs == std::vector<double>{ 0, 150, 25 } );
+        REQUIRE( app.m_durationGridUs == std::vector<double>{ 200, 600, 100 } );
+        REQUIRE( app.m_gainGrid == std::vector<double>{ 0.3, 1.0, 0.1 } );
+        REQUIRE( counterOffload::gridValid( app.m_startGridUs, 0, 1e6 ) );
+        REQUIRE( counterOffload::gridValid( app.m_durationGridUs, 1, 1e6 ) );
+        REQUIRE( counterOffload::gridValid( app.m_gainGrid, 0, 2 ) );
+    }
+
+    SECTION( "the operating defaults are the best measured on the bench" )
+    {
+        counterOffload fresh;
+        REQUIRE( fresh.calibParams() == counterOffload::calibParamsT{ 25, 330, 0.5 } );
+    }
+
+    SECTION( "a grid is min, max, step within the limits" )
+    {
+        REQUIRE_FALSE( counterOffload::gridValid( { 0, 400 }, 0, 1e6 ) );        // step required
+        REQUIRE_FALSE( counterOffload::gridValid( { 400, 0, 25 }, 0, 1e6 ) );    // max below min
+        REQUIRE_FALSE( counterOffload::gridValid( { 0, 400, 0 }, 0, 1e6 ) );     // step must be positive
+        REQUIRE_FALSE( counterOffload::gridValid( { 0.5, 2.5, 0.1 }, 0, 2 ) );   // above the gain limit
+        REQUIRE( counterOffload::gridValid( { 0.5, 0.5, 0.1 }, 0, 2 ) );         // a single point
+    }
+
+    SECTION( "settings are range checked, and integer settings must be integral" )
+    {
+        REQUIRE( app.applyCalibSetting( app.m_nAverage, 1, 2, 1000 ) < 0 ); // a single PSD is never used for a score
+        REQUIRE( app.applyCalibSetting( app.m_nAverage, 4.5, 2, 1000 ) < 0 );
+        REQUIRE( app.m_nAverage == 3 );
+        REQUIRE( app.applyCalibSetting( app.m_nAverage, 5, 2, 1000 ) == 0 );
+        REQUIRE( app.m_nAverage == 5 );
+
+        REQUIRE( app.applyCalibSetting( app.m_calibLeak, 0, 1e-9, 1 ) < 0 ); // calibration must leak
+        REQUIRE( app.applyCalibSetting( app.m_calibLeak, std::numeric_limits<double>::quiet_NaN(), 1e-9, 1 ) < 0 );
+        REQUIRE( app.applyCalibSetting( app.m_calibLeak, 0.005, 1e-9, 1 ) == 0 );
+        REQUIRE( app.m_calibLeak == 0.005 );
+    }
+
+    SECTION( "grids are checked before they are set" )
+    {
+        REQUIRE( app.applyCalibGrid( app.m_gainGrid, { 0.5, 2.5, 0.1 }, 0, 2 ) < 0 );
+        REQUIRE( app.m_gainGrid == std::vector<double>{ 0.3, 1.0, 0.1 } );
+        REQUIRE( app.applyCalibGrid( app.m_gainGrid, { 0.4, 1.2, 0.2 }, 0, 2 ) == 0 );
+        REQUIRE( app.m_gainGrid == std::vector<double>{ 0.4, 1.2, 0.2 } );
+    }
+
+    SECTION( "nothing changes while a calibration runs" )
+    {
+        app.m_calibRunning = true;
+        REQUIRE( app.applyCalibSetting( app.m_modeMax, 10, 0, 1e6 ) < 0 );
+        REQUIRE( app.m_modeMax == 0 );
+        REQUIRE( app.applyCalibGrid( app.m_startGridUs, { 0, 100, 25 }, 0, 1e6 ) < 0 );
+        REQUIRE( app.m_startGridUs == std::vector<double>{ 0, 150, 25 } );
     }
 }
 
