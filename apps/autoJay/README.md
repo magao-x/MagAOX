@@ -98,8 +98,10 @@ After manually establishing the desired aligned state and optical setup, request
 checks signal quality without needing an older calibration, and saves/installs
 one complete bundle. Capture never publishes a correction sample. Use
 `measure.request` for one measurement, `continuous.toggle` for repeated measurements,
-and `stop.request` to cancel. `status.current` explains progress/rejection;
-`status.calibration` identifies the installed bundle.
+and `stop.request` to cancel. The app monitors the camera while idle. Check
+`status.current` for acquisition progress and `status.calibration` for the
+installed bundle. The log records capture requests, successful local poke
+writes, and problems that block or abort acquisition.
 
 The default accepted shift limit is 5 detector pixels, configurable with
 `quality.maxShift`; it applies to both individual displacements and their
@@ -164,11 +166,13 @@ does not cause silent fallback to an older optical setup. Recapture after changi
 the required setup or sampling; a bundle missing a newly configured setup binding
 is invalid. ROI size/origin changes alone are supported.
 
-`save_diagnostics.request` retains the next completed sequence. Rejected completed
+`save_diagnostics.toggle` retains each completed sequence while On. Turn it Off
+when finished inspecting pokes. Rejected completed
 sequences also save diagnostic FITS images under `autoJay.diagnosticsDir`, default
 `<basePath>/rawimages/<sensor-instance>`. Suffixes `_0`, `_1`, and `_2` identify
 baseline, NCPC, and tweeter means; reference images are retained when available.
-Headers identify the reason, calibration, sequence, and frame counters. An
+The log gives the saved filename prefix. Headers identify the reason,
+calibration, sequence, and frame counters. An
 incomplete timed-out sequence may have no completed diagnostic product.
 
 On a normal exit or detected failure the app attempts to clear its owned channels.
