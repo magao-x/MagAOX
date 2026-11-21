@@ -698,3 +698,4 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
   - `calibEvalT` now returns int (1 evaluated, 0 infeasible, −1 abort). In `coordinateScan`, an infeasible point ends its sweep: larger values of that parameter are skipped, and only the evaluated points are used for the parabolic refinement.
   - A clipped baseline still aborts the run.
   - The best ratio starts at `numeric_limits<double>::max()`, so a clipped starting point never counts as the best.
+- **C3 keep the best on abort.** When a run aborts for any reason, including an operator abort, `runCalibration()` applies the best parameters so far if their ratio is below 1, and logs it as a WARNING. Otherwise it restores the originals, as before. `calibration.best*` is also updated in that case. No unit test: `runCalibration` needs the threads and streams.

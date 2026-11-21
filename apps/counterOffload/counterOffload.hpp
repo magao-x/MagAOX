@@ -521,7 +521,10 @@ class counterOffload : public MagAOXApp<true>,
     /// Calibration thread function.  Runs a calibration on each start request until m_shutdown is true.
     void calibThreadExec();
 
-    /// Run one calibration, then apply the best parameters, or restore the originals on abort.
+    /// Run one calibration, then apply the best parameters.
+    /** On abort, the best parameters so far are applied if they improved on the baseline, otherwise the originals are
+     * restored.
+     */
     void runCalibration();
 
     /// Set the band for a run from the frequency stream and the offloader's rate and numModes.
@@ -1768,11 +1771,13 @@ inline void counterOffload::runCalibration()
                              } );
     }
 
+    const bool keepBest = ok || bestRatio < 1; // an aborted run still keeps an improvement
+
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
         m_bandValid = false;
 
-        if( ok )
+        if( keepBest )
         {
             m_calibBest      = best;
             m_calibBestRatio = bestRatio;
@@ -1792,6 +1797,15 @@ inline void counterOffload::runCalibration()
         {
             log<text_log>( "calibration found no improvement over the gain-0 baseline", logPrio::LOG_WARNING );
         }
+    }
+    else if( keepBest )
+    {
+        setCalibParams( best );
+
+        log<text_log>( "calibration aborted, applied the best so far: rampStartUs=" + std::to_string( best[0] ) +
+                           " rampDurationUs=" + std::to_string( best[1] ) + " gain=" + std::to_string( best[2] ) +
+                           " ratio=" + std::to_string( bestRatio ),
+                       logPrio::LOG_WARNING );
     }
     else
     {
