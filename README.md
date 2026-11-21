@@ -108,6 +108,15 @@ To prevent linking against the Princeton Instruments PICam library, define `PICA
 #### Pylon
 To prevent linking against the Basler Pylon library, define `Pylon=false` in `local/common.mk`.  This will prevent building the `baslerCtrl` app.
 
+### 3.2 INDI Client Build
+
+On a machine which only needs to talk to MagAO-X over INDI, use
+```
+$ make client
+$ make client_install
+```
+to build and install the INDI utilities (`getINDI`, `setINDI`, `evalINDI`, etc.), `cursesINDI`, the rtimv plugins, and the GUIs.  No apps, log utilities, or `libMagAOX` are built.  The rtimv plugins and GUIs still require Qt5, qwt, rtimv, and mxlib.  As with a full build, which plugins and GUIs are built depends on `MAGAOX_ROLE`.  Use `make client_clean` to clean these components.
+
 ## 4 Software Install
 
 The software install process (from BIOS setup to building the MagAO-X software) is described in detail in [setup/README.md](setup/README.md). To the extent practicable, this is automated by the scripts in `setup/` that take over after CentOS is installed.
