@@ -107,16 +107,11 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     std::array<std::string, 2>                     m_patternFiles; ///< Optional FITS source maps for reference capture.
     std::array<std::vector<std::array<int, 2>>, 2> m_pokeActuators; ///< Zero-based (x, y) pairs for each DM.
     autoJayDetail::registrationSettings m_quality;       ///< Registration acceptance thresholds.
-    std::string                         m_controller{ "autoJay-ctrl" }; ///< Guarded closedLoopIndi device.
     std::string                         m_aoLoop{ "holoop" };           ///< Main AO loop which must remain open.
     std::string m_retiredAlignmentDevice; ///< Legacy override used only to discard obsolete setup rules.
-    std::string m_actuator{ "ttmperi" };                  ///< Read-only correction voltage source.
-    bool        m_controllerEnabled{
-        false };             ///< Require guarded correction acknowledgments; false permits initial calibration.
+    bool        m_publishControl{ false };   ///< Mark accepted measurements eligible for a correction consumer.
     double      m_frameMaxAge{ 5 };          ///< Maximum time since a coherent camera frame was received, in seconds.
-    double      m_controlSettle{ 0.2 };      ///< Quiet interval after acknowledged voltage readback.
-    double      m_controlTimeout{ 5 };       ///< Bounded correction acknowledgment/readback wait.
-    double      m_voltageTolerance{ 0.005 }; ///< Covers one 150/32767 V controller quantization step.
+    double      m_controlSettle{ 0.2 };      ///< Minimum interval after publishing a correction-eligible sample.
     double      m_dmTolerance{ 1e-5 };       ///< Combined-command tolerance at pixels changed by a poke transition.
     std::string m_diagnosticsDir;            ///< Directory for rejected/requested diagnostic images.
     ///@}
@@ -147,9 +142,7 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     bool              m_reloadRequested{ false };  ///< Queued latest-calibration recall request.
     bool              m_stopRequested{ false };    ///< Queued cancellation request.
     std::atomic<bool> m_saveDiagnostics{ false };  ///< Retain diagnostics for each completed sequence while enabled.
-    bool              m_waitingControl{ false };   ///< Awaiting this sample's controller acknowledgment and settling.
-    double            m_controlDeadline{ 0 };      ///< Monotonic correction deadline.
-    double            m_quietSince{ 0 };           ///< Start of matching command/current readback interval.
+    double            m_nextMeasurementTime{ 0 };  ///< End of the local delay after publication, or zero when idle.
     double            m_lastFrameTime{ 0 };        ///< Last coherent camera frame received.
     double            m_pixelTime{ 0 };            ///< Last camera acquisition timestamp, for diagnostics.
     uint64_t          m_cameraCounter{ 0 };        ///< Last coherent camera counter.
@@ -215,8 +208,7 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     bool checkSetup( calibration &cal,     /**< [in/out] Capture rules may resolve wildcard values. */
                      geometry    &geom,    /**< [out] Applied camera geometry. */
                      bool         capture, /**< [in] Resolve wildcard values for a new reference. */
-                     std::string &error,   /**< [out] Failure reason. */
-                     bool settling = false /**< [in] Permit the acknowledged correction to be moving. */ ) const;
+                     std::string &error /**< [out] Failure reason. */ ) const;
 
     /// Load the capture input for one DM from FITS or paired actuator coordinates.
     int loadPokeConfig( mx::app::appConfigurator &cfg, /**< [in] Parsed application settings. */
@@ -262,9 +254,6 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
 
     /// Publish measurement invalidity without advancing the accepted counter.
     void invalidate();
-
-    /// Wait for the controller's acknowledgment, voltage readback, and quiet interval.
-    bool controlSettled( std::string &error /**< [out] Failure reason; empty while waiting. */ );
 
     /// Load and atomically install the newest valid calibration in this profile.
     bool recall();
@@ -392,9 +381,7 @@ inline void autoJay::setupConfig()
     for( const auto &key : { "autoJay.camera",
                              "autoJay.profile",
                              "autoJay.orientation",
-                             "autoJay.controller",
                              "autoJay.aoLoop",
-                             "autoJay.actuator",
                              "autoJay.diagnosticsDir" } )
         add( key, "string", "Camera/profile/control identity or diagnostic path." );
     for( const auto &dm : { "ncpc", "tweeter" } )
@@ -419,7 +406,8 @@ inline void autoJay::setupConfig()
         add( std::string( "acquisition." ) + name,
              "unsigned",
              "Distinct averaged or discarded frame count; frames >= 2." );
-    add( "control.enabled", "bool", "Enable guarded correction handshake only after measuring the controller matrix." );
+    add( "control.enabled", "bool", "Mark accepted measurements eligible for a correction consumer." );
+    add( "control.settle", "double", "Local delay in seconds after publishing a correction-eligible sample." );
     for( const auto &key : { "acquisition.dmSleep",
                              "acquisition.phaseTimeout",
                              "quality.maxShift",
@@ -430,9 +418,6 @@ inline void autoJay::setupConfig()
                              "quality.maxSecondaryRatio",
                              "quality.peakExclusion",
                              "quality.saturation",
-                             "control.settle",
-                             "control.timeout",
-                             "control.voltageTolerance",
                              "acquisition.dmTolerance" } )
     {
         add( key,
@@ -503,7 +488,6 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
     cfg( m_captureConfig.camera, "autoJay.camera" );
     cfg( m_captureConfig.profile, "autoJay.profile" );
     cfg( m_captureConfig.cameraGeometry.orientation, "autoJay.orientation" );
-    cfg( m_controller, "autoJay.controller" );
     cfg( m_aoLoop, "autoJay.aoLoop" );
     m_retiredAlignmentDevice.clear();
     const auto legacyKey = mx::app::iniFile::makeKey( "autoJay", "alignmentLoop" );
@@ -512,7 +496,6 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
         cfg.configUnused( m_retiredAlignmentDevice, legacyKey );
     }
 
-    cfg( m_actuator, "autoJay.actuator" );
     cfg( m_diagnosticsDir, "autoJay.diagnosticsDir" );
     for( size_t i = 0; i < 2; ++i )
     {
@@ -535,9 +518,20 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
     cfg( m_quality.peakExclusion, "quality.peakExclusion" );
     cfg( m_quality.saturation, "quality.saturation" );
     cfg( m_controlSettle, "control.settle" );
-    cfg( m_controllerEnabled, "control.enabled" );
-    cfg( m_controlTimeout, "control.timeout" );
-    cfg( m_voltageTolerance, "control.voltageTolerance" );
+    cfg( m_publishControl, "control.enabled" );
+    // Older configs can still be loaded. The sensor has no corrector inputs.
+    std::string obsolete;
+    for( const auto &key : { mx::app::iniFile::makeKey( "autoJay", "controller" ),
+                             mx::app::iniFile::makeKey( "autoJay", "actuator" ),
+                             mx::app::iniFile::makeKey( "control", "timeout" ),
+                             mx::app::iniFile::makeKey( "control", "voltageTolerance" ) } )
+    {
+        if( cfg.isSetUnused( key ) )
+        {
+            cfg.configUnused( obsolete, key );
+        }
+    }
+
     cfg( m_dmTolerance, "acquisition.dmTolerance" );
     cfg( m_frameMaxAge, "monitor.maxAge" );
     cfg( m_parkableDevices, "setup.parkableDevices" );
@@ -640,10 +634,12 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
 
     if( ruleKeys.insert( m_captureConfig.camera + ".exptime.current" ).second )
         m_captureConfig.setup.push_back( { m_captureConfig.camera, "exptime", "current", "*", 0, 1e-9 } );
-    for( double value : { m_controlSettle, m_voltageTolerance, m_dmTolerance } )
+    for( double value : { m_controlSettle, m_dmTolerance } )
+    {
         if( !mx::math::isFinite( value ) || value < 0 )
             return -1;
-    for( double value : { m_controlTimeout, m_frameMaxAge, double( m_quality.maxShift ) } )
+    }
+    for( double value : { m_frameMaxAge, double( m_quality.maxShift ) } )
     {
         if( !mx::math::isFinite( value ) || value <= 0 )
         {
@@ -651,8 +647,7 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
         }
     }
 
-    if( m_controlSettle >= m_controlTimeout || m_controller.empty() || m_aoLoop.empty() || m_actuator.empty() ||
-        m_captureConfig.profile.empty() )
+    if( m_aoLoop.empty() || m_captureConfig.profile.empty() )
     {
         return -1;
     }
@@ -733,8 +728,10 @@ inline int autoJay::receive( const pcf::IndiProperty &prop )
         signature << ':' << element.first << '='
                   << ( prop.getType() == pcf::IndiProperty::Switch ? std::to_string( element.second.getSwitchState() )
                                                                    : element.second.get() );
-    if( prop.getDevice() != m_controller && signature.str() != it->second.signature )
+    if( signature.str() != it->second.signature )
+    {
         ++m_generation;
+    }
     it->second.value     = prop;
     it->second.signature = signature.str();
     return 0;
@@ -746,8 +743,7 @@ inline const pcf::IndiProperty *autoJay::property( const std::string &device, co
     return it != m_observed.end() && it->second.value ? &*it->second.value : nullptr;
 }
 
-inline bool
-autoJay::checkSetup( calibration &cal, geometry &geom, bool capture, std::string &error, bool settling ) const
+inline bool autoJay::checkSetup( calibration &cal, geometry &geom, bool capture, std::string &error ) const
 {
     const double now    = monotonic();
     auto         reject = [&]( const std::string &why )
@@ -860,29 +856,6 @@ autoJay::checkSetup( calibration &cal, geometry &geom, bool capture, std::string
             return reject( "loop must be open: " + m_aoLoop );
         }
 
-        if( m_controllerEnabled )
-        {
-            const auto *ctrl = property( m_controller, "loop_state" );
-            if( !ctrl || !ctrl->find( "toggle" ) )
-                return reject( "correction controller unavailable" );
-            if( capture && ( *ctrl )["toggle"].getSwitchState() != pcf::IndiElement::Off )
-                return reject( "open the correction loop before capturing references" );
-            const auto *actuator = property( m_actuator, "fsm" );
-            if( !actuator || !actuator->find( "state" ) || ( *actuator )["state"].get() != "OPERATING" )
-                return reject( "both correction axes must be enabled" );
-        }
-        for( const auto &axis : { "axis1_voltage", "axis2_voltage" } )
-        {
-            const auto *p = property( m_actuator, axis );
-            double      current, target;
-            if( !p || !number( *p, "current", current ) || !number( *p, "target", target ) ||
-                p->getState() == pcf::IndiProperty::Alert ||
-                ( !settling &&
-                  ( p->getState() == pcf::IndiProperty::Busy || std::abs( current - target ) > m_voltageTolerance ) ) )
-            {
-                return reject( "correction voltage is unavailable or unsettled: " + m_actuator + "." + axis );
-            }
-        }
     }
     catch( ... )
     {
@@ -1266,8 +1239,16 @@ inline bool autoJay::begin( bool capture )
         stop( error );
         return false;
     }
-    updateSwitchIfChanged(
-        m_indiP_ready, "toggle", capture || !m_controllerEnabled ? pcf::IndiElement::Off : pcf::IndiElement::On );
+    if( capture )
+    {
+        invalidate();
+    }
+    else
+    {
+        updateSwitchIfChanged(
+            m_indiP_ready, "toggle", m_publishControl ? pcf::IndiElement::On : pcf::IndiElement::Off );
+    }
+
     return true;
 }
 
@@ -1286,7 +1267,7 @@ inline void autoJay::stop( const std::string &reason, logPrioT level )
         std::lock_guard<std::mutex> lock( m_mutex );
         m_active         = false;
         m_continuous     = false;
-        m_waitingControl = false;
+        m_nextMeasurementTime = 0;
         m_acquisition.fail( reason );
         m_status = reason;
     }
@@ -1368,73 +1349,6 @@ inline bool autoJay::recall()
         m_status = "calibration loaded; verify setup before measuring";
     }
     return true;
-}
-
-inline bool autoJay::controlSettled( std::string &error )
-{
-    std::lock_guard<std::mutex> lock( m_mutex );
-    const double                now = monotonic();
-    if( now > m_controlDeadline )
-    {
-        error = "correction acknowledgment/readback timed out";
-        return false;
-    }
-    const auto *ack = property( m_controller, "processed" );
-    if( !ack )
-        return false;
-    for( const auto &name : { "counter", "session", "target0", "target1", "applied", "status" } )
-        if( !ack->find( name ) )
-            return false;
-    std::array<double, 6>            values{};
-    const std::array<std::string, 6> names{ "counter", "session", "target0", "target1", "applied", "status" };
-    for( size_t i = 0; i < values.size(); ++i )
-        if( !number( *ack, names[i], values[i] ) )
-        {
-            error = "invalid controller acknowledgment number";
-            return false;
-        }
-    if( values[1] != m_session || values[0] != double( m_counter ) )
-        return false;
-    double statusValue = values[5];
-    if( statusValue < -2 || statusValue > 5 || statusValue != std::floor( statusValue ) ||
-        values[4] != ( statusValue == 1 ? 1 : 0 ) )
-    {
-        error = "invalid controller acknowledgment status";
-        return false;
-    }
-    int status = static_cast<int>( statusValue );
-    if( status < 0 || status == 2 )
-    {
-        error = "controller rejected sample or actuator not ready";
-        return false;
-    }
-    if( status == 4 || status == 5 || status == 0 )
-    {
-        m_quietSince = 0;
-        return true;
-    }
-    const auto *fsm = property( m_actuator, "fsm" );
-    if( !fsm || !fsm->find( "state" ) || ( *fsm )["state"].get() != "OPERATING" )
-    {
-        error = "correction actuator is not enabled";
-        return false;
-    }
-    for( size_t i = 0; i < 2; ++i )
-    {
-        const auto  *axis   = property( m_actuator, i == 0 ? "axis1_voltage" : "axis2_voltage" );
-        const double target = values[2 + i];
-        double       current, commanded;
-        if( !axis || !number( *axis, "current", current ) || !number( *axis, "target", commanded ) ||
-            axis->getState() == pcf::IndiProperty::Busy || axis->getState() == pcf::IndiProperty::Alert ||
-            std::abs( current - target ) > m_voltageTolerance || std::abs( commanded - target ) > m_voltageTolerance )
-        {
-            m_quietSince = 0;
-            return false;
-        }
-    }
-    if( m_quietSince == 0 )
-        m_quietSince = now;
-    return now - m_quietSince >= m_controlSettle;
 }
 
 inline void autoJay::diagnostics( const std::array<autoJayDetail::frameStack, 3> &stacks, const std::string &reason )
@@ -1575,15 +1489,17 @@ inline void autoJay::finish()
                 m_indiP_measurement,
                 std::vector<std::string>{ "delta_x", "delta_y", "counter", "valid", "session", "timestamp" },
                 std::vector<double>{
-                    m_deltaX, m_deltaY, double( m_counter ), m_controllerEnabled ? 1.0 : 0.0, m_session, realtime() },
+                    m_deltaX, m_deltaY, double( m_counter ), m_publishControl ? 1.0 : 0.0, m_session, realtime() },
                 INDI_OK );
-            m_waitingControl  = m_controllerEnabled;
-            m_controlDeadline = monotonic() + m_controlTimeout;
-            m_quietSince      = 0;
-            m_status          = m_controllerEnabled ? "measurement accepted; waiting for correction acknowledgment"
-                                                    : "measurement accepted; corrections disabled";
-            if( !m_controllerEnabled && m_continuous )
+            m_status = "measurement accepted";
+            if( m_publishControl )
+            {
+                m_nextMeasurementTime = monotonic() + m_controlSettle;
+            }
+            else if( m_continuous )
+            {
                 m_startRequested = true;
+            }
         }
     }
     if( !error.empty() )
@@ -1602,13 +1518,6 @@ inline int autoJay::appStartup()
 
     for( const auto &name : { "roi_region_state", "fsm" } )
         if( subscribe( m_captureConfig.camera, name ) < 0 )
-            return -1;
-    if( m_controllerEnabled )
-        for( const auto &name : { "loop_state", "processed" } )
-            if( subscribe( m_controller, name ) < 0 )
-                return -1;
-    for( const auto &name : { "axis1_voltage", "axis2_voltage", "fsm" } )
-        if( subscribe( m_actuator, name ) < 0 )
             return -1;
     CREATE_REG_INDI_RO_NUMBER( m_indiP_measurement, "measurement", "Registration residual", "Alignment" );
     for( const auto &name : { "delta_x", "delta_y", "counter", "valid", "session", "timestamp" } )
@@ -1668,7 +1577,7 @@ inline int autoJay::appLogic()
         }
         else if( capture || start )
         {
-            if( m_active || m_waitingControl )
+            if( m_active || m_nextMeasurementTime != 0 )
             {
                 m_status = "request rejected: acquisition is busy";
                 log<text_log>( m_status, logPrio::LOG_WARNING );
@@ -1679,17 +1588,28 @@ inline int autoJay::appLogic()
                 begin( capture );
             }
         }
-        if( m_waitingControl )
+        if( m_nextMeasurementTime != 0 )
         {
             std::string error;
             { //mutex scope
                 std::lock_guard<std::mutex> lock( m_mutex );
                 geometry                    current;
-                checkSetup( m_cycle, current, false, error, true );
+                if( m_generation != m_cycleGeneration )
+                {
+                    error = "setup changed after measurement";
+                }
+                else
+                {
+                    checkSetup( m_cycle, current, false, error );
+                }
             }
-            if( error.empty() && controlSettled( error ) )
+            if( !error.empty() )
             {
-                m_waitingControl = false;
+                stop( error );
+            }
+            else if( monotonic() >= m_nextMeasurementTime )
+            {
+                m_nextMeasurementTime = 0;
                 if( m_continuous )
                 {
                     begin( false );
@@ -1699,8 +1619,6 @@ inline int autoJay::appLogic()
                     stop( "single measurement complete", logPrio::LOG_NOTICE );
                 }
             }
-            else if( !error.empty() )
-                stop( error );
         }
         bool                                done  = false;
         const autoJayDetail::dmCalibration *poked = nullptr;
@@ -1859,7 +1777,8 @@ inline int autoJay::checkRecordTimes()
 inline int autoJay::recordTelem( const telem_pokeloop *type )
 {
     static_cast<void>( type );
-    telem<telem_pokeloop>( { static_cast<uint8_t>( m_active || m_waitingControl ), m_deltaX, m_deltaY, m_counter } );
+    telem<telem_pokeloop>(
+        { static_cast<uint8_t>( m_active || m_nextMeasurementTime != 0 ), m_deltaX, m_deltaY, m_counter } );
     return 0;
 }
 

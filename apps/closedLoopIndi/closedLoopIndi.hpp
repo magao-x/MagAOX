@@ -84,6 +84,7 @@ class closedLoopIndi : public MagAOXApp<true>
     mx::improc::eigenImage<float> m_references; ///< The reference values of the disturbances
 
     bool m_operatingOK{ false }; ///< If true then it's ok for the ctrl device to be OPERATING when a command is sent
+    bool m_requireOperating{ false }; ///< Require OPERATING on every corrector even when READY is normally accepted.
 
     std::unordered_map<std::string, std::string> m_fsmStates; ///< The FSM states of the control devices.
 
@@ -176,6 +177,9 @@ class closedLoopIndi : public MagAOXApp<true>
 
     /// Return Unix time in seconds for input-age and arm-boundary checks.
     static double inputTime();
+
+    /// Check whether a corrector FSM state permits commands.
+    bool controllerStateReady( const std::string &state /**< [in] Corrector FSM state. */ ) const;
 
     /// Check all controller states and, in guarded mode, received current values.
     bool controllersReady() const;
@@ -363,6 +367,15 @@ void closedLoopIndi::setupConfig()
                 false,
                 "bool",
                 "If true then it's ok for the ctrl device to be OPERATING when a command is sent. Default is false." );
+    config.add( "ctrl.requireOperating",
+                "",
+                "ctrl.requireOperating",
+                argType::Required,
+                "ctrl",
+                "requireOperating",
+                false,
+                "bool",
+                "Require OPERATING for all correctors. Overrides operatingOK when true." );
 
     config.add( "loop.intMat00",
                 "",
@@ -491,6 +504,7 @@ int closedLoopIndi::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_ctrlCurrents, "ctrl.currents" );
     _config( m_ctrlTargets, "ctrl.targets" );
     _config( m_operatingOK, "ctrl.operatingOK" );
+    _config( m_requireOperating, "ctrl.requireOperating" );
 
     if( m_ctrlDevices.size() == 1 )
     {
@@ -725,6 +739,16 @@ int closedLoopIndi::toggleLoop( bool onoff )
     return 0;
 }
 
+inline bool closedLoopIndi::controllerStateReady( const std::string &state ) const
+{
+    if( m_requireOperating )
+    {
+        return state == "OPERATING";
+    }
+
+    return state == "READY" || ( m_operatingOK && state == "OPERATING" );
+}
+
 inline bool closedLoopIndi::controllersReady() const
 {
     if( m_ctrlDevices.empty() )
@@ -732,9 +756,11 @@ inline bool closedLoopIndi::controllersReady() const
     for( size_t n = 0; n < m_ctrlDevices.size(); ++n )
     {
         auto state = m_fsmStates.find( m_ctrlDevices[n] );
-        if( state == m_fsmStates.end() ||
-            ( state->second != "READY" && !( m_operatingOK && state->second == "OPERATING" ) ) )
+        if( state == m_fsmStates.end() || !controllerStateReady( state->second ) )
+        {
             return false;
+        }
+
         if( m_inputGuarded && ( n >= m_currentValid.size() || !m_currentValid[n] ) )
             return false;
     }
@@ -1056,13 +1082,18 @@ INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrl0_fsm )( const pcf::IndiPrope
 
     if( ipRecv.find( "state" ) )
     {
-        m_fsmStates[ipRecv.getDevice()] = ipRecv["state"].get();
-        if( m_inputGuarded && ipRecv["state"].get() != "READY" &&
-            !( m_operatingOK && ipRecv["state"].get() == "OPERATING" ) )
+        const auto state                = ipRecv["state"].get();
+        m_fsmStates[ipRecv.getDevice()] = state;
+        if( m_inputGuarded && !controllerStateReady( state ) )
         {
             for( size_t n = 0; n < m_ctrlDevices.size(); ++n )
+            {
                 if( m_ctrlDevices[n] == ipRecv.getDevice() )
+                {
                     m_currentValid[n] = false;
+                }
+            }
+
             toggleLoop( false );
         }
     }
@@ -1103,13 +1134,18 @@ INDI_SETCALLBACK_DEFN( closedLoopIndi, m_indiP_ctrl1_fsm )( const pcf::IndiPrope
 
     if( ipRecv.find( "state" ) )
     {
-        m_fsmStates[ipRecv.getDevice()] = ipRecv["state"].get();
-        if( m_inputGuarded && ipRecv["state"].get() != "READY" &&
-            !( m_operatingOK && ipRecv["state"].get() == "OPERATING" ) )
+        const auto state                = ipRecv["state"].get();
+        m_fsmStates[ipRecv.getDevice()] = state;
+        if( m_inputGuarded && !controllerStateReady( state ) )
         {
             for( size_t n = 0; n < m_ctrlDevices.size(); ++n )
+            {
                 if( m_ctrlDevices[n] == ipRecv.getDevice() )
+                {
                     m_currentValid[n] = false;
+                }
+            }
+
             toggleLoop( false );
         }
     }

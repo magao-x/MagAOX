@@ -96,7 +96,6 @@ class autoJayHarness : public MagAOX::app::autoJay
     std::array<uint64_t, 2>           m_fakeCounters{}; ///< Fake combined-DM acknowledgments.
 
     using autoJay::begin;
-    using autoJay::controlSettled;
     using autoJay::finish;
     using autoJay::loadConfigImpl;
     using autoJay::m_acquisition;
@@ -105,22 +104,21 @@ class autoJayHarness : public MagAOX::app::autoJay
     using autoJay::m_captureConfig;
     using autoJay::m_captureRequested;
     using autoJay::m_continuous;
-    using autoJay::m_controlDeadline;
-    using autoJay::m_controllerEnabled;
     using autoJay::m_controlSettle;
     using autoJay::m_counter;
     using autoJay::m_cycle;
     using autoJay::m_cycleGeneration;
     using autoJay::m_generation;
     using autoJay::m_lastFrameTime;
+    using autoJay::m_nextMeasurementTime;
     using autoJay::m_observed;
     using autoJay::m_patternFiles;
+    using autoJay::m_publishControl;
     using autoJay::m_quality;
     using autoJay::m_session;
     using autoJay::m_startRequested;
     using autoJay::m_status;
     using autoJay::m_stopRequested;
-    using autoJay::m_waitingControl;
     using autoJay::monotonic;
     using autoJay::recall;
     using autoJay::stop;
@@ -186,19 +184,13 @@ class autoJayHarness : public MagAOX::app::autoJay
     /// Validate a copy of the capture or loaded configuration and return the resolved snapshot.
     bool setupValid( bool         capture /**< [in] Resolve capture wildcards */,
                      std::string &error /**< [out] Setup rejection */,
-                     calibration *resolved = nullptr /**< [out] Optional checked snapshot */,
-                     bool         settling = false /**< [in] Permit an expected correction in progress */ );
+                     calibration *resolved = nullptr /**< [out] Optional checked snapshot */ );
 
     /// Load application settings from a private test configuration file.
     int configure( const std::string &contents /**< [in] INI configuration text */ );
 
     /// Generate distinct frames through every real acquisition phase, without application threads.
     void completeSequence();
-
-    /// Configure a controller acknowledgment for the current sample.
-    void acknowledgment( double session /**< [in] Producer identity */,
-                         double counter /**< [in] Processed sample counter */,
-                         int    status /**< [in] Controller outcome */ );
 
     /// Evaluate an asymmetric synthetic response for one DM.
     imageT response( unsigned dm /**< [in] Select NCPC or tweeter response */ ) const;
@@ -233,7 +225,7 @@ autoJayHarness::autoJayHarness()
     m_captureConfig.dmSleep      = 0;
     m_captureConfig.phaseTimeout = 5;
     m_session                    = 123456;
-    m_controllerEnabled          = true;
+    m_publishControl             = true;
     for( unsigned i = 0; i < 2; ++i )
     {
         m_captureConfig.dm[i].amplitude       = 0.1F;
@@ -244,21 +236,17 @@ autoJayHarness::autoJayHarness()
         REQUIRE( MagAOX::app::autoJayDetail::calibrationIO::writeImage(
             m_patternFiles[i], m_captureConfig.dm[i].pattern, error ) );
     }
-    for( const auto &device : { "stagelosel", "stageflowfs", "holoop", "autoJay-ctrl", "ttmperi" } )
+    for( const auto &device : { "stagelosel", "stageflowfs", "holoop" } )
     {
         text( device, "fsm", "state", "READY" );
     }
 
     text( "camflowfs", "fsm", "state", "OPERATING" );
-    text( "ttmperi", "fsm", "state", "OPERATING" );
     toggle( "stagelosel", "presetName", "pupil", true );
     numbers( "stagelosel", "position", { { "current", 3.5 } } );
     numbers( "stageflowfs", "position", { { "current", 32.0 } } );
     numbers( "camflowfs", "exptime", { { "current", 0.001 } } );
     toggle( "holoop", "loop_state", "toggle", false );
-    toggle( "autoJay-ctrl", "loop_state", "toggle", false );
-    for( const auto &axis : { "axis1_voltage", "axis2_voltage" } )
-        numbers( "ttmperi", axis, { { "current", 50 }, { "target", 50 } } );
     liveGeometry( 44, 40 );
     calibration aligned;
     std::string error;
@@ -428,12 +416,12 @@ int autoJayHarness::cameraFrame( void *source, IMAGE_METADATA &metadata )
     return result;
 }
 
-bool autoJayHarness::setupValid( bool capture, std::string &error, calibration *resolved, bool settling )
+bool autoJayHarness::setupValid( bool capture, std::string &error, calibration *resolved )
 {
     std::lock_guard<std::mutex> lock( m_mutex );
     calibration candidate = capture ? m_captureConfig : *m_calibration;
     geometry    geom;
-    bool        result = checkSetup( candidate, geom, capture, error, settling );
+    bool                        result = checkSetup( candidate, geom, capture, error );
     if( result && capture )
         candidate.cameraGeometry = geom;
     if( resolved )
@@ -498,18 +486,6 @@ void autoJayHarness::completeSequence()
     m_lastFrameTime = monotonic();
 }
 
-void autoJayHarness::acknowledgment( double session, double counter, int status )
-{
-    numbers( "autoJay-ctrl",
-             "processed",
-             { { "session", session },
-               { "counter", counter },
-               { "status", status },
-               { "applied", status == 1 ? 1 : 0 },
-               { "target0", 50 },
-               { "target1", 50 } } );
-}
-
 std::string autoJayHarness::calibrationRoot() const
 {
     return m_calibDir + "/" + m_configName;
@@ -533,7 +509,6 @@ int autoJayHarness::startMonitoring( const std::string &stream )
     cameraMonitor::m_smThreadPrio = 0;
     cameraMonitor::m_shmimName    = stream;
     m_captureConfig.stream        = stream;
-    m_controllerEnabled           = false;
     m_lastFrameTime               = 0;
     std::filesystem::create_directories( m_tel.logPath() );
     return appStartup();
@@ -651,29 +626,6 @@ TEST_CASE( "autoJay rejects incomplete science-camera profiles", "[autoJay][app]
     REQUIRE( ( app.configure( config ) == 0 ) == ( omitted < 0 ) );
 }
 
-/// Correction settling relaxes only the actuator motion check and retains required optical and loop states.
-/** \ingroup autoJay_unit_test */
-TEST_CASE( "autoJay monitors setup while an expected correction settles", "[autoJay][app]" )
-{
-    // clang-format off
-    #ifdef AUTOJAY_TEST_DOXYGEN_REF
-    MagAOX::app::autoJay::checkSetup;
-    #endif
-    // clang-format on
-    autoJayHarness app;
-    app.numbers( "ttmperi", "axis1_voltage", { { "current", 49 }, { "target", 50 } } );
-    auto voltage = app.observedProperty( "ttmperi.axis1_voltage" );
-    voltage.setState( pcf::IndiProperty::Busy );
-    app.deliver( voltage );
-    std::string error;
-    REQUIRE_FALSE( app.setupValid( false, error ) );
-    error.clear();
-    REQUIRE( app.setupValid( false, error, nullptr, true ) );
-    app.toggle( "holoop", "loop_state", "toggle", true );
-    REQUIRE_FALSE( app.setupValid( false, error, nullptr, true ) );
-    REQUIRE( error.find( "loop" ) != std::string::npos );
-}
-
 /// Unknown, invalid, moving, or mismatched setup and a stale camera stream inhibit acquisition.
 /** \ingroup autoJay_unit_test */
 TEST_CASE( "autoJay rejects invalid setup before opening channels", "[autoJay][app]" )
@@ -748,10 +700,6 @@ TEST_CASE( "autoJay rejects invalid setup before opening channels", "[autoJay][a
         auto value     = app.observedProperty( "camflowfs.roi_region_state" );
         value["units"] = 2;
         app.deliver( value );
-    }
-    SECTION( "actuator still settling" )
-    {
-        app.numbers( "ttmperi", "axis1_voltage", { { "current", 50 }, { "target", 51 } } );
     }
     SECTION( "malformed position" )
     {
@@ -966,7 +914,6 @@ TEST_CASE( "autoJay publishes only a complete current measurement", "[autoJay][a
     #endif
     // clang-format on
     autoJayHarness app;
-    app.toggle( "autoJay-ctrl", "loop_state", "toggle", true );
     REQUIRE( app.begin( false ) );
     app.completeSequence();
     bool accepted    = false;
@@ -979,8 +926,7 @@ TEST_CASE( "autoJay publishes only a complete current measurement", "[autoJay][a
     {
         accepted                = true;
         corrections             = false;
-        app.m_controllerEnabled = false;
-        app.toggle( "autoJay-ctrl", "loop_state", "toggle", false );
+        app.m_publishControl    = false;
     }
     SECTION( "setup changed and returned" )
     {
@@ -1001,7 +947,7 @@ TEST_CASE( "autoJay publishes only a complete current measurement", "[autoJay][a
     app.finish();
     INFO( app.m_status );
     REQUIRE( app.m_counter == ( accepted ? 1 : 0 ) );
-    REQUIRE( app.m_waitingControl == ( accepted && corrections ) );
+    REQUIRE( ( app.m_nextMeasurementTime != 0 ) == ( accepted && corrections ) );
     REQUIRE_FALSE( app.m_active );
     REQUIRE_FALSE( app.m_open );
     REQUIRE( app.m_clearCount >= 1 );
@@ -1027,6 +973,8 @@ TEST_CASE( "autoJay can start a first capture after monitoring while idle", "[au
     REQUIRE( app.m_observed.contains( "stagelosel.parked" ) );
     REQUIRE( app.m_observed.contains( "stageflowfs.parked" ) );
     REQUIRE_FALSE( app.m_observed.contains( "camflowfs.parked" ) );
+    REQUIRE_FALSE( app.m_observed.contains( "ttmperi.axis1_voltage" ) );
+    REQUIRE_FALSE( app.m_observed.contains( "autoJay-ctrl.processed" ) );
     pcf::IndiProperty capture( pcf::IndiProperty::Switch, "autoJay-test", "capture" );
     capture.add( pcf::IndiElement( "request" ) );
     capture["request"].setSwitchState( pcf::IndiElement::On );
@@ -1132,7 +1080,7 @@ TEST_CASE( "autoJay captures its first reference without an existing calibration
     REQUIRE( app.m_calibration );
     REQUIRE( app.m_calibration->id.starts_with( "calibration__T" ) );
     REQUIRE( app.m_counter == 0 );
-    REQUIRE_FALSE( app.m_waitingControl );
+    REQUIRE( app.m_nextMeasurementTime == 0 );
     REQUIRE_FALSE( app.m_active );
     autoJayHarness::calibration saved;
     std::string                 error;
@@ -1252,32 +1200,32 @@ TEST_CASE( "autoJay failed recall inhibits the previously loaded calibration", "
     REQUIRE( app.m_openCount == 0 );
 }
 
-/// Counter/session acknowledgment and settled voltage readback bound the interval between measurements.
+/// Correction-eligible publication starts a local delay without controller or actuator properties.
 /** \ingroup autoJay_unit_test */
-TEST_CASE( "autoJay waits for its own acknowledged correction", "[autoJay][app]" )
+TEST_CASE( "autoJay paces correction samples without corrector feedback", "[autoJay][app]" )
 {
     // clang-format off
     #ifdef AUTOJAY_TEST_DOXYGEN_REF
-    MagAOX::app::autoJay::controlSettled;
+    MagAOX::app::autoJay::loadConfigImpl;
+    MagAOX::app::autoJay::finish;
     #endif
     // clang-format on
     autoJayHarness app;
-    app.m_counter         = 3;
-    app.m_controlDeadline = app.monotonic() + 5;
-    app.m_controlSettle   = 0;
-    std::string error;
-    REQUIRE_FALSE( app.controlSettled( error ) );
-    app.acknowledgment( app.m_session + 1, 3, 1 );
-    REQUIRE_FALSE( app.controlSettled( error ) );
-    app.acknowledgment( app.m_session, 2, 1 );
-    REQUIRE_FALSE( app.controlSettled( error ) );
-    app.acknowledgment( app.m_session, 3, 1 );
-    REQUIRE( app.controlSettled( error ) );
-    app.numbers( "ttmperi", "axis1_voltage", { { "current", 49 }, { "target", 50 } } );
-    REQUIRE_FALSE( app.controlSettled( error ) );
-    app.m_controlDeadline = app.monotonic() - 1;
-    REQUIRE_FALSE( app.controlSettled( error ) );
-    REQUIRE( error.find( "timed out" ) != std::string::npos );
+    REQUIRE( app.configure( "[autoJay]\ncontroller=old-controller\nactuator=old-actuator\n"
+                            "[control]\nenabled=true\nsettle=0.25\ntimeout=5\nvoltageTolerance=0.005\n" ) == 0 );
+    REQUIRE( app.m_publishControl );
+    REQUIRE( app.begin( false ) );
+    app.m_continuous = true;
+    app.completeSequence();
+    const auto before = app.monotonic();
+    app.finish();
+    REQUIRE( app.m_counter == 1 );
+    REQUIRE( app.m_continuous );
+    REQUIRE_FALSE( app.m_startRequested );
+    REQUIRE( app.m_nextMeasurementTime >= before + 0.25 );
+    REQUIRE( app.m_nextMeasurementTime <= app.monotonic() + 0.25 );
+    app.stop( "operator stop" );
+    REQUIRE( app.m_nextMeasurementTime == 0 );
 }
 
 /// Stop clears fake owned channels, cancels continuous operation, and leaves the accepted counter unchanged.
@@ -1296,7 +1244,7 @@ TEST_CASE( "autoJay stop cancels acquisition and reports cleanup failure", "[aut
     app.stop( "operator stop" );
     REQUIRE_FALSE( app.m_active );
     REQUIRE_FALSE( app.m_continuous );
-    REQUIRE_FALSE( app.m_waitingControl );
+    REQUIRE( app.m_nextMeasurementTime == 0 );
     REQUIRE( app.m_clearCount == 1 );
     REQUIRE( app.m_counter == 0 );
     REQUIRE( app.m_status.find( "injected cleanup failure" ) != std::string::npos );

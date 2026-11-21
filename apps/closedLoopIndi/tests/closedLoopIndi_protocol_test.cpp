@@ -94,7 +94,8 @@ class Fixture : public MagAOX::app::closedLoopIndi
     /// Configure guarded or legacy operation through the actual configuration loader.
     Fixture( bool               guarded = true, /**< [in] Enable the opt-in protocol. */
              const std::string &matrix =
-                 "intMat00=2\nintMat01=1\nintMat10=-1\nintMat11=3\n" /**< [in] Matrix configuration. */ );
+                 "intMat00=2\nintMat01=1\nintMat10=-1\nintMat11=3\n", /**< [in] Matrix configuration. */
+             bool requireOperating = false /**< [in] Require OPERATING even when READY is normally accepted. */ );
 
     /// Release private transport before removing fixture files.
     ~Fixture();
@@ -132,7 +133,7 @@ class Fixture : public MagAOX::app::closedLoopIndi
     std::string m_directory;          ///< Private temporary configuration and transport files.
 };
 
-Fixture::Fixture( bool guarded, const std::string &matrix )
+Fixture::Fixture( bool guarded, const std::string &matrix, bool requireOperating )
 {
     now         = 1800000000;
     char path[] = "/tmp/closedloop-protocol-XXXXXX";
@@ -147,7 +148,7 @@ Fixture::Fixture( bool guarded, const std::string &matrix )
     output << "[input]\ndevice=sensor\nproperty=measurement\nelements=delta_x,delta_y\nguarded="
            << ( guarded ? "true" : "false" )
            << "\nmaxAge=5\n[ctrl]\ndevices=ttmperi\nproperties=axis1_voltage,axis2_voltage\noperatingOK=true\n"
-              "[loop]\ngain=0.1\ngains=1,1\n"
+           << "requireOperating=" << ( requireOperating ? "true" : "false" ) << "\n[loop]\ngain=0.1\ngains=1,1\n"
            << matrix << "upstream=sensor\nupstreamProperty=ready\nupstreamFollowClosed=true\n";
     output.close();
     REQUIRE( config.readConfig( configPath ) == 0 );
@@ -387,6 +388,43 @@ TEST_CASE( "guarded closedLoopIndi rejects invalid coherent inputs", "[closedLoo
     REQUIRE( app.m_capture->m_commands.empty() );
     app.close();
     REQUIRE_FALSE( app.closed() );
+}
+
+/// Require the corrector's enabled FSM state at arming and throughout closed loop.
+/** \ingroup closedLoopIndi_unit_test */
+TEST_CASE( "guarded closedLoopIndi can require OPERATING", "[closedLoopIndi][protocol]" )
+{
+    // clang-format off
+    #ifdef CLOSEDLOOPINDI_TEST_DOXYGEN_REF
+    MagAOX::app::closedLoopIndi::controllerStateReady( "OPERATING" );
+    MagAOX::app::closedLoopIndi::toggleLoop( true );
+    #endif
+    // clang-format on
+    Fixture app( true, "intMat00=2\nintMat01=1\nintMat10=-1\nintMat11=3\n", true );
+    REQUIRE( app.setCallBack_m_indiP_inputs( app.sample( 1 ) ) == 0 );
+    app.controller( "READY" );
+    app.current( 0, "75" );
+    app.current( 1, "80" );
+    app.close();
+    REQUIRE_FALSE( app.closed() );
+    REQUIRE( app.m_capture->m_commands.empty() );
+
+    app.controller( "OPERATING" );
+    app.close();
+    REQUIRE( app.closed() );
+    app.controller( "READY" );
+    REQUIRE_FALSE( app.closed() );
+    now += 1;
+    REQUIRE( app.setCallBack_m_indiP_inputs( app.sample( 2 ) ) == 0 );
+    REQUIRE( app.m_capture->m_commands.empty() );
+
+    app.controller( "OPERATING" );
+    app.close();
+    REQUIRE_FALSE( app.closed() );
+    app.current( 0, "75" );
+    app.current( 1, "80" );
+    app.close();
+    REQUIRE( app.closed() );
 }
 
 /// Verify session changes, reordered input, and expired input cannot rearm or reuse a previous command.

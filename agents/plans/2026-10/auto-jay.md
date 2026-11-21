@@ -744,3 +744,21 @@ On 2026-11-21 the optimized build and offline app suite passed
 (21 cases, 1,931 assertions). The tests cover legacy configs and saved
 bundles with default and custom alignment controller names, and verify
 that the main AO interlock still blocks acquisition when closed.
+
+### Follow-up: independent sensor and corrector
+
+AutoJay no longer subscribes to the correction controller or actuator and
+does not wait for a correction acknowledgment or voltage readback. Capture
+and both measurement modes work with the corrector offline.
+`control.enabled` marks samples eligible for the guarded controller.
+`control.settle` is a local delay after a correction-eligible publication,
+replacing the acknowledgment wait. Commission it to cover command delivery
+and optical settling before the next cycle. Corrector readiness and input
+validation remain in the separate controller. The AutoJay controller
+profile now sets `ctrl.requireOperating=true` to keep the former check
+that both axes are enabled with the app that sends corrections.
+
+Both optimized builds and both focused offline suites passed on 2026-11-21
+(28 cases, 4,522 assertions). Tests cover sensor startup and publication
+without corrector telemetry and corrector arming and disarming with the
+`OPERATING` requirement.
