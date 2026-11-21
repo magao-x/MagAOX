@@ -192,7 +192,8 @@ void Widget::ready()
 }
 /// \endcond
 
-/** \brief The panel and its children subscribe to the current hwpSequencer and stage property names, not the removed HWP tracking ones.
+/** \brief The panel and its children subscribe to the current hwpSequencer and stage property names, not the removed
+ * HWP tracking ones.
  * \ingroup polarimetryGUI_unit_test
  */
 TEST_CASE( "Polarimetry subscribes to current property names", "[polarimetryGUI]" )
