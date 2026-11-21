@@ -192,7 +192,7 @@ void Widget::ready()
 }
 /// \endcond
 
-/** \brief The panel and its children subscribe to the current hwpSequencer and stage property names.
+/** \brief The panel and its children subscribe to the current hwpSequencer and stage property names, not the removed HWP tracking ones.
  * \ingroup polarimetryGUI_unit_test
  */
 TEST_CASE( "Polarimetry subscribes to current property names", "[polarimetryGUI]" )
@@ -204,7 +204,10 @@ TEST_CASE( "Polarimetry subscribes to current property names", "[polarimetryGUI]
     // clang-format on
     Widget widget;
 
-    for( const auto *key : { "hwpsequence.sequence",
+    for( const auto *key : { "hwptrack.fsm",
+                             "hwptrack.hwp_position",
+                             "hwptrack.hwp_position_name",
+                             "hwpsequence.sequence",
                              "hwpsequence.last_cycle",
                              "hwpsequence.abort",
                              "hwpsequence.num_cycles",
@@ -232,11 +235,19 @@ TEST_CASE( "Polarimetry subscribes to current property names", "[polarimetryGUI]
                              "hwpsequence.hwpPosIndex",
                              "hwpsequence.curCycle",
                              "stagepollin.",
-                             "stageqwplin." } )
+                             "stageqwplin.",
+                             "hwptrack.tracking",
+                             "hwptrack.hwp_tracking_offset",
+                             "hwptrack.hwp_position_actual",
+                             "stagepolrot.fsm" } )
     {
         INFO( key );
         CHECK( widget.m_publisher.count( key ) == 0 );
     }
+
+    CHECK( widget.findChild<QWidget *>( "qwpPupilFsm" ) != nullptr );
+    CHECK( widget.findChild<QWidget *>( "sliderHwpTracking" ) == nullptr );
+    CHECK( widget.findChild<QWidget *>( "stagePolRotFsm" ) == nullptr );
 }
 
 /** \brief While idle, the time entry is disabled in frames mode and the sequencing buttons are hidden.
