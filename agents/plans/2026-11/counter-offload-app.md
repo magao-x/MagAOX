@@ -700,7 +700,7 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
   - The best ratio starts at `numeric_limits<double>::max()`, so a clipped starting point never counts as the best.
 - **C3 keep the best on abort.** When a run aborts for any reason, including an operator abort, `runCalibration()` applies the best parameters so far if their ratio is below 1, and logs it as a WARNING. Otherwise it restores the originals, as before. `calibration.best*` is also updated in that case. No unit test: `runCalibration` needs the threads and streams.
 
-### Proposed: Noise-Robust Calibration (items 1–4; not implemented)
+### Noise-Robust Calibration (items 1–4; implemented 2026-11-20, not yet built)
 **Request (2026-11-20).** Make the calibration result less driven by noise. A run must take **≤ 20 min**. Implement items 1–4 from the discussion:
 1. correct for baseline drift;
 2. choose each parameter from a fitted curve;
@@ -794,3 +794,25 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
 - **N-Q1.** Duration: keep it in round 1 only, as above, or fix it at 330 and drop it?
 - **N-Q2.** Is `calibMoveSigma = 2` the right threshold? It makes the scan conservative: in 202219Z, gain 0.5 → 0.68 (a predicted improvement of 0.02) would not move, but start 120 → 25 would.
 - **N-Q3.** Should the confirm step also measure the original parameters alternately, so that the result is a direct comparison of new against old (about +3 points)?
+
+**Answers**
+- N-A1: keep it in round 1 only
+- N-A2: use a threshold of 1.5x the noise
+- N-A3: no need for that feature
+
+**Implementation log (2026-11-20).**
+- **Answers applied:**
+  - duration is swept in round 1 only;
+  - `calibMoveSigma` defaults to **1.5**;
+  - the confirm step does not measure the originals.
+- **Defaults:** `calibBaselineEvery` 4; `calibReplicates` 3; `calibConfirmPairs` 3; `calibSigmaFloor` 0.02; `calibRounds` 2.
+- **Run length:** `estimatePoints()` = 58 measurements, about 12 min. It is logged when a run starts, at WARNING above 20 min.
+- **Pure, unit-tested functions:** `interpBaseline`, `sweepOrder`, `fitQuadratic` (`quadFitT`), `chooseValue` (`choiceT`), `noiseT`, `estimatePoints`.
+- **Thread functions:** `replicate()` (off/P/…/off, used for both the noise estimate and the confirmation), `sweep()`, `measurePoint()`, `ensureBaseline()`, `addRow()`/`flushRows()`, `writeFitRow()`.
+- **Removed:** `coordinateScan`, `calibEvalT`, `evaluate`, `writeCsv`, and the refine stages.
+- **Stages:** off, initial, start, duration, gain, confirm, clipped, fit start, fit duration, fit gain.
+- **CSV columns added:** `ratioInterp`, `fitCurrent`, `fitCandidate`, `threshold`, `moved`, `sigma`. Measurement rows are written when their sweep (or replicate block) closes.
+- **INDI `calibration` elements added:** `sigma`, `confirmRatio`, `confirmStd`. `best*` is now the chosen parameters and their predicted ratio.
+- **Clipping during a sweep:** a clip at x skips the remaining larger values, and larger values measured before the clip (the order is scrambled) are left out of the fit. Clipped replicates are left out of their mean.
+- **The end of a run.** The chosen parameters are applied only if the confirmed ratio is below 1; otherwise the originals are restored. On abort (C3), the chosen parameters are applied if their predicted ratio is below 1.
+

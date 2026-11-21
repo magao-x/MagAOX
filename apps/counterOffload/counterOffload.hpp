@@ -16,9 +16,9 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
-#include <functional>
 #include <iomanip>
 #include <limits>
+#include <numeric>
 #include <type_traits>
 #include <vector>
 
@@ -76,8 +76,10 @@ struct psdShmimT
  * change therefore affects only new offloads.  Disabling stops accepting new offloads and requests a zero, so the contribution is
  * cleared at the next slot.
  *
- * Calibrate mode scans rampStartUs, rampDurationUs and gain to minimize the closed-loop WFS PSD power in a band around
- * the offload rate, summed over the offloaded modes, relative to a gain-0 baseline, and applies the best values.
+ * Calibrate mode minimizes the closed-loop WFS PSD power in a band around the offload rate, summed over the offloaded
+ * modes, as a ratio to a gain-0 baseline interpolated in time.  It estimates the noise from replicates, sweeps
+ * rampStartUs, gain and rampDurationUs, then rampStartUs and gain again, choosing each from a quadratic fit and moving
+ * only for an improvement beyond the noise, and applies the result if replicates confirm it.
  *
  * \ingroup counterOffload
  */
@@ -120,15 +122,103 @@ class counterOffload : public MagAOXApp<true>,
     /// Calibrated parameters, in order: rampStartUs, rampDurationUs, gain.
     typedef std::array<double, 3> calibParamsT;
 
-    /// Calibration evaluator: parameters, axis (0-2), pass (0 coarse, 1 refine), and the ratio to fill in.
-    /** Returns 1 when the ratio was evaluated, 0 when the parameters are infeasible (the ratio is not set), and -1 to
-     * abort the scan.
-     */
-    typedef std::function<int( const calibParamsT &, int, int, double & )> calibEvalT;
+    /// Calibration stages, as used by calibStageName(), the CSV and the calibration.stage INDI element.
+    enum calibStage
+    {
+        stageOff = 0,     ///< A gain-0 baseline.
+        stageInitial,     ///< A replicate of the starting parameters, for the noise estimate.
+        stageStart,       ///< A point of the rampStartUs sweep.
+        stageDuration,    ///< A point of the rampDurationUs sweep.
+        stageGain,        ///< A point of the gain sweep.
+        stageConfirm,     ///< A replicate of the chosen parameters.
+        stageClipped,     ///< A point skipped because the command clipped.
+        stageFitStart,    ///< The rampStartUs decision.
+        stageFitDuration, ///< The rampDurationUs decision.
+        stageFitGain      ///< The gain decision.
+    };
 
-    static constexpr int m_clippedStage{ 8 }; ///< calibStageName() index of a point skipped because it clipped.
+    /// Least-squares quadratic r(x) = c0 + c1 u + c2 u^2 in the scaled coordinate u = (x - x0) / scale.
+    struct quadFitT
+    {
+        bool ok{ false }; ///< Whether the fit was computed.
+
+        double x0{ 0 }; ///< Center of the fitted x values.
+
+        double scale{ 1 }; ///< Half range of the fitted x values.
+
+        std::array<double, 3> c{ 0, 0, 0 }; ///< Coefficients in u.
+
+        double resSd{ 0 }; ///< Residual standard deviation, with n - 3 degrees of freedom; 0 if n <= 3.
+
+        /// Evaluate the fit.
+        double operator()( double x /**< [in] the parameter value */ ) const
+        {
+            const double u = ( x - x0 ) / scale;
+            return c[0] + c[1] * u + c[2] * u * u;
+        }
+    };
+
+    /// The decision for one parameter at the end of a sweep.
+    struct choiceT
+    {
+        double candidate{ 0 }; ///< Value with the lowest predicted ratio within the measured range.
+
+        double rCurrent{ 0 }; ///< Predicted ratio at the current value; 0 if outside the measured range.
+
+        double rCandidate{ 0 }; ///< Predicted ratio at the candidate.
+
+        double threshold{ 0 }; ///< Improvement needed to move.
+
+        bool outside{ false }; ///< Whether the current value is outside the measured range.
+
+        bool move{ false }; ///< Whether to move to the candidate.
+    };
+
+    /// Pooled noise estimate of the ratio, from replicate scatter and fit residuals.
+    struct noiseT
+    {
+        double sumSq{ 0 }; ///< Sum of squared deviations.
+
+        int dof{ 0 }; ///< Degrees of freedom.
+
+        /// Add a standard deviation with its degrees of freedom.
+        void add( double sd /**< [in] standard deviation */, int d /**< [in] degrees of freedom */ )
+        {
+            if( d > 0 )
+            {
+                sumSq += sd * sd * d;
+                dof += d;
+            }
+        }
+
+        /// The pooled standard deviation, but at least floor; floor if nothing was added.
+        double sigma( double floor /**< [in] smallest value returned */ ) const
+        {
+            return ( dof > 0 ) ? std::max( floor, std::sqrt( sumSq / dof ) ) : floor;
+        }
+    };
+
+    /// One measurement, held until the baselines around it are measured.
+    struct calibRowT
+    {
+        timespec wall{}; ///< CLOCK_REALTIME at the end of the measurement.
+
+        int64_t tNs{ 0 }; ///< CLOCK_MONOTONIC at the end of the measurement, ns.
+
+        int stage{ 0 }; ///< Stage index.
+
+        calibParamsT p{ 0, 0, 0 }; ///< Parameters.
+
+        double fom{ 0 }; ///< Mean band power.
+
+        double fomStd{ 0 }; ///< Standard deviation of the band powers.
+
+        double fomOff{ 0 }; ///< Latest baseline when measured.
+    };
 
     static constexpr double m_clipDelayS{ 1 }; ///< Clipping is counted from this long after a change, s.
+
+    static constexpr double m_maxRunMin{ 20 }; ///< A run estimated to take longer than this logs a warning, min.
 
   protected:
     /** \name Configurable Parameters - Data
@@ -175,7 +265,7 @@ class counterOffload : public MagAOXApp<true>,
 
     int m_nAverage{ 3 }; ///< Settled averaged PSDs, published 0.5 s apart, averaged for each evaluation, at least 2.
 
-    int m_baselineEvery{ 5 }; ///< Re-measure the gain-0 baseline before every this many evaluations.
+    int m_baselineEvery{ 4 }; ///< Measure a gain-0 baseline after every this many points of a sweep.
 
     double m_settleS{ 11 }; ///< Wait after a change before PSDs are collected; covers the modalPSDs average, s.
 
@@ -190,6 +280,16 @@ class counterOffload : public MagAOXApp<true>,
     std::vector<double> m_durationGridUs{ 200, 600, 100 }; ///< rampDurationUs scan: min, max, step, in us.
 
     std::vector<double> m_gainGrid{ 0.3, 1.0, 0.1 }; ///< gain scan: min, max, step.
+
+    int m_replicates{ 3 }; ///< Measurements of the starting parameters for the first noise estimate.
+
+    int m_confirmPairs{ 3 }; ///< Measurements of the chosen parameters, each after a baseline, to confirm them.
+
+    double m_moveSigma{ 1.5 }; ///< A parameter moves only if the fit improves by this many standard errors.
+
+    double m_sigmaFloor{ 0.02 }; ///< Smallest noise estimate of the ratio used.
+
+    int m_rounds{ 2 }; ///< Rounds of sweeps; rounds after the first sweep only rampStartUs and gain.
 
     ///@}
 
@@ -273,21 +373,35 @@ class counterOffload : public MagAOXApp<true>,
 
     double m_fomOff{ 0 }; ///< Latest gain-0 baseline band power.
 
-    int m_calibStage{ 0 }; ///< Stage of the latest evaluation, an index into calibStageName().
+    int m_calibStage{ 0 }; ///< Stage of the latest measurement or decision, an index into calibStageName().
 
-    int m_calibPoint{ 0 }; ///< Evaluations completed in the current run.
+    int m_calibPoint{ 0 }; ///< Points measured in the current run, not counting baselines.
 
-    double m_lastFom{ 0 }; ///< Band power of the latest evaluation.
+    double m_lastFom{ 0 }; ///< Band power of the latest point.
 
-    double m_lastRatio{ 0 }; ///< Ratio to the baseline of the latest evaluation.
+    double m_lastRatio{ 0 }; ///< Ratio of the latest point to the latest baseline.
 
-    calibParamsT m_calibBest{ 0, 0, 0 }; ///< Best parameters so far in the current or last run.
+    calibParamsT m_calibBest{ 0, 0, 0 }; ///< Parameters chosen so far in the current or last run.
 
-    double m_calibBestRatio{ 0 }; ///< Ratio to the baseline of m_calibBest.
+    double m_calibBestRatio{ 0 }; ///< Ratio predicted for m_calibBest.
 
-    int m_evalCount{ 0 }; ///< Evaluations in the current run, used to schedule baselines.  Calibration thread only.
+    double m_calibSigma{ 0 }; ///< Current noise estimate of the ratio.
+
+    double m_confirmRatio{ 0 }; ///< Mean confirmed ratio of the chosen parameters.
+
+    double m_confirmStd{ 0 }; ///< Standard error of m_confirmRatio.
 
     std::ofstream m_csv; ///< The current run's CSV file.  Calibration thread only.
+
+    std::vector<int64_t> m_offTimes; ///< CLOCK_MONOTONIC times of the run's baselines, ns.  Calibration thread only.
+
+    std::vector<double> m_offFoms; ///< The run's baselines, matching m_offTimes.  Calibration thread only.
+
+    std::vector<calibRowT> m_rows; ///< Measurements not yet written to the CSV.  Calibration thread only.
+
+    noiseT m_noise; ///< The run's noise estimate.  Calibration thread only.
+
+    bool m_lastWasOff{ false }; ///< Whether the latest measurement was a baseline.  Calibration thread only.
 
     ///@}
 
@@ -427,20 +541,46 @@ class counterOffload : public MagAOXApp<true>,
                              double       halfWidthHz /**< [in] band half width, Hz */,
                              uint32_t     modeMax /**< [in] number of modes to sum */ );
 
-    /// Coordinate scan minimizing an evaluator over the three calibrated parameters.
-    /** Pass 0 scans each parameter in turn over its grid, holding the others at the best so far.  Pass 1 rescans each
-     * over +/- one step at half the step, then evaluates the vertex of a parabola through the minimum and its
-     * neighbours.  best and bestFom must hold an evaluated starting point, and are updated as better points are found.
-     * An infeasible point ends its sweep: larger values of that parameter in the same sweep are not evaluated.
-     *
-     * \returns true if the scan finished
-     * \returns false if the evaluator aborted
+    /// Baseline at a time, linearly interpolated between baselines and constant beyond the first and last.
+    /**
+     * \returns the interpolated baseline
+     * \returns 0 if there are no baselines
      */
-    static bool
-    coordinateScan( const std::array<std::vector<double>, 3> &grids /**< [in] min, max, step per parameter */,
-                    calibParamsT                             &best /**< [in,out] best parameters */,
-                    double                                   &bestFom /**< [in,out] value at best */,
-                    const calibEvalT                         &eval /**< [in] the evaluator */ );
+    static double interpBaseline( int64_t                     tNs /**< [in] the time, ns */,
+                                  const std::vector<int64_t> &offTimes /**< [in] baseline times, ascending, ns */,
+                                  const std::vector<double>  &offFoms /**< [in] baselines, matching offTimes */ );
+
+    /// Order in which to measure the n points of a sweep: the indices in bit-reversed (van der Corput) order.
+    /** For n = 7 the order is 0, 4, 2, 6, 1, 5, 3, so that neighbouring values are measured far apart in time and slow
+     * drift does not look like a trend.
+     *
+     * \returns a permutation of 0 to n - 1
+     */
+    static std::vector<size_t> sweepOrder( size_t n /**< [in] number of points */ );
+
+    /// Least-squares quadratic fit.
+    /**
+     * \returns the fit, with ok false for fewer than 3 points, a single x value, or a singular system
+     */
+    static quadFitT fitQuadratic( const std::vector<double> &xs /**< [in] parameter values */,
+                                  const std::vector<double> &rs /**< [in] ratios */ );
+
+    /// Choose a parameter value from a sweep.
+    /** With at least 4 points, a quadratic is fitted, and the candidate is its minimum within the measured range.  With
+     * fewer, or if the fit fails, the candidate is the minimum of a 3-point running mean.  The parameter moves to the
+     * candidate only if the predicted improvement over the current value exceeds moveSigma * sigma * sqrt(6 / n), or if
+     * the current value is outside the measured range.
+     *
+     * \returns the decision; with no points, the candidate is the current value and move is false
+     */
+    static choiceT chooseValue( const std::vector<double> &xs /**< [in] parameter values */,
+                                const std::vector<double> &rs /**< [in] ratios */,
+                                double                     current /**< [in] the current value */,
+                                double                     sigma /**< [in] noise of one ratio */,
+                                double                     moveSigma /**< [in] standard errors needed to move */ );
+
+    /// Number of measurements a run takes with the current settings, including baselines.
+    int estimatePoints();
 
     /// Get the current calibrated parameters.
     calibParamsT calibParams();
@@ -521,9 +661,9 @@ class counterOffload : public MagAOXApp<true>,
     /// Calibration thread function.  Runs a calibration on each start request until m_shutdown is true.
     void calibThreadExec();
 
-    /// Run one calibration, then apply the best parameters.
-    /** On abort, the best parameters so far are applied if they improved on the baseline, otherwise the originals are
-     * restored.
+    /// Run one calibration: noise estimate, sweeps, and confirmation.
+    /** The chosen parameters are applied if their confirmed ratio is below 1, otherwise the originals are restored.  On
+     * abort, the parameters chosen so far are applied if their predicted ratio is below 1.
      */
     void runCalibration();
 
@@ -557,22 +697,60 @@ class counterOffload : public MagAOXApp<true>,
      */
     bool measureBaseline( const calibParamsT &p /**< [in] parameters; the gain is replaced by 0 */ );
 
-    /// Evaluate parameters as a ratio to the baseline, re-measuring the baseline when due.
-    /** A point that clips is recorded in the CSV as stage "clipped", with empty fom, fomStd and ratio.
-     *
-     * \returns 1 on success
-     * \returns 0 if the point clipped, so is infeasible
-     * \returns -1 to abort the scan
+    /// Measure a baseline unless the latest measurement was one.
+    /**
+     * \returns true on success
      */
-    int evaluate( const calibParamsT &p /**< [in] parameters */,
-                   int                 stage /**< [in] stage index, see calibStageName() */,
-                   double             &ratio /**< [out] band power over the baseline */ );
+    bool ensureBaseline( const calibParamsT &p /**< [in] parameters; the gain is replaced by 0 */ );
 
-    /// Write one CSV row.  fom, fomStd and ratio are left empty for m_clippedStage.
-    void writeCsv( int                 stage /**< [in] stage index */,
-                   const calibParamsT &p /**< [in] parameters */,
-                   double              fom /**< [in] mean band power */,
-                   double              fomStd /**< [in] standard deviation of the band powers */ );
+    /// Measure one point and hold its row.  A point that clips is held as stage "clipped".
+    /**
+     * \returns 1 on success
+     * \returns 0 if the point clipped
+     * \returns -1 on failure, or if the ratio to the latest baseline exceeds m_abortRatio
+     */
+    int measurePoint( const calibParamsT &p /**< [in] parameters */,
+                      int                 stage /**< [in] stage index */,
+                      double             &fom /**< [out] mean band power */ );
+
+    /// Measure parameters n times, each between baselines, and return their interpolated ratios.
+    /**
+     * \returns true on success; clipped measurements are left out of the ratios
+     */
+    bool replicate( const calibParamsT  &p /**< [in] parameters */,
+                    int                  stage /**< [in] stage index */,
+                    int                  n /**< [in] number of measurements */,
+                    std::vector<double> &ratios /**< [out] ratios to the interpolated baseline */ );
+
+    /// Sweep one parameter, then choose its value, see chooseValue().
+    /** The sweep is bracketed by baselines, with one after every m_baselineEvery points.  After a point clips, larger
+     * values are not measured, and larger values already measured are not used.
+     *
+     * \returns true on success
+     */
+    bool sweep( int           axis /**< [in] 0 rampStartUs, 1 rampDurationUs, 2 gain */,
+                calibParamsT &cur /**< [in,out] the chosen parameters */,
+                double       &curRatio /**< [in,out] the ratio predicted for cur */ );
+
+    /// Hold a measurement row.
+    void addRow( int                 stage /**< [in] stage index */,
+                 const calibParamsT &p /**< [in] parameters */,
+                 double              fom /**< [in] mean band power */,
+                 double              fomStd /**< [in] standard deviation of the band powers */ );
+
+    /// Write the held rows, with ratios to the latest and to the interpolated baseline.
+    void flushRows();
+
+    /// Write the time, stage, parameters and band columns of a CSV row.  The caller must hold m_calibMutex.
+    void writeCsvPrefix( const timespec     &wall /**< [in] CLOCK_REALTIME of the row */,
+                         int                 stage /**< [in] stage index */,
+                         const calibParamsT &p /**< [in] parameters */ );
+
+    /// Write a decision row.
+    void writeFitRow( int                 stage /**< [in] stage index, one of the fit stages */,
+                      const calibParamsT &p /**< [in] parameters, with the swept one at the candidate */,
+                      const choiceT      &ch /**< [in] the decision */,
+                      double              sigma /**< [in] the noise estimate used */ );
 
     ///@}
 
@@ -622,6 +800,16 @@ class counterOffload : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_durationGrid; ///< Property to set the rampDurationUs scan grid: min, max, step.
 
     pcf::IndiProperty m_indiP_gainGrid; ///< Property to set the gain scan grid: min, max, step.
+
+    pcf::IndiProperty m_indiP_replicates; ///< Property to set the replicates for the first noise estimate.
+
+    pcf::IndiProperty m_indiP_confirmPairs; ///< Property to set the confirmation measurements.
+
+    pcf::IndiProperty m_indiP_moveSigma; ///< Property to set the standard errors needed to move a parameter.
+
+    pcf::IndiProperty m_indiP_sigmaFloor; ///< Property to set the smallest noise estimate used.
+
+    pcf::IndiProperty m_indiP_rounds; ///< Property to set the rounds of sweeps.
 
     pcf::IndiProperty m_indiP_calibration; ///< Read-only calibration progress and best parameters.
 
@@ -713,6 +901,16 @@ class counterOffload : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_durationGrid );
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_gainGrid );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_replicates );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_confirmPairs );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_moveSigma );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_sigmaFloor );
+
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_rounds );
 
     INDI_SETCALLBACK_DECL( counterOffload, m_indiP_offloadFps );
 
@@ -970,7 +1168,17 @@ inline int counterOffload::appStartup()
         { m_indiP_settle, "calibSettleS", 0, 1e3, m_settleS, INDI_NEWCALLBACK( m_indiP_settle ) },
         { m_indiP_timeout, "calibTimeoutS", 1, 1e4, m_timeoutS, INDI_NEWCALLBACK( m_indiP_timeout ) },
         { m_indiP_abortRatio, "calibAbortRatio", 1, 1e6, m_abortRatio, INDI_NEWCALLBACK( m_indiP_abortRatio ) },
-        { m_indiP_calibLeak, "calibLeak", 1e-9, 1, m_calibLeak, INDI_NEWCALLBACK( m_indiP_calibLeak ) } };
+        { m_indiP_calibLeak, "calibLeak", 1e-9, 1, m_calibLeak, INDI_NEWCALLBACK( m_indiP_calibLeak ) },
+        { m_indiP_replicates, "calibReplicates", 2, 20, double( m_replicates ), INDI_NEWCALLBACK( m_indiP_replicates ) },
+        { m_indiP_confirmPairs,
+          "calibConfirmPairs",
+          1,
+          20,
+          double( m_confirmPairs ),
+          INDI_NEWCALLBACK( m_indiP_confirmPairs ) },
+        { m_indiP_moveSigma, "calibMoveSigma", 0, 10, m_moveSigma, INDI_NEWCALLBACK( m_indiP_moveSigma ) },
+        { m_indiP_sigmaFloor, "calibSigmaFloor", 0, 1, m_sigmaFloor, INDI_NEWCALLBACK( m_indiP_sigmaFloor ) },
+        { m_indiP_rounds, "calibRounds", 1, 5, double( m_rounds ), INDI_NEWCALLBACK( m_indiP_rounds ) } };
 
     for( auto &n : numbers )
     {
@@ -1013,8 +1221,18 @@ inline int counterOffload::appStartup()
     }
 
     createROIndiNumber( m_indiP_calibration, "calibration", "Calibration" );
-    for( const char *el :
-         { "stage", "point", "fom", "fomOff", "ratio", "bestStartUs", "bestDurationUs", "bestGain", "bestRatio" } )
+    for( const char *el : { "stage",
+                            "point",
+                            "fom",
+                            "fomOff",
+                            "ratio",
+                            "bestStartUs",
+                            "bestDurationUs",
+                            "bestGain",
+                            "bestRatio",
+                            "sigma",
+                            "confirmRatio",
+                            "confirmStd" } )
     {
         m_indiP_calibration.add( pcf::IndiElement( el ) );
         m_indiP_calibration[el] = 0;
@@ -1152,13 +1370,26 @@ inline int counterOffload::appLogic()
                   m_calibBest[0],
                   m_calibBest[1],
                   m_calibBest[2],
-                  m_calibBestRatio };
+                  m_calibBestRatio,
+                  m_calibSigma,
+                  m_confirmRatio,
+                  m_confirmStd };
     }
 
     updateIfChanged(
         m_indiP_calibration,
-        std::vector<std::string>{
-            "stage", "point", "fom", "fomOff", "ratio", "bestStartUs", "bestDurationUs", "bestGain", "bestRatio" },
+        std::vector<std::string>{ "stage",
+                                  "point",
+                                  "fom",
+                                  "fomOff",
+                                  "ratio",
+                                  "bestStartUs",
+                                  "bestDurationUs",
+                                  "bestGain",
+                                  "bestRatio",
+                                  "sigma",
+                                  "confirmRatio",
+                                  "confirmStd" },
         calib );
 
     updateSwitchIfChanged( m_indiP_calibrate,
@@ -1525,109 +1756,250 @@ inline double counterOffload::bandPower( const realT *psd,
     return sum * df;
 }
 
-inline bool counterOffload::coordinateScan( const std::array<std::vector<double>, 3> &grids,
-                                            calibParamsT                             &best,
-                                            double                                   &bestFom,
-                                            const calibEvalT                         &eval )
+inline double counterOffload::interpBaseline( int64_t                     tNs,
+                                              const std::vector<int64_t> &offTimes,
+                                              const std::vector<double>  &offFoms )
 {
-    for( int pass = 0; pass < 2; ++pass )
+    if( offTimes.empty() )
     {
-        for( int a = 0; a < 3; ++a )
+        return 0;
+    }
+
+    if( tNs <= offTimes.front() )
+    {
+        return offFoms.front();
+    }
+
+    if( tNs >= offTimes.back() )
+    {
+        return offFoms.back();
+    }
+
+    // offTimes[i - 1] <= tNs < offTimes[i]
+    const size_t i = std::upper_bound( offTimes.begin(), offTimes.end(), tNs ) - offTimes.begin();
+    const double w = double( tNs - offTimes[i - 1] ) / double( offTimes[i] - offTimes[i - 1] );
+
+    return offFoms[i - 1] + w * ( offFoms[i] - offFoms[i - 1] );
+}
+
+inline std::vector<size_t> counterOffload::sweepOrder( size_t n )
+{
+    size_t bits = 0;
+    while( ( size_t( 1 ) << bits ) < n )
+    {
+        ++bits;
+    }
+
+    std::vector<size_t> order;
+
+    for( size_t k = 0; k < ( size_t( 1 ) << bits ); ++k )
+    {
+        size_t r = 0;
+        for( size_t b = 0; b < bits; ++b )
         {
-            const double lo   = grids[a][0];
-            const double hi   = grids[a][1];
-            const double step = ( pass == 0 ) ? grids[a][2] : 0.5 * grids[a][2];
-
-            std::vector<double> xs;
-
-            if( pass == 0 )
+            if( k & ( size_t( 1 ) << b ) )
             {
-                const int n = static_cast<int>( std::floor( ( hi - lo ) / step + 1e-9 ) );
-                for( int i = 0; i <= n; ++i )
-                {
-                    xs.push_back( lo + i * step );
-                }
+                r |= size_t( 1 ) << ( bits - 1 - b );
             }
-            else
+        }
+
+        if( r < n )
+        {
+            order.push_back( r );
+        }
+    }
+
+    return order;
+}
+
+inline counterOffload::quadFitT counterOffload::fitQuadratic( const std::vector<double> &xs,
+                                                              const std::vector<double> &rs )
+{
+    quadFitT     fit;
+    const size_t n = xs.size();
+
+    if( n < 3 || rs.size() != n )
+    {
+        return fit;
+    }
+
+    const auto [xlo, xhi] = std::minmax_element( xs.begin(), xs.end() );
+
+    fit.x0    = 0.5 * ( *xhi + *xlo );
+    fit.scale = 0.5 * ( *xhi - *xlo );
+
+    if( !( fit.scale > 0 ) )
+    {
+        return fit;
+    }
+
+    // Normal equations A c = y, with A_jk = sum u^(j+k) and y_j = sum u^j r.
+    std::array<double, 5> su{ 0, 0, 0, 0, 0 };
+    std::array<double, 3> y{ 0, 0, 0 };
+
+    for( size_t i = 0; i < n; ++i )
+    {
+        const double u  = ( xs[i] - fit.x0 ) / fit.scale;
+        double       uk = 1;
+
+        for( size_t k = 0; k < 5; ++k )
+        {
+            su[k] += uk;
+            if( k < 3 )
             {
-                for( int k = -2; k <= 2; ++k )
-                {
-                    const double x = best[a] + k * step;
-                    if( x >= lo - 1e-9 && x <= hi + 1e-9 )
-                    {
-                        xs.push_back( x );
-                    }
-                }
+                y[k] += uk * rs[i];
+            }
+            uk *= u;
+        }
+    }
+
+    typedef std::array<std::array<double, 3>, 3> mat3T;
+
+    auto det3 = []( const mat3T &m )
+    {
+        return m[0][0] * ( m[1][1] * m[2][2] - m[1][2] * m[2][1] ) - m[0][1] * ( m[1][0] * m[2][2] - m[1][2] * m[2][0] ) +
+               m[0][2] * ( m[1][0] * m[2][1] - m[1][1] * m[2][0] );
+    };
+
+    const mat3T  A{ { { su[0], su[1], su[2] }, { su[1], su[2], su[3] }, { su[2], su[3], su[4] } } };
+    const double det = det3( A );
+
+    if( !( std::fabs( det ) > 1e-9 * su[0] * su[0] * su[0] ) )
+    {
+        return fit;
+    }
+
+    for( size_t j = 0; j < 3; ++j ) // Cramer's rule
+    {
+        mat3T Aj = A;
+        for( size_t k = 0; k < 3; ++k )
+        {
+            Aj[k][j] = y[k];
+        }
+        fit.c[j] = det3( Aj ) / det;
+    }
+
+    fit.ok = true;
+
+    if( n > 3 )
+    {
+        double ss = 0;
+        for( size_t i = 0; i < n; ++i )
+        {
+            const double d = rs[i] - fit( xs[i] );
+            ss += d * d;
+        }
+        fit.resSd = std::sqrt( ss / ( n - 3 ) );
+    }
+
+    return fit;
+}
+
+inline counterOffload::choiceT counterOffload::chooseValue( const std::vector<double> &xs,
+                                                            const std::vector<double> &rs,
+                                                            double                     current,
+                                                            double                     sigma,
+                                                            double                     moveSigma )
+{
+    choiceT      ch;
+    const size_t n = xs.size();
+
+    ch.candidate = current;
+
+    if( n == 0 || rs.size() != n )
+    {
+        return ch;
+    }
+
+    std::vector<size_t> idx( n );
+    std::iota( idx.begin(), idx.end(), 0 );
+    std::sort( idx.begin(), idx.end(), [&xs]( size_t a, size_t b ) { return xs[a] < xs[b]; } );
+
+    const double lo = xs[idx.front()];
+    const double hi = xs[idx.back()];
+
+    ch.outside = ( current < lo - 1e-9 || current > hi + 1e-9 );
+
+    const quadFitT fit = ( n >= 4 ) ? fitQuadratic( xs, rs ) : quadFitT();
+
+    if( fit.ok )
+    {
+        // The lower end, or the vertex of an upward parabola if it is inside.
+        double v = ( fit( hi ) < fit( lo ) ) ? hi : lo;
+
+        if( fit.c[2] > 0 )
+        {
+            const double vertex = fit.x0 - fit.scale * fit.c[1] / ( 2 * fit.c[2] );
+
+            if( vertex >= lo && vertex <= hi )
+            {
+                v = vertex;
+            }
+        }
+
+        ch.candidate  = v;
+        ch.rCandidate = fit( v );
+        ch.rCurrent   = ch.outside ? 0 : fit( current );
+    }
+    else
+    {
+        // 3-point running mean over the points in x order, interpolated linearly at the current value.
+        std::vector<double> sx( n ), sm( n );
+
+        for( size_t k = 0; k < n; ++k )
+        {
+            const size_t j0 = ( k > 0 ) ? k - 1 : 0;
+            const size_t j1 = std::min( k + 1, n - 1 );
+
+            double sum = 0;
+            for( size_t j = j0; j <= j1; ++j )
+            {
+                sum += rs[idx[j]];
             }
 
-            std::vector<double> fs( xs.size() );
+            sx[k] = xs[idx[k]];
+            sm[k] = sum / ( j1 - j0 + 1 );
+        }
 
-            for( size_t i = 0; i < xs.size(); ++i )
+        const size_t kmin = std::min_element( sm.begin(), sm.end() ) - sm.begin();
+
+        ch.candidate  = sx[kmin];
+        ch.rCandidate = sm[kmin];
+
+        if( !ch.outside )
+        {
+            ch.rCurrent = sm[0];
+
+            for( size_t k = 0; k + 1 < n; ++k )
             {
-                calibParamsT p = best;
-                p[a]           = xs[i];
-
-                const int r = eval( p, a, pass, fs[i] );
-
-                if( r < 0 )
+                if( current >= sx[k] && current <= sx[k + 1] )
                 {
-                    return false;
-                }
-
-                if( r == 0 ) // infeasible: skip the larger values, and keep only the evaluated points
-                {
-                    xs.resize( i );
-                    fs.resize( i );
+                    const double w = ( sx[k + 1] > sx[k] ) ? ( current - sx[k] ) / ( sx[k + 1] - sx[k] ) : 0;
+                    ch.rCurrent    = sm[k] + w * ( sm[k + 1] - sm[k] );
                     break;
                 }
-
-                if( fs[i] < bestFom )
-                {
-                    bestFom = fs[i];
-                    best    = p;
-                }
-            }
-
-            if( pass == 0 || xs.size() < 3 )
-            {
-                continue;
-            }
-
-            // Parabolic refinement through the scan minimum and its neighbours.
-            const size_t i = std::min_element( fs.begin(), fs.end() ) - fs.begin();
-
-            if( i == 0 || i + 1 == xs.size() )
-            {
-                continue;
-            }
-
-            const double denom = fs[i - 1] - 2 * fs[i] + fs[i + 1];
-
-            if( !( denom > 0 ) )
-            {
-                continue;
-            }
-
-            calibParamsT p = best;
-            p[a]           = std::clamp( xs[i] + 0.5 * step * ( fs[i - 1] - fs[i + 1] ) / denom, lo, hi );
-
-            double    f;
-            const int r = eval( p, a, pass, f );
-
-            if( r < 0 )
-            {
-                return false;
-            }
-
-            if( r > 0 && f < bestFom )
-            {
-                bestFom = f;
-                best    = p;
             }
         }
     }
 
-    return true;
+    ch.threshold = moveSigma * sigma * std::sqrt( 6.0 / n );
+    ch.move      = ch.outside || ( ch.rCurrent - ch.rCandidate > ch.threshold );
+
+    return ch;
+}
+
+inline int counterOffload::estimatePoints()
+{
+    auto sweepPoints = [this]( const std::vector<double> &g )
+    {
+        const int n = static_cast<int>( std::floor( ( g[1] - g[0] ) / g[2] + 1e-9 ) ) + 1;
+        return n + ( n - 1 ) / m_baselineEvery + 1; // points, the baselines within, and the closing baseline
+    };
+
+    const int startGain = sweepPoints( m_startGridUs ) + sweepPoints( m_gainGrid );
+
+    return ( 2 * m_replicates + 1 ) + startGain + sweepPoints( m_durationGridUs ) + ( m_rounds - 1 ) * startGain +
+           2 * m_confirmPairs;
 }
 
 inline counterOffload::calibParamsT counterOffload::calibParams()
@@ -1649,9 +2021,9 @@ inline void counterOffload::setCalibParams( const calibParamsT &p )
 inline const char *counterOffload::calibStageName( int stage )
 {
     static const char *names[] = {
-        "off", "initial", "start", "duration", "gain", "refine start", "refine duration", "refine gain", "clipped" };
+        "off", "initial", "start", "duration", "gain", "confirm", "clipped", "fit start", "fit duration", "fit gain" };
 
-    return ( stage >= 0 && stage <= m_clippedStage ) ? names[stage] : "unknown";
+    return ( stage >= stageOff && stage <= stageFitGain ) ? names[stage] : "unknown";
 }
 
 inline bool counterOffload::gridValid( const std::vector<double> &grid, double lo, double hi )
@@ -1724,6 +2096,7 @@ inline void counterOffload::calibThreadExec()
 inline void counterOffload::runCalibration()
 {
     const calibParamsT original = calibParams();
+    constexpr double   none     = std::numeric_limits<double>::max(); // no ratio measured yet
 
     double originalLeak;
     { //mutex scope
@@ -1735,83 +2108,124 @@ inline void counterOffload::runCalibration()
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
         m_calibPoint     = 0;
-        m_calibStage     = 0;
+        m_calibStage     = stageOff;
         m_calibBest      = original;
-        m_calibBestRatio = std::numeric_limits<double>::max(); // until a point is evaluated without clipping
+        m_calibBestRatio = none;
+        m_calibSigma     = 0;
+        m_confirmRatio   = 0;
+        m_confirmStd     = 0;
     }
 
-    m_evalCount = 0;
+    m_offTimes.clear();
+    m_offFoms.clear();
+    m_rows.clear();
+    m_noise      = noiseT();
+    m_lastWasOff = false;
 
-    calibParamsT best      = original;
-    double       bestRatio = std::numeric_limits<double>::max();
+    const int    points  = estimatePoints();
+    const double minutes = points * ( m_settleS + 0.5 * m_nAverage ) / 60;
 
-    bool ok = setupBand() && openCsv() && measureBaseline( original );
+    log<text_log>( "calibration: about " + std::to_string( points ) + " measurements, " +
+                       std::to_string( minutes ) + " min",
+                   ( minutes > m_maxRunMin ) ? logPrio::LOG_WARNING : logPrio::LOG_INFO );
 
-    if( ok )
+    calibParamsT        cur      = original;
+    double              curRatio = none;
+    double              confirm  = none;
+    double              confirmSe = 0;
+    std::vector<double> rs;
+
+    // Noise estimate from replicates of the starting point.
+    bool ok = setupBand() && openCsv() && replicate( original, stageInitial, m_replicates, rs );
+
+    if( ok && !rs.empty() )
     {
-        double    ratio;
-        const int r = evaluate( original, 1, ratio );
+        const double mean = std::accumulate( rs.begin(), rs.end(), 0.0 ) / rs.size();
+        double       ss   = 0;
 
-        ok = ( r >= 0 );
-
-        if( r > 0 )
+        for( double r : rs )
         {
-            bestRatio = ratio;
+            ss += ( r - mean ) * ( r - mean );
+        }
+
+        if( rs.size() > 1 )
+        {
+            m_noise.add( std::sqrt( ss / ( rs.size() - 1 ) ), static_cast<int>( rs.size() ) - 1 );
+        }
+
+        curRatio = mean;
+
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_calibBestRatio = curRatio;
+        m_calibSigma     = m_noise.sigma( m_sigmaFloor );
+    }
+
+    // Sweeps: start, gain, then duration in the first round; start and gain in later rounds.
+    for( int round = 0; ok && round < m_rounds; ++round )
+    {
+        const std::vector<int> axes = ( round == 0 ) ? std::vector<int>{ 0, 2, 1 } : std::vector<int>{ 0, 2 };
+
+        for( size_t k = 0; ok && k < axes.size(); ++k )
+        {
+            ok = sweep( axes[k], cur, curRatio );
         }
     }
 
+    // Confirm the chosen parameters.
     if( ok )
     {
-        ok = coordinateScan( { m_startGridUs, m_durationGridUs, m_gainGrid },
-                             best,
-                             bestRatio,
-                             [this]( const calibParamsT &p, int axis, int pass, double &ratio )
-                             {
-                                 return evaluate( p, 2 + axis + 3 * pass, ratio );
-                             } );
+        ok = replicate( cur, stageConfirm, m_confirmPairs, rs );
     }
 
-    const bool keepBest = ok || bestRatio < 1; // an aborted run still keeps an improvement
+    if( ok && !rs.empty() )
+    {
+        confirm = std::accumulate( rs.begin(), rs.end(), 0.0 ) / rs.size();
+
+        double ss = 0;
+        for( double r : rs )
+        {
+            ss += ( r - confirm ) * ( r - confirm );
+        }
+
+        confirmSe = ( rs.size() > 1 ) ? std::sqrt( ss / ( rs.size() - 1 ) / rs.size() ) : 0;
+
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_confirmRatio = confirm;
+        m_confirmStd   = confirmSe;
+    }
+
+    flushRows(); // anything held when a run aborts
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
         m_bandValid = false;
-
-        if( keepBest )
-        {
-            m_calibBest      = best;
-            m_calibBestRatio = bestRatio;
-        }
     }
 
-    if( ok )
-    {
-        setCalibParams( best );
+    const std::string params = "rampStartUs=" + std::to_string( cur[0] ) + " rampDurationUs=" +
+                               std::to_string( cur[1] ) + " gain=" + std::to_string( cur[2] );
 
-        log<text_log>( "calibration complete, applied rampStartUs=" + std::to_string( best[0] ) +
-                           " rampDurationUs=" + std::to_string( best[1] ) + " gain=" + std::to_string( best[2] ) +
-                           " ratio=" + std::to_string( bestRatio ),
+    if( ok && confirm < 1 )
+    {
+        setCalibParams( cur );
+
+        log<text_log>( "calibration complete, applied " + params + " confirmed ratio=" + std::to_string( confirm ) +
+                           " +/- " + std::to_string( confirmSe ),
                        logPrio::LOG_INFO );
-
-        if( bestRatio >= 1 )
-        {
-            log<text_log>( "calibration found no improvement over the gain-0 baseline", logPrio::LOG_WARNING );
-        }
     }
-    else if( keepBest )
+    else if( !ok && curRatio < 1 ) // an aborted run still keeps an improvement
     {
-        setCalibParams( best );
+        setCalibParams( cur );
 
-        log<text_log>( "calibration aborted, applied the best so far: rampStartUs=" + std::to_string( best[0] ) +
-                           " rampDurationUs=" + std::to_string( best[1] ) + " gain=" + std::to_string( best[2] ) +
-                           " ratio=" + std::to_string( bestRatio ),
+        log<text_log>( "calibration aborted, applied the parameters chosen so far: " + params +
+                           " predicted ratio=" + std::to_string( curRatio ),
                        logPrio::LOG_WARNING );
     }
     else
     {
         setCalibParams( original );
 
-        log<text_log>( "calibration aborted, restored rampStartUs=" + std::to_string( original[0] ) +
+        log<text_log>( std::string( ok ? "calibration found no confirmed improvement" : "calibration aborted" ) +
+                           ", restored rampStartUs=" + std::to_string( original[0] ) +
                            " rampDurationUs=" + std::to_string( original[1] ) +
                            " gain=" + std::to_string( original[2] ),
                        logPrio::LOG_WARNING );
@@ -1908,7 +2322,7 @@ inline bool counterOffload::openCsv()
     }
 
     m_csv << "time,stage,rampStartUs,rampDurationUs,gain,offloadHz,numModes,halfWidthHz,nAverage,fom,fomStd,fomOff,"
-             "ratio\n";
+             "ratio,ratioInterp,fitCurrent,fitCandidate,threshold,moved,sigma\n";
 
     log<text_log>( "calibration started at " + std::to_string( m_bandCenterHz ) + " Hz over " +
                        std::to_string( m_bandModes ) + " modes, writing " + path,
@@ -2013,24 +2427,27 @@ inline bool counterOffload::measureBaseline( const calibParamsT &p )
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
-        m_fomOff = fom;
+        m_fomOff     = fom;
+        m_calibStage = stageOff;
     }
 
-    writeCsv( 0, off, fom, fomStd );
+    addRow( stageOff, off, fom, fomStd );
+
+    m_offTimes.push_back( m_rows.back().tNs );
+    m_offFoms.push_back( fom );
+    m_lastWasOff = true;
 
     return true;
 }
 
-inline int counterOffload::evaluate( const calibParamsT &p, int stage, double &ratio )
+inline bool counterOffload::ensureBaseline( const calibParamsT &p )
 {
-    if( m_evalCount > 0 && m_evalCount % m_baselineEvery == 0 && !measureBaseline( p ) )
-    {
-        return -1;
-    }
+    return m_lastWasOff || measureBaseline( p );
+}
 
-    ++m_evalCount;
-
-    double    fom, fomStd;
+inline int counterOffload::measurePoint( const calibParamsT &p, int stage, double &fom )
+{
+    double    fomStd;
     const int m = measure( p, fom, fomStd );
 
     if( m < 0 )
@@ -2038,35 +2455,28 @@ inline int counterOffload::evaluate( const calibParamsT &p, int stage, double &r
         return -1;
     }
 
-    if( m == 0 )
-    {
-        { //mutex scope
-            std::lock_guard<std::mutex> lock( m_calibMutex );
-            m_calibStage = m_clippedStage;
-            ++m_calibPoint;
-        }
+    m_lastWasOff = false;
 
-        writeCsv( m_clippedStage, p, 0, 0 );
+    addRow( ( m > 0 ) ? stage : int( stageClipped ), p, fom, fomStd );
 
-        return 0;
-    }
+    const double ratio = fom / m_fomOff;
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
-        ratio        = fom / m_fomOff;
-        m_calibStage = stage;
+        m_calibStage = ( m > 0 ) ? stage : int( stageClipped );
         ++m_calibPoint;
-        m_lastFom   = fom;
-        m_lastRatio = ratio;
 
-        if( ratio < m_calibBestRatio )
+        if( m > 0 )
         {
-            m_calibBest      = p;
-            m_calibBestRatio = ratio;
+            m_lastFom   = fom;
+            m_lastRatio = ratio;
         }
     }
 
-    writeCsv( stage, p, fom, fomStd );
+    if( m == 0 )
+    {
+        return 0;
+    }
 
     if( ratio > m_abortRatio )
     {
@@ -2078,26 +2488,244 @@ inline int counterOffload::evaluate( const calibParamsT &p, int stage, double &r
     return 1;
 }
 
-inline void counterOffload::writeCsv( int stage, const calibParamsT &p, double fom, double fomStd )
+inline bool counterOffload::replicate( const calibParamsT &p, int stage, int n, std::vector<double> &ratios )
 {
-    timespec ts;
-    clock_gettime( CLOCK_REALTIME, &ts );
+    ratios.clear();
 
-    std::lock_guard<std::mutex> lock( m_calibMutex );
-
-    m_csv << std::fixed << ts.tv_sec << "." << std::setw( 9 ) << std::setfill( '0' ) << ts.tv_nsec
-          << std::setfill( ' ' ) << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << "," << p[1]
-          << "," << p[2] << "," << m_bandCenterHz << "," << m_bandModes << "," << m_bandHalfWidthHz << "," << m_nAverage;
-
-    if( stage == m_clippedStage )
+    if( !ensureBaseline( p ) )
     {
-        m_csv << ",,," << m_fomOff << ",\n";
+        return false;
+    }
+
+    std::vector<size_t> rows;
+
+    for( int i = 0; i < n; ++i )
+    {
+        double    fom;
+        const int r = measurePoint( p, stage, fom );
+
+        if( r < 0 )
+        {
+            return false;
+        }
+
+        if( r > 0 )
+        {
+            rows.push_back( m_rows.size() - 1 );
+        }
+
+        if( !measureBaseline( p ) )
+        {
+            return false;
+        }
+    }
+
+    for( size_t k : rows )
+    {
+        ratios.push_back( m_rows[k].fom / interpBaseline( m_rows[k].tNs, m_offTimes, m_offFoms ) );
+    }
+
+    flushRows();
+
+    return true;
+}
+
+inline bool counterOffload::sweep( int axis, calibParamsT &cur, double &curRatio )
+{
+    static const char *axisName[] = { "rampStartUs", "rampDurationUs", "gain" };
+
+    const std::vector<double> &grid  = ( axis == 0 ) ? m_startGridUs : ( axis == 1 ) ? m_durationGridUs : m_gainGrid;
+    const int                  stage = stageStart + axis;
+    const size_t               n     = static_cast<size_t>( std::floor( ( grid[1] - grid[0] ) / grid[2] + 1e-9 ) ) + 1;
+
+    if( !ensureBaseline( cur ) )
+    {
+        return false;
+    }
+
+    std::vector<double> xs;
+    std::vector<size_t> rows;
+
+    double clipAt = std::numeric_limits<double>::max(); // smallest value that clipped
+    int    since  = 0;                                  // points since the latest baseline
+
+    for( size_t i : sweepOrder( n ) )
+    {
+        const double x = grid[0] + i * grid[2];
+
+        if( x >= clipAt - 1e-9 )
+        {
+            continue;
+        }
+
+        if( since == m_baselineEvery )
+        {
+            if( !measureBaseline( cur ) )
+            {
+                return false;
+            }
+
+            since = 0;
+        }
+
+        calibParamsT p = cur;
+        p[axis]        = x;
+
+        double    fom;
+        const int r = measurePoint( p, stage, fom );
+
+        ++since;
+
+        if( r < 0 )
+        {
+            return false;
+        }
+
+        if( r == 0 )
+        {
+            clipAt = std::min( clipAt, x );
+            continue;
+        }
+
+        xs.push_back( x );
+        rows.push_back( m_rows.size() - 1 );
+    }
+
+    if( !measureBaseline( cur ) )
+    {
+        return false;
+    }
+
+    // Ratios to the interpolated baseline, leaving out values at or above one that clipped.
+    std::vector<double> fx, fr;
+
+    for( size_t k = 0; k < xs.size(); ++k )
+    {
+        if( xs[k] < clipAt - 1e-9 )
+        {
+            fx.push_back( xs[k] );
+            fr.push_back( m_rows[rows[k]].fom / interpBaseline( m_rows[rows[k]].tNs, m_offTimes, m_offFoms ) );
+        }
+    }
+
+    const quadFitT fit = ( fx.size() >= 4 ) ? fitQuadratic( fx, fr ) : quadFitT();
+
+    if( fit.ok )
+    {
+        m_noise.add( fit.resSd, static_cast<int>( fx.size() ) - 3 );
+    }
+
+    const double  sigma = m_noise.sigma( m_sigmaFloor );
+    const choiceT ch    = chooseValue( fx, fr, cur[axis], sigma, m_moveSigma );
+
+    flushRows();
+
+    calibParamsT pc = cur;
+    pc[axis]        = ch.candidate;
+
+    writeFitRow( stageFitStart + axis, pc, ch, sigma );
+
+    if( fx.empty() )
+    {
+        log<text_log>( std::string( "calibration: no usable points for " ) + axisName[axis] + ", kept " +
+                           std::to_string( cur[axis] ),
+                       logPrio::LOG_WARNING );
     }
     else
     {
-        m_csv << "," << fom << "," << fomStd << "," << m_fomOff << "," << fom / m_fomOff << "\n";
+        log<text_log>( std::string( "calibration: " ) + axisName[axis] + " candidate " +
+                           std::to_string( ch.candidate ) + " (ratio " + std::to_string( ch.rCandidate ) + "), current " +
+                           std::to_string( cur[axis] ) +
+                           ( ch.outside ? " outside the sweep" : " (ratio " + std::to_string( ch.rCurrent ) + ")" ) +
+                           ", threshold " + std::to_string( ch.threshold ) + ": " + ( ch.move ? "moved" : "kept" ),
+                       logPrio::LOG_INFO );
+
+        if( ch.move )
+        {
+            cur[axis] = ch.candidate;
+            curRatio  = ch.rCandidate;
+        }
+        else
+        {
+            curRatio = ch.rCurrent;
+        }
     }
 
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_calibStage     = stageFitStart + axis;
+        m_calibBest      = cur;
+        m_calibBestRatio = curRatio;
+        m_calibSigma     = sigma;
+    }
+
+    return true;
+}
+
+inline void counterOffload::addRow( int stage, const calibParamsT &p, double fom, double fomStd )
+{
+    calibRowT row;
+
+    clock_gettime( CLOCK_REALTIME, &row.wall );
+    row.tNs    = synco::monotonicNs();
+    row.stage  = stage;
+    row.p      = p;
+    row.fom    = fom;
+    row.fomStd = fomStd;
+    row.fomOff = m_fomOff;
+
+    m_rows.push_back( row );
+}
+
+inline void counterOffload::flushRows()
+{
+    std::lock_guard<std::mutex> lock( m_calibMutex );
+
+    for( const calibRowT &row : m_rows )
+    {
+        writeCsvPrefix( row.wall, row.stage, row.p );
+
+        if( row.stage == stageClipped )
+        {
+            m_csv << ",,," << row.fomOff << ",,";
+        }
+        else
+        {
+            m_csv << "," << row.fom << "," << row.fomStd << "," << row.fomOff << "," << row.fom / row.fomOff << ","
+                  << row.fom / interpBaseline( row.tNs, m_offTimes, m_offFoms );
+        }
+
+        m_csv << ",,,,,\n";
+    }
+
+    m_rows.clear();
+    m_csv.flush();
+}
+
+inline void counterOffload::writeCsvPrefix( const timespec &wall, int stage, const calibParamsT &p )
+{
+    m_csv << std::fixed << wall.tv_sec << "." << std::setw( 9 ) << std::setfill( '0' ) << wall.tv_nsec
+          << std::setfill( ' ' ) << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << "," << p[1]
+          << "," << p[2] << "," << m_bandCenterHz << "," << m_bandModes << "," << m_bandHalfWidthHz << "," << m_nAverage;
+}
+
+inline void counterOffload::writeFitRow( int stage, const calibParamsT &p, const choiceT &ch, double sigma )
+{
+    timespec wall;
+    clock_gettime( CLOCK_REALTIME, &wall );
+
+    std::lock_guard<std::mutex> lock( m_calibMutex );
+
+    writeCsvPrefix( wall, stage, p );
+
+    m_csv << ",,,,,,";
+
+    if( !ch.outside )
+    {
+        m_csv << ch.rCurrent;
+    }
+
+    m_csv << "," << ch.rCandidate << "," << ch.threshold << "," << int( ch.move ) << "," << sigma << "\n";
     m_csv.flush();
 }
 
@@ -2466,6 +3094,36 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_gainGrid )( const pcf::IndiProper
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_gainGrid, ipRecv );
     return setCalibGrid( m_indiP_gainGrid, ipRecv, m_gainGrid, 0, 2 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_replicates )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_replicates, ipRecv );
+    return setCalibNumber( m_indiP_replicates, ipRecv, m_replicates, 2, 20 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_confirmPairs )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_confirmPairs, ipRecv );
+    return setCalibNumber( m_indiP_confirmPairs, ipRecv, m_confirmPairs, 1, 20 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_moveSigma )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_moveSigma, ipRecv );
+    return setCalibNumber( m_indiP_moveSigma, ipRecv, m_moveSigma, 0, 10 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_sigmaFloor )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_sigmaFloor, ipRecv );
+    return setCalibNumber( m_indiP_sigmaFloor, ipRecv, m_sigmaFloor, 0, 1 );
+}
+
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_rounds )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_rounds, ipRecv );
+    return setCalibNumber( m_indiP_rounds, ipRecv, m_rounds, 1, 5 );
 }
 
 INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_offloadFps )( const pcf::IndiProperty &ipRecv )

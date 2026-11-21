@@ -8,7 +8,9 @@
 
 #include "../counterOffload.hpp"
 
+#include <algorithm>
 #include <limits>
+#include <numeric>
 
 using namespace MagAOX::app;
 
@@ -636,114 +638,226 @@ TEST_CASE( "counterOffload integrates the PSD band", "[counterOffload]" )
     }
 }
 
-/// Verify the coordinate scan on a synthetic objective.
+/// Verify the baseline interpolation used for the ratios.
 /**
  * \ingroup counterOffload_unit_test
  */
-TEST_CASE( "counterOffload coordinate scan finds the minimum", "[counterOffload]" )
+TEST_CASE( "counterOffload interpolates the baseline in time", "[counterOffload]" )
 {
     // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
-    counterOffload::coordinateScan({},best,bestFom,nullptr);
+    counterOffload::interpBaseline(0,{},{});
     #endif
     // clang-format on
 
-    const std::array<std::vector<double>, 3> grids{
-        std::vector<double>{ 0, 400, 25 }, std::vector<double>{ 100, 600, 50 }, std::vector<double>{ 0.5, 1.5, 0.1 } };
+    const std::vector<int64_t> t{ 10, 20, 40 };
+    const std::vector<double>  f{ 2, 4, 1 };
 
-    // Separable quadratic with its minimum between grid points.
-    auto f = []( const counterOffload::calibParamsT &p )
+    REQUIRE( counterOffload::interpBaseline( 15, t, f ) == Approx( 3 ) );
+    REQUIRE( counterOffload::interpBaseline( 30, t, f ) == Approx( 2.5 ) );
+    REQUIRE( counterOffload::interpBaseline( 20, t, f ) == Approx( 4 ) );
+    REQUIRE( counterOffload::interpBaseline( 0, t, f ) == 2 );  // constant before the first
+    REQUIRE( counterOffload::interpBaseline( 99, t, f ) == 1 ); // and after the last
+    REQUIRE( counterOffload::interpBaseline( 5, {}, {} ) == 0 );
+}
+
+/// Verify the sweep order spreads neighbouring values in time.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload sweep order", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::sweepOrder(0);
+    #endif
+    // clang-format on
+
+    REQUIRE( counterOffload::sweepOrder( 7 ) == std::vector<size_t>{ 0, 4, 2, 6, 1, 5, 3 } );
+    REQUIRE( counterOffload::sweepOrder( 1 ) == std::vector<size_t>{ 0 } );
+    REQUIRE( counterOffload::sweepOrder( 0 ).empty() );
+
+    for( size_t n : { 2, 5, 8, 9, 15 } )
     {
-        return 0.2 + std::pow( ( p[0] - 210 ) / 100, 2 ) + std::pow( ( p[1] - 330 ) / 200, 2 ) +
-               std::pow( ( p[2] - 1.12 ) / 0.5, 2 );
+        std::vector<size_t> o = counterOffload::sweepOrder( n );
+        std::sort( o.begin(), o.end() );
+
+        std::vector<size_t> all( n );
+        std::iota( all.begin(), all.end(), 0 );
+
+        REQUIRE( o == all ); // a permutation
+    }
+}
+
+/// Verify the quadratic fit.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload quadratic fit", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::fitQuadratic({},{});
+    #endif
+    // clang-format on
+
+    auto q = []( double x )
+    {
+        return 0.4 + 0.002 * ( x - 60 ) * ( x - 60 ) / 100;
     };
 
-    counterOffload::calibParamsT best{ 120, 330, 1 };
-    double                       bestFom = f( best );
-    int                          nEval   = 0;
-
-    SECTION( "the scan converges near the true minimum" )
+    std::vector<double> xs{ 0, 25, 50, 75, 100, 125, 150 }, rs;
+    for( double x : xs )
     {
-        REQUIRE( counterOffload::coordinateScan( grids,
-                                                 best,
-                                                 bestFom,
-                                                 [&]( const counterOffload::calibParamsT &p, int, int, double &r )
-                                                 {
-                                                     ++nEval;
-                                                     r = f( p );
-                                                     return 1;
-                                                 } ) );
-
-        REQUIRE( best[0] == Approx( 210 ).margin( 2 ) );
-        REQUIRE( best[1] == Approx( 330 ).margin( 5 ) );
-        REQUIRE( best[2] == Approx( 1.12 ).margin( 0.01 ) );
-        REQUIRE( bestFom == Approx( f( best ) ) );
-        REQUIRE( nEval < 70 );
+        rs.push_back( q( x ) );
     }
 
-    SECTION( "the scan stays within the grid limits" )
+    SECTION( "an exact quadratic is recovered with no residual" )
     {
-        auto edge = []( const counterOffload::calibParamsT &p )
+        const counterOffload::quadFitT fit = counterOffload::fitQuadratic( xs, rs );
+
+        REQUIRE( fit.ok );
+        REQUIRE( fit( 60 ) == Approx( 0.4 ) );
+        REQUIRE( fit( 137 ) == Approx( q( 137 ) ) );
+        REQUIRE( fit.resSd == Approx( 0 ).margin( 1e-9 ) );
+    }
+
+    SECTION( "the residual standard deviation has n - 3 degrees of freedom" )
+    {
+        rs[3] += 0.1; // one outlier of 0.1
+
+        const counterOffload::quadFitT fit = counterOffload::fitQuadratic( xs, rs );
+
+        REQUIRE( fit.ok );
+        REQUIRE( fit.resSd > 0.03 );
+        REQUIRE( fit.resSd < 0.1 );
+    }
+
+    SECTION( "too few points or a single x value cannot be fitted" )
+    {
+        REQUIRE_FALSE( counterOffload::fitQuadratic( { 0, 1 }, { 1, 2 } ).ok );
+        REQUIRE_FALSE( counterOffload::fitQuadratic( { 1, 1, 1 }, { 1, 2, 3 } ).ok );
+    }
+}
+
+/// Verify the decision for one parameter at the end of a sweep.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload chooses parameter values beyond the noise", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::chooseValue({},{},0,0,0);
+    #endif
+    // clang-format on
+
+    const std::vector<double> xs{ 0, 25, 50, 75, 100, 125, 150 };
+
+    auto ratios = [&xs]( double vertex, double curvature )
+    {
+        std::vector<double> rs;
+        for( double x : xs )
         {
-            return -p[0] - p[1] - p[2];
-        }; // minimum at the maxima
+            rs.push_back( 0.4 + curvature * ( x - vertex ) * ( x - vertex ) );
+        }
+        return rs;
+    };
 
-        bestFom = edge( best );
-        REQUIRE( counterOffload::coordinateScan( grids,
-                                                 best,
-                                                 bestFom,
-                                                 [&]( const counterOffload::calibParamsT &p, int, int, double &r )
-                                                 {
-                                                     REQUIRE( p[0] <= 400 + 1e-9 );
-                                                     REQUIRE( p[2] <= 1.5 + 1e-9 );
-                                                     r = edge( p );
-                                                     return 1;
-                                                 } ) );
-        REQUIRE( best[0] == Approx( 400 ) );
-        REQUIRE( best[1] == Approx( 600 ) );
-        REQUIRE( best[2] == Approx( 1.5 ) );
+    SECTION( "the vertex inside the sweep is the candidate, and a large improvement moves" )
+    {
+        const counterOffload::choiceT ch = counterOffload::chooseValue( xs, ratios( 60, 2e-5 ), 150, 0.05, 1.5 );
+
+        REQUIRE( ch.candidate == Approx( 60 ) );
+        REQUIRE( ch.rCandidate == Approx( 0.4 ) );
+        REQUIRE( ch.rCurrent == Approx( 0.4 + 2e-5 * 90 * 90 ) );
+        REQUIRE( ch.threshold == Approx( 1.5 * 0.05 * std::sqrt( 6.0 / 7 ) ) );
+        REQUIRE( ch.move );
     }
 
-    SECTION( "an evaluator abort stops the scan and keeps the best so far" )
+    SECTION( "an improvement within the noise does not move" )
     {
-        REQUIRE_FALSE( counterOffload::coordinateScan( grids,
-                                                       best,
-                                                       bestFom,
-                                                       [&]( const counterOffload::calibParamsT &p, int, int, double &r )
-                                                       {
-                                                           r = f( p );
-                                                           return ++nEval < 5 ? 1 : -1;
-                                                       } ) );
-        REQUIRE( nEval == 5 );
-        REQUIRE( bestFom == Approx( f( best ) ) );
+        const counterOffload::choiceT ch = counterOffload::chooseValue( xs, ratios( 60, 2e-5 ), 25, 0.05, 1.5 );
+
+        REQUIRE( ch.candidate == Approx( 60 ) );
+        REQUIRE( ch.rCurrent - ch.rCandidate < ch.threshold );
+        REQUIRE_FALSE( ch.move );
     }
 
-    SECTION( "an infeasible point ends its sweep and the scan continues" )
+    SECTION( "a minimum beyond the sweep gives the lower end" )
     {
-        double maxGainTried = 0;
+        REQUIRE( counterOffload::chooseValue( xs, ratios( -100, 2e-5 ), 150, 0.01, 1.5 ).candidate == Approx( 0 ) );
+        REQUIRE( counterOffload::chooseValue( xs, ratios( 60, -2e-5 ), 60, 0.01, 1.5 ).candidate == Approx( 150 ) );
+    }
 
-        REQUIRE( counterOffload::coordinateScan( grids,
-                                                 best,
-                                                 bestFom,
-                                                 [&]( const counterOffload::calibParamsT &p, int, int, double &r )
-                                                 {
-                                                     maxGainTried = std::max( maxGainTried, p[2] );
+    SECTION( "a current value outside the sweep always moves" )
+    {
+        const counterOffload::choiceT ch = counterOffload::chooseValue( xs, ratios( 60, 2e-5 ), 400, 10, 1.5 );
 
-                                                     if( p[2] > 1.05 ) // e.g. the command clips above this gain
-                                                     {
-                                                         return 0;
-                                                     }
+        REQUIRE( ch.outside );
+        REQUIRE( ch.move );
+    }
 
-                                                     r = f( p );
-                                                     return 1;
-                                                 } ) );
+    SECTION( "with fewer than 4 points a running mean is used" )
+    {
+        const counterOffload::choiceT ch =
+            counterOffload::chooseValue( { 0.3, 0.4, 0.5 }, { 0.7, 0.5, 0.45 }, 0.3, 0.01, 1.5 );
 
-        REQUIRE( maxGainTried == Approx( 1.1 ) ); // the first infeasible gain, and nothing above it
-        REQUIRE( best[2] <= 1.05 );
-        REQUIRE( best[2] == Approx( 1.05 ).margin( 0.01 ) );
-        REQUIRE( best[0] == Approx( 210 ).margin( 2 ) );
-        REQUIRE( bestFom == Approx( f( best ) ) );
-        REQUIRE( std::string( counterOffload::calibStageName( counterOffload::m_clippedStage ) ) == "clipped" );
+        REQUIRE( ch.candidate == Approx( 0.5 ) );
+        REQUIRE( ch.rCandidate == Approx( 0.475 ) );
+        REQUIRE( ch.rCurrent == Approx( 0.6 ) );
+        REQUIRE( ch.move );
+    }
+
+    SECTION( "with no points nothing moves" )
+    {
+        const counterOffload::choiceT ch = counterOffload::chooseValue( {}, {}, 25, 0.05, 1.5 );
+
+        REQUIRE( ch.candidate == 25 );
+        REQUIRE_FALSE( ch.move );
+    }
+}
+
+/// Verify the pooled noise estimate and the run length.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload noise estimate and run length", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::estimatePoints();
+    counterOffload::calibStageName(0);
+    #endif
+    // clang-format on
+
+    SECTION( "standard deviations pool by degrees of freedom, with a floor" )
+    {
+        counterOffload::noiseT noise;
+        REQUIRE( noise.sigma( 0.02 ) == 0.02 );
+
+        noise.add( 0.06, 2 );
+        noise.add( 0.03, 4 );
+        REQUIRE( noise.sigma( 0.02 ) == Approx( std::sqrt( ( 0.0036 * 2 + 0.0009 * 4 ) / 6 ) ) );
+        REQUIRE( noise.sigma( 0.1 ) == 0.1 );
+
+        noise.add( 1, 0 ); // no degrees of freedom adds nothing
+        REQUIRE( noise.dof == 6 );
+    }
+
+    SECTION( "a run with the defaults takes well under 20 minutes" )
+    {
+        counterOffload_test app;
+
+        REQUIRE( app.estimatePoints() == 58 );
+        REQUIRE( app.estimatePoints() * ( app.m_settleS + 0.5 * app.m_nAverage ) / 60 < 20 );
+    }
+
+    SECTION( "stage names" )
+    {
+        REQUIRE( std::string( counterOffload::calibStageName( counterOffload::stageClipped ) ) == "clipped" );
+        REQUIRE( std::string( counterOffload::calibStageName( counterOffload::stageFitGain ) ) == "fit gain" );
+        REQUIRE( std::string( counterOffload::calibStageName( 99 ) ) == "unknown" );
     }
 }
 
