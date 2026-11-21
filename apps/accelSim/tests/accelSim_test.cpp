@@ -238,6 +238,82 @@ TEST_CASE( "accelSim optical disturbance reduces ACC/WFS coherence", "[accelSim]
         }
 }
 
+/** \brief The ACC-only mode adds a 50 Hz acceleration PSD peak but nothing to optical or WFS pointing.
+ * Both models change the runtime optical controls identically; optical values must stay bitwise equal throughout.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim ACC-only mode", "[accelSim][model][accel-only]" )
+{
+    constexpr size_t length = 8000, segments = 8; // Hann-windowed 1-Hz bins at 8 kHz, resolving 50 Hz from 54 Hz.
+    parameters       config;
+    config.m_fps = 8000;
+    model baseline, accelOnly;
+    baseline.configure( config, referenceModes( 123, { .8 } ) );
+    config.m_accelOnly = true;
+    accelOnly.configure( config, referenceModes( 123, { .8 } ) );
+    const double factor = accelerationFactor( 50, config.m_leverArm );
+    // Hann-windowed X power of {baseline, ACC-only} acceleration at 40, 50, 60 and 120 Hz and optical pointing at 50
+    // Hz.
+    const std::array<double, 4>          frequencies{ 40, 50, 60, 120 };
+    std::array<std::array<double, 4>, 2> accel{};
+    std::array<double, 2>                optical{};
+    std::vector<std::array<sample, 2>>   record( length );
+    for( size_t segment = 0; segment < segments; ++segment )
+    {
+        for( size_t n = 0; n < length; ++n )
+        {
+            const size_t frame = segment * length + n;
+            for( model *simulation : { &baseline, &accelOnly } ) // Runtime controls, as the acquisition thread does.
+            {
+                simulation->m_config.m_commonCoupling = frame < 16000 ? 1 : frame < 32000 ? .3 : frame < 48000 ? 0 : 1;
+                simulation->m_config.m_opticalAmplitude = frame >= 40000 && frame < 56000 ? .5 : 0;
+            }
+            record[n]                     = { baseline.step(), accelOnly.step() };
+            const auto &[expected, value] = record[n];
+            REQUIRE( value.m_pointing == expected.m_pointing );
+            REQUIRE( value.m_wfsPointing == expected.m_wfsPointing );
+            REQUIRE( value.m_noise == expected.m_noise );
+            for( size_t axis = 0; axis < 2; ++axis ) // The added acceleration is the added mechanical motion's.
+                REQUIRE( value.m_acceleration[axis] - expected.m_acceleration[axis] ==
+                         Approx( factor * ( value.m_physicalPointing[axis] - expected.m_physicalPointing[axis] ) )
+                             .margin( 1e-12 ) );
+        }
+        for( size_t which = 0; which < 2; ++which )
+        {
+            std::array<std::complex<double>, 4> a{};
+            std::complex<double>                o;
+            for( size_t n = 0; n < length; ++n )
+            {
+                const double window = .5 - .5 * std::cos( 2 * pi * n / length );
+                const double phase  = -2 * pi * double( n ) / config.m_fps;
+                for( size_t f = 0; f < frequencies.size(); ++f )
+                    a[f] += std::polar( window, frequencies[f] * phase ) * record[n][which].m_acceleration[0];
+                o += std::polar( window, 50 * phase ) * record[n][which].m_pointing[0];
+            }
+            for( size_t f = 0; f < frequencies.size(); ++f )
+                accel[which][f] += std::norm( a[f] );
+            optical[which] += std::norm( o );
+        }
+    }
+    INFO( "ACC power at 40/50/60/120 Hz: " << accel[0][0] << "/" << accel[0][1] << "/" << accel[0][2] << "/"
+                                           << accel[0][3] << " -> " << accel[1][0] << "/" << accel[1][1] << "/"
+                                           << accel[1][2] << "/" << accel[1][3] );
+    // About 78 times the broadband baseline at 50 Hz and 40-60 times its own 40 and 60 Hz neighbours.
+    REQUIRE( accel[1][1] > 20 * accel[0][1] );
+    REQUIRE( accel[1][1] > 10 * std::max( accel[1][0], accel[1][2] ) );
+    REQUIRE( accel[1][3] == Approx( accel[0][3] ).epsilon( .01 ) ); // Confined to 50 Hz,
+    REQUIRE( optical[1] == optical[0] );                            // with no optical counterpart.
+    config.m_accelOnlyFrequency = 4000;                             // Nyquist at 8 kHz.
+    REQUIRE_THROWS( model().configure( config, referenceModes( 123 ) ) );
+    config.m_accelOnlyFrequency = 0;
+    REQUIRE_THROWS( model().configure( config, referenceModes( 123 ) ) );
+    config.m_accelOnlyFrequency = 50;
+    config.m_accelOnlyAmplitude = -1;
+    REQUIRE_THROWS( model().configure( config, referenceModes( 123 ) ) );
+    config.m_accelOnly = false; // Disabled settings are ignored.
+    REQUIRE_NOTHROW( model().configure( config, referenceModes( 123 ) ) );
+}
+
 /** \brief Known AR coefficients, stable innovation scaling, and stationary covariance invariance.
  * \ingroup accelSim_unit_test
  */
@@ -1364,6 +1440,10 @@ TEST_CASE( "accelSim example configuration", "[accelSim][app]" )
     REQUIRE( app.m_parameters.m_noisePSD == 1e-8 );
     REQUIRE( app.m_parameters.m_seed == 42 );
     REQUIRE( app.m_parameters.m_modeSeed == 123 );
+    REQUIRE( !app.m_parameters.m_accelOnly );
+    REQUIRE( app.m_parameters.m_accelOnlyFrequency == 50 );
+    REQUIRE( app.m_parameters.m_accelOnlyAmplitude == .005 );
+    REQUIRE( app.m_parameters.m_accelOnlySeed == 11 );
     REQUIRE( app.m_syncTimeout == .01 );
     REQUIRE( app.m_maxSlew == .05 );
     REQUIRE( app.m_referenceFps == 0 );
@@ -1383,6 +1463,21 @@ TEST_CASE( "accelSim example configuration", "[accelSim][app]" )
     REQUIRE( app.m_parameters.m_leverArm == 20 );
     REQUIRE( app.m_parameters.m_zero == 2000 );
     REQUIRE( app.m_model.m_noiseSigma == 0 );
+    {
+        std::ofstream file( overrideFile );
+        file << "[sim]\nfps=4000\n[accelOnly]\nenabled=1\nfrequency=2000\namplitude=0.01\nseed=5\n";
+    }
+    app.config.readConfig( overrideFile );
+    REQUIRE( app.loadConfigImpl( app.config ) < 0 ); // At the 4-kHz Nyquist frequency.
+    {
+        std::ofstream file( overrideFile );
+        file << "[sim]\nfps=4000\n[accelOnly]\nenabled=1\nfrequency=50\namplitude=0.01\nseed=5\n";
+    }
+    app.config.readConfig( overrideFile );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.m_parameters.m_accelOnly );
+    REQUIRE( app.m_parameters.m_accelOnlyAmplitude == .01 );
+    REQUIRE( app.m_parameters.m_accelOnlySeed == 5 );
     {
         std::ofstream file( overrideFile );
         file << "[accel]\nnumChannels=3\n";

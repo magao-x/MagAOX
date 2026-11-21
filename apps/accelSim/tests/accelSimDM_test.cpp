@@ -354,6 +354,7 @@ struct dmAppTest : MagAOX::app::accelSim
     using accelSim::m_indiP_dmStatus;
     using accelSim::m_indiP_opticalAmplitude;
     using accelSim::m_indiP_opticalCoupling;
+    using accelSim::m_maxFrequency;
     using accelSim::m_model;
     using accelSim::m_opticalAmplitude;
     using accelSim::m_parameters;
@@ -497,6 +498,52 @@ TEST_CASE( "accelSim optical configuration", "[accelSim][dm-controls]" )
     MagAOX::app::accelSim::loadConfigImpl;
     MagAOX::app::accelSim::newCallBack_m_indiP_opticalCoupling;
     MagAOX::app::accelSim::newCallBack_m_indiP_opticalAmplitude;
+#endif
+    // clang-format on
+}
+
+/** \brief [accelOnly] is disabled by default, parsed when enabled, included in rate validation, and range checked.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim ACC-only configuration", "[accelSim][dm-controls][accel-only]" )
+{
+    dmAppTest defaults;
+    defaults.setupConfig();
+    REQUIRE( defaults.loadConfigImpl( defaults.config ) == 0 );
+    REQUIRE( !defaults.m_parameters.m_accelOnly );
+    const double maxFrequency = defaults.m_maxFrequency;
+
+    dmAppTest configured;
+    configured.setupConfig();
+    configured.config.m_values["sim.fps"]             = "8000";
+    configured.config.m_values["accelOnly.enabled"]   = "1";
+    configured.config.m_values["accelOnly.frequency"] = "1000";
+    configured.config.m_values["accelOnly.amplitude"] = "0.01";
+    configured.config.m_values["accelOnly.seed"]      = "5";
+    REQUIRE( configured.loadConfigImpl( configured.config ) == 0 );
+    REQUIRE( configured.m_parameters.m_accelOnly );
+    REQUIRE( configured.m_parameters.m_accelOnlyFrequency == 1000 );
+    REQUIRE( configured.m_parameters.m_accelOnlyAmplitude == .01 );
+    REQUIRE( configured.m_parameters.m_accelOnlySeed == 5 );
+    REQUIRE( configured.m_maxFrequency == 1000 ); // Above the population's maximum, so it bounds fps requests.
+    REQUIRE( maxFrequency < 1000 );
+    REQUIRE( configured.m_model.m_modes.size() == defaults.m_model.m_modes.size() ); // Existing modes unchanged.
+
+    for( const auto &[key, text] : { std::pair{ "accelOnly.frequency", "0" },
+                                     { "accelOnly.frequency", "4000" },
+                                     { "accelOnly.amplitude", "-1" } } )
+    {
+        dmAppTest invalid;
+        invalid.setupConfig();
+        invalid.config.m_values["sim.fps"]           = "8000";
+        invalid.config.m_values["accelOnly.enabled"] = "1";
+        invalid.config.m_values[key]                 = text;
+        REQUIRE( invalid.loadConfigImpl( invalid.config ) < 0 );
+    }
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::loadConfigImpl;
+    MagAOX::app::accelSimDetail::model::configure;
 #endif
     // clang-format on
 }
