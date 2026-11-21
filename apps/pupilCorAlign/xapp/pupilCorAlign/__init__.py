@@ -283,7 +283,7 @@ class pupilCorAlign(XDevice):
         current_name = self.get_current_state('fwpupil.filterName')
         filename = "reference_{:s}_image.fits".format(current_name.replace('-', '_'))
         hp.write_field(im, self.config.calibration.path + filename)
-        self._reference_state_machine.transition_to_idle()
+        #self._reference_state_machine.transition_to_idle()
 
     def handle_fwlyot_ref(self):
         '''
@@ -298,21 +298,20 @@ class pupilCorAlign(XDevice):
         hp.write_field(im, self.config.calibration.path + filename)
 
         print("transition back")
-        self._reference_state_machine.transition_to_idle()
+        #self._reference_state_machine.transition_to_idle()
 
     def handle_centroid_ref(self):
         '''
         '''
         actuator_im = self.measure_actuator()
         filename = "actuator_reference_image.fits"
-        hp.write_field(im, self.config.calibration.path + filename)
-        self._reference_state_machine.transition_to_idle()
+        hp.write_field(actuator_im, self.config.calibration.path + filename)
+        #self._reference_state_machine.transition_to_idle()
 
     def loop(self):
-        '''
-        '''
+        """Run the selected alignment operation and publish the measured mask offsets."""
+        # Dispatch the active mode before publishing its latest measurements.
         self._state_machine.loop()
-        self._reference_state_machine.loop()
         self.update_properties()
 
     def update_properties(self):

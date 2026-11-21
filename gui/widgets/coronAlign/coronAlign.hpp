@@ -1,5 +1,5 @@
 /** \file coronAlign.hpp
- * \brief Coronagraph alignment control widget for coordinated filter-wheel, pico, and PIAA positioning.
+ * \brief Coronagraph control panel for manual positioning and automatic pupil and Lyot mask alignment.
  */
 #ifndef coronAlign_hpp
 #define coronAlign_hpp
@@ -8,6 +8,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <set>
 #include <sstream>
 #include <unistd.h>
 
@@ -25,8 +26,9 @@ namespace xqt
 /// Main coronagraph alignment control panel.
 /** Transport loss disables the full panel. Device/FSM loss invalidates only that
  * device's readiness, positions, and pending moves; individual motion-property
- * deletion leaves other axes available. Commands require fresh current values
- * and observed target elements. Callbacks and motion slots run on the Qt thread.
+ * deletion leaves other axes available. Manual moves require fresh current values
+ * and observed target elements. Automatic alignment follows the exclusive mode
+ * published by pupilCorAlign. Callbacks and motion slots run on the Qt thread.
  */
 class coronAlign : public xWidget
 {
@@ -410,6 +412,22 @@ class coronAlign : public xWidget
     void on_button_ipiaa1_scale_pressed();
 
   private:
+    /// Switch elements advertised by pupilCorAlign.state since the last invalidation.
+    std::set<std::string> m_alignmentModes;
+
+    /// Currently selected alignment mode, or empty until a selection is observed.
+    std::string m_alignmentMode;
+
+    /// Merge a one-of-many alignment observation and refresh the mask controls.
+    void receiveAlignmentState( const pcf::IndiProperty &property, /**< [in] Alignment switch vector. */
+                                bool                     definition /**< [in] Replace prior observations for a definition. */ );
+
+    /// Show which reference and mask actions are available in the published mode.
+    void updateAlignmentButtons();
+
+    /// Request one mode from the alignment controller.
+    void requestAlignmentMode( const std::string &mode /**< [in] Switch element to select. */ );
+
     /// Availability of one subscribed motion property or FSM.
     struct propertyState
     {
@@ -458,6 +476,13 @@ class coronAlign : public xWidget
 coronAlign::coronAlign( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent, f )
 {
     ui.setupUi( this );
+
+    // Route reference acquisition, wheel alignment, and stop to the controller's exclusive state switch.
+    connect( ui.button_measureReference, &QPushButton::pressed, this, [this]() { requestAlignmentMode( "centroid" ); } );
+    connect( ui.button_startPupilAlignment, &QPushButton::pressed, this, [this]() { requestAlignmentMode( "fwpupil" ); } );
+    connect( ui.button_startLyotAlignment, &QPushButton::pressed, this, [this]() { requestAlignmentMode( "fwlyot" ); } );
+    connect( ui.button_stopAlignment, &QPushButton::pressed, this, [this]() { requestAlignmentMode( "idle" ); } );
+
     ui.button_pupil_scale->setProperty( "isScaleButton", true );
     ui.button_focal_scale->setProperty( "isScaleButton", true );
     ui.button_lyot_scale->setProperty( "isScaleButton", true );
@@ -554,6 +579,11 @@ void coronAlign::forEachChildSubscriber( funcT &&func )
 
 void coronAlign::resetConnectionState()
 {
+    // Forget the controller's selection and capabilities before the next connection.
+    m_alignmentModes.clear();
+    m_alignmentMode.clear();
+    updateAlignmentButtons();
+
     for( auto &entry : m_properties )
         entry.second = propertyState{};
     for( const auto *device : { "picomotors", "fwpupil", "fwfpm", "fwlyot", "stagepiaa", "stageipiaa" } )
@@ -694,6 +724,9 @@ void coronAlign::subscribe()
 {
     if( m_parent == nullptr )
         return;
+
+    // Subscribe to the alignment controller independently of the manual motion devices.
+    m_parent->addSubscriberProperty( this, "pupilCorAlign", "state" );
 
     for( const auto &entry : m_properties )
         m_parent->addSubscriberProperty( this, entry.first.first, entry.first.second );
@@ -849,6 +882,16 @@ void coronAlign::handleDelProperty( const pcf::IndiProperty &ipRecv )
     const auto device      = ipRecv.getDevice();
     const auto name        = ipRecv.getName();
     const bool wholeDevice = name.empty() || name == "fsm";
+
+    // Losing the alignment controller or its state vector affects only the automatic controls.
+    if( device == "pupilCorAlign" && ( wholeDevice || name == "state" ) )
+    {
+        m_alignmentModes.clear();
+        m_alignmentMode.clear();
+        updateAlignmentButtons();
+        return;
+    }
+
     if( !wholeDevice && m_properties.count( { device, name } ) == 0 )
         return;
     for( auto &entry : m_properties )
@@ -894,6 +937,14 @@ void coronAlign::receiveProperty( const pcf::IndiProperty &property, bool defini
 {
     if( !m_connected )
         return;
+
+    // Decode the alignment switch separately from numeric positions and text FSMs.
+    if( property.getDevice() == "pupilCorAlign" && property.getName() == "state" )
+    {
+        receiveAlignmentState( property, definition );
+        return;
+    }
+
     const auto found = m_properties.find( { property.getDevice(), property.getName() } );
     if( found == m_properties.end() )
         return;
@@ -941,6 +992,71 @@ void coronAlign::receiveProperty( const pcf::IndiProperty &property, bool defini
         resetDevice( property.getDevice() );
     cacheProperty( validated );
     updateGUI();
+}
+
+void coronAlign::receiveAlignmentState( const pcf::IndiProperty &property, bool definition )
+{
+    // A new definition replaces all previously advertised modes.
+    if( definition || property.getType() != pcf::IndiProperty::Switch )
+    {
+        m_alignmentModes.clear();
+        m_alignmentMode.clear();
+    }
+
+    // A partial update can select a mode without repeating the other switches.
+    if( property.getType() == pcf::IndiProperty::Switch )
+    {
+        for( const auto &entry : property.getElements() )
+        {
+            const auto state = entry.second.getSwitchState();
+
+            if( state == pcf::IndiElement::UnknownSwitchState )
+            {
+                m_alignmentModes.erase( entry.first );
+            }
+            else
+            {
+                m_alignmentModes.insert( entry.first );
+            }
+
+            if( state == pcf::IndiElement::On )
+            {
+                m_alignmentMode = entry.first;
+            }
+            else if( m_alignmentMode == entry.first )
+            {
+                m_alignmentMode.clear();
+            }
+        }
+    }
+
+    // Reflect the published selection even when another client made the change.
+    updateAlignmentButtons();
+}
+
+void coronAlign::updateAlignmentButtons()
+{
+    // Offer a new measurement or alignment only from idle and for advertised modes.
+    const bool idle = m_alignmentMode == "idle";
+    ui.button_measureReference->setEnabled( idle && m_alignmentModes.count( "centroid" ) );
+    ui.button_measureReference->setText( m_alignmentMode == "centroid" ? "Measuring actuator reference..." : "Measure actuator reference" );
+    ui.button_startPupilAlignment->setEnabled( idle && m_alignmentModes.count( "fwpupil" ) );
+    ui.button_startLyotAlignment->setEnabled( idle && m_alignmentModes.count( "fwlyot" ) );
+
+    // Name the active wheel and leave other controller operations, such as centroid acquisition, alone.
+    const bool pupil = m_alignmentMode == "fwpupil";
+    const bool lyot  = m_alignmentMode == "fwlyot";
+    ui.button_stopAlignment->setEnabled( ( pupil || lyot ) && m_alignmentModes.count( "idle" ) );
+    ui.button_stopAlignment->setText( pupil ? "Stop pupil alignment" : lyot ? "Stop Lyot alignment"
+                                                                            : "Stop alignment" );
+}
+
+void coronAlign::requestAlignmentMode( const std::string &mode )
+{
+    // XStateMachine accepts a transition when the request contains only the newly selected switch.
+    pcf::IndiProperty command( pcf::IndiProperty::Switch, "pupilCorAlign", "state" );
+    command.add( pcf::IndiElement( mode, pcf::IndiElement::On ) );
+    sendNewProperty( command );
 }
 
 void coronAlign::cacheProperty( const pcf::IndiProperty &ipRecv )

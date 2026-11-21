@@ -1,5 +1,5 @@
 /** \file coronAlign_test.cpp
- * \brief Offline coronagraph restart, baseline, pending-motion, and rediscovery tests.
+ * \brief Offline tests for coronagraph mask alignment, manual motion, and device recovery.
  * \ingroup coronAlignGUI_unit_test
  */
 #define CATCH_CONFIG_RUNNER
@@ -176,6 +176,111 @@ std::string deviceFor( const std::string &button )
     return "picomotors";
 }
 /// \endcond
+
+/** \brief Reference, Start, and Stop buttons follow pupilCorAlign.state and send one selected switch per request.
+ * \ingroup coronAlignGUI_unit_test
+ */
+TEST_CASE( "Coronagraph mask controls follow the controller's exclusive mode", "[coronAlignGUI]" )
+{
+    // clang-format off
+#ifdef CORONALIGN_GUI_TEST_DOXYGEN_REF
+    xqt::coronAlign::subscribe;
+    xqt::coronAlign::receiveAlignmentState;
+    xqt::coronAlign::updateAlignmentButtons;
+    xqt::coronAlign::requestAlignmentMode;
+    xqt::coronAlign::handleDelProperty;
+#endif
+    // clang-format on
+
+    // Start with manual controls online and the alignment controller absent.
+    Widget widget;
+    widget.ready();
+    auto *reference = qobject_cast<QPushButton *>( widget.control( "button_measureReference" ) );
+    auto *pupil     = qobject_cast<QPushButton *>( widget.control( "button_startPupilAlignment" ) );
+    auto *lyot      = qobject_cast<QPushButton *>( widget.control( "button_startLyotAlignment" ) );
+    auto *stop      = qobject_cast<QPushButton *>( widget.control( "button_stopAlignment" ) );
+
+    // Every button must be inert before the controller publishes its modes.
+    for( auto *button : { reference, pupil, lyot, stop } )
+    {
+        REQUIRE( button != nullptr );
+        REQUIRE_FALSE( button->isEnabled() );
+        button->click();
+    }
+
+    REQUIRE( widget.m_publisher.m_commands.empty() );
+
+    // Advertise the same exclusive modes as the alignment application.
+    pcf::IndiProperty modes( pcf::IndiProperty::Switch, "pupilCorAlign", "state" );
+    for( const auto *mode : { "centroid", "fwpupil", "fwlyot" } )
+    {
+        modes.add( pcf::IndiElement( mode, pcf::IndiElement::Off ) );
+    }
+
+    modes.add( pcf::IndiElement( "idle", pcf::IndiElement::On ) );
+    widget.publish( modes );
+
+    // Verify the wire message and simulate the controller publishing its selection.
+    auto clickMode = [&]( QPushButton *button, const std::string &mode )
+    {
+        REQUIRE( button->isEnabled() );
+        button->click();
+        REQUIRE( widget.m_publisher.m_commands.size() == 1 );
+        const auto &command = widget.m_publisher.m_commands.front();
+        REQUIRE( command.getDevice() == "pupilCorAlign" );
+        REQUIRE( command.getName() == "state" );
+        REQUIRE( command.getType() == pcf::IndiProperty::Switch );
+        REQUIRE( command.getNumElements() == 1 );
+        REQUIRE( command.find( mode ) );
+        REQUIRE( command[mode].getSwitchState() == pcf::IndiElement::On );
+        widget.publish( command, false );
+        widget.m_publisher.m_commands.clear();
+    };
+
+    // Centroid acquisition completes when the application itself goes idle.
+    REQUIRE_FALSE( stop->isEnabled() );
+    clickMode( reference, "centroid" );
+    REQUIRE_FALSE( reference->isEnabled() );
+    REQUIRE_FALSE( pupil->isEnabled() );
+    REQUIRE_FALSE( lyot->isEnabled() );
+    REQUIRE_FALSE( stop->isEnabled() );
+    widget.publish( modes, false );
+
+    // Both wheel modes use the same stop command and exclude other operations while running.
+    for( auto *wheel : { pupil, lyot } )
+    {
+        clickMode( wheel, wheel == pupil ? "fwpupil" : "fwlyot" );
+        REQUIRE_FALSE( reference->isEnabled() );
+        REQUIRE_FALSE( pupil->isEnabled() );
+        REQUIRE_FALSE( lyot->isEnabled() );
+        REQUIRE( stop->text() == ( wheel == pupil ? "Stop pupil alignment" : "Stop Lyot alignment" ) );
+        clickMode( stop, "idle" );
+    }
+
+    // Loss of the alignment controller preserves manual motion and requires fresh mode information.
+    for( const auto *deleted : { "state", "fsm", "" } )
+    {
+        widget.erase( "pupilCorAlign", deleted );
+        REQUIRE( widget.control( "button_pupil_u" )->isEnabled() );
+
+        for( auto *button : { reference, pupil, lyot, stop } )
+        {
+            REQUIRE_FALSE( button->isEnabled() );
+        }
+
+        widget.publish( modes );
+        REQUIRE( reference->isEnabled() );
+    }
+
+    // A reconnect also clears the selection until the controller republishes.
+    widget.onDisconnect();
+    widget.onConnect();
+    REQUIRE_FALSE( reference->isEnabled() );
+    REQUIRE_FALSE( pupil->isEnabled() );
+    REQUIRE_FALSE( lyot->isEnabled() );
+    REQUIRE_FALSE( stop->isEnabled() );
+    REQUIRE( widget.m_publisher.m_commands.empty() );
+}
 
 /** \brief Missing startup properties and full reconnect block every direct motion slot.
  * \ingroup coronAlignGUI_unit_test
