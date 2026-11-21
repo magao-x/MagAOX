@@ -34,8 +34,8 @@ struct telem_qwptrack : public flatbuffer_log
     struct messageT : public fbMessage
     {
         /// Construct from components
-        messageT( const float &qwp1_angle,   /**<[in] the HWP set angle */
-                  const float &qwp2_angle, /**<[in] the actual HWP angle */
+        messageT( const float &qwp1_angle,   /**<[in] QWP1 fast-axis angle */
+                  const float &qwp2_angle, /**<[in] QWP2 fast-axis angle */
                   const bool &tracking
         )
         {
