@@ -558,30 +558,39 @@ at startup from its own generator, and advances only while `a > 0`. Setting
 is still a valid stationary sample. With `g = 1` and `a = 0` restored, DM
 pointing returns exactly to the uncontrolled sequence.
 
-### ACC-only vibration mode (`[accelOnly]`)
+### ACC-only vibration modes (`[accelOnly]`)
 
-`accelOnly.enabled=true` adds one extra mechanical mode, by default at
-`accelOnly.frequency=50` Hz, that the accelerometer senses but the optics do
-not. It is an ordinary X/Y pair of the same AR(2) oscillators, with pole radius
-0.99995 (as the 54–58 Hz modes), per-axis acceleration RMS
-`accelOnly.amplitude` [m/s^2] (default 0.005, comparable to the 120 Hz mode) and
-its own generator seeded by `accelOnly.seed` (default 11). It is added to
-`sample::m_acceleration` (hence the ADC counts) and to
-`sample::m_physicalPointing`, and never to `sample::m_pointing`,
-`sample::m_wfsPointing` or the DM disturbance. It does not pass through `c_k`,
-`optical_coupling` or `optical_amplitude`, so its optical contribution is exactly
-zero for every runtime optical setting. With a 1-Hz-resolution Hann PSD its
-50 Hz ACC line is about 78 times the broadband baseline there, while DM pointing,
-WFS truth and the published DM commands stay bitwise identical to a run without
-it (`[accel-only]` tests).
+`accelOnly.enabled=true` adds extra mechanical modes that the accelerometer
+senses but the optics do not. `accelOnly.frequency` and `accelOnly.amplitude`
+are comma-separated lists of equal length: mode k has frequency `frequency[k]`
+[Hz] and per-axis acceleration RMS `amplitude[k]` [m/s^2]. The defaults,
+`frequency=50` and `amplitude=0.005` (comparable to the 120 Hz mode), are the
+original single-mode configuration, and a single-value configuration behaves
+exactly as before.
+
+Each mode is an ordinary independent X/Y pair of the same AR(2) oscillators,
+with pole radius 0.99995 (as the 54–58 Hz modes) and its own generator seeded
+with `accelOnly.seed + k` (default seed 11). A mode's sequence therefore depends
+only on its own frequency, amplitude and seed: adding, removing or reordering
+other entries does not change it, and each run is bitwise reproducible. The
+modes are summed into `sample::m_acceleration` (hence the ADC counts) and
+`sample::m_physicalPointing`, and never into `sample::m_pointing`,
+`sample::m_wfsPointing` or the DM disturbance. They do not pass through `c_k`,
+`optical_coupling` or `optical_amplitude`, so their optical contribution is
+exactly zero for every runtime optical setting. With modes at 35, 50 and 70 Hz
+and a 1-Hz-resolution Hann PSD, each ACC line is 69–103 times the broadband
+baseline at its frequency, while DM pointing, WFS truth and the published DM
+commands stay bitwise identical to a run without them (`[accel-only]` tests).
 
 All `[accelOnly]` settings are startup-only. The default is disabled; disabled
 settings are ignored, and the main and optical realizations are bitwise
-unchanged either way because the mode draws only from its own generator. The
+unchanged either way because the modes draw only from their own generators. The
 existing 214 modes, synchronization and DM scheduling are untouched. When
-enabled, the frequency must be positive and below Nyquist, and it joins the
-mode population in validating rate changes (`fps.target` must exceed twice the
-highest mode frequency, including this one).
+enabled, startup rejects empty or unequal-length lists, non-numeric entries, a
+frequency that is not positive or not below Nyquist, and a negative or
+nonfinite amplitude. The modes also join the mode population in validating rate
+changes (`fps.target` must exceed twice the highest mode frequency, including
+these).
 
 The ADC calculation is `zero + acceleration*sensitivity/voltsPerBit`, followed
 by `std::round`, floating-point clamping, and conversion to `uint16_t`. Defaults

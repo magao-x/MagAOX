@@ -238,25 +238,25 @@ TEST_CASE( "accelSim optical disturbance reduces ACC/WFS coherence", "[accelSim]
         }
 }
 
-/** \brief The ACC-only mode adds a 50 Hz acceleration PSD peak but nothing to optical or WFS pointing.
+/** \brief ACC-only modes at 35, 50 and 70 Hz each add an acceleration PSD peak but nothing to optical or WFS pointing.
  * Both models change the runtime optical controls identically; optical values must stay bitwise equal throughout.
  * \ingroup accelSim_unit_test
  */
-TEST_CASE( "accelSim ACC-only mode", "[accelSim][model][accel-only]" )
+TEST_CASE( "accelSim ACC-only modes", "[accelSim][model][accel-only]" )
 {
     constexpr size_t length = 8000, segments = 8; // Hann-windowed 1-Hz bins at 8 kHz, resolving 50 Hz from 54 Hz.
     parameters       config;
     config.m_fps = 8000;
     model baseline, accelOnly;
     baseline.configure( config, referenceModes( 123, { .8 } ) );
-    config.m_accelOnly = true;
+    config.m_accelOnly            = true;
+    config.m_accelOnlyFrequencies = { 35, 50, 70 };
+    config.m_accelOnlyAmplitudes  = { .005, .005, .005 };
     accelOnly.configure( config, referenceModes( 123, { .8 } ) );
-    const double factor = accelerationFactor( 50, config.m_leverArm );
-    // Hann-windowed X power of {baseline, ACC-only} acceleration at 40, 50, 60 and 120 Hz and optical pointing at 50
-    // Hz.
-    const std::array<double, 4>          frequencies{ 40, 50, 60, 120 };
-    std::array<std::array<double, 4>, 2> accel{};
-    std::array<double, 2>                optical{};
+    // Hann-windowed X power of {baseline, ACC-only} acceleration at the three peaks, between them and at 120 Hz.
+    const std::array<double, 6>          frequencies{ 35, 50, 70, 42, 62, 120 };
+    std::array<std::array<double, 6>, 2> accel{};
+    std::array<std::array<double, 3>, 2> optical{};
     std::vector<std::array<sample, 2>>   record( length );
     for( size_t segment = 0; segment < segments; ++segment )
     {
@@ -273,43 +273,108 @@ TEST_CASE( "accelSim ACC-only mode", "[accelSim][model][accel-only]" )
             REQUIRE( value.m_pointing == expected.m_pointing );
             REQUIRE( value.m_wfsPointing == expected.m_wfsPointing );
             REQUIRE( value.m_noise == expected.m_noise );
-            for( size_t axis = 0; axis < 2; ++axis ) // The added acceleration is the added mechanical motion's.
-                REQUIRE( value.m_acceleration[axis] - expected.m_acceleration[axis] ==
-                         Approx( factor * ( value.m_physicalPointing[axis] - expected.m_physicalPointing[axis] ) )
-                             .margin( 1e-12 ) );
+            REQUIRE( value.m_acceleration != expected.m_acceleration );
         }
         for( size_t which = 0; which < 2; ++which )
         {
-            std::array<std::complex<double>, 4> a{};
-            std::complex<double>                o;
+            std::array<std::complex<double>, 6> a{};
+            std::array<std::complex<double>, 3> o{};
             for( size_t n = 0; n < length; ++n )
             {
                 const double window = .5 - .5 * std::cos( 2 * pi * n / length );
                 const double phase  = -2 * pi * double( n ) / config.m_fps;
                 for( size_t f = 0; f < frequencies.size(); ++f )
                     a[f] += std::polar( window, frequencies[f] * phase ) * record[n][which].m_acceleration[0];
-                o += std::polar( window, 50 * phase ) * record[n][which].m_pointing[0];
+                for( size_t f = 0; f < o.size(); ++f )
+                    o[f] += std::polar( window, frequencies[f] * phase ) * record[n][which].m_pointing[0];
             }
             for( size_t f = 0; f < frequencies.size(); ++f )
                 accel[which][f] += std::norm( a[f] );
-            optical[which] += std::norm( o );
+            for( size_t f = 0; f < o.size(); ++f )
+                optical[which][f] += std::norm( o[f] );
         }
     }
-    INFO( "ACC power at 40/50/60/120 Hz: " << accel[0][0] << "/" << accel[0][1] << "/" << accel[0][2] << "/"
-                                           << accel[0][3] << " -> " << accel[1][0] << "/" << accel[1][1] << "/"
-                                           << accel[1][2] << "/" << accel[1][3] );
-    // About 78 times the broadband baseline at 50 Hz and 40-60 times its own 40 and 60 Hz neighbours.
-    REQUIRE( accel[1][1] > 20 * accel[0][1] );
-    REQUIRE( accel[1][1] > 10 * std::max( accel[1][0], accel[1][2] ) );
-    REQUIRE( accel[1][3] == Approx( accel[0][3] ).epsilon( .01 ) ); // Confined to 50 Hz,
-    REQUIRE( optical[1] == optical[0] );                            // with no optical counterpart.
-    config.m_accelOnlyFrequency = 4000;                             // Nyquist at 8 kHz.
-    REQUIRE_THROWS( model().configure( config, referenceModes( 123 ) ) );
-    config.m_accelOnlyFrequency = 0;
-    REQUIRE_THROWS( model().configure( config, referenceModes( 123 ) ) );
-    config.m_accelOnlyFrequency = 50;
-    config.m_accelOnlyAmplitude = -1;
-    REQUIRE_THROWS( model().configure( config, referenceModes( 123 ) ) );
+    const double between = std::max( accel[1][3], accel[1][4] );
+    for( size_t f = 0; f < 3; ++f )
+    {
+        INFO( frequencies[f] << " Hz ACC power " << accel[0][f] << " -> " << accel[1][f] << "; between peaks "
+                             << between );
+        REQUIRE( accel[1][f] > 20 * accel[0][f] ); // A distinct ACC peak at every configured frequency,
+        REQUIRE( accel[1][f] > 10 * between );
+        REQUIRE( optical[1][f] == optical[0][f] ); // with no optical counterpart.
+    }
+    REQUIRE( accel[1][5] == Approx( accel[0][5] ).epsilon( .01 ) ); // Other mode peaks are unchanged.
+}
+
+/** \brief ACC-only output is deterministic, mode k is seeded by seed+k independently of the others, the default
+ * single-mode lists are the original single-mode configuration, and invalid lists are rejected.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim ACC-only determinism and validation", "[accelSim][model][accel-only]" )
+{
+    parameters config;
+    config.m_fps   = 8000;
+    const auto run = [&]( bool enabled, std::vector<double> frequencies, std::vector<double> amplitudes, uint64_t seed )
+    {
+        parameters value             = config;
+        value.m_accelOnly            = enabled;
+        value.m_accelOnlyFrequencies = std::move( frequencies );
+        value.m_accelOnlyAmplitudes  = std::move( amplitudes );
+        value.m_accelOnlySeed        = seed;
+        model simulation;
+        simulation.configure( value, referenceModes( 123 ) );
+        std::vector<sample> samples( 4000 );
+        for( auto &sample : samples )
+            sample = simulation.step();
+        return samples;
+    };
+    const auto same = []( const std::vector<sample> &a, const std::vector<sample> &b )
+    {
+        return std::equal( a.begin(),
+                           a.end(),
+                           b.begin(),
+                           b.end(),
+                           []( const sample &x, const sample &y )
+                           {
+                               return x.m_physicalPointing == y.m_physicalPointing && x.m_pointing == y.m_pointing &&
+                                      x.m_wfsPointing == y.m_wfsPointing && x.m_acceleration == y.m_acceleration &&
+                                      x.m_noise == y.m_noise && x.m_adc == y.m_adc;
+                           } );
+    };
+    const auto baseline = run( false, {}, {}, 11 );
+    const auto both     = run( true, { 50, 80 }, { .005, .003 }, 11 );
+    const auto first    = run( true, { 50 }, { .005 }, 11 );
+    const auto second   = run( true, { 80 }, { .003 }, 12 );              // Mode 1 of `both` is seeded 11+1.
+    REQUIRE( same( run( true, { 50, 80 }, { .005, .003 }, 11 ), both ) ); // Bitwise reproducible.
+    REQUIRE( same( run( true, parameters().m_accelOnlyFrequencies, parameters().m_accelOnlyAmplitudes, 11 ), first ) );
+    REQUIRE( !same( run( true, { 50, 80 }, { .005, .003 }, 12 ), both ) );
+    for( size_t n = 0; n < baseline.size(); ++n )
+        for( size_t axis = 0; axis < 2; ++axis )
+        {
+            REQUIRE( both[n].m_pointing[axis] == baseline[n].m_pointing[axis] );
+            REQUIRE( both[n].m_wfsPointing[axis] == baseline[n].m_wfsPointing[axis] );
+            // Each mode's contribution is the same alone or combined: the sum is a superposition.
+            REQUIRE( both[n].m_acceleration[axis] - baseline[n].m_acceleration[axis] ==
+                     Approx( first[n].m_acceleration[axis] - baseline[n].m_acceleration[axis] +
+                             second[n].m_acceleration[axis] - baseline[n].m_acceleration[axis] )
+                         .margin( 1e-12 ) );
+        }
+
+    config.m_accelOnly = true;
+    for( const auto &[frequencies, amplitudes] :
+         std::vector<std::pair<std::vector<double>, std::vector<double>>>{ { {}, {} },
+                                                                           { { 50, 80 }, { .005 } },
+                                                                           { { 50 }, { .005, .005 } },
+                                                                           { { 50, 0 }, { .005, .005 } },
+                                                                           { { 50, 4000 }, { .005, .005 } }, // Nyquist.
+                                                                           { { 50, NAN }, { .005, .005 } },
+                                                                           { { 50, 80 }, { .005, -1 } },
+                                                                           { { 50, 80 }, { .005, INFINITY } } } )
+    {
+        config.m_accelOnlyFrequencies = frequencies;
+        config.m_accelOnlyAmplitudes  = amplitudes;
+        REQUIRE_THROWS( model().configure( config, referenceModes( 123 ) ) );
+    }
     config.m_accelOnly = false; // Disabled settings are ignored.
     REQUIRE_NOTHROW( model().configure( config, referenceModes( 123 ) ) );
 }
@@ -1441,8 +1506,8 @@ TEST_CASE( "accelSim example configuration", "[accelSim][app]" )
     REQUIRE( app.m_parameters.m_seed == 42 );
     REQUIRE( app.m_parameters.m_modeSeed == 123 );
     REQUIRE( !app.m_parameters.m_accelOnly );
-    REQUIRE( app.m_parameters.m_accelOnlyFrequency == 50 );
-    REQUIRE( app.m_parameters.m_accelOnlyAmplitude == .005 );
+    REQUIRE( app.m_parameters.m_accelOnlyFrequencies == std::vector<double>{ 50 } );
+    REQUIRE( app.m_parameters.m_accelOnlyAmplitudes == std::vector<double>{ .005 } );
     REQUIRE( app.m_parameters.m_accelOnlySeed == 11 );
     REQUIRE( app.m_syncTimeout == .01 );
     REQUIRE( app.m_maxSlew == .05 );
@@ -1471,12 +1536,13 @@ TEST_CASE( "accelSim example configuration", "[accelSim][app]" )
     REQUIRE( app.loadConfigImpl( app.config ) < 0 ); // At the 4-kHz Nyquist frequency.
     {
         std::ofstream file( overrideFile );
-        file << "[sim]\nfps=4000\n[accelOnly]\nenabled=1\nfrequency=50\namplitude=0.01\nseed=5\n";
+        file << "[sim]\nfps=4000\n[accelOnly]\nenabled=1\nfrequency=50, 70\namplitude=0.01, 0.02\nseed=5\n";
     }
     app.config.readConfig( overrideFile );
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
     REQUIRE( app.m_parameters.m_accelOnly );
-    REQUIRE( app.m_parameters.m_accelOnlyAmplitude == .01 );
+    REQUIRE( app.m_parameters.m_accelOnlyFrequencies == std::vector<double>{ 50, 70 } );
+    REQUIRE( app.m_parameters.m_accelOnlyAmplitudes == std::vector<double>{ .01, .02 } );
     REQUIRE( app.m_parameters.m_accelOnlySeed == 5 );
     {
         std::ofstream file( overrideFile );
