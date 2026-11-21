@@ -240,10 +240,10 @@ class dmSyncopation : public MagAOXApp<true>,
     std::string              m_cameraProperty{ "fg_timing" }; ///< Measured camera timing property.
     std::string              m_cameraElement{ "acq_fps" };    ///< Measured acquisition-rate element.
     std::string              m_loopDevice{ "holoop" };        ///< AO loop readback for the open-loop zero request.
-    int                      m_requested{ 3 };                ///< Fixed requested count, including passive step 0.
-    int                      m_primarySemaphore{ 5 }; ///< Required reader semaphore; reject allocation fallback.
-    unsigned                 m_lockFrames{ 32 };  ///< Clean main observations before preparing the first active cycle.
-    unsigned                 m_failureLimit{ 3 }; ///< Consecutive original event failures before reacquisition.
+    int         m_requested{ 3 }; ///< Requested count including step zero, or zero for automatic production selection.
+    int         m_primarySemaphore{ 5 }; ///< Required reader semaphore; reject allocation fallback.
+    unsigned    m_lockFrames{ 32 };      ///< Clean main observations before preparing the first active cycle.
+    unsigned    m_failureLimit{ 3 };     ///< Consecutive original event failures before reacquisition.
     unsigned    m_rateFrames{ 32 };    ///< Cadence violation persistence and primary-rate qualification interval count.
     double      m_nominalRate{ 2000 }; ///< Acquisition fallback, Hz.
     double      m_maxCadence{ 6000 };  ///< Nominal sanity rating, Hz, including step 0.
@@ -264,6 +264,7 @@ class dmSyncopation : public MagAOXApp<true>,
     bool        m_diagnosticsOnly{ false };    ///< Observe arbitrary primary metadata without attaching DM resources.
     bool        m_simulationEnabled{ false };  ///< Startup-only shadow policy; live scheduling is prohibited.
     bool        m_productionEnabled{ false };  ///< Continuous tagged-provider operation on the qualified counter grid.
+    int         m_productionSteps{ 0 };        ///< Selected automatic count, zero until qualified.
     double      m_productionReadyLeadUs{ 50 }; ///< Source completion cutoff ahead of each slot.
     double      m_productionStep0LeadUs{ 20 }; ///< Passive-copy completion lead before the next predicted main.
     uint64_t    m_passiveCopied{ 0 }, m_passiveSkipped{ 0 }; ///< Completed and suppressed passive batches.
@@ -976,7 +977,8 @@ class dmSyncopation : public MagAOXApp<true>,
     bool zeroTestGrid( uint64_t         counter /**< [in] Genuine main cycle label. */,
                        synco::GridTime &grid /**< [out] Frozen local monotonic main grid. */,
                        uint64_t        &periodQ32 /**< [out] Frozen cadence, scaled nanoseconds. */,
-                       synco::GridTime *rawGrid = nullptr /**< [out] Optional frozen producer-clock main grid. */ );
+                       synco::GridTime *rawGrid =
+                           nullptr /**< [out] Optional frozen producer-clock grid, even if local projection fails. */ );
 
     /// Publish source-counter timing and clock-quality populations only from an ordinary-thread snapshot.
     void updateZeroPublication( const ZeroSnapshot &snapshot /**< [in] Coherent cycle-owned state copy. */,
@@ -1045,6 +1047,9 @@ class dmSyncopation : public MagAOXApp<true>,
 
     /// Select the common qualified counter scheduler for finite or continuous operation.
     bool zeroEngine() const;
+
+    /// Return the selected automatic count or the configured fixed count.
+    int scheduleSteps() const;
 
     /// Attach production mappings and tagged command sidecars before arming.
     bool openProduction();
@@ -1208,7 +1213,8 @@ inline void dmSyncopation::setupConfig()
         { "tracking.cameraDevice", "Camera device publishing measured acquisition timing." },
         { "tracking.cameraProperty", "Measured camera timing property." },
         { "tracking.cameraElement", "Measured camera FPS element." },
-        { "scheduler.maxSubframes", "Fixed requested steps, including passive step zero (1-16)." },
+        { "scheduler.maxSubframes",
+          "Steps including passive step zero (1-16), or 0 for automatic production cadence." },
         { "scheduler.maxCadenceHz", "Nominal total cadence sanity rating, Hz." },
         { "scheduler.keepoutUs", "Controller processing/last-reader bound, us." },
         { "scheduler.guardUs", "Extra reserve beyond explicit delivery/reader bounds, us." },
@@ -1419,7 +1425,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         config( m_zeroLateUs, "production.lateUs" );
         config( m_zeroWakeAheadUs, "production.wakeAheadUs" );
         m_zeroTestChannel = m_destinations.empty() ? std::string{} : m_destinations.front();
-        if( m_zeroTestEnabled || m_simulationEnabled || m_diagnosticsOnly || m_requested < 1 || m_requested > 4 ||
+        if( m_zeroTestEnabled || m_simulationEnabled || m_diagnosticsOnly ||
             readerReleaseMonitorT::m_shmimName.empty() || !finite( m_productionReadyLeadUs ) ||
             !finite( m_productionStep0LeadUs ) || m_productionStep0LeadUs <= 0 ||
             m_productionStep0LeadUs >= m_productionReadyLeadUs || m_productionReadyLeadUs >= 100 ||
@@ -1503,12 +1509,12 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     {
         return -1;
     }
-    if( m_requested < 1 || m_requested > synco::maxSteps || m_destinations.empty() || m_destinations.size() > 32 ||
-        !finite( m_maxCadence ) || m_maxCadence <= 0 || !finite( m_nominalRate ) || !finite( m_minRate ) ||
-        !finite( m_maxRate ) || m_minRate < 1 || m_maxRate > 100000 || m_minRate > m_nominalRate ||
-        m_nominalRate > m_maxRate || !finite( m_rateTolerance ) || m_rateTolerance < 0 || m_rateTolerance > 1 ||
-        !finite( m_gain ) || m_gain < 0 || m_gain > 1 || !finite( m_maxAdvanceUs ) || m_maxAdvanceUs < 0 ||
-        m_maxAdvanceUs > 1000 || !finite( m_outputTimeoutUs ) || m_outputTimeoutUs <= 0 ||
+    if( m_requested < ( m_productionEnabled ? 0 : 1 ) || m_requested > synco::maxSteps || m_destinations.empty() ||
+        m_destinations.size() > 32 || !finite( m_maxCadence ) || m_maxCadence <= 0 || !finite( m_nominalRate ) ||
+        !finite( m_minRate ) || !finite( m_maxRate ) || m_minRate < 1 || m_maxRate > 100000 ||
+        m_minRate > m_nominalRate || m_nominalRate > m_maxRate || !finite( m_rateTolerance ) || m_rateTolerance < 0 ||
+        m_rateTolerance > 1 || !finite( m_gain ) || m_gain < 0 || m_gain > 1 || !finite( m_maxAdvanceUs ) ||
+        m_maxAdvanceUs < 0 || m_maxAdvanceUs > 1000 || !finite( m_outputTimeoutUs ) || m_outputTimeoutUs <= 0 ||
         m_outputTimeoutUs > 1000000 || !m_lockFrames || !m_failureLimit || !m_rateFrames || m_primarySemaphore < 0 ||
         m_primarySemaphore == 9 || m_primarySemaphore >= SEMAPHORE_MAXVAL || m_bounds.copy == 0 ||
         m_bounds.snapshot == 0 || m_bounds.visibility == 0 || m_bounds.reserve == 0 ||
@@ -1586,8 +1592,9 @@ inline void dmSyncopation::synchronizeMainTiming()
         return;
     }
 
-    m_mainTiming.synchronize(
-        m_enabled.load( std::memory_order_acquire ), uint64_t( m_requested ), uint64_t( m_generation ) );
+    m_mainTiming.synchronize( m_enabled.load( std::memory_order_acquire ),
+                              uint64_t( std::max( 1, scheduleSteps() ) ),
+                              uint64_t( m_generation ) );
 }
 
 inline void dmSyncopation::capturePassiveMainTiming()
@@ -3269,7 +3276,7 @@ inline void dmSyncopation::publishSchedule( int64_t observed, int completed )
     m_record[synco::epoch]      = m_epoch;
     m_record[synco::generation] = m_generation;
     m_record[synco::state]      = observed > 0 ? m_scheduleState : synco::invalid;
-    m_record[synco::steps]      = m_requested;
+    m_record[synco::steps]      = scheduleSteps();
     m_record[synco::period]     = m_period;
     m_record[synco::reference]  = observed;
     m_record[synco::expires]    = observed > 0 ? observed + 2 * m_period : 0;
@@ -3402,7 +3409,7 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
         }
         m_scheduleState = m_enabled ? ( m_zeroStats.active ? synco::armed : synco::acquiring ) : synco::invalid;
         m_primed        = m_enabled && m_zeroStats.active;
-        m_feasible      = m_primed ? m_requested : 0;
+        m_feasible      = m_primed ? scheduleSteps() : 0;
         m_mainDelivered = m_zeroStats.mainMatched;
         m_delivered     = m_zeroStats.acknowledged;
         m_missed        = m_zeroStats.skipped;
@@ -4852,7 +4859,7 @@ inline int dmSyncopation::setupINDI()
     for( const auto &name : settingKeys )
     {
         m_indiP_settings.add( pcf::IndiElement( name ) );
-        m_indiP_settings[name].setMin( std::string( name ) == "steps" ? 1 : 0 );
+        m_indiP_settings[name].setMin( std::string( name ) == "steps" && !m_productionEnabled ? 1 : 0 );
         m_indiP_settings[name].setMax( std::string( name ) == "steps" ? synco::maxSteps : 1000000 );
         m_indiP_settings[name].setStep( std::string( name ) == "steps" ? 1 : 0 );
         m_indiP_settings[name].setFormat( "%g" );
@@ -5233,12 +5240,13 @@ inline int dmSyncopation::appLogic()
                 "faultEntryToCounterUs",
 #endif
             };
+            const int                 activeSteps = m_primed ? scheduleSteps() : 0;
             const std::vector<double> values{
                 1e9 / m_period,
-                m_requested * 1e9 / m_period,
+                ( m_requested == 0 ? activeSteps : m_requested ) * 1e9 / m_period,
                 m_deliveredHz,
                 double( m_requested ),
-                m_primed ? double( m_requested ) : 0,
+                double( activeSteps ),
                 double( m_feasible ),
                 double( m_missed ),
                 double( m_faults ),
@@ -5698,7 +5706,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
         }
         else if( name == "steps" )
         {
-            if( value < 1 || value > synco::maxSteps || value != std::floor( value ) )
+            if( value < ( m_productionEnabled ? 0 : 1 ) || value > synco::maxSteps || value != std::floor( value ) )
             {
                 return -1;
             }
@@ -5743,7 +5751,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
     m_zeroDurationSec              = duration;
     if( zeroEngine() )
     {
-        if( requested < ( m_productionEnabled ? 1 : 2 ) || requested > 4 || ( reconfigure && !configureZeroTest() ) )
+        if( ( m_zeroTestEnabled && ( requested < 2 || requested > 4 ) ) || ( reconfigure && !configureZeroTest() ) )
         {
             m_requested       = previousRequested;
             m_maxCadence      = previousCadence;

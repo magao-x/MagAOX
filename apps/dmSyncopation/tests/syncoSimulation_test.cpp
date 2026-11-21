@@ -2169,7 +2169,7 @@ TEST_CASE( "synco clock-only qualified frozen grid", "[dmSyncopation][simulation
 
         if( counter == 4 )
         {
-            CHECK( clock.summary().valid );
+            CHECK_FALSE( clock.summary().valid );
             CHECK( clock.summary().cadence.state == CadenceState::nominal );
             CHECK_FALSE( clock.frozenGrid( counter, clockGrid, clockPeriod ) );
         }
@@ -2180,8 +2180,7 @@ TEST_CASE( "synco clock-only qualified frozen grid", "[dmSyncopation][simulation
     GridTime shadowGrid;
     uint64_t shadowPeriod = 0;
     REQUIRE( shadow.frozenGrid( 20001, shadowGrid, shadowPeriod ) );
-    CHECK( clockGrid.ns == shadowGrid.ns );
-    CHECK( clockGrid.fractionQ32 == shadowGrid.fractionQ32 );
+    CHECK( clockGrid.ns == clock.summary().lastMainNs );
     CHECK( clockPeriod == shadowPeriod );
     CHECK( clockPeriod == uint64_t( 500000 ) * periodScale + periodScale / 4 );
     CHECK( clock.summary().nextActiveNs == 0 );

@@ -1493,7 +1493,9 @@ inline void Simulation::primary( uint64_t                                      c
         return;
     }
 
-    if( m_pointCount == m_config.window )
+    // Seed the clock-only writer's phase with the measured cadence.
+    if( m_pointCount == m_config.window &&
+        ( !m_config.clockOnly || m_summary.cadence.state == MagAOX::dmSyncoSimulation::CadenceState::full ) )
     {
         if( !m_planCount )
         {

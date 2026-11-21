@@ -18,6 +18,11 @@ inline bool dmSyncopation::zeroEngine() const
     return m_zeroTestEnabled || m_productionEnabled;
 }
 
+inline int dmSyncopation::scheduleSteps() const
+{
+    return m_productionEnabled && m_requested == 0 ? m_productionSteps : m_requested;
+}
+
 inline void dmSyncopation::closeProduction()
 {
     for( auto &mapping : m_mappings )
@@ -93,21 +98,22 @@ inline void dmSyncopation::publishProductionSchedule( synco::GridTime grid, uint
         return;
     }
 
-    const auto now = m_now();
+    const auto now   = m_now();
+    const int  steps = scheduleSteps();
     m_record.fill( 0 );
     m_record[synco::version]    = synco::productionVersion;
     m_record[synco::epoch]      = m_epoch;
     m_record[synco::generation] = m_generation;
     m_record[synco::state]      = m_enabled ? synco::armed : synco::invalid;
-    m_record[synco::steps]      = m_requested;
+    m_record[synco::steps]      = steps;
     m_record[synco::period]     = int64_t( periodQ32 / MagAOX::dmSyncoSimulation::periodScale );
     m_record[synco::reference]  = now;
     m_record[synco::expires]    = now + 2 * m_record[synco::period];
     m_record[synco::cycle]      = int64_t( primary );
 
-    for( int step = 0; step < m_requested; ++step )
+    for( int step = 0; step < steps; ++step )
     {
-        const auto target = synco::stepGrid( grid, periodQ32, step ? step : m_requested, m_requested ).ns;
+        const auto target = synco::stepGrid( grid, periodQ32, step ? step : steps, steps ).ns;
         const auto cutoff = target - int64_t( m_productionReadyLeadUs * 1000 );
 
         if( cutoff > now )
@@ -270,7 +276,7 @@ inline bool dmSyncopation::prepareProductionStep( int step, int64_t target, uint
 
 inline void dmSyncopation::productionStep0( synco::GridTime grid, uint64_t periodQ32, uint64_t primary )
 {
-    const auto           target = synco::stepGrid( grid, periodQ32, m_requested, m_requested ).ns;
+    const auto           target = synco::stepGrid( grid, periodQ32, 1, 1 ).ns;
     const synco::Request request{
         m_epoch, m_generation, int64_t( primary + 1 ), 0, target, target - int64_t( m_productionReadyLeadUs * 1000 ) };
     const auto cutoff = target - int64_t( m_productionStep0LeadUs * 1000 );

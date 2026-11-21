@@ -14,9 +14,10 @@ namespace app
 inline bool dmSyncopation::configureZeroTest()
 {
     m_mainTiming.reset();
+    m_productionSteps = 0;
     synco::Simulation::Config settings;
     settings.clockOnly       = true;
-    settings.steps           = m_requested;
+    settings.steps           = std::max( 1, scheduleSteps() );
     settings.window          = m_simulationWindow;
     settings.nominalPeriod   = int64_t( std::llround( 1e9 / m_nominalRate ) );
     settings.minInterval     = int64_t( 1e9 / m_maxRate );
@@ -41,8 +42,8 @@ inline bool dmSyncopation::configureZeroTest()
         m_zeroStats.active = m_zeroStats.warming = false;
     }
 
-    const bool configured = m_zeroClock.configure( settings ) && m_zeroPhase.configure( m_requested ) &&
-                            m_zeroPublicationClock.configure() && m_zeroPublicationTiming.configure( m_requested );
+    const bool configured = m_zeroClock.configure( settings ) && m_zeroPhase.configure( settings.steps ) &&
+                            m_zeroPublicationClock.configure() && m_zeroPublicationTiming.configure( settings.steps );
     m_zeroClockEpoch = m_zeroPublicationClock.status().epoch;
     publishZeroTestStatus( m_now(), true );
     return configured;
@@ -759,6 +760,12 @@ dmSyncopation::zeroTestGrid( uint64_t counter, synco::GridTime &grid, uint64_t &
     {
         return false;
     }
+
+    if( rawGrid )
+    {
+        *rawGrid = raw;
+    }
+
     const auto projected = m_zeroPublicationClock.project( raw.ns );
 
     if( projected <= 0 )
@@ -766,12 +773,8 @@ dmSyncopation::zeroTestGrid( uint64_t counter, synco::GridTime &grid, uint64_t &
         periodQ32 = 0;
         return false;
     }
-    grid = { projected, raw.fractionQ32 };
 
-    if( rawGrid )
-    {
-        *rawGrid = raw;
-    }
+    grid = { projected, raw.fractionQ32 };
     return true;
 }
 
@@ -866,7 +869,7 @@ inline void dmSyncopation::zeroTestClockRejected( ZeroClockFailure failure, int6
     const bool  active =
         m_zeroStats.startedNs > 0 && observed >= m_zeroStats.startedNs &&
         ( m_productionEnabled || observed - m_zeroStats.startedNs < int64_t( m_zeroDurationSec * 1e9 ) );
-    const auto slots = active ? uint64_t( m_requested - 1 ) : 0;
+    const auto slots = active ? uint64_t( std::max( 0, scheduleSteps() - 1 ) ) : 0;
     ++m_zeroStats.clockRejected;
     m_zeroStats.clockExcludedCycles += active ? 1 : 0;
     m_zeroStats.clockExcludedSlots += slots;
@@ -1116,14 +1119,60 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     synco::GridTime rawGrid;
     uint64_t        periodQ32  = 0;
     const bool      clockReady = zeroTestGrid( primary, grid, periodQ32, &rawGrid );
-    const auto      period     = periodQ32 / MagAOX::dmSyncoSimulation::periodScale;
-    const bool      rateReady =
-        period &&
-        ( m_productionEnabled ? double( m_requested ) * 1e9 / double( period ) <= m_maxCadence * ( 1 + m_rateTolerance )
-                              : std::abs( 1e9 / double( period ) - 2000.0 ) <= 2000 * m_rateTolerance );
-    if( m_productionEnabled && clockReady && m_enabled )
+
+    if( m_productionEnabled && !clockReady && rawGrid.ns > 0 )
     {
-        publishProductionSchedule( grid, periodQ32, primary );
+        // The primary timestamp already mapped successfully. A frozen grid outside the mapping window
+        // can lag for minutes under bounded phase slew after a rate change. Requalify from this main.
+        m_zeroClock.reset();
+        m_zeroClock.primary( primary, publication );
+        ++m_generation;
+        publishSchedule( 0, -1 );
+    }
+
+    bool rateReady = false;
+
+    if( m_productionEnabled )
+    {
+        const auto period = double( periodQ32 ) / MagAOX::dmSyncoSimulation::periodScale;
+        const int  capacity =
+            clockReady
+                 ? int( std::min<double>( synco::maxSteps, ( m_maxCadence / 1e9 ) * period * ( 1 + m_rateTolerance ) ) )
+                 : 0;
+
+        if( clockReady && m_requested == 0 && capacity != m_productionSteps )
+        {
+            m_productionSteps = capacity;
+            ++m_generation;
+
+            if( detailedTimingEnabled() )
+            {
+                m_zeroPhase.configure( std::max( 1, capacity ) );
+                m_zeroPublicationTiming.configure( std::max( 1, capacity ) );
+            }
+
+            if( m_enabled )
+            {
+                capturePassiveMainTiming();
+            }
+        }
+
+        const int selected = scheduleSteps();
+        rateReady          = selected > 0 && selected <= capacity;
+
+        if( m_enabled && clockReady && rateReady && m_zeroIdle )
+        {
+            publishProductionSchedule( grid, periodQ32, primary );
+        }
+        else if( m_enabled && m_record[synco::state] == synco::armed )
+        {
+            publishSchedule( 0, -1 );
+        }
+    }
+    else
+    {
+        const auto period = periodQ32 / MagAOX::dmSyncoSimulation::periodScale;
+        rateReady         = period && std::abs( 1e9 / double( period ) - 2000.0 ) <= 2000 * m_rateTolerance;
     }
 
     if( !m_enabled )
@@ -1185,6 +1234,7 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
 
     if( m_zeroStats.warming )
     {
+        m_zeroStats.active = false;
         m_reason = m_productionEnabled ? "production clock/ownership warming" : "zero trial clock/ownership warming";
         zeroTestCombined( m_zeroLastCombined );
         m_zeroHaveCombined = synco::ZeroTiming::valid( m_zeroLastCombined );
@@ -1198,10 +1248,11 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         zeroTestEvent( -1, ZeroOutcome::started, ZeroStage::lifecycle, grid.ns, observed );
     }
 
+    const int steps    = scheduleSteps();
     m_zeroStats.active = true;
     m_reason           = m_productionEnabled ? "production active" : "zero trial active";
     ++m_zeroStats.mainObserved;
-    m_zeroStats.auxiliaryOpportunities += uint64_t( m_requested - 1 );
+    m_zeroStats.auxiliaryOpportunities += uint64_t( steps - 1 );
     m_zeroCounterTargetRawNs = rawGrid.ns;
     if( detailedTimingEnabled() )
     {
@@ -1212,9 +1263,8 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     const bool             recovering   = !m_zeroHaveCombined;
     auto                   baseline     = m_zeroLastCombined;
     bool                   haveBaseline = m_zeroHaveCombined;
-    const auto             mainDeadline =
-        std::min( observed + int64_t( m_outputTimeoutUs * 1000 ),
-                  zeroTestPublicationTarget( synco::stepGrid( grid, periodQ32, 1, m_requested ).ns ) );
+    const auto             mainDeadline = std::min( observed + int64_t( m_outputTimeoutUs * 1000 ),
+                                        zeroTestPublicationTarget( synco::stepGrid( grid, periodQ32, 1, steps ).ns ) );
 
     while( zeroTestWait( m_now(), primary ) && m_now() <= mainDeadline )
     {
@@ -1283,10 +1333,10 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         zeroTestEvent(
             0, ZeroOutcome::combinedUnclassified, ZeroStage::mainAcknowledgement, grid.ns, rejectedAt, main, reason );
 
-        for( int step = 1; step < m_requested; ++step )
+        for( int step = 1; step < steps; ++step )
         {
-            m_zeroCounterTargetRawNs = synco::stepGrid( rawGrid, periodQ32, step, m_requested ).ns;
-            const auto target = zeroTestPublicationTarget( synco::stepGrid( grid, periodQ32, step, m_requested ).ns );
+            m_zeroCounterTargetRawNs = synco::stepGrid( rawGrid, periodQ32, step, steps ).ns;
+            const auto target        = zeroTestPublicationTarget( synco::stepGrid( grid, periodQ32, step, steps ).ns );
             zeroTestSkip( step, reason, ZeroStage::mainAcknowledgement, target, rejectedAt, main );
         }
         const bool pendingCommit = haveBaseline && main.inode == baseline.inode && main.counter == baseline.counter &&
@@ -1357,14 +1407,14 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     if( detailedTimingEnabled() )
     {
         zeroTestEvent( 0, ZeroOutcome::mainAcknowledged, ZeroStage::mainAcknowledgement, grid.ns, observed, main );
-        m_zeroPhase.observe( primary, 0, m_requested, main, grid.ns, periodQ32 );
+        m_zeroPhase.observe( primary, 0, steps, main, grid.ns, periodQ32 );
     }
 
-    for( int step = 1; step < m_requested; ++step )
+    for( int step = 1; step < steps; ++step )
     {
-        m_zeroPublicationWait    = {};
-        m_zeroCounterTargetRawNs = synco::stepGrid( rawGrid, periodQ32, step, m_requested ).ns;
-        const auto target = zeroTestPublicationTarget( synco::stepGrid( grid, periodQ32, step, m_requested ).ns );
+        m_zeroPublicationWait         = {};
+        m_zeroCounterTargetRawNs      = synco::stepGrid( rawGrid, periodQ32, step, steps ).ns;
+        const auto             target = zeroTestPublicationTarget( synco::stepGrid( grid, periodQ32, step, steps ).ns );
         synco::ZeroTiming::Key combined;
         if( m_productionEnabled && !prepareProductionStep( step, target, primary ) )
         {
@@ -1662,7 +1712,7 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
             m_zeroLastCombined = combined;
             if( detailedTimingEnabled() )
             {
-                m_zeroPhase.observe( primary, step, m_requested, combined, grid.ns, periodQ32, auxiliaryKey );
+                m_zeroPhase.observe( primary, step, steps, combined, grid.ns, periodQ32, auxiliaryKey );
             }
             zeroTestEvent( step,
                            ZeroOutcome::acknowledged,
@@ -1807,7 +1857,9 @@ inline int dmSyncopation::setupZeroTestINDI()
         m_indiP_zeroPhase[name] = 0.0;
     }
 
-    for( unsigned step = 0; step < 4; ++step )
+    const int diagnosticSteps = m_productionEnabled ? synco::maxSteps : 4;
+
+    for( int step = 0; step < diagnosticSteps; ++step )
     {
         for( const auto *population : { "interval", "intervalError", "phaseError", "transport" } )
         {
@@ -1845,7 +1897,7 @@ inline int dmSyncopation::setupZeroTestINDI()
         m_indiP_zeroPublication[name] = 0.0;
     }
 
-    for( unsigned step = 0; step < 4; ++step )
+    for( int step = 0; step < diagnosticSteps; ++step )
     {
         for( const auto *population :
              { "interval", "intervalError", "phaseError", "publicationError", "preCounterLead", "apiCost" } )
@@ -1913,11 +1965,13 @@ inline void dmSyncopation::publishZeroTestStatus( int64_t now, bool force )
 
     synchronizeMainTiming();
     const bool requested = m_enabled.load( std::memory_order_acquire );
+    const int  steps     = scheduleSteps();
 
     if( !force && m_zeroPublished.capturedNs > 0 && now >= m_zeroPublished.capturedNs &&
         now - m_zeroPublished.capturedNs < 100000000 && requested == m_zeroPublished.requested &&
         m_zeroStats.active == m_zeroPublished.stats.active && m_zeroStats.warming == m_zeroPublished.stats.warming &&
-        m_zeroStats.finished == m_zeroPublished.stats.finished && m_zeroTrial == m_zeroPublished.trial )
+        m_zeroStats.finished == m_zeroPublished.stats.finished && m_zeroTrial == m_zeroPublished.trial &&
+        steps == m_zeroPublished.steps )
     {
         return;
     }
@@ -1931,17 +1985,17 @@ inline void dmSyncopation::publishZeroTestStatus( int64_t now, bool force )
         snapshot.phase       = m_zeroPhase.summary();
         snapshot.publication = m_zeroPublicationTiming.summary();
     }
-    snapshot.clock         = m_zeroPublicationClock.status();
-    snapshot.sequence      = m_zeroPublished.sequence + 1;
-    snapshot.trial         = m_zeroTrial;
-    snapshot.eventsDropped = m_zeroEvents.dropped();
-    snapshot.eventsQueued  = m_zeroEvents.queued();
-    snapshot.capturedNs    = now;
-    snapshot.targetHz      = period ? double( m_requested ) * 1e9 * MagAOX::dmSyncoSimulation::periodScale / period : 0;
-    snapshot.durationSec   = m_productionEnabled ? 0 : m_zeroDurationSec;
-    snapshot.durationLimitSec     = m_zeroDurationLimitSec;
-    snapshot.steps                = m_requested;
-    snapshot.eventStride          = m_zeroEventStride;
+    snapshot.clock            = m_zeroPublicationClock.status();
+    snapshot.sequence         = m_zeroPublished.sequence + 1;
+    snapshot.trial            = m_zeroTrial;
+    snapshot.eventsDropped    = m_zeroEvents.dropped();
+    snapshot.eventsQueued     = m_zeroEvents.queued();
+    snapshot.capturedNs       = now;
+    snapshot.targetHz         = period ? double( steps ) * 1e9 * MagAOX::dmSyncoSimulation::periodScale / period : 0;
+    snapshot.durationSec      = m_productionEnabled ? 0 : m_zeroDurationSec;
+    snapshot.durationLimitSec = m_zeroDurationLimitSec;
+    snapshot.steps            = steps;
+    snapshot.eventStride      = m_zeroEventStride;
     snapshot.publicationAdvanceUs = m_zeroPublicationAdvanceUs;
     snapshot.commitLeadUs         = m_zeroCommitLeadUs;
     snapshot.lateUs               = m_zeroLateUs;
@@ -2250,7 +2304,9 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                          double( phase.phaseExcluded ),
                                          double( phase.transportExcluded ) };
 
-        for( unsigned step = 0; step < phase.interval.size(); ++step )
+        const unsigned diagnosticSteps = m_productionEnabled ? synco::maxSteps : 4;
+
+        for( unsigned step = 0; step < diagnosticSteps; ++step )
         {
             std::ostringstream output;
             output << "[zero_test] kind=phase labelVersion=9 trial=" << trial << " toStep=" << step
@@ -2332,7 +2388,9 @@ inline void dmSyncopation::updateZeroPublication( const ZeroSnapshot &snapshot, 
                                     p.maxBracketNs * 1e-3,
                                     p.sourceFault ? 1.0 : 0.0 };
 
-        for( unsigned step = 0; step < p.interval.size(); ++step )
+        const unsigned diagnosticSteps = m_productionEnabled ? synco::maxSteps : 4;
+
+        for( unsigned step = 0; step < diagnosticSteps; ++step )
         {
             std::ostringstream output;
             output << "[zero_test] kind=publication labelVersion=9 endpoint=cnt0_writetime_proxy trial="

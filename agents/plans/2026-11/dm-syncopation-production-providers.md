@@ -805,3 +805,28 @@ The callback changes the cadence under the existing producer mutex. An
 outstanding tagged payload still follows the protocol's acknowledgement and
 ownership rules. Offline tests exercise switching in both directions with
 modulation active and three auxiliary slots receiving distinct planes at 8 kHz.
+
+## 2026-11-21 Automatic production cadence
+
+The operator requested the fastest rated combined cadence from a 500 Hz to
+3.6 kHz main loop. The production preset uses `scheduler.maxSubframes=0`
+and `scheduler.maxCadenceHz=8000`. Choose the largest integer subdivision
+allowed by the measured period, the existing rating tolerance and the
+16-slot protocol capacity. At 3.6 kHz, two steps give 7.2 kHz. At 500 Hz,
+16 steps give 8 kHz. The preset allows primary measurements down to 450 Hz
+to avoid placing the nominal 500 Hz endpoint on the qualification boundary.
+
+The shared timing record already has room for 16 steps. Carry the selected
+count through schedule publication, execution, main timing labels and optional
+per-slot diagnostics. A changed count advances the provider generation.
+Retain the existing exact reader-release checks, fixed copy budget and
+publication cutoffs. After a rate change puts the old grid outside the
+mapping window, withdraw it and acquire a new full cadence baseline.
+
+The workstation app build and diagnostic INDI syntax check pass. The scheduler,
+simulation, zero timing, main timing and provider suites pass 251 cases. The
+private-stream regression checks every auxiliary acknowledgement, provider
+snapshot, passive step-zero copy and final-slot INDI readback at 500 Hz, 1 kHz,
+2 kHz, 2.5 kHz and approximately 3.6 kHz. The live 2-to-1 kHz case checks
+schedule withdrawal and new slot spacing after reacquisition. Delivered rate
+and misses at the endpoints still require instrument qualification.
