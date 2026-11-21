@@ -1,5 +1,6 @@
 /** \file polarimetry.hpp
- * \brief Polarimetry control widget: HWP angle, QWP polarization and pupil tracking, linear stages, and the hwpSequencer.
+ * \brief Polarimetry control widget: HWP angle, QWP polarization and pupil tracking, linear stages, and the
+ * hwpSequencer.
  */
 
 #ifndef polarimetry_hpp
@@ -20,10 +21,10 @@ namespace xqt
 /// Polarimetry panel for `hwptrack`, `qwptrack`, `qwppupil`, the polarimetry stages, and `hwpsequence`.
 /**
  * Shows the HWP angle and name, the FSM states of `hwptrack`, `qwppupil`, `qwptrack` and the stages, and
- * the hwpSequencer status, and sends start, stop, last-cycle and abort requests to `hwpsequence`. While `qwptrack` is tracking, the QWP fast-axis angles are shown
- * beside the QWP pol. tracking slider. While `qwppupil` is tracking, the ttmperi voltage offsets it applies
- * are shown beside the QWP pupil tracking slider, which may be toggled during a sequence. Sequence
- * parameters other than `num_cycles` are locked while sequencing, and `time_per_pos` is disabled in
+ * the hwpSequencer status, and sends start, stop, last-cycle and abort requests to `hwpsequence`. While `qwptrack` is
+ * tracking, the QWP fast-axis angles are shown beside the QWP pol. tracking slider. While `qwppupil` is tracking, the
+ * ttmperi voltage offsets it applies are shown beside the QWP pupil tracking slider, which may be toggled during a
+ * sequence. Sequence parameters other than `num_cycles` are locked while sequencing, and `time_per_pos` is disabled in
  * frames mode (`frames_per_pos` > 0).
  */
 class polarimetry : public xWidget
@@ -244,7 +245,6 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
     ui.qwpTrackFsm->highlightChanges( false );
     ui.stageQwpLinFsm->highlightChanges( false );
 
-
     ui.labelHwptrack->setText( QString( "hwptrack" ) );
     ui.hwptrackFsm->device( "hwptrack" );
 
@@ -279,7 +279,6 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
     ui.entryHwpAngle->setup( "hwptrack", "hwp_position", statusEntry::FLOAT, "HWP target", "°" );
     ui.entryHwpAngle->format( "%.01f" );
     ui.entryHwpAngle->setStretch( 0, 2, 1 );
-
 
     ui.comboHwpLin->setup( "stagepollin", "presetName", "", "HWP lin. stage", "" );
     ui.comboHwpLin->ctrlWidget( nullptr );
