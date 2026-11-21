@@ -5,8 +5,9 @@
 #ifndef autoJay_hpp
 #define autoJay_hpp
 
-#include <chrono>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -101,6 +102,8 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     /** \name Configuration - Data
      * @{ */
     calibration                         m_captureConfig; ///< Bootstrap pattern identities and required setup.
+    /// Setup devices that publish retained positions and a parked flag when powered off.
+    std::vector<std::string> m_parkableDevices{ "stagelosel", "stageflowfs", "stagebs", "stagesci1" };
     std::array<std::string, 2>                     m_patternFiles; ///< Optional FITS source maps for reference capture.
     std::array<std::vector<std::array<int, 2>>, 2> m_pokeActuators; ///< Zero-based (x, y) pairs for each DM.
     autoJayDetail::registrationSettings m_quality;       ///< Registration acceptance thresholds.
@@ -189,6 +192,9 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     /// Register a property once, retaining a stable callback object.
     int subscribe( const std::string &device, /**< [in] Publisher. */
                    const std::string &property /**< [in] Property name. */ );
+
+    /// Register setup, FSM, and applicable parked-state subscriptions.
+    int subscribeSetup( const std::vector<autoJayDetail::setupRule> &rules /**< [in] Setup requirements. */ );
 
     /// Dispatch subscribed values without issuing hardware commands.
     static int receive( void                    *object, /**< [in] Application pointer. */
@@ -405,6 +411,7 @@ inline void autoJay::setupConfig()
         add( std::string( "setup." ) + name,
              "vector<string>",
              "Parallel setup rules; types 0 numeric, 1 text, 2 switch. '*' captures a value." );
+    add( "setup.parkableDevices", "vector<string>", "Setup devices with retained positions and parked.current." );
     for( const auto &name : { "frames", "settleFrames" } )
         add( std::string( "acquisition." ) + name,
              "unsigned",
@@ -524,6 +531,12 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
     cfg( m_voltageTolerance, "control.voltageTolerance" );
     cfg( m_dmTolerance, "acquisition.dmTolerance" );
     cfg( m_frameMaxAge, "monitor.maxAge" );
+    cfg( m_parkableDevices, "setup.parkableDevices" );
+    if( !std::ranges::all_of( m_parkableDevices, autoJayDetail::calibrationIO::component ) )
+    {
+        return -1;
+    }
+
     std::array<std::vector<std::string>, 6> fields;
     const std::array<std::string, 6> keys{ "devices", "properties", "elements", "values", "types", "tolerances" };
     for( size_t i = 0; i < keys.size(); ++i )
@@ -660,6 +673,25 @@ inline int autoJay::receive( void *object, const pcf::IndiProperty &prop )
     return static_cast<autoJay *>( object )->receive( prop );
 }
 
+inline int autoJay::subscribeSetup( const std::vector<autoJayDetail::setupRule> &rules )
+{
+    for( const auto &rule : rules )
+    {
+        if( subscribe( rule.device, rule.property ) < 0 || subscribe( rule.device, "fsm" ) < 0 )
+        {
+            return -1;
+        }
+
+        if( std::ranges::find( m_parkableDevices, rule.device ) != m_parkableDevices.end() &&
+            subscribe( rule.device, "parked" ) < 0 )
+        {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 inline int autoJay::receive( const pcf::IndiProperty &prop )
 {
     std::lock_guard<std::mutex> lock( m_mutex );
@@ -735,14 +767,43 @@ autoJay::checkSetup( calibration &cal, geometry &geom, bool capture, std::string
         {
             const auto *p   = property( rule.device, rule.property );
             const auto *fsm = property( rule.device, "fsm" );
-            if( !p || !p->find( rule.element ) || p->getState() == pcf::IndiProperty::Busy ||
-                p->getState() == pcf::IndiProperty::Alert )
-                return reject( "missing, moving, or invalid setup: " + rule.device + "." + rule.property );
+            if( !p || !p->find( rule.element ) || p->getState() == pcf::IndiProperty::Alert )
+            {
+                return reject( "missing or invalid setup: " + rule.device + "." + rule.property );
+            }
+
             if( !fsm || !fsm->find( "state" ) )
+            {
                 return reject( "missing device state: " + rule.device );
+            }
+
             const auto state = ( *fsm )["state"].get();
-            if( state != "READY" && state != "OPERATING" )
-                return reject( "device not ready: " + rule.device );
+            const bool poweredOffParkable =
+                state == "POWEROFF" && std::ranges::find( m_parkableDevices, rule.device ) != m_parkableDevices.end();
+            if( poweredOffParkable )
+            {
+                const auto *parked = property( rule.device, "parked" );
+                double      value;
+                if( !parked || parked->getState() == pcf::IndiProperty::Busy ||
+                    parked->getState() == pcf::IndiProperty::Alert || !number( *parked, "current", value ) ||
+                    value != 1 )
+                {
+                    return reject( "device powered off without confirmed park: " + rule.device );
+                }
+            }
+            else if( state != "READY" && state != "OPERATING" )
+            {
+                return reject( "device not ready: " + rule.device + " (" + state + ")" );
+            }
+
+            // Zaber's retained numeric position can carry Busy at power off.
+            if( p->getState() == pcf::IndiProperty::Busy &&
+                !( poweredOffParkable && rule.type == 0 && rule.element == "current" &&
+                   ( rule.property == "position" || rule.property == "rawpos" || rule.property == "preset" ) ) )
+            {
+                return reject( "setup property is busy: " + rule.device + "." + rule.property );
+            }
+
             if( rule.type == 2 && ( p->getType() != pcf::IndiProperty::Switch ||
                                     ( ( *p )[rule.element].getSwitchState() != pcf::IndiElement::On &&
                                       ( *p )[rule.element].getSwitchState() != pcf::IndiElement::Off ) ) )
@@ -1258,9 +1319,12 @@ inline bool autoJay::recall()
             return false;
         }
     }
-    for( const auto &rule : candidate.setup )
-        if( subscribe( rule.device, rule.property ) < 0 || subscribe( rule.device, "fsm" ) < 0 )
-            return false;
+    if( subscribeSetup( candidate.setup ) < 0 )
+    {
+        m_status = "could not subscribe to calibration setup properties";
+        return false;
+    }
+
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_mutex );
         if( generation != m_generation )
@@ -1500,9 +1564,11 @@ inline void autoJay::finish()
 inline int autoJay::appStartup()
 {
     m_session = static_cast<double>( static_cast<uint64_t>( realtime() * 1e3 ) );
-    for( const auto &rule : m_captureConfig.setup )
-        if( subscribe( rule.device, rule.property ) < 0 || subscribe( rule.device, "fsm" ) < 0 )
-            return -1;
+    if( subscribeSetup( m_captureConfig.setup ) < 0 )
+    {
+        return -1;
+    }
+
     for( const auto &name : { "roi_region_state", "fsm" } )
         if( subscribe( m_captureConfig.camera, name ) < 0 )
             return -1;

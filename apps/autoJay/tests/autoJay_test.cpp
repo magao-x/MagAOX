@@ -766,6 +766,74 @@ TEST_CASE( "autoJay rejects invalid setup before opening channels", "[autoJay][a
     REQUIRE( app.m_counter == 0 );
 }
 
+/// Powered-off stages must report a confirmed park and still match the required optical setup.
+/** \ingroup autoJay_unit_test */
+TEST_CASE( "autoJay accepts matching parked stages with power off", "[autoJay][app]" )
+{
+    // clang-format off
+    #ifdef AUTOJAY_TEST_DOXYGEN_REF
+    MagAOX::app::autoJay::checkSetup;
+    #endif
+    // clang-format on
+    autoJayHarness app;
+    for( const auto *stage : { "stagelosel", "stageflowfs" } )
+    {
+        app.text( stage, "fsm", "state", "POWEROFF" );
+        app.numbers( stage, "parked", { { "current", 1 } } );
+        auto park = app.observedProperty( std::string( stage ) + ".parked" );
+        park.setState( pcf::IndiProperty::Idle );
+        app.deliver( park );
+        auto position = app.observedProperty( std::string( stage ) + ".position" );
+        position.setState( pcf::IndiProperty::Busy );
+        app.deliver( position );
+    }
+
+    std::string error;
+    REQUIRE( app.setupValid( true, error ) );
+    REQUIRE( app.setupValid( false, error ) );
+
+    SECTION( "park flag is missing" )
+    {
+        app.m_observed.at( "stagelosel.parked" ).value.reset();
+    }
+    SECTION( "park flag is cleared" )
+    {
+        app.numbers( "stageflowfs", "parked", { { "current", 0 } } );
+    }
+    SECTION( "park flag is invalid or unsettled" )
+    {
+        auto park = app.observedProperty( "stageflowfs.parked" );
+        park.setState( GENERATE( pcf::IndiProperty::Alert, pcf::IndiProperty::Busy ) );
+        app.deliver( park );
+    }
+    SECTION( "parked at the wrong preset" )
+    {
+        app.toggle( "stagelosel", "presetName", "pupil", false );
+    }
+    SECTION( "parked outside the requested position tolerance" )
+    {
+        app.numbers( "stageflowfs", "position", { { "current", 33 } } );
+    }
+    SECTION( "parked position reports an error" )
+    {
+        auto value = app.observedProperty( "stageflowfs.position" );
+        value.setState( pcf::IndiProperty::Alert );
+        app.deliver( value );
+    }
+    SECTION( "stage leaves the stable power-off state" )
+    {
+        app.text( "stageflowfs", "fsm", "state", "HOMING" );
+    }
+    SECTION( "unlisted devices cannot use the parked flag" )
+    {
+        app.text( "camflowfs", "fsm", "state", "POWEROFF" );
+        app.numbers( "camflowfs", "parked", { { "current", 1 } } );
+    }
+
+    REQUIRE_FALSE( app.begin( true ) );
+    REQUIRE( app.m_openCount == 0 );
+}
+
 /// A stable INDI setup remains usable after the camera freshness interval passes.
 /** \ingroup autoJay_unit_test */
 TEST_CASE( "autoJay retains subscribed setup that has not changed", "[autoJay][app]" )
@@ -959,6 +1027,9 @@ TEST_CASE( "autoJay can start a first capture after monitoring while idle", "[au
     autoJayHarness  app;
     REQUIRE( app.startMonitoring( camera.m_name ) == 0 );
     REQUIRE_FALSE( app.m_calibration );
+    REQUIRE( app.m_observed.contains( "stagelosel.parked" ) );
+    REQUIRE( app.m_observed.contains( "stageflowfs.parked" ) );
+    REQUIRE_FALSE( app.m_observed.contains( "camflowfs.parked" ) );
     pcf::IndiProperty capture( pcf::IndiProperty::Switch, "autoJay-test", "capture" );
     capture.add( pcf::IndiElement( "request" ) );
     capture["request"].setSwitchState( pcf::IndiElement::On );

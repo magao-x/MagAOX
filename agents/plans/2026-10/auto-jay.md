@@ -713,3 +713,19 @@ It uses a private synthetic ImageStreamIO camera to verify idle startup
 through the normal monitor and acquisition entry points. The suite also
 checks that a blocked capture logs its reason and that diagnostic retention
 survives multiple captures until turned off.
+
+### Follow-up: powered-off parked stages
+
+AutoJay accepts a listed setup device in `POWEROFF` when its INDI
+`parked.current` is valid and equal to 1. The ordinary position, preset,
+and tolerance checks still apply to the retained values. Zaber marks some
+retained numeric readbacks Busy while powered off. Permit that state for
+current position readbacks only when the device confirms its park. The default
+`setup.parkableDevices` list covers the Zaber stages used by the flowfs
+and science profiles. AutoJay subscribes to the parked flag for these
+devices only when they are part of the required setup. The saved optical
+setup and calibration schema are unchanged.
+
+On 2026-11-21 the optimized app build and the offline app suite passed
+(20 cases, 2,012 assertions). Tests cover retained Busy readbacks,
+invalid parked telemetry, and preset and position mismatches.
