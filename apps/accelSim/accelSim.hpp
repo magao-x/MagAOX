@@ -565,9 +565,9 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     double dmScale = 0;
     DMSYNCOPATIONPRODUCER_LOAD_CONFIG( config );
     config( m_dmChannel, "dm.channelName" );
-    if( !m_dmChannel.empty() && ( m_dmChannel != "dm01disp10_aux" || m_syncopationTiming.empty() ) )
+    if( !m_dmChannel.empty() && ( m_syncopationTiming.empty() ) )
         return log<software_error, -1>(
-            { __FILE__, __LINE__, "DM output requires dm01disp10_aux and an existing syncopation.timingStream" } );
+            { __FILE__, __LINE__, "DM output requires an existing syncopation.timingStream" } );
 
     config( m_dmModes, "dm.modeCube" );
     config( m_dmMask, "dm.mask" );
