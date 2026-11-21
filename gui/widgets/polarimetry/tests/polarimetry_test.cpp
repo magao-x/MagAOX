@@ -249,6 +249,8 @@ TEST_CASE( "Polarimetry subscribes to current property names", "[polarimetryGUI]
     CHECK( widget.findChild<QWidget *>( "qwpPupilFsm" ) != nullptr );
     CHECK( widget.findChild<QWidget *>( "sliderHwpTracking" ) == nullptr );
     CHECK( widget.findChild<QWidget *>( "stagePolRotFsm" ) == nullptr );
+    CHECK( widget.findChild<QWidget *>( "stagePolLinFsm" ) == nullptr );
+    CHECK( widget.findChild<QWidget *>( "stageQwpLinFsm" ) == nullptr );
 }
 
 /** \brief While idle, the time entry is disabled in frames mode and the sequencing buttons are hidden.
