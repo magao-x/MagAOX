@@ -244,7 +244,8 @@ all_guis = \
 	loopCtrlGUI \
 	roiGUI \
 	cameraGUI \
-	stageGUI
+	stageGUI \
+	polarimetryGUI \
 
 # If building for coverage, don't build guis for now
 ifeq ($(NO_GUIS),1)
