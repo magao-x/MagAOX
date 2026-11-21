@@ -444,7 +444,8 @@ struct stdCameraHasFocus<derivedT, std::void_t<decltype( derivedT::c_stdCamera_h
  *         \code
  *             int setShutter(int); // shut the shutter if 0, open the shutter otherwise.
  *         \endcode
- *         which shuts the shutter if the argument is 0, opens it otherwise.
+ *         The derived class also maintains \ref m_shutterState. The INDI `shutter.toggle`
+ *         is `On` when the shutter is shut and `Off` when it is open or unknown.
  *
  *     - Focus State and Control:
  *
@@ -891,9 +892,9 @@ class stdCamera
 
     int m_shutterState{ -1 }; ///< State of the shutter.  0 = shut, 1 = open, -1 = unknown.
 
-    pcf::IndiProperty m_indiP_shutterStatus; ///< Property to report shutter status
+    pcf::IndiProperty m_indiP_shutterStatus; ///< Property reporting shutter status.
 
-    pcf::IndiProperty m_indiP_shutter; ///< Property used to control the shutter, a switch.
+    pcf::IndiProperty m_indiP_shutter; ///< Switch that reports and requests closure with `On`.
 
     ///@}
 
@@ -3276,7 +3277,7 @@ int stdCamera<derivedT>::appLogic()
                         derived().updateIfChanged( m_indiP_shutterStatus, "status", m_shutterStatus, INDI_IDLE );
                     }
 
-                    if( m_shutterState == 1 )
+                    if( m_shutterState == 0 )
                     {
                         derived().updateSwitchIfChanged( m_indiP_shutter, "toggle", pcf::IndiElement::On, INDI_OK );
                     }

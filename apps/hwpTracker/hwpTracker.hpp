@@ -10,8 +10,9 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
-#include <mx/math/gslInterpolation.hpp>
-#include <mx/ioutils/readColumns.hpp>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
 
 /** \defgroup hwpTracker
  * \brief The MagAO-X application to track pupil rotation with the HWP.
@@ -31,8 +32,11 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X ADC Tracker
-/**
+/// The MagAO-X HWP rotation tracker
+/** Converts a requested HWP angle into a stage target, optionally adding a tracking offset computed from the
+ * telescope altitude and parallactic angle.  Stage commands are only sent while the stage is READY; a move requested
+ * while the stage is busy is queued and sent when it next reports READY.
+ *
  * \ingroup hwpTracker
  */
 class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
@@ -45,40 +49,79 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
 
     typedef dev::telemeter<hwpTracker> telemeterT;
 
+  public:
+    static constexpr float posTolerance = 0.5; ///< Tolerance for matching a named HWP position [deg].
+
   protected:
-    /** \name Configurable Parameters
+    /** \name Configurable Parameters - Data
      *@{
      */
-    float m_altitude{ 0 }; ///< Current altitude
 
-    float m_parang{ 0 }; ///< Current parallactic angle
+    float m_zero{ 360 }; ///< The stage position at HWP angle 0 [deg].  Default is 360.
 
-    float m_hwpTrackingOffset{ 0 }; ///< HWP tracking offset
+    int m_sign{ -1 }; ///< The sign relating HWP angle to stage position, +1 or -1.  Default is -1.
 
-    float m_hwpSetPos{ 0 };
+    std::string m_devName{ "stagepolrot" }; ///< The device name of the HWP stage.  Default is 'stagepolrot'.
 
-    float m_hwpCurPos{ 0 };
+    std::string m_tcsDevName{ "tcsi" }; ///< The TCS interface device providing 'teldata'.  Default is 'tcsi'.
 
-    float m_hwpActualPos{ 0 };
+    float m_updateInterval{ 10 }; ///< The interval at which to update positions while tracking [sec].  Default is 10.
 
-    std::string m_hwpPosName{ "" };
+    int m_trackOffsetSign{ -1 }; ///< The sign applied to the parallactic angle term, +1 for Ns-W, -1 for Ns-E.
 
-    float m_zero{ 360 }; ///< The zero point of the HWP stage.
+    float m_pupilOffset{ 0 }; ///< The pupil offset used for HWP tracking (must match twice the kTracker offset) [deg].
 
-    int m_sign{ -1 }; ///< The sign to apply to the calculated HWP angle.
+    ///@}
 
-    int m_trackOffsetSign{ -1 }; ///< The sign to apply to the HWP tracking offset
+    /** \name Tracking State - Data
+     * These members are protected by m_indiMutex.
+     *@{
+     */
 
-    std::string m_devName{ "stagepolrot" }; ///< The device name of the HWP stage.  Default is 'stagehwprot'
+    bool m_tracking{ false }; ///< True when the HWP tracking offset is applied.
 
-    std::string m_tcsDevName{
-        "tcsi" }; ///< The device name of the TCS Interface providing 'teldata.altitude'.  Default is 'tcsi'
+    float m_altitude{ 0 }; ///< The last valid telescope altitude [deg].
 
-    float m_updateInterval{ 10 }; ///< The interval at which to update positions, in seconds.  Default is 10 secs.
+    float m_parang{ 0 }; ///< The last valid parallactic angle [deg], unwrapped to be continuous while tracking.
 
-    float m_pupilOffset{ 0 }; ///< The pupil offset used for HWP tracking (must match twice the kTracker offset)
+    bool m_haveTelData{ false }; ///< True once a valid teldata update has been received.
 
-    bool m_tracking{ false }; ///< Is the HWP in ADI synchronization mode?. Default is false.
+    bool m_telDataValid{ true }; ///< Validity of the last teldata update, used to log only on transitions.
+
+    float m_hwpSetPos{ 0 }; ///< The requested HWP angle, without tracking offset [deg].
+
+    float m_hwpTrackingOffset{ 0 }; ///< The tracking offset applied in the last stage command [deg].
+
+    float m_hwpCurPos{ 0 }; ///< The measured HWP angle with the tracking offset removed [deg].
+
+    float m_hwpActualPos{ 0 }; ///< The measured HWP angle including the tracking offset [deg].
+
+    std::string m_hwpPosName; ///< The name of the measured HWP position, or 'Unknown'.
+
+    stateCodes::stateCodeT m_stageState{ stateCodes::NOTCONNECTED }; ///< The last state reported by the stage.
+
+    bool m_haveStageState{ false }; ///< True once the stage has reported its state.
+
+    bool m_movePending{ false }; ///< True when a stage move is waiting for the stage to become READY.
+
+    double m_lastUpdate{ 0 }; ///< The time of the last periodic tracking update [sec].
+
+    ///@}
+
+    /** \name Telemetry - Data
+     * The last recorded values, protected by m_indiMutex.
+     *@{
+     */
+
+    float m_telemCurPos{ 0 }; ///< The last recorded measured HWP angle without offset [deg].
+
+    float m_telemActualPos{ 0 }; ///< The last recorded measured HWP angle with offset [deg].
+
+    std::string m_telemPosName; ///< The last recorded HWP position name.
+
+    bool m_telemTracking{ false }; ///< The last recorded tracking flag.
+
+    ///@}
 
   public:
     /// Default c'tor.
@@ -89,24 +132,31 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
     {
     }
 
+    /// Set up the configuration options.
     virtual void setupConfig();
 
     /// Implementation of loadConfig logic, separated for testing.
     /** This is called by loadConfig().
+     *
+     * \returns 0 on success
+     * \returns -1 on an invalid configuration
      */
     int loadConfigImpl(
         mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
 
+    /// Load the configuration, shutting down on an invalid configuration.
     virtual void loadConfig();
 
-    /// Startup function
+    /// Register the INDI properties and set the initial state.
     /**
-     *
+     * \returns 0 on success
+     * \returns -1 on an error requiring shutdown
      */
     virtual int appStartup();
 
     /// Implementation of the FSM for hwpTracker.
-    /**
+    /** Sends periodic tracking updates and queued moves when the stage is READY, and updates the app state.
+     *
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
@@ -114,49 +164,109 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
 
     /// Shutdown the app.
     /**
-     *
+     * \returns 0 on success
      */
     virtual int appShutdown();
 
-    virtual std::string getHwpStatus();
+    /// Calculate the HWP tracking offset.
+    /**
+     * \returns the tracking offset [deg]
+     */
+    static float trackingOffset( float altitude,  /**< [in] the telescope altitude [deg] */
+                                 float parang,    /**< [in] the parallactic angle [deg] */
+                                 int   trackSign, /**< [in] the sign of the parallactic angle term */
+                                 float pupilOffset /**< [in] the pupil offset [deg] */ );
 
-    virtual void getHwpTrackingOffset();
+    /// Convert a HWP angle to a stage target, without wrapping.
+    /**
+     * \returns the stage target [deg]
+     */
+    static float stageTarget( float hwpPos, /**< [in] the HWP angle including any tracking offset [deg] */
+                              float zero,   /**< [in] the stage position at HWP angle 0 [deg] */
+                              int   sign /**< [in] the sign relating HWP angle to stage position */ );
 
-    virtual void updateHwpPos();
+    /// Shift an angle by a multiple of 360 degrees to lie within 180 degrees of a reference.
+    /**
+     * \returns the shifted angle [deg]
+     */
+    static float nearestAngle( float angle, /**< [in] the angle to shift [deg] */
+                               float ref /**< [in] the reference angle [deg] */ );
+
+    /// Check that a value is finite, independent of -ffast-math.
+    /** The build uses -ffast-math, under which std::isfinite may be optimized to always return true, so this
+     * checks the exponent bits directly.
+     *
+     * \returns true if the value is neither NaN nor infinite
+     */
+    static bool isFinite( float val /**< [in] the value to check */ );
+
+    /// Get the name of a HWP angle, matching the named positions modulo 90 degrees.
+    /**
+     * \returns one of Qplus, Qminus, Uplus, Uminus, or Unknown
+     */
+    static std::string positionName( float hwpPos /**< [in] the HWP angle without tracking offset [deg] */ );
+
+  protected:
+    /// Command the stage to the current setpoint, or queue the move if the stage is not READY.
+    /** Must be called without m_indiMutex held.
+     *
+     * \returns 0 on success or when queued
+     * \returns -1 on an error sending the command
+     */
+    int requestMove();
+
+    /// Send a target to the stage.
+    /**
+     * \returns 0 on success
+     * \returns -1 on an error
+     */
+    virtual int sendStageTarget( float target /**< [in] the stage target [deg] */ );
+
+    /// Determine the app state from the stage state, teldata receipt and tracking.
+    /** Must be called without m_indiMutex held.
+     *
+     * \returns the state the app should be in
+     */
+    stateCodes::stateCodeT trackerState();
 
     /** @name INDI
      *
      * @{
      */
   protected:
-    pcf::IndiProperty m_indiP_tracking;
+    pcf::IndiProperty m_indiP_tracking; ///< Toggle to enable or disable tracking.
 
-    pcf::IndiProperty m_indiP_teldata;
+    pcf::IndiProperty m_indiP_hwpSetPos; ///< The requested (target) and measured (current) HWP angle.
 
-    pcf::IndiProperty m_indiP_hwpSetPos;
+    pcf::IndiProperty m_indiP_hwpPosName; ///< The name of the measured HWP position.
 
-    pcf::IndiProperty m_indiP_hwpPosName;
+    pcf::IndiProperty m_indiP_hwpTrackingOffset; ///< The tracking offset applied in the last stage command.
 
-    pcf::IndiProperty m_indiP_hwpTrackingOffset;
+    pcf::IndiProperty m_indiP_hwpActualPos; ///< The measured HWP angle including the tracking offset.
 
-    pcf::IndiProperty m_indiP_hwpActualPos;
+    pcf::IndiProperty m_indiP_teldata; ///< Subscription to the TCS 'teldata' property.
 
-    pcf::IndiProperty m_indiP_hwpStagePos;
+    pcf::IndiProperty m_indiP_stageTarget; ///< Template for sending 'position.target' to the stage.
 
-    pcf::IndiProperty m_indiP_stagePolRot;
+    pcf::IndiProperty m_indiP_stagePos; ///< Subscription to the stage 'position' property.
 
-    pcf::IndiProperty m_indiP_stagePolRotFsm;
+    pcf::IndiProperty m_indiP_stageFsm; ///< Subscription to the stage 'fsm' property.
 
   public:
+    /// Handle requests to enable or disable tracking.
     INDI_NEWCALLBACK_DECL( hwpTracker, m_indiP_tracking );
 
+    /// Handle requests for a new HWP angle.
     INDI_NEWCALLBACK_DECL( hwpTracker, m_indiP_hwpSetPos );
 
+    /// Record the telescope altitude and parallactic angle.
     INDI_SETCALLBACK_DECL( hwpTracker, m_indiP_teldata );
 
-    INDI_SETCALLBACK_DECL( hwpTracker, m_indiP_stagePolRot );
+    /// Record the measured stage position.
+    INDI_SETCALLBACK_DECL( hwpTracker, m_indiP_stagePos );
 
-    INDI_SETCALLBACK_DECL( hwpTracker, m_indiP_stagePolRotFsm );
+    /// Record the stage state, sending any queued move when it becomes READY.
+    INDI_SETCALLBACK_DECL( hwpTracker, m_indiP_stageFsm );
 
     ///@}
 
@@ -164,11 +274,15 @@ class hwpTracker : public MagAOXApp<true>, public dev::telemeter<hwpTracker>
      *
      * @{
      */
+
+    /// Check whether telemetry needs to be recorded.
     int checkRecordTimes();
 
-    int recordTelem( const telem_poltrack * );
+    /// Record telemetry on the telemeter's schedule.
+    int recordTelem( const telem_poltrack * /**< [in] tag for the telemetry type */ );
 
-    int recordPolTrack( bool force = false );
+    /// Record the HWP tracking telemetry if it changed.
+    int recordPolTrack( bool force = false /**< [in] record even if nothing changed */ );
 
     ///@}
 };
@@ -188,7 +302,7 @@ void hwpTracker::setupConfig()
                 "zero",
                 false,
                 "float",
-                "The HWP zero position.  Default is 360." );
+                "The stage position at HWP angle 0.  Default is 360." );
 
     config.add( "hwp.sign",
                 "",
@@ -198,7 +312,7 @@ void hwpTracker::setupConfig()
                 "sign",
                 false,
                 "int",
-                "The HWP rotation sign. Default is -1." );
+                "The HWP rotation sign, +1 or -1. Default is -1." );
 
     config.add( "hwp.devName",
                 "",
@@ -208,7 +322,7 @@ void hwpTracker::setupConfig()
                 "devName",
                 false,
                 "string",
-                "The device name of the HWPstage.  Default is 'stagepolrot'" );
+                "The device name of the HWP stage.  Default is 'stagepolrot'" );
 
     config.add( "tcs.devName",
                 "",
@@ -228,7 +342,7 @@ void hwpTracker::setupConfig()
                 "updateInterval",
                 false,
                 "float",
-                "The interval at which to update positions, in seconds.  Default is 1 sec." );
+                "The interval at which to update positions, in seconds.  Default is 10 sec." );
 
     config.add( "tracking.sign",
                 "",
@@ -240,7 +354,6 @@ void hwpTracker::setupConfig()
                 "int",
                 "The sign to apply to the HWP tracking offset. 1 for Ns-W, -1 for Ns-E.  Default is -1." );
 
-
     config.add( "tracking.pupilOffset",
                 "",
                 "tracking.pupilOffset",
@@ -250,7 +363,6 @@ void hwpTracker::setupConfig()
                 false,
                 "float",
                 "The HWP tracking pupil offset. Must match twice the kTracker offset. Default is 0." );
-
 
     TELEMETER_SETUP_CONFIG( config );
 }
@@ -262,7 +374,33 @@ int hwpTracker::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_devName, "hwp.devName" );
     _config( m_tcsDevName, "tcs.devName" );
     _config( m_updateInterval, "tracking.updateInterval" );
+    _config( m_trackOffsetSign, "tracking.sign" );
     _config( m_pupilOffset, "tracking.pupilOffset" );
+
+    if( m_sign != 1 && m_sign != -1 )
+    {
+        return log<text_log, -1>( "hwp.sign must be +1 or -1", logPrio::LOG_CRITICAL );
+    }
+
+    if( m_trackOffsetSign != 1 && m_trackOffsetSign != -1 )
+    {
+        return log<text_log, -1>( "tracking.sign must be +1 or -1", logPrio::LOG_CRITICAL );
+    }
+
+    if( !isFinite( m_updateInterval ) || m_updateInterval <= 0 )
+    {
+        return log<text_log, -1>( "tracking.updateInterval must be finite and positive", logPrio::LOG_CRITICAL );
+    }
+
+    if( !isFinite( m_zero ) || !isFinite( m_pupilOffset ) )
+    {
+        return log<text_log, -1>( "hwp.zero and tracking.pupilOffset must be finite", logPrio::LOG_CRITICAL );
+    }
+
+    if( m_devName == "" || m_tcsDevName == "" )
+    {
+        return log<text_log, -1>( "hwp.devName and tcs.devName must not be empty", logPrio::LOG_CRITICAL );
+    }
 
     TELEMETER_LOAD_CONFIG( _config );
 
@@ -271,20 +409,16 @@ int hwpTracker::loadConfigImpl( mx::app::appConfigurator &_config )
 
 void hwpTracker::loadConfig()
 {
-    loadConfigImpl( config );
+    if( loadConfigImpl( config ) < 0 )
+    {
+        m_shutdown = 1;
+    }
 }
 
 int hwpTracker::appStartup()
 {
-
     createStandardIndiToggleSw( m_indiP_tracking, "tracking" );
     registerIndiPropertyNew( m_indiP_tracking, INDI_NEWCALLBACK( m_indiP_tracking ) );
-
-    REG_INDI_SETPROP( m_indiP_teldata, m_tcsDevName, "teldata" );
-
-    REG_INDI_SETPROP( m_indiP_stagePolRot, m_devName, "position" );
-
-    REG_INDI_SETPROP( m_indiP_stagePolRotFsm, m_devName, "fsm" );
 
     createStandardIndiNumber<float>(
         m_indiP_hwpSetPos, "hwp_position", -360.0, 360.0, 1e-3, "%.03f", "HWP Set Position", "HWP Status" );
@@ -302,39 +436,54 @@ int hwpTracker::appStartup()
     m_indiP_hwpActualPos.add( pcf::IndiElement( "value" ) );
     m_indiP_hwpActualPos["value"].set( 0 );
 
-    m_indiP_hwpStagePos = pcf::IndiProperty( pcf::IndiProperty::Number );
-    m_indiP_hwpStagePos.setDevice( m_devName );
-    m_indiP_hwpStagePos.setName( "position" );
-    m_indiP_hwpStagePos.add( pcf::IndiElement( "target" ) );
+    m_indiP_stageTarget = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_stageTarget.setDevice( m_devName );
+    m_indiP_stageTarget.setName( "position" );
+    m_indiP_stageTarget.add( pcf::IndiElement( "target" ) );
+
+    REG_INDI_SETPROP( m_indiP_teldata, m_tcsDevName, "teldata" );
+
+    REG_INDI_SETPROP( m_indiP_stagePos, m_devName, "position" );
+
+    REG_INDI_SETPROP( m_indiP_stageFsm, m_devName, "fsm" );
 
     TELEMETER_APP_STARTUP;
 
-    state( stateCodes::READY );
+    state( stateCodes::NOTCONNECTED );
 
     return 0;
 }
 
 int hwpTracker::appLogic()
 {
+    double now = mx::sys::get_curr_time();
 
-    static double lastupdate = 0;
+    bool move = false;
 
-    if( m_tracking && mx::sys::get_curr_time() - lastupdate > m_updateInterval )
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        if( m_stageState == stateCodes::READY )
+        {
+            if( m_tracking && now - m_lastUpdate > m_updateInterval )
+            {
+                m_lastUpdate = now;
+                move         = true;
+            }
+
+            if( m_movePending )
+            {
+                move = true;
+            }
+        }
+    } // mutex scope
+
+    if( move )
     {
-
-        getHwpTrackingOffset();
-
-        updatesIfChanged<float>( m_indiP_hwpTrackingOffset, { "value" }, { m_hwpTrackingOffset } );
-
-        updateHwpPos();
-
-        lastupdate = mx::sys::get_curr_time();
+        requestMove();
     }
-    else
-    {
-        if( !m_tracking )
-            lastupdate = 0;
-    }
+
+    state( trackerState() );
 
     TELEMETER_APP_LOGIC;
 
@@ -348,77 +497,162 @@ int hwpTracker::appShutdown()
     return 0;
 }
 
-std::string hwpTracker::getHwpStatus()
-{
-    float tol = 0.5; // degrees
-    if( fabs( m_hwpCurPos - 0 ) < tol )
-        return "Qplus";
-    else if( fabs( m_hwpCurPos - 45 ) < tol )
-        return "Qminus";
-    else if( fabs( m_hwpCurPos - 22.5 ) < tol )
-        return "Uplus";
-    else if( fabs( m_hwpCurPos - 67.5 ) < tol )
-        return "Uminus";
-    else
-        return "Unknown";
-}
-
-void hwpTracker::getHwpTrackingOffset()
+float hwpTracker::trackingOffset( float altitude, float parang, int trackSign, float pupilOffset )
 {
     // While on Nasmyth East, the sign is negative
     // While on Nasmyth West, the sign is positive
-    m_hwpTrackingOffset = m_trackOffsetSign * 0.5 * m_parang + m_altitude + m_pupilOffset;
+    return trackSign * 0.5 * parang + altitude + pupilOffset;
 }
 
-void hwpTracker::updateHwpPos()
+float hwpTracker::stageTarget( float hwpPos, float zero, int sign )
 {
-    float hwpActualPos = m_hwpSetPos + m_hwpTrackingOffset;
+    // Not wrapped: the stage moves in absolute position, so wrapping into [0, 360) sends it the long way
+    // round whenever the target crosses the 0/360 boundary.
+    return zero + sign * hwpPos;
+}
 
-    float hwpStagePos = m_zero + m_sign * hwpActualPos;
+float hwpTracker::nearestAngle( float angle, float ref )
+{
+    float diff = angle - ref;
 
-    std::cerr << "HWP set to: " << hwpActualPos << "\n";
-    std::cerr << "Sending HWP stage to: " << hwpStagePos << "\n";
-    log<text_log>( "HWP set to: " + std::to_string( hwpActualPos ) );
+    return ref + diff - 360 * std::round( diff / 360 );
+}
 
-    m_indiP_hwpStagePos["target"] = hwpStagePos;
-    sendNewProperty( m_indiP_hwpStagePos );
+bool hwpTracker::isFinite( float val )
+{
+    uint32_t bits;
+    std::memcpy( &bits, &val, sizeof( bits ) );
 
-    recordPolTrack();
+    return ( bits & 0x7f800000 ) != 0x7f800000;
+}
+
+std::string hwpTracker::positionName( float hwpPos )
+{
+    static const std::vector<std::pair<std::string, float>> positions = {
+        { "Qplus", 0 }, { "Qminus", 45 }, { "Uplus", 22.5 }, { "Uminus", 67.5 } };
+
+    for( auto &pos : positions )
+    {
+        float diff = hwpPos - pos.second;
+
+        diff -= 90 * std::round( diff / 90 );
+
+        if( std::fabs( diff ) < posTolerance )
+        {
+            return pos.first;
+        }
+    }
+
+    return "Unknown";
+}
+
+int hwpTracker::requestMove()
+{
+    float hwpPos = 0;
+    float offset = 0;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        if( m_stageState != stateCodes::READY )
+        {
+            m_movePending = true;
+            return 0;
+        }
+
+        m_movePending = false;
+
+        if( m_tracking )
+        {
+            m_hwpTrackingOffset = trackingOffset( m_altitude, m_parang, m_trackOffsetSign, m_pupilOffset );
+        }
+        else
+        {
+            m_hwpTrackingOffset = 0;
+        }
+
+        offset = m_hwpTrackingOffset;
+        hwpPos = m_hwpSetPos + offset;
+    } // mutex scope
+
+    float target = stageTarget( hwpPos, m_zero, m_sign );
+
+    updateIfChanged<float>( m_indiP_hwpTrackingOffset, "value", offset );
+
+    log<text_log>( "HWP set to " + std::to_string( hwpPos ) + ", stage target " + std::to_string( target ) );
+
+    return sendStageTarget( target );
+}
+
+int hwpTracker::sendStageTarget( float target )
+{
+    if( sendNewProperty( m_indiP_stageTarget, "target", target ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "failed to send HWP stage target" } );
+    }
+
+    return 0;
+}
+
+stateCodes::stateCodeT hwpTracker::trackerState()
+{
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    if( !m_haveStageState || !m_haveTelData )
+    {
+        return stateCodes::NOTCONNECTED;
+    }
+
+    if( m_stageState == stateCodes::ERROR || m_stageState == stateCodes::FAILURE )
+    {
+        return stateCodes::ERROR;
+    }
+
+    if( m_stageState == stateCodes::OPERATING || m_stageState == stateCodes::HOMING ||
+        ( m_stageState == stateCodes::READY && m_tracking ) )
+    {
+        return stateCodes::OPERATING;
+    }
+
+    if( m_stageState == stateCodes::READY )
+    {
+        return stateCodes::READY;
+    }
+
+    return stateCodes::NOTCONNECTED;
 }
 
 INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_hwpSetPos )( const pcf::IndiProperty &ipRecv )
 {
-
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_hwpSetPos, ipRecv );
 
-    if( ipRecv.getName() != m_indiP_hwpSetPos.getName() )
+    if( !ipRecv.find( "target" ) )
     {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
-        return -1;
+        return 0;
     }
 
-    if( !ipRecv.find( "target" ) )
-        return 0;
+    float target = ipRecv["target"].get<float>();
 
-    m_hwpSetPos = ipRecv["target"].get<float>();
+    if( !isFinite( target ) )
+    {
+        return log<software_error, 0>( { __FILE__, __LINE__, "ignoring non-finite HWP position request" } );
+    }
 
-    updateIfChanged<float>(m_indiP_hwpSetPos, "target", m_hwpSetPos);
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+        m_hwpSetPos = target;
+    } // mutex scope
 
-    updateHwpPos();
+    updateIfChanged<float>( m_indiP_hwpSetPos, "target", target );
+
+    requestMove();
 
     return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_tracking )( const pcf::IndiProperty &ipRecv )
 {
-
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_tracking, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_tracking.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
-        return -1;
-    }
 
     if( !ipRecv.find( "toggle" ) )
     {
@@ -427,115 +661,193 @@ INDI_NEWCALLBACK_DEFN( hwpTracker, m_indiP_tracking )( const pcf::IndiProperty &
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
     {
+        bool haveTelData = false;
+
+        { //mutex scope
+            std::lock_guard<std::mutex> guard( m_indiMutex );
+
+            haveTelData = m_haveTelData;
+
+            if( haveTelData )
+            {
+                // m_parang holds the raw parallactic angle while not tracking, so unwrapping starts from it.
+                m_tracking   = true;
+                m_lastUpdate = mx::sys::get_curr_time();
+            }
+        } // mutex scope
+
+        if( !haveTelData )
+        {
+            updateSwitchIfChanged( m_indiP_tracking, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+
+            return log<text_log, 0>( "cannot start HWP rotation tracking: no valid teldata from " + m_tcsDevName,
+                                     logPrio::LOG_WARNING );
+        }
+
         updateSwitchIfChanged( m_indiP_tracking, "toggle", pcf::IndiElement::On, INDI_IDLE );
-
-        m_tracking = true;
-
-        getHwpTrackingOffset();
-
-        updateIfChanged<float>( m_indiP_hwpTrackingOffset, "value", m_hwpTrackingOffset );
-
-        updateHwpPos();
 
         log<text_log>( "started HWP rotation tracking" );
     }
     else
     {
+        { //mutex scope
+            std::lock_guard<std::mutex> guard( m_indiMutex );
+            m_tracking = false;
+        } // mutex scope
+
         updateSwitchIfChanged( m_indiP_tracking, "toggle", pcf::IndiElement::Off, INDI_IDLE );
-
-        m_tracking = false;
-
-        m_hwpTrackingOffset = 0;
-
-        updateIfChanged<float>( m_indiP_hwpTrackingOffset, "value", m_hwpTrackingOffset );
-
-        updateHwpPos();
 
         log<text_log>( "stopped HWP rotation tracking" );
     }
 
-    return 0;
-}
-
-INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_teldata )( const pcf::IndiProperty &ipRecv )
-{
-
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_teldata, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_teldata.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
-        return -1;
-    }
-
-    if( !ipRecv.find( "zd" ) )
-        return 0;
-
-    if( !ipRecv.find( "pa" ) )
-        return 0;
-
-    m_altitude = 90 - ipRecv["zd"].get<float>();
-
-    m_parang = ipRecv["pa"].get<float>();
-
-    return 0;
-}
-
-INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stagePolRot )( const pcf::IndiProperty &ipRecv )
-{
-
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stagePolRot, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_stagePolRot.getName() )
-    {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
-        return -1;
-    }
-
-    if( !ipRecv.find( "current" ) )
-        return 0;
-
-    float hwpStagePos = ipRecv["current"].get<float>();
-
-    m_hwpActualPos = m_sign * (hwpStagePos - m_zero);
-    if (fabs(m_hwpActualPos) < 1e-2)
-        m_hwpActualPos = 0;
-    updateIfChanged<float>(m_indiP_hwpActualPos, "value", m_hwpActualPos);
-
-    m_hwpCurPos = m_hwpActualPos - m_hwpTrackingOffset;
-    // round to two decimal points
-    m_hwpCurPos = std::round(m_hwpCurPos * 100) / 100;
-    updateIfChanged<float>(m_indiP_hwpSetPos, "current", m_hwpCurPos);
-
-    m_hwpPosName = getHwpStatus();
-
-    updateIfChanged<std::string>( m_indiP_hwpPosName, "value", m_hwpPosName );
+    requestMove();
 
     recordPolTrack();
 
     return 0;
 }
 
-INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stagePolRotFsm )( const pcf::IndiProperty &ipRecv )
+INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_teldata )( const pcf::IndiProperty &ipRecv )
 {
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_teldata, ipRecv );
 
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stagePolRotFsm, ipRecv );
-
-    if( ipRecv.getName() != m_indiP_stagePolRotFsm.getName() )
+    if( !ipRecv.find( "zd" ) || !ipRecv.find( "pa" ) )
     {
-        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received" } );
-
-        return -1;
+        return 0;
     }
 
-    if( !ipRecv.find( "state" ) )
+    float zd = ipRecv["zd"].get<float>();
+    float pa = ipRecv["pa"].get<float>();
+
+    bool valid = isFinite( zd ) && isFinite( pa ) && zd >= 0 && zd <= 90;
+
+    bool changed = false;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        changed        = ( valid != m_telDataValid );
+        m_telDataValid = valid;
+
+        if( valid )
+        {
+            m_altitude = 90 - zd;
+
+            // Unwrap while tracking so the 0.5*pa term does not jump by 180 degrees when pa crosses 0/360.
+            if( m_tracking )
+            {
+                m_parang = nearestAngle( pa, m_parang );
+            }
+            else
+            {
+                m_parang = pa;
+            }
+
+            m_haveTelData = true;
+        }
+    } // mutex scope
+
+    if( changed && !valid )
+    {
+        log<text_log>( "ignoring invalid teldata: zd=" + std::to_string( zd ) + " pa=" + std::to_string( pa ),
+                       logPrio::LOG_WARNING );
+    }
+    else if( changed )
+    {
+        log<text_log>( "teldata valid again" );
+    }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stagePos )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stagePos, ipRecv );
+
+    if( !ipRecv.find( "current" ) )
+    {
         return 0;
+    }
 
-    std::string stagepolrot_state = ipRecv["state"].get<std::string>();
+    float stagePos = ipRecv["current"].get<float>();
 
-    state(stateCodes::str2CodeFast(stagepolrot_state));
+    if( !isFinite( stagePos ) )
+    {
+        return 0;
+    }
+
+    float       actualPos = 0;
+    float       curPos    = 0;
+    std::string posName;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        // Report angles in the user's frame, i.e. nearest to the commanded angle, in case the stage reports a wrapped
+        // position.
+        actualPos = nearestAngle( m_sign * ( stagePos - m_zero ), m_hwpSetPos + m_hwpTrackingOffset );
+
+        if( std::fabs( actualPos ) < 1e-2 )
+        {
+            actualPos = 0;
+        }
+
+        // round to two decimal points
+        curPos = std::round( ( actualPos - m_hwpTrackingOffset ) * 100 ) / 100;
+
+        posName = positionName( curPos );
+
+        m_hwpActualPos = actualPos;
+        m_hwpCurPos    = curPos;
+        m_hwpPosName   = posName;
+    } // mutex scope
+
+    updateIfChanged<float>( m_indiP_hwpActualPos, "value", actualPos );
+
+    updateIfChanged<float>( m_indiP_hwpSetPos, "current", curPos );
+
+    updateIfChanged<std::string>( m_indiP_hwpPosName, "value", posName );
+
+    recordPolTrack();
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( hwpTracker, m_indiP_stageFsm )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stageFsm, ipRecv );
+
+    if( !ipRecv.find( "state" ) )
+    {
+        return 0;
+    }
+
+    std::string stateStr = ipRecv["state"].get<std::string>();
+
+    stateCodes::stateCodeT stageState = stateCodes::str2Code( stateStr );
+
+    if( stateCodes::codeText( stageState ) != stateStr )
+    {
+        log<text_log>( "unrecognized state '" + stateStr + "' from " + m_devName, logPrio::LOG_WARNING );
+
+        stageState = stateCodes::NOTCONNECTED;
+    }
+
+    bool move = false;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+
+        m_stageState     = stageState;
+        m_haveStageState = true;
+
+        move = ( stageState == stateCodes::READY && m_movePending );
+    } // mutex scope
+
+    if( move )
+    {
+        requestMove();
+    }
 
     return 0;
 }
@@ -552,23 +864,32 @@ int hwpTracker::recordTelem( const telem_poltrack * )
 
 int hwpTracker::recordPolTrack( bool force )
 {
-    static float hwpSetPos = 0;
+    float       curPos    = 0;
+    float       actualPos = 0;
+    std::string posName;
+    bool        tracking = false;
 
-    static float hwpActualPos = 0;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    static std::string hwpPosName = "";
+        if( !force && m_hwpCurPos == m_telemCurPos && m_hwpActualPos == m_telemActualPos &&
+            m_hwpPosName == m_telemPosName && m_tracking == m_telemTracking )
+        {
+            return 0;
+        }
 
-    static bool tracking = false;
+        curPos    = m_hwpCurPos;
+        actualPos = m_hwpActualPos;
+        posName   = m_hwpPosName;
+        tracking  = m_tracking;
 
-    if( m_hwpCurPos != hwpSetPos || m_hwpActualPos != hwpActualPos || hwpPosName != m_hwpPosName || tracking != m_tracking || force )
-    {
-        telem<telem_poltrack>( { m_hwpCurPos, m_hwpActualPos, m_hwpPosName, m_tracking} );
+        m_telemCurPos    = curPos;
+        m_telemActualPos = actualPos;
+        m_telemPosName   = posName;
+        m_telemTracking  = tracking;
+    } // mutex scope
 
-        hwpSetPos    = m_hwpCurPos;
-        hwpActualPos = m_hwpActualPos;
-        hwpPosName   = m_hwpPosName;
-        tracking     = m_tracking;
-    }
+    telem<telem_poltrack>( { curPos, actualPos, posName, tracking } );
 
     return 0;
 }

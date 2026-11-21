@@ -25,6 +25,7 @@ gui/**/makefile.*
 
 #Agents:
 .codex
+**/*.gcov
 
 #Ignore any old folders
 **/old/
@@ -90,6 +91,7 @@ gui/rtimv/plugins/acquisition/makefile.acquisition
 #h
 apps/hoPredCtrl/hoPredCtrl
 apps/hsfwCtrl/hsfwCtrl
+apps/hwpSequencer/hwpSequencer
 apps/hwpTracker/hwpTracker
 
 #i
@@ -137,6 +139,9 @@ apps/pupilFit/pupilFit
 apps/pvcamCtrl/pvcamCtrl
 apps/pwfsSlopeCalc/pwfsSlopeCalc
 apps/photonCounter
+
+#q
+apps/qwpTracker/qwpTracker
 
 #r
 apps/rhusbMon/rhusbMon

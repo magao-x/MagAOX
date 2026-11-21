@@ -532,6 +532,19 @@ TEST_CASE( "Call to accessor with invalid member", "[libMagAOX::logger::logTypes
         REQUIRE( lmd.hierarch == true );
     }
 
+    SECTION( "telem_qwppupil" )
+    {
+        MagAOX::logger::logMetaDetail lmd = MagAOX::logger::telem_qwppupil::getAccessor( "" );
+
+        REQUIRE( lmd.keyword == "" );
+        REQUIRE( lmd.comment == "" );
+        REQUIRE( lmd.format == "" );
+        REQUIRE( lmd.valType == -1 );
+        REQUIRE( lmd.metaType == -1 );
+        REQUIRE( lmd.accessor == nullptr );
+        REQUIRE( lmd.hierarch == true );
+    }
+
     SECTION( "telem_rhusb" )
     {
         MagAOX::logger::logMetaDetail lmd = MagAOX::logger::telem_rhusb::getAccessor( "" );

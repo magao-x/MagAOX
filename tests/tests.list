@@ -53,6 +53,7 @@
 ../apps/virtualPDU/tests/virtualPDU_test
 ../apps/acronameUsbHub/tests/acronameUsbHub_test
 ../apps/adcTracker/tests/adcTracker_test
+../apps/hwpSequencer/tests/hwpSequencer_test
 ../apps/alpaoCtrl/tests/alpaoCtrl_test
 ../apps/alignLoop/tests/alignLoop_test
 ../apps/autoJay/tests/autoJayAcquisition_test
@@ -81,10 +82,16 @@
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_subscription_test
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_integration_test
 ../apps/loopTimingMonitor/tests/loopTimingMonitor_synco_test
+../apps/elliptecCtrl/tests/elliptecCtrl_test
+../apps/elliptecLowLevel/tests/elliptecDevice_test
+../apps/elliptecLowLevel/tests/elliptecLowLevel_test
 ../apps/filterWheelCtrl/tests/filterWheelCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_test
 ../apps/flipperCtrl/tests/flipperCtrl_entrypoint_test
 ../apps/flowRPM/tests/flowRPM_test
+../apps/hwpTracker/tests/hwpTracker_test
+../apps/qwpPupilTracker/tests/qwpPupilTracker_test
+../apps/qwpPupilTracker/tests/qwpPupilTracker_indi_test
 ../apps/indiTSAccumulator/tests/indiTSAccumulator_test
 ../apps/irisaoCtrl/tests/irisaoCtrl_test
 ../apps/koolanceCtrl/tests/koolanceCtrl_test
@@ -121,6 +128,8 @@
 ../apps/pvcamCtrl/tests/pvcamCtrl_test
 ../apps/pvcamCtrl/tests/pvcamCtrl_hotplug_test
 ../apps/pwfsSlopeCalc/tests/pwfsSlopeCalc_test
+../apps/qwpTracker/tests/qwpTracker_test
+../apps/qwpTracker/tests/qwpTracker_indi_test
 ../apps/refRMS/tests/refRMS_test
 ../apps/rhusbMon/tests/rhusbMon_test
 ../apps/rhusbMon/tests/rhusbMonParsers_test
