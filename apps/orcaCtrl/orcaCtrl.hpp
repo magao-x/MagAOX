@@ -105,6 +105,11 @@ namespace app
  * temperature status and the cooling fan are exposed through dev::stdCamera. Camera state is
  * recorded through dev::telemeter as telem_stdcam.
  *
+ * The `readout_speed` choices are `standard` (Standard scan: 120 fps full frame, 0.43 e- rms, 7.2 us
+ * minimum exposure) and `ultra_quiet` (Ultra quiet scan: 25.4 fps full frame, 0.30 e- rms, 33.9 us minimum
+ * exposure). The stdCamera key `camera.defaultReadoutSpeed` (default `standard`) sets the power-on speed.
+ * Changing the speed restarts acquisition. See agents/plans/2026-11/orca-ultraquiet.md.
+ *
  * Configuration specific to this app (in addition to the stdCamera, frameGrabber and telemeter keys):
  * - `camera.serialNumber`: the camera ID reported by DCAM_IDSTR_CAMERAID (e.g. `PHX2`). Required.
  * - `camera.liquidCooling`: declares a liquid-cooled camera. Default `true`. When true, the fan is held off
@@ -644,7 +649,8 @@ class orcaCtrl : public MagAOXApp<>,
     int setTempSetPt();
 
     /// Request a readout-speed change through the next reconfigure. [stdCamera interface]
-    /**
+    /** configureAcquisition() writes m_readoutSpeedNameSet to the camera, which restarts acquisition.
+     *
      * \returns 0 always
      */
     int setReadoutSpeed();
@@ -735,9 +741,10 @@ class orcaCtrl : public MagAOXApp<>,
      */
 
     /// Configure the camera for the pending settings and start continuous acquisition. [framegrabber interface]
-    /** Applies the cooling and fan state and the ROI and binning, reads back the frame geometry, readout
-     * time, exposure-time limits, exposure time and frame rate, then allocates the DCAM buffers and starts
-     * capture.
+    /** Applies the cooling and fan state, the readout speed, and the ROI and binning, reads back the frame
+     * geometry, readout time, exposure-time limits, exposure time and frame rate, then allocates the DCAM
+     * buffers and starts capture. The readout speed applied by the camera is read back into
+     * m_readoutSpeedName.
      *
      * \returns 0 on success
      * \returns -1 on error
@@ -831,9 +838,9 @@ inline orcaCtrl::orcaCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
     // m_acqBuff.memory_size = 0;
     // m_acqBuff.memory      = 0;
 
-    m_defaultReadoutSpeed    = "Standard";
-    m_readoutSpeedNames      = { "Standard", "Ultra-quiet" };
-    m_readoutSpeedNameLabels = { "Standard", "Ultra-quiet" };
+    m_defaultReadoutSpeed    = "standard";
+    m_readoutSpeedNames      = { "standard", "ultra_quiet" };
+    m_readoutSpeedNameLabels = { "Standard", "Ultra Quiet" };
 
     // m_defaultVShiftSpeed    = "1_2us";
     // m_vShiftSpeedNames      = { "0_7us", "1_2us", "2_0us", "5_0us" };
@@ -1778,7 +1785,7 @@ inline int orcaCtrl::powerOnDefaults()
     m_currentROI.bin_x = 1;
     m_currentROI.bin_y = 1;
 
-    m_readoutSpeedName = "Standard";
+    m_readoutSpeedName = m_defaultReadoutSpeed;
     // m_vShiftSpeedName  = "1_2us";
 
     if( m_fanSpeedControlEnabled )
@@ -2081,17 +2088,44 @@ inline int orcaCtrl::configureAcquisition()
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
-    ///\todo The readout speed is read but never set from m_readoutSpeedNameSet.
-    int32 cmode;
-    if( getorcaParameter( cmode, DCAM_IDPROP_READOUTSPEED ) < 0 )
+    // Written first, since it changes the readout time, exposure limits and frame rate read below.
+    // Standard scan is the camera's fastest readout speed and Ultra quiet scan its slowest.
+    if( m_readoutSpeedNameSet != "standard" && m_readoutSpeedNameSet != "ultra_quiet" )
+    {
+        log<text_log>( "unknown readout speed '" + m_readoutSpeedNameSet + "', keeping " + m_readoutSpeedName,
+                       logPrio::LOG_WARNING );
+
+        m_readoutSpeedNameSet = m_readoutSpeedName;
+    }
+
+    int32 readoutSpeed =
+        m_readoutSpeedNameSet == "ultra_quiet" ? DCAMPROP_READOUTSPEED__SLOWEST : DCAMPROP_READOUTSPEED__FASTEST;
+
+    DCAMPROP_ATTR speedAttr{};
+    speedAttr.cbSize = sizeof( speedAttr );
+    speedAttr.iProp  = DCAM_IDPROP_READOUTSPEED;
+
+    if( setorcaParameter( DCAM_IDPROP_READOUTSPEED, readoutSpeed ) < 0 ||
+        getorcaParameter( readoutSpeed, DCAM_IDPROP_READOUTSPEED ) < 0 ||
+        failed( dcamprop_getattr( m_cameraHandle, &speedAttr ) ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
         {
             return -1;
         }
-        log<software_error>( { __FILE__, __LINE__, "could not get Readout Control Mode" } );
+        log<software_error>( { __FILE__, __LINE__, "could not set the readout speed" } );
         return -1;
     }
+
+    const std::string appliedSpeed = readoutSpeed <= speedAttr.valuemin ? "ultra_quiet" : "standard";
+
+    if( appliedSpeed != m_readoutSpeedName )
+    {
+        log<text_log>( "readout speed changed from " + m_readoutSpeedName + " to " + appliedSpeed,
+                       logPrio::LOG_NOTICE );
+    }
+
+    m_readoutSpeedName = appliedSpeed;
 
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
