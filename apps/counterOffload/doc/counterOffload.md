@@ -108,7 +108,8 @@ causes, measured in the closed-loop WFS PSDs.
 
 **Figure of merit.** The power of the averaged closed-loop PSDs (`aol1_clpsds`, from modalPSDs) within `calibHalfWidthHz` of
 the offload rate `t2wOffloader.fps`, summed over the first `t2wOffloader.numModes` modes. It is reported as a ratio to a
-baseline measured at gain 0, the counter-offload off.
+baseline measured at gain 0, the counter-offload off. The baseline drifts (about ±16% over 8 min on the bench), so
+each ratio uses the baseline linearly interpolated in time between the baselines measured before and after it.
 
 **Averaging.** `aol1_clpsds` is the mean of the raw PSDs over the last `psdAvgTime` (10 s), republished every 0.5 s. Its
 oldest data are `psdAvgTime + psdTime` (10.5 s) old. After each change, an evaluation therefore waits `calibSettleS` (11 s),
@@ -116,23 +117,38 @@ so that only PSDs made entirely of data taken after the change are used. It then
 published PSDs, 0.5 s apart.
 
 These samples share most of their data. Their standard deviation (`fomStd`) shows whether the value is stable; it is
-not an independent noise estimate. If you change modalPSDs `psdAvgTime` or `psdTime`, change `calibSettleS` to match. The
-baseline is re-measured every `calibBaselineEvery` evaluations to follow drift.
+not an independent noise estimate. If you change modalPSDs `psdAvgTime` or `psdTime`, change `calibSettleS` to match.
 
-**Scan.**
+**Scan.** Repeated measurements of the same parameters scatter by about 0.05–0.08 in ratio, as much as many of the
+effects being measured, so the run is built to choose values from many points, not from the single lowest one.
 
-1. Set `leak` to `calibLeak` (default 0.0025 per slot, about 50 ms at 8 kHz), so that the held contribution
-   stays at a few offloads. Then measure the baseline and the starting parameters.
-2. Scan `rampStartUs`, then `rampDurationUs`, then `gain`, each over its grid with the others at the best so far.
-3. Rescan each over ± one step at half the step, then evaluate the vertex of a parabola through the minimum.
-4. Apply the best parameters and log them at INFO, as values to copy into the config. Restore the original `leak`.
+1. **Setup.** Set `leak` to `calibLeak` (default 0.0025 per slot, about 50 ms at 8 kHz), so that the held
+   contribution stays at a few offloads.
+2. **Noise estimate.** Measure the starting parameters `calibReplicates` (3) times, each between baselines. Their
+   scatter is the first estimate σ of the noise of one ratio.
+3. **Sweeps.** In round 1, sweep `rampStartUs`, then `gain`, then `rampDurationUs`. In later rounds (`calibRounds`,
+   default 2), sweep `rampStartUs` and `gain` again with the updated values, since they may interact. In each sweep:
+   - the grid is measured in a scrambled order (for example 0, 100, 50, 150, 25, 125, 75), so slow drift does not
+     look like a trend;
+   - a baseline is measured before and after the sweep, and after every `calibBaselineEvery` (4) points;
+   - a quadratic is fitted to all the sweep's ratios, and its minimum within the measured range is the candidate.
+     With fewer than 4 points the minimum of a 3-point running mean is used. The fit residuals are pooled into σ,
+     which is never taken below `calibSigmaFloor`;
+   - the parameter moves to the candidate only if the predicted improvement over its current value exceeds
+     `calibMoveSigma` × σ × √(6 / n), with n the number of points (1.5 standard errors by default). Otherwise it keeps
+     its value. A current value outside the swept range always moves.
+4. **Confirmation.** Measure the chosen parameters `calibConfirmPairs` (3) times, each between baselines. If their mean
+   ratio is below 1, apply them and log them, with the confirmed ratio ± its standard error, at INFO as values to copy
+   into the config. Otherwise restore the parameters from before the run, with a WARNING.
+5. Restore the original `leak`.
 
-With the defaults a run is about 45–50 measurements of about 12 s each, so about 10 minutes.
+With the defaults a run is 58 measurements of about 12.5 s each, so about 12 minutes. The estimate is logged when a run
+starts, as a WARNING if it is over 20 minutes, for example after widening a grid.
 
 **Clipping.** A point at which the counter command clips at `maxCommand` is skipped, not used. Clipping is counted
 from 1 s after each change, so the previous point's held contribution can leak away first. The point is written to the
-CSV with stage `clipped` and empty `fom`, `fomStd` and `ratio`. Larger values of the same parameter in that sweep
-are not tried, so a gain scan stops at the first gain that clips, and the run continues with the next stage.
+CSV with stage `clipped` and empty `fom`, `fomStd` and ratios. Larger values of the same parameter in that sweep are
+not measured, and those already measured are not used, so a gain sweep ends at the first gain that clips.
 
 **Running it.** With the loop closed, offloading, and the app enabled:
 
@@ -142,22 +158,32 @@ setINDI -s <instance>.calibrate.toggle=On
 
 Turning `calibrate` off aborts the run. The run also aborts if:
 
-- an evaluation exceeds `abortRatio` times the baseline;
-- no settled PSDs arrive within `timeoutS` (for example the loop opened or modalPSDs stopped);
+- a point exceeds `calibAbortRatio` times the latest baseline;
+- no settled PSDs arrive within `calibTimeoutS` (for example the loop opened or modalPSDs stopped);
 - `t2wOffloader.fps` or `numModes` changes;
 - the app is disabled, or the PSD stream is reallocated;
 - the gain-0 baseline cannot be measured, including when it clips.
 
-On an abort, the best parameters found so far are applied, with a WARNING, if their ratio is below 1. Otherwise the
-parameters from before the run are restored.
+On an abort, the parameters chosen so far are applied, with a WARNING, if their predicted ratio is below 1. Otherwise
+the parameters from before the run are restored.
 
 The gain applies to offloads as they arrive, so the gain-0 baseline means "stop countering new offloads". The
 contribution already held leaks away within about 50 ms at the calibration leak.
 
-**Results.** The read-only `calibration` property shows `stage`, `point`, the latest `fom`, `fomOff` and `ratio`, and
-the best parameters and ratio so far. Each run writes `<instance>_calib_<UTC time>.csv` in `csvDir`, one row per
-evaluation, with the stage, parameters, offload rate, modes, band, `nAverage`, `fom`, its standard deviation, `fomOff`
-and `ratio`.
+**Results.** The read-only `calibration` property shows:
+
+- `stage` (0 off, 1 initial, 2 start, 3 duration, 4 gain, 5 confirm, 6 clipped, 7–9 the start, duration and gain
+  decisions) and `point`, the number of points measured;
+- the latest `fom`, `fomOff` and `ratio` (to the latest baseline);
+- `bestStartUs`, `bestDurationUs`, `bestGain` and `bestRatio`: the parameters chosen so far and their predicted ratio;
+- `sigma`, the current noise estimate, and `confirmRatio` ± `confirmStd` at the end.
+
+Each run writes `<instance>_calib_<UTC time>.csv` in `csvDir`. Measurement rows have the time, stage, parameters,
+offload rate, modes, band, `nAverage`, `fom`, `fomStd`, `fomOff` (the latest baseline), `ratio` (to it) and
+`ratioInterp` (to the interpolated baseline, the value the run uses). They are written when their sweep closes. After
+each sweep a `fit start`, `fit duration` or `fit gain` row records the decision: the parameters with the swept one at
+the candidate, then `fitCurrent` and `fitCandidate` (the predicted ratios; `fitCurrent` is empty if the current value
+was outside the sweep), `threshold`, `moved` (1 or 0) and `sigma`.
 
 These are set in the config:
 
@@ -176,7 +202,7 @@ is in progress. A rejected value is logged as an error and the setting keeps its
 | `calibHalfWidthHz` | 10 | Band half width around the offload rate, Hz. |
 | `calibModeMax` | 0 | Modes summed; 0 uses `t2wOffloader.numModes`. |
 | `calibNAverage` | 3 | Settled PSDs averaged per evaluation, 2 to 1000. |
-| `calibBaselineEvery` | 5 | Evaluations between baselines. |
+| `calibBaselineEvery` | 4 | Sweep points between baselines. |
 | `calibSettleS` | 11 | Wait after each change before PSDs count; must cover `psdAvgTime + psdTime`, s. |
 | `calibTimeoutS` | 5 | Longest wait for an evaluation's PSDs after settling, s. |
 | `calibAbortRatio` | 3 | Abort above this multiple of the baseline. |
@@ -184,6 +210,11 @@ is in progress. A rejected value is logged as an error and the setting keeps its
 | `calibStartGridUs` | 0, 150, 25 | `rampStartUs` scan; elements `min`, `max`, `step`. |
 | `calibDurationGridUs` | 200, 600, 100 | `rampDurationUs` scan; elements `min`, `max`, `step`. |
 | `calibGainGrid` | 0.3, 1.0, 0.1 | `gain` scan; elements `min`, `max`, `step`. |
+| `calibReplicates` | 3 | Measurements of the starting parameters for the first noise estimate, 2 to 20. |
+| `calibConfirmPairs` | 3 | Measurements of the chosen parameters, each after a baseline, 1 to 20. |
+| `calibMoveSigma` | 1.5 | Standard errors of improvement needed to move a parameter. |
+| `calibSigmaFloor` | 0.02 | Smallest noise estimate of the ratio used. |
+| `calibRounds` | 2 | Rounds of sweeps; rounds after the first sweep only `rampStartUs` and `gain`, 1 to 5. |
 
 For example, to scan gains from 0.5 to 1.2:
 
