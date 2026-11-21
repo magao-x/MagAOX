@@ -7,10 +7,10 @@ to its own aligned reference. The reported residual is tweeter displacement
 minus NCPC displacement, in detector pixels; aligned references define zero.
 A separate `closedLoopIndi` instance commands `ttmperi`.
 
-The operator establishes the optical setup and opens both `holoop` and
-`twAlign-camwfs-ctrl`. The sensor checks these conditions; it does not move setup
-stages, `ttmpupil`, or `stagecamlensx/y`. Camlens follow-up and deciding when the
-alignment is complete remain manual.
+The operator establishes the optical setup and opens `holoop`. The sensor
+checks these conditions before poking. Setup stage motion, `ttmpupil`, and
+`stagecamlensx/y` are handled separately. Camlens follow-up and deciding when
+the alignment is complete remain manual.
 
 ## Configure an instance
 
@@ -59,14 +59,27 @@ For `camflowfs`, require `stagelosel.presetName.pupil` On and
 this setup. Also capture `stagelosel.position.current` with a 0.01 tolerance.
 Confirm these tolerances and add the actual bump-mask/filter requirements.
 
+AutoJay accepts a setup stage in `POWEROFF` when it reports `parked.current=1`
+and its retained position and preset still match the profile. By default this
+applies to `stagelosel`, `stageflowfs`, `stagebs`, and `stagesci1` when they
+appear in the setup. Set `setup.parkableDevices` to list the devices in your
+setup that publish this parked state. A confirmed park allows Zaber's retained
+numeric position readback to carry the INDI `Busy` state.
+
 The six `setup` arrays have one entry per requirement in matching order. Types
 are `0` for a number, `1` for text, and `2` for a switch; switch values are `0`/`1`.
 `*` records a property's current value during capture and requires that saved
 value during measurement. Numeric tolerances are absolute and use the property's
-units. Missing, Busy, or Alert setup properties block acquisition. AutoJay
+units. Missing or Alert properties block acquisition, as does Busy outside the
+parked position exception above. AutoJay
 retains each subscribed value until it receives an update. `monitor.maxAge`
 applies to camera frames only. Remove `monitor.refreshInterval` from any copied
 configuration.
+
+The former `autoJay.alignmentLoop` setting and its setup rule are obsolete.
+AutoJay drops the old `twAlign-camwfs-ctrl.loop_state.toggle` requirement from
+copied configs and saved calibrations. If an older config named a different
+alignment controller, its legacy setting identifies the rule to drop.
 
 The local `camflowfs` mapping uses `pvcamCtrl`: the example captures
 `exptime.current` and all four `readout_speed` switches (`sensitivity`, `speed`,
@@ -98,8 +111,10 @@ After manually establishing the desired aligned state and optical setup, request
 checks signal quality without needing an older calibration, and saves/installs
 one complete bundle. Capture never publishes a correction sample. Use
 `measure.request` for one measurement, `continuous.toggle` for repeated measurements,
-and `stop.request` to cancel. `status.current` explains progress/rejection;
-`status.calibration` identifies the installed bundle.
+and `stop.request` to cancel. The app monitors the camera while idle. Check
+`status.current` for acquisition progress and `status.calibration` for the
+installed bundle. The log records capture requests, successful local poke
+writes, and problems that block or abort acquisition.
 
 The default accepted shift limit is 5 detector pixels, configurable with
 `quality.maxShift`; it applies to both individual displacements and their
@@ -164,11 +179,13 @@ does not cause silent fallback to an older optical setup. Recapture after changi
 the required setup or sampling; a bundle missing a newly configured setup binding
 is invalid. ROI size/origin changes alone are supported.
 
-`save_diagnostics.request` retains the next completed sequence. Rejected completed
+`save_diagnostics.toggle` retains each completed sequence while On. Turn it Off
+when finished inspecting pokes. Rejected completed
 sequences also save diagnostic FITS images under `autoJay.diagnosticsDir`, default
 `<basePath>/rawimages/<sensor-instance>`. Suffixes `_0`, `_1`, and `_2` identify
 baseline, NCPC, and tweeter means; reference images are retained when available.
-Headers identify the reason, calibration, sequence, and frame counters. An
+The log gives the saved filename prefix. Headers identify the reason,
+calibration, sequence, and frame counters. An
 incomplete timed-out sequence may have no completed diagnostic product.
 
 On a normal exit or detected failure the app attempts to clear its owned channels.

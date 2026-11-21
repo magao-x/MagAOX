@@ -692,3 +692,55 @@ On 2026-11-20 the optimized app build and all four offline AutoJay suites
 passed (40 cases, 2,259 assertions). Tests cover timing with both triggers
 empty, mixed feedback in either direction, and capture and reload without
 combined streams.
+
+### Follow-up: idle camera monitor and capture diagnostics
+
+During commissioning, a capture returned `camera stream is stale` before
+opening the poke channels. AutoJay previously set its idle FSM state to
+`READY`, while its camera monitor only attaches and reads in
+`OPERATING`. Keep the FSM in the monitor's operating state by default,
+including between transactions. The INDI acquisition status still reports
+which request or transaction is in progress.
+
+Capture requests, local poke writes, failures, and saved diagnostic file
+prefixes are now logged. `save_diagnostics.toggle` retains completed
+sequences until turned off. Rejected completed sequences still retain
+diagnostics with the toggle off.
+
+On 2026-11-21 the optimized build and offline app suite passed
+(19 cases, 1,687 assertions).
+It uses a private synthetic ImageStreamIO camera to verify idle startup
+through the normal monitor and acquisition entry points. The suite also
+checks that a blocked capture logs its reason and that diagnostic retention
+survives multiple captures until turned off.
+
+### Follow-up: powered-off parked stages
+
+AutoJay accepts a listed setup device in `POWEROFF` when its INDI
+`parked.current` is valid and equal to 1. The ordinary position, preset,
+and tolerance checks still apply to the retained values. Zaber marks some
+retained numeric readbacks Busy while powered off. Permit that state for
+current position readbacks only when the device confirms its park. The default
+`setup.parkableDevices` list covers the Zaber stages used by the flowfs
+and science profiles. AutoJay subscribes to the parked flag for these
+devices only when they are part of the required setup. The saved optical
+setup and calibration schema are unchanged.
+
+On 2026-11-21 the optimized app build and the offline app suite passed
+(20 cases, 2,012 assertions). Tests cover retained Busy readbacks,
+invalid parked telemetry, and preset and position mismatches.
+
+### Follow-up: remove the tweeter/WFS alignment interlock
+
+Only the main AO loop remains a required loop interlock. AutoJay no longer
+subscribes to the former alignment controller or checks its state. Both camera
+templates omit that setting and its setup bindings. When reading an older
+config or reference bundle, AutoJay discards the obsolete alignment loop rule
+before checking setup or registering subscriptions. The old config key, when
+present, identifies a custom name for the same retired rule. Existing bundles
+retain their optical setup and references.
+
+On 2026-11-21 the optimized build and offline app suite passed
+(21 cases, 1,931 assertions). The tests cover legacy configs and saved
+bundles with default and custom alignment controller names, and verify
+that the main AO interlock still blocks acquisition when closed.
