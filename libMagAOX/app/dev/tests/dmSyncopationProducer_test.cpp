@@ -204,6 +204,48 @@ TEST_CASE( "syncopation schedule versions and exact target identities", "[dmSync
     REQUIRE( slot.generation == 3 );
 }
 
+/// A main-only producer waits for step 0 even while earlier auxiliary steps are available.
+TEST_CASE( "producer can target only the next main cycle", "[dmSyncopationProducer]" )
+{
+    Fixture        fixture;
+    synco::Request slot;
+    REQUIRE( fixture.m_producer.syncopationPoll( slot, fixture.m_source, true ) == 0 );
+
+    auto &record           = fixture.m_record;
+    record[synco::cutoffs] = record[synco::reference];
+    record[synco::targets] = record[synco::targets + 1] + 10000000;
+    REQUIRE( synco::writeRecord( fixture.m_schedule, record ) );
+    REQUIRE( fixture.m_producer.syncopationPoll( slot, fixture.m_source, true ) == 0 );
+
+    record[synco::cutoffs] = record[synco::cutoffs + 1] + 10000000;
+    REQUIRE( synco::writeRecord( fixture.m_schedule, record ) );
+    REQUIRE( fixture.m_producer.syncopationPoll( slot, fixture.m_source, true ) == 1 );
+    REQUIRE( slot.step == 0 );
+    REQUIRE( slot.cycle == record[synco::cycle] + 1 );
+    const float pixels[]{ 1, 2, 3, 4 };
+    REQUIRE( fixture.m_producer.syncopationPublish( pixels, slot, fixture.m_source ) );
+    const auto command = fixture.commit();
+    CHECK( synco::commandMatches( command, slot ) );
+    fixture.acknowledge( command );
+    CHECK( fixture.m_producer.syncopationPoll( slot, fixture.m_source, true ) == 0 );
+
+    const auto cycle = slot.cycle;
+    fixture.advertise( 1, 1, 0 );
+    record[synco::cycle] = cycle;
+    record[synco::steps] = 1;
+    REQUIRE( synco::writeRecord( fixture.m_schedule, record ) );
+    REQUIRE( fixture.m_producer.syncopationPoll( slot, fixture.m_source, true ) == 1 );
+    CHECK( slot.step == 0 );
+    CHECK( slot.cycle == cycle + 1 );
+
+    // clang-format off
+#ifdef DMSYNCOPATIONPRODUCER_TEST_DOXYGEN_REF
+    MagAOX::app::dev::dmSyncopationProducer<Producer>::syncopationPoll;
+    MagAOX::app::dev::dmSyncopationProducer<Producer>::syncopationPublish;
+#endif
+    // clang-format on
+}
+
 /// An exact transport acknowledgement, including discard, releases payload ownership before physical DM completion.
 TEST_CASE( "producer freezes each payload until exact snapshot acknowledgement", "[dmSyncopationProducer]" )
 {

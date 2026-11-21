@@ -44,6 +44,9 @@ observer wake and cycle-lock delays.
 
 ## Configure and rebuild
 
+Use the [diagnostic INDI build](dmSyncopation.md#diagnostic-indi-build) for the
+readbacks in this procedure.
+
 The operator performs these steps on the instrument. Keep the recorded camera,
 loop, dmcomb mode/delay, CPU/IRQ placement and workload unchanged, including modal
 gains. Retain RTC latency tuning On, the BMC SDK worker/full pipeline, and the

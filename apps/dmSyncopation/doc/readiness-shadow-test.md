@@ -10,6 +10,9 @@ preparation, SDK service and three-credit post accounting.
 
 ## Setup
 
+Use the [diagnostic INDI build](dmSyncopation.md#diagnostic-indi-build) for the
+readbacks in this procedure.
+
 Rebuild/install **dmSyncopation and logdump**. The BMC controller publisher is
 unchanged; retain both `dmtweeter_read_done` and `dmtweeter_done`, the SDK worker
 on `dmtweeter-sdk` / CPU56, and the release observer at FIFO30 on
