@@ -29,7 +29,7 @@ class NativeDeploymentTest(unittest.TestCase):
             self.assertFalse((Path(temporary) / "relative-build").exists())
 
     def test_default_config_is_continuous_and_preserves_calibration(self):
-        """Installed defaults acquire all inputs without a journal directory, output or automatic learning."""
+        """Installed defaults acquire all inputs without a journal directory or automatic learning."""
         config, original = configparser.ConfigParser(), configparser.ConfigParser()
         # MagAO-X supports unsectioned application keys; ConfigParser needs a synthetic section for those keys.
         config.read_string("[application]\n" + (APP / "loPredCtrlAcc.conf").read_text())
@@ -41,7 +41,8 @@ class NativeDeploymentTest(unittest.TestCase):
         self.assertEqual(config["shmimMonitor"]["shmimName"], "aol1_modevalWFS")
         self.assertEqual(config["dm"]["channelName"], "dm01disp09_aux")
         self.assertNotIn("predict", config["parameters"])
-        self.assertNotIn("framegrabber", [s.lower() for s in config.sections()])
+        # The always-on main-loop modal output (as loPredCtrl's frameGrabber) never republishes into the WFS input.
+        self.assertNotEqual(config["framegrabber"].get("shmimName"), config["shmimMonitor"]["shmimName"])
 
     def test_online_worker_example_adds_no_trust_or_output_override(self):
         """Example enables bounded processing, retaining unknown native clocks and all physical output guards."""

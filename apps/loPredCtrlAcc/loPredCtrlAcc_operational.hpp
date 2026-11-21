@@ -6,12 +6,19 @@
 #define loPredCtrlAcc_operational_hpp
 
 #include <atomic>
+#include <chrono>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include <random>
 #include <sstream>
 #include <thread>
+#include <vector>
 
+#include <fcntl.h>
+#include <semaphore.h>
+#include <sys/file.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -43,15 +50,30 @@ namespace MagAOX::app
  * Slot ordinals are scheduler cycle*steps+step. A frame's slots follow the newest slot copied when the WFS frame
  * arrived. Training uses the commands copied since the previous decision; missed or discarded slots retain the
  * previous copy, as synco does.
+ *
+ * Main-loop modal output, as the original loPredCtrl: each new WFS frame is republished through the frameGrabber with
+ * the controlled tip/tilt modes 0 and 1 set to zero and every other mode copied unchanged, so the main loop keeps
+ * correcting higher-order modes while DDSPC alone drives tip/tilt. The WFS input stream and the DDSPC measurement are
+ * never modified.
  */
 class loPredCtrlAcc_operational : public MagAOXApp<true>,
                                   public dev::shmimMonitor<loPredCtrlAcc_operational>,
+                                  public dev::frameGrabber<loPredCtrlAcc_operational>,
+                                  public dev::telemeter<loPredCtrlAcc_operational>,
                                   protected dev::dmSyncopationProducer<loPredCtrlAcc_operational>
 {
     friend class dev::shmimMonitor<loPredCtrlAcc_operational>;
+    friend class dev::frameGrabber<loPredCtrlAcc_operational>;
+    friend class dev::telemeter<loPredCtrlAcc_operational>;
     friend class dev::dmSyncopationProducer<loPredCtrlAcc_operational>;
     using shmimMonitorT          = dev::shmimMonitor<loPredCtrlAcc_operational>;
+    using frameGrabberT          = dev::frameGrabber<loPredCtrlAcc_operational>;
+    using telemeterT             = dev::telemeter<loPredCtrlAcc_operational>;
     using dmSyncopationProducerT = dev::dmSyncopationProducer<loPredCtrlAcc_operational>;
+
+  public:
+    /// The modal output is a vector and cannot be flipped.
+    static constexpr bool c_frameGrabber_flippable = false;
 
   protected:
     /// Common model parameters; the RLS/QR implementation is shared with the existing controller.
@@ -277,6 +299,22 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Per-phase ddspc_performance element names (rmse_phase<k>, acc_phase<k>), owned for the INDI update vector.
     std::vector<std::string> m_phaseNames;
 
+    /** \name Main-loop modal output - Data
+     * @{ */
+    /// parameters.own_shmim, as loPredCtrl: destroy the output at shutdown. Default false keeps it for consumers.
+    bool m_modalOwnShmim{ false };
+
+    std::vector<float> m_modalScratch;         ///< WFS-thread copy of the coherent input frame, zeroed before exchange.
+    std::vector<float> m_modalFrame;           ///< Latest output frame, under m_modalMutex.
+    timespec           m_modalAtime{};         ///< WFS acquisition time of m_modalFrame, under m_modalMutex.
+    bool               m_modalFresh{ false };  ///< m_modalFrame is not yet in the stream, under m_modalMutex.
+    std::mutex         m_modalMutex;           ///< Frame exchange between the WFS thread and the frameGrabber thread.
+    std::uint64_t      m_modalCounter{ 0 };    ///< WFS counter of the latest output frame; WFS thread only.
+    sem_t              m_modalSemaphore;       ///< Posted once per new frame, as loPredCtrl's m_smSemaphore.
+    int                m_modalLock{ -1 };      ///< Exclusive `<stream>.producer` lock held while publishing.
+    bool               m_modalLogged{ false }; ///< A refused attachment was logged; frameGrabber thread only.
+    /// @}
+
     /// Load the existing calibration or selected finite masked cube planes; derive the request projection by QR.
     void loadCalibration();
 
@@ -372,6 +410,49 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     int processImage( void              *source /**< [in] Coherent FLOAT WFS modal payload. */,
                       const dev::shmimT &tag /**< [in] WFS monitor tag. */ );
 
+    /// Reject a modal output that could feed back into the WFS input or zero other than modes 0 and 1.
+    void validateModalOutput() const;
+
+    /// Zero the controlled tip/tilt in m_modalScratch, exchange it for the frameGrabber and signal it; WFS thread.
+    void publishModal( std::uint64_t   counter /**< [in] WFS counter of the copied frame. */,
+                       const timespec &atime /**< [in] WFS acquisition time of the copied frame. */ );
+
+    /// Log a refused modal-output attachment once and return -1, so the frameGrabber retries.
+    int modalRefused( const std::string &reason /**< [in] Why the output stream cannot be used yet. */ );
+
+    /** \name frameGrabber Interface
+     * As loPredCtrl, publishing the latest modal frame each time the WFS thread posts m_modalSemaphore.
+     * @{ */
+
+    /// Take the exclusive output lock, then attach an idle existing stream of the same shape or size a new one.
+    int configureAcquisition();
+
+    /// Return 0: the output follows the WFS stream, so frameGrabber latency statistics are not configured.
+    float fps();
+
+    /// Nothing to start; frames come from the WFS thread.
+    int startAcquisition();
+
+    /// Wait up to 1 s for a new frame; 0 when one is ready, 1 on timeout.
+    int acquireAndCheckValid();
+
+    /// Copy the latest modal frame and its WFS acquisition time into the stream.
+    int loadImageIntoStream( void *dest /**< [out] Output stream buffer. */ );
+
+    /// Nothing to reconfigure; configureAcquisition() re-reads the input shape.
+    int reconfig();
+    ///@}
+
+    /** \name telemeter Interface
+     * @{ */
+
+    /// Record frameGrabber timing telemetry when due.
+    int checkRecordTimes();
+
+    /// Record frameGrabber timing telemetry.
+    int recordTelem( const telem_fgtimings * /**< [in] Telemetry type tag. */ );
+    ///@}
+
   public:
     /// Set operational model defaults before reading configuration.
     loPredCtrlAcc_operational();
@@ -438,7 +519,10 @@ inline loPredCtrlAcc_operational::~loPredCtrlAcc_operational() noexcept
 {
     m_shutdown = true;
     stopOutput();
+    frameGrabberT::appShutdown(); // Join the publisher before its frame storage is destroyed.
     shmimMonitorT::appShutdown();
+    if( m_modalLock >= 0 )
+        close( m_modalLock );
 }
 
 inline bool loPredCtrlAcc_operational::stopOutput()
@@ -462,6 +546,8 @@ inline void loPredCtrlAcc_operational::setupConfig()
 {
     SHMIMMONITOR_SETUP_CONFIG( config );
     DMSYNCOPATIONPRODUCER_SETUP_CONFIG( config );
+    FRAMEGRABBER_SETUP_CONFIG( config );
+    TELEMETER_SETUP_CONFIG( config );
     auto add =
         [this]( const std::string &section, const std::string &key, const std::string &type, const std::string &help )
     { config.add( section + "." + key, "", section + "." + key, argType::Required, section, key, false, type, help ); };
@@ -480,6 +566,10 @@ inline void loPredCtrlAcc_operational::setupConfig()
     add( "parameters", "dm_slots", "int", "DM slots per WFS frame: the scheduler's steps per cycle (default 4)." );
     add( "parameters", "acc_ratio", "int", "Upstream ACC samples per WFS frame (default 4)." );
     add( "parameters", "qrd", "bool", "Use QR-RLS for both independent models." );
+    add( "parameters",
+         "own_shmim",
+         "bool",
+         "Destroy the modal output stream at shutdown, as loPredCtrl (default false: keep it for consumers)." );
     for( const auto &key : { "channelName", "modeCube", "mask", "calibration" } )
         add( "dm", key, "string", "Existing own auxiliary/calibration; calibration overrides modeCube/mask." );
     add( "dm", "threadPrio", "int", "DM worker real-time priority [0,99], as dmSpeckle; 0 (default) is SCHED_OTHER." );
@@ -514,6 +604,10 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
     {
         SHMIMMONITOR_LOAD_CONFIG( config );
         DMSYNCOPATIONPRODUCER_LOAD_CONFIG( config );
+        config( m_modalOwnShmim, "parameters.own_shmim" );
+        frameGrabberT::m_ownShmim = m_modalOwnShmim;
+        FRAMEGRABBER_LOAD_CONFIG( config );
+        TELEMETER_LOAD_CONFIG( config );
         config( m_gain, "parameters.gain" );
         config( m_settings.m_lambda, "parameters.regularization" );
         config( m_settings.m_gamma, "parameters.gamma" );
@@ -550,6 +644,7 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         m_ring                     = 4 * m_slots;
         m_settings.m_accelChannels = 2 * m_ratio * m_accelHistory;
         loadCalibration();
+        validateModalOutput(); // After the calibration, which can replace the modal indices.
         resetModels();
     }
     catch( const std::exception &error )
@@ -1276,6 +1371,19 @@ inline int loPredCtrlAcc_operational::allocate( const dev::shmimT & )
         shmimMonitorT::m_width * shmimMonitorT::m_height <=
             *std::max_element( m_calibration.m_indices.begin(), m_calibration.m_indices.begin() + m_settings.m_modes ) )
         return -1;
+    { //mutex scope
+        const std::size_t size = std::size_t( shmimMonitorT::m_width ) * shmimMonitorT::m_height;
+        m_modalScratch.assign( size, 0 );
+        m_modalCounter = 0;
+        std::lock_guard<std::mutex> lock( m_modalMutex );
+        if( m_modalFrame.size() != size )
+        {
+            // A changed input shape makes the publisher reattach or recreate its stream at the new size.
+            frameGrabberT::m_reconfig = !m_modalFrame.empty();
+            m_modalFrame.assign( size, 0 );
+            m_modalFresh = false;
+        }
+    }
     std::lock_guard<std::mutex> lock( m_modelMutex );
     m_models->invalidate( {} );
     m_havePending = false;
@@ -1308,11 +1416,165 @@ inline int loPredCtrlAcc_operational::processImage( void *source, const dev::shm
     DDSPC::Matrix measurement( m_settings.m_modes, 1 ), features;
     for( int mode = 0; mode < m_settings.m_modes; ++mode )
         measurement( mode ) = static_cast<const float *>( source )[m_calibration.m_indices[mode]];
+    // The modal output copies the same coherent frame; the input and the measurement above are never modified.
+    const bool     modal = !m_modalScratch.empty(); // Sized by allocate().
+    const timespec atime = metadata.atime;
+    if( modal )
+        std::memcpy( m_modalScratch.data(), source, m_modalScratch.size() * sizeof( float ) );
     std::atomic_thread_fence( std::memory_order_acquire );
     if( metadata.write || counter != metadata.cnt0 )
         return 0;
+    if( modal ) // Before learning, as loPredCtrl posts its output before updating the model.
+        publishModal( counter, atime );
     const bool valid = acceleration( features, now );
     return step( measurement, counter, features, valid, applied, ordinal, now );
+}
+
+inline void loPredCtrlAcc_operational::validateModalOutput() const
+{
+    const auto &name = frameGrabberT::m_shmimName;
+    if( m_settings.m_modes != 2 || m_calibration.m_indices.size() < 2 || m_calibration.m_indices[0] != 0 ||
+        m_calibration.m_indices[1] != 1 )
+        throw std::invalid_argument( "The main-loop modal output requires DDSPC to control exactly modes 0 and 1" );
+    if( name.empty() || name == shmimMonitorT::m_shmimName || name == m_syncopationTiming || name.ends_with( "_aux" ) )
+        throw std::invalid_argument(
+            "framegrabber.shmimName must name a modal stream distinct from the WFS input and DM transport" );
+}
+
+inline void loPredCtrlAcc_operational::publishModal( std::uint64_t counter, const timespec &atime )
+{
+    if( counter == m_modalCounter )
+        return;
+    for( int mode = 0; mode < m_settings.m_modes; ++mode ) // Validated to be exactly modes 0 and 1.
+        m_modalScratch[m_calibration.m_indices[mode]] = 0;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_modalMutex );
+        if( m_modalFrame.size() != m_modalScratch.size() )
+            return;
+        m_modalFrame.swap( m_modalScratch ); // Equal preallocated sizes: no allocation.
+        m_modalAtime = atime;
+        m_modalFresh = true;
+    }
+    m_modalCounter = counter;
+    sem_post( &m_modalSemaphore );
+}
+
+inline int loPredCtrlAcc_operational::modalRefused( const std::string &reason )
+{
+    if( !m_modalLogged )
+        log<text_log>( "Modal output " + frameGrabberT::m_shmimName + " not published: " + reason,
+                       logPrio::LOG_WARNING );
+    m_modalLogged = true;
+    return -1;
+}
+
+inline int loPredCtrlAcc_operational::configureAcquisition()
+{
+    std::size_t size;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_modalMutex );
+        size = m_modalFrame.size();
+    }
+    if( !size )
+        return -1; // Wait for the WFS input shape.
+    char path[4096];
+    if( ImageStreamIO_filename( path, sizeof( path ), frameGrabberT::m_shmimName.c_str() ) != 0 )
+        return modalRefused( "invalid stream name" );
+    if( m_modalLock < 0 )
+    {
+        // The syncopation producers' cooperative convention: one publisher per stream.
+        const std::string lockName = std::string( path ) + ".producer";
+        const int         lock     = open( lockName.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0660 );
+        if( lock < 0 || flock( lock, LOCK_EX | LOCK_NB ) != 0 )
+        {
+            if( lock >= 0 )
+                close( lock );
+            return modalRefused( "another publisher holds " + lockName );
+        }
+        m_modalLock = lock;
+    }
+    struct stat info{};
+    if( stat( path, &info ) != 0 )
+    {
+        // No stream yet: the frameGrabber creates it at this size.
+        frameGrabberT::m_width    = size;
+        frameGrabberT::m_height   = 1;
+        frameGrabberT::m_dataType = _DATATYPE_FLOAT;
+        m_modalLogged             = false;
+        return 0;
+    }
+    // Attach an existing stream, so its consumers keep their mapping. Never recreate, resize or share it.
+    if( frameGrabberT::openShmim() != 0 )
+        return modalRefused( "existing stream is not ready" );
+    const auto *metadata = frameGrabberT::m_imageStream->md;
+    const auto  before   = metadata->cnt0;
+    std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) ); // 40 frames at 2 kHz.
+    const char *refusal =
+        frameGrabberT::m_width != size || frameGrabberT::m_height != 1 || metadata->datatype != _DATATYPE_FLOAT
+            ? "existing stream has a different shape or type"
+        : metadata->cnt0 != before ? "existing stream is being published by another process"
+                                   : nullptr;
+    if( refusal )
+    {
+        ImageStreamIO_closeIm( frameGrabberT::m_imageStream );
+        free( frameGrabberT::m_imageStream );
+        frameGrabberT::m_imageStream = nullptr;
+        return modalRefused( refusal );
+    }
+    m_modalLogged = false;
+    return 0;
+}
+
+inline float loPredCtrlAcc_operational::fps()
+{
+    return 0;
+}
+
+inline int loPredCtrlAcc_operational::startAcquisition()
+{
+    return 0;
+}
+
+inline int loPredCtrlAcc_operational::acquireAndCheckValid()
+{
+    timespec ts;
+    if( clock_gettime( CLOCK_REALTIME, &ts ) < 0 )
+        return log<software_critical, -1>( { errno, "clock_gettime" } );
+    ts.tv_sec += 1;
+    if( sem_timedwait( &m_modalSemaphore, &ts ) != 0 )
+        return 1;
+    std::lock_guard<std::mutex> lock( m_modalMutex );
+    if( m_modalFrame.size() != std::size_t( frameGrabberT::m_width ) * frameGrabberT::m_height )
+    {
+        frameGrabberT::m_reconfig = true; // Input shape changed: reattach before publishing.
+        return 1;
+    }
+    return m_modalFresh ? 0 : 1;
+}
+
+inline int loPredCtrlAcc_operational::loadImageIntoStream( void *dest )
+{
+    std::lock_guard<std::mutex> lock( m_modalMutex );
+    const auto count = std::min( m_modalFrame.size(), std::size_t( frameGrabberT::m_width ) * frameGrabberT::m_height );
+    std::memcpy( dest, m_modalFrame.data(), count * sizeof( float ) );
+    frameGrabberT::m_currImageTimestamp = m_modalAtime; // Stored as the output atime after this call.
+    m_modalFresh                        = false;
+    return 0;
+}
+
+inline int loPredCtrlAcc_operational::reconfig()
+{
+    return 0;
+}
+
+inline int loPredCtrlAcc_operational::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_fgtimings() );
+}
+
+inline int loPredCtrlAcc_operational::recordTelem( const telem_fgtimings * )
+{
+    return recordFGTimings( true );
 }
 
 inline bool loPredCtrlAcc_operational::removed() const
@@ -1478,6 +1740,11 @@ inline int loPredCtrlAcc_operational::appStartup()
                          outputThreadStart ) < 0 )
             throw std::runtime_error( "DM worker thread priority/cpuset setup failed" );
         m_output.initialize();
+        // Before WFS monitoring, which posts the semaphore.
+        if( sem_init( &m_modalSemaphore, 0, 0 ) < 0 )
+            throw std::runtime_error( "Could not initialize the modal-output semaphore" );
+        FRAMEGRABBER_APP_STARTUP;
+        TELEMETER_APP_STARTUP;
         SHMIMMONITOR_APP_STARTUP;
     }
     catch( const std::exception &error )
@@ -1491,8 +1758,11 @@ inline int loPredCtrlAcc_operational::appStartup()
 inline int loPredCtrlAcc_operational::appLogic()
 {
     SHMIMMONITOR_APP_LOGIC;
+    FRAMEGRABBER_APP_LOGIC;
+    TELEMETER_APP_LOGIC;
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     SHMIMMONITOR_UPDATE_INDI;
+    FRAMEGRABBER_UPDATE_INDI;
     const auto             output = m_output.status();
     DDSPC::ShadowStatus    standard;
     DDSPC::MultirateStatus assisted;
@@ -1716,6 +1986,13 @@ inline int loPredCtrlAcc_operational::appLogic()
 inline int loPredCtrlAcc_operational::appShutdown()
 {
     const bool removed = stopOutput();
+    frameGrabberT::appShutdown();
+    telemeterT::appShutdown();
+    if( m_modalLock >= 0 )
+    {
+        close( m_modalLock );
+        m_modalLock = -1;
+    }
     SHMIMMONITOR_APP_SHUTDOWN;
     m_adc.reset();
     if( !removed )

@@ -37,6 +37,10 @@ class OperationalConfigTest(unittest.TestCase):
         self.assertEqual(config.getfloat('parameters', 'ripple'), 10)
         self.assertFalse(config.getboolean('parameters', 'assisted_diagnostic'))
         self.assertEqual(config['shmimMonitor']['shmimName'], 'aol1_modevalWFS')
+        # The always-on main-loop modal output keeps its stream and can never be the WFS input.
+        self.assertNotIn('modal_output', config['parameters'])
+        self.assertFalse(config.getboolean('parameters', 'own_shmim'))
+        self.assertNotEqual(config['framegrabber'].get('shmimName'), config['shmimMonitor']['shmimName'])
         self.assertEqual(config['syncopation']['timingStream'], 'dmtweeter_synco_timing')
         simulator = configuration(ROOT / 'apps/accelSim/acc000.conf')
         self.assertEqual(config['dm']['modeCube'], simulator['dm']['modeCube'])
