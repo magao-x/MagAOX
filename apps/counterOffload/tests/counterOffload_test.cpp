@@ -660,7 +660,7 @@ TEST_CASE( "counterOffload coordinate scan finds the minimum", "[counterOffload]
                                                  {
                                                      ++nEval;
                                                      r = f( p );
-                                                     return true;
+                                                     return 1;
                                                  } ) );
 
         REQUIRE( best[0] == Approx( 210 ).margin( 2 ) );
@@ -686,7 +686,7 @@ TEST_CASE( "counterOffload coordinate scan finds the minimum", "[counterOffload]
                                                      REQUIRE( p[0] <= 400 + 1e-9 );
                                                      REQUIRE( p[2] <= 1.5 + 1e-9 );
                                                      r = edge( p );
-                                                     return true;
+                                                     return 1;
                                                  } ) );
         REQUIRE( best[0] == Approx( 400 ) );
         REQUIRE( best[1] == Approx( 600 ) );
@@ -701,10 +701,38 @@ TEST_CASE( "counterOffload coordinate scan finds the minimum", "[counterOffload]
                                                        [&]( const counterOffload::calibParamsT &p, int, int, double &r )
                                                        {
                                                            r = f( p );
-                                                           return ++nEval < 5;
+                                                           return ++nEval < 5 ? 1 : -1;
                                                        } ) );
         REQUIRE( nEval == 5 );
         REQUIRE( bestFom == Approx( f( best ) ) );
+    }
+
+    SECTION( "an infeasible point ends its sweep and the scan continues" )
+    {
+        double maxGainTried = 0;
+
+        REQUIRE( counterOffload::coordinateScan( grids,
+                                                 best,
+                                                 bestFom,
+                                                 [&]( const counterOffload::calibParamsT &p, int, int, double &r )
+                                                 {
+                                                     maxGainTried = std::max( maxGainTried, p[2] );
+
+                                                     if( p[2] > 1.05 ) // e.g. the command clips above this gain
+                                                     {
+                                                         return 0;
+                                                     }
+
+                                                     r = f( p );
+                                                     return 1;
+                                                 } ) );
+
+        REQUIRE( maxGainTried == Approx( 1.1 ) ); // the first infeasible gain, and nothing above it
+        REQUIRE( best[2] <= 1.05 );
+        REQUIRE( best[2] == Approx( 1.05 ).margin( 0.01 ) );
+        REQUIRE( best[0] == Approx( 210 ).margin( 2 ) );
+        REQUIRE( bestFom == Approx( f( best ) ) );
+        REQUIRE( std::string( counterOffload::calibStageName( counterOffload::m_clippedStage ) ) == "clipped" );
     }
 }
 

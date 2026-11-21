@@ -691,3 +691,10 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
   - Operational: `rampStartUs` 25, `gain` 0.5, `maxCommand` 1.0. Their config keys are kept.
 - **Removed config keys.** The `calibrate.*` tuning keys are gone. **An instance config that still sets them is "Unrecognized" and the app will not start.** Remove them from the RTC config before installing.
 
+- **C2 clip handling.**
+  - `measure()` returns 1 (measured), 0 (clipped) or −1 (failure).
+  - Clipping is counted from `m_clipDelayS` (1 s) after each change, so the previous point's held contribution can leak out first. That takes about 50 ms at the default calibration leak.
+  - `evaluate()` returns 0 for a clipped point and writes a CSV row with stage `clipped`, leaving fom, fomStd and ratio empty.
+  - `calibEvalT` now returns int (1 evaluated, 0 infeasible, −1 abort). In `coordinateScan`, an infeasible point ends its sweep: larger values of that parameter are skipped, and only the evaluated points are used for the parabolic refinement.
+  - A clipped baseline still aborts the run.
+  - The best ratio starts at `numeric_limits<double>::max()`, so a clipped starting point never counts as the best.

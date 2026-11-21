@@ -121,9 +121,14 @@ class counterOffload : public MagAOXApp<true>,
     typedef std::array<double, 3> calibParamsT;
 
     /// Calibration evaluator: parameters, axis (0-2), pass (0 coarse, 1 refine), and the ratio to fill in.
-    /** Returns false to abort the scan.
+    /** Returns 1 when the ratio was evaluated, 0 when the parameters are infeasible (the ratio is not set), and -1 to
+     * abort the scan.
      */
-    typedef std::function<bool( const calibParamsT &, int, int, double & )> calibEvalT;
+    typedef std::function<int( const calibParamsT &, int, int, double & )> calibEvalT;
+
+    static constexpr int m_clippedStage{ 8 }; ///< calibStageName() index of a point skipped because it clipped.
+
+    static constexpr double m_clipDelayS{ 1 }; ///< Clipping is counted from this long after a change, s.
 
   protected:
     /** \name Configurable Parameters - Data
@@ -227,8 +232,6 @@ class counterOffload : public MagAOXApp<true>,
     std::atomic<uint64_t> m_clipped{ 0 }; ///< Slots in which the command or the accumulator was clipped.
 
     uint64_t m_clippedLogged{ 0 }; ///< m_clipped at the last clipping warning.  appLogic only.
-
-    uint64_t m_calibClipStart{ 0 }; ///< m_clipped at the start of the current calibration run.
 
     ///@}
 
@@ -428,6 +431,7 @@ class counterOffload : public MagAOXApp<true>,
     /** Pass 0 scans each parameter in turn over its grid, holding the others at the best so far.  Pass 1 rescans each
      * over +/- one step at half the step, then evaluates the vertex of a parabola through the minimum and its
      * neighbours.  best and bestFom must hold an evaluated starting point, and are updated as better points are found.
+     * An infeasible point ends its sweep: larger values of that parameter in the same sweep are not evaluated.
      *
      * \returns true if the scan finished
      * \returns false if the evaluator aborted
@@ -533,11 +537,14 @@ class counterOffload : public MagAOXApp<true>,
     bool openCsv();
 
     /// Apply parameters, wait for settled PSDs, and average their band powers.
-    /**
-     * \returns true on success
-     * \returns false on abort, disable, timeout or a change of the offloader's rate or numModes
+    /** Clipping is counted from m_clipDelayS after the change, so that the previous point's held contribution can
+     * leak away first.
+     *
+     * \returns 1 on success
+     * \returns 0 if the counter command clipped at maxCommand
+     * \returns -1 on abort, disable, timeout or a change of the offloader's rate or numModes
      */
-    bool measure( const calibParamsT &p /**< [in] parameters to apply */,
+    int measure( const calibParamsT &p /**< [in] parameters to apply */,
                   double             &fom /**< [out] mean band power */,
                   double             &fomStd /**< [out] standard deviation of the band powers */ );
 
@@ -548,15 +555,17 @@ class counterOffload : public MagAOXApp<true>,
     bool measureBaseline( const calibParamsT &p /**< [in] parameters; the gain is replaced by 0 */ );
 
     /// Evaluate parameters as a ratio to the baseline, re-measuring the baseline when due.
-    /**
-     * \returns true on success
-     * \returns false to abort the scan
+    /** A point that clips is recorded in the CSV as stage "clipped", with empty fom, fomStd and ratio.
+     *
+     * \returns 1 on success
+     * \returns 0 if the point clipped, so is infeasible
+     * \returns -1 to abort the scan
      */
-    bool evaluate( const calibParamsT &p /**< [in] parameters */,
+    int evaluate( const calibParamsT &p /**< [in] parameters */,
                    int                 stage /**< [in] stage index, see calibStageName() */,
                    double             &ratio /**< [out] band power over the baseline */ );
 
-    /// Write one CSV row.
+    /// Write one CSV row.  fom, fomStd and ratio are left empty for m_clippedStage.
     void writeCsv( int                 stage /**< [in] stage index */,
                    const calibParamsT &p /**< [in] parameters */,
                    double              fom /**< [in] mean band power */,
@@ -1555,9 +1564,18 @@ inline bool counterOffload::coordinateScan( const std::array<std::vector<double>
                 calibParamsT p = best;
                 p[a]           = xs[i];
 
-                if( !eval( p, a, pass, fs[i] ) )
+                const int r = eval( p, a, pass, fs[i] );
+
+                if( r < 0 )
                 {
                     return false;
+                }
+
+                if( r == 0 ) // infeasible: skip the larger values, and keep only the evaluated points
+                {
+                    xs.resize( i );
+                    fs.resize( i );
+                    break;
                 }
 
                 if( fs[i] < bestFom )
@@ -1590,14 +1608,15 @@ inline bool counterOffload::coordinateScan( const std::array<std::vector<double>
             calibParamsT p = best;
             p[a]           = std::clamp( xs[i] + 0.5 * step * ( fs[i - 1] - fs[i + 1] ) / denom, lo, hi );
 
-            double f;
+            double    f;
+            const int r = eval( p, a, pass, f );
 
-            if( !eval( p, a, pass, f ) )
+            if( r < 0 )
             {
                 return false;
             }
 
-            if( f < bestFom )
+            if( r > 0 && f < bestFom )
             {
                 bestFom = f;
                 best    = p;
@@ -1627,9 +1646,9 @@ inline void counterOffload::setCalibParams( const calibParamsT &p )
 inline const char *counterOffload::calibStageName( int stage )
 {
     static const char *names[] = {
-        "off", "initial", "start", "duration", "gain", "refine start", "refine duration", "refine gain" };
+        "off", "initial", "start", "duration", "gain", "refine start", "refine duration", "refine gain", "clipped" };
 
-    return ( stage >= 0 && stage < 8 ) ? names[stage] : "unknown";
+    return ( stage >= 0 && stage <= m_clippedStage ) ? names[stage] : "unknown";
 }
 
 inline bool counterOffload::gridValid( const std::vector<double> &grid, double lo, double hi )
@@ -1710,22 +1729,33 @@ inline void counterOffload::runCalibration()
         m_leak       = m_calibLeak; // keep the held contribution small so gain steps cannot saturate the tweeter
     }
 
-    m_calibClipStart = m_clipped;
-
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
         m_calibPoint     = 0;
         m_calibStage     = 0;
         m_calibBest      = original;
-        m_calibBestRatio = 0;
+        m_calibBestRatio = std::numeric_limits<double>::max(); // until a point is evaluated without clipping
     }
 
     m_evalCount = 0;
 
     calibParamsT best      = original;
-    double       bestRatio = 0;
+    double       bestRatio = std::numeric_limits<double>::max();
 
-    bool ok = setupBand() && openCsv() && measureBaseline( original ) && evaluate( original, 1, bestRatio );
+    bool ok = setupBand() && openCsv() && measureBaseline( original );
+
+    if( ok )
+    {
+        double    ratio;
+        const int r = evaluate( original, 1, ratio );
+
+        ok = ( r >= 0 );
+
+        if( r > 0 )
+        {
+            bestRatio = ratio;
+        }
+    }
 
     if( ok )
     {
@@ -1873,18 +1903,36 @@ inline bool counterOffload::openCsv()
     return true;
 }
 
-inline bool counterOffload::measure( const calibParamsT &p, double &fom, double &fomStd )
+inline int counterOffload::measure( const calibParamsT &p, double &fom, double &fomStd )
 {
     setCalibParams( p );
 
     std::unique_lock<std::mutex> lock( m_calibMutex );
 
+    const int64_t changed = synco::monotonicNs();
+
     m_psdPowers.clear();
-    m_psdAfterNs           = synco::monotonicNs() + static_cast<int64_t>( m_settleS * 1e9 );
-    const int64_t deadline = m_psdAfterNs + static_cast<int64_t>( m_timeoutS * 1e9 );
+    m_psdAfterNs             = changed + static_cast<int64_t>( m_settleS * 1e9 );
+    const int64_t deadline   = m_psdAfterNs + static_cast<int64_t>( m_timeoutS * 1e9 );
+    const int64_t clipFromNs = changed + static_cast<int64_t>( m_clipDelayS * 1e9 );
+
+    bool     clipRef   = false;
+    uint64_t clipStart = 0;
 
     while( m_psdPowers.size() < static_cast<size_t>( m_nAverage ) )
     {
+        if( !clipRef && synco::monotonicNs() >= clipFromNs )
+        {
+            clipStart = m_clipped;
+            clipRef   = true;
+        }
+
+        if( clipRef && m_clipped != clipStart && !m_calibAbort && !m_shutdown )
+        {
+            log<text_log>( "calibration: counter command clipped at maxCommand, point skipped", logPrio::LOG_WARNING );
+            return 0;
+        }
+
         std::string why;
 
         if( m_calibAbort || m_shutdown )
@@ -1894,10 +1942,6 @@ inline bool counterOffload::measure( const calibParamsT &p, double &fom, double 
         else if( !m_enabled )
         {
             why = "app disabled";
-        }
-        else if( m_clipped != m_calibClipStart )
-        {
-            why = "counter command clipped at maxCommand";
         }
         else if( std::fabs( m_offloadFps - m_bandCenterHz ) > 0.5 ||
                  ( m_modeMax == 0 && m_offloadModes != m_bandModes ) )
@@ -1912,7 +1956,7 @@ inline bool counterOffload::measure( const calibParamsT &p, double &fom, double 
         if( !why.empty() )
         {
             log<text_log>( "calibration: " + why, logPrio::LOG_WARNING );
-            return false;
+            return -1;
         }
 
         m_calibCond.wait_for( lock, std::chrono::milliseconds( 100 ) );
@@ -1931,7 +1975,7 @@ inline bool counterOffload::measure( const calibParamsT &p, double &fom, double 
     fom    = sum / n;
     fomStd = std::sqrt( std::max( 0.0, ( sum2 - sum * sum / n ) / ( n - 1 ) ) );
 
-    return true;
+    return 1;
 }
 
 inline bool counterOffload::measureBaseline( const calibParamsT &p )
@@ -1941,8 +1985,9 @@ inline bool counterOffload::measureBaseline( const calibParamsT &p )
 
     double fom, fomStd;
 
-    if( !measure( off, fom, fomStd ) )
+    if( measure( off, fom, fomStd ) < 1 )
     {
+        log<text_log>( "calibration: the gain-0 baseline could not be measured", logPrio::LOG_WARNING );
         return false;
     }
 
@@ -1962,20 +2007,34 @@ inline bool counterOffload::measureBaseline( const calibParamsT &p )
     return true;
 }
 
-inline bool counterOffload::evaluate( const calibParamsT &p, int stage, double &ratio )
+inline int counterOffload::evaluate( const calibParamsT &p, int stage, double &ratio )
 {
     if( m_evalCount > 0 && m_evalCount % m_baselineEvery == 0 && !measureBaseline( p ) )
     {
-        return false;
+        return -1;
     }
 
     ++m_evalCount;
 
-    double fom, fomStd;
+    double    fom, fomStd;
+    const int m = measure( p, fom, fomStd );
 
-    if( !measure( p, fom, fomStd ) )
+    if( m < 0 )
     {
-        return false;
+        return -1;
+    }
+
+    if( m == 0 )
+    {
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_calibMutex );
+            m_calibStage = m_clippedStage;
+            ++m_calibPoint;
+        }
+
+        writeCsv( m_clippedStage, p, 0, 0 );
+
+        return 0;
     }
 
     { //mutex scope
@@ -1986,7 +2045,7 @@ inline bool counterOffload::evaluate( const calibParamsT &p, int stage, double &
         m_lastFom   = fom;
         m_lastRatio = ratio;
 
-        if( stage == 1 || ratio < m_calibBestRatio )
+        if( ratio < m_calibBestRatio )
         {
             m_calibBest      = p;
             m_calibBestRatio = ratio;
@@ -1999,10 +2058,10 @@ inline bool counterOffload::evaluate( const calibParamsT &p, int stage, double &
     {
         log<text_log>( "calibration: band power " + std::to_string( ratio ) + " times the baseline, aborting",
                        logPrio::LOG_WARNING );
-        return false;
+        return -1;
     }
 
-    return true;
+    return 1;
 }
 
 inline void counterOffload::writeCsv( int stage, const calibParamsT &p, double fom, double fomStd )
@@ -2014,8 +2073,16 @@ inline void counterOffload::writeCsv( int stage, const calibParamsT &p, double f
 
     m_csv << std::fixed << ts.tv_sec << "." << std::setw( 9 ) << std::setfill( '0' ) << ts.tv_nsec
           << std::setfill( ' ' ) << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << "," << p[1]
-          << "," << p[2] << "," << m_bandCenterHz << "," << m_bandModes << "," << m_bandHalfWidthHz << "," << m_nAverage
-          << "," << fom << "," << fomStd << "," << m_fomOff << "," << fom / m_fomOff << "\n";
+          << "," << p[2] << "," << m_bandCenterHz << "," << m_bandModes << "," << m_bandHalfWidthHz << "," << m_nAverage;
+
+    if( stage == m_clippedStage )
+    {
+        m_csv << ",,," << m_fomOff << ",\n";
+    }
+    else
+    {
+        m_csv << "," << fom << "," << fomStd << "," << m_fomOff << "," << fom / m_fomOff << "\n";
+    }
 
     m_csv.flush();
 }
