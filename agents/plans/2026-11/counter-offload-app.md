@@ -599,3 +599,29 @@ File: `counterOffload_calib_20261120T193905Z.csv`, copied to `~/Documents/MagAO-
 - **ocam2KCtrl:** the descramble work does not change the camwfs `fps` property or its stream names, which t2wOffloader reads.
 - **RTC cpusets:** `spare31` is retired and CPU31 is now `camwfs_sw`; `camwfs_descramble` is on CPU32. `spare26` (counterOffload's producer) is unchanged. It now shares L3 domain 24–31 with `camwfs_sw`; the two share no streams, so this is only a cache-capacity neighbour, but watch it if counterOffload's `failed` rate rises.
 - **`tests/Makefile.one`:** the changes add ocam-only header dependencies. Still clean before rebuilding the counterOffload test.
+
+### Bench: Calibration Run `20261120T202219Z` (after the windup fix)
+File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202219Z.csv`.
+
+- **Progress.** 41 rows over 493 s, about 12 s each.
+  - The run completed the coarse start and duration scans and the gain scan up to 0.5. It ended while measuring gain 0.6.
+  - Cause not in the CSV. Most likely the clip abort, since a higher gain gives a larger counter command. Log requested.
+- **Baseline.**
+  - Band power with the counter off is about 2.1×10⁻⁵, about 270× the earlier run's 7.7×10⁻⁸. The spike now dominates the band, so the measurement is sensitive.
+  - It drifts by 10.7% (relative SD) over 8 min, between 1.71 and 2.38×10⁻⁵.
+  - Ratios below are recomputed against a baseline linearly interpolated between neighbouring `off` rows. The difference from the logged ratio is up to 0.1.
+- **Effect.** Counter-offloading clearly reduces the 240–260 Hz power: ratios 0.39–0.6 at gain 0.4–0.5.
+- **Gain (start 25, duration 330).**
+  - Ratio by gain: 0.1 → 0.73, 0.2 → 0.66, 0.3 → 0.61, 0.4 → 0.48, 0.5 → 0.39. It is still falling at 0.5.
+  - A quadratic fit including ratio 1 at gain 0 is `0.96 − 1.73g + 1.27g²`, with its minimum about 0.37 at g ≈ 0.68. This extrapolates beyond the data.
+  - The model |1 − gH|² plus an uncancelled floor fits the shape.
+- **Start time (duration 330, gain 0.4).** Earlier is better. Interpolated ratio:
+  - 0–75 µs: 0.48 ± 0.08;
+  - 100–275 µs: 0.59 ± 0.03;
+  - 300–400 µs: 0.74 ± 0.08.
+  - The best values are at the bottom edge of the grid. Because the first slot lands 100–225 µs after the offload arrives, a start below about 100 µs means the ramp is already partly complete at the first slot: the counter acts as fast as the scheduling allows. The ramp fitted to the woofer response is later than optimal.
+- **Duration (start 25, gain 0.4).** No significant trend: 0.47–0.63, mean 0.56 ± 0.05, within the noise.
+- **Noise and scan method.**
+  - Repeated settings disagree by more than the per-row `fomStd` suggests. Start 25 / duration 330 / gain 0.4 gave 0.42 in the start scan but 0.48 in the gain scan, and durations 300–350 at the same start gave 0.56–0.57.
+  - The per-point SD of the ratio is about 0.05–0.08.
+  - The coordinate scan keeps the single lowest noisy value as "best" (0.395 at start 25). Later stages must beat that lucky value, so the duration scan changed nothing ("winner's curse").
