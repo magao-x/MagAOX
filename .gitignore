@@ -5,7 +5,7 @@
 *.so
 *.log
 doc/output
-local/
+local/*
 !local/common.example.mk
 !local/config.example.mk
 **/a.out
@@ -13,15 +13,6 @@ local/
 **/.*~
 **/*.stash
 **/*-swp
-
-#Qt:
-**/res/
-ui*.h
-**/bin/
-**/moc/
-**/moc_*
-makefile.*GUI
-gui/**/makefile.*
 
 #Agents:
 .codex
@@ -33,197 +24,23 @@ gui/**/makefile.*
 #Ignore any generated code directories:
 **/generated/
 
+#Doc outputs
 libMagAOX/doc/sw_html/
 apps/doc/
+utils/doc
 doc/www/
 
 #ignore test executables
 **/tests/*_test
 
-##########################################
-#Executables and app specifics to ignore:
-
+#Python app build outputs
 apps/*/build/
-
-#a
-apps/adcTracker/adcTracker
-apps/alpaoCtrl/alpaoCtrl
-apps/andorCtrl/andorCtrl
-apps/acronameUsbHub/acronameUsbHub
-apps/acronameUsbHub/utils/configusbhub
-apps/alignLoop/alignLoop
-
-#b
-apps/baslerCtrl/baslerCtrl
-apps/bmcCtrl/bmcCtrl
-
-#c
-apps/cacaoInterface/cacaoInterface
-apps/cameraSim/cameraSim
-apps/closedLoopIndi/closedLoopIndi
-apps/cred2Ctrl/cred2Ctrl
-
-#d
-apps/dlDataCollection/dlDataCollection
-apps/dmMode/dmMode
-apps/dmPokeCenter/dmPokeCenter
-apps/dmPokeXCorr/dmPokeXCorr
-apps/dmRecon/dmRecon
-apps/dmSpeckle/dmSpeckle
-apps/dmSyncopation/dmSyncopation
-
-#e
-apps/elliptecCtrl/elliptecCtrl
-apps/elliptecLowLevel/elliptecLowLevel
-
-#f
-apps/filterWheelCtrl/filterWheelCtrl
-apps/flipperCtrl/flipperCtrl
-
-apps/magAOXMaths/magAOXMaths
-apps/flowRPM/flowRPM
-
-#g/gui
-gui/rtimv/plugins/cameraStatus/makefile.cameraStatus
-gui/rtimv/plugins/indiDictionary/makefile.indiDictionary
-gui/rtimv/plugins/pwfsAlignment/makefile.pwfsAlignment
-gui/rtimv/plugins/dmStatus/makefile.dmStatus
-gui/rtimv/plugins/acquisition/makefile.acquisition
-
-#h
-apps/hoPredCtrl/hoPredCtrl
-apps/hsfwCtrl/hsfwCtrl
-apps/hwpSequencer/hwpSequencer
-apps/hwpTracker/hwpTracker
-
-#i
-INDI/INDI/evalINDI
-INDI/INDI/getINDI
-INDI/INDI/indiserver
-INDI/INDI/setINDI
-INDI/xindidriver/xindidriver
-apps/indiTSAccumulator/indiTSAccumulator
-apps/irisaoCtrl/irisaoCtrl
-
-#k
-apps/kcubeCtrl/kcubeCtrl
-apps/kTracker/kTracker
-apps/koolanceCtrl/koolanceCtrl
-
-#l
-apps/loPredCtrl/loPredCtrl
-apps/loopTimingMonitor/loopTimingMonitor
-
-#m
-apps/mcp3008Ctrl/mcp3008Ctrl
-apps/mcp3208Ctrl/mcp3208Ctrl
-apps/modalFilter/modalFilter
-apps/modalGainOpt/modalGainOpt
-apps/modalPSDs/modalPSDs
-apps/mzmqServer/mzmqServer
-apps/mzmqClient/mzmqClient
-
-#n
-apps/nnReconstructor/nnReconstructor
-
-#o
-apps/observerCtrl/observerCtrl
-apps/ocam2KCtrl/ocam2KCtrl
-
-#p
-apps/photonCounter/photonCounter
-apps/pi335Ctrl/pi335Ctrl
-apps/picamCtrl/picamCtrl
-apps/picoMotorCtrl/picoMotorCtrl
-apps/po4ao/po4ao
-apps/psfFit/psfFit
-apps/psfAcq/psfAcq
-apps/pupilAlign/pupilAlign
-apps/pupilFit/pupilFit
-apps/pvcamCtrl/pvcamCtrl
-apps/pwfsSlopeCalc/pwfsSlopeCalc
-
-#q
-apps/qhyCtrl/qhyCtrl
-
-#q
-apps/qwpTracker/qwpTracker
-
-#r
-apps/rhusbMon/rhusbMon
-apps/refRMS/refRMS
-
-#s
-apps/shmimIntegrator/shmimIntegrator
-apps/siglentSDG/siglentSDG
-apps/siglentSDG/tests/siglentSDG_test
-apps/smc100ccCtrl/smc100ccCtrl
-apps/sshDigger/sshDigger
-apps/sparkleClock/sparkleClock
-apps/stateRuleEngine/stateRuleEngine
-apps/strehlEstimator/strehlEstimator
-apps/streamCircBuff/streamCircBuff
-apps/streamWriter/streamWriter
-
-apps/sysMonitor/sysMonitor
-
-#t
-apps/t2wOffloader/t2wOffloader
-apps/timeSeriesSimulator/timeSeriesSimulator
-apps/tcsInterface/tcsInterface
-apps/template/template
-apps/trippLitePDU/trippLitePDU
-apps/ttmModulator/ttmModulator
-
-#u
-apps/usbtempMon/usbtempMon
-apps/userGainCtrl/userGainCtrl
-
-#w
-apps/w2tcsOffloader/w2tcsOffloader
-apps/wooferTweeterRecon/wooferTweeterRecon
-
-#x
-apps/xindiserver/tests/remoteDriver_test
-apps/xindiserver/tests/tunneledHost_test
-apps/xindiserver/tests/xindiserver_test
-apps/xindiserver/xindiserver
-
-apps/xt1121Ctrl/xt1121Ctrl
-
-apps/xt1121DCDU/xt1121DCDU
-
-apps/xInstGraph/xInstGraph
-
-#z
-apps/zaberCtrl/zaberCtrl
-apps/zaberLowLevel/zaberLowLevel
-apps/zaberLowLevelBinary/zaberLowLevelBinary
-apps/zylaCtrl/zylaCtrl
-
 
 #libMagAOX/...
 libMagAOX/logger/tests/catch2_tests
 libMagAOX/logger/tests/gen_entropy_tests
 libMagAOX/logger/tests/generated_entropy_test_e1_n2
 libMagAOX/logger/tests/generated_tests
-
-##########################################
-#Executables and util specifics to ignore:
-
-
-utils/instGraph/instGraph
-utils/logdump/logdump
-utils/logsurgeon/logsurgeon
-utils/cursesINDI/cursesINDI
-utils/logstream/logstream
-utils/shmimDelta/shmimDelta
-utils/shmimInfo/shmimInfo
-utils/shmimPlot/shmimPlot
-utils/xrif2shmim/xrif2shmim
-utils/xrif2fits/xrif2fits
-
-utils/doc
 
 ###########################3
 #test files to ignore
@@ -236,10 +53,6 @@ tests/results/
 
 xlog*.binlog
 
-#Devel stuff in flatlogs
-flatlogs/src/flatlogcodes
-flatlogs/src/logCodes.dat
-
 .vagrant/
 .DS_Store
 .vscode
@@ -247,9 +60,6 @@ flatlogs/src/logCodes.dat
 setup/bundle.zip
 setup/xvm/input/
 setup/xvm/output/
-vm/cache/
-vm/calib/
-vm/config/
 vm/
 *.swp
 
@@ -269,4 +79,5 @@ coverage_report/
 # Valgrind logs
 tests/valgrind/logs/*
 
-apps/virtualPDU/virtualPDU
+# Per-component build products live in .gitignore files beside each app/util,
+# in gui/, INDI/, and flatlogs/.
