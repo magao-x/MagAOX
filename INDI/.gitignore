@@ -1,0 +1,6 @@
+# Executables built from the vendored INDI sources
+/INDI/evalINDI
+/INDI/getINDI
+/INDI/indiserver
+/INDI/setINDI
+/xindidriver/xindidriver
