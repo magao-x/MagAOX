@@ -5,6 +5,8 @@ The normal build runs closed-loop DDSPC on the existing WFS monitor (`aol1_modev
 - **Standard mode** follows loPredCtrl and is unchanged: one decision and RLS update per WFS frame on the WFS thread, held on that frame's four DM slots. It does not use the accelerometers and runs with `adc.enabled=false`.
 - **Assisted mode** recalculates every 8 kHz DM slot on the DM worker from the newest upstream ACC sample, the newest WFS frame and the commands the scheduler actually copied. Learning is one shared QR-RLS update per genuine WFS frame (2 kHz) on the WFS thread; the four phase predictors and their slot gains reach the worker through a triple buffer, so the worker never waits for learning. The formulation and its validation are in `agents/plans/2026-11/ddspc-multirate-8khz-assisted.md`.
 
+Every WFS frame is also republished to the main AO loop with tip/tilt set to zero, so DDSPC is the only tip/tilt controller (see "Main-loop modal output").
+
 Each model trains only while its mode is selected, so the standard and assisted fits are independent experiments. Both learn only from genuine WFS measurements and the commands the scheduler copied from this channel.
 
 ## DM channel, worker and timing
@@ -166,6 +168,43 @@ cd ~/source/MagAOX-DDSPC/apps/loPredCtrlAcc
 make -f tests/Makefile.offline check-rtc-controller
 taskset -c 28,29 build/offline/rtc-controller/ddspc_offline_test '[rtc-benchmark]'
 ```
+
+## Main-loop modal output
+
+loPredCtrlAcc always republishes every new `aol1_modevalWFS` frame to the main AO loop, as the original loPredCtrl does. Tip and tilt (modes 0 and 1) are set to zero, and every other mode is copied bit-for-bit. The main loop then corrects only higher-order modes, and DDSPC, through its 8 kHz auxiliary channel, is the only tip/tilt controller. Nothing else changes:
+- DDSPC still learns, predicts and applies feedback from the unmodified `aol1_modevalWFS` tip/tilt.
+- The input stream is never written.
+- Learning, predictive gains, ACC handling, scheduler timing and the auxiliary channel are unchanged.
+
+**This starts with the application, before any DDSPC correction.** If the main loop reads this stream, it stops correcting tip/tilt as soon as loPredCtrlAcc starts, even while prediction is off. Tip/tilt is then uncorrected until DDSPC prediction is on.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `framegrabber.shmimName` | app name | Output stream, as loPredCtrl's `[framegrabber] shmimName`. Use the stream the main loop's modal filter reads. Startup rejects the WFS input, a `*_aux` channel, the scheduler timing stream and an empty value. |
+| `framegrabber.threadPrio`, `cpuset` | 2, none | Publisher thread, as loPredCtrl. Copy them from the deployed loPredCtrl.conf. |
+| `parameters.own_shmim` | `false` | As loPredCtrl, but its default there is true. `true` destroys the stream at shutdown; `false` leaves it for the main loop. |
+
+Startup requires `num_modes=2` with `modal_index0=0` and `modal_index1=1`, so the zeroed modes are exactly the DDSPC-controlled ones.
+
+**One publisher only.** The publisher takes an exclusive lock, `<stream file>.producer`, the convention of the syncopation producers. It creates the stream only if it is absent. An existing stream is attached unchanged, so the main loop keeps its mapping, but only when it has the same shape and float type and its counter does not advance for 20 ms. The original loPredCtrl takes no lock; the counter check is what refuses its stream while it is still publishing. A refusal is logged once and retried every second. Stop loPredCtrl before starting loPredCtrlAcc, and never run both.
+
+**What the main loop does with zero tip/tilt.** The deployed modal filter is cacao `mfilt-1` (`agents/plans/2026-10/rtc-cpuset-restructuring.md`; its source is not in this repository). The MagAO-X `modalFilter` app implements the same kind of law, `DM[k] = -g*gfact*WFS[k] + mc*mfact*DM[k-1]` (`apps/modalFilter/modalFilter.hpp:997-998`). With zero input, each tip/tilt state holds its last value when `mc*mfact = 1`, or decays geometrically when it is below 1. **It is not cleared.** A tip/tilt command accumulated before the handover therefore stays on the main loop's DM channel, summed with the DDSPC contribution. Opening the main loop is a different case: it zeroes its own state (modalFilter) and stops all modes. loPredCtrlAcc never changes main-loop gains, multipliers or loop state.
+
+Before installing, check these on the RTC:
+1. Which stream the main loop's modal filter (`mfilt-1`) reads, and that it is not `aol1_modevalWFS`. Use loPredCtrl's `[framegrabber] shmimName` if loPredCtrl feeds it, and set the same name here. If the filter reads `aol1_modevalWFS` directly, nothing reaches the main loop until it is repointed, which is a separate cacao configuration decision.
+2. That `aol1_modevalWFS` is published upstream by the reconstructor and nothing writes the output stream back into it, so DDSPC never trains on zeroed tip/tilt.
+3. Who publishes the output stream now: stop loPredCtrl and confirm its counter stops advancing.
+4. The main loop's tip/tilt gain and multiplier factors (`mgainfact`/`mmultfact` or the cacao equivalents), to know whether the held state is constant or leaking.
+
+Handover, with every step an operator decision:
+1. With the main loop closed, stop loPredCtrl.
+2. Start loPredCtrlAcc with prediction off. Tip/tilt is now uncorrected, and the main loop's state holds (or slowly leaks), so the DM does not jump.
+3. Train and enable DDSPC as above. It learns the plant with the main loop no longer correcting tip/tilt; a fit trained before the handover saw a different plant, so retrain it.
+4. Leave the held tip/tilt state in place unless it must be removed. It is a constant offset on the DM, and it supplies the static tip/tilt that DDSPC's proportional feedback (`gain*y`) may not hold by itself. To remove it smoothly, lower only the tip/tilt multiplier slightly below 1 (about 0.999 gives a 0.5 s time constant at 2 kHz) and restore it after the offset has decayed. Never zero the multiplier or reset the loop: that removes the whole offset in one frame.
+
+To hand tip/tilt back, turn prediction off and wait for `zero_confirmed`. Then stop loPredCtrlAcc and restore loPredCtrl or the filter's original input; the main loop resumes from its held state.
+
+The main loop's modal input depends on loPredCtrlAcc, as it did on loPredCtrl: if loPredCtrlAcc stops, the main loop stops receiving frames for every mode. The output carries the WFS frame's acquisition time. `fps()` is 0, so `fg_timing` latency statistics stay empty. Check publication with `getINDI 'loPredCtrlAcc.fg_shmimName.*' 'loPredCtrlAcc.fg_frameSize.*'` and the stream's counter, which advances once per WFS frame. To confirm what the main loop receives, read one frame of the output stream: entries 0 and 1 are zero, and the rest match the same `aol1_modevalWFS` frame.
 
 ## Remove the contribution
 

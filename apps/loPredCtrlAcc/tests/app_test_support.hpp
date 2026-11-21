@@ -4,6 +4,8 @@
 #ifndef loPredCtrlAcc_app_test_support_hpp
 #define loPredCtrlAcc_app_test_support_hpp
 
+#include <atomic>
+#include <cstdlib>
 #include <map>
 #include <sstream>
 #include <mutex>
@@ -526,13 +528,42 @@ class frameGrabber : public TestLifecycle
     /// Timestamp storage expected by the legacy callback.
     timespec m_currImageTimestamp{};
 
+    /// Output stream name, as configured for the real publisher.
+    std::string m_shmimName;
+
+    /// Reconfiguration request, observed by tests instead of a publisher thread.
+    std::atomic<bool> m_reconfig{ false };
+
+    /// Attached output, a malloc'd copy of m_existing made by openShmim(); null when none.
+    IMAGE *m_imageStream{ nullptr };
+
+    /// Fixture stream returned by openShmim(), standing in for an existing shared-memory image; null when absent.
+    IMAGE *m_existing{ nullptr };
+
     /// Ignore timing telemetry.
     int recordFGTimings( bool /**< [in] Force record. */ );
+
+    /// Attach m_existing as the real base attaches an existing stream: 0 on success, 1 when not ready.
+    int openShmim();
 };
 
 template <class D>
 inline int frameGrabber<D>::recordFGTimings( bool /**< [in] Force record. */ )
 {
+    return 0;
+}
+
+template <class D>
+inline int frameGrabber<D>::openShmim()
+{
+    if( !m_existing || !m_existing->md )
+        return 1;
+    free( m_imageStream );
+    m_imageStream  = static_cast<IMAGE *>( malloc( sizeof( IMAGE ) ) );
+    *m_imageStream = *m_existing; // Shares the fixture metadata, as a mapping shares the stream.
+    m_width        = m_existing->md->size[0];
+    m_height       = m_existing->md->naxis > 1 ? m_existing->md->size[1] : 1;
+    m_dataType     = m_existing->md->datatype;
     return 0;
 }
 template <class D>

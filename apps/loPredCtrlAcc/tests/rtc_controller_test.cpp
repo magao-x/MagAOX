@@ -24,14 +24,21 @@ namespace
 class Controller : public MagAOX::app::loPredCtrlAcc_operational
 {
   public:
+    // The WFS monitor's members, named as the shmimMonitor base also shared with the modal frameGrabber.
+    using MagAOX::app::dev::shmimMonitor<MagAOX::app::loPredCtrlAcc_operational>::m_height;
+    using MagAOX::app::dev::shmimMonitor<MagAOX::app::loPredCtrlAcc_operational>::m_imageStream;
+    using MagAOX::app::dev::shmimMonitor<MagAOX::app::loPredCtrlAcc_operational>::m_shmimName;
+    using MagAOX::app::dev::shmimMonitor<MagAOX::app::loPredCtrlAcc_operational>::m_width;
     using loPredCtrlAcc_operational::allocate;
     using loPredCtrlAcc_operational::appliedSlots;
     using loPredCtrlAcc_operational::appLogic;
     using loPredCtrlAcc_operational::appShutdown;
     using loPredCtrlAcc_operational::appStartup;
+    using loPredCtrlAcc_operational::configureAcquisition;
     using loPredCtrlAcc_operational::copied;
     using loPredCtrlAcc_operational::fastSample;
     using loPredCtrlAcc_operational::loadCalibration;
+    using loPredCtrlAcc_operational::loadImageIntoStream;
     using loPredCtrlAcc_operational::m_accelEnabled;
     using loPredCtrlAcc_operational::m_adcAnchor;
     using loPredCtrlAcc_operational::m_adcSegment;
@@ -58,6 +65,8 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_indiP_sync;
     using loPredCtrlAcc_operational::m_learning;
     using loPredCtrlAcc_operational::m_learnUs;
+    using loPredCtrlAcc_operational::m_modalFresh;
+    using loPredCtrlAcc_operational::m_modalLock;
     using loPredCtrlAcc_operational::m_mode;
     using loPredCtrlAcc_operational::m_modeCube;
     using loPredCtrlAcc_operational::m_modelMutex;
@@ -74,6 +83,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_slots;
     using loPredCtrlAcc_operational::m_slotShifts;
     using loPredCtrlAcc_operational::m_syncLocked;
+    using loPredCtrlAcc_operational::m_syncopationTiming;
     using loPredCtrlAcc_operational::m_unlockedTraining;
     using loPredCtrlAcc_operational::m_wfsCounter;
     using loPredCtrlAcc_operational::outputCandidate;
@@ -83,6 +93,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::resetModels;
     using loPredCtrlAcc_operational::sensorHistory;
     using loPredCtrlAcc_operational::step;
+    using loPredCtrlAcc_operational::validateModalOutput;
 
     /// Allocate private synthetic calibration and configure the actual existing producer state without starting it.
     explicit Controller( bool qr /**< [in] Select the real QR or covariance RLS implementation. */ );
@@ -1243,5 +1254,258 @@ TEST_CASE( "Operational INDI controls retain the original workflow", "[rtc-contr
     REQUIRE( app.newCallBack_m_indiP_reset( reset ) == 0 );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates == 0 );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_updates == 0 );
+}
+
+/// \cond RTC_TEST_SUPPORT
+namespace
+{
+using ModalGrabber   = MagAOX::app::dev::frameGrabber<MagAOX::app::loPredCtrlAcc_operational>;
+using ModalTelemeter = MagAOX::app::dev::telemeter<MagAOX::app::loPredCtrlAcc_operational>;
+
+/// One run over a fixed six-mode WFS frame sequence, through the WFS monitor or directly through step().
+struct ModalRun
+{
+    std::vector<DDSPC::Matrix>      m_slots;     ///< Rendered DM slots after each frame, modes by four.
+    std::vector<std::vector<float>> m_frames;    ///< Each incoming WFS frame.
+    std::vector<std::vector<float>> m_published; ///< Each main-loop modal frame (empty without the monitor).
+    DDSPC::ShadowStatus             m_standard;  ///< Final standard-fit status.
+};
+
+/// Train standard DDSPC with probes, as test "Standard WFS monitor trains...", and collect its output.
+/** With monitor, frames enter through processImage(), which also builds the main-loop modal frame. Without it, the same
+ * measurements go straight to step(), as Controller::advance() does: DDSPC with no modal output path at all.
+ */
+ModalRun runModal( bool monitor /**< [in] Use the WFS monitor callback. */ )
+{
+    constexpr int                modes = 6;
+    Controller                   app( true );
+    IMAGE_METADATA               md{};
+    std::array<float, 2 * modes> wfs{};
+    app.m_imageStream.md      = &md;
+    app.m_imageStream.array.F = wfs.data();
+    md.naxis                  = 3;
+    md.size[0]                = modes;
+    md.size[1]                = 1;
+    md.size[2]                = 2;
+    app.m_width               = modes;
+    app.m_height              = 1;
+    REQUIRE( app.allocate( {} ) == 0 );
+    // Size the output as the frameGrabber thread does; the fixture stream is absent, so it would be created.
+    char path[4096];
+    REQUIRE( ImageStreamIO_filename( path, sizeof( path ), "ddspc_modal_run_test" ) == 0 );
+    std::filesystem::create_directories( std::filesystem::path( path ).parent_path() );
+    std::filesystem::remove( path );
+    static_cast<ModalGrabber &>( app ).m_shmimName = "ddspc_modal_run_test";
+    REQUIRE( app.configureAcquisition() == 0 );
+    app.m_gain = .2f;
+    app.train();
+    ModalRun run;
+    for( unsigned n = 1; n <= 600; ++n )
+    {
+        md.cnt0     = n;
+        md.cnt1     = n % 2;
+        md.atime    = { time_t( n ), 7 };
+        auto *frame = wfs.data() + modes * md.cnt1;
+        for( int m = 0; m < modes; ++m )
+            frame[m] = ( m + 1 ) * std::sin( n * .13f + m ) + 1e-7f * m; // Distinct, nonzero tip/tilt included.
+        const auto input = wfs;
+        if( monitor )
+        {
+            REQUIRE( app.processImage( frame, {} ) == 0 );
+            REQUIRE( wfs == input ); // The WFS input stream is never written.
+            std::vector<float> out( modes, -1 );
+            REQUIRE( app.m_modalFresh );
+            REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
+            REQUIRE( app.m_currImageTimestamp.tv_sec == time_t( n ) ); // The WFS frame's acquisition time.
+            REQUIRE( app.processImage( frame, {} ) == 0 );             // A repeated counter publishes nothing.
+            REQUIRE_FALSE( app.m_modalFresh );
+            run.m_published.push_back( out );
+        }
+        else
+        {
+            DDSPC::Matrix y( 2, 1 ), empty, applied;
+            y << frame[0], frame[1];
+            std::int64_t ordinal;
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( app.m_commandMutex );
+                ordinal = app.appliedSlots( applied );
+            }
+            REQUIRE( app.step( y, n, empty, false, applied, ordinal, MagAOX::app::synco::monotonicNs() ) == 0 );
+            REQUIRE_FALSE( app.m_modalFresh );
+        }
+        DDSPC::Matrix slots( 2, 4 );
+        for( int j = 0; j < 4; ++j )
+            slots.col( j ) = app.slot( app.m_slot++ );
+        run.m_slots.push_back( slots );
+        run.m_frames.emplace_back( frame, frame + modes );
+    }
+    run.m_standard = app.m_models->status( DDSPC::ShadowMode::Standard );
+    return run;
+}
+
+/// Six-mode WFS input and a modal output named name.
+void prepareModal( Controller        &app /**< [in,out] Application under test. */,
+                   IMAGE_METADATA    &md /**< [out] WFS metadata kept alive by the caller. */,
+                   const std::string &name /**< [in] Output stream name. */ )
+{
+    app.m_imageStream.md                           = &md;
+    app.m_width                                    = 6;
+    app.m_height                                   = 1;
+    static_cast<ModalGrabber &>( app ).m_shmimName = name;
+    REQUIRE( app.allocate( {} ) == 0 );
+}
+} // namespace
+/// \endcond
+
+/** \brief Every WFS frame yields a main-loop modal frame with exactly modes 0 and 1 zeroed and every higher mode copied
+ * bitwise; the WFS input is never written, and DDSPC learning and every rendered DM slot are bitwise identical to the
+ * same measurements stepped without the modal path.
+ */
+TEST_CASE( "Modal output zeroes tip/tilt only and leaves DDSPC unchanged", "[rtc-controller][modal-output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::processImage;
+    MagAOX::app::loPredCtrlAcc_operational::publishModal;
+    MagAOX::app::loPredCtrlAcc_operational::loadImageIntoStream;
+    MagAOX::app::loPredCtrlAcc_operational::allocate;
+#endif
+    // clang-format on
+    const auto direct = runModal( false ), monitor = runModal( true );
+    REQUIRE( direct.m_published.empty() );
+    REQUIRE( monitor.m_published.size() == monitor.m_frames.size() ); // One modal frame per WFS frame.
+    for( std::size_t n = 0; n < monitor.m_frames.size(); ++n )
+    {
+        const auto &in = monitor.m_frames[n], &out = monitor.m_published[n];
+        REQUIRE( in == direct.m_frames[n] );
+        REQUIRE( in[0] != 0 );
+        REQUIRE( in[1] != 0 );
+        REQUIRE( out[0] == 0 );
+        REQUIRE( out[1] == 0 );
+        REQUIRE( std::equal( in.begin() + 2, in.end(), out.begin() + 2 ) ); // Exact, including sub-ulp offsets.
+        REQUIRE( monitor.m_slots[n] == direct.m_slots[n] );                 // Bitwise identical DDSPC output.
+    }
+    INFO( "standard updates " << monitor.m_standard.m_updates );
+    REQUIRE( monitor.m_standard.m_ready ); // Trained and predicting, so the comparison covers DDSPC predictions.
+    REQUIRE( monitor.m_standard.m_updates == direct.m_standard.m_updates );
+    REQUIRE( monitor.m_standard.m_originRmse == direct.m_standard.m_originRmse );
+}
+
+/** \brief The modal output requires DDSPC to control exactly modes 0 and 1 and a stream distinct from the WFS input and
+ * the DM transport, so the zeroed vector can never be read back as DDSPC input.
+ */
+TEST_CASE( "Modal output configuration rejects feedback and other modes", "[rtc-controller][modal-output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::validateModalOutput;
+    MagAOX::app::loPredCtrlAcc_operational::loadConfigImpl;
+#endif
+    // clang-format on
+    Controller app( true );
+    auto      &grabber      = static_cast<ModalGrabber &>( app );
+    app.m_shmimName         = "aol1_modevalWFS";
+    app.m_syncopationTiming = "dmtweeter_synco_timing";
+    grabber.m_shmimName     = "loPredCtrlAcc"; // The frameGrabber default: the application's name.
+    REQUIRE_NOTHROW( app.validateModalOutput() );
+    for( const auto *name : { "", "aol1_modevalWFS", "dm01disp09_aux", "dmtweeter_synco_timing" } )
+    {
+        grabber.m_shmimName = name;
+        REQUIRE_THROWS( app.validateModalOutput() );
+    }
+    grabber.m_shmimName         = "loPredCtrlAcc";
+    app.m_calibration.m_indices = { 0, 2 };
+    REQUIRE_THROWS( app.validateModalOutput() );
+    app.m_calibration.m_indices = { 0, 1 };
+    app.m_settings.m_modes      = 1;
+    REQUIRE_THROWS( app.validateModalOutput() );
+}
+
+/** \brief The publisher takes an exclusive lock, creates an absent stream, attaches an idle one of the same shape, and
+ * refuses a stream of another shape, one not ready, or one another process is still publishing.
+ */
+TEST_CASE( "Modal output never shares or reshapes another publisher's stream", "[rtc-controller][modal-output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::configureAcquisition;
+    MagAOX::app::loPredCtrlAcc_operational::modalRefused;
+#endif
+    // clang-format on
+    const std::string name = "ddspc_modal_output_test";
+    char              path[4096];
+    REQUIRE( ImageStreamIO_filename( path, sizeof( path ), name.c_str() ) == 0 );
+    std::filesystem::create_directories( std::filesystem::path( path ).parent_path() );
+    std::filesystem::remove( path );
+    std::filesystem::remove( std::string( path ) + ".producer" );
+    Controller     app( true ), other( true );
+    IMAGE_METADATA md{}, otherMd{};
+    prepareModal( app, md, name );
+    prepareModal( other, otherMd, name );
+    auto &grabber = static_cast<ModalGrabber &>( app );
+
+    REQUIRE( app.configureAcquisition() == 0 ); // Absent: the frameGrabber creates it at the WFS size.
+    REQUIRE( grabber.m_width == 6 );
+    REQUIRE( grabber.m_height == 1 );
+    REQUIRE( grabber.m_dataType == _DATATYPE_FLOAT );
+    REQUIRE( grabber.m_imageStream == nullptr );
+    REQUIRE( app.m_modalLock >= 0 );
+    REQUIRE( other.configureAcquisition() == -1 ); // A second publisher cannot take the lock.
+    REQUIRE( other.m_modalLock < 0 );
+
+    std::ofstream( path ) << "stream";
+    IMAGE_METADATA existing{};
+    IMAGE          image{};
+    existing.naxis    = 2;
+    existing.size[0]  = 6;
+    existing.size[1]  = 1;
+    existing.datatype = _DATATYPE_FLOAT;
+    image.md          = &existing;
+    REQUIRE( app.configureAcquisition() == -1 ); // Present but not yet openable: wait, never recreate.
+    grabber.m_existing = &image;
+    REQUIRE( app.configureAcquisition() == 0 ); // Idle and the same shape: attach.
+    REQUIRE( grabber.m_imageStream != nullptr );
+    existing.size[0] = 5;
+    REQUIRE( app.configureAcquisition() == -1 ); // Another shape: never resized.
+    REQUIRE( grabber.m_imageStream == nullptr );
+    existing.size[0] = 6;
+    std::atomic<bool> stop{ false };
+    std::thread       writer(
+        [&]
+        {
+            while( !stop )
+            {
+                ++existing.cnt0; // Another process still publishing, e.g. the original loPredCtrl.
+                std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            }
+        } );
+    const int active = app.configureAcquisition();
+    stop             = true;
+    writer.join();
+    REQUIRE( active == -1 );
+    REQUIRE( grabber.m_imageStream == nullptr );
+    std::filesystem::remove( path );
+}
+
+/** \brief The modal frameGrabber and its telemeter always start and stop with the application, as in loPredCtrl.
+ */
+TEST_CASE( "Modal output always starts with the application", "[rtc-controller][modal-output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::appStartup;
+    MagAOX::app::loPredCtrlAcc_operational::appLogic;
+    MagAOX::app::loPredCtrlAcc_operational::appShutdown;
+#endif
+    // clang-format on
+    Controller app( true );
+    app.m_accelEnabled = false;
+    REQUIRE( app.appStartup() == 0 );
+    app.appShutdown();
+    const auto &grabber = static_cast<ModalGrabber &>( app );
+    const auto &tel     = static_cast<ModalTelemeter &>( app );
+    REQUIRE( grabber.m_starts == 1 );
+    REQUIRE( tel.m_starts == 1 );
+    REQUIRE( grabber.m_stops == 1 );
 }
 } // namespace libXWCTest::loPredCtrlAccTest
