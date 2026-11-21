@@ -16,11 +16,10 @@ the alignment is complete remain manual.
 
 Use [config/camflowfs.conf](config/camflowfs.conf) for sensor instance
 `autoJay-camflowfs` and [config/camflowfs-ctrl.conf](config/camflowfs-ctrl.conf)
-for controller instance `autoJay-camflowfs-ctrl`. The example filenames are not
-deployment names: keep the actual instance names, controller input device, and
-sensor controller setting consistent. These examples are not installed by this
-change. The execution host, process list, INDI routes, and camera/DM shared-memory
-routes must be configured by the operator.
+for controller instance `autoJay-camflowfs-ctrl`. Set the controller input device
+to the actual sensor instance name. Install the examples under the instance
+names you use, and configure the execution host, process list, INDI routes,
+and camera/DM shared-memory routes.
 
 Run the sensor on ICC with the camera and NCPC. Reserve `dm02disp02` for NCPC
 and `dm01disp02` for tweeter exclusively for this sensor. Relay the tweeter
@@ -99,12 +98,11 @@ Update it and take a separate calibration if stream orientation changes.
 
 ## Capture and inspect
 
-Start with `control.enabled=false`. Reference capture and observational
-measurements then need no controller acknowledgment. Accepted observational
-deltas advance `measurement.counter` but carry `measurement.valid=0` and leave
-`ready.toggle` Off; they cannot drive a guarded controller. Settled, current
-`ttmperi` voltage readbacks are still required, and the sensor still applies
-the configured DM pokes.
+Reference capture and measurements need only the camera, DM streams, and
+optical setup. AutoJay has no corrector inputs. Start with
+`control.enabled=false` for observational measurements. Accepted samples
+advance `measurement.counter` with `measurement.valid=0` and `ready.toggle`
+Off so a guarded controller leaves the loop open.
 
 After manually establishing the desired aligned state and optical setup, request
 `capture.request`. This uses the same three-state acquisition as a measurement,
@@ -144,17 +142,21 @@ matrix or substitute an identity matrix.
 All four `loop.intMatXX` entries are deliberately commented out in the controller
 example. `input.guarded=true` requires explicit finite entries and a nonsingular
 matrix, so the example refuses startup until calibrated values are supplied.
-Leave `upstreamFollowClosed=false`. Enable the sensor's `control.enabled` only
-after this controller is configured; changing that setting requires restarting
-the sensor. Both correction axes must be enabled and provide settled readbacks.
+Leave `upstreamFollowClosed=false`. Enable the sensor's `control.enabled` after
+commissioning the controller and restart the sensor. This makes accepted samples
+eligible to drive corrections. The controller requires finite voltage readbacks and uses
+`ctrl.requireOperating=true` to require both `ttmperi` axes to be enabled.
+Use that setting in older copies of the controller config as well.
 
 With the controller open, start continuous sensing and wait for fresh accepted
 samples. The first sample establishes the sensor session without commanding.
 Then manually close the controller's `loop_state.toggle`; only a newer sample
-completed after arming can command. The sensor waits for the matching `processed`
-acknowledgment, voltage readback, and quiet interval before the next cycle.
-Acknowledgment alone does not prove optical settling. Producer/controller clocks
-must agree because guarded timestamps use epoch seconds.
+completed after arming can command. AutoJay uses a fixed local delay,
+`control.settle`, after publishing each correction-eligible sample. Set it
+to cover command delivery and physical settling before the next acquisition.
+Producer/controller clocks must agree because guarded timestamps use epoch
+seconds. Older sensor configs can drop `autoJay.controller`,
+`autoJay.actuator`, `control.timeout`, and `control.voltageTolerance`.
 
 Stop, capture, reload, invalid setup, rejected images, stale input, and a new
 session invalidate control and require manual rearming. Recovery never
