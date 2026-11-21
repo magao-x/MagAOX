@@ -71,23 +71,11 @@
                         <item row="1" column="1">
                             <widget class="xqt::fsmDisplay" name="qwpPupilFsm" />
                         </item>
-                        <item row="2" column="0">
-                            <widget class="QLabel" name="labelStagePolLin" />
-                        </item>
-                        <item row="2" column="1">
-                            <widget class="xqt::fsmDisplay" name="stagePolLinFsm" />
-                        </item>
                         <item row="1" column="2">
                             <widget class="QLabel" name="labelQwpTrack" />
                         </item>
                         <item row="1" column="3">
                             <widget class="xqt::fsmDisplay" name="qwpTrackFsm" />
-                        </item>
-                        <item row="2" column="2">
-                            <widget class="QLabel" name="labelStageQwpLin" />
-                        </item>
-                        <item row="2" column="3">
-                            <widget class="xqt::fsmDisplay" name="stageQwpLinFsm" />
                         </item>
                     </layout>
                 </widget>

@@ -422,3 +422,10 @@ columns, `stagePolRotFsm` and their subscriptions/members are removed; `qwpPupil
 macOS (Homebrew Qt, scratch tree; the checked-in INDI `.a` files are Linux objects, so `liblilxml.a` and
 `libcommon.a` were rebuilt in the scratch copy) and run offscreen: 7 test cases, 186 assertions pass.
 Not built: the full `polarimetryGUI` app (needs mxlib).
+
+- HD7 (2026-11-21, after implementation). User: "actually remove the stageqwplin and stagepollin FSMs, we can
+  tell if they aren't working because the stage dropdowns below won't work". `gridFsmStatus` is now two rows,
+  `hwptrack | hwpsequence` and `qwppupil | qwptrack`; `labelStagePolLin`/`stagePolLinFsm` and
+  `labelStageQwpLin`/`stageQwpLinFsm` removed. Supersedes row 2 of HD2. `stagepollin.fsm`/`stageqwplin.fsm` stay subscribed:
+  `statusCombo` subscribes to its device's `fsm` (`statusCombo.hpp:280`) to follow the stage state. T1 asserts
+  the FSM widgets are gone. `polarimetry_test` rebuilt (scratch tree) and run offscreen: 7 test cases pass.

@@ -1,5 +1,5 @@
 /** \file polarimetry.hpp
- * \brief Polarimetry control widget: HWP angle, QWP polarization and pupil tracking, linear stages, and the
+ * \brief Polarimetry control widget: HWP angle, QWP polarization and pupil tracking, linear stage presets, and the
  * hwpSequencer.
  */
 
@@ -18,9 +18,9 @@
 namespace xqt
 {
 
-/// Polarimetry panel for `hwptrack`, `qwptrack`, `qwppupil`, the polarimetry stages, and `hwpsequence`.
+/// Polarimetry panel for `hwptrack`, `qwptrack`, `qwppupil`, the linear stage presets, and `hwpsequence`.
 /**
- * Shows the HWP angle and name, the FSM states of `hwptrack`, `qwppupil`, `qwptrack` and the stages, and
+ * Shows the HWP angle and name, the FSM states of `hwptrack`, `hwpsequence`, `qwppupil` and `qwptrack`, and
  * the hwpSequencer status, and sends start, stop, last-cycle and abort requests to `hwpsequence`. While `qwptrack` is
  * tracking, the QWP fast-axis angles are shown beside the QWP pol. tracking slider. While `qwppupil` is tracking, the
  * ttmperi voltage offsets it applies are shown beside the QWP pupil tracking slider, which may be toggled during a
@@ -210,9 +210,7 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
     setXwFont( ui.labelHwptrack );
     setXwFont( ui.labelHwpseq );
     setXwFont( ui.labelQwpPupil );
-    setXwFont( ui.labelStagePolLin );
     setXwFont( ui.labelQwpTrack );
-    setXwFont( ui.labelStageQwpLin );
 
     setXwFont( ui.labelAngle );
     setXwFont( ui.labelName );
@@ -241,9 +239,7 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
     ui.hwptrackFsm->highlightChanges( false );
     ui.hwpseqFsm->highlightChanges( false );
     ui.qwpPupilFsm->highlightChanges( false );
-    ui.stagePolLinFsm->highlightChanges( false );
     ui.qwpTrackFsm->highlightChanges( false );
-    ui.stageQwpLinFsm->highlightChanges( false );
 
     ui.labelHwptrack->setText( QString( "hwptrack" ) );
     ui.hwptrackFsm->device( "hwptrack" );
@@ -254,9 +250,6 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
     ui.labelQwpPupil->setText( QString( "qwppupil" ) );
     ui.qwpPupilFsm->device( "qwppupil" );
 
-    ui.labelStagePolLin->setText( QString( "stagepollin" ) );
-    ui.stagePolLinFsm->device( "stagepollin" );
-
     ui.labelQwpTracking->setVisible( false );
     ui.labelQwpTracking->setText( QString( "---" ) );
 
@@ -265,9 +258,6 @@ polarimetry::polarimetry( QWidget *Parent, Qt::WindowFlags f ) : xWidget( Parent
 
     ui.labelQwpTrack->setText( QString( "qwptrack" ) );
     ui.qwpTrackFsm->device( "qwptrack" );
-
-    ui.labelStageQwpLin->setText( QString( "stageqwplin" ) );
-    ui.stageQwpLinFsm->device( "stageqwplin" );
 
     ui.buttonLastCycle->setCheckable( true );
     ui.buttonLastCycle->setProperty( "isHighlightButton", true );
@@ -347,9 +337,7 @@ void polarimetry::subscribe()
     m_parent->addSubscriber( ui.hwptrackFsm );
     m_parent->addSubscriber( ui.hwpseqFsm );
     m_parent->addSubscriber( ui.qwpPupilFsm );
-    m_parent->addSubscriber( ui.stagePolLinFsm );
     m_parent->addSubscriber( ui.qwpTrackFsm );
-    m_parent->addSubscriber( ui.stageQwpLinFsm );
     m_parent->addSubscriber( ui.entryHwpAngle );
     m_parent->addSubscriber( ui.comboHwpLin );
     m_parent->addSubscriber( ui.sliderQwpPupilTracking );
@@ -369,9 +357,7 @@ void polarimetry::onConnect()
     ui.hwptrackFsm->onConnect();
     ui.hwpseqFsm->onConnect();
     ui.qwpPupilFsm->onConnect();
-    ui.stagePolLinFsm->onConnect();
     ui.qwpTrackFsm->onConnect();
-    ui.stageQwpLinFsm->onConnect();
 
     setBold( ui.hwpSetAngle, true );
     setBold( ui.hwpAngleName, true );
@@ -410,9 +396,7 @@ void polarimetry::onDisconnect()
     ui.hwptrackFsm->onDisconnect();
     ui.hwpseqFsm->onDisconnect();
     ui.qwpPupilFsm->onDisconnect();
-    ui.stagePolLinFsm->onDisconnect();
     ui.qwpTrackFsm->onDisconnect();
-    ui.stageQwpLinFsm->onDisconnect();
 
     ui.hwpSetAngle->setText( QString( "---" ) );
     ui.hwpAngleName->setText( QString( "---" ) );
