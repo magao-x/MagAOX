@@ -7,10 +7,10 @@ to its own aligned reference. The reported residual is tweeter displacement
 minus NCPC displacement, in detector pixels; aligned references define zero.
 A separate `closedLoopIndi` instance commands `ttmperi`.
 
-The operator establishes the optical setup and opens both `holoop` and
-`twAlign-camwfs-ctrl`. The sensor checks these conditions; it does not move setup
-stages, `ttmpupil`, or `stagecamlensx/y`. Camlens follow-up and deciding when the
-alignment is complete remain manual.
+The operator establishes the optical setup and opens `holoop`. The sensor
+checks these conditions before poking. Setup stage motion, `ttmpupil`, and
+`stagecamlensx/y` are handled separately. Camlens follow-up and deciding when
+the alignment is complete remain manual.
 
 ## Configure an instance
 
@@ -75,6 +75,11 @@ parked position exception above. AutoJay
 retains each subscribed value until it receives an update. `monitor.maxAge`
 applies to camera frames only. Remove `monitor.refreshInterval` from any copied
 configuration.
+
+The former `autoJay.alignmentLoop` setting and its setup rule are obsolete.
+AutoJay drops the old `twAlign-camwfs-ctrl.loop_state.toggle` requirement from
+copied configs and saved calibrations. If an older config named a different
+alignment controller, its legacy setting identifies the rule to drop.
 
 The local `camflowfs` mapping uses `pvcamCtrl`: the example captures
 `exptime.current` and all four `readout_speed` switches (`sensitivity`, `speed`,
