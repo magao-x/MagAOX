@@ -699,3 +699,98 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
   - A clipped baseline still aborts the run.
   - The best ratio starts at `numeric_limits<double>::max()`, so a clipped starting point never counts as the best.
 - **C3 keep the best on abort.** When a run aborts for any reason, including an operator abort, `runCalibration()` applies the best parameters so far if their ratio is below 1, and logs it as a WARNING. Otherwise it restores the originals, as before. `calibration.best*` is also updated in that case. No unit test: `runCalibration` needs the threads and streams.
+
+### Proposed: Noise-Robust Calibration (items 1–4; not implemented)
+**Request (2026-11-20).** Make the calibration result less driven by noise. A run must take **≤ 20 min**. Implement items 1–4 from the discussion:
+1. correct for baseline drift;
+2. choose each parameter from a fitted curve;
+3. only move a parameter for a real improvement;
+4. confirm the result instead of refining it.
+
+**Motivation (run 202219Z).**
+- Per-point scatter of the ratio is 0.05–0.08.
+- The baseline drifts ±16% over 8 min.
+- The coordinate scan keeps the single lowest noisy value, so later stages have to beat a lucky point.
+- The half-step refine pass resolves differences smaller than the noise.
+
+**Design.**
+1. **Baseline drift.**
+   - Each sweep is bracketed by `off` measurements, and has one every `calibBaselineEvery` points (default changed from 5 to 4).
+   - Each point's ratio is fom divided by the baseline linearly interpolated in time between the bracketing `off` points. Ratios are therefore final at the end of a sweep, when the closing baseline is in.
+   - The live INDI `ratio` and the `abortRatio` check still use the latest baseline.
+   - The sweep order is a fixed interleave of the grid rather than ascending, for example 0, 100, 50, 150, 25, 125, 75 (van der Corput order of the indices). Slow drift then cannot look like a trend.
+2. **Fitted choice.**
+   - At the end of each sweep, fit `r(x) = a + bx + cx²` to all its points by least squares.
+   - **Candidate value:**
+     - the vertex, if c > 0 and it is inside the grid;
+     - otherwise the grid end where the fitted curve is lower;
+     - with fewer than 4 points, or a singular fit, the minimum of a 3-point running mean.
+   - **Clipped points:** the sweep stops at the first clipped point (C2), and the fit uses the points before it.
+3. **Only move for a real improvement.**
+   - **Noise estimate σ.**
+     - The run starts with off, P, off, P, off, P, off, where P is the starting point. The scatter of the three P ratios gives the first estimate of σ.
+     - σ is then pooled with the fit residuals of each sweep (n − 3 degrees of freedom).
+     - σ is never below `calibSigmaFloor`, default 0.02, to guard against an unlucky small estimate.
+   - **The test.** The parameter moves to the candidate only if the fitted improvement `r(current) − r(candidate)` exceeds `calibMoveSigma · σ · √(6/n)`, with `calibMoveSigma` default 2 and n the number of fitted points. √(6/n) is roughly the standard error of the difference between two values of a 3-parameter fit, in units of σ.
+   - **Current value outside the grid:** if the current value is outside the grid, the parameter always moves to the candidate.
+   - Each decision writes a `fit` CSV row: axis, candidate, r(current), r(candidate), threshold, moved yes/no, σ.
+4. **Confirm instead of refine.**
+   - The half-step pass and the parabolic-vertex evaluation are removed.
+   - At the end, the run alternates off and the chosen point `calibConfirmPairs` times (default 3). The reported result is the mean interpolated ratio ± its standard error, as CSV stage `confirm`, INDI `calibration.confirmRatio`/`confirmStd`, and the INFO log.
+   - If the confirmed ratio is not below 1, the original parameters are restored with a WARNING.
+
+**Run structure and time** (about 12.5 s per point; defaults):
+
+| Step | Points |
+| --- | --- |
+| Noise estimate (off/P ×3 + off) | 7 |
+| Round 1: start (7), gain (8), duration (5), plus about 8 baselines | 28 |
+| Round 2: start and gain again with the updated values, plus about 6 baselines | 21 |
+| Confirm (3 off/best pairs) | 6 |
+| **Total** | **≈ 62 points ≈ 13 min** |
+
+- **Order:** start → gain → duration. Gain comes before duration because duration showed little effect.
+- **Round 2** rescans start and gain, because they may interact. It fits within the 20 min budget.
+- **Logging and the cap:** the estimated duration is logged when the run starts. A run whose estimate exceeds 20 min, for example after the grids are widened over INDI, still runs, but logs a WARNING.
+
+**New INDI settings** (same rules as the other calibration settings):
+- `calibReplicates` (3);
+- `calibConfirmPairs` (3);
+- `calibMoveSigma` (2);
+- `calibSigmaFloor` (0.02);
+- `calibRounds` (2; the second round rescans only start and gain).
+
+**Code shape.**
+- Pure functions, so they can be unit tested:
+  - `interpBaseline(times, offTimes, offFoms)`;
+  - `sweepOrder(n)`;
+  - `fitQuadratic(xs, rs)`, returning coefficients and residual SD;
+  - `chooseValue(xs, rs, lo, hi, current, sigma, moveSigma)`, returning the candidate, the predicted values and whether to move.
+- `runCalibration()` becomes:
+  1. noise stage;
+  2. rounds of sweeps, using a `sweep(axis, grid)` helper that measures, closes the baseline, fits and decides;
+  3. confirm.
+- `coordinateScan()` is removed, along with its tests.
+- C2 (clip handling) and C3 (keep the best on abort) are kept. On abort, "best" means the current chosen parameters, if their latest interpolated ratio is below 1.
+- **CSV.** Rows are written as now, plus a new `ratioInterp` column. It is filled in at the end of each sweep: rows are buffered per sweep and written when it closes.
+
+**Tests.**
+- **Unit:**
+  - interpolation, including flat extrapolation at the ends;
+  - the sweep order is a permutation;
+  - the quadratic fit recovers known coefficients;
+  - `chooseValue`:
+    - the vertex inside the grid;
+    - an edge minimum;
+    - c ≤ 0;
+    - a small improvement → no move;
+    - a large improvement → move;
+    - current outside the grid → move;
+  - the pooled σ.
+- **Offline:** add a cell to `calibration_run_analysis.ipynb` that replays steps 1–3 on 202219Z, to show what the new rules would have chosen.
+- **Bench:** one run; check the `fit` rows and the confirmed ratio against the replicates.
+
+**Open questions.**
+- **N-Q1.** Duration: keep it in round 1 only, as above, or fix it at 330 and drop it?
+- **N-Q2.** Is `calibMoveSigma = 2` the right threshold? It makes the scan conservative: in 202219Z, gain 0.5 → 0.68 (a predicted improvement of 0.02) would not move, but start 120 → 25 would.
+- **N-Q3.** Should the confirm step also measure the original parameters alternately, so that the result is a direct comparison of new against old (about +3 points)?
