@@ -81,7 +81,7 @@ def make_ncpc_alignment_poke_pattern(offset_y_axis=0):
     probe : Field
         The probe pattern.
     '''
-    ncpc_act_grid = make_pupil_grid(34, 34/30.0 * np.array([1.0, np.sqrt(2)]))
+    ncpc_act_grid = hp.make_pupil_grid(34, 34/30.0 * np.array([1.0, np.sqrt(2)]))
     probe = make_vertical_probe(ncpc_act_grid, 'down', offset_y_axis) + make_vertical_probe(ncpc_act_grid, 'up', offset_y_axis)
     probe += make_horizontal_probe(ncpc_act_grid, 'left', offset_y_axis) + make_horizontal_probe(ncpc_act_grid, 'right', offset_y_axis)
     return probe
