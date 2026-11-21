@@ -105,6 +105,7 @@ telem_sparkleclock       20940    telem_sparkleclock
 
 telem_poltrack           20945    telem_poltrack
 telem_adctrack           20946    telem_adctrack
+telem_qwptrack           20950    telem_qwptrack
 telem_qwppupil           20951    telem_qwppupil
 
 telem_outlet            12010    telem_outlet

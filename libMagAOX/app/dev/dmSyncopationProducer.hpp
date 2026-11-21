@@ -125,7 +125,7 @@ namespace dev
 /** The application owns the CPU-backed 2-D float32 source IMAGE and the thread
  * calling poll/publish/close. Add this helper as a CRTP base, alias it as
  * dmSyncopationProducerT, and use its configuration/shutdown interface macros.
- * The derived application supplies only pixels for Request::targetNs. It must
+ * The derived application supplies only pixels for the advertised Request. It must
  * not modify the managed source directly, including while disabling modulation.
  *
  * A complete _ready commit transfers source ownership to synco. The matching
@@ -219,9 +219,10 @@ class dmSyncopationProducer
     /// Load and validate optional timing configuration without opening streams.
     int loadConfig( mx::app::appConfigurator &config /**< [in] Parsed application configuration. */ );
 
-    /// Return 1 for a new usable slot, 0 while waiting, or -1 for unavailable/incompatible transport.
+    /// Poll for a new usable slot, returning 1 for a request, 0 while waiting, or -1 for unavailable transport.
     int syncopationPoll( Request &slot /**< [out] Immutable target and source-ready deadline. */,
-                         IMAGE   &source /**< [in] Existing CPU-backed 2-D float32 source. */ );
+                         IMAGE   &source, /**< [in] Existing CPU-backed 2-D float32 source. */
+                         bool     mainOnly = false /**< [in] Select only the next passive step 0 when true. */ );
 
     /// Wait to the configured lead, revalidate, and publish a complete tagged payload before its cutoff.
     bool syncopationPublish( const float   *pixels /**< [in] Complete private source image. */,
@@ -394,7 +395,7 @@ bool dmSyncopationProducer<derivedT>::syncopationOpen( IMAGE &source )
 }
 
 template <class derivedT>
-int dmSyncopationProducer<derivedT>::syncopationPoll( Request &slot, IMAGE &source )
+int dmSyncopationProducer<derivedT>::syncopationPoll( Request &slot, IMAGE &source, bool mainOnly )
 {
     if( m_syncopationSchedule.md && !syncopationSource( source ) )
     {
@@ -443,9 +444,9 @@ int dmSyncopationProducer<derivedT>::syncopationPoll( Request &slot, IMAGE &sour
         m_syncopationOutstanding = false;
     }
 
-    const int step = synco::nextProductionStep( record, now );
+    const int step = mainOnly ? 0 : synco::nextProductionStep( record, now );
 
-    if( step < 0 )
+    if( step < 0 || record[synco::cutoffs + step] <= now )
     {
         return 0;
     }

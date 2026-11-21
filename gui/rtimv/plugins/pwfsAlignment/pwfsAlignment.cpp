@@ -1,7 +1,8 @@
+/** \file pwfsAlignment.cpp
+ * \brief Draws measured and target pyramid wavefront sensor pupils in rtimv.
+ */
 
 #include "pwfsAlignment.hpp"
-
-#define errPrint(expl) std::cerr << "pwfsAlignment: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
 
 pwfsAlignment::pwfsAlignment() : rtimvOverlayInterface()
 {
@@ -11,41 +12,42 @@ pwfsAlignment::~pwfsAlignment()
 {
 }
 
-int pwfsAlignment::attachOverlay( rtimvOverlayAccess & roa,
-                                  mx::app::appConfigurator & config
-                                )
+int pwfsAlignment::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurator &config )
 {
-
     m_roa = roa;
 
     m_enabled = false;
 
-    config.configUnused(m_deviceName, mx::app::iniFile::makeKey("pwfsAlignment", "name"));
+    config.configUnused( m_deviceName, mx::app::iniFile::makeKey( "pwfsAlignment", "name" ) );
 
-    if(m_deviceName == "") 
+    if( m_deviceName.empty() )
     {
-      pluginLogInfo("not configured");
-      return 1; //Tell rtimv we can't be used.
+        pluginLogInfo( "not configured" );
+        return 1;
     }
 
-
-    if(m_roa.m_dictionary != nullptr)
+    if( m_roa.m_dictionary != nullptr )
     {
-        //Register these
-        (*m_roa.m_dictionary)[m_deviceName + ".numPupils"].setBlob(nullptr, 0);
-        (*m_roa.m_dictionary)[m_deviceName + ".sm_frameSize"].setBlob(nullptr, 0);
-        (*m_roa.m_dictionary)[m_deviceName + ".quadrant1"].setBlob(nullptr, 0);
-        (*m_roa.m_dictionary)[m_deviceName + ".quadrant2"].setBlob(nullptr, 0);
-        (*m_roa.m_dictionary)[m_deviceName + ".quadrant3"].setBlob(nullptr, 0);
-        (*m_roa.m_dictionary)[m_deviceName + ".quadrant4"].setBlob(nullptr, 0);
-        //(*m_roa.m_dictionary)[m_deviceName + "."].setBlob(nullptr, 0);
+        // The INDI dictionary derives property subscriptions from device.property.element keys.
+        auto &dictionary = *m_roa.m_dictionary;
+        dictionary.try_emplace( m_deviceName + ".numPupils.value" );
+        dictionary.try_emplace( m_deviceName + ".sm_frameSize.width" );
+        dictionary.try_emplace( m_deviceName + ".sm_frameSize.height" );
 
+        for( int quadrant = 1; quadrant <= 4; ++quadrant )
+        {
+            const auto prefix = m_deviceName + ".quadrant" + std::to_string( quadrant ) + ".";
+
+            for( const char *element : { "x", "y", "D", "set-x", "set-y", "set-D" } )
+            {
+                dictionary.try_emplace( prefix + element );
+            }
+        }
     }
 
-    pluginLogInfo(std::format("configured for {}", m_deviceName));
+    pluginLogInfo( std::format( "configured for {}", m_deviceName ) );
 
-    if(m_enabled) enableOverlay();
-    else disableOverlay();
+    disableOverlay();
 
     return 0;
 }
@@ -76,6 +78,13 @@ int pwfsAlignment::updateOverlay()
       m_height = atoi(m_blob);
    }
 
+   // These blobs are empty until the fitter publishes them and can be cleared on disconnect.
+   if( ( m_numPupils != 3 && m_numPupils != 4 ) || m_width <= 0 || m_height <= 0 )
+   {
+       return 0;
+   }
+
+   // Read the measured and target centers and diameters from the same quadrant properties.
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.x") > 0)
    {
       if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
@@ -93,7 +102,6 @@ int pwfsAlignment::updateOverlay()
       if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
       m_1D = strtod(m_blob,0);
    }
-   //std::cerr << "1: " << m_1x << " " << m_1y << " " << m_1D << "\n";
 
    if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.set-x") > 0)
    {
@@ -221,12 +229,9 @@ int pwfsAlignment::updateOverlay()
       m_set4D = strtod(m_blob,0);
    }
 
+   // The scene owns the graphics items. Create the geometry for the configured pupil layout once.
    if(!initialized)
    {
-      if(m_numPupils == 0) return 0; //This means we haven't received this property yet.
-      if(m_width == 0) return 0; //This means we haven't received this property yet.
-      if(m_height == 0) return 0; //This means we haven't received this property yet.
-
       float dQw = 0.5*(0.5*m_width - 1.0);
 
       float dQh = 0.5*(0.5*m_height - 1.0);
@@ -275,6 +280,7 @@ int pwfsAlignment::updateOverlay()
       initialized = true;
    }
 
+   // Convert fitter coordinates to the scene's downward-increasing y axis.
    if(m_numPupils == 3)
    {
       m_1to2->setLine(QLineF(m_1x,m_height-1-m_1y, m_2x, m_height-1-m_2y ));

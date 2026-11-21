@@ -4,12 +4,19 @@
 #ifndef dmSyncopation_hpp
 #define dmSyncopation_hpp
 
+/// Enable extended INDI readbacks for engineering captures.
+#ifndef DMSYNCOPATION_DIAGNOSTIC_INDI
+    #define DMSYNCOPATION_DIAGNOSTIC_INDI 0
+#endif
+
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <sstream>
+#include <thread>
 #include <sys/random.h>
 
 #include <mx/improc/milkImage.hpp>
@@ -24,6 +31,7 @@
 #include "../../libMagAOX/app/dev/dmTiming.hpp"
 #include "../../libMagAOX/app/dev/dmTimingEventStream.hpp"
 #include "../../libMagAOX/common/latestSnapshot.hpp"
+#include "../../libMagAOX/common/streamCopy.hpp"
 #include "../../magaox_git_version.h"
 #include "syncoSchedule.hpp"
 #include "syncoSimulation.hpp"
@@ -231,6 +239,7 @@ class dmSyncopation : public MagAOXApp<true>,
     std::string              m_cameraDevice{ "camwfs" };      ///< Device publishing measured acquisition timing.
     std::string              m_cameraProperty{ "fg_timing" }; ///< Measured camera timing property.
     std::string              m_cameraElement{ "acq_fps" };    ///< Measured acquisition-rate element.
+    std::string              m_loopDevice{ "holoop" };        ///< AO loop readback for the open-loop zero request.
     int                      m_requested{ 3 };                ///< Fixed requested count, including passive step 0.
     int                      m_primarySemaphore{ 5 }; ///< Required reader semaphore; reject allocation fallback.
     unsigned                 m_lockFrames{ 32 };  ///< Clean main observations before preparing the first active cycle.
@@ -646,10 +655,13 @@ class dmSyncopation : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_enable;            ///< Enable request and acknowledged quiescence.
     pcf::IndiProperty m_indiP_reacquire;         ///< Request fresh synchronization.
+    pcf::IndiProperty m_indiP_zero;              ///< Request one open-loop zero publication.
     pcf::IndiProperty m_indiP_settings;          ///< Disabled-only essential numeric controls.
     pcf::IndiProperty m_indiP_status;            ///< Compact rates/counts/outcome summary.
-    pcf::IndiProperty m_indiP_health;            ///< Schedule reason and stream identities.
+    pcf::IndiProperty m_indiP_health;            ///< Scheduler phase, last fault and mode.
     pcf::IndiProperty m_indiP_camera;            ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_loop;              ///< External AO loop state subscription.
+    bool              m_loopOpen{ false };       ///< Affirmative Off readback, serialized with the zero request.
     pcf::IndiProperty m_indiP_simulation;        ///< Conditional grid, phase and collection-quality diagnostics.
     pcf::IndiProperty m_indiP_simulationCadence; ///< Long-baseline cadence state, coverage and independent freshness.
     pcf::IndiProperty
@@ -773,13 +785,26 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Request acquisition without clearing persistent contributions.
     INDI_NEWCALLBACK_DECL( dmSyncopation, m_indiP_reacquire );
 
+    /// Clear the configured destination channels while the AO loop is open and synco is disabled.
+    INDI_NEWCALLBACK_DECL( dmSyncopation, m_indiP_zero );
+
     /// Validate an atomic disabled-only timing/count setting update.
     INDI_NEWCALLBACK_DECL( dmSyncopation, m_indiP_settings );
 
     /// Accept measured camera FPS and optional acquisition statistics as one coherent report.
     INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_camera );
 
+    /// Track affirmative Off reports from the configured AO loop interface.
+    INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_loop );
+
   protected:
+    /// Register the operator interface, camera subscription and build-selected diagnostic readbacks.
+    int setupINDI();
+
+    /// Clear the numbered destinations, trigger dmcomb once and check the combined output.
+    /** \returns A failure message, or nullptr after dmcomb publishes the updated combination. */
+    const char *zeroDestinations();
+
     /// Configure/reset the shadow engine without opening or modifying any image.
     bool configureSimulation( double seedRate = 0 /**< [in] New acquisition seed, Hz; zero retains the reference. */ );
 
@@ -955,7 +980,8 @@ class dmSyncopation : public MagAOXApp<true>,
 
     /// Publish source-counter timing and clock-quality populations only from an ordinary-thread snapshot.
     void updateZeroPublication( const ZeroSnapshot &snapshot /**< [in] Coherent cycle-owned state copy. */,
-                                bool record /**< [in] Include text telemetry alongside INDI updates. */ );
+                                bool                record /**< [in] Emit text telemetry. */,
+                                bool publish /**< [in] Publish the registered diagnostic INDI properties. */ );
 
     /// Record one actual outcome without allocation, logging or unbounded buffering.
     void zeroTestEvent( int         step /**< [in] Zero for main; positive auxiliary slot. */,
@@ -1014,7 +1040,7 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Register coarse ordinary-loop service and event-throughput properties.
     int setupLogicTimingINDI();
 
-    /// Publish completed coarse service costs and the preceding profile report's own publication cost.
+    /// Log coarse service costs and publish the profile to INDI when registered.
     void updateLogicTimingINDI();
 
     /// Select the common qualified counter scheduler for finite or continuous operation.
@@ -1178,6 +1204,7 @@ inline void dmSyncopation::setupConfig()
         { "streams.destinations", "Ordered numbered DM destinations; sources append _aux; first triggers." },
         { "streams.combined", "Combined output to observe." },
         { "streams.timing", "Same-host signed-int64 schedule stream." },
+        { "zero.loopDevice", "Device publishing loop_state.toggle for open-loop zero requests." },
         { "tracking.cameraDevice", "Camera device publishing measured acquisition timing." },
         { "tracking.cameraProperty", "Measured camera timing property." },
         { "tracking.cameraElement", "Measured camera FPS element." },
@@ -1272,6 +1299,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_destinations, "streams.destinations" );
     config( m_combinedName, "streams.combined" );
     config( m_timingName, "streams.timing" );
+    config( m_loopDevice, "zero.loopDevice" );
     config( m_cameraDevice, "tracking.cameraDevice" );
     config( m_cameraProperty, "tracking.cameraProperty" );
     config( m_cameraElement, "tracking.cameraElement" );
@@ -1690,13 +1718,16 @@ inline void dmSyncopation::updateMainTiming( int64_t now )
         }
     }
 
-    updateIfChanged( m_indiP_mainTiming,
-                     std::vector<std::string>{ "enabled", "generation", "dropped", "publishFailures", "queued" },
-                     std::vector<double>{ 1,
-                                          double( m_mainTimingStatusGeneration ),
-                                          double( m_mainTiming.dropped() ),
-                                          double( m_mainTimingPublishFailures ),
-                                          double( m_mainTiming.queued() ) } );
+    if( m_indiP_mainTiming.find( "enabled" ) )
+    {
+        updateIfChanged( m_indiP_mainTiming,
+                         std::vector<std::string>{ "enabled", "generation", "dropped", "publishFailures", "queued" },
+                         std::vector<double>{ 1,
+                                              double( m_mainTimingStatusGeneration ),
+                                              double( m_mainTiming.dropped() ),
+                                              double( m_mainTimingPublishFailures ),
+                                              double( m_mainTiming.queued() ) } );
+    }
 }
 
 inline void dmSyncopation::closeMainTiming()
@@ -1717,6 +1748,160 @@ inline ino_t dmSyncopation::inode( const std::string &name )
     ImageStreamIO_filename( filename, sizeof( filename ), name.c_str() );
     struct stat info{};
     return stat( filename, &info ) == 0 ? info.st_ino : 0;
+}
+
+inline const char *dmSyncopation::zeroDestinations()
+{
+    auto closeImage = []( IMAGE *image )
+    {
+        ImageStreamIO_closeIm( image );
+        delete image;
+    };
+    using ImageHandle    = std::unique_ptr<IMAGE, decltype( closeImage )>;
+    const auto openImage = [&closeImage]( const std::string &name ) -> ImageHandle
+    {
+        auto image = std::make_unique<IMAGE>();
+
+        if( ImageStreamIO_openIm( image.get(), name.c_str() ) != IMAGESTREAMIO_SUCCESS )
+        {
+            return { nullptr, closeImage };
+        }
+
+        return { image.release(), closeImage };
+    };
+    const auto backingInode = []( const IMAGE &image ) -> ino_t
+    {
+        struct stat status{};
+        return fstat( image.shmfd, &status ) == 0 ? status.st_ino : 0;
+    };
+
+    ImageHandle combined( nullptr, closeImage );
+    ino_t       combinedFile{ 0 };
+    uint64_t    combinedCounter{ 0 };
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_cycleMutex );
+
+        if( !m_loopOpen || m_enabled || shutdown() )
+        {
+            return "zero requires an open AO loop and disabled synco";
+        }
+
+        combined = openImage( m_combinedName );
+
+        if( !combined || !combined->md )
+        {
+            return "combined DM stream unavailable";
+        }
+
+        const auto width       = combined->md->size[0];
+        const auto height      = combined->md->size[1];
+        const auto count       = uint64_t( width ) * height;
+        const auto bytes       = count * sizeof( float );
+        const auto validPixels = [width, height, count, bytes]( const IMAGE &image )
+        {
+            const auto *md = image.md;
+            return md && md->shared == 1 && md->location == -1 && md->naxis == 2 && md->datatype == _DATATYPE_FLOAT &&
+                   md->size[0] == width && md->size[1] == height && md->nelement == count &&
+                   md->imdatamemsize == bytes && image.array.F;
+        };
+        combinedFile           = backingInode( *combined );
+        combinedCounter        = combined->md->cnt0;
+        const auto primaryFile = inode( shmimMonitorT::m_shmimName );
+
+        if( m_destinations.empty() || !count || count > 1048576 || !validPixels( *combined ) || !combinedFile ||
+            combinedFile == primaryFile || combined->md->write || combinedCounter == UINT64_MAX )
+        {
+            return "combined DM stream busy or incompatible";
+        }
+
+        const std::vector<float> zeros( count, 0.0F );
+        std::vector<ImageHandle> destinations;
+        std::vector<ino_t>       identities{ combinedFile, primaryFile };
+        std::vector<uint64_t>    counters;
+
+        for( const auto &name : m_destinations )
+        {
+            auto       image = openImage( name );
+            const auto file  = image ? backingInode( *image ) : 0;
+
+            if( !image || !validPixels( *image ) || image->md->write || !file ||
+                std::find( identities.begin(), identities.end(), file ) != identities.end() )
+            {
+                return "a synco destination is missing, busy, aliased or incompatible";
+            }
+
+            identities.push_back( file );
+            counters.push_back( image->md->cnt0 );
+            destinations.push_back( std::move( image ) );
+        }
+
+        for( size_t j = 0; j < destinations.size(); ++j )
+        {
+            const auto *md = destinations[j]->md;
+
+            if( md->write || md->cnt0 != counters[j] || inode( m_destinations[j] ) != identities[j + 2] )
+            {
+                return "a synco destination changed during zero preflight";
+            }
+        }
+
+        auto      &trigger        = *destinations.front();
+        const auto triggerCounter = counters.front();
+        timespec   stamp{};
+
+        if( trigger.md->sem == 0 || triggerCounter == UINT64_MAX || inode( m_combinedName ) != combinedFile ||
+            combined->md->write || combined->md->cnt0 != combinedCounter || clock_gettime( CLOCK_ISIO, &stamp ) < 0 )
+        {
+            return "DM trigger or combined stream unavailable for zero publication";
+        }
+
+        for( auto &image : destinations )
+        {
+            image->md->write = 1;
+            MagAOX::streamCopy( image->array.F, zeros.data(), bytes );
+        }
+
+        // Finish the passive destinations before the first destination's counter can trigger dmcomb.
+        for( size_t j = 1; j < destinations.size(); ++j )
+        {
+            auto &md     = *destinations[j]->md;
+            md.writetime = md.atime = stamp;
+            md.write                = 0;
+        }
+
+        const bool published = ImageStreamIO_UpdateIm( &trigger ) == IMAGESTREAMIO_SUCCESS &&
+                               trigger.md->cnt0 == triggerCounter + 1 && !trigger.md->write;
+        trigger.md->write = 0;
+        invalidate( published ? "open-loop zero published" : "open-loop zero trigger failed" );
+        closeResources();
+        m_nextAttach = 0;
+
+        if( m_productionEnabled )
+        {
+            closeZeroTest();
+            m_zeroNextAttach = 0;
+        }
+
+        if( !published )
+        {
+            return "channels cleared; zero trigger publication failed";
+        }
+    }
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( 100 );
+    do
+    {
+        if( !combined->md->write && combined->md->cnt0 == combinedCounter + 1 &&
+            inode( m_combinedName ) == combinedFile )
+        {
+            return nullptr;
+        }
+
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    } while( !shutdown() && std::chrono::steady_clock::now() < deadline );
+
+    return "channels cleared and trigger published; dmcomb did not confirm a single combined update";
 }
 
 inline bool dmSyncopation::configureSimulation( double seedRate )
@@ -4624,28 +4809,13 @@ inline void dmSyncopation::configureDiagnostics()
     m_mainTiming.configure( m_mainTimingName.empty() ? 0 : m_mainTimingCapacity );
 }
 
-inline int dmSyncopation::appStartup()
+inline int dmSyncopation::setupINDI()
 {
-    try
-    {
-        configureDiagnostics();
-    }
-    catch( const std::exception &error )
-    {
-        return log<software_error, -1>( { std::string( "Timing allocation: " ) + error.what() } );
-    }
-
-    if( !m_mainTimingName.empty() && m_mainTimingStream.open( m_mainTimingName, m_mainTimingCapacity ) < 0 )
-    {
-        return log<software_error, -1>( { "could not create main timing diagnostic stream" } );
-    }
-
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
     if( setupMainTimingINDI() < 0 )
     {
         return -1;
     }
-
-    synchronizeMainTiming();
 
     if( setupProductionINDI() < 0 || setupLogicTimingINDI() < 0 || setupZeroTestINDI() < 0 ||
         setupSimulationINDI() < 0 || setupPrimaryCadenceINDI() < 0 || setupCombinerCadenceINDI() < 0 ||
@@ -4665,16 +4835,8 @@ inline int dmSyncopation::appStartup()
     {
         return -1;
     }
+#endif
 
-    if( getrandom( &m_epoch, sizeof( m_epoch ), 0 ) != sizeof( m_epoch ) )
-    {
-        return -1;
-    }
-    m_epoch &= INT64_MAX;
-    if( m_epoch == 0 )
-    {
-        m_epoch = 1;
-    }
     if( createStandardIndiToggleSw( m_indiP_enable, "enable" ) < 0 ||
         registerIndiPropertyNew( m_indiP_enable, INDI_NEWCALLBACK( m_indiP_enable ) ) < 0 ||
         createStandardIndiRequestSw( m_indiP_reacquire, "reacquire" ) < 0 ||
@@ -4706,57 +4868,71 @@ inline int dmSyncopation::appStartup()
     }
     REG_INDI_NEWPROP_NOCB( m_indiP_status, "timing", pcf::IndiProperty::Number );
     m_indiP_status.setPerm( pcf::IndiProperty::ReadOnly );
-    for( const auto &name : { "mainHz",
-                              "cameraHz",
-                              "plannedHz",
-                              "deliveredHz",
-                              "delivered",
-                              "requested",
-                              "active",
-                              "feasible",
-                              "missed",
-                              "faults",
-                              "cached",
-                              "notStarted",
-                              "copiedLate",
-                              "snapshotMaxUs",
-                              "copyMaxUs",
-                              "primaryFaults",
-                              "resourceFaults",
-                              "outputFaults",
-                              "triggerFaults",
-                              "duplicatePosts",
-                              "step0WakeUs",
-                              "step0WakeMaxUs",
-                              "step0AdvanceUs",
-                              "copyBudgetUs",
-                              "snapshotBudgetUs",
-                              "lastPrimaryDelta",
-                              "lastIntervalUs",
-                              "lastOutputDelta",
-                              "lastFaultAgeSec",
-                              "cameraJitterUs",
-                              "cameraMinUs",
-                              "cameraMaxUs",
-                              "cameraAgeSec",
-                              "primaryMeasuredHz",
-                              "faultIntervalUs",
-                              "faultPeriodUs",
-                              "faultResidualUs",
-                              "faultPrimaryCounter",
-                              "faultPublishUs",
-                              "faultPublishValid",
-                              "faultObserveExtraUs",
-                              "faultPrevCallbackUs",
-                              "faultCallbackGapUs",
-                              "faultEntryToCounterUs" } )
+    for( const auto &name : {
+             "mainHz",
+             "plannedHz",
+             "deliveredHz",
+             "requested",
+             "active",
+             "feasible",
+             "missed",
+             "faults",
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
+             "cameraHz",
+             "delivered",
+             "cached",
+             "notStarted",
+             "copiedLate",
+             "snapshotMaxUs",
+             "copyMaxUs",
+             "primaryFaults",
+             "resourceFaults",
+             "outputFaults",
+             "triggerFaults",
+             "duplicatePosts",
+             "step0WakeUs",
+             "step0WakeMaxUs",
+             "step0AdvanceUs",
+             "copyBudgetUs",
+             "snapshotBudgetUs",
+             "lastPrimaryDelta",
+             "lastIntervalUs",
+             "lastOutputDelta",
+             "lastFaultAgeSec",
+             "cameraJitterUs",
+             "cameraMinUs",
+             "cameraMaxUs",
+             "cameraAgeSec",
+             "primaryMeasuredHz",
+             "faultIntervalUs",
+             "faultPeriodUs",
+             "faultResidualUs",
+             "faultPrimaryCounter",
+             "faultPublishUs",
+             "faultPublishValid",
+             "faultObserveExtraUs",
+             "faultPrevCallbackUs",
+             "faultCallbackGapUs",
+             "faultEntryToCounterUs",
+#endif
+         } )
     {
         m_indiP_status.add( pcf::IndiElement( name ) );
     }
     REG_INDI_NEWPROP_NOCB( m_indiP_health, "health", pcf::IndiProperty::Text );
     m_indiP_health.setPerm( pcf::IndiProperty::ReadOnly );
-    for( const auto &name :
-         { "reason", "lastFault", "periodSource", "primary", "combined", "timingStream", "mapping", "mode" } )
+    for( const auto &name : {
+             "reason",
+             "lastFault",
+             "mode",
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
+             "periodSource",
+             "primary",
+             "combined",
+             "timingStream",
+             "mapping",
+#endif
+         } )
     {
         m_indiP_health.add( pcf::IndiElement( name ) );
     }
@@ -4764,6 +4940,54 @@ inline int dmSyncopation::appStartup()
     {
         REG_INDI_SETPROP( m_indiP_camera, m_cameraDevice, m_cameraProperty );
     }
+
+    if( !m_diagnosticsOnly && !m_simulationEnabled && !m_zeroTestEnabled && !m_loopDevice.empty() )
+    {
+        if( createStandardIndiRequestSw( m_indiP_zero, "zero" ) < 0 ||
+            registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK( m_indiP_zero ) ) < 0 )
+        {
+            return -1;
+        }
+
+        REG_INDI_SETPROP( m_indiP_loop, m_loopDevice, "loop_state" );
+    }
+
+    return 0;
+}
+
+inline int dmSyncopation::appStartup()
+{
+    try
+    {
+        configureDiagnostics();
+    }
+    catch( const std::exception &error )
+    {
+        return log<software_error, -1>( { std::string( "Timing allocation: " ) + error.what() } );
+    }
+
+    if( !m_mainTimingName.empty() && m_mainTimingStream.open( m_mainTimingName, m_mainTimingCapacity ) < 0 )
+    {
+        return log<software_error, -1>( { "could not create main timing diagnostic stream" } );
+    }
+
+    synchronizeMainTiming();
+
+    if( getrandom( &m_epoch, sizeof( m_epoch ), 0 ) != sizeof( m_epoch ) )
+    {
+        return -1;
+    }
+    m_epoch &= INT64_MAX;
+    if( m_epoch == 0 )
+    {
+        m_epoch = 1;
+    }
+
+    if( setupINDI() < 0 )
+    {
+        return -1;
+    }
+
     state( stateCodes::READY );
     TELEMETER_APP_STARTUP;
     SHMIMMONITOR_APP_STARTUP;
@@ -4819,30 +5043,38 @@ inline int dmSyncopation::appLogic()
     if( detailed )
     {
         m_primaryCadence.update( m_now() );
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
         updatePrimaryCadenceINDI();
+#endif
         recordLogicStage( LogicStage::primary, began );
         drainZeroTestEvents();
 
         began = m_now();
         m_combinerCadence.update( m_now() );
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
         updateCombinerCadenceINDI();
+#endif
         recordLogicStage( LogicStage::combiner, began );
         drainZeroTestEvents();
 
         began = m_now();
         m_cameraCadence.update( m_now() );
+        m_cameraPublicationCadence.update( m_now() );
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
         updateCadenceINDI( m_cameraCadence, m_indiP_cameraTiming, m_indiP_cameraQuality, "acquisition_" );
         updatePairsINDI( m_cameraCadence, m_indiP_cameraPairs );
-        m_cameraPublicationCadence.update( m_now() );
         updateCadenceINDI(
             m_cameraPublicationCadence, m_indiP_cameraWriteTiming, m_indiP_cameraWriteQuality, "publication_" );
         updatePairsINDI( m_cameraPublicationCadence, m_indiP_cameraWritePairs );
+#endif
         recordLogicStage( LogicStage::camera, began );
         drainZeroTestEvents();
 
         began = m_now();
         m_pipelineCadence.update( m_now() );
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
         updatePipelineINDI();
+#endif
         recordLogicStage( LogicStage::pipeline, began );
         drainZeroTestEvents();
 
@@ -4851,7 +5083,9 @@ inline int dmSyncopation::appLogic()
         {
             m_readerTiming.update( m_now() );
             m_readerReleaseTiming.update( m_now() );
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
             updateReaderTimingINDI();
+#endif
         }
     }
 
@@ -4951,61 +5185,66 @@ inline int dmSyncopation::appLogic()
                 settingNames.resize( 2 );
                 settingValues.resize( 2 );
             }
-            const std::vector<std::string> names{ "mainHz",
-                                                  "cameraHz",
-                                                  "plannedHz",
-                                                  "deliveredHz",
-                                                  "delivered",
-                                                  "requested",
-                                                  "active",
-                                                  "feasible",
-                                                  "missed",
-                                                  "faults",
-                                                  "cached",
-                                                  "notStarted",
-                                                  "copiedLate",
-                                                  "snapshotMaxUs",
-                                                  "copyMaxUs",
-                                                  "primaryFaults",
-                                                  "resourceFaults",
-                                                  "outputFaults",
-                                                  "triggerFaults",
-                                                  "duplicatePosts",
-                                                  "step0WakeUs",
-                                                  "step0WakeMaxUs",
-                                                  "step0AdvanceUs",
-                                                  "copyBudgetUs",
-                                                  "snapshotBudgetUs",
-                                                  "lastPrimaryDelta",
-                                                  "lastIntervalUs",
-                                                  "lastOutputDelta",
-                                                  "lastFaultAgeSec",
-                                                  "cameraJitterUs",
-                                                  "cameraMinUs",
-                                                  "cameraMaxUs",
-                                                  "cameraAgeSec",
-                                                  "primaryMeasuredHz",
-                                                  "faultIntervalUs",
-                                                  "faultPeriodUs",
-                                                  "faultResidualUs",
-                                                  "faultPrimaryCounter",
-                                                  "faultPublishUs",
-                                                  "faultPublishValid",
-                                                  "faultObserveExtraUs",
-                                                  "faultPrevCallbackUs",
-                                                  "faultCallbackGapUs",
-                                                  "faultEntryToCounterUs" };
-            const std::vector<double>      values{
+            const std::vector<std::string> names{
+                "mainHz",
+                "plannedHz",
+                "deliveredHz",
+                "requested",
+                "active",
+                "feasible",
+                "missed",
+                "faults",
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
+                "cameraHz",
+                "delivered",
+                "cached",
+                "notStarted",
+                "copiedLate",
+                "snapshotMaxUs",
+                "copyMaxUs",
+                "primaryFaults",
+                "resourceFaults",
+                "outputFaults",
+                "triggerFaults",
+                "duplicatePosts",
+                "step0WakeUs",
+                "step0WakeMaxUs",
+                "step0AdvanceUs",
+                "copyBudgetUs",
+                "snapshotBudgetUs",
+                "lastPrimaryDelta",
+                "lastIntervalUs",
+                "lastOutputDelta",
+                "lastFaultAgeSec",
+                "cameraJitterUs",
+                "cameraMinUs",
+                "cameraMaxUs",
+                "cameraAgeSec",
+                "primaryMeasuredHz",
+                "faultIntervalUs",
+                "faultPeriodUs",
+                "faultResidualUs",
+                "faultPrimaryCounter",
+                "faultPublishUs",
+                "faultPublishValid",
+                "faultObserveExtraUs",
+                "faultPrevCallbackUs",
+                "faultCallbackGapUs",
+                "faultEntryToCounterUs",
+#endif
+            };
+            const std::vector<double> values{
                 1e9 / m_period,
-                m_cameraReport.m_fps,
                 m_requested * 1e9 / m_period,
                 m_deliveredHz,
-                double( m_delivered ),
                 double( m_requested ),
                 m_primed ? double( m_requested ) : 0,
                 double( m_feasible ),
                 double( m_missed ),
                 double( m_faults ),
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
+                m_cameraReport.m_fps,
+                double( m_delivered ),
                 double( m_cached ),
                 double( m_notStarted ),
                 double( m_copiedLate ),
@@ -5037,29 +5276,35 @@ inline int dmSyncopation::appLogic()
                 m_faultTiming.m_publication > 0 ? m_faultTiming.m_publication / 1000.0 : -1,
                 m_faultTiming.m_publication > 0 ? 1.0 : 0.0,
                 m_faultTiming.m_publication > 0
-                         ? ( double( m_faultInterval ) - double( m_faultTiming.m_publication ) ) / 1000.0
-                         : -1,
+                    ? ( double( m_faultInterval ) - double( m_faultTiming.m_publication ) ) / 1000.0
+                    : -1,
                 m_faultTiming.m_previousRuntime >= 0 ? m_faultTiming.m_previousRuntime / 1000.0 : -1,
                 m_faultTiming.m_gap >= 0 ? m_faultTiming.m_gap / 1000.0 : -1,
-                m_faultTiming.m_sampleDelay >= 0 ? m_faultTiming.m_sampleDelay / 1000.0 : -1 };
-            const std::string reason       = m_reason;
-            const std::string lastFault    = m_lastFaultReason;
+                m_faultTiming.m_sampleDelay >= 0 ? m_faultTiming.m_sampleDelay / 1000.0 : -1,
+#endif
+            };
+            const std::string reason    = m_reason;
+            const std::string lastFault = m_lastFaultReason;
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
             const std::string periodSource = m_periodSource;
             std::string       mappings;
             for( const auto &name : m_destinations )
             {
                 mappings += ( mappings.empty() ? "" : ", " ) + name + "_aux -> " + name;
             }
+#endif
             lock.unlock(); // Never hold the cycle mutex across INDI driver I/O.
             updateIfChanged( m_indiP_settings, settingNames, settingValues );
             updateIfChanged( m_indiP_status, names, values, status );
             updateIfChanged( m_indiP_health, "reason", reason );
             updateIfChanged( m_indiP_health, "lastFault", lastFault );
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
             updateIfChanged( m_indiP_health, "periodSource", periodSource );
             updateIfChanged( m_indiP_health, "primary", shmimMonitorT::m_shmimName );
             updateIfChanged( m_indiP_health, "combined", m_combinedName );
             updateIfChanged( m_indiP_health, "timingStream", m_timingName );
             updateIfChanged( m_indiP_health, "mapping", mappings );
+#endif
             const std::string mode =
                 m_productionEnabled ? "production providers"
                 : m_zeroTestEnabled
@@ -5067,14 +5312,18 @@ inline int dmSyncopation::appLogic()
                     : ( m_simulationEnabled ? "shadow simulation"
                                             : ( m_diagnosticsOnly ? "diagnostics only" : "scheduler" ) );
             updateIfChanged( m_indiP_health, "mode", mode );
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
             updateSimulationINDI();
+#endif
         }
     }
     recordLogicStage( LogicStage::legacy, began );
     drainZeroTestEvents();
     began = detailed ? m_now() : 0;
     updateZeroTest();
+#if DMSYNCOPATION_DIAGNOSTIC_INDI
     updateProductionINDI();
+#endif
     SHMIMMONITOR_UPDATE_INDI;
     recordLogicStage( LogicStage::status, began );
 
@@ -5372,6 +5621,45 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_reacquire )( const pcf::IndiProper
     return 0;
 }
 
+INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_zero )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_zero, ipRecv );
+
+    if( ipRecv.getType() != pcf::IndiProperty::Switch || !ipRecv.find( "request" ) || ipRecv.getElements().size() != 1 )
+    {
+        return -1;
+    }
+
+    if( ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+    {
+        return 0;
+    }
+
+    updateSwitchIfChanged( m_indiP_zero, "request", pcf::IndiElement::On, INDI_BUSY );
+    std::string failure;
+
+    try
+    {
+        if( const char *reason = zeroDestinations() )
+        {
+            failure = reason;
+        }
+    }
+    catch( const std::exception &error )
+    {
+        failure = error.what();
+    }
+
+    if( !failure.empty() )
+    {
+        updateSwitchIfChanged( m_indiP_zero, "request", pcf::IndiElement::Off, INDI_ALERT );
+        return log<text_log, -1>( "open-loop zero: " + failure, logPrio::LOG_ERROR );
+    }
+
+    updateSwitchIfChanged( m_indiP_zero, "request", pcf::IndiElement::Off, INDI_OK );
+    return log<text_log, 0>( "open-loop zero published by dmcomb", logPrio::LOG_NOTICE );
+}
+
 INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_settings, ipRecv );
@@ -5487,6 +5775,17 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
         updateIfChanged( m_indiP_settings, "durationSec", duration );
     }
 
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_loop )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loop, ipRecv );
+
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+    m_loopOpen = ipRecv.getType() == pcf::IndiProperty::Switch && ipRecv.find( "toggle" ) &&
+                 ipRecv.getState() != INDI_ALERT && ipRecv.getState() != INDI_BUSY &&
+                 ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off;
     return 0;
 }
 

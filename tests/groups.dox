@@ -117,6 +117,11 @@ $ less tests/results/latest/run.log
  * \ingroup application_unit_test
  */
 
+/** \defgroup qwpTracker_unit_test qwpTracker Unit Tests
+ * \brief Angle mapping, tracking law, tracking/manual modes, stage gating and FSM tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup loopTimingMonitor_unit_test Loop Timing Monitor Unit Tests
  * \brief Offline timestamp association, polling, operating gates and persistent fgtimes telemetry.
  * \ingroup application_unit_test
@@ -189,6 +194,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup hwpSequencer_unit_test hwpSequencer Unit Tests
+ * \brief Offline tests of the HWP sequencer callbacks, configuration, bounded waits, and sequence logic.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup filterWheelCtrl_unit_test Filter Wheel Controller Unit Tests
  * \brief Offline communication recovery, homing, and power-transition tests.
  * \ingroup application_unit_test
@@ -241,6 +251,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
 
 /** \defgroup pupilGuideGUI_unit_test Pupil Guide GUI Unit Tests
  * \brief Offline device availability, recovery, and command routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup timingGUI_unit_test Timing GUI Unit Tests
+ * \brief Offline timing conversions, INDI availability, and command routing tests.
  * \ingroup application_unit_test
  */
 
