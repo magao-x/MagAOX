@@ -240,3 +240,25 @@ image noise drops. Then switch back.
   - The user runs the read-only probe `dcamReadoutProbe.cpp` with orcaCtrl stopped, to confirm the DCAM
     values (Q1) and whether `READOUTSPEED` can be set while capturing.
   - The hardware check described under Tests.
+
+**2026-11-21: probe results (`dcamReadoutProbe`, read-only, run by the user with orcaCtrl stopped).**
+
+| Property | Result |
+| --- | --- |
+| `READOUTSPEED` | min 1, max 2, step 1, default 2, current 2. Writable. **Not settable while capturing.** |
+| `READOUTSPEED` value texts | `1` and `2` both return an empty string from `dcamprop_getvaluetext` |
+| `EXPOSURETIME` (at speed 2) | min 7.2 µs, max 1800 s, step 10 ns. Settable while capturing. |
+| `TIMING_READOUTTIME` (at speed 2) | 8.316 ms (full frame) |
+
+What the results mean:
+
+- **Q1 is confirmed.** There are two speeds, 1 (slowest) and 2 (fastest). The 7.2 µs exposure minimum at
+  speed 2 matches the manual's Standard scan, so 2 = Standard and 1 = Ultra quiet. The camera powers up
+  in Standard (default 2), consistent with the `standard` default. The code's `valuemin` / `valuemax`
+  mapping and the fake DCAM's [1, 2] range match the camera.
+- The value texts are empty, so the names can't be taken from DCAM. The name mapping in
+  `configureAcquisition()` is needed.
+- **Q2 is confirmed.** `READOUTSPEED` can't change during capture, so the reconfigure path (stop capture,
+  write, restart) is required. Mid-capture switching isn't possible, which closes that follow-up.
+- No code changes were needed. Still to do: run `orcaCtrl_test` on the build machine, and the hardware
+  switching check.
