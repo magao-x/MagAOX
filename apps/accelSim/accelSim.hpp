@@ -475,6 +475,10 @@ inline void accelSim::setupConfig()
          "double",
          "Initial optical_amplitude: unsensed optical disturbance [0,100], default 0." );
     add( "optical", "seed", "uint64_t", "Independent optical disturbance random seed, default 7." );
+    add( "accelOnly", "enabled", "bool", "Add one mode sensed only by the accelerometer, default false." );
+    add( "accelOnly", "frequency", "double", "ACC-only mode frequency [Hz], default 50." );
+    add( "accelOnly", "amplitude", "double", "ACC-only mode per-axis acceleration RMS [m/s^2], default 0.005." );
+    add( "accelOnly", "seed", "uint64_t", "ACC-only mode random seed, default 11." );
     add( "sensor", "noisePSD", "double", "One-sided acceleration noise PSD, default 1e-8." );
     add( "adc", "zero", "double", "ADC zero point [counts], default 2048." );
     add( "adc", "voltsPerBit", "double", "Empirical volts per count, default 0.0083799." );
@@ -548,6 +552,10 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_parameters.m_commonCoupling, "optical.commonCoupling" );
     config( m_parameters.m_opticalAmplitude, "optical.amplitude" );
     config( m_parameters.m_opticalSeed, "optical.seed" );
+    config( m_parameters.m_accelOnly, "accelOnly.enabled" );
+    config( m_parameters.m_accelOnlyFrequency, "accelOnly.frequency" );
+    config( m_parameters.m_accelOnlyAmplitude, "accelOnly.amplitude" );
+    config( m_parameters.m_accelOnlySeed, "accelOnly.seed" );
     config( m_parameters.m_noisePSD, "sensor.noisePSD" );
     config( m_parameters.m_zero, "adc.zero" );
     config( m_parameters.m_voltsPerBit, "adc.voltsPerBit" );
@@ -662,7 +670,8 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
         if( !std::isfinite( m_dtTransfer + m_wfsProcess + m_dtF + m_wfsRead ) )
             throw std::invalid_argument( "timing-model overflow" );
         m_model.configure( m_parameters, accelSimDetail::referenceModes( m_parameters.m_modeSeed, m_opticalCoupling ) );
-        m_maxFrequency = m_model.m_modes.back().m_spec.m_frequency;
+        m_maxFrequency = std::max( m_model.m_modes.back().m_spec.m_frequency,
+                                   m_parameters.m_accelOnly ? m_parameters.m_accelOnlyFrequency : 0 );
     }
     catch( const std::exception &error )
     {

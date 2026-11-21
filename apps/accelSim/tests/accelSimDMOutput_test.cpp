@@ -124,6 +124,7 @@ struct dmOutputApp : MagAOX::app::accelSim
     using accelSim::m_indiP_opticalAmplitude;
     using accelSim::m_indiP_opticalCoupling;
     using accelSim::m_model;
+    using accelSim::m_parameters;
     using accelSim::m_shutdown;
     using accelSim::m_syncopationTiming;
     using accelSim::m_timeline;
@@ -144,7 +145,8 @@ struct dmOutputFixture
     uint64_t m_acquisitions{ 0 }; ///< Accelerometer measurements taken through the app's acquisition seam.
 
     /// Create ordinary files, calibrated ramps and an 8-kHz timeline, without native streams or hardware.
-    explicit dmOutputFixture( int writeLeadUs = 50 /**< [in] Configured producer lead before cutoff in us. */ );
+    explicit dmOutputFixture( int  writeLeadUs = 50 /**< [in] Configured producer lead before cutoff in us. */,
+                              bool accelOnly   = false /**< [in] Enable the default 50 Hz ACC-only mode. */ );
 
     /// Release producer ownership before deleting this test's private files.
     ~dmOutputFixture();
@@ -172,7 +174,7 @@ double expected( dmOutputApp &app /**< [in] app owning the timeline */,
            pointing.surface( ( double( pixel % 50 ) - 24.5 ) * 6.5 / 48, ( double( pixel / 50 ) - 24.5 ) * 6.5 / 48 );
 }
 
-dmOutputFixture::dmOutputFixture( int writeLeadUs )
+dmOutputFixture::dmOutputFixture( int writeLeadUs, bool accelOnly )
 {
     char path[] = "/tmp/accelSim-producer-XXXXXX";
     REQUIRE( mkdtemp( path ) != nullptr );
@@ -189,6 +191,7 @@ dmOutputFixture::dmOutputFixture( int writeLeadUs )
     schedule();
     m_app.setupConfig();
     m_app.config.m_values["syncopation.writeLeadUs"] = std::to_string( writeLeadUs );
+    m_app.config.m_values["accelOnly.enabled"]       = accelOnly ? "1" : "0";
     REQUIRE( m_app.loadConfigImpl( m_app.config ) == 0 );
     REQUIRE( m_app.setupProperties() == 0 );
     std::vector<double> x( 2500 ), y( 2500 ), mask( 2500, 1 );
@@ -929,6 +932,73 @@ TEST_CASE( "accelSim runtime optical controls preserve acquisition and DM timing
     MagAOX::app::accelSim::measure;
     MagAOX::app::accelSim::newCallBack_m_indiP_opticalCoupling;
     MagAOX::app::accelSim::newCallBack_m_indiP_opticalAmplitude;
+#endif
+    // clang-format on
+}
+
+/** \brief The ACC-only mode changes acc000 but leaves DM pointing, WFS truth and published commands bitwise unchanged,
+ * while optical_coupling and optical_amplitude change at runtime through the real callbacks.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim ACC-only mode never reaches the DM", "[accelSim][dm-output][accel-only]" )
+{
+    using MagAOX::app::accelSimDetail::sample;
+    struct record
+    {
+        std::vector<sample>             m_acquired, m_physical; ///< acc000 samples and timeline values at acquisition.
+        std::vector<std::vector<float>> m_commands;             ///< DM source surface after each service.
+        int                             m_published{ 0 };       ///< DM publications.
+    };
+    const auto run = []( bool accelOnly )
+    {
+        record          result;
+        dmOutputFixture fixture( 50, accelOnly );
+        auto           &app = fixture.m_app;
+        REQUIRE( app.m_parameters.m_accelOnly == accelOnly );
+        fixture.enable( 1 );
+        const auto set = [&]( double coupling, double amplitude )
+        {
+            auto common = app.m_indiP_opticalCoupling, independent = app.m_indiP_opticalAmplitude;
+            common["target"]      = coupling;
+            independent["target"] = amplitude;
+            REQUIRE( app.newCallBack_m_indiP_opticalCoupling( common ) == 0 );
+            REQUIRE( app.newCallBack_m_indiP_opticalAmplitude( independent ) == 0 );
+        };
+        for( int n = 0; n < 3000; ++n )
+        {
+            if( n == 1000 )
+                set( .5, 1 );
+            if( n == 2000 )
+                set( 0, 0 );
+            fixture.advance();
+            sample physical;
+            REQUIRE( app.m_timeline.physical( g_tick, physical ) );
+            result.m_acquired.push_back( app.m_acquiredSample );
+            result.m_physical.push_back( physical );
+            if( app.serviceDM() )
+                acknowledge();
+            result.m_commands.push_back( g_images.at( "dm01disp10_aux" ).m_pixels );
+        }
+        app.updateDMINDI();
+        result.m_published = app.m_indiP_dmStatus["published"].get<int>();
+        return result;
+    };
+    const auto baseline = run( false ), accelOnly = run( true );
+    REQUIRE( accelOnly.m_published == baseline.m_published );
+    REQUIRE( baseline.m_published > 2000 );
+    REQUIRE( accelOnly.m_commands == baseline.m_commands );
+    bool sensed = false;
+    for( size_t n = 0; n < baseline.m_acquired.size(); ++n )
+    {
+        REQUIRE( accelOnly.m_physical[n].m_pointing == baseline.m_physical[n].m_pointing );
+        REQUIRE( accelOnly.m_physical[n].m_wfsPointing == baseline.m_physical[n].m_wfsPointing );
+        sensed = sensed || accelOnly.m_acquired[n].m_adc != baseline.m_acquired[n].m_adc;
+    }
+    REQUIRE( sensed );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::loadConfigImpl;
+    MagAOX::app::accelSimDetail::model::step;
 #endif
     // clang-format on
 }

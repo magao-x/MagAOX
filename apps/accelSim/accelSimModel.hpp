@@ -23,8 +23,9 @@ namespace accelSimDetail
 
 constexpr double   pi                  = 3.14159265358979323846;
 constexpr double   arcsecToRad         = pi / ( 180.0 * 3600.0 );
-constexpr uint64_t maxCatchUp          = 8;   ///< Maximum skipped ticks advanced before a stationary restart.
-constexpr double   maxOpticalAmplitude = 100; ///< Upper limit of the independent optical disturbance amplitude.
+constexpr uint64_t maxCatchUp          = 8;      ///< Maximum skipped ticks advanced before a stationary restart.
+constexpr double   maxOpticalAmplitude = 100;    ///< Upper limit of the independent optical disturbance amplitude.
+constexpr double   accelOnlyPoleRadius = .99995; ///< Pole radius of the ACC-only mode, as the 54-58 Hz modes.
 
 /// Parameters for one independent pair of pointing oscillators.
 struct modeSpec
@@ -40,17 +41,21 @@ struct modeSpec
 /// Configurable physical model and empirical ADC calibration.
 struct parameters
 {
-    double   m_fps{ 6000 };              ///< Nominal discrete sample rate in Hz.
-    uint64_t m_seed{ 42 };               ///< Seed for initialization, innovations, and sensor noise.
-    uint64_t m_modeSeed{ 123 };          ///< Independent seed for the fixed high-frequency population.
-    double   m_leverArm{ 10 };           ///< Effective lever arm in metres.
-    double   m_noisePSD{ 1e-8 };         ///< One-sided acceleration noise density.
-    double   m_zero{ 2048 };             ///< ADC zero point in counts.
-    double   m_voltsPerBit{ 0.0083799 }; ///< Empirical volts-per-count calibration.
-    double   m_sensitivity{ 1.02 };      ///< Empirical acceleration sensitivity.
-    uint64_t m_opticalSeed{ 7 };         ///< Seed of the independent optical-only disturbance.
-    double   m_opticalAmplitude{ 0 };    ///< Linear scale of the independent optical disturbance; zero disables it.
-    double   m_commonCoupling{ 1 };      ///< Common factor multiplying every mode's optical coupling, in [0,1].
+    double   m_fps{ 6000 };                ///< Nominal discrete sample rate in Hz.
+    uint64_t m_seed{ 42 };                 ///< Seed for initialization, innovations, and sensor noise.
+    uint64_t m_modeSeed{ 123 };            ///< Independent seed for the fixed high-frequency population.
+    double   m_leverArm{ 10 };             ///< Effective lever arm in metres.
+    double   m_noisePSD{ 1e-8 };           ///< One-sided acceleration noise density.
+    double   m_zero{ 2048 };               ///< ADC zero point in counts.
+    double   m_voltsPerBit{ 0.0083799 };   ///< Empirical volts-per-count calibration.
+    double   m_sensitivity{ 1.02 };        ///< Empirical acceleration sensitivity.
+    uint64_t m_opticalSeed{ 7 };           ///< Seed of the independent optical-only disturbance.
+    double   m_opticalAmplitude{ 0 };      ///< Linear scale of the independent optical disturbance; zero disables it.
+    double   m_commonCoupling{ 1 };        ///< Common factor multiplying every mode's optical coupling, in [0,1].
+    bool     m_accelOnly{ false };         ///< Add one mode sensed by the accelerometer with no optical contribution.
+    double   m_accelOnlyFrequency{ 50 };   ///< ACC-only mode frequency in Hz, below Nyquist.
+    double   m_accelOnlyAmplitude{ .005 }; ///< ACC-only mode per-axis acceleration RMS in m/s^2.
+    uint64_t m_accelOnlySeed{ 11 };        ///< Seed of the ACC-only mode's independent generator.
 };
 
 /// Stable stationary scaling and a two-sample oscillator history.
@@ -153,6 +158,11 @@ class model
     std::vector<mode>                m_optical;
     std::mt19937_64                  m_opticalRng;            ///< Generator of the independent optical disturbance.
     std::normal_distribution<double> m_opticalNormal{ 0, 1 }; ///< Standard-normal draws of m_opticalRng.
+
+    /// ACC-only mode, empty unless enabled; its own generator keeps the other realizations unchanged.
+    std::vector<mode>                m_accelOnly;
+    std::mt19937_64                  m_accelOnlyRng;            ///< Generator of the ACC-only mode.
+    std::normal_distribution<double> m_accelOnlyNormal{ 0, 1 }; ///< Standard-normal draws of m_accelOnlyRng.
 };
 
 /// Absolute monotonic pacing with fractional-nanosecond period accumulation.
@@ -444,7 +454,9 @@ inline void model::configure( const parameters &config, const std::vector<modeSp
         config.m_noisePSD < 0 || !std::isfinite( config.m_zero ) || !std::isfinite( config.m_voltsPerBit ) ||
         config.m_voltsPerBit <= 0 || !std::isfinite( config.m_sensitivity ) || config.m_sensitivity <= 0 ||
         !( config.m_opticalAmplitude >= 0 && config.m_opticalAmplitude <= maxOpticalAmplitude ) ||
-        !( config.m_commonCoupling >= 0 && config.m_commonCoupling <= 1 ) )
+        !( config.m_commonCoupling >= 0 && config.m_commonCoupling <= 1 ) ||
+        ( config.m_accelOnly && !( config.m_accelOnlyFrequency > 0 && config.m_accelOnlyAmplitude >= 0 &&
+                                   std::isfinite( config.m_accelOnlyAmplitude ) ) ) )
         throw std::invalid_argument( "invalid physical/ADC/optical configuration" );
     m_config = config;
     m_modes.clear();
@@ -458,10 +470,18 @@ inline void model::configure( const parameters &config, const std::vector<modeSp
         m_modes.push_back( { spec, factor, {} } );
     }
     m_optical = m_modes; // Always allocated so the amplitude can change at runtime without allocation or restart.
+    m_accelOnly.clear();
+    if( config.m_accelOnly )
+        m_accelOnly.push_back(
+            { { config.m_accelOnlyFrequency, config.m_accelOnlyAmplitude, accelOnlyPoleRadius, 0, 0, 0 },
+              accelerationFactor( config.m_accelOnlyFrequency, config.m_leverArm ),
+              {} } );
     m_rng.seed( config.m_seed );
     m_normal.reset();
     m_opticalRng.seed( config.m_opticalSeed );
     m_opticalNormal.reset();
+    m_accelOnlyRng.seed( config.m_accelOnlySeed );
+    m_accelOnlyNormal.reset();
     m_clipLow  = {};
     m_clipHigh = {};
     m_ticks    = 0;
@@ -473,9 +493,10 @@ inline bool model::validRate( double fps ) const
 {
     if( !std::isfinite( fps ) || fps <= 0 || fps > 10000 )
         return false;
-    for( const auto &mode : m_modes )
-        if( mode.m_spec.m_frequency >= fps / 2 )
-            return false;
+    for( const auto *modes : { &m_modes, &m_accelOnly } )
+        for( const auto &mode : *modes )
+            if( mode.m_spec.m_frequency >= fps / 2 )
+                return false;
     return true;
 }
 
@@ -486,7 +507,7 @@ inline void model::setRate( double fps )
     const double sigma = std::sqrt( m_config.m_noisePSD * fps / 2 );
     if( !std::isfinite( sigma ) )
         throw std::invalid_argument( "sensor noise overflow" );
-    for( auto *modes : { &m_modes, &m_optical } )
+    for( auto *modes : { &m_modes, &m_optical, &m_accelOnly } )
         for( auto &mode : *modes )
             for( auto &axis : mode.m_axes )
                 axis.configure(
@@ -510,6 +531,13 @@ inline void model::restart()
         {
             const double z1 = m_opticalNormal( m_opticalRng );
             const double z2 = m_opticalNormal( m_opticalRng );
+            axis.initialize( z1, z2 );
+        }
+    for( auto &mode : m_accelOnly )
+        for( auto &axis : mode.m_axes )
+        {
+            const double z1 = m_accelOnlyNormal( m_accelOnlyRng );
+            const double z2 = m_accelOnlyNormal( m_accelOnlyRng );
             axis.initialize( z1, z2 );
         }
 }
@@ -539,6 +567,13 @@ inline const sample &model::step()
                 m_sample.m_wfsPointing[axis] +=
                     optical * ( axis == 0 ? mode.m_spec.m_couplingX : mode.m_spec.m_couplingY );
             }
+    for( auto &mode : m_accelOnly ) // Mechanical motion sensed by the accelerometer only, never optical.
+        for( size_t axis = 0; axis < 2; ++axis )
+        {
+            const double pointing = mode.m_axes[axis].step( m_accelOnlyNormal( m_accelOnlyRng ) );
+            m_sample.m_physicalPointing[axis] += pointing;
+            m_sample.m_acceleration[axis] += mode.m_accelPerArcsec * pointing;
+        }
     for( size_t axis = 0; axis < 2; ++axis )
     {
         m_sample.m_noise[axis] = m_noiseSigma * m_normal( m_rng );
