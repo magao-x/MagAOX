@@ -34,6 +34,7 @@ apps_aoc = \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
+	qwpTracker \
 	stateRuleEngine \
 	xInstGraph
 
