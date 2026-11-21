@@ -147,6 +147,43 @@ TEST_CASE( "accelSim optical coupling and independent disturbance", "[accelSim][
     REQUIRE( std::abs( cross ) < .99 * std::sqrt( power * extra ) ); // Not a copy of the sensed realization.
 }
 
+/** \brief Runtime optical controls change later DM pointing only, without restarting or perturbing ACC values.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim runtime optical controls", "[accelSim][model][optical]" )
+{
+    parameters config;
+    config.m_fps = 8000;
+    model baseline, controlled;
+    baseline.configure( config, referenceModes( 123, { .8 } ) );
+    controlled.configure( config, referenceModes( 123, { .8 } ) );
+    bool independent = false;
+    for( size_t frame = 0; frame < 6000; ++frame )
+    {
+        const bool changed                     = frame >= 2000 && frame < 4000;
+        controlled.m_config.m_commonCoupling   = changed ? .25 : 1;
+        controlled.m_config.m_opticalAmplitude = frame >= 3000 && frame < 4000 ? .5 : 0;
+        const sample expected = baseline.step(), value = controlled.step();
+        REQUIRE( value.m_acceleration == expected.m_acceleration );
+        REQUIRE( value.m_adc == expected.m_adc );
+        REQUIRE( value.m_physicalPointing == expected.m_physicalPointing );
+        REQUIRE( controlled.m_ticks == baseline.m_ticks );
+        if( !changed ) // Restoring the controls restores the exact sequence: no oscillator was reset.
+            REQUIRE( value.m_pointing == expected.m_pointing );
+        else if( frame < 3000 )
+            for( size_t axis = 0; axis < 2; ++axis )
+                REQUIRE( value.m_pointing[axis] == Approx( .25 * expected.m_pointing[axis] ) );
+        else
+            independent = independent || std::abs( value.m_pointing[0] - .25 * expected.m_pointing[0] ) > 1e-6;
+    }
+    REQUIRE( independent );
+    config.m_commonCoupling = 1.5;
+    REQUIRE_THROWS( model().configure( config, referenceModes( 123 ) ) );
+    config.m_commonCoupling   = 1;
+    config.m_opticalAmplitude = maxOpticalAmplitude * 2;
+    REQUIRE_THROWS( model().configure( config, referenceModes( 123 ) ) );
+}
+
 /** \brief The independent optical disturbance lowers ACC/WFS magnitude-squared coherence at shared mode peaks.
  * The baseline is below 1 because the weak modes are fully sensed but only 1% WFS coupled. An equal-power independent
  * realization (amplitude 1) roughly doubles WFS power at the prominent peaks, so coherence falls to about half.

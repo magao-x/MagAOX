@@ -280,6 +280,8 @@ class accelSim : public MagAOXApp<true>,
     bool                m_dmStartupEnabled{ false }; ///< Startup enable remains unsupported; operators use dm_enable.
     bool                m_dmReady{ false }; ///< Immutable calibration preparation result until acquisition has joined.
     std::atomic<double> m_dmScale{ 0 };     ///< DM-only amplitude scale, independent of model amplitudes.
+    std::atomic<double> m_commonCoupling{ 1 };   ///< optical_coupling, applied by the acquisition thread.
+    std::atomic<double> m_opticalAmplitude{ 0 }; ///< optical_amplitude, applied by the acquisition thread.
     bool m_dmEnabled{ false }, m_dmZeroPending{ false }; ///< Operator request and required removal, under m_dmMutex.
     bool m_dmActive{ false }, m_dmZeroAcknowledged{ false }; ///< Last copied contribution and explicit zero receipt.
     bool m_dmTransportFault{ false }; ///< Current transport availability, without fault latching.
@@ -302,6 +304,7 @@ class accelSim : public MagAOXApp<true>,
     synco::Record     m_dmRecord{}; ///< Last coherent scheduler record read for staging and counting.
     uint64_t          m_dmRecordCounter{ 0 };                              ///< Schedule stream counter of m_dmRecord.
     pcf::IndiProperty m_indiP_dmEnable, m_indiP_dmScale, m_indiP_dmStatus; ///< Minimal low-rate DM controls/status.
+    pcf::IndiProperty m_indiP_opticalCoupling, m_indiP_opticalAmplitude;   ///< Runtime optical disturbance controls.
     pcf::IndiProperty m_indiP_dmCalibration; ///< Calibration method, K, fit residuals and unavailability reason.
     pcf::IndiProperty m_indiP_dmSteps, m_indiP_dmTiming; ///< Per-step counts and per-report-interval timing.
     /// Compatible accelerometer controls, serialized by m_controlMutex.
@@ -422,6 +425,10 @@ class accelSim : public MagAOXApp<true>,
     INDI_NEWCALLBACK_DECL( accelSim, m_indiP_dmEnable );
     /// Set the independent commissioning scale in [0,100].
     INDI_NEWCALLBACK_DECL( accelSim, m_indiP_dmScale );
+    /// Set the common factor in [0,1] multiplying every mode's optical coupling.
+    INDI_NEWCALLBACK_DECL( accelSim, m_indiP_opticalCoupling );
+    /// Set the independent optical disturbance amplitude in [0,100].
+    INDI_NEWCALLBACK_DECL( accelSim, m_indiP_opticalAmplitude );
 };
 
 inline accelSim::accelSim() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -459,7 +466,14 @@ inline void accelSim::setupConfig()
          "coupling",
          "string",
          "Optical TT coupling in [0,1]: empty (all 1), one value, or 14 prominent modes then one for weak modes." );
-    add( "optical", "amplitude", "double", "Independent optical-only disturbance scale (not sensed), default 0." );
+    add( "optical",
+         "commonCoupling",
+         "double",
+         "Initial optical_coupling in [0,1] multiplying every mode's optical.coupling, default 1." );
+    add( "optical",
+         "amplitude",
+         "double",
+         "Initial optical_amplitude: unsensed optical disturbance [0,100], default 0." );
     add( "optical", "seed", "uint64_t", "Independent optical disturbance random seed, default 7." );
     add( "sensor", "noisePSD", "double", "One-sided acceleration noise PSD, default 1e-8." );
     add( "adc", "zero", "double", "ADC zero point [counts], default 2048." );
@@ -531,6 +545,7 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_parameters.m_leverArm, "sim.leverArm" );
     std::string coupling;
     config( coupling, "optical.coupling" );
+    config( m_parameters.m_commonCoupling, "optical.commonCoupling" );
     config( m_parameters.m_opticalAmplitude, "optical.amplitude" );
     config( m_parameters.m_opticalSeed, "optical.seed" );
     config( m_parameters.m_noisePSD, "sensor.noisePSD" );
@@ -657,7 +672,9 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     m_postDelay    = postDelay;
     m_activeFps    = m_parameters.m_fps;
     m_requestedFps = m_parameters.m_fps;
-    m_dmScale      = dmScale;
+    m_dmScale          = dmScale;
+    m_commonCoupling   = m_parameters.m_commonCoupling;
+    m_opticalAmplitude = m_parameters.m_opticalAmplitude;
     return 0;
 }
 
@@ -675,6 +692,20 @@ inline int accelSim::setupProperties()
         m_indiP_dmScale, "dm_scale", 0, accelSimDetail::maxDMScale, .001, "%.3f", "DM scale", "DM" );
     m_indiP_dmScale["current"] = m_dmScale.load();
     m_indiP_dmScale["target"]  = m_dmScale.load();
+    CREATE_REG_INDI_NEW_NUMBERD(
+        m_indiP_opticalCoupling, "optical_coupling", 0, 1, .001, "%.3f", "Optical coupling", "Optical" );
+    m_indiP_opticalCoupling["current"] = m_commonCoupling.load();
+    m_indiP_opticalCoupling["target"]  = m_commonCoupling.load();
+    CREATE_REG_INDI_NEW_NUMBERD( m_indiP_opticalAmplitude,
+                                 "optical_amplitude",
+                                 0,
+                                 accelSimDetail::maxOpticalAmplitude,
+                                 .001,
+                                 "%.3f",
+                                 "Optical amplitude",
+                                 "Optical" );
+    m_indiP_opticalAmplitude["current"] = m_opticalAmplitude.load();
+    m_indiP_opticalAmplitude["target"]  = m_opticalAmplitude.load();
     CREATE_REG_INDI_RO_NUMBER( m_indiP_dmStatus, "dm_status", "DM readiness", "DM" );
     for( const char *name : { "ready",
                               "attached",
@@ -1740,6 +1771,9 @@ inline int accelSim::loadImageIntoStream( void *destination )
 
 inline void accelSim::measure( int64_t acquired, uint64_t tick )
 {
+    // Runtime optical controls affect only nodes generated from now on; ACC values and oscillator states are unchanged.
+    m_model.m_config.m_commonCoupling   = m_commonCoupling.load();
+    m_model.m_config.m_opticalAmplitude = m_opticalAmplitude.load();
     if( m_timeline.advance( m_model, acquired ) )
         ++m_diagnostics.m_discontinuities;
     // Clamps count published measurements only, not generated-ahead nodes.
@@ -1866,6 +1900,32 @@ inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_dmScale )( const pcf::IndiProper
     m_indiP_dmScale["current"] = value;
     m_indiP_dmScale["target"]  = value;
     return propertyState( m_indiP_dmScale, true );
+}
+
+inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_opticalCoupling )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_opticalCoupling, ipRecv );
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    const double                value = target( ipRecv );
+    if( !( value >= 0 && value <= 1 ) )
+        return propertyState( m_indiP_opticalCoupling, false );
+    m_commonCoupling                   = value;
+    m_indiP_opticalCoupling["current"] = value;
+    m_indiP_opticalCoupling["target"]  = value;
+    return propertyState( m_indiP_opticalCoupling, true );
+}
+
+inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_opticalAmplitude )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_opticalAmplitude, ipRecv );
+    std::lock_guard<std::mutex> guard( m_controlMutex );
+    const double                value = target( ipRecv );
+    if( !( value >= 0 && value <= accelSimDetail::maxOpticalAmplitude ) )
+        return propertyState( m_indiP_opticalAmplitude, false );
+    m_opticalAmplitude                  = value;
+    m_indiP_opticalAmplitude["current"] = value;
+    m_indiP_opticalAmplitude["target"]  = value;
+    return propertyState( m_indiP_opticalAmplitude, true );
 }
 
 inline INDI_NEWCALLBACK_DEFN( accelSim, m_indiP_fps )( const pcf::IndiProperty &ipRecv )
