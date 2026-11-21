@@ -11,6 +11,7 @@
 #include <dcamprop.h>
 
 #include <cstring>
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -143,6 +144,19 @@ extern "C"
         param->valuemin  = 1e-5;
         param->valuemax  = param->iProp == DCAM_IDPROP_SENSORCOOLER ? f.m_coolerMax : 10;
         param->valuestep = 1e-6;
+
+        // Readout speed 1 is Ultra quiet scan and 2 is Standard scan, which sets the exposure minimum
+        if( param->iProp == DCAM_IDPROP_READOUTSPEED )
+        {
+            param->valuemin  = 1;
+            param->valuemax  = 2;
+            param->valuestep = 1;
+        }
+        else if( param->iProp == DCAM_IDPROP_EXPOSURETIME )
+        {
+            param->valuemin = f.m_props[DCAM_IDPROP_READOUTSPEED] == 1 ? 33.9e-6 : 7.2e-6;
+        }
+
         return orcaHarness::call( "dcamprop_getattr" );
     }
 
@@ -160,6 +174,12 @@ extern "C"
 
     DCAMERR dcamprop_setgetvalue( HDCAM, int32 iProp, double *pValue, int32 )
     {
+        // DCAM replaces DCAMPROP_READOUTSPEED__FASTEST with the fastest valid speed
+        if( iProp == DCAM_IDPROP_READOUTSPEED )
+        {
+            *pValue = std::min( std::max( *pValue, 1.0 ), 2.0 );
+        }
+
         orcaHarness::g_fake.m_props[iProp] = *pValue;
         return DCAMERR_SUCCESS;
     }
@@ -292,6 +312,13 @@ struct Fixture : outletHarness::Controller<MagAOX::app::orcaCtrl>
     using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_tempControlStatusSet;
     using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_tempControlStatusStr;
 
+    /// Expose the stdCamera readout-speed and exposure state used by the tests.
+    using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_readoutSpeedName;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_readoutSpeedNameSet;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_minExpTime;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_expTimeSet;
+    using MagAOX::app::dev::stdCamera<MagAOX::app::orcaCtrl>::m_expTime;
+
     /// Configure one air-cooled camera and reset the fakes.
     Fixture()
     {
@@ -308,6 +335,12 @@ struct Fixture : outletHarness::Controller<MagAOX::app::orcaCtrl>
         m_liquidCooling          = true;
         m_fanSpeedControlEnabled = false; // as loadConfigImpl() does
         g_fake.m_missing.clear();
+    }
+
+    /// Current DCAM_IDPROP_READOUTSPEED value in the fake camera (1 Ultra quiet, 2 Standard).
+    static int32 speed()
+    {
+        return static_cast<int32>( g_fake.m_props[DCAM_IDPROP_READOUTSPEED] );
     }
 
     /// Current DCAM_IDPROP_SENSORCOOLER value in the fake camera.
@@ -712,6 +745,117 @@ TEST_CASE( "orcaCtrl temperature-control toggle", "[orcaCtrl][cooling]" )
         REQUIRE( g_fake.m_props.count( DCAM_IDPROP_SENSORCOOLER ) == 0 );
     }
 
+    REQUIRE( f.errors() == 0 );
+}
+
+/// Selecting a readout speed and reconfiguring switches the camera between Standard and Ultra quiet scan,
+/// restarts capture, and updates the reported speed and the exposure limits.
+/** \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl switches between Standard and Ultra quiet readout", "[orcaCtrl][readout]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaCtrl::setReadoutSpeed();
+    orcaCtrl::configureAcquisition();
+    orcaCtrl::reconfig();
+    #endif
+    // clang-format on
+
+    Fixture f;
+    f.start( 1 );
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.m_readoutSpeedNameSet == "standard" );
+
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE( f.speed() == 2 );
+    REQUIRE( f.m_readoutSpeedName == "standard" );
+    REQUIRE( f.m_minExpTime == Approx( 7.2e-6 ) );
+    REQUIRE( g_fake.m_calls["dcamcap_start"] == 1 );
+
+    // To Ultra quiet, with an exposure below its minimum
+    f.m_expTimeSet          = 10e-6;
+    f.m_readoutSpeedNameSet = "ultra_quiet";
+    f.m_reconfig            = false;
+    REQUIRE( f.setReadoutSpeed() == 0 );
+    REQUIRE( f.m_reconfig );
+
+    REQUIRE( f.reconfig() == 0 );
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE( f.speed() == 1 );
+    REQUIRE( f.m_readoutSpeedName == "ultra_quiet" );
+    REQUIRE( f.m_minExpTime == Approx( 33.9e-6 ) );
+    REQUIRE( f.m_expTime == Approx( 33.9e-6 ) );
+    REQUIRE( g_fake.m_calls["dcamcap_start"] == 2 );
+    REQUIRE( f.count( "readout speed changed from standard to ultra_quiet" ) == 1 );
+
+    // And back to Standard
+    f.m_readoutSpeedNameSet = "standard";
+    REQUIRE( f.setReadoutSpeed() == 0 );
+    REQUIRE( f.reconfig() == 0 );
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE( f.speed() == 2 );
+    REQUIRE( f.m_readoutSpeedName == "standard" );
+    REQUIRE( f.m_minExpTime == Approx( 7.2e-6 ) );
+    REQUIRE( g_fake.m_calls["dcamcap_start"] == 3 );
+    REQUIRE( f.count( "readout speed changed from ultra_quiet to standard" ) == 1 );
+
+    REQUIRE( f.errors() == 0 );
+}
+
+/// `camera.defaultReadoutSpeed` sets the speed applied after power-on.
+/** \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl starts in the configured default readout speed", "[orcaCtrl][readout]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaCtrl::powerOnDefaults();
+    orcaCtrl::connect();
+    orcaCtrl::configureAcquisition();
+    #endif
+    // clang-format on
+
+    Fixture f;
+    f.configText( "[camera]\ndefaultReadoutSpeed=ultra_quiet\n" );
+    REQUIRE( f.loadConfigImpl( f.config ) == 0 );
+    REQUIRE( !f.m_liquidCooling );
+
+    f.start( 1 );
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.m_readoutSpeedNameSet == "ultra_quiet" );
+
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE( f.speed() == 1 );
+    REQUIRE( f.m_readoutSpeedName == "ultra_quiet" );
+    REQUIRE( f.errors() == 0 );
+}
+
+/// An unknown readout speed is logged and replaced by the current speed, and acquisition still starts.
+/** \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl rejects an unknown readout speed", "[orcaCtrl][readout]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaCtrl::configureAcquisition();
+    #endif
+    // clang-format on
+
+    Fixture f;
+    f.start( 1 );
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE( f.speed() == 2 );
+
+    f.m_readoutSpeedNameSet = "bogus";
+    REQUIRE( f.reconfig() == 0 );
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE( f.count( "unknown readout speed 'bogus'" ) == 1 );
+    REQUIRE( f.m_readoutSpeedNameSet == "standard" );
+    REQUIRE( f.m_readoutSpeedName == "standard" );
+    REQUIRE( f.speed() == 2 );
+    REQUIRE( g_fake.m_calls["dcamcap_start"] == 2 );
     REQUIRE( f.errors() == 0 );
 }
 
