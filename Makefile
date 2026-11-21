@@ -31,6 +31,7 @@ apps_aoc = \
 	adcTracker \
 	hwpSequencer \
 	hwpTracker \
+	qwpPupilTracker \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
@@ -164,6 +165,7 @@ all_buildable_apps = \
 	psfFit \
 	pupilFit \
 	pwfsSlopeCalc \
+	qwpPupilTracker \
 	refRMS \
 	rhusbMon \
 	shmimIntegrator \
