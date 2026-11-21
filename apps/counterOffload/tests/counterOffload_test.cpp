@@ -497,6 +497,23 @@ TEST_CASE( "counterOffload validates its configuration", "[counterOffload]" )
     }
 }
 
+/// Verify the default ramp and gain are the best measured on the bench.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload operating defaults", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::calibParams();
+    #endif
+    // clang-format on
+
+    counterOffload app; // only one MagAOXApp may exist at a time, so not alongside a test harness
+
+    REQUIRE( app.calibParams() == counterOffload::calibParamsT{ 25, 330, 0.5 } );
+}
+
 /// Verify the calibration setting defaults and the checks applied when they are set over INDI.
 /**
  * \ingroup counterOffload_unit_test
@@ -525,12 +542,6 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
         REQUIRE( counterOffload::gridValid( app.m_startGridUs, 0, 1e6 ) );
         REQUIRE( counterOffload::gridValid( app.m_durationGridUs, 1, 1e6 ) );
         REQUIRE( counterOffload::gridValid( app.m_gainGrid, 0, 2 ) );
-    }
-
-    SECTION( "the operating defaults are the best measured on the bench" )
-    {
-        counterOffload fresh;
-        REQUIRE( fresh.calibParams() == counterOffload::calibParamsT{ 25, 330, 0.5 } );
     }
 
     SECTION( "a grid is min, max, step within the limits" )
