@@ -266,29 +266,41 @@ cpuset=tweeterSpeck
 [dm]
 channelName=dm01disp09_aux
 trigger=off
-frequency=8000
-dwell=1
 amp=0.01
 
 [syncopation]
 timingStream=dmtweeter_synco_timing
 writeLeadUs=50
+loopLock=true
 ```
 
 The existing dmSpeckle channel/modulation configuration selects its source and
-waveform. Managed mode does not independently trigger a main channel. Its
-target-time waveform calculation remains in dmSpeckle; schedule validation,
-buffer ownership and tagged publication are handled by the CRTP helper.
+waveform. The main loop controls the main DM trigger. Waveform calculation
+remains in dmSpeckle. The CRTP helper handles schedule validation, buffer
+ownership and tagged publication.
 An empty timing-stream setting preserves legacy dmSpeckle operation. There is
 no `opMode=managed` setting: use `sparkle`, `arbcube` or `tiptilt` with a nonempty
 timing stream. The source must end in `_aux` and its corresponding destination
 must appear in synco's mapping list.
 
-For sparkle and arbitrary cubes, `frequency/dwell` is the plane-advance rate,
-independent of synco's slot rate. At 8000/dwell 1, a four-plane sparkle advances
-every nominal 125 us slot and repeats its full pattern at 2 kHz. At 2000/dwell 1,
-it typically repeats each plane across four 8 kHz slots. In `tiptilt` mode,
-`frequency` instead sets the physical vibration frequency of each axis.
+With loop lock on, managed sparkle submits for step 0 only. It chooses a plane
+from the upcoming main frame counter and holds it through the auxiliary steps.
+The four-plane pattern spans four main frames at any loop rate. An unavailable
+or missed main slot retains the previous contribution. Auxiliary snapshots
+that retain the sparkle plane count toward that producer's diagnostic
+`missing` counter.
+
+Set `tweeterSpeck.loop_lock.toggle` Off in INDI to switch to timed playback
+while running, or set `syncopation.loopLock=false` for the startup default.
+Timed sparkle uses all available synco slots and samples the plane sequence
+at `frequency/dwell`. Set `tweeterSpeck.frequency.target` to the desired
+frequency in Hz. At 2 kHz main with four steps, 8000 Hz and dwell 1 request a
+plane advance at each nominal 125 µs slot. The delivered update rate is
+bounded by the available slots. A command committed before a switch can
+still take effect at its tagged slot.
+
+For arbitrary cubes, `frequency/dwell` sets the nominal plane-advance rate.
+In `tiptilt` mode, `frequency` sets the physical vibration frequency of each axis.
 
 Start synco before the producer so the shared sources and protocol records
 exist. Both start disabled. After verifying the configuration and resource
