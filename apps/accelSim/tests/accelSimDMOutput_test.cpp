@@ -121,6 +121,8 @@ struct dmOutputApp : MagAOX::app::accelSim
     using accelSim::m_indiP_dmStatus;
     using accelSim::m_indiP_dmSteps;
     using accelSim::m_indiP_dmTiming;
+    using accelSim::m_indiP_opticalAmplitude;
+    using accelSim::m_indiP_opticalCoupling;
     using accelSim::m_model;
     using accelSim::m_shutdown;
     using accelSim::m_syncopationTiming;
@@ -859,6 +861,74 @@ TEST_CASE( "accelSim accelerometer realization is independent of DM output", "[a
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::measure;
     MagAOX::app::accelSim::serviceDM;
+#endif
+    // clang-format on
+}
+
+/** \brief INDI optical controls change only later DM pointing; acc000 values and DM publication are unaffected.
+ * \ingroup accelSim_unit_test
+ */
+TEST_CASE( "accelSim runtime optical controls preserve acquisition and DM timing", "[accelSim][dm-output]" )
+{
+    using MagAOX::app::accelSimDetail::sample;
+    struct record
+    {
+        std::vector<sample> m_acquired, m_physical; ///< acc000 samples and timeline DM pointing at acquisition.
+        int                 m_published{ 0 };       ///< DM publications.
+    };
+    const auto run = []( bool controlled )
+    {
+        record          result;
+        dmOutputFixture fixture;
+        auto           &app = fixture.m_app;
+        fixture.enable( 1 );
+        const auto set = [&]( double coupling, double amplitude )
+        {
+            auto common = app.m_indiP_opticalCoupling, independent = app.m_indiP_opticalAmplitude;
+            common["target"]      = coupling;
+            independent["target"] = amplitude;
+            REQUIRE( app.newCallBack_m_indiP_opticalCoupling( common ) == 0 );
+            REQUIRE( app.newCallBack_m_indiP_opticalAmplitude( independent ) == 0 );
+        };
+        for( int n = 0; n < 4000; ++n )
+        {
+            if( controlled && n == 1000 )
+                set( .5, 1 );
+            if( controlled && n == 2000 )
+                set( 1, 0 );
+            fixture.advance();
+            sample physical;
+            REQUIRE( app.m_timeline.physical( g_tick, physical ) );
+            result.m_acquired.push_back( app.m_acquiredSample );
+            result.m_physical.push_back( physical );
+            if( app.serviceDM() )
+                acknowledge();
+        }
+        app.updateDMINDI();
+        result.m_published = app.m_indiP_dmStatus["published"].get<int>();
+        return result;
+    };
+    const auto baseline = run( false ), controlled = run( true );
+    REQUIRE( controlled.m_published == baseline.m_published );
+    REQUIRE( baseline.m_published > 2000 );
+    bool changed = false;
+    for( size_t n = 0; n < baseline.m_acquired.size(); ++n )
+    {
+        REQUIRE( controlled.m_acquired[n].m_adc == baseline.m_acquired[n].m_adc );
+        REQUIRE( controlled.m_acquired[n].m_acceleration == baseline.m_acquired[n].m_acceleration );
+        // Nodes already generated within the 5-ms (40-tick) lookahead keep their values; later ones follow the
+        // controls.
+        if( n < 1000 || n >= 2100 )
+            REQUIRE( controlled.m_physical[n].m_pointing == baseline.m_physical[n].m_pointing );
+        else if( n >= 1100 && n < 2000 )
+            changed = changed || controlled.m_physical[n].m_pointing != baseline.m_physical[n].m_pointing;
+    }
+    REQUIRE( changed );
+    // clang-format off
+#ifdef ACCELSIM_TEST_DOXYGEN_REF
+    MagAOX::app::accelSim::measure;
+    MagAOX::app::accelSim::newCallBack_m_indiP_opticalCoupling;
+    MagAOX::app::accelSim::newCallBack_m_indiP_opticalAmplitude;
 #endif
     // clang-format on
 }

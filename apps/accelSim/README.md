@@ -511,10 +511,12 @@ pointing is retained internally without sensor noise or a separate output stream
 `sample::m_pointing`, the pointing injected on the DM, is
 
 ```text
-theta_DM = sum_k c_k * theta_k + optical.amplitude * theta_indep
+theta_DM = sum_k g * c_k * theta_k + a * theta_indep
 ```
 
-where `theta_k` is mode k's pointing and `c_k` its optical coupling in [0,1].
+where `theta_k` is mode k's pointing, `c_k` its configured optical coupling in
+[0,1], `g` the common runtime coupling `optical_coupling` and `a` the runtime
+`optical_amplitude`.
 Acceleration and ADC counts still use every `theta_k` in full, so they are
 bitwise unchanged by these settings. `optical.coupling` is empty (all 1), one
 value for all modes, or 15 values: the 14 prominent modes in notebook order
@@ -528,11 +530,33 @@ keeps the uncoupled mechanical sum sensed by the accelerometer, and
 nonzero amplitude make ACC/WFS coherence realistically less than 1; with
 `optical.amplitude=1` the measured ACC/WFS magnitude-squared coherence at 120,
 220 and 300 Hz falls from 0.61–0.83 to 0.33–0.46, about half (`[optical]` tests).
-The baseline is below 1 because the weak modes are fully sensed but 1% WFS coupled. The defaults
-(couplings 1, amplitude 0) reproduce the previous sequence exactly, and the
-independent realization uses no oscillators or random draws until it is enabled.
-These settings apply at startup only and do not change synchronization, DM
-calibration, or `dm.scale`, which still scales the whole DM disturbance.
+The baseline is below 1 because the weak modes are fully sensed but 1% WFS
+coupled. The defaults (couplings 1, amplitude 0) reproduce the previous sequence
+exactly. None of these settings change synchronization, DM calibration, or
+`dm.scale`, which still scales the whole DM disturbance.
+
+`optical.coupling` and `optical.seed` are startup-only. Two writable INDI numbers
+adjust the rest at runtime, in the same `current`/`target` style as `dm_scale`:
+
+- `optical_coupling` (`g`, in [0,1], initialized from `optical.commonCoupling`,
+  default 1) **multiplies** every per-mode coupling `c_k`; it does not replace
+  them. With `optical.coupling` set per mode, `g` scales that whole profile, so
+  the relative coupling between modes is preserved. With a single configured
+  value `c`, the effective coupling of every mode is `g * c`.
+- `optical_amplitude` (`a`, in [0,100], initialized from `optical.amplitude`)
+  scales the independent realization.
+
+Out-of-range or nonfinite targets are rejected and keep the last accepted value.
+The acquisition thread copies both values into the model before generating new
+timeline nodes, so a change applies only to nodes generated afterwards: samples
+already in the 5-ms lookahead keep their values, and the DM sees the change
+within about 5 ms. No oscillator is reset, and the main generator's draws,
+acceleration, ADC counts, 8-kHz acquisition timing and DM publication are
+unchanged. The independent realization is allocated and stationary-initialized
+at startup from its own generator, and advances only while `a > 0`. Setting
+`a = 0` freezes it, and raising `a` later resumes from its frozen state, which
+is still a valid stationary sample. With `g = 1` and `a = 0` restored, DM
+pointing returns exactly to the uncontrolled sequence.
 
 The ADC calculation is `zero + acceleration*sensitivity/voltsPerBit`, followed
 by `std::round`, floating-point clamping, and conversion to `uint16_t`. Defaults
@@ -632,6 +656,9 @@ Measured publication rate is in `fg_timing`.
 `numChannels` accepts only 2, including on its external subscription; rejected
 updates leave the shape and accepted values intact and set Alert. There is no
 additional camera-style start/stop control.
+The writable `optical_coupling` and `optical_amplitude` numbers adjust the DM
+optical disturbance at runtime; see "Optical coupling and independent optical
+disturbance" above.
 
 `channel_readout_us` measures simulation acquisition computation, not fictitious
 SPI hardware timing. In timer mode synchronization-only measurements are zero.

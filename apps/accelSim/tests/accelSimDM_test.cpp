@@ -339,6 +339,7 @@ struct dmAppTest : MagAOX::app::accelSim
     using accelSim::calibrationUnchanged;
     using accelSim::config;
     using accelSim::loadDMCalibration;
+    using accelSim::m_commonCoupling;
     using accelSim::m_configName;
     using accelSim::m_dmEnabled;
     using accelSim::m_dmInjection;
@@ -351,7 +352,10 @@ struct dmAppTest : MagAOX::app::accelSim
     using accelSim::m_indiP_dmEnable;
     using accelSim::m_indiP_dmScale;
     using accelSim::m_indiP_dmStatus;
+    using accelSim::m_indiP_opticalAmplitude;
+    using accelSim::m_indiP_opticalCoupling;
     using accelSim::m_model;
+    using accelSim::m_opticalAmplitude;
     using accelSim::m_parameters;
     using accelSim::prepareDMCalibration;
     using accelSim::setupProperties;
@@ -426,7 +430,7 @@ TEST_CASE( "accelSim DM simple operator controls", "[accelSim][dm-controls]" )
 #endif
 
 #ifndef ACCELSIM_MODEL_ONLY
-/** \brief Startup optical keys reach the model; defaults couple every mode fully with no independent disturbance.
+/** \brief Startup optical keys reach the model and runtime controls; INDI updates are range checked.
  * \ingroup accelSim_unit_test
  */
 TEST_CASE( "accelSim optical configuration", "[accelSim][dm-controls]" )
@@ -440,10 +444,32 @@ TEST_CASE( "accelSim optical configuration", "[accelSim][dm-controls]" )
 
     dmAppTest configured;
     configured.setupConfig();
-    configured.config.m_values["optical.coupling"]  = ".1,.2,.3,.4,.5,.6,.7,.8,.9,1,1,1,1,1,.25";
-    configured.config.m_values["optical.amplitude"] = "0.5";
-    configured.config.m_values["optical.seed"]      = "11";
+    configured.config.m_values["optical.coupling"]       = ".1,.2,.3,.4,.5,.6,.7,.8,.9,1,1,1,1,1,.25";
+    configured.config.m_values["optical.amplitude"]      = "0.5";
+    configured.config.m_values["optical.seed"]           = "11";
+    configured.config.m_values["optical.commonCoupling"] = "0.75";
     REQUIRE( configured.loadConfigImpl( configured.config ) == 0 );
+    REQUIRE( configured.m_commonCoupling == .75 );
+    REQUIRE( configured.m_opticalAmplitude == .5 );
+    REQUIRE( configured.setupProperties() == 0 );
+    REQUIRE( configured.m_indiP_opticalCoupling["current"].get<double>() == .75 );
+    REQUIRE( configured.m_indiP_opticalAmplitude["target"].get<double>() == .5 );
+    auto coupling  = configured.m_indiP_opticalCoupling;
+    auto amplitude = configured.m_indiP_opticalAmplitude;
+    for( const auto &[value, valid] :
+         { std::pair{ 0., true }, { 1., true }, { -.1, false }, { 1.1, false }, { double( NAN ), false } } )
+    {
+        coupling["target"] = value;
+        REQUIRE( ( configured.newCallBack_m_indiP_opticalCoupling( coupling ) == 0 ) == valid );
+        REQUIRE( configured.m_commonCoupling == ( valid ? value : 1. ) ); // Rejection keeps the last accepted value.
+    }
+    for( const auto &[value, valid] :
+         { std::pair{ 0., true }, { 100., true }, { -1., false }, { 100.1, false }, { double( INFINITY ), false } } )
+    {
+        amplitude["target"] = value;
+        REQUIRE( ( configured.newCallBack_m_indiP_opticalAmplitude( amplitude ) == 0 ) == valid );
+        REQUIRE( configured.m_opticalAmplitude == ( valid ? value : 100. ) );
+    }
     REQUIRE( configured.m_parameters.m_opticalAmplitude == .5 );
     REQUIRE( configured.m_parameters.m_opticalSeed == 11 );
     REQUIRE( configured.m_model.m_modes.front().m_spec.m_opticalCoupling == .1 ); // 11 Hz
@@ -457,7 +483,9 @@ TEST_CASE( "accelSim optical configuration", "[accelSim][dm-controls]" )
                                      { "optical.coupling", "1.5" },
                                      { "optical.coupling", "x" },
                                      { "optical.coupling", "0.5x" },
-                                     { "optical.amplitude", "-1" } } )
+                                     { "optical.amplitude", "-1" },
+                                     { "optical.amplitude", "101" },
+                                     { "optical.commonCoupling", "1.5" } } )
     {
         dmAppTest invalid;
         invalid.setupConfig();
@@ -467,6 +495,8 @@ TEST_CASE( "accelSim optical configuration", "[accelSim][dm-controls]" )
     // clang-format off
 #ifdef ACCELSIM_TEST_DOXYGEN_REF
     MagAOX::app::accelSim::loadConfigImpl;
+    MagAOX::app::accelSim::newCallBack_m_indiP_opticalCoupling;
+    MagAOX::app::accelSim::newCallBack_m_indiP_opticalAmplitude;
 #endif
     // clang-format on
 }

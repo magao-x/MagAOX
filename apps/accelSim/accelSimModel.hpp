@@ -21,9 +21,10 @@ namespace app
 namespace accelSimDetail
 {
 
-constexpr double   pi          = 3.14159265358979323846;
-constexpr double   arcsecToRad = pi / ( 180.0 * 3600.0 );
-constexpr uint64_t maxCatchUp  = 8; ///< Maximum skipped ticks advanced before a stationary restart.
+constexpr double   pi                  = 3.14159265358979323846;
+constexpr double   arcsecToRad         = pi / ( 180.0 * 3600.0 );
+constexpr uint64_t maxCatchUp          = 8;   ///< Maximum skipped ticks advanced before a stationary restart.
+constexpr double   maxOpticalAmplitude = 100; ///< Upper limit of the independent optical disturbance amplitude.
 
 /// Parameters for one independent pair of pointing oscillators.
 struct modeSpec
@@ -49,6 +50,7 @@ struct parameters
     double   m_sensitivity{ 1.02 };      ///< Empirical acceleration sensitivity.
     uint64_t m_opticalSeed{ 7 };         ///< Seed of the independent optical-only disturbance.
     double   m_opticalAmplitude{ 0 };    ///< Linear scale of the independent optical disturbance; zero disables it.
+    double   m_commonCoupling{ 1 };      ///< Common factor multiplying every mode's optical coupling, in [0,1].
 };
 
 /// Stable stationary scaling and a two-sample oscillator history.
@@ -147,7 +149,7 @@ class model
     std::mt19937_64                  m_rng;            ///< Reproducible generator owned by the model.
     std::normal_distribution<double> m_normal{ 0, 1 }; ///< Independent standard-normal draws.
 
-    /// Optical-only realization of the same population with its own generator; empty when the amplitude is zero.
+    /// Optical-only realization of the same population with its own generator; stepped only for a positive amplitude.
     std::vector<mode>                m_optical;
     std::mt19937_64                  m_opticalRng;            ///< Generator of the independent optical disturbance.
     std::normal_distribution<double> m_opticalNormal{ 0, 1 }; ///< Standard-normal draws of m_opticalRng.
@@ -441,7 +443,8 @@ inline void model::configure( const parameters &config, const std::vector<modeSp
     if( !std::isfinite( config.m_leverArm ) || config.m_leverArm <= 0 || !std::isfinite( config.m_noisePSD ) ||
         config.m_noisePSD < 0 || !std::isfinite( config.m_zero ) || !std::isfinite( config.m_voltsPerBit ) ||
         config.m_voltsPerBit <= 0 || !std::isfinite( config.m_sensitivity ) || config.m_sensitivity <= 0 ||
-        !std::isfinite( config.m_opticalAmplitude ) || config.m_opticalAmplitude < 0 )
+        !( config.m_opticalAmplitude >= 0 && config.m_opticalAmplitude <= maxOpticalAmplitude ) ||
+        !( config.m_commonCoupling >= 0 && config.m_commonCoupling <= 1 ) )
         throw std::invalid_argument( "invalid physical/ADC/optical configuration" );
     m_config = config;
     m_modes.clear();
@@ -454,7 +457,7 @@ inline void model::configure( const parameters &config, const std::vector<modeSp
             throw std::invalid_argument( "invalid vibration mode" );
         m_modes.push_back( { spec, factor, {} } );
     }
-    m_optical = config.m_opticalAmplitude > 0 ? m_modes : std::vector<mode>{};
+    m_optical = m_modes; // Always allocated so the amplitude can change at runtime without allocation or restart.
     m_rng.seed( config.m_seed );
     m_normal.reset();
     m_opticalRng.seed( config.m_opticalSeed );
@@ -519,21 +522,23 @@ inline const sample &model::step()
         for( size_t axis = 0; axis < 2; ++axis )
         {
             const double pointing = mode.m_axes[axis].step( m_normal( m_rng ) );
-            const double optical  = pointing * mode.m_spec.m_opticalCoupling;
+            const double optical  = pointing * mode.m_spec.m_opticalCoupling * m_config.m_commonCoupling;
             m_sample.m_physicalPointing[axis] += pointing;
             m_sample.m_pointing[axis] += optical;
             m_sample.m_wfsPointing[axis] += optical * ( axis == 0 ? mode.m_spec.m_couplingX : mode.m_spec.m_couplingY );
             m_sample.m_acceleration[axis] += mode.m_accelPerArcsec * pointing;
         }
     }
-    for( auto &mode : m_optical ) // Optical only: the accelerometer does not sense this disturbance.
-        for( size_t axis = 0; axis < 2; ++axis )
-        {
-            const double optical =
-                m_config.m_opticalAmplitude * mode.m_axes[axis].step( m_opticalNormal( m_opticalRng ) );
-            m_sample.m_pointing[axis] += optical;
-            m_sample.m_wfsPointing[axis] += optical * ( axis == 0 ? mode.m_spec.m_couplingX : mode.m_spec.m_couplingY );
-        }
+    if( m_config.m_opticalAmplitude > 0 ) // Optical only, unsensed by the accelerometer; advances only while enabled.
+        for( auto &mode : m_optical )
+            for( size_t axis = 0; axis < 2; ++axis )
+            {
+                const double optical =
+                    m_config.m_opticalAmplitude * mode.m_axes[axis].step( m_opticalNormal( m_opticalRng ) );
+                m_sample.m_pointing[axis] += optical;
+                m_sample.m_wfsPointing[axis] +=
+                    optical * ( axis == 0 ? mode.m_spec.m_couplingX : mode.m_spec.m_couplingY );
+            }
     for( size_t axis = 0; axis < 2; ++axis )
     {
         m_sample.m_noise[axis] = m_noiseSigma * m_normal( m_rng );
