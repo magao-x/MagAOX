@@ -352,3 +352,73 @@ lock) failed 2 assertions as expected. Not built: the full `polarimetryGUI` app 
 Manual check by the user (M6): with `qwppupil` running, the slider is locked until `qwppupil` is
 READY; enabling shows `ΔV1/ΔV2` that follow the QWP moves; the slider can be toggled during a
 sequence.
+
+## HWP slider removal, label renames, qwppupil FSM (2026-11-21)
+
+User request: "more updates to the polarimetryGUI-- I want to remove the hwp tracking slider. rename QWP
+Tracking to QWP pol. tracking. rename QWP Pupil Tracking to QWP pupil tracking. We can remove the HWP offset
+and Actual from the status (just have a row of two entries). Instead of showing the stagepolrot FSM, let's
+show the qwppupil FSM (since the hwptrack FSM already feeds back to the stagepolrot FSM)."
+
+### Findings
+
+- H-F1. `sliderHwpTracking` (`hwptrack.tracking`) is the only control in the GUI for HWP tracking. Its
+  companion `labelHwpTracking` shows a fixed `SYNCHRO_ADI` while tracking is On. `hwpTracker` starts with
+  `m_tracking = false` and `hwpSequencer` never touches `hwptrack.tracking`, so after removal HWP tracking
+  can only be toggled outside this GUI (e.g. `setINDI`, another panel).
+- H-F2. Removing the slider makes the `hwptrack.tracking` subscription and `m_hwpTracking` unused; removing
+  the Offset/Actual columns makes `hwptrack.{hwp_tracking_offset, hwp_position_actual}`,
+  `m_hwpTrackingOffset`, `m_hwpActualAngle`, and the `hwpTrackingOffset`/`hwpActualAngle`/`labelOffset`/
+  `labelActual` widgets unused.
+- H-F3. The HWP status row (`gridHwpAngles`) becomes `HWP Angle: | Angle | Name`.
+- H-F4. `stagePolRotFsm` sits at row 1 col 0-1 of `gridFsmStatus`; `qwppupil.fsm` is already subscribed by
+  the panel (PD2) for `m_qwppupilFsmOk`, so a `qwpPupilFsm` display adds only its own subscription.
+  This reverses PD1 ("No `qwppupil` FSM display in the status grid").
+- H-F5. `qwptrack` and `qwppupil` slider labels are set in `setup()` (`polarimetry.hpp:305,308`).
+- H-F6. Existing tests do not reference `sliderHwpTracking`, the Offset/Actual widgets, or `stagePolRotFsm`
+  directly; the subscription test (T1) and the setup helper (`state( "hwptrack", "READY" )`) do touch
+  `hwptrack` and may need adjusting.
+
+### Decisions
+
+Grilled with the user on 2026-11-21.
+
+- HD1. HWP tracking is no longer used. Remove the slider and `labelHwpTracking` with no replacement
+  indicator; it can still be enabled via INDI. Drop the `hwptrack.tracking` subscription and
+  `m_hwpTracking`.
+- HD2. Status grid regrouped by role: row 0 `hwptrack | hwpsequence`, row 1 QWP trackers, row 2
+  `stagepollin | stageqwplin`. `stagepolrot` removed (its state is reflected by `hwptrack`).
+- HD3. Row 1 is `qwppupil | qwptrack`, matching the slider order (pupil first, PD1). New widgets
+  `labelQwpPupil`/`qwpPupilFsm` (`highlightChanges(false)`, device `qwppupil`). Supersedes PD1's "no FSM".
+- HD4. HWP status keeps its header row: `HWP Angle: | Angle | Name`; Offset/Actual widgets, members and
+  subscriptions removed (H-F2). Start still requires `hwptrack` READY/OPERATING (the sequencer moves the
+  HWP through it).
+- HD5. Slider labels exactly "QWP pol. tracking" and "QWP pupil tracking".
+- HD6. Tests: T1 asserts the removed `hwptrack` subscriptions (`tracking`, `hwp_tracking_offset`,
+  `hwp_position_actual`) and `stagepolrot.fsm` are absent and `qwppupil.fsm` is present. Commits: functional
+  (+ plan), tests, documentation, `clang-format` (rule 22).
+
+### Implementation (draft)
+
+1. Functional:
+   - `polarimetry.ui`: remove `sliderHwpTracking`/`labelHwpTracking` (row 1) and renumber `gridControls`;
+     remove `labelOffset`, `labelActual`, `hwpTrackingOffset`, `hwpActualAngle`; replace
+     `labelStagePolRot`/`stagePolRotFsm` with `labelQwpPupil`/`qwpPupilFsm`.
+   - `polarimetry.hpp`: drop the corresponding members, subscriptions, `handleSetProperty` branches,
+     `onConnect`/`onDisconnect`/`updateGUI` lines; rename slider labels to "QWP pol. tracking" and
+     "QWP pupil tracking"; `qwpPupilFsm` device `qwppupil`, label text `qwppupil`.
+2. Tests: update T1 subscriptions (no `hwptrack.tracking`/`hwp_tracking_offset`/`hwp_position_actual`;
+   `qwppupil` FSM display); anything else per decisions.
+3. Documentation pass (class doc mentions the HWP slider / Offset) and `clang-format`.
+
+Manual check by the user (M7): panel shows `qwppupil` FSM in place of `stagepolrot`; HWP row shows Angle
+and Name only; no HWP slider; QWP slider labels read as requested.
+
+Status 2026-11-21: implemented per HD1-HD6. `sliderHwpTracking`/`labelHwpTracking`, the Offset/Actual
+columns, `stagePolRotFsm` and their subscriptions/members are removed; `qwpPupilFsm` added at row 1 of
+`gridFsmStatus` (`qwppupil | qwptrack`); slider labels renamed. The start button still requires
+`hwptrack` READY/OPERATING. T1 now asserts the removed subscriptions (`hwptrack.tracking`,
+`hwp_tracking_offset`, `hwp_position_actual`, `stagepolrot.fsm`) are absent. `polarimetry_test` built on
+macOS (Homebrew Qt, scratch tree; the checked-in INDI `.a` files are Linux objects, so `liblilxml.a` and
+`libcommon.a` were rebuilt in the scratch copy) and run offscreen: 7 test cases, 186 assertions pass.
+Not built: the full `polarimetryGUI` app (needs mxlib).
