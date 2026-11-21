@@ -22,6 +22,9 @@ placement, priorities and acquisition rate unchanged during the comparison.
 
 ## Prepare the isolated producer chain
 
+Use the [diagnostic INDI build](dmSyncopation.md#diagnostic-indi-build) for the
+readbacks in this procedure.
+
 1. Build and install the matching `dmSyncopation` and `logdump`. The application
    must include diagnostic-only mode; the reader must understand camera
    publication timing. Record their Git hashes with the test results.

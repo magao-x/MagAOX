@@ -86,6 +86,8 @@
 ../apps/flipperCtrl/tests/flipperCtrl_entrypoint_test
 ../apps/flowRPM/tests/flowRPM_test
 ../apps/hwpTracker/tests/hwpTracker_test
+../apps/qwpPupilTracker/tests/qwpPupilTracker_test
+../apps/qwpPupilTracker/tests/qwpPupilTracker_indi_test
 ../apps/indiTSAccumulator/tests/indiTSAccumulator_test
 ../apps/irisaoCtrl/tests/irisaoCtrl_test
 ../apps/koolanceCtrl/tests/koolanceCtrl_test
@@ -122,6 +124,8 @@
 ../apps/pvcamCtrl/tests/pvcamCtrl_test
 ../apps/pvcamCtrl/tests/pvcamCtrl_hotplug_test
 ../apps/pwfsSlopeCalc/tests/pwfsSlopeCalc_test
+../apps/qwpTracker/tests/qwpTracker_test
+../apps/qwpTracker/tests/qwpTracker_indi_test
 ../apps/refRMS/tests/refRMS_test
 ../apps/rhusbMon/tests/rhusbMon_test
 ../apps/rhusbMon/tests/rhusbMonParsers_test
