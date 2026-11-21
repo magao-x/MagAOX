@@ -7,6 +7,7 @@ import importlib.machinery
 import importlib.util
 import io
 from pathlib import Path
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -133,6 +134,67 @@ class CleanupTest(unittest.TestCase):
         self.assertIn("Removed 2 cpuset directories", output)
         self.assertEqual((self.mountpoint / "tasks").read_text(), "1\n")
         self.assertEqual((self.mountpoint / "system/tasks").read_text(), "2\n")
+
+    def test_rtc_setup_covers_each_dedicated_cpu_and_cleanup_name(self):
+        """Audit the complete setup without executing its CPU or cgroup writes."""
+        setup = SCRIPT.with_name("make_cpusets")
+        source = setup.read_text()
+        assignments = re.findall(
+            r'^/bin/echo (\S+) > "\$cpusetMount/([\w.-]+)/cpuset\.cpus"$',
+            source, re.MULTILINE,
+        )
+        cpus = {name: value for value, name in assignments}
+        declared = re.findall(r'^mkdir -p "\$cpusetMount/([\w.-]+)"$', source, re.MULTILINE)
+        self.assertEqual(len(assignments), len(cpus))
+        self.assertEqual(len(declared), len(cpus))
+        self.assertEqual(set(declared), cpus.keys())
+        self.assertEqual(cpus.pop("system"), "0-23,64-87")
+        self.assertEqual(len(cpus), 40)
+        self.assertEqual({int(value) for value in cpus.values()}, set(range(24, 64)))
+        self.assertEqual(cpus["camwfs_sw"], "31")
+        self.assertEqual(cpus["camwfs_descramble"], "32")
+        self.assertEqual(cpus["camwfs"], "33")
+        self.assertEqual(cpus["camwfs_irq"], "34")
+        self.assertNotIn("spare31", cpus)
+        self.assertTrue(cpus.keys() <= cleanup.allowed_names(setup))
+
+    def test_rtc_cleanup_accepts_complete_current_and_migrated_layouts(self):
+        """Clean old CPU31/32 names, new names, and every retained RTC group."""
+        owned = cleanup.allowed_names(SCRIPT.with_name("make_cpusets"))
+
+        for migrated in (False, True):
+            with self.subTest(migrated=migrated):
+                # Include all retired names too, modeling an accumulated deployment.
+                names = owned if migrated else owned - {"camwfs_descramble"}
+                groups = [self.group(name) for name in sorted(names)]
+                (self.mountpoint / "camwfs_sw/cpuset.cpus").write_text("31\n" if migrated else "32\n")
+                (self.mountpoint / "spare31/cpuset.cpus").write_text("31\n")
+
+                if migrated:
+                    (self.mountpoint / "camwfs_descramble/cpuset.cpus").write_text("32\n")
+
+                output, removals = self.run_main(["--apply"])
+                self.assertEqual(removals.call_args_list, [mock.call(group) for group in groups])
+                self.assertIn(f"Removed {len(groups)} cpuset directories", output)
+                self.assertEqual((self.mountpoint / "tasks").read_text(), "1\n")
+                self.assertEqual((self.mountpoint / "system/tasks").read_text(), "2\n")
+
+    def test_rtc_worker_migration_requires_empty_old_and_new_groups(self):
+        """Never remove any cpuset while a recorder, worker, or retired reserve is occupied."""
+        groups = [self.group(name) for name in ("camwfs_sw", "camwfs_descramble", "spare31")]
+
+        def unexpected_remove(directory):
+            """Reject even an empty-group removal if the migration preflight fails."""
+            self.fail(f"Attempted removal during an occupied migration: {directory}")
+
+        for group in groups:
+            with self.subTest(group=group.name):
+                (group / "tasks").write_text("999999999\n")
+
+                with self.assertRaisesRegex(RuntimeError, f"Occupied cpusets.*\n.*{group.name}"):
+                    self.run_main(["--apply"], unexpected_remove)
+
+                (group / "tasks").write_text("")
 
     def test_new_tasks_during_apply_stop_further_removal(self):
         """Recheck a parent after its child is removed to catch a restarted thread."""

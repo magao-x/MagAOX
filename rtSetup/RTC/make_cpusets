@@ -7,7 +7,8 @@
 ## See https://linux.die.net/man/7/cpuset
 ##
 ## Run this as sudo at startup of the system
-## Before changing names or CPU assignments, stop instrument processes and run remove_cpusets.
+## Before changing names or CPU assignments, stop instrument processes, preview with remove_cpusets,
+## then run remove_cpusets --apply. The cleanup accepts both current and retired RTC names.
 ## Applications and CACAO FPS settings place their threads in these sets.
 ##
 ####################################################
@@ -109,17 +110,19 @@ mkdir -p "$cpusetMount/spare30"
 /bin/echo 1 > "$cpusetMount/spare30/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/spare30/cpuset.mems"
 
-#spare31: dedicated development reserve
-mkdir -p "$cpusetMount/spare31"
-/bin/echo 31 > "$cpusetMount/spare31/cpuset.cpus"
-/bin/echo 1 > "$cpusetMount/spare31/cpuset.cpu_exclusive"
-/bin/echo 0 > "$cpusetMount/spare31/cpuset.mems"
-
-#camwfs_sw
+#camwfs_sw: stream writer outside the framegrabber's L3 cache
 mkdir -p "$cpusetMount/camwfs_sw"
-/bin/echo 32 > "$cpusetMount/camwfs_sw/cpuset.cpus"
+/bin/echo 31 > "$cpusetMount/camwfs_sw/cpuset.cpus"
 /bin/echo 1 > "$cpusetMount/camwfs_sw/cpuset.cpu_exclusive"
 /bin/echo 0 > "$cpusetMount/camwfs_sw/cpuset.mems"
+
+# L3 domain 4 (CPUs 32-39): OCAM acquisition, descrambling, IRQ and loop processes.
+
+#camwfs_descramble: OCAM worker on a separate core sharing camwfs L3
+mkdir -p "$cpusetMount/camwfs_descramble"
+/bin/echo 32 > "$cpusetMount/camwfs_descramble/cpuset.cpus"
+/bin/echo 1 > "$cpusetMount/camwfs_descramble/cpuset.cpu_exclusive"
+/bin/echo 0 > "$cpusetMount/camwfs_descramble/cpuset.mems"
 
 #camwfs
 mkdir -p "$cpusetMount/camwfs"
