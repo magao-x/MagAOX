@@ -49,6 +49,7 @@ timingPanel::timingPanel( QWidget *parent ) : xWidget( parent )
     auto *timing = new QGroupBox( QStringLiteral( "Timing" ), this );
     auto *grid   = new QGridLayout( timing );
     setXwFont( timing );
+    constexpr float timingFontScale = 1.2F;
     grid->setColumnMinimumWidth( 1, 85 );
     grid->setColumnMinimumWidth( 3, 85 );
     grid->setColumnStretch( 5, 1 );
@@ -58,27 +59,29 @@ timingPanel::timingPanel( QWidget *parent ) : xWidget( parent )
         auto     &measurement = m_measurements[index];
         const int row         = int( index );
         auto     *label       = new QLabel( QString::fromLatin1( measurement.m_label ), timing );
-        setXwFont( label );
+        setXwFont( label, timingFontScale );
         grid->addWidget( label, row, 0 );
 
         measurement.m_value = new statusLabel( timing );
+        setXwFont( measurement.m_value, timingFontScale );
         measurement.m_value->setAlignment( Qt::AlignRight | Qt::AlignVCenter );
         const QString device = QString::fromLatin1( measurement.m_device );
         measurement.m_value->setObjectName( device + QStringLiteral( ".value" ) );
 
         const bool latency = measurement.m_kind == MeasurementKind::latency;
         auto      *units   = new QLabel( latency ? QStringLiteral( "us" ) : QStringLiteral( "FPS" ), timing );
-        setXwFont( units );
+        setXwFont( units, timingFontScale );
         grid->addWidget( measurement.m_value, row, 1 );
         grid->addWidget( units, row, 2 );
 
         if( measurement.m_jitterElement )
         {
             measurement.m_jitter = new statusLabel( timing );
+            setXwFont( measurement.m_jitter, timingFontScale );
             measurement.m_jitter->setAlignment( Qt::AlignRight | Qt::AlignVCenter );
             measurement.m_jitter->setObjectName( device + QStringLiteral( ".jitter" ) );
             auto *jitterUnits = new QLabel( QStringLiteral( "us rms" ), timing );
-            setXwFont( jitterUnits );
+            setXwFont( jitterUnits, timingFontScale );
             const auto jitterDescription = QStringLiteral( "Jitter (standard deviation)" );
             measurement.m_jitter->setToolTip( jitterDescription );
             jitterUnits->setToolTip( jitterDescription );
