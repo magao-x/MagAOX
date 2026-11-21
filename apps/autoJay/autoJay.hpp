@@ -109,7 +109,7 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     autoJayDetail::registrationSettings m_quality;       ///< Registration acceptance thresholds.
     std::string                         m_controller{ "autoJay-ctrl" }; ///< Guarded closedLoopIndi device.
     std::string                         m_aoLoop{ "holoop" };           ///< Main AO loop which must remain open.
-    std::string m_alignmentLoop{ "twAlign-camwfs-ctrl" }; ///< Tweeter/WFS alignment loop which must remain open.
+    std::string m_retiredAlignmentDevice; ///< Legacy override used only to discard obsolete setup rules.
     std::string m_actuator{ "ttmperi" };                  ///< Read-only correction voltage source.
     bool        m_controllerEnabled{
         false };             ///< Require guarded correction acknowledgments; false permits initial calibration.
@@ -195,6 +195,10 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
 
     /// Register setup, FSM, and applicable parked-state subscriptions.
     int subscribeSetup( const std::vector<autoJayDetail::setupRule> &rules /**< [in] Setup requirements. */ );
+
+    /// Remove the former alignment interlock from older configs and calibration bundles.
+    void
+    discardAlignmentRule( std::vector<autoJayDetail::setupRule> &rules /**< [in,out] Setup requirements. */ ) const;
 
     /// Dispatch subscribed values without issuing hardware commands.
     static int receive( void                    *object, /**< [in] Application pointer. */
@@ -390,7 +394,6 @@ inline void autoJay::setupConfig()
                              "autoJay.orientation",
                              "autoJay.controller",
                              "autoJay.aoLoop",
-                             "autoJay.alignmentLoop",
                              "autoJay.actuator",
                              "autoJay.diagnosticsDir" } )
         add( key, "string", "Camera/profile/control identity or diagnostic path." );
@@ -502,7 +505,13 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
     cfg( m_captureConfig.cameraGeometry.orientation, "autoJay.orientation" );
     cfg( m_controller, "autoJay.controller" );
     cfg( m_aoLoop, "autoJay.aoLoop" );
-    cfg( m_alignmentLoop, "autoJay.alignmentLoop" );
+    m_retiredAlignmentDevice.clear();
+    const auto legacyKey = mx::app::iniFile::makeKey( "autoJay", "alignmentLoop" );
+    if( cfg.isSetUnused( legacyKey ) )
+    {
+        cfg.configUnused( m_retiredAlignmentDevice, legacyKey );
+    }
+
     cfg( m_actuator, "autoJay.actuator" );
     cfg( m_diagnosticsDir, "autoJay.diagnosticsDir" );
     for( size_t i = 0; i < 2; ++i )
@@ -564,6 +573,8 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
     {
         return -1;
     }
+
+    discardAlignmentRule( m_captureConfig.setup );
     if( m_captureConfig.setup.empty() )
     {
         if( m_captureConfig.camera != "camflowfs" )
@@ -610,17 +621,23 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
         if( !filter || !beamsplitter || !focus )
             return -1;
     }
-    // Loop-off rules are mandatory even when the optical requirements are customized.
-    for( const auto &device : { m_aoLoop, m_alignmentLoop } )
+    // AO must remain open even when the optical requirements are customized.
+    const auto aoKey = m_aoLoop + ".loop_state.toggle";
+    if( ruleKeys.insert( aoKey ).second )
     {
-        const auto key = device + ".loop_state.toggle";
-        if( ruleKeys.insert( key ).second )
-            m_captureConfig.setup.push_back( { device, "loop_state", "toggle", "0", 2, 0 } );
-        else
-            for( const auto &r : m_captureConfig.setup )
-                if( r.device + "." + r.property + "." + r.element == key && ( r.type != 2 || r.value != "0" ) )
-                    return -1;
+        m_captureConfig.setup.push_back( { m_aoLoop, "loop_state", "toggle", "0", 2, 0 } );
     }
+    else
+    {
+        for( const auto &r : m_captureConfig.setup )
+        {
+            if( r.device + "." + r.property + "." + r.element == aoKey && ( r.type != 2 || r.value != "0" ) )
+            {
+                return -1;
+            }
+        }
+    }
+
     if( ruleKeys.insert( m_captureConfig.camera + ".exptime.current" ).second )
         m_captureConfig.setup.push_back( { m_captureConfig.camera, "exptime", "current", "*", 0, 1e-9 } );
     for( double value : { m_controlSettle, m_voltageTolerance, m_dmTolerance } )
@@ -634,8 +651,8 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
         }
     }
 
-    if( m_controlSettle >= m_controlTimeout || m_controller.empty() || m_aoLoop.empty() || m_alignmentLoop.empty() ||
-        m_actuator.empty() || m_captureConfig.profile.empty() )
+    if( m_controlSettle >= m_controlTimeout || m_controller.empty() || m_aoLoop.empty() || m_actuator.empty() ||
+        m_captureConfig.profile.empty() )
     {
         return -1;
     }
@@ -690,6 +707,18 @@ inline int autoJay::subscribeSetup( const std::vector<autoJayDetail::setupRule> 
     }
 
     return 0;
+}
+
+inline void autoJay::discardAlignmentRule( std::vector<autoJayDetail::setupRule> &rules ) const
+{
+    std::erase_if( rules,
+                   [this]( const auto &rule )
+                   {
+                       return rule.device != m_aoLoop &&
+                              ( rule.device == "twAlign-camwfs-ctrl" ||
+                                ( !m_retiredAlignmentDevice.empty() && rule.device == m_retiredAlignmentDevice ) ) &&
+                              rule.property == "loop_state" && rule.element == "toggle";
+                   } );
 }
 
 inline int autoJay::receive( const pcf::IndiProperty &prop )
@@ -824,13 +853,13 @@ autoJay::checkSetup( calibration &cal, geometry &geom, bool capture, std::string
             else if( value != rule.value )
                 return reject( "setup mismatch: " + rule.device + "." + rule.property );
         }
-        // These remain mandatory even if a loaded bundle has different optical setup rules.
-        for( const auto &device : { m_aoLoop, m_alignmentLoop } )
+        // AO must remain open even if the loaded bundle has different optical setup rules.
+        const auto *loop = property( m_aoLoop, "loop_state" );
+        if( !loop || !loop->find( "toggle" ) || ( *loop )["toggle"].getSwitchState() != pcf::IndiElement::Off )
         {
-            const auto *loop = property( device, "loop_state" );
-            if( !loop || !loop->find( "toggle" ) || ( *loop )["toggle"].getSwitchState() != pcf::IndiElement::Off )
-                return reject( "loop must be open: " + device );
+            return reject( "loop must be open: " + m_aoLoop );
         }
+
         if( m_controllerEnabled )
         {
             const auto *ctrl = property( m_controller, "loop_state" );
@@ -1290,6 +1319,8 @@ inline bool autoJay::recall()
     }
     for( const auto &why : skipped )
         log<text_log>( why, logPrio::LOG_WARNING );
+
+    discardAlignmentRule( candidate.setup );
     if( candidate.camera != m_captureConfig.camera || candidate.stream != m_captureConfig.stream )
     {
         m_status = "calibration camera/stream identity mismatch";

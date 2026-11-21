@@ -244,9 +244,11 @@ autoJayHarness::autoJayHarness()
         REQUIRE( MagAOX::app::autoJayDetail::calibrationIO::writeImage(
             m_patternFiles[i], m_captureConfig.dm[i].pattern, error ) );
     }
-    for( const auto &device :
-         { "stagelosel", "stageflowfs", "holoop", "twAlign-camwfs-ctrl", "autoJay-ctrl", "ttmperi" } )
+    for( const auto &device : { "stagelosel", "stageflowfs", "holoop", "autoJay-ctrl", "ttmperi" } )
+    {
         text( device, "fsm", "state", "READY" );
+    }
+
     text( "camflowfs", "fsm", "state", "OPERATING" );
     text( "ttmperi", "fsm", "state", "OPERATING" );
     toggle( "stagelosel", "presetName", "pupil", true );
@@ -254,7 +256,6 @@ autoJayHarness::autoJayHarness()
     numbers( "stageflowfs", "position", { { "current", 32.0 } } );
     numbers( "camflowfs", "exptime", { { "current", 0.001 } } );
     toggle( "holoop", "loop_state", "toggle", false );
-    toggle( "twAlign-camwfs-ctrl", "loop_state", "toggle", false );
     toggle( "autoJay-ctrl", "loop_state", "toggle", false );
     for( const auto &axis : { "axis1_voltage", "axis2_voltage" } )
         numbers( "ttmperi", axis, { { "current", 50 }, { "target", 50 } } );
@@ -539,7 +540,7 @@ int autoJayHarness::startMonitoring( const std::string &stream )
 }
 /// \endcond
 
-/// Default requirements resolve exposure at capture and verify both operator-open loops.
+/// Default requirements resolve exposure at capture and verify the open AO loop.
 /** \ingroup autoJay_unit_test */
 TEST_CASE( "autoJay setup defaults capture stable camera settings", "[autoJay][app]" )
 {
@@ -553,7 +554,7 @@ TEST_CASE( "autoJay setup defaults capture stable camera settings", "[autoJay][a
     std::string                 error;
     autoJayHarness::calibration resolved;
     REQUIRE( app.setupValid( true, error, &resolved ) );
-    REQUIRE( resolved.setup.size() == 6 );
+    REQUIRE( resolved.setup.size() == 5 );
     REQUIRE( resolved.setup[0].device == "stagelosel" );
     REQUIRE( resolved.setup[0].value == "1" );
     REQUIRE( resolved.setup[1].device == "stageflowfs" );
@@ -687,10 +688,6 @@ TEST_CASE( "autoJay rejects invalid setup before opening channels", "[autoJay][a
     SECTION( "AO loop closed" )
     {
         app.toggle( "holoop", "loop_state", "toggle", true );
-    }
-    SECTION( "alignment loop closed" )
-    {
-        app.toggle( "twAlign-camwfs-ctrl", "loop_state", "toggle", true );
     }
     SECTION( "LOS not pupil" )
     {
@@ -1188,6 +1185,42 @@ TEST_CASE( "autoJay checks actuator coordinates against the DM stream", "[autoJa
     REQUIRE( app.m_status.find( "outside DM stream geometry" ) != std::string::npos );
     REQUIRE_FALSE( app.m_active );
     REQUIRE( app.m_commands.empty() );
+}
+
+/// Legacy configs and saved bundles can be used without the former alignment controller.
+/** \ingroup autoJay_unit_test */
+TEST_CASE( "autoJay drops the legacy alignment interlock from old settings and bundles", "[autoJay][app]" )
+{
+    // clang-format off
+    #ifdef AUTOJAY_TEST_DOXYGEN_REF
+    MagAOX::app::autoJay::loadConfigImpl;
+    MagAOX::app::autoJay::discardAlignmentRule;
+    MagAOX::app::autoJay::recall;
+    #endif
+    // clang-format on
+    autoJayHarness    app;
+    const bool        renamed = GENERATE( false, true );
+    const std::string legacy  = renamed ? "old-alignment-ctrl" : "twAlign-camwfs-ctrl";
+    std::string       settings =
+        "[setup]\ndevices=" + legacy + "\nproperties=loop_state\nelements=toggle\nvalues=0\ntypes=2\ntolerances=0\n";
+    if( renamed )
+    {
+        settings += "[autoJay]\nalignmentLoop=" + legacy + "\n";
+    }
+
+    REQUIRE( app.configure( settings ) == 0 );
+    std::string error;
+    REQUIRE( app.setupValid( true, error ) );
+
+    auto previous = *app.m_calibration;
+    previous.setup.push_back( { legacy, "loop_state", "toggle", "0", 2, 0 } );
+    REQUIRE( MagAOX::app::autoJayDetail::saveCalibration( previous, app.calibrationRoot(), error ) );
+    REQUIRE( app.recall() );
+    REQUIRE_FALSE( app.m_observed.contains( legacy + ".loop_state" ) );
+    REQUIRE_FALSE( app.m_observed.contains( legacy + ".fsm" ) );
+    REQUIRE( app.setupValid( false, error ) );
+    app.toggle( "holoop", "loop_state", "toggle", true );
+    REQUIRE_FALSE( app.setupValid( false, error ) );
 }
 
 /// An explicitly failed recall cannot leave an older calibration available for a subsequent measurement.

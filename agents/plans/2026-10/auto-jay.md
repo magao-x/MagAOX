@@ -729,3 +729,18 @@ setup and calibration schema are unchanged.
 On 2026-11-21 the optimized app build and the offline app suite passed
 (20 cases, 2,012 assertions). Tests cover retained Busy readbacks,
 invalid parked telemetry, and preset and position mismatches.
+
+### Follow-up: remove the tweeter/WFS alignment interlock
+
+Only the main AO loop remains a required loop interlock. AutoJay no longer
+subscribes to the former alignment controller or checks its state. Both camera
+templates omit that setting and its setup bindings. When reading an older
+config or reference bundle, AutoJay discards the obsolete alignment loop rule
+before checking setup or registering subscriptions. The old config key, when
+present, identifies a custom name for the same retired rule. Existing bundles
+retain their optical setup and references.
+
+On 2026-11-21 the optimized build and offline app suite passed
+(21 cases, 1,931 assertions). The tests cover legacy configs and saved
+bundles with default and custom alignment controller names, and verify
+that the main AO interlock still blocks acquisition when closed.
