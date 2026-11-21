@@ -245,6 +245,7 @@ all_guis = \
 	pwr \
 	coronAlignGUI \
 	loopCtrlGUI \
+	loPredCtrlAccGUI \
 	timingGUI \
 	roiGUI \
 	cameraGUI \
