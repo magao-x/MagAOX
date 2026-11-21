@@ -1797,7 +1797,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
     m_learning = enabled;
     if( enabled )
     {
-        m_exploration = parseExploration( "1000,0.1,100,1000,0.1,3,1000,0.1,0.1" );
+        m_exploration = parseExploration( "1000,0.05,100,1000,0.05,3,1000,0.05,0.1" );
         m_predicting  = true;
     }
     else
