@@ -139,7 +139,7 @@ class XCorrShift():
         if filter_size is not None:
             # Change this to a super gaussian filter to remove ringing.
             #self._spatial_filter = hp.make_circular_aperture(self._filter_size)(self._fft.output_grid)
-            self._spatial_filter = hp.make_super_gaussian_filter(self._filter_size, 10.0)(self._fft.output_grid)
+            self._spatial_filter = hp.make_super_gaussian_aperture(self._filter_size, 10.0)(self._fft.output_grid)
         else:
             self._spatial_filter = 1
 
