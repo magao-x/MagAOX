@@ -66,21 +66,21 @@
                             <widget class="xqt::fsmDisplay" name="hwpseqFsm" />
                         </item>
                         <item row="1" column="0">
-                            <widget class="QLabel" name="labelStagePolRot" />
+                            <widget class="QLabel" name="labelQwpPupil" />
                         </item>
                         <item row="1" column="1">
-                            <widget class="xqt::fsmDisplay" name="stagePolRotFsm" />
-                        </item>
-                        <item row="1" column="2">
-                            <widget class="QLabel" name="labelStagePolLin" />
-                        </item>
-                        <item row="1" column="3">
-                            <widget class="xqt::fsmDisplay" name="stagePolLinFsm" />
+                            <widget class="xqt::fsmDisplay" name="qwpPupilFsm" />
                         </item>
                         <item row="2" column="0">
-                            <widget class="QLabel" name="labelQwpTrack" />
+                            <widget class="QLabel" name="labelStagePolLin" />
                         </item>
                         <item row="2" column="1">
+                            <widget class="xqt::fsmDisplay" name="stagePolLinFsm" />
+                        </item>
+                        <item row="1" column="2">
+                            <widget class="QLabel" name="labelQwpTrack" />
+                        </item>
+                        <item row="1" column="3">
                             <widget class="xqt::fsmDisplay" name="qwpTrackFsm" />
                         </item>
                         <item row="2" column="2">
@@ -127,26 +127,6 @@
                             </widget>
                         </item>
                         <item row="0" column="2">
-                            <widget class="QLabel" name="labelOffset">
-                                <property name="text">
-                                    <string>Offset</string>
-                                </property>
-                                <property name="alignment">
-                                    <set>Qt::AlignBottom|Qt::AlignHCenter</set>
-                                </property>
-                            </widget>
-                        </item>
-                        <item row="0" column="3">
-                            <widget class="QLabel" name="labelActual">
-                                <property name="text">
-                                    <string>Actual</string>
-                                </property>
-                                <property name="alignment">
-                                    <set>Qt::AlignBottom|Qt::AlignHCenter</set>
-                                </property>
-                            </widget>
-                        </item>
-                        <item row="0" column="4">
                             <widget class="QLabel" name="labelName">
                                 <property name="text">
                                     <string>Name</string>
@@ -182,38 +162,6 @@
                             </widget>
                         </item>
                         <item row="1" column="2">
-                            <widget class="QLabel" name="hwpTrackingOffset">
-                                <property name="text">
-                                    <string></string>
-                                </property>
-                                <property name="alignment">
-                                    <set>Qt::AlignCenter</set>
-                                </property>
-
-                                <property name="font">
-                                    <font>
-                                        <bold>true</bold>
-                                    </font>
-                                </property>
-                            </widget>
-                        </item>
-                        <item row="1" column="3">
-                            <widget class="QLabel" name="hwpActualAngle">
-                                <property name="text">
-                                    <string></string>
-                                </property>
-                                <property name="alignment">
-                                    <set>Qt::AlignCenter</set>
-                                </property>
-
-                                <property name="font">
-                                    <font>
-                                        <bold>true</bold>
-                                    </font>
-                                </property>
-                            </widget>
-                        </item>
-                        <item row="1" column="4">
                             <widget class="QLabel" name="hwpAngleName">
                                 <property name="text">
                                     <string></string>
@@ -328,56 +276,49 @@
                             <widget class="xqt::statusEntry" name="entryHwpAngle"/>
                         </item>
                         <item row="1" column="0">
-                            <widget class="xqt::toggleSlider" name="sliderHwpTracking">
-                            </widget>
-                        </item>
-                        <item row="1" column="1">
-                            <widget class="QLabel" name="labelHwpTracking"/>
-                        </item>
-                        <item row="2" column="0">
                             <widget class="xqt::statusCombo" name="comboHwpLin"/>
                         </item>
-                        <item row="3" column="0">
+                        <item row="2" column="0">
                             <widget class="xqt::toggleSlider" name="sliderQwpPupilTracking">
                             </widget>
                         </item>
-                        <item row="3" column="1">
+                        <item row="2" column="1">
                             <widget class="QLabel" name="labelQwpPupilTracking"/>
                         </item>
-                        <item row="4" column="0">
+                        <item row="3" column="0">
                             <widget class="xqt::toggleSlider" name="sliderQwpTracking">
                             </widget>
                         </item>
-                        <item row="4" column="1">
+                        <item row="3" column="1">
                             <widget class="QLabel" name="labelQwpTracking"/>
                         </item>
-                        <item row="5" column="0">
+                        <item row="4" column="0">
                             <widget class="xqt::statusCombo" name="comboQwpLin"/>
                         </item>
-                        <item row="6" column="0">
+                        <item row="5" column="0">
                             <widget class="xqt::statusEntry" name="entryNumCycles"/>
                         </item>
-                        <item row="6" column="1" alignment="Qt::AlignLeft">
+                        <item row="5" column="1" alignment="Qt::AlignLeft">
                             <widget class="QLabel" name="labelNumCyclesHint">
                                 <property name="text">
                                     <string>(0 for infinite)</string>
                                 </property>
                             </widget>
                         </item>
-                        <item row="7" column="0">
+                        <item row="6" column="0">
                             <widget class="xqt::statusEntry" name="entryFramesPerPos"/>
                         </item>
-                        <item row="7" column="1" alignment="Qt::AlignLeft">
+                        <item row="6" column="1" alignment="Qt::AlignLeft">
                             <widget class="QLabel" name="labelFramesHint">
                                 <property name="text">
                                     <string>(0 = use time)</string>
                                 </property>
                             </widget>
                         </item>
-                        <item row="8" column="0">
+                        <item row="7" column="0">
                             <widget class="xqt::statusEntry" name="entryTimePerPos"/>
                         </item>
-                        <item row="8" column="1" alignment="Qt::AlignLeft">
+                        <item row="7" column="1" alignment="Qt::AlignLeft">
                             <widget class="QLabel" name="labelTimeHint">
                                 <property name="text">
                                     <string>(if frames = 0)</string>
