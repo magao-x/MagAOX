@@ -59,11 +59,19 @@ For `camflowfs`, require `stagelosel.presetName.pupil` On and
 this setup. Also capture `stagelosel.position.current` with a 0.01 tolerance.
 Confirm these tolerances and add the actual bump-mask/filter requirements.
 
+AutoJay accepts a setup stage in `POWEROFF` when it reports `parked.current=1`
+and its retained position and preset still match the profile. By default this
+applies to `stagelosel`, `stageflowfs`, `stagebs`, and `stagesci1` when they
+appear in the setup. Set `setup.parkableDevices` to list the devices in your
+setup that publish this parked state. A confirmed park allows Zaber's retained
+numeric position readback to carry the INDI `Busy` state.
+
 The six `setup` arrays have one entry per requirement in matching order. Types
 are `0` for a number, `1` for text, and `2` for a switch; switch values are `0`/`1`.
 `*` records a property's current value during capture and requires that saved
 value during measurement. Numeric tolerances are absolute and use the property's
-units. Missing, Busy, or Alert setup properties block acquisition. AutoJay
+units. Missing or Alert properties block acquisition, as does Busy outside the
+parked position exception above. AutoJay
 retains each subscribed value until it receives an update. `monitor.maxAge`
 applies to camera frames only. Remove `monitor.refreshInterval` from any copied
 configuration.
