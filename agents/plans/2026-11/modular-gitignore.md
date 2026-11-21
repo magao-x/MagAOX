@@ -229,6 +229,13 @@ Tracked in the grilling session; answers recorded here as they are decided.
 - `apps/doc` and `utils/doc` stay top-level; `utils/tests` has no Makefile so
   gets no file.
 
+## Implementation Notes (commits 2 and 3)
+- `.github/workflows/gitignore-check.yml` implemented per Q12; no pyyaml on the
+  Mac, so YAML was parsed with ruby and the `run` step extracted and executed
+  locally: passes on the tree; with `/adcTracker` removed, `utils/shmimLat/.gitignore`
+  and `apps/zaberCtrl/.gitignore` deleted it exits 1 listing all three; restored.
+- `apps/template/readme.md` rename step now includes `.gitignore`.
+
 ## Follow-up and Edge Cases
 - `**/old/` matches tracked `apps/nnReconstructor/OLD/` on case-insensitive
   filesystems (macOS); new files there are silently ignored. Owner to decide.
