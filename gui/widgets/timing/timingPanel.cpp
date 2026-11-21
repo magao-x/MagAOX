@@ -281,14 +281,15 @@ void timingPanel::addModulator( QBoxLayout *layout, const char *device )
     auto *controls = new QVBoxLayout( box );
     setXwFont( box );
     addEntry( controls, device, "amp", "Amplitude", "", statusEntry::FLOAT );
-    addEntry( controls, device, "frequency", "Frequency", "Hz", statusEntry::FLOAT );
 
     if( std::string_view( device ) == "tweeterSpeck" )
     {
+        addEntry( controls, device, "separation", "Separation", "λ/D", statusEntry::FLOAT );
         addEntry( controls, device, "angle", "Angle", "deg", statusEntry::FLOAT );
     }
     else
     {
+        addEntry( controls, device, "frequency", "Frequency", "Hz", statusEntry::FLOAT );
         addFileReadback( controls, device );
     }
 

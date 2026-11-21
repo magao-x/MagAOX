@@ -237,19 +237,28 @@ TEST_CASE( "timingGUI routes synco and waveform controls to the named devices", 
         CHECK( fixture.m_publisher.m_commands.back().createUniqueKey() == modulating.createUniqueKey() );
         CHECK( fixture.m_publisher.m_commands.back()["toggle"].getSwitchState() == pcf::IndiElement::On );
 
-        pcf::IndiProperty frequency( pcf::IndiProperty::Number, device, "frequency" );
-        frequency.add( pcf::IndiElement( "current", 2000.0 ) );
-        frequency.add( pcf::IndiElement( "target", 2000.0 ) );
-        fixture.publish( frequency );
-        auto *entry = fixture.widget<QWidget>( ( device + ".frequency" ).c_str() );
+        const bool        sparkle   = device == "tweeterSpeck";
+        const char       *parameter = sparkle ? "separation" : "frequency";
+        const auto        current   = sparkle ? 15.0 : 2000.0;
+        const auto        target    = sparkle ? 17.5 : 2100.0;
+        pcf::IndiProperty setting( pcf::IndiProperty::Number, device, parameter );
+        setting.add( pcf::IndiElement( "current", current ) );
+        setting.add( pcf::IndiElement( "target", current ) );
+        fixture.publish( setting );
+
+        auto *entry = fixture.widget<QWidget>( ( device + "." + parameter ).c_str() );
         auto *line  = entry->findChild<QLineEdit *>();
         REQUIRE( line );
         REQUIRE( entry->isEnabled() );
-        line->setText( "2100" );
+        CHECK( line->text().toDouble() == current );
+        line->setText( QString::number( target ) );
         REQUIRE( QMetaObject::invokeMethod( entry, "on_value_returnPressed", Qt::DirectConnection ) );
-        CHECK( fixture.m_publisher.m_commands.back().createUniqueKey() == frequency.createUniqueKey() );
-        CHECK( fixture.m_publisher.m_commands.back()["target"].get<double>() == 2100 );
+        CHECK( fixture.m_publisher.m_commands.back().createUniqueKey() == setting.createUniqueKey() );
+        CHECK( fixture.m_publisher.m_commands.back()["target"].get<double>() == target );
     }
+
+    CHECK( fixture.m_panel.findChild<QWidget *>( "tweeterSpeck.frequency" ) == nullptr );
+    CHECK( fixture.m_panel.findChild<QWidget *>( "tweeterMod.separation" ) == nullptr );
 
     pcf::IndiProperty angle( pcf::IndiProperty::Number, "tweeterSpeck", "angle" );
     angle.add( pcf::IndiElement( "current", 15.0 ) );
