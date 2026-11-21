@@ -105,6 +105,7 @@ INCLUDEDEPS= \
 	logger/types/telem_psfacq.hpp \
 	logger/types/telem_pupilfit.hpp \
 	logger/types/telem_pupilfit_state.hpp \
+	logger/types/telem_qwptrack.hpp \
 	logger/types/telem_rhusb.hpp \
 	logger/types/telem_saving_state.hpp \
 	logger/types/telem_saving.hpp \
@@ -125,6 +126,7 @@ INCLUDEDEPS= \
 	logger/types/telem_usage.hpp \
 	logger/types/telem_gpu.hpp \
 	logger/types/telem_irq.hpp \
+	logger/types/telem_raid.hpp \
 	logger/types/telem_w2tcsoffloader.hpp \
 	logger/types/telem_zaber.hpp \
 	logger/types/text_log.hpp \
@@ -196,7 +198,7 @@ logger/logMeta.o: logger/logMap.hpp logger/logMap.cpp logger/logMeta.hpp logger/
 logger/logMap.o: logger/logMap.hpp logger/logMap.cpp
 logger/logMeta.o logger/logMap.o: logger/types/telem_dmsynco.hpp common/dmReaderTiming.hpp
 logger/logMeta.o logger/logMap.o: logger/types/telem_dmtimings.hpp common/dmTiming.hpp
-logger/logMeta.o: logger/types/telem_gpu.hpp logger/types/telem_irq.hpp
+logger/logMeta.o: logger/types/telem_gpu.hpp logger/types/telem_irq.hpp logger/types/telem_raid.hpp
 logger/logBinarySchemata.o: logger/generated/logTypes.hpp logger/generated/binarySchemata.inc
 
 clean:

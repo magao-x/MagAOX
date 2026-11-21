@@ -75,6 +75,7 @@ telem_drivetemps         20827    telem_drivetemps
 telem_usage              20828    telem_usage
 telem_gpu                20829    telem_gpu
 telem_irq                20830    telem_irq
+telem_raid               20831    telem_raid
 
 telem_cooler             20850    telem_cooler
 
@@ -104,6 +105,8 @@ telem_sparkleclock       20940    telem_sparkleclock
 
 telem_poltrack           20945    telem_poltrack
 telem_adctrack           20946    telem_adctrack
+telem_qwptrack           20950    telem_qwptrack
+telem_qwppupil           20951    telem_qwppupil
 
 telem_outlet            12010    telem_outlet
 telem_pdu               12011    telem_pdu

@@ -1,5 +1,9 @@
 # RTC cpuset inventory and restructuring plan
 
+Current allocation update: see the
+[2026-11-18 camwfs descramble migration](#2026-11-18-camwfs-descramble-migration).
+Earlier inventory and migration tables retain their historical CPU31/32 names.
+
 Status: baseline inventory prepared 2026-10-26 and refreshed from the operator's
 synced configs for `po4ao`, `nnReconstructor`, `dmtweeter-synco` and the newly
 listed `dlDataCollection`. Remaining deployed/runtime differences await operator
@@ -874,3 +878,37 @@ independent of the RTC rollout.
 - Implementation and local verification: Complete for this migration; see checks above.
 - Operator deployment: Successful on first attempt; closed-loop operation reported.
 - Runtime placement readback and post-migration timing results: Pending.
+
+## 2026-11-18 camwfs descramble migration
+
+Following the [OCAM descramble trials](../2026-11/ocam_descramble.md), the
+operator tested `camwfs-sw` on CPU31 using `spare31` and reported no impact.
+The operator authorized making parallel descrambling the default and retaining
+the following allocation. Earlier tables in this record describe the previous
+maps; this section supersedes their CPU31/32 assignments.
+
+| CPU | Previous cpuset | Current cpuset | Workload |
+| --- | --- | --- | --- |
+| 31 | `spare31` | `camwfs_sw` | `camwfs-sw` software writer, tested by the operator |
+| 32 | `camwfs_sw` | `camwfs_descramble` | OCAM parallel descramble worker |
+| 33 | `camwfs` | Unchanged | Camera framegrabber |
+| 34 | `camwfs_irq` | Unchanged | EDT IRQ |
+
+CPU32 and CPU33 share L3 domain 32–39; CPU31 remains in domain 24–31.
+The `dmtweeter-post` worker stays on CPU44. Historical post-worker experiments
+on `spare31` do not reserve CPU31 for new comparisons.
+
+The workstation `make_cpusets` changes implement these names. Cleanup retains
+retired `spare31` as an accepted RTC name, alongside the current names, so the
+operator can remove the old empty exclusive sets before rebuilding. Occupied
+sets still prevent cleanup. The operator must stop workloads, run the existing
+cleanup/rebuild procedure, and restart with matching configuration; no live
+cpuset or external configuration changes were made by agents.
+
+The software writer selects `[framegrabber] cpuset=camwfs_sw`; replace any
+temporary `spare31` override. The camera's `[descramble] cpuset` selects
+`camwfs_descramble`; replace an explicit old `camwfs_sw` worker override or
+remove it to use the new application default. Verify the software writer on
+CPU31, the descramble worker on CPU32, the framegrabber on CPU33 and EDT IRQ
+on CPU34 after the operator migration. The reported CPU31 trial is evidence
+for the workload move, not confirmation that the renamed map has been deployed.

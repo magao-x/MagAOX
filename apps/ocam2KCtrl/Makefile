@@ -1,7 +1,9 @@
+## \file Makefile
+## \brief Build the OCAM2K camera application with its SDK and prepared descramble helpers.
 
 allall: all
 
-OTHER_HEADERS=ocamUtils.hpp
+OTHER_HEADERS=ocamUtils.hpp ocamDescrambler.hpp ocamDescrambleParallel.hpp ocamDescramblePlacement.hpp
 OTHER_OBJS=fli/ocam2_sdk.o
 TARGET=ocam2KCtrl
 

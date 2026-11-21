@@ -118,6 +118,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_cameraTime;
     using dmSyncopation::m_clean;
     using dmSyncopation::m_combined;
+    using dmSyncopation::m_combinedName;
     using dmSyncopation::m_combinerCadence;
     using dmSyncopation::m_combinerDiagnostics;
     using dmSyncopation::m_consumed;
@@ -145,6 +146,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_combinerQuality;
     using dmSyncopation::m_indiP_combinerTiming;
     using dmSyncopation::m_indiP_enable;
+    using dmSyncopation::m_indiP_health;
     using dmSyncopation::m_indiP_logicTiming;
     using dmSyncopation::m_indiP_pipelineBoundary;
     using dmSyncopation::m_indiP_pipelineQuality;
@@ -166,6 +168,8 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_indiP_simulationStatus;
     using dmSyncopation::m_indiP_simulationSteps;
     using dmSyncopation::m_indiP_simulationTrace;
+    using dmSyncopation::m_indiP_status;
+    using dmSyncopation::m_indiP_zero;
     using dmSyncopation::m_indiP_zeroPhase;
     using dmSyncopation::m_indiP_zeroTest;
     using dmSyncopation::m_lastFaultNs;
@@ -201,6 +205,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::m_primaryTiming;
     using dmSyncopation::m_primaryTraceInode;
     using dmSyncopation::m_primed;
+    using dmSyncopation::m_productionEnabled;
     using dmSyncopation::m_publicationNow;
     using dmSyncopation::m_rateFrames;
     using dmSyncopation::m_readerReleaseTiming;
@@ -274,6 +279,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::recordLogicStage;
     using dmSyncopation::setupCadenceINDI;
     using dmSyncopation::setupCombinerCadenceINDI;
+    using dmSyncopation::setupINDI;
     using dmSyncopation::setupLogicTimingINDI;
     using dmSyncopation::setupMainTimingINDI;
     using dmSyncopation::setupPipelineINDI;
@@ -10661,6 +10667,176 @@ TEST_CASE( "syncopation main export reuses existing qualified active acknowledge
     MagAOX::app::dmSyncopation::processImage;
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
     MagAOX::app::synco::MainTiming::capture;
+#endif
+    // clang-format on
+}
+
+/** \brief Exercise startup property discovery and finite-trial enable readback in both interface builds.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "syncopation advertises the build-selected INDI interface", "[dmSyncopation][indi]" )
+{
+    Streams    streams;
+    Harness    app;
+    const bool production   = GENERATE( false, true );
+    app.m_productionEnabled = production;
+    app.m_zeroTestEnabled   = !production;
+    app.m_mainTimingName    = "unpublished-local-main-timing";
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+
+    const auto definitions = app.propertyDefinitions();
+    for( const auto *name : { "enable", "reacquire", "settings", "timing", "health" } )
+    {
+        CHECK( definitions.find( std::string( "name=\"" ) + name + "\"" ) != std::string::npos );
+    }
+
+    for( const auto *name : { "main_timing",
+                              "logic_timing",
+                              "zero_test",
+                              "zero_phase",
+                              "zero_publication",
+                              "zero_clock",
+                              "primary_timing",
+                              "combiner_timing",
+                              "camera_timing",
+                              "pipeline_timing_quality",
+                              "reader_release_timing" } )
+    {
+        CHECK( ( definitions.find( std::string( "name=\"" ) + name + "\"" ) != std::string::npos ) ==
+               bool( DMSYNCOPATION_DIAGNOSTIC_INDI ) );
+    }
+
+    CHECK( ( definitions.find( "<defNumberVector device=\"synco_test\" name=\"production\"" ) != std::string::npos ) ==
+           ( production && DMSYNCOPATION_DIAGNOSTIC_INDI ) );
+    CHECK( app.m_indiP_status.getElements().size() == ( DMSYNCOPATION_DIAGNOSTIC_INDI ? 44 : 8 ) );
+    CHECK( app.m_indiP_health.getElements().size() == ( DMSYNCOPATION_DIAGNOSTIC_INDI ? 8 : 3 ) );
+
+    if( !production )
+    {
+        app.m_now = []
+        {
+            return int64_t{ 1000000000 };
+        };
+        app.m_zeroDurationSec     = 0.5;
+        app.m_zeroStats.startedNs = 1;
+        app.m_enabled             = true;
+        app.m_indiP_enable["toggle"].setSwitchState( pcf::IndiElement::On );
+        app.updateZeroTest( false );
+
+        CHECK_FALSE( app.m_enabled );
+        CHECK( app.m_indiP_enable["toggle"].getSwitchState() == pcf::IndiElement::Off );
+        CHECK( app.m_indiP_settings["durationSec"].get<double>() == 0.5 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::setupINDI;
+    MagAOX::app::dmSyncopation::updateZeroTest;
+    MagAOX::app::MagAOXApp<true>::handleGetProperties;
+#endif
+    // clang-format on
+}
+
+/** \brief Check open-loop zero interlocks and one combined publication with idle primary fixtures.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "syncopation zeros configured channels and triggers dmcomb while open", "[dmSyncopation][indi]" )
+{
+    Streams streams;
+    Harness app;
+    app.m_productionEnabled = GENERATE( false, true );
+    app.m_shmimName         = "dm97disp03";
+    app.m_combinedName      = "dm97disp";
+    app.m_destinations      = { "dm97disp07", "dm97disp08" };
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+
+    auto request = app.m_indiP_zero;
+    request["request"].setSwitchState( pcf::IndiElement::On );
+    auto &primary             = streams.images[0];
+    auto &combined            = streams.images[1];
+    auto &trigger             = streams.images[2];
+    auto &other               = streams.images[3];
+    primary.array.F[0]        = 4.0F;
+    const auto primaryBefore  = primary.md->cnt0;
+    const auto combinedBefore = combined.md->cnt0;
+    const auto triggerBefore  = trigger.md->cnt0;
+    const auto otherBefore    = other.md->cnt0;
+
+    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
+    pcf::IndiProperty loop( pcf::IndiProperty::Switch );
+    loop.setDevice( "holoop" );
+    loop.setName( "loop_state" );
+    loop.setState( INDI_OK );
+    loop.add( pcf::IndiElement( "toggle" ) );
+    loop["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.setCallBack_m_indiP_loop( loop ) == 0 );
+    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
+
+    loop["toggle"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( app.setCallBack_m_indiP_loop( loop ) == 0 );
+    app.m_enabled = true;
+    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
+    app.m_enabled = false;
+
+    other.md->write = 1;
+    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
+    other.md->write = 0;
+    CHECK( app.m_indiP_zero.getState() == INDI_ALERT );
+    CHECK( trigger.md->cnt0 == triggerBefore );
+    CHECK( trigger.array.F[0] == 2.0F );
+    CHECK( other.array.F[0] == 3.0F );
+
+    ImageStreamIO_semflush( &trigger, 0 );
+    auto dmcomb =
+        std::async( std::launch::async,
+                    [&]()
+                    {
+                        timespec deadline{};
+                        clock_gettime( CLOCK_REALTIME, &deadline );
+                        ++deadline.tv_sec;
+
+                        if( ImageStreamIO_semtimedwait( &trigger, 0, &deadline ) != 0 || trigger.md->write ||
+                            other.md->write || trigger.md->cnt0 != triggerBefore + 1 || other.md->cnt0 != otherBefore )
+                        {
+                            return false;
+                        }
+
+                        for( size_t pixel = 0; pixel < 9; ++pixel )
+                        {
+                            if( trigger.array.F[pixel] != 0 || other.array.F[pixel] != 0 )
+                            {
+                                return false;
+                            }
+                        }
+
+                        combined.md->write = 1;
+                        std::copy_n( primary.array.F, 9, combined.array.F );
+                        return ImageStreamIO_UpdateIm( &combined ) == IMAGESTREAMIO_SUCCESS;
+                    } );
+
+    CHECK( app.newCallBack_m_indiP_zero( request ) == 0 );
+    REQUIRE( dmcomb.get() );
+    CHECK( app.m_indiP_zero.getState() == INDI_OK );
+    CHECK( app.m_indiP_zero["request"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( combined.md->cnt0 == combinedBefore + 1 );
+    CHECK( combined.array.F[0] == 4.0F );
+    CHECK( primary.md->cnt0 == primaryBefore );
+    CHECK( primary.array.F[0] == 4.0F );
+    CHECK_FALSE( app.m_enabled );
+
+    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
+    CHECK( app.m_indiP_zero.getState() == INDI_ALERT );
+    CHECK( trigger.md->cnt0 == triggerBefore + 2 );
+    CHECK( combined.md->cnt0 == combinedBefore + 1 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::setupINDI;
+    MagAOX::app::dmSyncopation::setCallBack_m_indiP_loop;
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_zero;
+    MagAOX::app::dmSyncopation::zeroDestinations;
 #endif
     // clang-format on
 }

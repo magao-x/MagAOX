@@ -45,10 +45,11 @@ force a clean app rebuild and install before restarting synco:
 ```bash
 cd "$(git rev-parse --show-toplevel)" &&
 make -C apps/dmSyncopation clean &&
-make -C apps/dmSyncopation &&
-make -C apps/dmSyncopation install
+make -C apps/dmSyncopation CPPFLAGS=-DDMSYNCOPATION_DIAGNOSTIC_INDI=1 &&
+make -C apps/dmSyncopation CPPFLAGS=-DDMSYNCOPATION_DIAGNOSTIC_INDI=1 install
 ```
 
+The capture requires the [diagnostic INDI build](dmSyncopation.md#diagnostic-indi-build).
 The installed binary must expose `zero_test.labelVersion=9`,
 `zero_test.targetEndpoint=1` and `zero_test.idealPublisher=1`; an older
 coordinated-trial binary does not have the current progress/reporting interface.
@@ -118,7 +119,10 @@ with gains/workload/settings unchanged:
 - Reader-release observer FIFO30 on `dmtweeter-synco-release` / CPU57
   (historically `spare57`), reading `dmtweeter_read_done`.
 - BMC SDK worker FIFO55 on `dmtweeter-sdk` / CPU56 (historically `spare56`);
-  retain the tested ordered post worker FIFO30 on `spare31` / CPU31 for this comparison.
+  ordered post worker FIFO30 on `dmtweeter-post` / CPU44. The earlier comparison
+  used `spare31` / CPU31; the [2026-11-18 RTC migration](../../../agents/plans/2026-10/rtc-cpuset-restructuring.md#2026-11-18-camwfs-descramble-migration)
+  assigns CPU31 to `camwfs_sw`. Record CPU44 placement with the new reference
+  capture rather than reusing the historical CPU31 baseline.
 - The working three-credit pipeline and matching delivery-clock diagnostics.
 - `sysMonRTC.set_latency.toggle=On`.
 - dmcomb mode 4 / DELAY / 5 us, using auxiliary-counter change detection. This

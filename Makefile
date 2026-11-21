@@ -29,10 +29,13 @@ apps_aoc = \
 	xt1121DCDU \
 	tcsInterface \
 	adcTracker \
+	hwpSequencer \
 	hwpTracker \
+	qwpPupilTracker \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
+	qwpTracker \
 	stateRuleEngine \
 	xInstGraph
 
@@ -90,6 +93,8 @@ pythonapps_rtc = \
 # Apps needed on ICC
 apps_icc = \
 	dmPokeCenter \
+	elliptecCtrl \
+	elliptecLowLevel \
 	filterWheelCtrl \
 	smc100ccCtrl \
 	usbtempMon \
@@ -138,6 +143,8 @@ all_buildable_apps = \
 	dmPokeXCorr \
 	dmSpeckle \
 	dmSyncopation \
+	elliptecCtrl \
+	elliptecLowLevel \
 	loopTimingMonitor \
 	filterWheelCtrl \
 	flipperCtrl \
@@ -160,6 +167,7 @@ all_buildable_apps = \
 	psfFit \
 	pupilFit \
 	pwfsSlopeCalc \
+	qwpPupilTracker \
 	refRMS \
 	rhusbMon \
 	shmimIntegrator \
@@ -239,6 +247,7 @@ all_guis = \
 	pwr \
 	coronAlignGUI \
 	loopCtrlGUI \
+	timingGUI \
 	roiGUI \
 	cameraGUI \
 	stageGUI
@@ -269,7 +278,8 @@ all_rtimv_plugins = \
 	pwfsAlignment \
 	dmStatus \
 	warnings \
-	acquisition
+	acquisition \
+	valueDisplay
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -314,7 +324,8 @@ scripts_to_install = \
 	inventory_files \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
-	cyverse_replicate 
+	cyverse_replicate \
+	xnormconfig
 
 ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup
@@ -526,6 +537,34 @@ utils_clean:
 		for app in ${utils_to_build}; do \
 			(cd utils/$$app && ${MAKE} clean) || exit 1; \
 		done
+
+# INDI-client-only machines: INDI tools (getINDI, setINDI, etc.), cursesINDI,
+# rtimv plugins, and GUIs.  None of these link libMagAOX, so no apps, libs,
+# or log utilities are built.
+# If mxlib and rtimv have successfully been installed the only additional
+# dependencies will be qwt and maybe svg:
+#  On Ubuntu 24/26: sudo apt install -y libqt5svg5-dev libqwtmathml-qt5-dev
+
+client_utils = cursesINDI
+
+# Run make (with optional goal $(3)) in each directory $(2) under $(1)
+make_each = for d in $(2); do (cd $(1)/$$d && ${MAKE} $(3)) || exit 1; done
+
+.PHONY: client
+client: indi_all
+	$(call make_each,gui/rtimv/plugins,${rtimv_plugins_to_build})
+	$(call make_each,gui/apps,${guis_to_build})
+	$(call make_each,utils,${client_utils})
+
+.PHONY: client_install
+client_install: indi_install
+	$(call make_each,gui/rtimv/plugins,${rtimv_plugins_to_build},install)
+	$(call make_each,gui/apps,${guis_to_build},install)
+	$(call make_each,utils,${client_utils},install)
+
+.PHONY: client_clean
+client_clean: indi_clean guis_clean
+	$(call make_each,utils,${client_utils},clean)
 
 .PHONY: test
 test: tests_clean
