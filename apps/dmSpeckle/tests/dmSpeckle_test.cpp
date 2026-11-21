@@ -7,8 +7,8 @@
 
 #include "../dmSpeckle.hpp"
 
-#include <limits>
 #include <cstdio>
+#include <limits>
 
 using namespace MagAOX::app;
 
@@ -32,12 +32,19 @@ class dmSpeckleHarness : public dmSpeckle
   public:
     using MagAOXApp<true>::config;
     using dmSpeckle::fillTipTilt;
+    using dmSpeckle::handleFileReload;
     using dmSpeckle::m_amp;
+    using dmSpeckle::m_arbcube;
     using dmSpeckle::m_dmChannelName;
     using dmSpeckle::m_dwell;
+    using dmSpeckle::m_fileName;
     using dmSpeckle::m_frequency;
     using dmSpeckle::m_height;
     using dmSpeckle::m_imageStream;
+    using dmSpeckle::m_indiP_amp;
+    using dmSpeckle::m_indiP_file;
+    using dmSpeckle::m_indiP_frequency;
+    using dmSpeckle::m_indiP_loadFile;
     using dmSpeckle::m_indiP_loopLock;
     using dmSpeckle::m_indiP_modulating;
     using dmSpeckle::m_indiP_trigger;
@@ -178,10 +185,13 @@ TEST_CASE( "dmSpeckle provider selects samples from the main cycle or target tim
     app.m_frequency            = 2000;
     app.m_dwell                = 2;
     app.m_shapes.resize( 2, 2, 4 );
+    app.m_arbcube.resize( 2, 2, 4 );
+    app.m_amp = 0.5f;
 
     for( int plane = 0; plane < 4; ++plane )
     {
         app.m_shapes.image( plane ).setConstant( float( plane + 1 ) );
+        app.m_arbcube.image( plane ).setConstant( float( 10 * ( plane + 1 ) ) );
     }
 
     mx::improc::eigenImage<float> command( 2, 2 );
@@ -208,15 +218,15 @@ TEST_CASE( "dmSpeckle provider selects samples from the main cycle or target tim
     app.m_opMode  = ARBCUBE;
     slot.targetNs = 125000;
     REQUIRE( app.prepareSyncopationCommand( command, slot, false ) == 0 );
-    CHECK( command.minCoeff() == 1 );
-    CHECK( command.maxCoeff() == 1 );
+    CHECK( command.minCoeff() == 5 );
+    CHECK( command.maxCoeff() == 5 );
     slot.targetNs = 2125000;
     REQUIRE( app.prepareSyncopationCommand( command, slot, false ) == 0 );
-    CHECK( command.minCoeff() == 3 );
-    CHECK( command.maxCoeff() == 3 );
+    CHECK( command.minCoeff() == 15 );
+    CHECK( command.maxCoeff() == 15 );
     slot.targetNs = 4125000;
     REQUIRE( app.prepareSyncopationCommand( command, slot, false ) == 0 );
-    CHECK( command.minCoeff() == 1 );
+    CHECK( command.minCoeff() == 5 );
 
     app.m_opMode    = TIPTILT;
     app.m_frequency = 200;
@@ -232,6 +242,105 @@ TEST_CASE( "dmSpeckle provider selects samples from the main cycle or target tim
 
     REQUIRE( app.prepareSyncopationCommand( command, slot, true ) == 0 );
     REQUIRE( command.isZero() );
+}
+
+/// Load once, then apply new gain and frequency commands entirely from the cached FITS frames.
+/** \ingroup dmSpeckle_unit_test */
+TEST_CASE( "dmSpeckle reuses a loaded arbitrary cube across start and parameter changes", "[dmSpeckle]" )
+{
+    // clang-format off
+    #ifdef DMSPECKLE_TEST_DOXYGEN_REF
+    dmSpeckle::handleFileReload();
+    dmSpeckle::loadArbcubeFile(mx::improc::eigenCube<float>(), "");
+    dmSpeckle::newCallBack_m_indiP_loadFile(pcf::IndiProperty());
+    dmSpeckle::newCallBack_m_indiP_modulating(pcf::IndiProperty());
+    dmSpeckle::newCallBack_m_indiP_amp(pcf::IndiProperty());
+    dmSpeckle::newCallBack_m_indiP_frequency(pcf::IndiProperty());
+    dmSpeckle::prepareSyncopationCommand;
+    #endif
+    // clang-format on
+    dmSpeckleHarness app;
+    app.m_width = app.m_height = 2;
+    app.m_indiP_file.setName( "file" );
+    app.m_indiP_loadFile.setName( "load_file" );
+    app.m_indiP_modulating.setName( "modulating" );
+    app.m_indiP_amp.setName( "amp" );
+    app.m_indiP_frequency.setName( "frequency" );
+
+    mx::improc::eigenCube<float> cube( 2, 2, 40000 );
+    cube.setZero();
+    cube.image( 1 ).setConstant( 3 );
+    cube.image( 2 ).setConstant( 5 );
+
+    char path[]     = "/tmp/dmSpeckle-arbcube-XXXXXX";
+    int  descriptor = mkstemp( path );
+    REQUIRE( descriptor >= 0 );
+    close( descriptor );
+
+    mx::fits::fitsFile<float> fits;
+    const auto                writeResult = fits.write( path, cube );
+
+    if( writeResult != mx::error_t::noerror )
+    {
+        std::remove( path );
+    }
+
+    REQUIRE( writeResult == mx::error_t::noerror );
+    app.m_fileName = path;
+
+    pcf::IndiProperty load;
+    load.setName( "load_file" );
+    load.add( pcf::IndiElement( "request" ) );
+    load["request"]        = pcf::IndiElement::On;
+    const int reloadResult = app.newCallBack_m_indiP_loadFile( load );
+    app.handleFileReload();
+    REQUIRE( std::remove( path ) == 0 );
+    REQUIRE( reloadResult == 0 );
+    REQUIRE( app.m_indiP_file.getState() == INDI_OK );
+    REQUIRE( app.m_arbcube.planes() == 40000 );
+
+    app.m_opMode = ARBCUBE;
+    pcf::IndiProperty modulating;
+    modulating.setName( "modulating" );
+    modulating.add( pcf::IndiElement( "toggle" ) );
+    modulating["toggle"] = pcf::IndiElement::On;
+    REQUIRE( app.newCallBack_m_indiP_modulating( modulating ) == 0 );
+    app.handleFileReload();
+    REQUIRE( app.m_modulating );
+
+    pcf::IndiProperty amp;
+    amp.setName( "amp" );
+    amp.add( pcf::IndiElement( "target" ) );
+    amp["target"] = 0.0f;
+    REQUIRE( app.newCallBack_m_indiP_amp( amp ) == 0 );
+
+    mx::improc::eigenImage<float> command( 2, 2 );
+    const synco::Request          slot{ .step = 1, .targetNs = 1250000 };
+    REQUIRE( app.prepareSyncopationCommand( command, slot, false ) == 0 );
+    REQUIRE( command.isZero() );
+
+    amp["target"] = 0.5f;
+    REQUIRE( app.newCallBack_m_indiP_amp( amp ) == 0 );
+    app.handleFileReload();
+    REQUIRE( app.prepareSyncopationCommand( command, slot, false ) == 0 );
+    REQUIRE( command.minCoeff() == 2.5f );
+
+    pcf::IndiProperty frequency;
+    frequency.setName( "frequency" );
+    frequency.add( pcf::IndiElement( "target" ) );
+    frequency["target"] = 1000.0f;
+    REQUIRE( app.newCallBack_m_indiP_frequency( frequency ) == 0 );
+    app.handleFileReload();
+    REQUIRE( app.prepareSyncopationCommand( command, slot, false ) == 0 );
+    REQUIRE( command.maxCoeff() == 1.5f );
+    REQUIRE( app.m_arbcube.image( 1 ).maxCoeff() == 3 );
+
+    REQUIRE( app.newCallBack_m_indiP_loadFile( load ) == 0 );
+    REQUIRE( app.m_indiP_file.getState() == INDI_BUSY );
+    app.handleFileReload();
+    REQUIRE( app.m_indiP_file.getState() == INDI_ALERT );
+    REQUIRE_FALSE( app.m_modulating );
+    REQUIRE( app.m_arbcube.planes() == 0 );
 }
 
 /// Switch managed sparkle to auxiliary-slot playback and back while modulation is active.
