@@ -475,10 +475,13 @@ inline void accelSim::setupConfig()
          "double",
          "Initial optical_amplitude: unsensed optical disturbance [0,100], default 0." );
     add( "optical", "seed", "uint64_t", "Independent optical disturbance random seed, default 7." );
-    add( "accelOnly", "enabled", "bool", "Add one mode sensed only by the accelerometer, default false." );
-    add( "accelOnly", "frequency", "double", "ACC-only mode frequency [Hz], default 50." );
-    add( "accelOnly", "amplitude", "double", "ACC-only mode per-axis acceleration RMS [m/s^2], default 0.005." );
-    add( "accelOnly", "seed", "uint64_t", "ACC-only mode random seed, default 11." );
+    add( "accelOnly", "enabled", "bool", "Add modes sensed only by the accelerometer, default false." );
+    add( "accelOnly", "frequency", "string", "Comma-separated ACC-only mode frequencies [Hz], default 50." );
+    add( "accelOnly",
+         "amplitude",
+         "string",
+         "Comma-separated per-axis acceleration RMS [m/s^2], one per frequency, default 0.005." );
+    add( "accelOnly", "seed", "uint64_t", "Seed of the first ACC-only mode; mode k uses seed+k, default 11." );
     add( "sensor", "noisePSD", "double", "One-sided acceleration noise PSD, default 1e-8." );
     add( "adc", "zero", "double", "ADC zero point [counts], default 2048." );
     add( "adc", "voltsPerBit", "double", "Empirical volts per count, default 0.0083799." );
@@ -553,8 +556,9 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_parameters.m_opticalAmplitude, "optical.amplitude" );
     config( m_parameters.m_opticalSeed, "optical.seed" );
     config( m_parameters.m_accelOnly, "accelOnly.enabled" );
-    config( m_parameters.m_accelOnlyFrequency, "accelOnly.frequency" );
-    config( m_parameters.m_accelOnlyAmplitude, "accelOnly.amplitude" );
+    std::string accelOnlyFrequencies = "50", accelOnlyAmplitudes = "0.005";
+    config( accelOnlyFrequencies, "accelOnly.frequency" );
+    config( accelOnlyAmplitudes, "accelOnly.amplitude" );
     config( m_parameters.m_accelOnlySeed, "accelOnly.seed" );
     config( m_parameters.m_noisePSD, "sensor.noisePSD" );
     config( m_parameters.m_zero, "adc.zero" );
@@ -604,16 +608,23 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_dmThreadCpuset, "dm.cpuset" );
     try
     {
-        std::stringstream couplingInput( coupling );
-        std::string       couplingItem;
-        m_opticalCoupling.clear();
-        while( std::getline( couplingInput, couplingItem, ',' ) )
+        const auto numbers = []( const std::string &text, const char *key )
         {
-            std::size_t used = 0;
-            m_opticalCoupling.push_back( std::stod( couplingItem, &used ) ); // Throws for a non-number.
-            if( couplingItem.find_first_not_of( " \t", used ) != std::string::npos )
-                throw std::invalid_argument( "optical.coupling must be comma-separated numbers" );
-        }
+            std::stringstream   input( text );
+            std::string         item;
+            std::vector<double> values;
+            while( std::getline( input, item, ',' ) )
+            {
+                std::size_t used = 0;
+                values.push_back( std::stod( item, &used ) ); // Throws for a non-number.
+                if( item.find_first_not_of( " \t", used ) != std::string::npos )
+                    throw std::invalid_argument( std::string( key ) + " must be comma-separated numbers" );
+            }
+            return values;
+        };
+        m_opticalCoupling                   = numbers( coupling, "optical.coupling" );
+        m_parameters.m_accelOnlyFrequencies = numbers( accelOnlyFrequencies, "accelOnly.frequency" );
+        m_parameters.m_accelOnlyAmplitudes  = numbers( accelOnlyAmplitudes, "accelOnly.amplitude" );
         if( m_dmThreadPrio < 0 || m_dmThreadPrio > 99 )
             throw std::invalid_argument( "dm.threadPrio must be in [0,99]" );
         if( m_dmStartupEnabled || !std::isfinite( dmScale ) || dmScale < 0 || dmScale > accelSimDetail::maxDMScale ||
@@ -670,8 +681,10 @@ inline int accelSim::loadConfigImpl( mx::app::appConfigurator &config )
         if( !std::isfinite( m_dtTransfer + m_wfsProcess + m_dtF + m_wfsRead ) )
             throw std::invalid_argument( "timing-model overflow" );
         m_model.configure( m_parameters, accelSimDetail::referenceModes( m_parameters.m_modeSeed, m_opticalCoupling ) );
-        m_maxFrequency = std::max( m_model.m_modes.back().m_spec.m_frequency,
-                                   m_parameters.m_accelOnly ? m_parameters.m_accelOnlyFrequency : 0 );
+        m_maxFrequency = m_model.m_modes.back().m_spec.m_frequency;
+        if( m_parameters.m_accelOnly )
+            for( double frequency : m_parameters.m_accelOnlyFrequencies )
+                m_maxFrequency = std::max( m_maxFrequency, frequency );
     }
     catch( const std::exception &error )
     {

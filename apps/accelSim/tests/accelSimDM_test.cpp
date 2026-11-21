@@ -502,7 +502,7 @@ TEST_CASE( "accelSim optical configuration", "[accelSim][dm-controls]" )
     // clang-format on
 }
 
-/** \brief [accelOnly] is disabled by default, parsed when enabled, included in rate validation, and range checked.
+/** \brief [accelOnly] is disabled by default, parses equal-length lists, joins rate validation, and is range checked.
  * \ingroup accelSim_unit_test
  */
 TEST_CASE( "accelSim ACC-only configuration", "[accelSim][dm-controls][accel-only]" )
@@ -511,27 +511,33 @@ TEST_CASE( "accelSim ACC-only configuration", "[accelSim][dm-controls][accel-onl
     defaults.setupConfig();
     REQUIRE( defaults.loadConfigImpl( defaults.config ) == 0 );
     REQUIRE( !defaults.m_parameters.m_accelOnly );
+    REQUIRE( defaults.m_parameters.m_accelOnlyFrequencies == std::vector<double>{ 50 } ); // Single-mode default.
+    REQUIRE( defaults.m_parameters.m_accelOnlyAmplitudes == std::vector<double>{ .005 } );
     const double maxFrequency = defaults.m_maxFrequency;
 
     dmAppTest configured;
     configured.setupConfig();
     configured.config.m_values["sim.fps"]             = "8000";
     configured.config.m_values["accelOnly.enabled"]   = "1";
-    configured.config.m_values["accelOnly.frequency"] = "1000";
-    configured.config.m_values["accelOnly.amplitude"] = "0.01";
+    configured.config.m_values["accelOnly.frequency"] = "1000,50";
+    configured.config.m_values["accelOnly.amplitude"] = "0.01,0.02";
     configured.config.m_values["accelOnly.seed"]      = "5";
     REQUIRE( configured.loadConfigImpl( configured.config ) == 0 );
     REQUIRE( configured.m_parameters.m_accelOnly );
-    REQUIRE( configured.m_parameters.m_accelOnlyFrequency == 1000 );
-    REQUIRE( configured.m_parameters.m_accelOnlyAmplitude == .01 );
+    REQUIRE( configured.m_parameters.m_accelOnlyFrequencies == std::vector<double>{ 1000, 50 } );
+    REQUIRE( configured.m_parameters.m_accelOnlyAmplitudes == std::vector<double>{ .01, .02 } );
     REQUIRE( configured.m_parameters.m_accelOnlySeed == 5 );
-    REQUIRE( configured.m_maxFrequency == 1000 ); // Above the population's maximum, so it bounds fps requests.
+    REQUIRE( configured.m_maxFrequency == 1000 ); // The highest list entry now bounds fps requests.
     REQUIRE( maxFrequency < 1000 );
     REQUIRE( configured.m_model.m_modes.size() == defaults.m_model.m_modes.size() ); // Existing modes unchanged.
 
     for( const auto &[key, text] : { std::pair{ "accelOnly.frequency", "0" },
-                                     { "accelOnly.frequency", "4000" },
-                                     { "accelOnly.amplitude", "-1" } } )
+                                     { "accelOnly.frequency", "50,4000" }, // Nyquist at 8 kHz.
+                                     { "accelOnly.frequency", "50,70" },   // Two frequencies, one amplitude.
+                                     { "accelOnly.frequency", "50,x" },
+                                     { "accelOnly.amplitude", "0.005,0.005" },
+                                     { "accelOnly.amplitude", "-1" },
+                                     { "accelOnly.amplitude", "0.005x" } } )
     {
         dmAppTest invalid;
         invalid.setupConfig();
