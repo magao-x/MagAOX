@@ -8,6 +8,9 @@ active steps do not create controller records.
 
 ## Setup
 
+Use the [diagnostic INDI build](dmSyncopation.md#diagnostic-indi-build) for the
+readbacks in this procedure.
+
 Rebuild/install the DM controller (`bmcCtrl` for dmtweeter), `dmSyncopation` and
 `logdump`. The completion publisher itself does not need a new reader, but this
 test adds a new optional `dmsynco` telemetry table, so the reader must be rebuilt.

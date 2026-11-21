@@ -236,3 +236,14 @@ disabling diagnostics alone did not resolve it.
 The reported jitter is an operational observation, not a measured worst-case
 bound. No additional raw capture accompanies this report. No instrument action
 was performed by the agent during this validation or PR preparation.
+
+## Operator INDI interface
+
+On 2026-11-20, the operator asked to reduce the number of visible INDI
+properties. The default build now publishes `enable`, `reacquire`, `settings`,
+a short `timing` summary and `health`, alongside standard MagAOX properties.
+`loopTimingMonitor` continues to subscribe to `enable.toggle` and to consume
+the configured main-timing stream. The
+[diagnostic INDI build](../../../apps/dmSyncopation/doc/dmSyncopation.md#diagnostic-indi-build)
+restores the extended readbacks cited earlier in this record. The
+`diagnostics.windowSec` setting still controls collection in either build.

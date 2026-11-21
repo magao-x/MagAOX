@@ -232,33 +232,28 @@ pipeline timing collection, optional observer threads, per-event telemetry,
 phase/publication statistics, main SDK/reader diagnostic associations and
 app-logic profiling. It retains the publication-clock qualification, exact
 combined/read-done matching, required reader-release queue, scheduling and
-copy-cutoff checks, provider results, timing maxima, health and aggregate
-`zero_test`/`zero_clock` readbacks. Turning diagnostics off does not relax
-readiness or safety checks. The operational primary monitor and
-`readerReleaseMonitor` worker continue running; they are separate from the
-optional timing observers.
+copy-cutoff checks, provider results, timing maxima and aggregate telemetry.
+The default INDI build exposes the operator controls plus `health` and the
+short `timing` summary. The primary monitor and `readerReleaseMonitor` worker
+continue running.
 
 Keep `diagnostics.maxEvents` positive: production also uses this capacity for
 the required reader-release queue, so zero is rejected even in minimal mode.
 The preset retains 20000 entries. Do not disable the controller's operational
 completion or reader-release streams to reduce diagnostic overhead.
 
-For a detailed investigation, set `diagnostics.windowSec=2` and restart synco
-through the normal operator procedure. The existing `diagnostics.combiner`,
-`diagnostics.camera` and `diagnostics.pipeline` switches select their optional
-observers when the window is positive; their defaults are true. Restore a zero
-window and restart after the capture when minimal production operation is
-desired. These settings do not change diagnostic capture in the camera, DM
-controller or other applications.
+For detailed INDI readbacks, use the
+[diagnostic INDI build](dmSyncopation.md#diagnostic-indi-build). To collect the
+optional timing populations, set `diagnostics.windowSec=2` and restart synco.
+The `diagnostics.combiner`, `diagnostics.camera` and `diagnostics.pipeline`
+settings select their observers when the window is positive. Restore a zero
+window and restart for minimal collection.
 
-After restarting, verify `zero_test.diagnosticsEnabled`, `zero_phase.enabled`,
-`zero_publication.enabled` and `logic_timing.enabled` are all zero for minimal
-mode. The primary, camera, combiner and pipeline timing-quality properties also
-report `enabled=0`. These values describe collection, not scheduler readiness:
-`zero_clock`, scheduler counters and health still update during operation.
-Likewise, `reader_release_timing_quality.enabled=0` means its diagnostic
-aggregation is off; it does not mean the required reader-release worker or
-exact readiness checks are off. These mode indicators are fixed at startup.
+In the diagnostic build with a zero window, `zero_test.diagnosticsEnabled`,
+`zero_phase.enabled`, `zero_publication.enabled` and `logic_timing.enabled`
+report zero. The timing-quality `enabled` fields likewise describe optional
+collection. Publication-clock qualification and exact reader-release checks
+continue to run, and `zero_clock`, scheduler counters and health remain live.
 
 For managed dmSpeckle, configure its DM channel as the mapped auxiliary source
 and set the shared timing stream:
@@ -271,29 +266,41 @@ cpuset=tweeterSpeck
 [dm]
 channelName=dm01disp09_aux
 trigger=off
-frequency=8000
-dwell=1
 amp=0.01
 
 [syncopation]
 timingStream=dmtweeter_synco_timing
 writeLeadUs=50
+loopLock=true
 ```
 
 The existing dmSpeckle channel/modulation configuration selects its source and
-waveform. Managed mode does not independently trigger a main channel. Its
-target-time waveform calculation remains in dmSpeckle; schedule validation,
-buffer ownership and tagged publication are handled by the CRTP helper.
+waveform. The main loop controls the main DM trigger. Waveform calculation
+remains in dmSpeckle. The CRTP helper handles schedule validation, buffer
+ownership and tagged publication.
 An empty timing-stream setting preserves legacy dmSpeckle operation. There is
 no `opMode=managed` setting: use `sparkle`, `arbcube` or `tiptilt` with a nonempty
 timing stream. The source must end in `_aux` and its corresponding destination
 must appear in synco's mapping list.
 
-For sparkle and arbitrary cubes, `frequency/dwell` is the plane-advance rate,
-independent of synco's slot rate. At 8000/dwell 1, a four-plane sparkle advances
-every nominal 125 us slot and repeats its full pattern at 2 kHz. At 2000/dwell 1,
-it typically repeats each plane across four 8 kHz slots. In `tiptilt` mode,
-`frequency` instead sets the physical vibration frequency of each axis.
+With loop lock on, managed sparkle submits for step 0 only. It chooses a plane
+from the upcoming main frame counter and holds it through the auxiliary steps.
+The four-plane pattern spans four main frames at any loop rate. An unavailable
+or missed main slot retains the previous contribution. Auxiliary snapshots
+that retain the sparkle plane count toward that producer's diagnostic
+`missing` counter.
+
+Set `tweeterSpeck.loop_lock.toggle` Off in INDI to switch to timed playback
+while running, or set `syncopation.loopLock=false` for the startup default.
+Timed sparkle uses all available synco slots and samples the plane sequence
+at `frequency/dwell`. Set `tweeterSpeck.frequency.target` to the desired
+frequency in Hz. At 2 kHz main with four steps, 8000 Hz and dwell 1 request a
+plane advance at each nominal 125 µs slot. The delivered update rate is
+bounded by the available slots. A command committed before a switch can
+still take effect at its tagged slot.
+
+For arbitrary cubes, `frequency/dwell` sets the nominal plane-advance rate.
+In `tiptilt` mode, `frequency` sets the physical vibration frequency of each axis.
 
 Start synco before the producer so the shared sources and protocol records
 exist. Both start disabled. After verifying the configuration and resource
@@ -323,6 +330,10 @@ Confirm that the numbered destination contains the zero contribution before
 disabling synco or stopping either application. A "zero submitted" log confirms
 transport submission, not destination application. Stopping either application
 alone does not remove the last copied contribution.
+
+With the AO loop open and synco disabled, use
+`dmtweeter-synco.zero.request=On` to clear all configured destinations and
+trigger one dmcomb update. [Open-loop clearing procedure](dmSyncopation.md#controller-clearing-and-maintenance)
 
 ## Adding another producer application
 
@@ -354,7 +365,7 @@ allow the DM trigger. Do not modify the managed source through another app
 callback or an independent zero/trigger path. Generate the next image in
 private storage while a source commitment remains outstanding.
 
-The read-only `production` INDI property reports passive copies/skips and
+In the diagnostic INDI build, `production` reports passive copies/skips and
 `accepted0`, `missing0`, `rejected0`, and corresponding indices in configured
 destination order. Accepted counts mean private snapshots; they are separate
 from destination-copy completion and DM delivery. Shared scheduler counters
@@ -370,7 +381,9 @@ production state, rate and publications, rather than a hypothetical shadow rate.
 
 ## Capture the running production setup
 
-Keep synco enabled and tweeterSpeck modulating with the settings being tested.
+The capture below uses the
+[diagnostic INDI build](dmSyncopation.md#diagnostic-indi-build). Keep synco
+enabled and tweeterSpeck modulating with the settings being tested.
 Use this read-only block from anywhere inside the MagAOX checkout. It captures
 120 seconds of telemetry after the before-snapshots finish; the bounded
 before/after queries add to the total wall time. It saves the current synco and
