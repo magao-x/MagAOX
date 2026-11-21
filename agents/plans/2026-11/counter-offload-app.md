@@ -605,10 +605,10 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
 
 - **Progress.** 41 rows over 493 s, about 12 s each.
   - The run completed the coarse start and duration scans and the gain scan up to 0.5. It ended while measuring gain 0.6.
-  - Cause not in the CSV. Most likely the clip abort, since a higher gain gives a larger counter command. Log requested.
+  - **Confirmed by the user (2026-11-20): the clip abort ended the run** ("counter command clipped at maxCommand", with maxCommand=0.5) during the gain 0.6 point. The original parameters were then restored.
 - **Baseline.**
   - Band power with the counter off is about 2.1×10⁻⁵, about 270× the earlier run's 7.7×10⁻⁸. The spike now dominates the band, so the measurement is sensitive.
-  - It drifts by 10.7% (relative SD) over 8 min, between 1.71 and 2.38×10⁻⁵.
+  - It drifts between 1.71 and 2.38×10⁻⁵ over 8 min: a relative SD of 10.7%, and ±16% about the mean as a half-range.
   - Ratios below are recomputed against a baseline linearly interpolated between neighbouring `off` rows. The difference from the logged ratio is up to 0.1.
 - **Effect.** Counter-offloading clearly reduces the 240–260 Hz power: ratios 0.39–0.6 at gain 0.4–0.5.
 - **Gain (start 25, duration 330).**
@@ -620,8 +620,26 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
   - 100–275 µs: 0.59 ± 0.03;
   - 300–400 µs: 0.74 ± 0.08.
   - The best values are at the bottom edge of the grid. Because the first slot lands 100–225 µs after the offload arrives, a start below about 100 µs means the ramp is already partly complete at the first slot: the counter acts as fast as the scheduling allows. The ramp fitted to the woofer response is later than optimal.
-- **Duration (start 25, gain 0.4).** No significant trend: 0.47–0.63, mean 0.56 ± 0.05, within the noise.
+- **Duration (start 25, gain 0.4).** At most a weak trend: 0.47–0.63, mean 0.56 ± 0.05. Against the interpolated baseline, longer durations (400–600 µs) are slightly lower, by about 2σ.
 - **Noise and scan method.**
   - Repeated settings disagree by more than the per-row `fomStd` suggests. Start 25 / duration 330 / gain 0.4 gave 0.42 in the start scan but 0.48 in the gain scan, and durations 300–350 at the same start gave 0.56–0.57.
   - The per-point SD of the ratio is about 0.05–0.08.
-  - The coordinate scan keeps the single lowest noisy value as "best" (0.395 at start 25). Later stages must beat that lucky value, so the duration scan changed nothing ("winner's curse").
+  - The coordinate scan keeps the single lowest noisy value as "best" (0.395 at start 25). Later stages must beat that lucky value, so the duration scan changed nothing ("winner's curse"). Only gain 0.5 (0.394) beat it, by 0.001.
+- **Visualization.** `~/Documents/MagAO-X/simulations/DM_dynamics/offloading/counter_offload/calibration_run_analysis.ipynb` (not in this repo) plots this run and the 193905Z run.
+
+### Proposed: Clip Handling During Calibration (not implemented)
+**Current behaviour.**
+- `measure()` fails the whole run if `m_clipped` has changed since the run started.
+- `runCalibration()` then restores the original parameters, so a scan that reaches a too-large gain discards everything it found.
+
+**Options:**
+- **C1 (config only, next run).** Raise `maxCommand` to about 1.0. The tweeter's real limit is about ±1.5.
+- **C2 (code).**
+  - Treat a clip during a point as an *infeasible point*, not a run failure: write a CSV row with stage `clipped`, and give the scan an infinite cost for it.
+  - When that happens on the gain axis, skip the remaining larger gains.
+  - Reset the clip reference (`m_calibClipStart`) before each point, so that one clip doesn't fail every later point.
+  - Keep "abort and restore" only for operator abort, the app being disabled, offload-rate or mode changes, timeouts, and `abortRatio`.
+- **C3 (code).** On any abort, apply the best parameters found so far instead of the originals, if their ratio is below 1. Log it at WARNING.
+
+**Recommendation:** C1 for the next run, plus C2. C3 is optional.
+
