@@ -329,7 +329,7 @@ The complete [dmtweeter_synco.conf example](../dmtweeter_synco.conf) contains th
 | `streams.destinations` | `dm01disp07,dm01disp08` | Ordered numbered main-channel mapping. Sources append `_aux`; the first destination supplies every later-step trigger. |
 | `streams.combined` | `dm01disp` | Existing combined-output stream. |
 | `streams.timing` | `<instance>_timing` | Signed-int64 provider schedule; `dmtweeter_synco_timing` for this instance. |
-| `scheduler.maxSubframes` | 3 | Fixed requested count, 1–16, including passive step 0. |
+| `scheduler.maxSubframes` | 3 | Fixed requested count, 1–16, including passive step 0. Production also accepts 0 for automatic selection. |
 | `scheduler.maxCadenceHz` | 6000 | Nominal total-cadence sanity rating, including step 0. |
 | `scheduler.keepoutUs` | 115 | Controller processing/last-reader duration estimate. |
 | `scheduler.guardUs` | 20 | Reserve beyond explicit delivery/reader bounds. |
@@ -405,7 +405,7 @@ count in the production and legacy schedulers.
 | `enable` | Switch, read/write | `toggle` requests acquisition and operation when On. Off acknowledges after the current callback quiesces. Both source and destination retain their last values. |
 | `reacquire` | Switch, read/write | `request` invalidates the schedule and resets acquisition when On, then returns Off. |
 | `zero` | Switch, read/write | `request` clears the configured numbered destinations and triggers dmcomb once with the AO loop open and synco disabled. |
-| `settings` | Number, read/write while disabled | `steps` and `maxCadenceHz`. The legacy scheduler also exposes `keepoutUs`, `guardUs` and `step0LeadUs`. Finite trials add `durationSec`. Named elements are validated and applied together. |
+| `settings` | Number, read/write while disabled | `steps` and `maxCadenceHz`. Production accepts `steps=0` for automatic selection. The legacy scheduler also exposes `keepoutUs`, `guardUs` and `step0LeadUs`. Finite trials add `durationSec`. Named elements are validated and applied together. |
 | `timing` | Number, read-only | Reference, planned and confirmed rates (`mainHz`, `plannedHz`, `deliveredHz`), step counts (`requested`, `active`, `feasible`) and skip count (`missed`). `faults` counts legacy scheduler invalidations. |
 | `health` | Text, read-only | Current phase (`reason`), latched fault (`lastFault`) and operating `mode`. |
 

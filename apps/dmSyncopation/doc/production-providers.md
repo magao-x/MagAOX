@@ -2,8 +2,10 @@
 
 Production mode uses the counter-publication scheduler qualified by the finite
 zero trials, with changing, independent contributions from applications on the
-same RTC. It supports one through four steps, including passive-only `N=1`;
-four steps at 2 kHz main request 8 kHz total. `dmSpeckle` is the first application using the shared
+same RTC. It supports one through sixteen steps, including passive-only
+`N=1`. Automatic mode selects the highest integer subdivision allowed by the
+measured main rate and the configured combined-cadence rating. Four steps at
+2 kHz main request 8 kHz total. `dmSpeckle` is the first application using the shared
 `dev::dmSyncopationProducer<derivedT>` helper. The implementation and verification
 record is in the [production plan](../../../agents/plans/2026-11/dm-syncopation-production-providers.md).
 
@@ -180,9 +182,13 @@ readerReleaseReady=false
 pipelineBackend=false
 
 [scheduler]
-maxSubframes=4
+maxSubframes=0
 maxCadenceHz=8000
 copyBudgetUs=30
+
+[tracking]
+minMainRateHz=450
+maxMainRateHz=4000
 
 [diagnostics]
 windowSec=0
@@ -236,6 +242,29 @@ copy-cutoff checks, provider results, timing maxima and aggregate telemetry.
 The default INDI build exposes the operator controls plus `health` and the
 short `timing` summary. The primary monitor and `readerReleaseMonitor` worker
 continue running.
+
+The production scheduler seeds its phase grid after measuring a full cadence
+baseline, which takes at least 10 seconds of main publications. With
+`scheduler.maxSubframes=0`, it selects the highest integer count up to 16 whose
+combined rate fits `scheduler.maxCadenceHz` plus `tracking.rateTolerance`
+(default 1%). Step zero counts toward the total and is published by the main
+loop. A positive `maxSubframes` requests a fixed count.
+
+| Main rate | Steps | Planned combined rate with an 8 kHz rating |
+| --- | ---: | --- |
+| 500 Hz | 16 | 8 kHz |
+| 1 kHz | 8 | 8 kHz |
+| 2 kHz | 4 | 8 kHz |
+| 2.5 kHz | 3 | 7.5 kHz |
+| 3.6 kHz | 2 | 7.2 kHz |
+
+The preset's tracking range leaves headroom for a nominal 500 Hz loop's
+measured cadence. Synco uses the qualified primary publication rate and
+changes the provider schedule generation when the selected count changes.
+If a live rate change moves the frozen grid outside the publication clock's
+mapping window, synco withdraws the provider schedule and measures a fresh
+baseline before resuming. Delivery remains subject to the configured copy
+cutoffs and exact reader-release checks.
 
 Keep `diagnostics.maxEvents` positive: production also uses this capacity for
 the required reader-release queue, so zero is rejected even in minimal mode.
@@ -374,7 +403,9 @@ positive diagnostic window, and controller telemetry provides the independent
 evidence for backend execution.
 
 In production mode, `settings` exposes only `steps` and `maxCadenceHz`, editable
-while disabled. The older keepout/guard/step-0 settings belong to the legacy
+while disabled. Set `steps=0` for automatic selection. In this mode
+`timing.requested` shows 0 and `timing.active` shows the selected count once
+the scheduler is primed. The older keepout/guard/step-0 settings belong to the legacy
 scheduler; production uses exact reader-release readiness and its configured
 ready/passive-copy leads. The standard timing/health properties describe actual
 production state, rate and publications, rather than a hypothetical shadow rate.
