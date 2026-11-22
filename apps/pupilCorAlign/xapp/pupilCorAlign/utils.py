@@ -203,7 +203,7 @@ class XCorrShift():
             y_center + dy * self._xgrid.delta[1]
         ])
 
-    def measure(self, image, local_reference_point=np.array([0,0]), subpixel=True):
+    def measure(self, image, local_reference_point=np.array([0,0]), subpixel=False):
         xcorr = self.cross_correlate(image, local_reference_point)
 
         if subpixel:

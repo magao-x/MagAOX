@@ -33,6 +33,9 @@ class CalibrationConfig:
     superuser : bool = xconf.field(default=False, help="Whether to enable super user options for calibration.")
     fwpupil_modes : list[str] = xconf.field(help="List of calibrated fwpupil masks.")
     fwlyot_modes : list[str] = xconf.field(help="List of calibrated fwlyot masks.")
+    gain : float = xconf.field(default=0.25, help="Gain for the feedback loop.")
+    nrepeat : int = xconf.field(default=1, help="Number of times to repeat the actuator measurement pattern.")
+    nstack : int = xconf.field(default=4, help="Number of frames to stack for each measurement.")
 
 @xconf.config
 class DMConfig:
@@ -134,33 +137,45 @@ class pupilCorAlign(XDevice):
         self.fwlyot_reconstruction_matrix = np.linalg.pinv(fwlyot_response_matrix)
 
         # These also need to be exposed to indi
-        self.num_stack = 1
-        self.gain = 0.25
-        self.pattern_repeat = 1
+        self.nstack = self.config.calibration.nstack
+        self.gain = self.config.calibration.gain
+        self.nrepeat = self.config.calibration.nrepeat
         self.amp = 0.25
         self.sleep_time = 2.0
 
         nv = properties.NumberVector(name='nstack')
         nv.add_element(DefNumber(
             name='current', label='Number of frames', format='%i',
-            min=1, max=150, step=1, _value=1
+            min=1, max=150, step=1, _value=self.nstack
         ))
         nv.add_element(DefNumber(
             name='target', label='Number of frames', format='%i',
-            min=1, max=150, step=1, _value=1
+            min=1, max=150, step=1, _value=self.nstack
         ))
         self.add_property(nv, callback=self.handle_nstack)
 
         nv = properties.NumberVector(name='gain')
         nv.add_element(DefNumber(
             name='current', label='Loop Gain', format='%.2f',
-            min=0.00, max=1.00, step=0.01, _value=0.10
+            min=0.00, max=1.00, step=0.01, _value=self.gain
         ))
         nv.add_element(DefNumber(
             name='target', label='Loop Gain', format='%.2f',
-            min=0.00, max=1.00, step=0.01, _value=0.10
+            min=0.00, max=1.00, step=0.01, _value=self.gain
         ))
         self.add_property(nv, callback=self.handle_gain)
+
+        nv = properties.NumberVector(name='nrepeat')
+        nv.add_element(DefNumber(
+            name='current', label='Num repeat', format='%i',
+            min=1, max=150, step=1, _value=self.nrepeat
+        ))
+        nv.add_element(DefNumber(
+            name='target', label='Num repeat', format='%i',
+            min=1, max=150, step=1, _value=self.nrepeat
+        ))
+        self.add_property(nv, callback=self.handle_nrepeat)
+
 
         # These need to be exposed to INDI
         self.fwpupil_error = np.array([0., 0.])
@@ -169,22 +184,22 @@ class pupilCorAlign(XDevice):
         nv = properties.NumberVector(name='fwpupil')
         nv.add_element(DefNumber( #first element
             name='dx', label='dx', format='%.4f',
-            min=-50.00, max=50.00, step=0.0001, _value=0.21178766
+            min=-50.00, max=50.00, step=0.0001, _value=0
         ))
         nv.add_element(DefNumber(
             name='dy', label='dy', format='%.4f',
-            min=-50.00, max=50.00, step=0.0001, _value=0.19275196
+            min=-50.00, max=50.00, step=0.0001, _value=0
         ))
         self.add_property(nv, callback=self.handle_fwpupil_error)
 
         nv = properties.NumberVector(name='fwlyot')
         nv.add_element(DefNumber( #first element
             name='dx', label='dx', format='%.4f',
-            min=-50.00, max=50.00, step=0.0001, _value=0.21178766
+            min=-50.00, max=50.00, step=0.0001, _value=0
         ))
         nv.add_element(DefNumber(
             name='dy', label='dy', format='%.4f',
-            min=-50.00, max=50.00, step=0.0001, _value=0.19275196
+            min=-50.00, max=50.00, step=0.0001, _value=0
         ))
         self.add_property(nv, callback=self.handle_fwlyot_error)
 
@@ -212,24 +227,29 @@ class pupilCorAlign(XDevice):
             self.client['{:s}.target'.format(indi_targets[1])] = current_positions[1] - self.gain * cmd[1]
             time.sleep(self.sleep_time)
 
-    def measure_position(self, correlator):
+    def measure_position(self, correlator, calculate_delta=True):
         '''
         '''
-        im = self.camera.grab_stack(self.num_stack, check_before_wait=True)
+        im = self.camera.grab_stack(self.nstack, check_before_wait=True)
         shift = correlator.measure(im, self.actuators_shift)
+
+        if calculate_delta:
+            self.log.debug(f'Measured shift: {shift}, actuators shift: {self.actuators_shift}, delta: {shift - self.actuators_shift}')
+            shift -= self.actuators_shift
+
         return shift
 
     def measure_actuator(self):
         '''
         '''
         actuator_im = 0.
-        for i in range(self.pattern_repeat):
+        for i in range(self.nrepeat):
             for s in [-1, 1]:
                 self.ncpc_dm.actuators += s * self.amp * self.actuator_probe_pattern
                 self.ncpc_dm.send(0.05)
 
                 self.camera.grab_stack(2, check_before_wait=True)
-                actuator_im += s * self.camera.grab_stack(self.num_stack, check_before_wait=True)
+                actuator_im += s * self.camera.grab_stack(self.nstack, check_before_wait=True)
 
                 self.ncpc_dm.actuators -= s * self.amp * self.actuator_probe_pattern
         self.ncpc_dm.send()
@@ -249,7 +269,7 @@ class pupilCorAlign(XDevice):
         for mi, m in enumerate(self.config.calibration.fwpupil_modes):
             # Check if we are in the correct position
             if self.client['fwpupil.filterName.{:s}'.format(m)] == constants.SwitchState.ON:
-                self.fwpupil_error = self.measure_position(self.xcorr_fwpupil[mi])
+                self.fwpupil_error = self.measure_position(self.xcorr_fwpupil[mi], calculate_delta=True)
                 if self.taken_reference:
                     self.control_position(self.fwpupil_error, self.fwpupil_targets, self.fwpupil_reconstruction_matrix)
                 else:
@@ -261,7 +281,7 @@ class pupilCorAlign(XDevice):
         for mi, m in enumerate(self.config.calibration.fwlyot_modes):
             # Check if we are in the correct position
             if self.client['fwlyot.filterName.{:s}'.format(m)] == constants.SwitchState.ON:
-                self.fwlyot_error = self.measure_position(self.xcorr_fwlyot[mi])
+                self.fwlyot_error = self.measure_position(self.xcorr_fwlyot[mi], calculate_delta=True)
                 if self.taken_reference:
                     self.control_position(self.fwlyot_error, self.fwlyot_targets, self.fwlyot_reconstruction_matrix)
                 else:
@@ -279,7 +299,7 @@ class pupilCorAlign(XDevice):
     def handle_fwpupil_ref(self):
         '''
         '''
-        im = self.camera.grab_stack(self.num_stack, check_before_wait=True)
+        im = self.camera.grab_stack(self.nstack, check_before_wait=True)
         current_name = self.get_current_state('fwpupil.filterName')
         filename = "reference_{:s}_image.fits".format(current_name.replace('-', '_'))
         hp.write_field(im, self.config.calibration.path + filename)
@@ -289,7 +309,7 @@ class pupilCorAlign(XDevice):
         '''
         '''
         print("entering handle fwlyot ref")
-        im = self.camera.grab_stack(self.num_stack, check_before_wait=True)
+        im = self.camera.grab_stack(self.nstack, check_before_wait=True)
         current_name = self.get_current_state('fwlyot.filterName')
         filename = "reference_{:s}_image.fits".format(current_name.replace('-', '_'))
         print(current_name)
@@ -331,8 +351,8 @@ class pupilCorAlign(XDevice):
         if 'target' in new_message and new_message['target'] != existing_property['current']:
             existing_property['current'] = new_message['target']
             existing_property['target'] = new_message['target']
-            self.num_stack = int(new_message['target'])
-            self.log.debug(f'now averaging over {self.num_stack} frames')
+            self.nstack = int(new_message['target'])
+            self.log.debug(f'now averaging over {self.nstack} frames')
         self.update_property(existing_property)
 
     def handle_gain(self, existing_property, new_message):
@@ -343,6 +363,16 @@ class pupilCorAlign(XDevice):
             existing_property['target'] = new_message['target']
             self.gain = float(new_message['target'])
             self.log.debug(f'new feedback gain {self.gain} ')
+        self.update_property(existing_property)
+
+    def handle_nrepeat(self, existing_property, new_message):
+        '''
+        '''
+        if 'target' in new_message and new_message['target'] != existing_property['current']:
+            existing_property['current'] = new_message['target']
+            existing_property['target'] = new_message['target']
+            self.nrepeat = int(new_message['target'])
+            self.log.debug(f'now repeating the actuator measurement pattern {self.nrepeat} times')
         self.update_property(existing_property)
 
     # Ask joseph for a nicer way to deal with this
