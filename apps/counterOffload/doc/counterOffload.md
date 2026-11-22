@@ -39,10 +39,10 @@ ramp(τ)    = raised cosine, 0 before rampStartUs, 1 after rampStartUs + rampDur
     operation.
   - With `leak > 0`, the contribution leaks back to zero, so the main loop takes the correction back without a
     spike. The effective time constant depends on dmSyncopation's step count.
-- **Default ramp and gain.** 25 µs start, 330 µs duration and gain 0.5: the best measured in bench calibration run
-  20261120T202219Z. A start earlier than the first dmSyncopation slot (100–225 µs after an offload arrives) means
-  "as soon as possible". The original 120 µs start was fitted so that the tweeter's response matches the woofer's
-  deconvolved step response, but it is later than optimal.
+- **Default ramp and gain.** 0 µs start, 330 µs duration and gain 0.5.
+  - **Start.** The start is from bench calibration runs 20261120T202219Z, 20261122T183157Z and 20261122T184435Z. In each paired comparison a start of 0 measured as good as 25 µs or better, and starts of 50 µs or more were worse by about 0.1 in ratio at gain 0.4.
+  - **"As soon as possible".** The first dmSyncopation slot lands 100–225 µs after an offload arrives, so a start of 0 means "as soon as possible".
+  - **Why not 120 µs.** The original 120 µs start was fitted so that the tweeter's response matches the woofer's deconvolved step response, but it is later than optimal.
 - **The ramp reference t0.** The time counterOffload receives the update, plus `timeOffsetUs`.
 
 The app publishes only while something is changing: an active ramp, a leaking contribution, or a zero request. In
@@ -77,7 +77,7 @@ setINDI -s <instance>.zero.request=On
 | Setting | INDI | Default | Meaning |
 | --- | --- | --- | --- |
 | `counterOffload.channel` | — | `dm01disp08_aux` | Auxiliary source to write; must end in `_aux`. |
-| `counterOffload.rampStartUs` | `rampStartUs` | 25 | Ramp start after the woofer command, µs. |
+| `counterOffload.rampStartUs` | `rampStartUs` | 0 | Ramp start after the woofer command, µs. |
 | `counterOffload.rampDurationUs` | `rampDurationUs` | 330 | Ramp duration, µs. |
 | `counterOffload.leak` | `leak` | 0 | Fraction of the completed contribution removed after each published slot. |
 | `counterOffload.timeOffsetUs` | — | 0 | Added to the receipt time to give the ramp reference, µs. |
