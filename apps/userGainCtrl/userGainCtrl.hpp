@@ -7,13 +7,22 @@
 #ifndef userGainCtrl_hpp
 #define userGainCtrl_hpp
 
-#include <algorithm>
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
 #include <limits>
+#include <locale>
 #include <sstream>
+
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <mx/improc/eigenCube.hpp>
 #include <mx/improc/eigenImage.hpp>
 #include <mx/ioutils/fits/fitsFile.hpp>
+#include <mx/math/floatUtils.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -287,6 +296,7 @@ protected:
 
   mx::improc::eigenImage<realT> m_gainsCurrent; ///< The current gains.
   mx::improc::eigenImage<realT> m_gainsTarget;  ///< The target gains.
+  bool m_gainFrameReceived{ false }; ///< Whether the current gain buffer has been populated since allocation.
 
   realT ( *pixget )( void *, size_t ){
       nullptr }; ///< Pointer to a function to extract the image data as our desired type realT.
@@ -370,8 +380,27 @@ protected:
                     const gainShmimT &dummy     /**< [in] Tag selecting the gain monitor. */
   );
 
-  /// Publish the staged modal gains to shared memory.
-  int writeGains();
+  /// Invalidate the gain cache before the monitor unmaps the stream.
+  void shmimMonitorTiming( const gainShmimT      &tag /**< [in] Tag selecting the gain monitor. */,
+                           dev::shmimMonitorEvent event /**< [in] Stream lifecycle event. */ );
+
+  /// Check that the gain stream is ready while holding m_modeBlockMutex.
+  bool gainStreamReady() const;
+
+  /// Recompute the block gain means and uniformity flags from the current gain buffer.
+  void updateGainBlockStats();
+
+  /// Publish the staged modal gains and refresh the gain cache while holding m_modeBlockMutex.
+  int writeGains( bool updateTargets = false /**< [in] Whether to publish new targets for all blocks. */ );
+
+  /// Return the filename of the latest saved vector in this instance's sys directory.
+  std::string savedGainVectorPath() const;
+
+  /// Atomically replace the saved vector with a snapshot of the current modal gains.
+  int saveGainVector();
+
+  /// Read and apply the saved modal gains if they match the active stream dimensions.
+  int loadSavedGainVector();
 
   /// Set the gain of one block.
   int setBlockGain( int   n, /**< [in] Zero-based block index. */
@@ -437,6 +466,10 @@ protected:
 
   pcf::IndiProperty m_indiP_flatVector; ///< Request carrying the gain to write to every mode.
 
+  pcf::IndiProperty m_indiP_saveVector; ///< Request to persist the current gain vector.
+
+  pcf::IndiProperty m_indiP_loadSaved; ///< Request to apply the persisted gain vector.
+
   std::vector<pcf::IndiProperty> m_indiP_blockGains;  ///< Gain control of each block.
   std::vector<pcf::IndiProperty> m_indiP_blockMCs;    ///< Multiplier control of each block.
   std::vector<pcf::IndiProperty> m_indiP_blockLimits; ///< Limit control of each block.
@@ -455,6 +488,12 @@ public:
 
   /// Handle a request to assign one gain to every mode.
   INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_flatVector );
+
+  /// Handle a request to save the current gain vector.
+  INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_saveVector );
+
+  /// Handle a request to load the saved gain vector.
+  INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_loadSaved );
 
   /// Handle a change to the mode selected for individual controls.
   INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_singleModeNo );
@@ -627,6 +666,14 @@ int userGainCtrl::appStartup()
    m_indiP_flatVector.remove( "current" );
    m_indiP_flatVector.setPerm( pcf::IndiProperty::WriteOnly );
    if( registerIndiPropertyNew( m_indiP_flatVector, INDI_NEWCALLBACK( m_indiP_flatVector ) ) < 0 )
+   {
+       return -1;
+   }
+
+   createStandardIndiRequestSw( m_indiP_saveVector, "save_vector", "Save Vector", "Loop Controls" );
+   createStandardIndiRequestSw( m_indiP_loadSaved, "load_saved", "Load Saved", "Loop Controls" );
+   if( registerIndiPropertyNew( m_indiP_saveVector, INDI_NEWCALLBACK( m_indiP_saveVector ) ) < 0 ||
+       registerIndiPropertyNew( m_indiP_loadSaved, INDI_NEWCALLBACK( m_indiP_loadSaved ) ) < 0 )
    {
        return -1;
    }
@@ -911,6 +958,7 @@ int userGainCtrl::allocate(const gainShmimT & dummy)
 
     std::unique_lock<std::mutex> lock(m_modeBlockMutex);
 
+    m_gainFrameReceived = false;
     m_gainsCurrent.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
     m_gainsTarget.resize(shmimMonitorT::m_width, shmimMonitorT::m_height);
 
@@ -939,42 +987,12 @@ int userGainCtrl::processImage( void * curr_src,
       data[nn] = pixget(curr_src, nn);
    }
 
-   //update blocks here.
+   m_gainFrameReceived = true;
+   updateGainBlockStats();
 
-   for(size_t n =0; n < m_modeBlockStart.size(); ++n)
+   for( size_t n = 0; n < m_indiP_blockGains.size(); ++n )
    {
-      double mng = 0;
-
-      int NN = 0;
-
-      for(int m =0; m < m_modeBlockN[n]; ++m)
-      {
-         if(m_modeBlockStart[n] + m >= m_gainsCurrent.rows()) break;
-         mng += m_gainsCurrent(m_modeBlockStart[n] + m,0);
-         ++NN;
-      }
-
-      m_modeBlockGains[n] = mng / NN;
-
-      bool constant = true;
-
-      for(int m =0; m < m_modeBlockN[n]; ++m)
-      {
-         if(m_modeBlockStart[n] + m >= m_gainsCurrent.rows()) break;
-         if(m_gainsCurrent(m_modeBlockStart[n] + m,0) != m_modeBlockGains[n])
-         {
-            constant = false;
-            break;
-         }
-      }
-
-      m_modeBlockGainsConstant[n] = constant;
-
-   }
-
-   for(size_t n=0; n < m_indiP_blockGains.size(); ++n)
-   {
-      updateIfChanged(m_indiP_blockGains[n], "current", m_modeBlockGains[n]);
+       updateIfChanged( m_indiP_blockGains[n], "current", m_modeBlockGains[n] );
    }
 
    lock.unlock();
@@ -984,28 +1002,232 @@ int userGainCtrl::processImage( void * curr_src,
    return 0;
 }
 
-inline
-int userGainCtrl::writeGains()
+inline bool userGainCtrl::gainStreamReady() const
 {
-   shmimMonitorT::m_imageStream.md->write=1;
-   char * dest = static_cast<char *>(shmimMonitorT::m_imageStream.array.raw);
+    return m_gainFrameReceived && shmimMonitorT::m_imageStream.md && shmimMonitorT::m_imageStream.array.raw &&
+           shmimMonitorT::m_dataType == _DATATYPE_FLOAT && m_gainsTarget.size() > 0 &&
+           m_gainsTarget.rows() == shmimMonitorT::m_width && m_gainsTarget.cols() == shmimMonitorT::m_height;
+}
 
-   memcpy(dest, m_gainsTarget.data(), shmimMonitorT::m_width*shmimMonitorT::m_height*shmimMonitorT::m_typeSize  );
+inline void userGainCtrl::shmimMonitorTiming( const gainShmimT &, dev::shmimMonitorEvent event )
+{
+    if( event == dev::shmimMonitorEvent::disconnected )
+    {
+        std::lock_guard<std::mutex> lock( m_modeBlockMutex );
+        m_gainFrameReceived = false;
+    }
+}
 
-   //Set the time of last write
-   clock_gettime(CLOCK_REALTIME, &shmimMonitorT::m_imageStream.md->writetime);
+inline void userGainCtrl::updateGainBlockStats()
+{
+    for( size_t n = 0; n < m_modeBlockStart.size(); ++n )
+    {
+        double mng = 0;
 
-   //Set the image acquisition timestamp
-   shmimMonitorT::m_imageStream.md->atime = shmimMonitorT::m_imageStream.md->writetime;
+        int NN = 0;
 
-   //Update cnt0
-   shmimMonitorT::m_imageStream.md->cnt0++;
+        for( int m = 0; m < m_modeBlockN[n]; ++m )
+        {
+            if( m_modeBlockStart[n] + m >= m_gainsCurrent.rows() )
+            {
+                break;
+            }
 
-   //And post
-   shmimMonitorT::m_imageStream.md->write=0;
-   ImageStreamIO_sempost(&(shmimMonitorT::m_imageStream),-1);
+            mng += m_gainsCurrent( m_modeBlockStart[n] + m, 0 );
+            ++NN;
+        }
 
-   return 0;
+        m_modeBlockGains[n] = mng / NN;
+
+        bool constant = true;
+
+        for( int m = 0; m < m_modeBlockN[n]; ++m )
+        {
+            if( m_modeBlockStart[n] + m >= m_gainsCurrent.rows() )
+            {
+                break;
+            }
+
+            if( m_gainsCurrent( m_modeBlockStart[n] + m, 0 ) != m_modeBlockGains[n] )
+            {
+                constant = false;
+                break;
+            }
+        }
+
+        m_modeBlockGainsConstant[n] = constant;
+    }
+}
+
+inline int userGainCtrl::writeGains( bool updateTargets )
+{
+    IMAGE &stream    = shmimMonitorT::m_imageStream;
+    stream.md->write = 1;
+
+    memcpy( stream.array.raw, m_gainsTarget.data(), static_cast<size_t>( m_gainsTarget.size() ) * sizeof( realT ) );
+    clock_gettime( CLOCK_REALTIME, &stream.md->writetime );
+    stream.md->atime = stream.md->writetime;
+    stream.md->cnt0++;
+    stream.md->write = 0;
+    ImageStreamIO_sempost( &stream, -1 );
+
+    m_gainsCurrent = m_gainsTarget;
+    updateGainBlockStats();
+
+    if( updateTargets )
+    {
+        for( size_t n = 0; n < m_indiP_blockGains.size(); ++n )
+        {
+            updateIfChanged( m_indiP_blockGains[n], "target", m_modeBlockGains[n] );
+        }
+    }
+
+    return 0;
+}
+
+inline std::string userGainCtrl::savedGainVectorPath() const
+{
+    return m_sysPath + "/" + m_configName + "/saved_gain_vector.txt";
+}
+
+inline int userGainCtrl::saveGainVector()
+{
+    mx::improc::eigenImage<realT> gains;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_modeBlockMutex );
+        if( !gainStreamReady() )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "Gain stream is unavailable" } );
+        }
+
+        gains = m_gainsCurrent;
+    }
+
+    std::ostringstream output;
+    output.imbue( std::locale::classic() );
+    output << gains.rows() << ' ' << gains.cols() << '\n'
+           << std::setprecision( std::numeric_limits<realT>::max_digits10 );
+
+    for( Eigen::Index i = 0; i < gains.size(); ++i )
+    {
+        realT gain = gains.data()[i];
+        if( !mx::math::isFinite( gain ) )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "Cannot save a non-finite modal gain" } );
+        }
+
+        output << gain << '\n';
+    }
+
+    const std::string record    = output.str();
+    const std::string path      = savedGainVectorPath();
+    std::string       temporary = path + ".tmp.XXXXXX";
+
+    elevatedPrivileges ep( this );
+    int                fd = ::mkstemp( temporary.data() );
+    if( fd < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, errno, 0, "Cannot create temporary file for " + path } );
+    }
+
+    // Match the sys state file permissions so the app can read it after dropping privileges.
+    int    error   = ( ::fchmod( fd, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH ) < 0 ) ? errno : 0;
+    size_t written = 0;
+    while( !error && written < record.size() )
+    {
+        ssize_t count = ::write( fd, record.data() + written, record.size() - written );
+        if( count < 0 && errno == EINTR )
+        {
+            continue;
+        }
+
+        if( count <= 0 )
+        {
+            error = count < 0 ? errno : EIO;
+        }
+        else
+        {
+            written += count;
+        }
+    }
+
+    if( !error && ::fsync( fd ) < 0 )
+    {
+        error = errno;
+    }
+
+    if( ::close( fd ) < 0 && !error )
+    {
+        error = errno;
+    }
+
+    if( !error && ::rename( temporary.c_str(), path.c_str() ) < 0 )
+    {
+        error = errno;
+    }
+
+    if( error )
+    {
+        ::unlink( temporary.c_str() );
+        return log<software_error, -1>( { __FILE__, __LINE__, error, 0, "Cannot save gain vector in " + path } );
+    }
+
+    return 0;
+}
+
+inline int userGainCtrl::loadSavedGainVector()
+{
+    Eigen::Index rows, cols;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_modeBlockMutex );
+        if( !gainStreamReady() )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "Gain stream is unavailable" } );
+        }
+
+        rows = m_gainsCurrent.rows();
+        cols = m_gainsCurrent.cols();
+    }
+
+    const std::string path = savedGainVectorPath();
+    errno                  = 0;
+    std::ifstream input( path );
+    if( !input )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, errno, 0, "Cannot open saved gain vector " + path } );
+    }
+
+    input.imbue( std::locale::classic() );
+    Eigen::Index savedRows, savedCols;
+    if( !( input >> savedRows >> savedCols ) || savedRows != rows || savedCols != cols )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Saved gain vector dimensions do not match " + path } );
+    }
+
+    mx::improc::eigenImage<realT> gains( rows, cols );
+    for( Eigen::Index i = 0; i < gains.size(); ++i )
+    {
+        if( !( input >> gains.data()[i] ) || !mx::math::isFinite( gains.data()[i] ) )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "Invalid saved gain vector in " + path } );
+        }
+    }
+
+    input >> std::ws;
+    if( !input.eof() || input.bad() )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, "Extra or unreadable data in saved gain vector " + path } );
+    }
+
+    std::lock_guard<std::mutex> lock( m_modeBlockMutex );
+    if( !gainStreamReady() || m_gainsCurrent.rows() != rows || m_gainsCurrent.cols() != cols )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Gain stream changed while loading " + path } );
+    }
+
+    m_gainsTarget = std::move( gains );
+    return writeGains( true );
 }
 
 int userGainCtrl::setBlockGain( int n,
@@ -1013,6 +1235,11 @@ int userGainCtrl::setBlockGain( int n,
                               )
 {
    std::unique_lock<std::mutex> lock(m_modeBlockMutex);
+
+   if( !gainStreamReady() || n < 0 || static_cast<size_t>( n ) >= m_modeBlockN.size() )
+   {
+       return -1;
+   }
 
    m_gainsTarget = m_gainsCurrent;
 
@@ -1334,14 +1561,19 @@ int userGainCtrl::setSingleModeNo ( int m )
 
 int userGainCtrl::setSingleGain( float g )
 {
-   if(m_singleModeNo < 0 || m_singleModeNo >= m_gainsCurrent.rows()) return -1;
    recordBlockGains();
+
    std::unique_lock<std::mutex> lock(m_modeBlockMutex);
+   if( !gainStreamReady() || m_singleModeNo < 0 || m_singleModeNo >= m_gainsCurrent.rows() )
+   {
+       return -1;
+   }
+
+   m_gainsTarget                   = m_gainsCurrent;
    m_gainsTarget(m_singleModeNo,0) = g;
-   lock.unlock();
+
    recordBlockGains(true);
-   writeGains();
-   return 0;
+   return writeGains();
 }
 
 int userGainCtrl::setSingleMC( float mc )
@@ -1472,7 +1704,11 @@ INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_zeroAll)(const pcf::IndiProperty &ip
 
    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
    {
-      std::unique_lock<std::mutex> lock(m_indiMutex);
+       std::lock_guard<std::mutex> lock( m_modeBlockMutex );
+       if( !gainStreamReady() )
+       {
+           return log<software_error, -1>( { __FILE__, __LINE__, "Gain stream is unavailable" } );
+       }
 
       std::cerr << "Got zero all\n";
       m_gainsTarget.setZero();
@@ -1501,26 +1737,43 @@ INDI_NEWCALLBACK_DEFN( userGainCtrl, m_indiP_flatVector )( const pcf::IndiProper
     }
 
     std::lock_guard<std::mutex> lock( m_modeBlockMutex );
-    if( !shmimMonitorT::m_imageStream.md || !shmimMonitorT::m_imageStream.array.raw || m_gainsTarget.size() == 0 ||
-        m_gainsTarget.rows() != shmimMonitorT::m_width || m_gainsTarget.cols() != shmimMonitorT::m_height )
+    if( !gainStreamReady() )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "Gain stream is unavailable" } );
     }
 
     m_gainsTarget.setConstant( gain );
-    writeGains();
+    return writeGains( true );
+}
 
-    // Keep subsequent gain requests based on the vector just written.
-    m_gainsCurrent.setConstant( gain );
-    std::fill( m_modeBlockGains.begin(), m_modeBlockGains.end(), gain );
-    std::fill( m_modeBlockGainsConstant.begin(), m_modeBlockGainsConstant.end(), 1 );
+INDI_NEWCALLBACK_DEFN( userGainCtrl, m_indiP_saveVector )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_saveVector, ipRecv );
 
-    for( auto &blockGain : m_indiP_blockGains )
+    if( !ipRecv.find( "request" ) || ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
     {
-        updateIfChanged( blockGain, "target", gain );
+        return 0;
     }
 
-    return 0;
+    updateSwitchIfChanged( m_indiP_saveVector, "request", pcf::IndiElement::Off, INDI_BUSY );
+    int result = saveGainVector();
+    updateSwitchIfChanged( m_indiP_saveVector, "request", pcf::IndiElement::Off, result == 0 ? INDI_OK : INDI_ALERT );
+    return result;
+}
+
+INDI_NEWCALLBACK_DEFN( userGainCtrl, m_indiP_loadSaved )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loadSaved, ipRecv );
+
+    if( !ipRecv.find( "request" ) || ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+    {
+        return 0;
+    }
+
+    updateSwitchIfChanged( m_indiP_loadSaved, "request", pcf::IndiElement::Off, INDI_BUSY );
+    int result = loadSavedGainVector();
+    updateSwitchIfChanged( m_indiP_loadSaved, "request", pcf::IndiElement::Off, result == 0 ? INDI_OK : INDI_ALERT );
+    return result;
 }
 
 INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleModeNo)(const pcf::IndiProperty &ipRecv)

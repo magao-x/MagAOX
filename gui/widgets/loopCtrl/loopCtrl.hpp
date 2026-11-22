@@ -41,6 +41,8 @@ protected:
   bool m_loopWaiting{ false };         ///< Whether the loop slider is waiting for a state update.
   bool m_procState{ false };           ///< Loop-process state.
   bool m_flatVectorAvailable{ false }; ///< Whether the gain controller has advertised the flat-vector command.
+  bool m_saveVectorAvailable{ false }; ///< Whether the gain controller has advertised the save-vector command.
+  bool m_loadSavedAvailable{ false };  ///< Whether the gain controller has advertised the load-saved command.
 
   std::vector<int>        m_modes;      ///< Number of modes in each block.
   std::vector<gainCtrl *> m_blockCtrls; ///< Gain controls for the currently reported mode blocks.
@@ -97,6 +99,12 @@ public slots:
   /// Request that every mode use the gain shown in the first block.
   void on_button_flatVector_clicked();
 
+  /// Request that the current modal gains be saved.
+  void on_button_saveVector_clicked();
+
+  /// Request that the saved modal gains be applied.
+  void on_button_loadSaved_clicked();
+
   /// Request that all modal gains be zeroed.
   void on_button_zeroall_pressed();
 
@@ -115,6 +123,9 @@ signals:
   void blocksChanged( int nB /**< [in] New number of mode blocks. */ );
 
 private:
+  /// Send a momentary request to the gain controller.
+  void sendGainRequest( const char *name /**< [in] INDI switch property to request. */ );
+
   Ui::loopCtrl ui; ///< Qt Designer controls for this widget.
 };
 
@@ -162,6 +173,8 @@ loopCtrl::loopCtrl( std::string & procName,
     setXwFont(ui.button_autoGainDump);
 
     setXwFont( ui.button_flatVector );
+    setXwFont( ui.button_saveVector );
+    setXwFont( ui.button_loadSaved );
     setXwFont(ui.button_zeroall);
 
 
@@ -201,6 +214,8 @@ void loopCtrl::subscribe()
 
    m_parent->addSubscriberProperty(this, m_gainCtrl, "modes");
    m_parent->addSubscriberProperty( this, m_gainCtrl, "flat_vector" );
+   m_parent->addSubscriberProperty( this, m_gainCtrl, "save_vector" );
+   m_parent->addSubscriberProperty( this, m_gainCtrl, "load_saved" );
 
    m_parent->addSubscriber(ui.gainCtrl);
    m_parent->addSubscriber(ui.mcCtrl);
@@ -250,6 +265,8 @@ void loopCtrl::onDisconnect()
     ui.opticalGain->onDisconnect();
 
     m_flatVectorAvailable = false;
+    m_saveVectorAvailable = false;
+    m_loadSavedAvailable  = false;
     setEnableDisable( false );
 
     //xWidget::onDisconnect();
@@ -336,6 +353,21 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
        {
            m_flatVectorAvailable = true;
        }
+       else if( ipRecv.getName() == "save_vector" || ipRecv.getName() == "load_saved" )
+       {
+           bool  save      = ipRecv.getName() == "save_vector";
+           bool &available = save ? m_saveVectorAvailable : m_loadSavedAvailable;
+           if( available && ipRecv.getState() == pcf::IndiProperty::Alert )
+           {
+               auto *button = save ? ui.button_saveVector : ui.button_loadSaved;
+               QToolTip::showText( button->mapToGlobal( button->rect().bottomLeft() ),
+                                   save ? tr( "Could not save the gain vector. See the userGainCtrl log." )
+                                        : tr( "Could not load the saved vector. See the userGainCtrl log." ),
+                                   button );
+           }
+
+           available = true;
+       }
        else if( ipRecv.getName() == "modes" && ipRecv.find( "blocks" ) )
        {
            int nB = ipRecv["blocks"].get<int>();
@@ -379,15 +411,19 @@ void loopCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
     const std::string &name           = ipRecv.getName();
     bool               deviceDeleted  = name.empty() || name == "fsm";
     bool               modesDeleted   = deviceDeleted || name == "modes";
-    bool               commandDeleted = deviceDeleted || name == "flat_vector";
-    if( !modesDeleted && !commandDeleted )
-    {
-        return;
-    }
-
-    if( commandDeleted )
+    if( deviceDeleted || name == "flat_vector" )
     {
         m_flatVectorAvailable = false;
+    }
+
+    if( deviceDeleted || name == "save_vector" )
+    {
+        m_saveVectorAvailable = false;
+    }
+
+    if( deviceDeleted || name == "load_saved" )
+    {
+        m_loadSavedAvailable = false;
     }
 
     if( modesDeleted )
@@ -396,7 +432,10 @@ void loopCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
         emit blocksChanged( 0 );
     }
 
-    emit doUpdateGUI();
+    if( modesDeleted || name == "flat_vector" || name == "save_vector" || name == "load_saved" )
+    {
+        emit doUpdateGUI();
+    }
 }
 
 void loopCtrl::setEnableDisable( bool tf,
@@ -419,8 +458,10 @@ void loopCtrl::setEnableDisable( bool tf,
 
 
    std::lock_guard<std::mutex> lock(m_blockMutex);
-   bool                        flatVectorEnabled = tf && m_flatVectorAvailable && !m_blockCtrls.empty();
-   ui.button_flatVector->setEnabled( flatVectorEnabled );
+   bool                        haveBlocks = tf && !m_blockCtrls.empty();
+   ui.button_flatVector->setEnabled( haveBlocks && m_flatVectorAvailable );
+   ui.button_saveVector->setEnabled( haveBlocks && m_saveVectorAvailable );
+   ui.button_loadSaved->setEnabled( haveBlocks && m_loadSavedAvailable );
 
    QString flatVectorTip;
    if( !m_flatVectorAvailable )
@@ -516,17 +557,35 @@ void loopCtrl::on_button_flatVector_clicked()
     sendNewProperty( ip );
 }
 
+void loopCtrl::on_button_saveVector_clicked()
+{
+    if( ui.button_saveVector->isEnabled() )
+    {
+        sendGainRequest( "save_vector" );
+    }
+}
+
+void loopCtrl::on_button_loadSaved_clicked()
+{
+    if( ui.button_loadSaved->isEnabled() )
+    {
+        sendGainRequest( "load_saved" );
+    }
+}
+
 void loopCtrl::on_button_zeroall_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+    sendGainRequest( "zero_all" );
+}
 
-   ipFreq.setDevice(m_gainCtrl);
-   ipFreq.setName("zero_all");
-   ipFreq.add(pcf::IndiElement("request"));
+void loopCtrl::sendGainRequest( const char *name )
+{
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.setDevice( m_gainCtrl );
+    request.setName( name );
+    request.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
 
-   ipFreq["request"] = pcf::IndiElement::On;
-
-   sendNewProperty(ipFreq);
+    sendNewProperty( request );
 }
 
 void loopCtrl::setupBlocks(int nB)

@@ -370,6 +370,38 @@
           </spacer>
          </item>
          <item>
+          <widget class="QPushButton" name="button_saveVector">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="toolTip">
+            <string>Save the current gain vector, replacing the previous save.</string>
+           </property>
+           <property name="text">
+            <string>Save Vector</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="button_loadSaved">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="toolTip">
+            <string>Apply the most recently saved gain vector.</string>
+           </property>
+           <property name="text">
+            <string>Load Saved</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <widget class="QPushButton" name="button_flatVector">
            <property name="enabled">
             <bool>false</bool>
