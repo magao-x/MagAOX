@@ -578,6 +578,7 @@ inline int psfAcq::appLogic()
         updateIfChanged( m_detectedStars[n].prop(), "y", m_detectedStars[n].y );
         updateIfChanged( m_detectedStars[n].prop(), "peak", m_detectedStars[n].max );
         updateIfChanged( m_detectedStars[n].prop(), "fwhm", m_detectedStars[n].fwhm );
+        updateIfChanged( m_detectedStars[n].prop(), "seeing", m_detectedStars[n].seeing );
     }
     return 0;
 }
@@ -1038,6 +1039,8 @@ void psfAcq::registerStarProperty( Star &star, std::size_t rankIndex )
     star.prop()["peak"].set( star.max );
     star.prop().add( pcf::IndiElement( "fwhm" ) );
     star.prop()["fwhm"].set( star.fwhm );
+    star.prop().add( pcf::IndiElement( "seeing" ) );
+    star.prop()["seeing"].set( star.seeing );
     registerIndiPropertyReadOnly( star.prop() );
 }
 
