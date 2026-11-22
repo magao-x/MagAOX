@@ -365,6 +365,46 @@ including while synco is enabled or the AO loop is closed. Synco fences old
 provider commands and resumes after dmcomb is triggered.
 [Channel clearing procedure](dmSyncopation.md#controller-clearing-and-maintenance)
 
+## Production startup dry run
+
+For the zero-auxiliary startup comparison, add this setting to the working
+production configuration and restart the synco instance. Keep the real primary,
+combined stream, reader-release observer, CPU placement and scheduler settings.
+
+```ini
+[production]
+enabled=true
+dryRun=true
+```
+
+Confirm `health.mode` reads `production dry run`, allow the timing grid to
+qualify with `enable.toggle` Off, then enable it as usual. Synco uses the live
+main command and exact controller reader release for the first auxiliary slot
+in each cycle. It runs the production waits and full-size copies with zero
+inputs and process-local destinations. It leaves the numbered channels and
+provider streams alone. Zero Channels is unavailable in this mode.
+
+The virtual auxiliary responses use `production.dryRunCombineUs=5` and
+`production.dryRunReleaseUs=30` by default, both measured from the simulated
+trigger. The release delay must be at least as long as the combine delay.
+These are model inputs. The dry run exercises synco's own scheduling and copy
+work during live operation. Actual dmcomb, controller and mirror work remains
+at the genuine-main rate. A configured main timing stream continues to export
+genuine main associations.
+
+Find `production dry run startup` and `production dry run cycle` in the synco
+log. Each enable captures up to 32 primary callbacks immediately before enable
+and the first 32 callbacks starting at activation. Turning enable Off flushes
+a partial capture.
+The header includes the enable time and first callback time. Each cycle gives
+the primary counter and producer publication time, monotonic receipt and
+callback times, first private copy time, maximum copy-batch duration, and
+virtual trigger, skip and unacknowledged counts. Times and durations are in
+nanoseconds. Subtract timestamps only within the same clock domain.
+
+Restore `production.dryRun=false` and restart the instance to use live
+auxiliary publications again.
+
 ## Adding another producer application
 
 Derive from `dev::dmSyncopationProducer<yourApp>`, provide its friend declaration

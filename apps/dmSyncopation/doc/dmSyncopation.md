@@ -42,6 +42,9 @@ provider timing stream, copies no destination pixels, changes no command
 counters, and sends no DM triggers. Normal monitor semaphore registration and
 notification consumption still occur.
 
+For the live-primary production enable test with real copies into private
+buffers, see [Production startup dry run](production-providers.md#production-startup-dry-run).
+
 ```text
 primary counter + monotonic time ---> 10-second cadence (refresh 1 Hz)
                                                      |
