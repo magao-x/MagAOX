@@ -35,7 +35,13 @@ struct Fake
     int32 m_captureStatus{ DCAMCAP_STATUS_READY };
 
     /// Property values by ID.
-    std::map<int32, double> m_props;
+    std::map<int32, double> m_props{ { DCAM_IDPROP_READOUTSPEED, 2 } };
+
+    /// Result of reading DCAM_IDPROP_READOUTSPEED; a failure code makes the read fail.
+    DCAMERR m_speedGetResult{ DCAMERR_SUCCESS };
+
+    /// Result of writing DCAM_IDPROP_READOUTSPEED; a failure code makes the write fail.
+    DCAMERR m_speedSetResult{ DCAMERR_SUCCESS };
 
     /// Properties dcamprop_getattr reports as missing. The cooler properties are absent, as in Air mode.
     std::set<int32> m_missing{ DCAM_IDPROP_SENSORCOOLER, DCAM_IDPROP_SENSORCOOLERFAN };
@@ -162,7 +168,14 @@ extern "C"
 
     DCAMERR dcamprop_getvalue( HDCAM, int32 iProp, double *pValue )
     {
-        *pValue = orcaHarness::g_fake.m_props[iProp];
+        auto &f = orcaHarness::g_fake;
+
+        if( iProp == DCAM_IDPROP_READOUTSPEED && failed( f.m_speedGetResult ) )
+        {
+            return f.m_speedGetResult;
+        }
+
+        *pValue = f.m_props[iProp];
         return DCAMERR_SUCCESS;
     }
 
@@ -174,13 +187,25 @@ extern "C"
 
     DCAMERR dcamprop_setgetvalue( HDCAM, int32 iProp, double *pValue, int32 )
     {
-        // DCAM replaces DCAMPROP_READOUTSPEED__FASTEST with the fastest valid speed
+        auto &f = orcaHarness::g_fake;
+
+        // Like the camera, the readout speed is limited to its valid range [1, 2]
         if( iProp == DCAM_IDPROP_READOUTSPEED )
         {
-            *pValue = std::min( std::max( *pValue, 1.0 ), 2.0 );
+            ++f.m_calls["set readout speed"];
+
+            if( failed( f.m_speedSetResult ) )
+            {
+                return f.m_speedSetResult;
+            }
+
+            if( *pValue < 1 || *pValue > 2 )
+            {
+                return DCAMERR_OUTOFRANGE;
+            }
         }
 
-        orcaHarness::g_fake.m_props[iProp] = *pValue;
+        f.m_props[iProp] = *pValue;
         return DCAMERR_SUCCESS;
     }
 
@@ -767,11 +792,13 @@ TEST_CASE( "orcaCtrl switches between Standard and Ultra quiet readout", "[orcaC
     REQUIRE( f.loop() == 0 );
     REQUIRE( f.m_readoutSpeedNameSet == "standard" );
 
+    // The camera powers up in Standard, so nothing is written
     REQUIRE( f.configureAcquisition() == 0 );
     REQUIRE( f.speed() == 2 );
     REQUIRE( f.m_readoutSpeedName == "standard" );
     REQUIRE( f.m_minExpTime == Approx( 7.2e-6 ) );
     REQUIRE( g_fake.m_calls["dcamcap_start"] == 1 );
+    REQUIRE( g_fake.m_calls["set readout speed"] == 0 );
 
     // To Ultra quiet, with an exposure below its minimum
     f.m_expTimeSet          = 10e-6;
@@ -787,6 +814,7 @@ TEST_CASE( "orcaCtrl switches between Standard and Ultra quiet readout", "[orcaC
     REQUIRE( f.m_minExpTime == Approx( 33.9e-6 ) );
     REQUIRE( f.m_expTime == Approx( 33.9e-6 ) );
     REQUIRE( g_fake.m_calls["dcamcap_start"] == 2 );
+    REQUIRE( g_fake.m_calls["set readout speed"] == 1 );
     REQUIRE( f.count( "readout speed changed from standard to ultra_quiet" ) == 1 );
 
     // And back to Standard
@@ -856,6 +884,56 @@ TEST_CASE( "orcaCtrl rejects an unknown readout speed", "[orcaCtrl][readout]" )
     REQUIRE( f.m_readoutSpeedName == "standard" );
     REQUIRE( f.speed() == 2 );
     REQUIRE( g_fake.m_calls["dcamcap_start"] == 2 );
+    REQUIRE( f.errors() == 0 );
+}
+
+/// A readout speed that can't be read or set is a single warning, and acquisition still starts at the
+/// camera's current speed instead of failing and being retried every second.
+/** \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl keeps acquiring when the readout speed can't be read or set", "[orcaCtrl][readout]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaCtrl::configureAcquisition();
+    #endif
+    // clang-format on
+
+    Fixture f;
+
+    SECTION( "read fails" )
+    {
+        g_fake.m_speedGetResult = DCAMERR_BUSY;
+
+        f.start( 1 );
+        REQUIRE( f.loop() == 0 );
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE( f.count( "could not read the readout speed" ) == 1 );
+        REQUIRE( g_fake.m_calls["set readout speed"] == 0 );
+        REQUIRE( f.m_readoutSpeedName == "standard" );
+    }
+
+    SECTION( "write fails" )
+    {
+        g_fake.m_speedSetResult = DCAMERR_BUSY;
+
+        f.start( 1 );
+        REQUIRE( f.loop() == 0 );
+
+        f.m_readoutSpeedNameSet = "ultra_quiet";
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE( f.count( "could not set the readout speed to ultra_quiet" ) == 1 );
+        REQUIRE( f.speed() == 2 );
+        REQUIRE( f.m_readoutSpeedName == "standard" );
+        REQUIRE( f.m_readoutSpeedNameSet == "standard" );
+
+        // The failed request is not retried on the next reconfigure
+        REQUIRE( f.reconfig() == 0 );
+        REQUIRE( f.configureAcquisition() == 0 );
+        REQUIRE( f.count( "could not set the readout speed" ) == 1 );
+    }
+
+    REQUIRE( g_fake.m_calls["dcamcap_start"] >= 1 );
     REQUIRE( f.errors() == 0 );
 }
 
