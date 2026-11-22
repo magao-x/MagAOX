@@ -146,10 +146,12 @@ effects being measured, so the run is built to choose values from many points, n
 With the defaults a run is 58 measurements of about 12.5 s each, so about 12 minutes. The estimate is logged when a run
 starts, as a WARNING if it is over 20 minutes, for example after widening a grid.
 
-**Clipping.** A point at which the counter command clips at `maxCommand` is skipped, not used. Clipping is counted
-from 1 s after each change, so the previous point's held contribution can leak away first. The point is written to the
-CSV with stage `clipped` and empty `fom`, `fomStd` and ratios. Larger values of the same parameter in that sweep are
-not measured, and those already measured are not used, so a gain sweep ends at the first gain that clips.
+**Clipping.** A point is never skipped because the counter command clips at `maxCommand`: strong turbulence can
+saturate the counter whatever the parameters, so every point is used in the fits, the noise estimate and the
+confirmation. Clipping is recorded instead, counted from 1 s after each change (so the previous point's held
+contribution can leak away first) to the end of the point. Each measurement row of the CSV has `clippedSlots` and
+`clipFrac` (clipped / published slots), a point that clipped is logged at INFO, and the run logs how many measurements
+clipped when it ends.
 
 **Running it.** With the loop closed, offloading, and the app enabled:
 
@@ -163,7 +165,7 @@ Turning `calibrate` off aborts the run. The run also aborts if:
 - no settled PSDs arrive within `calibrate.timeoutS` (for example the loop opened or modalPSDs stopped);
 - `t2wOffloader.fps` or `numModes` changes;
 - the app is disabled, or the PSD stream is reallocated;
-- the gain-0 baseline cannot be measured, including when it clips.
+- the gain-0 baseline cannot be measured.
 
 On an abort, the parameters chosen so far are applied, with a WARNING, if their predicted ratio is below 1. Otherwise
 the parameters from before the run are restored.
@@ -173,7 +175,7 @@ contribution already held leaks away within about 50 ms at the calibration leak.
 
 **Results.** The read-only `calibration` property shows:
 
-- `stage` (0 off, 1 initial, 2 start, 3 duration, 4 gain, 5 confirm, 6 clipped, 7–9 the start, duration and gain
+- `stage` (0 off, 1 initial, 2 start, 3 duration, 4 gain, 5 confirm, 6 no longer used, 7–9 the start, duration and gain
   decisions) and `point`, the number of points measured;
 - the latest `ratio` (to the latest baseline);
 - `bestStartUs`, `bestDurationUs`, `bestGain` and `bestRatio`: the parameters chosen so far and their predicted ratio;
@@ -183,7 +185,7 @@ The band powers, the noise estimate σ and the standard error of the confirmed r
 
 Each run writes `<instance>_calib_<UTC time>.csv` in `csvDir`. Measurement rows have the time, stage, parameters,
 offload rate, modes, band, `nAverage`, `fom`, `fomStd`, `fomOff` (the latest baseline), `ratio` (to it) and
-`ratioInterp` (to the interpolated baseline, the value the run uses). They are written when their sweep closes. After
+`ratioInterp` (to the interpolated baseline, the value the run uses), then `clippedSlots` and `clipFrac`. They are written when their sweep closes. After
 each sweep a `fit start`, `fit duration` or `fit gain` row records the decision: the parameters with the swept one at
 the candidate, then `fitCurrent` and `fitCandidate` (the predicted ratios; `fitCurrent` is empty if the current value
 was outside the sweep), `threshold`, `moved` (1 or 0) and `sigma`.
