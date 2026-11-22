@@ -53,12 +53,13 @@ inline void dmSyncopation::closeZeroTest()
 {
     for( auto *image : { &m_zeroSdk, &m_zeroCombined, &m_zeroChannel } )
     {
-        if( image->md )
+        if( image->md && image->md != &m_dryChannel )
         {
             ImageStreamIO_closeIm( image );
         }
         *image = {};
     }
+    m_dryOutputAt = 0;
     if( m_productionEnabled )
     {
         publishSchedule( 0, -1 );
@@ -93,21 +94,30 @@ inline bool dmSyncopation::openZeroTest()
 {
     closeZeroTest();
     const auto *primary       = shmimMonitorT::m_imageStream.md;
-    const auto  channelInode  = inode( m_zeroTestChannel );
+    const auto  channelInode  = m_productionDryRun ? 0 : inode( m_zeroTestChannel );
     const auto  combinedInode = inode( m_combinedName );
 
-    if( !primary || !channelInode || !combinedInode || primary->naxis != 2 || primary->datatype != _DATATYPE_FLOAT ||
+    if( !primary || !combinedInode || primary->naxis != 2 || primary->datatype != _DATATYPE_FLOAT ||
         primary->location != -1 || !primary->size[0] || !primary->size[1] ||
         uint64_t( primary->size[0] ) * primary->size[1] > 1048576 ||
-        ImageStreamIO_openIm( &m_zeroChannel, m_zeroTestChannel.c_str() ) != 0 ||
+        ( !m_productionDryRun &&
+          ( !channelInode || ImageStreamIO_openIm( &m_zeroChannel, m_zeroTestChannel.c_str() ) != 0 ) ) ||
         ImageStreamIO_openIm( &m_zeroCombined, m_combinedName.c_str() ) != 0 )
     {
         closeZeroTest();
         return false;
     }
-    m_zeroWidth            = primary->size[0];
-    m_zeroHeight           = primary->size[1];
-    m_zeroBytes            = size_t( m_zeroWidth ) * m_zeroHeight * sizeof( float );
+    m_zeroWidth  = primary->size[0];
+    m_zeroHeight = primary->size[1];
+    m_zeroBytes  = size_t( m_zeroWidth ) * m_zeroHeight * sizeof( float );
+
+    if( m_productionDryRun )
+    {
+        m_dryChannel       = {};
+        m_dryChannel.inode = UINT64_MAX;
+        m_zeroChannel.md   = &m_dryChannel;
+    }
+
     m_zeroExpected         = m_zeroChannel.md->cnt0;
     m_zeroChannelInode     = channelInode;
     m_zeroCombinedInode    = combinedInode;
@@ -153,6 +163,11 @@ inline bool dmSyncopation::zeroTestResources( bool files )
     {
         const auto *metadata = image->md;
 
+        if( metadata == &m_dryChannel )
+        {
+            continue;
+        }
+
         if( metadata->naxis != 2 || metadata->datatype != _DATATYPE_FLOAT || metadata->location != -1 ||
             metadata->shared != 1 || metadata->size[0] != m_zeroWidth || metadata->size[1] != m_zeroHeight ||
             metadata->imdatamemsize != m_zeroBytes || !image->array.F || metadata->sem == 0 )
@@ -173,12 +188,12 @@ inline bool dmSyncopation::zeroTestResources( bool files )
 
     if( m_productionEnabled )
     {
-        if( !m_resources || m_mappings.size() != m_destinations.size() || !m_timing.md ||
-            ( files && inode( m_timingName ) != m_timingInode ) )
+        if( !m_resources || m_mappings.size() != m_destinations.size() ||
+            ( !m_productionDryRun && ( !m_timing.md || ( files && inode( m_timingName ) != m_timingInode ) ) ) )
         {
             return false;
         }
-        for( size_t j = 0; j < m_mappings.size(); ++j )
+        for( size_t j = 0; !m_productionDryRun && j < m_mappings.size(); ++j )
         {
             auto &mapping = m_mappings[j];
             if( files && ( inode( m_destinations[j] + "_aux" ) != mapping.m_sourceInode ||
@@ -197,9 +212,9 @@ inline bool dmSyncopation::zeroTestResources( bool files )
             }
         }
     }
-    return !files ||
-           ( inode( m_zeroTestChannel ) == m_zeroChannelInode && inode( m_combinedName ) == m_zeroCombinedInode &&
-             inode( shmimMonitorT::m_shmimName ) == shmimMonitorT::m_inode );
+    return !files || ( ( m_productionDryRun || inode( m_zeroTestChannel ) == m_zeroChannelInode ) &&
+                       inode( m_combinedName ) == m_zeroCombinedInode &&
+                       inode( shmimMonitorT::m_shmimName ) == shmimMonitorT::m_inode );
 }
 
 inline bool dmSyncopation::zeroTestCombined( synco::ZeroTiming::Key &key ) const
@@ -220,7 +235,20 @@ inline bool dmSyncopation::zeroTestCombined( synco::ZeroTiming::Key &key ) const
     {
         return false;
     }
-    key = sampled;
+    if( m_productionDryRun && m_dryOutputAt > 0 )
+    {
+        // Unexpected actual publications still veto virtual work within the current main cycle.
+        if( !synco::ZeroTiming::equal( sampled, m_dryMain ) )
+        {
+            return false;
+        }
+
+        key = m_now() >= m_dryOutputAt ? m_dryOutput : m_zeroLastCombined;
+    }
+    else
+    {
+        key = sampled;
+    }
     return true;
 }
 
@@ -315,6 +343,12 @@ inline void dmSyncopation::drainZeroTestReader( int64_t now )
 
 inline bool dmSyncopation::zeroTestReady( const synco::ZeroTiming::Key &key ) const
 {
+    if( m_productionDryRun && m_dryOutputAt > 0 && synco::ZeroTiming::equal( key, m_dryOutput ) )
+    {
+        return !m_zeroReaderFault && m_dryReleaseEpoch == m_simulationReleaseEpoch.load( std::memory_order_acquire ) &&
+               m_zeroReleaseDrops == m_simulationReleaseQueue.dropped() && m_now() >= m_dryReleaseAt;
+    }
+
     return m_zeroHaveRelease && !m_zeroReaderFault &&
            m_zeroReleaseEpoch == m_simulationReleaseEpoch.load( std::memory_order_acquire ) &&
            m_zeroReleaseDrops == m_simulationReleaseQueue.dropped() &&
@@ -435,7 +469,7 @@ dmSyncopation::zeroTestFinalGuard( uint64_t primary, const synco::ZeroTiming::Ke
         return ZeroOutcome::resourceUnavailable;
     }
 
-    if( m_productionEnabled )
+    if( m_productionEnabled && !m_productionDryRun )
     {
         for( const auto &mapping : m_mappings )
         {
@@ -1454,7 +1488,8 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
                 preparationRejected = true;
                 break;
             }
-            if( zeroTestReady( combined ) && m_zeroRelease.observedNs <= target )
+            if( zeroTestReady( combined ) &&
+                ( m_productionDryRun && m_dryOutputAt > 0 ? m_dryReleaseAt : m_zeroRelease.observedNs ) <= target )
             {
                 break;
             }
@@ -1625,8 +1660,19 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
                 continue;
             }
         }
-        m_zeroChannel.md->write = 1;
-        const auto published    = ImageStreamIO_UpdateIm( &m_zeroChannel );
+        long published = IMAGESTREAMIO_SUCCESS;
+
+        if( m_productionDryRun )
+        {
+            m_dryMain = main;
+            published = postDryRunTrigger();
+        }
+        else
+        {
+            m_zeroChannel.md->write = 1;
+            published               = ImageStreamIO_UpdateIm( &m_zeroChannel );
+        }
+
         ++m_zeroExpected;
         if( m_productionEnabled && !m_mappings.empty() )
         {
@@ -1750,6 +1796,13 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     {
         productionStep0( grid, periodQ32, primary );
     }
+
+    if( m_productionDryRun )
+    {
+        m_dryOutputAt      = 0;
+        m_zeroLastCombined = main;
+    }
+
     return 0;
 }
 

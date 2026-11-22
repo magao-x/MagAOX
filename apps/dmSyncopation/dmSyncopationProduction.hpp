@@ -41,6 +41,11 @@ inline void dmSyncopation::closeProduction()
 
 inline bool dmSyncopation::openProduction()
 {
+    if( m_productionDryRun )
+    {
+        return openDryRunDestinations();
+    }
+
     if( !openResources() )
     {
         return false;
@@ -93,7 +98,7 @@ inline bool dmSyncopation::openProduction()
 
 inline void dmSyncopation::publishProductionSchedule( synco::GridTime grid, uint64_t periodQ32, uint64_t primary )
 {
-    if( !m_timing.md || primary >= INT64_MAX )
+    if( ( !m_timing.md && !m_productionDryRun ) || primary >= INT64_MAX )
     {
         return;
     }
@@ -123,6 +128,11 @@ inline void dmSyncopation::publishProductionSchedule( synco::GridTime grid, uint
         }
     }
 
+    if( m_productionDryRun )
+    {
+        return;
+    }
+
     m_timing.md->write = 1;
     std::memcpy( m_timing.array.raw, m_record.data(), sizeof( m_record ) );
     ImageStreamIO_UpdateIm( &m_timing );
@@ -135,6 +145,13 @@ inline bool dmSyncopation::productionSnapshot( const synco::Request &request, in
     for( auto &mapping : m_mappings )
     {
         std::copy( mapping.m_cache.begin(), mapping.m_cache.end(), mapping.m_stage.begin() );
+
+        if( m_productionDryRun )
+        {
+            ++mapping.m_missing;
+            continue;
+        }
+
         synco::CommitRecord command{};
         auto               *ready           = mapping.m_ready.md;
         const auto         *source          = mapping.m_source->image()->md;
@@ -234,23 +251,44 @@ inline bool dmSyncopation::productionCopy( uint64_t primary, int64_t cutoff )
 
     for( auto &mapping : m_mappings )
     {
-        auto *destination = mapping.m_destination->image()->md;
+        auto *destination = m_productionDryRun ? nullptr : mapping.m_destination->image()->md;
 
-        if( input->write || input->cnt0 != primary || destination->write || destination->cnt0 != mapping.m_counter )
+        if( input->write || input->cnt0 != primary ||
+            ( destination && ( destination->write || destination->cnt0 != mapping.m_counter ) ) )
         {
             m_zeroWaitFailure = ZeroOutcome::primaryChanged;
             return false;
         }
 
-        mapping.m_destination->setWrite( true );
-        std::memcpy( mapping.m_destination->data(), mapping.m_stage.data(), mapping.m_stage.size() * sizeof( float ) );
-        mapping.m_destination->post();
+        if( destination )
+        {
+            mapping.m_destination->setWrite( true );
+        }
+
+        auto *pixels = m_productionDryRun ? mapping.m_dryDestination.data() : mapping.m_destination->data();
+        std::memcpy( pixels, mapping.m_stage.data(), mapping.m_stage.size() * sizeof( float ) );
+
+        if( destination )
+        {
+            mapping.m_destination->post();
+        }
+
         std::copy( mapping.m_stage.begin(), mapping.m_stage.end(), mapping.m_cache.begin() );
     }
 
     const auto finished = m_now();
     // Keep excursions visible without changing the configured admission budget for later slots.
     m_copyMax = std::max( m_copyMax, finished - started );
+
+    if( m_productionDryRun )
+    {
+        if( !m_dryCycle.firstCopyNs )
+        {
+            m_dryCycle.firstCopyNs = started;
+        }
+
+        m_dryCycle.maxCopyNs = std::max( m_dryCycle.maxCopyNs, finished - started );
+    }
 
     if( finished > cutoff || input->write || input->cnt0 != primary )
     {

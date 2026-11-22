@@ -189,8 +189,9 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Persistent stream handles and one-pass source staging, owned by the scheduler.
     struct Mapping
     {
-        std::unique_ptr<syncoImage> m_destination; ///< Existing numbered main channel.
-        std::unique_ptr<syncoImage> m_source;      ///< Persistent matching _aux image.
+        std::unique_ptr<syncoImage> m_destination;    ///< Existing numbered main channel.
+        std::unique_ptr<syncoImage> m_source;         ///< Persistent matching _aux image.
+        std::vector<float>          m_dryDestination; ///< Process-local copy destination used by the dry run.
         std::vector<float> m_cache; ///< Legacy source snapshot or production contribution committed to the destination.
         std::vector<float> m_stage; ///< Frozen snapshot for one copy.
         uint64_t           m_counter{ 0 };          ///< Last destination counter owned/accepted by this app.
@@ -263,11 +264,14 @@ class dmSyncopation : public MagAOXApp<true>,
     bool        m_diagnosticsOnly{ false };    ///< Observe arbitrary primary metadata without attaching DM resources.
     bool        m_simulationEnabled{ false };  ///< Startup-only shadow policy; live scheduling is prohibited.
     bool        m_productionEnabled{ false };  ///< Continuous tagged-provider operation on the qualified counter grid.
-    int         m_productionSteps{ 0 };        ///< Selected automatic count, zero until qualified.
-    double      m_productionReadyLeadUs{ 50 }; ///< Source completion cutoff ahead of each slot.
-    double      m_productionStep0LeadUs{ 20 }; ///< Passive-copy completion lead before the next predicted main.
-    uint64_t    m_passiveCopied{ 0 }, m_passiveSkipped{ 0 }; ///< Completed and suppressed passive batches.
-    pcf::IndiProperty m_indiP_production;                    ///< Continuous-mode per-provider admission diagnostics.
+    bool     m_productionDryRun{ false }; ///< Run production timing with process-local writes and virtual auxiliaries.
+    double   m_dryCombineUs{ 5 };         ///< Modeled trigger-to-combined-publication delay, us.
+    double   m_dryReleaseUs{ 30 };        ///< Modeled trigger-to-last-auxiliary-reader delay, us.
+    int      m_productionSteps{ 0 };      ///< Selected automatic count, zero until qualified.
+    double   m_productionReadyLeadUs{ 50 }; ///< Source completion cutoff ahead of each slot.
+    double   m_productionStep0LeadUs{ 20 }; ///< Passive-copy completion lead before the next predicted main.
+    uint64_t m_passiveCopied{ 0 }, m_passiveSkipped{ 0 }; ///< Completed and suppressed passive batches.
+    pcf::IndiProperty m_indiP_production;                 ///< Continuous-mode per-provider admission diagnostics.
     bool              m_zeroTestEnabled{ false };  ///< Startup-only finite empirical coordinated zero-write trial.
     std::string m_zeroTestChannel{ "dm01disp07" }; ///< Existing exclusive zero auxiliary; never created or cleared.
     std::string m_zeroSdkStream{ "dmtweeter_sdk_done" }; ///< Optional exact native-entry/result observer.
@@ -296,6 +300,44 @@ class dmSyncopation : public MagAOXApp<true>,
     std::mutex        m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
     synco::Simulation m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
     synco::Simulation m_zeroClock;  ///< Raw producer-clock cadence/phase estimator; never evaluates modeled admission.
+
+    /// Main callback timing and the measured local copy work for one dry-run cycle.
+    struct DryRunCycle
+    {
+        uint64_t primary{ 0 };        ///< Genuine primary counter.
+        int64_t  publicationNs{ 0 };  ///< Genuine primary publication in the producer clock.
+        int64_t  receiptNs{ 0 };      ///< Primary semaphore receipt in the scheduling clock.
+        int64_t  startNs{ 0 };        ///< Primary callback entry in the scheduling clock.
+        int64_t  endNs{ 0 };          ///< Primary callback body completion in the scheduling clock.
+        int64_t  firstCopyNs{ 0 };    ///< Start time of the first private copy, or zero.
+        int64_t  maxCopyNs{ 0 };      ///< Longest completed private copy batch in this callback.
+        uint64_t posted{ 0 };         ///< Virtual triggers posted during the callback.
+        uint64_t skipped{ 0 };        ///< Auxiliary slots skipped during the callback.
+        uint64_t unacknowledged{ 0 }; ///< Posted slots that failed to match the modeled output.
+    };
+
+    /// Retain a bounded trace on either side of one dry-run enable transition.
+    struct DryRunCapture
+    {
+        std::array<DryRunCycle, 32> before{};        ///< Latest distinct primary callbacks with enable Off.
+        std::array<DryRunCycle, 32> after{};         ///< First distinct callbacks starting at activation.
+        size_t                      beforeNext{ 0 }; ///< Next position in the rolling pre-enable trace.
+        size_t                      beforeSize{ 0 }; ///< Number of retained pre-enable callbacks.
+        size_t                      afterSize{ 0 };  ///< Number of retained active callbacks.
+        int64_t                     enableNs{ 0 };   ///< Monotonic enable time, zero while collecting baseline.
+        int64_t  firstEnabledNs{ 0 };                ///< First genuine callback entry after enable, including warmup.
+        uint64_t trial{ 0 };                         ///< Trial identifier assigned by the normal enable callback.
+    };
+
+    IMAGE_METADATA         m_dryChannel{}; ///< Process-local metadata aliased by the dummy trigger handle.
+    synco::ZeroTiming::Key m_dryMain;      ///< Genuine combined publication anchoring the virtual cycle.
+    synco::ZeroTiming::Key m_dryOutput;    ///< Pending virtual auxiliary combination, never exported as a real main.
+    int64_t                m_dryOutputAt{ 0 };        ///< Earliest monotonic observation of the virtual combination.
+    int64_t                m_dryReleaseAt{ 0 };       ///< Earliest virtual reader-release time.
+    uint64_t               m_dryReleaseEpoch{ 0 };    ///< Reader-observer epoch used by the pending virtual release.
+    DryRunCycle            m_dryCycle;                ///< Copy measurements accumulated in the current callback.
+    DryRunCapture          m_dryCapture;              ///< Cycle-owned startup trace, drained by ordinary app logic.
+    uint64_t               m_dryCapturedPrimary{ 0 }; ///< Last primary counter included in the dry-run trace.
 
     /// Actual event outcomes and diagnostic causes; numeric values before schema 2 were less specific.
     enum class ZeroOutcome : int
@@ -1067,6 +1109,18 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Attach production mappings and tagged command sidecars before arming.
     bool openProduction();
 
+    /// Allocate the zero-filled production copy buffers without opening any provider or destination stream.
+    bool openDryRunDestinations();
+
+    /// Post one simulated auxiliary trigger and begin its modeled combination and release timers.
+    int postDryRunTrigger();
+
+    /// Add the current genuine primary callback to the bounded startup timing trace.
+    void captureDryRunCycle( int64_t completed /**< [in] Monotonic callback body completion. */ );
+
+    /// Drain a finished startup trace and log it from ordinary app logic.
+    void logDryRunCapture();
+
     /// Close scheduler-owned sidecars without destroying persistent source pixels.
     void closeProduction();
 
@@ -1258,6 +1312,9 @@ inline void dmSyncopation::setupConfig()
         { "diagnostics.camera", "Observe camera acquisition/publication intervals independently of camera INDI FPS." },
         { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
         { "production.enabled", "Continuous tagged same-host producers on the qualified counter-publication grid." },
+        { "production.dryRun", "Run production timing and copies without publishing live auxiliary commands." },
+        { "production.dryRunCombineUs", "Dry-run trigger-to-combined delay, us." },
+        { "production.dryRunReleaseUs", "Dry-run trigger-to-reader-release delay, us." },
         { "production.readyLeadUs", "Input-ready deadline lead before the counter target, us." },
         { "production.step0LeadUs", "Passive step-zero copy completion lead before the main grid, us." },
         { "production.lateUs", "Final counter-publication admission allowance, us; default6." },
@@ -1334,6 +1391,9 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_maxAdvanceUs, "feedback.maxAdvanceUs" );
     config( m_outputTimeoutUs, "scheduler.outputTimeoutUs" );
     config( m_productionEnabled, "production.enabled" );
+    config( m_productionDryRun, "production.dryRun" );
+    config( m_dryCombineUs, "production.dryRunCombineUs" );
+    config( m_dryReleaseUs, "production.dryRunReleaseUs" );
 
     if( m_productionEnabled )
     {
@@ -1424,6 +1484,12 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
           m_zeroTestChannel.find_first_not_of( "0123456789", 8 ) != std::string::npos ||
           m_zeroTestChannel == shmimMonitorT::m_shmimName ||
           ( !m_zeroSdkStream.empty() && m_zeroSdkStream.find_first_of( "/\\ \t\n" ) != std::string::npos ) ) )
+    {
+        return -1;
+    }
+
+    if( m_productionDryRun && ( !m_productionEnabled || !finite( m_dryCombineUs ) || !finite( m_dryReleaseUs ) ||
+                                m_dryCombineUs < 0 || m_dryReleaseUs < m_dryCombineUs || m_dryReleaseUs > 1000000 ) )
     {
         return -1;
     }
@@ -2532,6 +2598,12 @@ inline void dmSyncopation::updateSimulationINDI()
 inline bool dmSyncopation::openResources()
 {
     closeResources();
+
+    if( m_productionDryRun )
+    {
+        return false;
+    }
+
     try
     {
         m_combined = std::make_unique<syncoImage>();
@@ -3123,6 +3195,12 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
 
 inline void dmSyncopation::publishSchedule( int64_t observed, int completed )
 {
+    if( m_productionDryRun )
+    {
+        m_record.fill( 0 );
+        return;
+    }
+
     if( !m_timing.md || m_timing.md->datatype != _DATATYPE_INT64 || m_timing.md->naxis != 1 ||
         m_timing.md->size[0] != synco::words || m_timing.md->location != -1 )
     {
@@ -3255,6 +3333,17 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
 
     std::lock_guard<std::mutex> lock( m_cycleMutex );
     capturePassiveMainTiming();
+
+    if( m_productionDryRun )
+    {
+        m_dryCycle                = {};
+        m_dryCycle.startNs        = observed;
+        m_dryCycle.receiptNs      = receipt;
+        m_dryCycle.posted         = m_zeroStats.posted;
+        m_dryCycle.skipped        = m_zeroStats.skipped;
+        m_dryCycle.unacknowledged = m_zeroStats.unacknowledged;
+    }
+
     const int     result    = zeroEngine() ? processZeroTestPrimary( observed, receipt ) : processPrimary( observed );
     const int64_t completed = m_now();
     if( m_productionEnabled )
@@ -3268,11 +3357,17 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
         m_primed        = m_enabled && m_zeroStats.active;
         m_feasible      = m_primed ? scheduleSteps() : 0;
         m_mainDelivered = m_zeroStats.mainMatched;
-        m_delivered     = m_zeroStats.acknowledged;
+        m_delivered     = m_productionDryRun ? 0 : m_zeroStats.acknowledged;
         m_missed        = m_zeroStats.skipped;
         m_notStarted    = m_passiveSkipped;
         m_periodSource  = "primary publication grid";
     }
+
+    if( m_productionDryRun )
+    {
+        captureDryRunCycle( completed );
+    }
+
     publishZeroTestStatus( completed );
     m_previousCallbackRuntime = completed >= observed ? completed - observed : -1;
     m_previousCallbackEnd     = completed;
@@ -4810,7 +4905,7 @@ inline int dmSyncopation::setupINDI()
         REG_INDI_SETPROP( m_indiP_camera, m_cameraDevice, m_cameraProperty );
     }
 
-    if( !m_diagnosticsOnly && !m_simulationEnabled && !m_zeroTestEnabled )
+    if( !m_diagnosticsOnly && !m_simulationEnabled && !m_zeroTestEnabled && !m_productionDryRun )
     {
         if( createStandardIndiRequestSw( m_indiP_zero, "zero" ) < 0 ||
             registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK( m_indiP_zero ) ) < 0 )
@@ -4885,6 +4980,11 @@ inline int dmSyncopation::appStartup()
 inline int dmSyncopation::appLogic()
 {
     serviceChannelZero();
+
+    if( m_productionDryRun )
+    {
+        logDryRunCapture();
+    }
 
     const bool detailed  = detailedTimingEnabled();
     const auto loopBegan = detailed || !m_mainTimingName.empty() ? m_now() : 0;
@@ -5177,7 +5277,8 @@ inline int dmSyncopation::appLogic()
             updateIfChanged( m_indiP_health, "mapping", mappings );
 #endif
             const std::string mode =
-                m_productionEnabled ? "production providers"
+                m_productionDryRun    ? "production dry run"
+                : m_productionEnabled ? "production providers"
                 : m_zeroTestEnabled
                     ? "coordinated zero test"
                     : ( m_simulationEnabled ? "shadow simulation"
@@ -5431,6 +5532,15 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
                 m_zeroPublicationTiming.reset();
                 ++m_zeroTrial;
                 m_zeroArmed = true;
+
+                if( m_productionDryRun )
+                {
+                    m_dryCapture.enableNs       = m_zeroArmedAt;
+                    m_dryCapture.trial          = m_zeroTrial;
+                    m_dryCapture.afterSize      = 0;
+                    m_dryCapture.firstEnabledNs = 0;
+                }
+
                 m_reason =
                     m_productionEnabled ? "production clock/ownership warming" : "zero trial clock/ownership warming";
             }
@@ -5494,6 +5604,11 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_reacquire )( const pcf::IndiProper
 
 INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_zero )( const pcf::IndiProperty &ipRecv )
 {
+    if( m_productionDryRun )
+    {
+        return -1;
+    }
+
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_zero, ipRecv );
 
     if( ipRecv.getType() != pcf::IndiProperty::Switch || !ipRecv.find( "request" ) || ipRecv.getElements().size() != 1 )
@@ -5685,4 +5800,5 @@ INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_camera )( const pcf::IndiProperty 
 #include "dmSyncopationProduction.hpp"
 #include "dmSyncopationZeroTest.hpp"
 #include "dmSyncopationChannelZero.hpp"
+#include "dmSyncopationDryRun.hpp"
 #endif

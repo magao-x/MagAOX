@@ -39,10 +39,14 @@ class ProductionHarness : public Harness
     using dmSyncopation::closeProduction;
     using dmSyncopation::configureDiagnostics;
     using dmSyncopation::detailedTimingEnabled;
+    using dmSyncopation::inode;
+    using dmSyncopation::logDryRunCapture;
+    using dmSyncopation::m_dryCapture;
     using dmSyncopation::m_generation;
     using dmSyncopation::m_indiP_production;
     using dmSyncopation::m_indiP_zeroPublication;
     using dmSyncopation::m_passiveCopied;
+    using dmSyncopation::m_productionDryRun;
     using dmSyncopation::m_productionEnabled;
     using dmSyncopation::m_productionReadyLeadUs;
     using dmSyncopation::m_productionStep0LeadUs;
@@ -972,6 +976,124 @@ TEST_CASE( "production chooses the fastest rated cadence", "[dmSyncopation][prod
     MagAOX::app::dmSyncopation::newCallBack_m_indiP_settings;
     MagAOX::app::dmSyncopation::publishProductionSchedule;
     MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
+/** \brief Run production startup against a genuine-main fixture and keep every auxiliary write private.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "production dry run measures startup without touching live command streams",
+           "[dmSyncopation][production][integration]" )
+{
+    Streams           streams;
+    ProductionHarness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_productionEnabled     = true;
+    app.m_productionDryRun      = true;
+    app.m_zeroTestEnabled       = false;
+    app.m_productionReadyLeadUs = 70;
+    app.m_zeroLateUs            = 6;
+    app.m_zeroWakeAheadUs       = 10;
+    app.m_bounds.copy           = 30000;
+    app.m_maxCadence            = 8000;
+    app.m_requested             = 0;
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+    REQUIRE( app.configureZeroTest() );
+    REQUIRE( app.m_indiP_zero.getElements().empty() );
+
+    const int64_t period = GENERATE( 1000000, 500000 );
+    const int64_t steps  = period / 125000;
+    int64_t       main   = 1000000000;
+
+    for( ; main < 3000000000; main += period )
+    {
+        ZeroClock::primary( main );
+    }
+
+    REQUIRE( app.m_zeroAttached );
+    REQUIRE( app.m_dryCapture.beforeSize == app.m_dryCapture.before.size() );
+    REQUIRE( app.m_mappings.size() == 2 );
+
+    auto &trigger  = streams.images[2];
+    auto &other    = streams.images[3];
+    auto &combined = streams.images[1];
+    std::fill_n( trigger.array.F, 9, 2.0F );
+    const auto firstBefore     = trigger.md->cnt0;
+    const auto otherBefore     = other.md->cnt0;
+    const auto combinedBefore  = combined.md->cnt0;
+    const auto firstStamp      = trigger.md->writetime;
+    const auto otherStamp      = other.md->writetime;
+    const auto mainBefore      = streams.images[0].md->cnt0;
+    const auto firstEnableMain = main;
+
+    for( auto &mapping : app.m_mappings )
+    {
+        REQUIRE( mapping.m_dryDestination.size() == 9 );
+        std::fill( mapping.m_dryDestination.begin(), mapping.m_dryDestination.end(), 42.0F );
+    }
+
+    auto enable = app.m_indiP_enable;
+    enable["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    REQUIRE( app.newCallBack_m_indiP_zero( app.m_indiP_zero ) < 0 );
+    const bool realRelease = GENERATE( true, false );
+    ZeroClock::release     = realRelease;
+
+    for( ; main < 12000000000LL && app.m_dryCapture.afterSize < app.m_dryCapture.after.size(); main += period )
+    {
+        ZeroClock::primary( main );
+    }
+
+    REQUIRE( app.m_dryCapture.afterSize == app.m_dryCapture.after.size() );
+    CHECK( app.m_dryCapture.firstEnabledNs >= firstEnableMain );
+    CHECK( app.m_dryCapture.firstEnabledNs < firstEnableMain + period );
+    CHECK( app.m_dryCapture.after.front().primary > mainBefore );
+    CHECK( app.m_record[synco::steps] == steps );
+    CHECK( app.m_delivered == 0 );
+    CHECK( app.m_timing.md == nullptr );
+    CHECK( app.inode( app.m_timingName ) == 0 );
+    CHECK( app.inode( "dm97disp07_aux" ) == 0 );
+    CHECK( app.inode( "dm97disp07_aux_ready" ) == 0 );
+    CHECK( app.inode( "dm97disp07_aux_ack" ) == 0 );
+    CHECK( trigger.md->cnt0 == firstBefore );
+    CHECK( other.md->cnt0 == otherBefore );
+    CHECK( trigger.md->writetime.tv_sec == firstStamp.tv_sec );
+    CHECK( trigger.md->writetime.tv_nsec == firstStamp.tv_nsec );
+    CHECK( other.md->writetime.tv_sec == otherStamp.tv_sec );
+    CHECK( other.md->writetime.tv_nsec == otherStamp.tv_nsec );
+    CHECK( trigger.array.F[0] == 2.0F );
+    CHECK( other.array.F[0] == 3.0F );
+    CHECK( combined.md->cnt0 - combinedBefore == streams.images[0].md->cnt0 - mainBefore );
+    CHECK( ZeroClock::posts.empty() );
+
+    const auto &firstCycle = app.m_dryCapture.after.front();
+    const auto  slots      = uint64_t( steps - 1 );
+    CHECK( firstCycle.posted == ( realRelease ? slots : 0 ) );
+    CHECK( firstCycle.skipped == ( realRelease ? 0 : slots ) );
+    CHECK( firstCycle.unacknowledged == 0 );
+    CHECK( ( firstCycle.firstCopyNs > 0 ) == realRelease );
+    CHECK( app.m_zeroStats.acknowledged == ( realRelease ? 32 * slots : 0 ) );
+
+    for( const auto &mapping : app.m_mappings )
+    {
+        for( const auto pixel : mapping.m_dryDestination )
+        {
+            CHECK( pixel == ( realRelease ? 0.0F : 42.0F ) );
+        }
+    }
+
+    app.logDryRunCapture();
+    CHECK( app.m_dryCapture.enableNs == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::openDryRunDestinations;
+    MagAOX::app::dmSyncopation::postDryRunTrigger;
+    MagAOX::app::dmSyncopation::captureDryRunCycle;
+    MagAOX::app::dmSyncopation::logDryRunCapture;
 #endif
     // clang-format on
 }

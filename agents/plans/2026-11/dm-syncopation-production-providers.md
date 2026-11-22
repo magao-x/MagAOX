@@ -862,3 +862,80 @@ the main-to-idle transition after a passive copy, and legacy source eligibility
 on reattachment. The trigger can complete a request with the combined counter
 unchanged, and the idle path can clear inputs with the combined stream absent.
 Live timing and recovery at the instrument remain to be qualified.
+
+### Closed-loop disturbance on enable
+
+The operator now sees an enable transient at 2 kHz that the loop recovers
+from, and repeatable saturation trips at 1 kHz. The effect occurs on sky
+under real load. The operator sees no disturbance in the lab. In the 1 kHz
+capture the tweeter cadence transitions near 05:51:32 UTC. The accepted main commands
+still arrive about 1 ms apart, and the measured camera-to-SDK-start mean
+changes from about 137 us to 139 us before the 05:51:35.254 trip. These
+statistics cover accepted timings and contain no command pixels or modal
+state. They cannot identify the first perturbation or exclude a short
+unmatched event at enable.
+
+The production scheduler retains the previously applied contribution for
+each provider that supplies no new command. Even with all contributions
+zero, the auxiliary triggers recompute and send the combined shape using
+the held primary command.
+At 8 kHz, 1 kHz main uses seven auxiliary slots per main cycle, versus
+three at 2 kHz. The saved tweeter configuration uses the primary channel
+as the controller's delta input. Every completed controller command
+publishes `dm01disp_delta`, which `dmtweeter-recon` consumes. If `writeDMf`
+is enabled, cacao `mfilt` can replace the integrator state from those
+reconstructions without validating their source-command age or coherence.
+The operator confirms `writeDMf` was Off during these trips. That excludes
+this optional integrator feedback path. Reconstruction itself can still run
+while the switch is Off. In the earlier slowdown investigation, stopping
+the reconstructor at 2 kHz did not improve MVM timing. The earlier one-step
+and four-step comparison did isolate the slowdown to work associated with
+auxiliary slots. See the [rate isolation](dm-syncopation-fixed-copy-budget.md#enable-dependent-mvm-slowdown).
+
+The local cacao combiner copies the new pixels into `dm01disp` before calling
+the publication routine, without setting the stream's write flag around the
+copy. BMC's vector check compares the combined stream identity before and
+after conversion. A reader running entirely within that copy interval can
+see the previous identity and a mixed payload. This is a protocol gap in the
+inspected source. The deployed revision, overlap at enable and any resulting
+command corruption remain unconfirmed. Saved deltas in `dmtweeter.sdk_pipeline`
+and `holoop-time.loop_timing_quality` can establish observed rejection,
+admission or main-pairing changes around the transition. They cannot detect
+a mixed payload accepted under a stable identity.
+
+Identical rewrites within one main cycle cannot produce a different shape
+through a torn pixel read. For zero auxiliary contributions with all other
+inputs held, a mixed command would require overlapping different primary
+shapes at a main-cycle boundary. Auxiliary triggers wait for the matching
+controller reader release. A new primary publication can trigger the combiner
+independently. Separately, BMC submits each qualified repeat on its serialized
+SDK worker. A repeat already in the SDK can delay the next changing command
+even after its shared-memory readers release. Compare the tails and misses
+of main-publication-to-SDK-start timing at the on-sky transition to test the
+timing hypothesis. The lab/sky difference alone cannot separate transport
+timing from command integrity or loop response.
+
+### Production startup dry run
+
+Use the production enable callback, primary grid, release gate, waits and copy
+routine with the live primary and combined streams. The dry run allocates one
+zero-filled private destination per configured mapping and keeps the schedule
+in process. It does not open a numbered destination or provider stream. Exact
+real reader release gates the first auxiliary slot. Subsequent virtual slots
+use configurable combination and release delays, initially 5 and 30 us from
+the simulated trigger. The real clock, primary identity and unexpected
+combined-publication checks remain active.
+
+Record the last 32 disabled primary callbacks and the first 32 callbacks
+starting at activation. Use the same logger for enable time, private copy
+latency and per-cycle virtual outcomes. Keep genuine-main diagnostic output
+available for the existing loop timing monitor. The proposed comparison can
+show an effect of synco's own scheduling and copies without reproducing the
+additional combiner, SDK or mirror load.
+
+The dry-run branch built and all 167 scheduler cases passed. The private-stream
+test exercised 1 kHz and 2 kHz startup with and without a genuine main reader
+release. It verified the timing capture and actual private buffer copies while
+checking that the numbered stream pixels, counters and timestamps did not
+change. The fixture produced only genuine-main combined publications and no
+live provider schedule or sidecar files. On-sky timing remains to be measured.
