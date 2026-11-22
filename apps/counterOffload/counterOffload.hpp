@@ -232,7 +232,7 @@ class counterOffload : public MagAOXApp<true>,
 
     std::string m_channel{ "dm01disp08_aux" }; ///< The dmSyncopation auxiliary source this app writes.
 
-    double m_rampStartUs{ 25 }; ///< Ramp start after the woofer command, in us.
+    double m_rampStartUs{ 0 }; ///< Ramp start after the woofer command, in us.
 
     double m_rampDurationUs{ 330 }; ///< Ramp duration, in us.
 
@@ -921,7 +921,7 @@ inline void counterOffload::setupConfig()
                 "rampStartUs",
                 false,
                 "real",
-                "Ramp start after the woofer command, in us.  Default is 25." );
+                "Ramp start after the woofer command, in us.  Default is 0." );
 
     config.add( "counterOffload.rampDurationUs",
                 "",

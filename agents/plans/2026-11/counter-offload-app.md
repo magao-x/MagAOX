@@ -998,3 +998,39 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
 - CSV: new last columns `clippedSlots,clipFrac` on measurement rows, empty on fit rows.
 - `stageClipped` (6) is kept, documented as no longer produced.
 - New static `clipFraction()`, with a unit test.
+
+### Bench: Calibration Run `20261122T183157Z` (clipped points kept)
+File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261122T183157Z.csv`.
+
+- **Run.** It completed in 9.2 min with 2 rounds. The grids were start 0–150/25, duration 200–600/100, and gain **0.3–0.5/0.1** (3 points). It started from 25/330/**0.3**. No parameter moved, and the confirmation gave 0.76 ± 0.06, so 25/330/0.3 was re-applied.
+- **Baseline.** 3.9×10⁻⁴ ± 6.4%, about 19× the 202219Z level, so the turbulence was much stronger.
+- **Clipping (new columns).** Only at gain 0.4 (0.02–0.04% of slots) and 0.5 (0.17–0.47%). One start point at gain 0.3 clipped 2 slots. It is negligible and does not limit the gain.
+- **Gain: the only clear signal.** Interpolated ratios in round 1 / round 2: 0.3 → 0.67/0.75; 0.4 → 0.57/0.65; 0.5 → 0.48/0.50. The ratio drops about 0.1 per 0.1 of gain and is still falling at 0.5. That matches 202219Z, whose fit had its minimum near 0.68.
+- **Start and duration: flat within the noise at gain 0.3.**
+  - The 25 measurements at gain 0.3 have a mean of 0.71 and an SD of 0.064, the same as the replicate SD (0.071).
+  - Start 0–125 µs averages 0.64–0.75 with no trend. Only 150 µs (0.78, 0.78) is slightly worse, consistent with 202219Z.
+  - Duration 200–600 shows no trend.
+  - At gain 0.3 a timing effect is scaled down by the gain, so the timing sweeps have little sensitivity.
+- **Decision-rule weakness (gain sweep).**
+  - With 3 points the rule uses the 3-point running mean, so the end values become 2-point means: rCurrent(0.3) = 0.622 and rCandidate(0.5) = 0.526.
+  - The measured 0.3 → 0.5 difference of 0.19–0.25 is therefore halved to 0.097. It falls below the threshold 1.5 × σ × √(6/3) = 0.157, so gain did not move, although both rounds show it clearly.
+  - With ≥ 4 points the quadratic fit is used instead. The default gain grid (8 points) avoids this.
+- **For the next run:**
+  - start at gain 0.5;
+  - restore the default gain grid 0.3–1.0;
+  - optionally use `rounds=1` or a narrower start grid (0–125), since start and duration are flat;
+  - optionally fix the < 4-point rule (proposal below).
+- **Proposal R-1 (not implemented).** With fewer than 4 points, compare the raw values at current and candidate (or fit a line) instead of the running mean, and use √2·σ as the standard error of the difference. Alternatively, refuse grids with fewer than 4 points.
+
+### Bench: Calibration Run `20261122T184435Z` (aborted by a loop error)
+File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261122T184435Z.csv`. It started from 25/330/**0.4** and has 18 rows: replicates, one start sweep, then one gain point before the abort.
+
+- **Gain 0.4 is reproduced.** The replicates are 0.62, 0.59 and 0.54 (mean 0.58, SD 0.045), and the gain point is 0.55. 183157Z gave 0.57 and 0.65. The noise σ was 0.05.
+- **Start sweep at gain 0.4: earlier is better again.**
+  - Ratios: 0 → 0.54, 25 → 0.55, 50 → 0.68, 75 → 0.59, 100 → 0.70, 125 → 0.70, 150 → 0.63.
+  - A linear fit gives +0.13 over 0–150 µs, at about 2.3σ. The fit row has candidate 0 at 0.52 against current 25 at 0.58, below the 0.07 threshold, so it did not move.
+  - This agrees with 202219Z at gain 0.4 (0–75 µs: 0.48; 100–275 µs: 0.59). Two runs at gain 0.4 now favour a start ≤ 25 µs by about 0.1. At gain 0.3 (183157Z) the effect was not resolved.
+- **Clipping.** At most 0.06% of slots. Negligible.
+- **Abort.** The predicted ratio of the chosen parameters (0.58) was below 1, so the abort should have applied 25/330/0.4, not restored the starting values. Check the "calibration aborted, applied …" log line.
+
+**Default `rampStartUs` changed 25 → 0 (user request, 2026-11-22).** Start 0 was at least as good as 25 µs in every paired comparison: 183157Z rounds 1 and 2 (0.65 against 0.74; 0.63 against 0.76) and 184435Z (0.54 against 0.55). Its value is "as soon as possible", since the first slot lands 100–225 µs after the offload arrives. The calibration start grid is unchanged (0–150/25).
