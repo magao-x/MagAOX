@@ -80,9 +80,9 @@ setINDI -s <instance>.zero.request=On
 | `counterOffload.rampStartUs` | `rampStartUs` | 25 | Ramp start after the woofer command, µs. |
 | `counterOffload.rampDurationUs` | `rampDurationUs` | 330 | Ramp duration, µs. |
 | `counterOffload.leak` | `leak` | 0 | Fraction of the completed contribution removed after each published slot. |
-| `counterOffload.timeOffsetUs` | `timeOffsetUs` | 0 | Added to the receipt time to give the ramp reference, µs. |
+| `counterOffload.timeOffsetUs` | — | 0 | Added to the receipt time to give the ramp reference, µs. |
 | `counterOffload.gain` | `gain` | 0.5 | Scale applied to each new offload when it arrives, 0 to 2. |
-| `counterOffload.maxCommand` | `maxCommand` | 1.0 | Clip level for every pixel of the command and of `A`. |
+| `counterOffload.maxCommand` | — | 1.0 | Clip level for every pixel of the command and of `A`. |
 | `counterOffload.computeLeadUs` | — | 20 | Time reserved to compute a command before the publish lead, µs. |
 | `counterOffload.threadPrio` / `cpuset` | — | 20 / none | Producer thread placement; the example uses `spare26`. |
 | `syncopation.timingStream` | — | none (required) | dmSyncopation schedule, e.g. `dmtweeter_synco_timing`. |
@@ -97,47 +97,48 @@ The read-only `stats` property reports these counters:
 - `events`: offloads accepted.
 - `published`: commands published.
 - `failed`: publishes that dmSyncopation did not accept.
-- `overflows`: offloads folded into `A` early because the ramp pool was full.
-- `active`: ramps still running.
 - `clipped`: slots in which the command or `A` was clipped to `maxCommand`.
+
+If the ramp pool fills, so that offloads are folded into `A` without a ramp, the app logs a WARNING with the number
+of offloads affected.
 
 ## Calibrate mode
 
 Calibrate mode tunes `rampStartUs`, `rampDurationUs` and `gain` to minimize the wavefront error spike that offloading
 causes, measured in the closed-loop WFS PSDs.
 
-**Figure of merit.** The power of the averaged closed-loop PSDs (`aol1_clpsds`, from modalPSDs) within `calibHalfWidthHz` of
+**Figure of merit.** The power of the averaged closed-loop PSDs (`aol1_clpsds`, from modalPSDs) within `calibrate.halfWidthHz` of
 the offload rate `t2wOffloader.fps`, summed over the first `t2wOffloader.numModes` modes. It is reported as a ratio to a
 baseline measured at gain 0, the counter-offload off. The baseline drifts (about ±16% over 8 min on the bench), so
 each ratio uses the baseline linearly interpolated in time between the baselines measured before and after it.
 
 **Averaging.** `aol1_clpsds` is the mean of the raw PSDs over the last `psdAvgTime` (10 s), republished every 0.5 s. Its
-oldest data are `psdAvgTime + psdTime` (10.5 s) old. After each change, an evaluation therefore waits `calibSettleS` (11 s),
-so that only PSDs made entirely of data taken after the change are used. It then averages the next `calibNAverage` (3)
+oldest data are `psdAvgTime + psdTime` (10.5 s) old. After each change, an evaluation therefore waits `calibrate.settleS` (11 s),
+so that only PSDs made entirely of data taken after the change are used. It then averages the next `calibrate.nAverage` (3)
 published PSDs, 0.5 s apart.
 
 These samples share most of their data. Their standard deviation (`fomStd`) shows whether the value is stable; it is
-not an independent noise estimate. If you change modalPSDs `psdAvgTime` or `psdTime`, change `calibSettleS` to match.
+not an independent noise estimate. If you change modalPSDs `psdAvgTime` or `psdTime`, change `calibrate.settleS` to match.
 
 **Scan.** Repeated measurements of the same parameters scatter by about 0.05–0.08 in ratio, as much as many of the
 effects being measured, so the run is built to choose values from many points, not from the single lowest one.
 
-1. **Setup.** Set `leak` to `calibLeak` (default 0.0025 per slot, about 50 ms at 8 kHz), so that the held
+1. **Setup.** Set `leak` to `calibrate.leak` (default 0.0025 per slot, about 50 ms at 8 kHz), so that the held
    contribution stays at a few offloads.
-2. **Noise estimate.** Measure the starting parameters `calibReplicates` (3) times, each between baselines. Their
+2. **Noise estimate.** Measure the starting parameters `calibrate.replicates` (3) times, each between baselines. Their
    scatter is the first estimate σ of the noise of one ratio.
-3. **Sweeps.** In round 1, sweep `rampStartUs`, then `gain`, then `rampDurationUs`. In later rounds (`calibRounds`,
+3. **Sweeps.** In round 1, sweep `rampStartUs`, then `gain`, then `rampDurationUs`. In later rounds (`calibrate.rounds`,
    default 2), sweep `rampStartUs` and `gain` again with the updated values, since they may interact. In each sweep:
    - the grid is measured in a scrambled order (for example 0, 100, 50, 150, 25, 125, 75), so slow drift does not
      look like a trend;
-   - a baseline is measured before and after the sweep, and after every `calibBaselineEvery` (4) points;
+   - a baseline is measured before and after the sweep, and after every `calibrate.baselineEvery` (4) points;
    - a quadratic is fitted to all the sweep's ratios, and its minimum within the measured range is the candidate.
      With fewer than 4 points the minimum of a 3-point running mean is used. The fit residuals are pooled into σ,
-     which is never taken below `calibSigmaFloor`;
+     which is never taken below `calibrate.sigmaFloor`;
    - the parameter moves to the candidate only if the predicted improvement over its current value exceeds
-     `calibMoveSigma` × σ × √(6 / n), with n the number of points (1.5 standard errors by default). Otherwise it keeps
+     `calibrate.moveSigma` × σ × √(6 / n), with n the number of points (1.5 standard errors by default). Otherwise it keeps
      its value. A current value outside the swept range always moves.
-4. **Confirmation.** Measure the chosen parameters `calibConfirmPairs` (3) times, each between baselines. If their mean
+4. **Confirmation.** Measure the chosen parameters `calibrate.confirmPairs` (3) times, each between baselines. If their mean
    ratio is below 1, apply them and log them, with the confirmed ratio ± its standard error, at INFO as values to copy
    into the config. Otherwise restore the parameters from before the run, with a WARNING.
 5. Restore the original `leak`.
@@ -158,8 +159,8 @@ setINDI -s <instance>.calibrate.toggle=On
 
 Turning `calibrate` off aborts the run. The run also aborts if:
 
-- a point exceeds `calibAbortRatio` times the latest baseline;
-- no settled PSDs arrive within `calibTimeoutS` (for example the loop opened or modalPSDs stopped);
+- a point exceeds `calibrate.abortRatio` times the latest baseline;
+- no settled PSDs arrive within `calibrate.timeoutS` (for example the loop opened or modalPSDs stopped);
 - `t2wOffloader.fps` or `numModes` changes;
 - the app is disabled, or the PSD stream is reallocated;
 - the gain-0 baseline cannot be measured, including when it clips.
@@ -174,9 +175,11 @@ contribution already held leaks away within about 50 ms at the calibration leak.
 
 - `stage` (0 off, 1 initial, 2 start, 3 duration, 4 gain, 5 confirm, 6 clipped, 7–9 the start, duration and gain
   decisions) and `point`, the number of points measured;
-- the latest `fom`, `fomOff` and `ratio` (to the latest baseline);
+- the latest `ratio` (to the latest baseline);
 - `bestStartUs`, `bestDurationUs`, `bestGain` and `bestRatio`: the parameters chosen so far and their predicted ratio;
-- `sigma`, the current noise estimate, and `confirmRatio` ± `confirmStd` at the end.
+- `confirmRatio`, the mean confirmed ratio, at the end.
+
+The band powers, the noise estimate σ and the standard error of the confirmed ratio are in the CSV and the INFO logs.
 
 Each run writes `<instance>_calib_<UTC time>.csv` in `csvDir`. Measurement rows have the time, stage, parameters,
 offload rate, modes, band, `nAverage`, `fom`, `fomStd`, `fomOff` (the latest baseline), `ratio` (to it) and
@@ -194,27 +197,34 @@ These are set in the config:
 | `calibrate.offloadDevice` | `t2wOffloader` | Source of `fps` and `numModes`. |
 | `calibrate.csvDir` | `/home/xsup/counterOffload` | Directory for the run CSVs. |
 
-These are INDI properties only, not config keys. A change lasts until restart, and they cannot be changed while a run
-is in progress. A rejected value is logged as an error and the setting keeps its value.
+These numeric settings are optional config keys in the `[calibrate]` section. None needs to be set: leave them out
+to use the defaults. An out-of-range or non-integral value for an integer setting is logged as an error, and the app does
+not start. All of them, and the grids, are logged at DEBUG at startup and at the start of every run.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `calibrate.halfWidthHz` | 10 | Band half width around the offload rate, Hz. |
+| `calibrate.modeMax` | 0 | Modes summed; 0 uses `t2wOffloader.numModes`. |
+| `calibrate.nAverage` | 3 | Settled PSDs averaged per evaluation, 2 to 1000. |
+| `calibrate.baselineEvery` | 4 | Sweep points between baselines. |
+| `calibrate.settleS` | 11 | Wait after each change before PSDs count; must cover `psdAvgTime + psdTime`, s. |
+| `calibrate.timeoutS` | 5 | Longest wait for an evaluation's PSDs after settling, s. |
+| `calibrate.abortRatio` | 3 | Abort above this multiple of the baseline. |
+| `calibrate.leak` | 0.0025 | `leak` used during a run, restored afterwards; must be above 0. |
+| `calibrate.replicates` | 3 | Measurements of the starting parameters for the first noise estimate, 2 to 20. |
+| `calibrate.confirmPairs` | 3 | Measurements of the chosen parameters, each after a baseline, 1 to 20. |
+| `calibrate.moveSigma` | 1.5 | Standard errors of improvement needed to move a parameter. |
+| `calibrate.sigmaFloor` | 0.02 | Smallest noise estimate of the ratio used. |
+| `calibrate.rounds` | 2 | Rounds of sweeps; rounds after the first sweep only `rampStartUs` and `gain`, 1 to 5. |
+
+The scan grids are INDI properties only, not config keys. A change lasts until restart, and they cannot be changed while
+a run is in progress. A rejected value is logged as an error and the grid keeps its value.
 
 | INDI property | Default | Meaning |
 | --- | --- | --- |
-| `calibHalfWidthHz` | 10 | Band half width around the offload rate, Hz. |
-| `calibModeMax` | 0 | Modes summed; 0 uses `t2wOffloader.numModes`. |
-| `calibNAverage` | 3 | Settled PSDs averaged per evaluation, 2 to 1000. |
-| `calibBaselineEvery` | 4 | Sweep points between baselines. |
-| `calibSettleS` | 11 | Wait after each change before PSDs count; must cover `psdAvgTime + psdTime`, s. |
-| `calibTimeoutS` | 5 | Longest wait for an evaluation's PSDs after settling, s. |
-| `calibAbortRatio` | 3 | Abort above this multiple of the baseline. |
-| `calibLeak` | 0.0025 | `leak` used during a run, restored afterwards; must be above 0. |
 | `calibStartGridUs` | 0, 150, 25 | `rampStartUs` scan; elements `min`, `max`, `step`. |
 | `calibDurationGridUs` | 200, 600, 100 | `rampDurationUs` scan; elements `min`, `max`, `step`. |
 | `calibGainGrid` | 0.3, 1.0, 0.1 | `gain` scan; elements `min`, `max`, `step`. |
-| `calibReplicates` | 3 | Measurements of the starting parameters for the first noise estimate, 2 to 20. |
-| `calibConfirmPairs` | 3 | Measurements of the chosen parameters, each after a baseline, 1 to 20. |
-| `calibMoveSigma` | 1.5 | Standard errors of improvement needed to move a parameter. |
-| `calibSigmaFloor` | 0.02 | Smallest noise estimate of the ratio used. |
-| `calibRounds` | 2 | Rounds of sweeps; rounds after the first sweep only `rampStartUs` and `gain`, 1 to 5. |
 
 For example, to scan gains from 0.5 to 1.2:
 
