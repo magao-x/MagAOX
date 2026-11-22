@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QIcon>
 #include <QLabel>
 #include <QPushButton>
 #include <QTimer>
@@ -43,6 +44,7 @@ std::optional<double> readTimingNumber( const pcf::IndiElement &element )
 timingPanel::timingPanel( QWidget *parent ) : xWidget( parent )
 {
     setWindowTitle( QStringLiteral( "timingGUI" ) );
+    setWindowIcon( QIcon( QStringLiteral( ":/icons/timer.png" ) ) );
     setStyleSheet( QStringLiteral( "QGroupBox { border: none; }" ) );
     auto *layout = new QVBoxLayout( this );
 
