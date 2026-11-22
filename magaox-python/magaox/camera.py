@@ -30,16 +30,19 @@ class XCam:
     _roi_state: dict[str, float]
     grid: Optional["hcipy.Field"]
 
-    def __init__(self, shm_name, pixel_size=1, indi_client=None, use_hcipy=False):
-        """Attach by stream name, optionally sharing an INDI client and scaling an HCIPy grid."""
+    def __init__(self, shm_name, pixel_size=1, indi_client=None, use_hcipy=False, *, already_subscribed=False):
+        """Attach by stream name. An already subscribed client can supply ROI updates asynchronously."""
         # Connect the INDI client and acquire the initial device properties.
         self.shm_name = shm_name
         if indi_client is None:
+            if already_subscribed:
+                raise ValueError("already_subscribed requires an existing INDI client")
             indi_client = indi.client.IndiClient()
             indi_client.connect()
         self._client = indi_client
-        self._client.wait_to_connect()
-        self._client.get_properties_and_wait(shm_name)
+        if not already_subscribed:
+            self._client.wait_to_connect()
+            self._client.get_properties_and_wait(shm_name)
 
         # Serialize camera reads and explicit reconnects independently of ROI notifications.
         self._camera_lock = threading.RLock()
@@ -52,14 +55,16 @@ class XCam:
         self.connect_camera()
 
         # Track ROI telemetry separately from the stream attachment.
-        self._roi_state = self._get_roi_state()
         self._client.register_callback(self._handle_indi_changes, device_name=self.shm_name)
+        self._roi_state = self._get_roi_state()
 
     def _get_roi_state(self):
         """Collect the current ROI when the camera provides the complete property set."""
-        if not all(k in self._client[self.shm_name] for k in self._roi_properties):
+        try:
+            device = self._client[self.shm_name]
+            return {k: device[k]["current"] for k in self._roi_properties}
+        except KeyError:
             return None
-        return {k: self._client[self.shm_name][k]["current"] for k in self._roi_properties}
 
     def _handle_indi_changes(self, message):
         """Refresh cached ROI telemetry independently of producer reconfiguration."""

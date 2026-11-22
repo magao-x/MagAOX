@@ -1,3 +1,5 @@
+## \file __init__.py
+# \brief INDI driver for coronagraph pupil alignment.
 import logging
 from enum import Enum
 import time
@@ -8,6 +10,7 @@ import xconf
 
 from magaox.indi.device import XDevice, BaseConfig
 from magaox.camera import XCam
+from magaox.shmim import ShmimNotReady
 from magaox.deformable_mirror import XDeformableMirror
 from magaox.constants import StateCodes
 from magaox.state_manager import XStateMachine
@@ -61,14 +64,26 @@ class RefStates(Enum):
     FWLYOTREF = 2
     CENTROIDREF = 3
 
+class PupilStateMachine(XStateMachine):
+    """Keep alignment idle until the app can acquire frames."""
+
+    def handle_state(self, existing_property, new_message):
+        # Discard selections made before INDI and the camera are available.
+        if not self._device.connected or self._device.camera is None:
+            self._device.update_property(existing_property)
+            return
+
+        # Use the usual selection behavior once startup is complete.
+        super().handle_state(existing_property, new_message)
+
 class pupilCorAlign(XDevice):
     config : pupilCorAlignConfig
 
     def setup(self):
         self.log.debug(f"I was configured! See? {self.config=}")
 
-        self.log.info("Found camera: {:s}".format(self.config.camera.shmim))
-        self.camera = XCam(self.config.camera.shmim, use_hcipy=True)
+        # Let the driver publish its properties before attempting camera attachment.
+        self.camera = None
 
         self.ncpc_act_grid = hp.make_pupil_grid(34, 34/30.0 * np.array([1.0, np.sqrt(2)]))
         self.ncpc_dm = XDeformableMirror(dm=self.config.dm.shmim, channel=self.config.dm.channel)
@@ -76,21 +91,21 @@ class pupilCorAlign(XDevice):
         self.client.get_properties('fwscind')
         self.client.get_properties('fwpupil')
         self.client.get_properties('fwfpm')
-        self.client.get_properties('fwpupil')
         self.client.get_properties('fwlyot')
-        self.client.get_properties('camsci1')
+        self.client.get_properties(self.config.camera.shmim)
         self.client.get_properties('camsci1-dark')
         self.client.get_properties('stagesci1')
         self.client.get_properties('picomotors')
         self.client.get_properties('ttmperi')
 
         fsm = properties.TextVector(name='fsm')
-        fsm.add_element(DefText(name='state', _value=StateCodes.INITIALIZED.name))
+        fsm.add_element(DefText(name='state', _value=StateCodes.NOTCONNECTED.name))
         self.add_property(fsm)
 
         self._state_names = ['idle', 'fwpupil', 'fwlyot', 'centroid']
         self._state_callbacks = [None, self.handle_fwpupil, self.handle_fwlyot, self.handle_centroid]
-        self._state_machine = XStateMachine(self, self._state_names, States, self._state_callbacks)
+        self._state_machine = PupilStateMachine(self, self._state_names, States, self._state_callbacks)
+        self.client.connection.add_callback(constants.TransportEvent.disconnection, self._indi_disconnected)
 
         if self.config.calibration.superuser:
             print(self.config.calibration.superuser)
@@ -204,6 +219,10 @@ class pupilCorAlign(XDevice):
     def control_position(self, shift, indi_targets, reconstruction_matrix):
         '''
         '''
+        # A server restart may have cancelled the selection during the camera exposure.
+        if not self.connected or self.properties['state']['idle'] == constants.SwitchState.ON:
+            return
+
         if self.stages_are_ready():
             current_positions = [self.client['{:s}.current'.format(indi_targets[i])] for i in [0, 1]]
             cmd = reconstruction_matrix.dot(shift)
@@ -307,11 +326,39 @@ class pupilCorAlign(XDevice):
         hp.write_field(im, self.config.calibration.path + filename)
         self._reference_state_machine.transition_to_idle()
 
+    def _indi_disconnected(self, status):
+        """Return to idle even when INDI reconnects between loop iterations."""
+        # Cancel the selection once per outage.
+        if self.properties['fsm']['state'] != StateCodes.NOTCONNECTED.name:
+            self._state_machine.transition_to_idle()
+            self.properties['fsm']['state'] = StateCodes.NOTCONNECTED.name
+            self.update_property(self.properties['fsm'])
+
     def loop(self):
-        '''
-        '''
-        self._state_machine.loop()
-        self._reference_state_machine.loop()
+        """Wait for INDI and the camera, then run the existing alignment loop."""
+        # Retry a late science stream at the normal app cadence.
+        if not self.connected:
+            return
+        if self.camera is None:
+            try:
+                self.camera = XCam(self.config.camera.shmim, indi_client=self.client, use_hcipy=True, already_subscribed=True)
+            except (FileNotFoundError, ShmimNotReady):
+                if self.connected and self.properties['fsm']['state'] != StateCodes.CONNECTED.name:
+                    self.properties['fsm']['state'] = StateCodes.CONNECTED.name
+                    self.update_property(self.properties['fsm'])
+                return
+
+        # A wheel or stage may still be publishing its first INDI properties.
+        try:
+            self._state_machine.loop()
+        except KeyError as exc:
+            self.log.warning(f'Alignment returned to idle while waiting for an INDI property: {exc}')
+            self._state_machine.transition_to_idle()
+
+        # Publish readiness on the transition to idle.
+        if self.connected and self.properties['state']['idle'] == constants.SwitchState.ON and self.properties['fsm']['state'] != StateCodes.READY.name:
+            self.properties['fsm']['state'] = StateCodes.READY.name
+            self.update_property(self.properties['fsm'])
         self.update_properties()
 
     def update_properties(self):
