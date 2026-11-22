@@ -2088,8 +2088,10 @@ inline int orcaCtrl::configureAcquisition()
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
 
-    // Written first, since it changes the readout time, exposure limits and frame rate read below.
-    // Standard scan is the camera's fastest readout speed and Ultra quiet scan its slowest.
+    // Applied first, since it changes the readout time, exposure limits and frame rate read below.
+    // Standard scan is the camera's fastest readout speed (valuemax) and Ultra quiet scan its slowest
+    // (valuemin).  A readout-speed failure is a warning, not an error: acquisition continues at the
+    // camera's current speed instead of failing and being retried every second.
     if( m_readoutSpeedNameSet != "standard" && m_readoutSpeedNameSet != "ultra_quiet" )
     {
         log<text_log>( "unknown readout speed '" + m_readoutSpeedNameSet + "', keeping " + m_readoutSpeedName,
@@ -2098,34 +2100,69 @@ inline int orcaCtrl::configureAcquisition()
         m_readoutSpeedNameSet = m_readoutSpeedName;
     }
 
-    int32 readoutSpeed =
-        m_readoutSpeedNameSet == "ultra_quiet" ? DCAMPROP_READOUTSPEED__SLOWEST : DCAMPROP_READOUTSPEED__FASTEST;
-
     DCAMPROP_ATTR speedAttr{};
     speedAttr.cbSize = sizeof( speedAttr );
     speedAttr.iProp  = DCAM_IDPROP_READOUTSPEED;
 
-    if( setorcaParameter( DCAM_IDPROP_READOUTSPEED, readoutSpeed ) < 0 ||
-        getorcaParameter( readoutSpeed, DCAM_IDPROP_READOUTSPEED ) < 0 ||
-        failed( dcamprop_getattr( m_cameraHandle, &speedAttr ) ) )
+    double readoutSpeed = 0;
+
+    error = dcamprop_getattr( m_cameraHandle, &speedAttr );
+
+    if( !failed( error ) )
+    {
+        error = dcamprop_getvalue( m_cameraHandle, DCAM_IDPROP_READOUTSPEED, &readoutSpeed );
+    }
+
+    if( failed( error ) )
     {
         if( powerState() != 1 || powerStateTarget() != 1 )
         {
             return -1;
         }
-        log<software_error>( { __FILE__, __LINE__, "could not set the readout speed" } );
-        return -1;
+
+        log<text_log>( "could not read the readout speed (" + dcamErrorString( m_cameraHandle, error ) +
+                           "), leaving it unchanged",
+                       logPrio::LOG_WARNING );
+
+        m_readoutSpeedNameSet = m_readoutSpeedName;
     }
-
-    const std::string appliedSpeed = readoutSpeed <= speedAttr.valuemin ? "ultra_quiet" : "standard";
-
-    if( appliedSpeed != m_readoutSpeedName )
+    else
     {
-        log<text_log>( "readout speed changed from " + m_readoutSpeedName + " to " + appliedSpeed,
-                       logPrio::LOG_NOTICE );
-    }
+        double target = m_readoutSpeedNameSet == "ultra_quiet" ? speedAttr.valuemin : speedAttr.valuemax;
 
-    m_readoutSpeedName = appliedSpeed;
+        // Only write on a change; DCAM returns the value it applied
+        if( target != readoutSpeed )
+        {
+            error = dcamprop_setgetvalue( m_cameraHandle, DCAM_IDPROP_READOUTSPEED, &target );
+
+            if( failed( error ) )
+            {
+                if( powerState() != 1 || powerStateTarget() != 1 )
+                {
+                    return -1;
+                }
+
+                log<text_log>( "could not set the readout speed to " + m_readoutSpeedNameSet + " (" +
+                                   dcamErrorString( m_cameraHandle, error ) + "), keeping the current speed",
+                               logPrio::LOG_WARNING );
+            }
+            else
+            {
+                readoutSpeed = target;
+            }
+        }
+
+        const std::string appliedSpeed = readoutSpeed <= speedAttr.valuemin ? "ultra_quiet" : "standard";
+
+        if( appliedSpeed != m_readoutSpeedName )
+        {
+            log<text_log>( "readout speed changed from " + m_readoutSpeedName + " to " + appliedSpeed,
+                           logPrio::LOG_NOTICE );
+        }
+
+        m_readoutSpeedName    = appliedSpeed;
+        m_readoutSpeedNameSet = appliedSpeed;
+    }
 
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
     //=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*=*
