@@ -19,6 +19,7 @@
 #include <iomanip>
 #include <limits>
 #include <numeric>
+#include <sstream>
 #include <type_traits>
 #include <vector>
 
@@ -248,8 +249,9 @@ class counterOffload : public MagAOXApp<true>,
     ///@}
 
     /** \name Calibrate Parameters - Data
-     * The stream, device and directory are configurable.  The rest are set over INDI only, and are reset to these
-     * defaults on restart.  They cannot be changed while a calibration runs.
+     * The stream, device, directory and numeric settings are optional config keys in the calibrate section, see
+     * calibKeys().  The scan grids are set over INDI only, and are reset to these defaults on restart.  None can be
+     * changed while a calibration runs.
      *@{
      */
 
@@ -333,6 +335,8 @@ class counterOffload : public MagAOXApp<true>,
 
     uint64_t m_clippedLogged{ 0 }; ///< m_clipped at the last clipping warning.  appLogic only.
 
+    uint64_t m_overflowsLogged{ 0 }; ///< m_overflows at the last ramp-pool overflow warning.  appLogic only.
+
     ///@}
 
     /** \name Calibrate State - Data
@@ -377,19 +381,13 @@ class counterOffload : public MagAOXApp<true>,
 
     int m_calibPoint{ 0 }; ///< Points measured in the current run, not counting baselines.
 
-    double m_lastFom{ 0 }; ///< Band power of the latest point.
-
     double m_lastRatio{ 0 }; ///< Ratio of the latest point to the latest baseline.
 
     calibParamsT m_calibBest{ 0, 0, 0 }; ///< Parameters chosen so far in the current or last run.
 
     double m_calibBestRatio{ 0 }; ///< Ratio predicted for m_calibBest.
 
-    double m_calibSigma{ 0 }; ///< Current noise estimate of the ratio.
-
     double m_confirmRatio{ 0 }; ///< Mean confirmed ratio of the chosen parameters.
-
-    double m_confirmStd{ 0 }; ///< Standard error of m_confirmRatio.
 
     std::ofstream m_csv; ///< The current run's CSV file.  Calibration thread only.
 
@@ -618,6 +616,38 @@ class counterOffload : public MagAOXApp<true>,
                         double                     lo /**< [in] smallest allowed value */,
                         double                     hi /**< [in] largest allowed value */ );
 
+    /// A numeric calibration setting, configured with an optional key in the calibrate section.
+    struct calibKeyT
+    {
+        const char *key; ///< Config keyword in the calibrate section.
+
+        double *real; ///< The setting if it is real, otherwise nullptr.
+
+        int *integer; ///< The setting if it is an integer, otherwise nullptr.
+
+        double lo; ///< Smallest allowed value.
+
+        double hi; ///< Largest allowed value.
+
+        const char *help; ///< Config help text, including the default.
+    };
+
+    /// The numeric calibration settings, with their limits and help text.
+    std::vector<calibKeyT> calibKeys();
+
+    /// Set a numeric calibration setting, see applyCalibSetting().
+    /**
+     * \returns 0 on success
+     * \returns -1 if the value is rejected by applyCalibSetting()
+     */
+    int applyCalibKey( const calibKeyT &k /**< [in] the setting */, double value /**< [in] the new value */ );
+
+    /// The current value of a numeric calibration setting.
+    static double calibKeyValue( const calibKeyT &k /**< [in] the setting */ );
+
+    /// All calibration settings and scan grids on one line, for the log.
+    std::string calibSettingsString();
+
   protected:
     /** \name Producer Thread
      * Publishes counter-offload commands for each dmSyncopation slot.
@@ -767,49 +797,19 @@ class counterOffload : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_leak; ///< Property to set the leak.
 
-    pcf::IndiProperty m_indiP_maxCommand; ///< Property to set the command clip level.
-
     pcf::IndiProperty m_indiP_rampStart; ///< Property to set the ramp start.
 
     pcf::IndiProperty m_indiP_rampDuration; ///< Property to set the ramp duration.
 
-    pcf::IndiProperty m_indiP_timeOffset; ///< Property to set the ramp reference time offset.
-
     pcf::IndiProperty m_indiP_stats; ///< Read-only counters.
 
     pcf::IndiProperty m_indiP_calibrate; ///< Toggle switch: On starts a calibration run, Off aborts it.
-
-    pcf::IndiProperty m_indiP_halfWidth; ///< Property to set the calibration band half width.
-
-    pcf::IndiProperty m_indiP_modeMax; ///< Property to set the number of PSD modes summed.
-
-    pcf::IndiProperty m_indiP_nAverage; ///< Property to set the PSDs averaged per evaluation.
-
-    pcf::IndiProperty m_indiP_baselineEvery; ///< Property to set the evaluations between baselines.
-
-    pcf::IndiProperty m_indiP_settle; ///< Property to set the settling wait.
-
-    pcf::IndiProperty m_indiP_timeout; ///< Property to set the PSD timeout.
-
-    pcf::IndiProperty m_indiP_abortRatio; ///< Property to set the abort ratio.
-
-    pcf::IndiProperty m_indiP_calibLeak; ///< Property to set the leak used during a run.
 
     pcf::IndiProperty m_indiP_startGrid; ///< Property to set the rampStartUs scan grid: min, max, step.
 
     pcf::IndiProperty m_indiP_durationGrid; ///< Property to set the rampDurationUs scan grid: min, max, step.
 
     pcf::IndiProperty m_indiP_gainGrid; ///< Property to set the gain scan grid: min, max, step.
-
-    pcf::IndiProperty m_indiP_replicates; ///< Property to set the replicates for the first noise estimate.
-
-    pcf::IndiProperty m_indiP_confirmPairs; ///< Property to set the confirmation measurements.
-
-    pcf::IndiProperty m_indiP_moveSigma; ///< Property to set the standard errors needed to move a parameter.
-
-    pcf::IndiProperty m_indiP_sigmaFloor; ///< Property to set the smallest noise estimate used.
-
-    pcf::IndiProperty m_indiP_rounds; ///< Property to set the rounds of sweeps.
 
     pcf::IndiProperty m_indiP_calibration; ///< Read-only calibration progress and best parameters.
 
@@ -827,18 +827,6 @@ class counterOffload : public MagAOXApp<true>,
                    double                  &value /**< [out] the parameter to set */,
                    double                   minVal /**< [in] smallest allowed value */,
                    double                   maxVal /**< [in] largest allowed value */ );
-
-    /// Update a calibration setting from an INDI new-property request, see applyCalibSetting().
-    /**
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-    template <typename T>
-    int setCalibNumber( pcf::IndiProperty       &prop /**< [in,out] the property being changed */,
-                        const pcf::IndiProperty &ipRecv /**< [in] the received request */,
-                        T                       &setting /**< [out] the setting */,
-                        double                   lo /**< [in] smallest allowed value */,
-                        double                   hi /**< [in] largest allowed value */ );
 
     /// Create and register a calibration grid property with min, max and step elements.
     /**
@@ -870,47 +858,17 @@ class counterOffload : public MagAOXApp<true>,
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_leak );
 
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_maxCommand );
-
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_rampStart );
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_rampDuration );
 
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_timeOffset );
-
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_calibrate );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_halfWidth );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_modeMax );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_nAverage );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_baselineEvery );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_settle );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_timeout );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_abortRatio );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_calibLeak );
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_startGrid );
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_durationGrid );
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_gainGrid );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_replicates );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_confirmPairs );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_moveSigma );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_sigmaFloor );
-
-    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_rounds );
 
     INDI_SETCALLBACK_DECL( counterOffload, m_indiP_offloadFps );
 
@@ -1062,6 +1020,13 @@ inline void counterOffload::setupConfig()
                 false,
                 "string",
                 "Directory for the per-run calibration CSV files.  Default is /home/xsup/counterOffload." );
+
+    for( const auto &k : calibKeys() )
+    {
+        const std::string name = std::string( "calibrate." ) + k.key;
+
+        config.add( name, "", name, argType::Required, "calibrate", k.key, false, k.real ? "real" : "int", k.help );
+    }
 }
 
 inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
@@ -1090,6 +1055,19 @@ inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_freqStream, "calibrate.freqStream" );
     _config( m_offloadDevice, "calibrate.offloadDevice" );
     _config( m_csvDir, "calibrate.csvDir" );
+
+    for( const auto &k : calibKeys() )
+    {
+        double value = calibKeyValue( k );
+
+        _config( value, std::string( "calibrate." ) + k.key );
+
+        if( applyCalibKey( k, value ) < 0 )
+        {
+            return log<text_log, -1>( std::string( "invalid calibrate." ) + k.key + ": " + std::to_string( value ),
+                                      logPrio::LOG_ERROR );
+        }
+    }
 
     return validateConfig();
 }
@@ -1152,33 +1130,8 @@ inline int counterOffload::appStartup()
     numberT numbers[] = {
         { m_indiP_gain, "gain", 0, 2, m_gain, INDI_NEWCALLBACK( m_indiP_gain ) },
         { m_indiP_leak, "leak", 0, 1, m_leak, INDI_NEWCALLBACK( m_indiP_leak ) },
-        { m_indiP_maxCommand, "maxCommand", 1e-6, 1e3, m_maxCommand, INDI_NEWCALLBACK( m_indiP_maxCommand ) },
         { m_indiP_rampStart, "rampStartUs", 0, 1e6, m_rampStartUs, INDI_NEWCALLBACK( m_indiP_rampStart ) },
-        { m_indiP_rampDuration, "rampDurationUs", 1, 1e6, m_rampDurationUs, INDI_NEWCALLBACK( m_indiP_rampDuration ) },
-        { m_indiP_timeOffset, "timeOffsetUs", -1e6, 1e6, m_timeOffsetUs, INDI_NEWCALLBACK( m_indiP_timeOffset ) },
-        { m_indiP_halfWidth, "calibHalfWidthHz", 0, 1e6, m_halfWidthHz, INDI_NEWCALLBACK( m_indiP_halfWidth ) },
-        { m_indiP_modeMax, "calibModeMax", 0, 1e6, double( m_modeMax ), INDI_NEWCALLBACK( m_indiP_modeMax ) },
-        { m_indiP_nAverage, "calibNAverage", 2, 1000, double( m_nAverage ), INDI_NEWCALLBACK( m_indiP_nAverage ) },
-        { m_indiP_baselineEvery,
-          "calibBaselineEvery",
-          1,
-          1e6,
-          double( m_baselineEvery ),
-          INDI_NEWCALLBACK( m_indiP_baselineEvery ) },
-        { m_indiP_settle, "calibSettleS", 0, 1e3, m_settleS, INDI_NEWCALLBACK( m_indiP_settle ) },
-        { m_indiP_timeout, "calibTimeoutS", 1, 1e4, m_timeoutS, INDI_NEWCALLBACK( m_indiP_timeout ) },
-        { m_indiP_abortRatio, "calibAbortRatio", 1, 1e6, m_abortRatio, INDI_NEWCALLBACK( m_indiP_abortRatio ) },
-        { m_indiP_calibLeak, "calibLeak", 1e-9, 1, m_calibLeak, INDI_NEWCALLBACK( m_indiP_calibLeak ) },
-        { m_indiP_replicates, "calibReplicates", 2, 20, double( m_replicates ), INDI_NEWCALLBACK( m_indiP_replicates ) },
-        { m_indiP_confirmPairs,
-          "calibConfirmPairs",
-          1,
-          20,
-          double( m_confirmPairs ),
-          INDI_NEWCALLBACK( m_indiP_confirmPairs ) },
-        { m_indiP_moveSigma, "calibMoveSigma", 0, 10, m_moveSigma, INDI_NEWCALLBACK( m_indiP_moveSigma ) },
-        { m_indiP_sigmaFloor, "calibSigmaFloor", 0, 1, m_sigmaFloor, INDI_NEWCALLBACK( m_indiP_sigmaFloor ) },
-        { m_indiP_rounds, "calibRounds", 1, 5, double( m_rounds ), INDI_NEWCALLBACK( m_indiP_rounds ) } };
+        { m_indiP_rampDuration, "rampDurationUs", 1, 1e6, m_rampDurationUs, INDI_NEWCALLBACK( m_indiP_rampDuration ) } };
 
     for( auto &n : numbers )
     {
@@ -1204,7 +1157,7 @@ inline int counterOffload::appStartup()
     }
 
     createROIndiNumber( m_indiP_stats, "stats", "Counters" );
-    for( const char *el : { "events", "published", "failed", "overflows", "active", "clipped" } )
+    for( const char *el : { "events", "published", "failed", "clipped" } )
     {
         m_indiP_stats.add( pcf::IndiElement( el ) );
         m_indiP_stats[el] = 0;
@@ -1221,18 +1174,8 @@ inline int counterOffload::appStartup()
     }
 
     createROIndiNumber( m_indiP_calibration, "calibration", "Calibration" );
-    for( const char *el : { "stage",
-                            "point",
-                            "fom",
-                            "fomOff",
-                            "ratio",
-                            "bestStartUs",
-                            "bestDurationUs",
-                            "bestGain",
-                            "bestRatio",
-                            "sigma",
-                            "confirmRatio",
-                            "confirmStd" } )
+    for( const char *el :
+         { "stage", "point", "ratio", "bestStartUs", "bestDurationUs", "bestGain", "bestRatio", "confirmRatio" } )
     {
         m_indiP_calibration.add( pcf::IndiElement( el ) );
         m_indiP_calibration[el] = 0;
@@ -1241,6 +1184,8 @@ inline int counterOffload::appStartup()
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
+
+    log<text_log>( calibSettingsString(), logPrio::LOG_DEBUG );
 
     REG_INDI_SETPROP( m_indiP_offloadFps, m_offloadDevice, std::string( "fps" ) );
 
@@ -1314,22 +1259,23 @@ inline int counterOffload::appLogic()
     SHMIMMONITORT_UPDATE_INDI( psdShmimMonitorT );
 
     std::vector<double> stats;
+    uint64_t            overflows;
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_stateMutex );
 
-        double active = 0;
-        for( const auto &r : m_ramps )
-        {
-            active += r.used;
-        }
-
-        stats = { double( m_events ), double( m_published ), double( m_failed ), double( m_overflows ), active,
-                  double( m_clipped ) };
+        stats     = { double( m_events ), double( m_published ), double( m_failed ), double( m_clipped ) };
+        overflows = m_overflows;
     }
 
-    updateIfChanged( m_indiP_stats,
-                     std::vector<std::string>{ "events", "published", "failed", "overflows", "active", "clipped" },
-                     stats );
+    updateIfChanged( m_indiP_stats, std::vector<std::string>{ "events", "published", "failed", "clipped" }, stats );
+
+    if( overflows != m_overflowsLogged ) // at most one warning per appLogic cycle
+    {
+        log<text_log>( "ramp pool full: " + std::to_string( overflows - m_overflowsLogged ) +
+                           " offloads folded without a ramp",
+                       logPrio::LOG_WARNING );
+        m_overflowsLogged = overflows;
+    }
 
     const uint64_t clipped = m_clipped;
 
@@ -1364,33 +1310,24 @@ inline int counterOffload::appLogic()
 
         calib = { double( m_calibStage ),
                   double( m_calibPoint ),
-                  m_lastFom,
-                  m_fomOff,
                   m_lastRatio,
                   m_calibBest[0],
                   m_calibBest[1],
                   m_calibBest[2],
                   m_calibBestRatio,
-                  m_calibSigma,
-                  m_confirmRatio,
-                  m_confirmStd };
+                  m_confirmRatio };
     }
 
-    updateIfChanged(
-        m_indiP_calibration,
-        std::vector<std::string>{ "stage",
-                                  "point",
-                                  "fom",
-                                  "fomOff",
-                                  "ratio",
-                                  "bestStartUs",
-                                  "bestDurationUs",
-                                  "bestGain",
-                                  "bestRatio",
-                                  "sigma",
-                                  "confirmRatio",
-                                  "confirmStd" },
-        calib );
+    updateIfChanged( m_indiP_calibration,
+                     std::vector<std::string>{ "stage",
+                                               "point",
+                                               "ratio",
+                                               "bestStartUs",
+                                               "bestDurationUs",
+                                               "bestGain",
+                                               "bestRatio",
+                                               "confirmRatio" },
+                     calib );
 
     updateSwitchIfChanged( m_indiP_calibrate,
                            "toggle",
@@ -2066,6 +2003,123 @@ counterOffload::applyCalibGrid( std::vector<double> &grid, const std::vector<dou
     return 0;
 }
 
+inline std::vector<counterOffload::calibKeyT> counterOffload::calibKeys()
+{
+    return {
+        { "halfWidthHz",
+          &m_halfWidthHz,
+          nullptr,
+          0,
+          1e6,
+          "Half width of the band integrated around the offload rate, Hz.  Default is 10." },
+        { "modeMax",
+          nullptr,
+          &m_modeMax,
+          0,
+          1e6,
+          "Number of PSD modes summed.  0 uses the offloader's numModes.  Default is 0." },
+        { "nAverage",
+          nullptr,
+          &m_nAverage,
+          2,
+          1000,
+          "Settled averaged PSDs averaged for each measurement, at least 2.  Default is 3." },
+        { "baselineEvery",
+          nullptr,
+          &m_baselineEvery,
+          1,
+          1e6,
+          "Measure a gain-0 baseline after every this many points of a sweep.  Default is 4." },
+        { "settleS",
+          &m_settleS,
+          nullptr,
+          0,
+          1e3,
+          "Wait after a change before PSDs are collected, s.  Default is 11." },
+        { "timeoutS",
+          &m_timeoutS,
+          nullptr,
+          1,
+          1e4,
+          "Longest wait for the PSDs of one measurement, after settling, s.  Default is 5." },
+        { "abortRatio",
+          &m_abortRatio,
+          nullptr,
+          1,
+          1e6,
+          "Abort when a measurement exceeds this multiple of the baseline.  Default is 3." },
+        { "leak",
+          &m_calibLeak,
+          nullptr,
+          1e-9,
+          1,
+          "Leak used during a calibration run, restored afterwards; must be > 0.  Default is 0.0025." },
+        { "replicates",
+          nullptr,
+          &m_replicates,
+          2,
+          20,
+          "Measurements of the starting parameters for the first noise estimate.  Default is 3." },
+        { "confirmPairs",
+          nullptr,
+          &m_confirmPairs,
+          1,
+          20,
+          "Measurements of the chosen parameters, each after a baseline, to confirm them.  Default is 3." },
+        { "moveSigma",
+          &m_moveSigma,
+          nullptr,
+          0,
+          10,
+          "A parameter moves only if the fit improves by this many standard errors.  Default is 1.5." },
+        { "sigmaFloor", &m_sigmaFloor, nullptr, 0, 1, "Smallest noise estimate of the ratio used.  Default is 0.02." },
+        { "rounds",
+          nullptr,
+          &m_rounds,
+          1,
+          5,
+          "Rounds of sweeps; rounds after the first sweep only rampStartUs and gain.  Default is 2." } };
+}
+
+inline int counterOffload::applyCalibKey( const calibKeyT &k, double value )
+{
+    if( k.real )
+    {
+        return applyCalibSetting( *k.real, value, k.lo, k.hi );
+    }
+
+    return applyCalibSetting( *k.integer, value, k.lo, k.hi );
+}
+
+inline double counterOffload::calibKeyValue( const calibKeyT &k )
+{
+    return k.real ? *k.real : *k.integer;
+}
+
+inline std::string counterOffload::calibSettingsString()
+{
+    std::ostringstream out;
+    out << "calibration settings:";
+
+    std::lock_guard<std::mutex> guard( m_stateMutex );
+
+    for( const auto &k : calibKeys() )
+    {
+        out << ' ' << k.key << '=' << calibKeyValue( k );
+    }
+
+    const std::pair<const char *, const std::vector<double> *> grids[] = { { "startGridUs", &m_startGridUs },
+                                                                           { "durationGridUs", &m_durationGridUs },
+                                                                           { "gainGrid", &m_gainGrid } };
+
+    for( const auto &[name, grid] : grids )
+    {
+        out << ' ' << name << '=' << ( *grid )[0] << ',' << ( *grid )[1] << ',' << ( *grid )[2];
+    }
+
+    return out.str();
+}
+
 inline void counterOffload::calibThreadStart( counterOffload *c )
 {
     c->calibThreadExec();
@@ -2098,6 +2152,8 @@ inline void counterOffload::runCalibration()
     const calibParamsT original = calibParams();
     constexpr double   none     = std::numeric_limits<double>::max(); // no ratio measured yet
 
+    log<text_log>( calibSettingsString(), logPrio::LOG_DEBUG ); // record the settings this run uses
+
     double originalLeak;
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_stateMutex );
@@ -2111,9 +2167,7 @@ inline void counterOffload::runCalibration()
         m_calibStage     = stageOff;
         m_calibBest      = original;
         m_calibBestRatio = none;
-        m_calibSigma     = 0;
         m_confirmRatio   = 0;
-        m_confirmStd     = 0;
     }
 
     m_offTimes.clear();
@@ -2157,7 +2211,6 @@ inline void counterOffload::runCalibration()
 
         std::lock_guard<std::mutex> lock( m_calibMutex );
         m_calibBestRatio = curRatio;
-        m_calibSigma     = m_noise.sigma( m_sigmaFloor );
     }
 
     // Sweeps: start, gain, then duration in the first round; start and gain in later rounds.
@@ -2191,7 +2244,6 @@ inline void counterOffload::runCalibration()
 
         std::lock_guard<std::mutex> lock( m_calibMutex );
         m_confirmRatio = confirm;
-        m_confirmStd   = confirmSe;
     }
 
     flushRows(); // anything held when a run aborts
@@ -2468,7 +2520,6 @@ inline int counterOffload::measurePoint( const calibParamsT &p, int stage, doubl
 
         if( m > 0 )
         {
-            m_lastFom   = fom;
             m_lastRatio = ratio;
         }
     }
@@ -2656,7 +2707,6 @@ inline bool counterOffload::sweep( int axis, calibParamsT &cur, double &curRatio
         m_calibStage     = stageFitStart + axis;
         m_calibBest      = cur;
         m_calibBestRatio = curRatio;
-        m_calibSigma     = sigma;
     }
 
     return true;
@@ -2850,26 +2900,6 @@ inline int counterOffload::setNumber(
     return 0;
 }
 
-template <typename T>
-inline int counterOffload::setCalibNumber(
-    pcf::IndiProperty &prop, const pcf::IndiProperty &ipRecv, T &setting, double lo, double hi )
-{
-    double target;
-
-    if( indiTargetUpdate( prop, target, ipRecv, true ) < 0 || applyCalibSetting( setting, target, lo, hi ) < 0 )
-    {
-        return log<text_log, -1>( "rejected " + prop.getName() + ": invalid, or a calibration is running",
-                                  logPrio::LOG_ERROR );
-    }
-
-    updateIfChanged( prop, "current", double( setting ) );
-    updateIfChanged( prop, "target", double( setting ) );
-
-    log<text_log>( "set " + prop.getName() + " to " + std::to_string( setting ), logPrio::LOG_NOTICE );
-
-    return 0;
-}
-
 inline int counterOffload::registerGrid( pcf::IndiProperty         &prop,
                                          const std::string         &name,
                                          const std::vector<double> &grid,
@@ -2967,12 +2997,6 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_leak )( const pcf::IndiProperty &
     return setNumber( m_indiP_leak, ipRecv, m_leak, 0, 1 );
 }
 
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_maxCommand )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_maxCommand, ipRecv );
-    return setNumber( m_indiP_maxCommand, ipRecv, m_maxCommand, 1e-6, 1e3 );
-}
-
 INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_rampStart )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_rampStart, ipRecv );
@@ -2983,12 +3007,6 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_rampDuration )( const pcf::IndiPr
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_rampDuration, ipRecv );
     return setNumber( m_indiP_rampDuration, ipRecv, m_rampDurationUs, 1, 1e6 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_timeOffset )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_timeOffset, ipRecv );
-    return setNumber( m_indiP_timeOffset, ipRecv, m_timeOffsetUs, -1e6, 1e6 );
 }
 
 INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_calibrate )( const pcf::IndiProperty &ipRecv )
@@ -3030,54 +3048,6 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_calibrate )( const pcf::IndiPrope
     return 0;
 }
 
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_halfWidth )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_halfWidth, ipRecv );
-    return setCalibNumber( m_indiP_halfWidth, ipRecv, m_halfWidthHz, 0, 1e6 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_modeMax )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_modeMax, ipRecv );
-    return setCalibNumber( m_indiP_modeMax, ipRecv, m_modeMax, 0, 1e6 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_nAverage )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_nAverage, ipRecv );
-    return setCalibNumber( m_indiP_nAverage, ipRecv, m_nAverage, 2, 1000 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_baselineEvery )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_baselineEvery, ipRecv );
-    return setCalibNumber( m_indiP_baselineEvery, ipRecv, m_baselineEvery, 1, 1e6 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_settle )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_settle, ipRecv );
-    return setCalibNumber( m_indiP_settle, ipRecv, m_settleS, 0, 1e3 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_timeout )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_timeout, ipRecv );
-    return setCalibNumber( m_indiP_timeout, ipRecv, m_timeoutS, 1, 1e4 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_abortRatio )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_abortRatio, ipRecv );
-    return setCalibNumber( m_indiP_abortRatio, ipRecv, m_abortRatio, 1, 1e6 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_calibLeak )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_calibLeak, ipRecv );
-    return setCalibNumber( m_indiP_calibLeak, ipRecv, m_calibLeak, 1e-9, 1 );
-}
-
 INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_startGrid )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_startGrid, ipRecv );
@@ -3094,36 +3064,6 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_gainGrid )( const pcf::IndiProper
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_gainGrid, ipRecv );
     return setCalibGrid( m_indiP_gainGrid, ipRecv, m_gainGrid, 0, 2 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_replicates )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_replicates, ipRecv );
-    return setCalibNumber( m_indiP_replicates, ipRecv, m_replicates, 2, 20 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_confirmPairs )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_confirmPairs, ipRecv );
-    return setCalibNumber( m_indiP_confirmPairs, ipRecv, m_confirmPairs, 1, 20 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_moveSigma )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_moveSigma, ipRecv );
-    return setCalibNumber( m_indiP_moveSigma, ipRecv, m_moveSigma, 0, 10 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_sigmaFloor )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_sigmaFloor, ipRecv );
-    return setCalibNumber( m_indiP_sigmaFloor, ipRecv, m_sigmaFloor, 0, 1 );
-}
-
-INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_rounds )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_rounds, ipRecv );
-    return setCalibNumber( m_indiP_rounds, ipRecv, m_rounds, 1, 5 );
 }
 
 INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_offloadFps )( const pcf::IndiProperty &ipRecv )

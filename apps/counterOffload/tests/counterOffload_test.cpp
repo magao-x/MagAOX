@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <limits>
 #include <numeric>
+#include <set>
+#include <string>
 
 using namespace MagAOX::app;
 
@@ -516,7 +518,7 @@ TEST_CASE( "counterOffload operating defaults", "[counterOffload]" )
     REQUIRE( app.calibParams() == counterOffload::calibParamsT{ 25, 330, 0.5 } );
 }
 
-/// Verify the calibration setting defaults and the checks applied when they are set over INDI.
+/// Verify the calibration setting defaults, and the checks applied when they are set from config or over INDI.
 /**
  * \ingroup counterOffload_unit_test
  */
@@ -527,6 +529,10 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
     counterOffload::gridValid({},0,0);
     counterOffload::applyCalibSetting(m_nAverage,0,0,0);
     counterOffload::applyCalibGrid(m_gainGrid,{},0,0);
+    counterOffload::calibKeys();
+    counterOffload::applyCalibKey({},0);
+    counterOffload::calibKeyValue({});
+    counterOffload::calibSettingsString();
     #endif
     // clang-format on
 
@@ -567,6 +573,37 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
         REQUIRE( app.applyCalibSetting( app.m_calibLeak, std::numeric_limits<double>::quiet_NaN(), 1e-9, 1 ) < 0 );
         REQUIRE( app.applyCalibSetting( app.m_calibLeak, 0.005, 1e-9, 1 ) == 0 );
         REQUIRE( app.m_calibLeak == 0.005 );
+    }
+
+    SECTION( "the config keys cover the 13 numeric settings, and every default is accepted" )
+    {
+        const auto keys = app.calibKeys();
+        REQUIRE( keys.size() == 13 );
+
+        std::set<std::string> names;
+        for( const auto &k : keys )
+        {
+            names.insert( k.key );
+            REQUIRE( ( k.real == nullptr ) != ( k.integer == nullptr ) );
+            REQUIRE( app.applyCalibKey( k, counterOffload::calibKeyValue( k ) ) == 0 );
+        }
+        REQUIRE( names.size() == keys.size() );
+
+        const auto nAverage = std::find_if(
+            keys.begin(), keys.end(), []( const auto &k ) { return std::string( k.key ) == "nAverage"; } );
+        REQUIRE( nAverage != keys.end() );
+        REQUIRE( app.applyCalibKey( *nAverage, 4.5 ) < 0 ); // integer settings must be integral
+        REQUIRE( app.applyCalibKey( *nAverage, 1 ) < 0 );   // below the limit
+        REQUIRE( app.applyCalibKey( *nAverage, 6 ) == 0 );
+        REQUIRE( app.m_nAverage == 6 );
+    }
+
+    SECTION( "the settings are logged on one line" )
+    {
+        const std::string s = app.calibSettingsString();
+        REQUIRE( s.find( "nAverage=3" ) != std::string::npos );
+        REQUIRE( s.find( "leak=0.0025" ) != std::string::npos );
+        REQUIRE( s.find( "gainGrid=0.3,1,0.1" ) != std::string::npos );
     }
 
     SECTION( "grids are checked before they are set" )

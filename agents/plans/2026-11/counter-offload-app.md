@@ -816,3 +816,121 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
 - **Clipping during a sweep:** a clip at x skips the remaining larger values, and larger values measured before the clip (the order is scrambled) are left out of the fit. Clipped replicates are left out of their mean.
 - **The end of a run.** The chosen parameters are applied only if the confirmed ratio is below 1; otherwise the originals are restored. On abort (C3), the chosen parameters are applied if their predicted ratio is below 1.
 
+
+### Offload-to-Synco Latency Measurement (plan, 2026-11-21; not implemented)
+
+**Request (2026-11-21).** Before the next calibration run, publish a number that measures the exact time between the woofer offload command being published and the new tweeter command being passed to dmSyncopation, so that the calibration results can be interpreted.
+
+**Findings.**
+- **Woofer publish (t2wOffloader, `t2wOffloader.hpp:910-916`).** The woofer channel is written with `memcpy`, then `cnt0++`, `write = 0`, `ImageStreamIO_sempost`. `ImageStreamIO_UpdateIm` is not called, so the woofer channel's `writetime` is not set, and no timestamp of this event exists today.
+- **Hand-off to counterOffload.** After the woofer sempost, t2wOffloader computes the tweeter projection (`calcTweeterOffload()`) and posts `aol0_tweeterOffload`. counterOffload stamps `CLOCK_MONOTONIC` when its monitor thread wakes (`processImage`, `counterOffload.hpp:1475`). That stamp, plus `timeOffsetUs`, is the ramp reference `t0`. It is later than the woofer publish by the projection time plus the wake latency, and neither is measured.
+- **Hand-off to dmSyncopation.** `syncopationPublish` copies the command into `<dest>_aux` and calls `ImageStreamIO_UpdateIm` at `cutoff − writeLeadUs`. It checks that the copy completed before the cutoff (`dmSyncopationProducer.hpp:500-516`). This is the moment the command is passed to the syncopator.
+- **The first command that contains an offload.** That is the first published command in which the event's `rampFraction > 0`, evaluated at the slot's `targetNs`. Slots earlier than `t0 + rampStartUs` are published without the event. With `rampStartUs = 25`, the first slot after receipt usually already contains it, but not always.
+- **Both processes are on the RTC,** so `CLOCK_MONOTONIC` is shared and no clock conversion (`PublicationClock`) is needed.
+
+**Proposed change.**
+1. **t2wOffloader: stamp the woofer publish.**
+   - Read `CLOCK_MONOTONIC` immediately after the woofer `ImageStreamIO_sempost`.
+   - Carry it to counterOffload with the matching `aol0_tweeterOffload` frame, so the stamp and the Δ cannot be mismatched. The options are in L-Q1.
+   - The woofer write path itself is unchanged (one `clock_gettime`, about 20 ns).
+2. **counterOffload: carry the stamp with each ramp.**
+   - `processImage` reads the woofer stamp and the receipt time. `rampT` gains `wooferNs`, `receivedNs` and `reported`.
+   - If the stamp is missing or implausible (zero, in the future, or more than 10 ms old), the event is counted as `unstamped` and left out of the latency statistics. The ramp is still applied as now.
+3. **counterOffload: measure at the publish.**
+   - `buildCommand` marks ramps that contribute (`frac > 0`) for the first time.
+   - After `syncopationPublish` returns true, read `CLOCK_MONOTONIC` (`passedNs`). For each marked ramp, record:
+     - **`totalUs` = passed − woofer.** This is the requested number: woofer published → command passed to dmSyncopation.
+     - **`handoffUs` = received − woofer.** The time to compute the projection, post, and wake counterOffload.
+     - **`waitUs` = passed − received.** The time waiting for a slot, then computing and writing.
+     - **`targetUs` = slot target − woofer.** The time at which dmSyncopation schedules this command onto the DM channel, which is also the time the ramp is evaluated at. Of these four numbers, this one compares directly with the woofer rise (t10/t50/t90 ≈ 483/623/717 µs after the command).
+     - **`firstFrac`.** The ramp fraction in that first command.
+   - If a publish fails, the ramp stays unmarked, so the next successful publish is the one measured.
+4. **Publishing the numbers.**
+   - **A new read-only INDI property, `latency`.** For each of total, handoff, wait and target it has `last`, `mean`, `min` and `max` (µs) over the last N events (default 250, about 1 s at 250 Hz). It also has `firstFrac` (last and mean), `count` and `unstamped`.
+   - Statistics are computed in the INDI/app-logic thread from a small fixed ring buffer, so nothing is allocated on the producer thread.
+   - **Calibration CSV.** Each measurement row gains `latencyUs`, `latencyStdUs`, `targetUs`, `targetStdUs`, `nEvents`: the mean and standard deviation over the events during the averaging window of that point. A point can then be read against the latency it actually saw.
+   - Not proposed: telemetry. It can be added later if you want a time series.
+5. **Tests.**
+   - Unit tests for: the stamp plausibility check; first-contribution marking (an event published at frac = 0 is not reported, and is reported at the first slot with frac > 0); a failed publish not consuming the measurement; the ring-buffer statistics.
+   - The cross-process stamp is checked on the bench. In zonal mode, or with counterOffload disabled, `count` stays at 0.
+
+**Questions and points of clarification.**
+- **L-Q1. How to carry the woofer stamp with the frame.** Options:
+  - (a) **The `atime` field of `aol0_tweeterOffload`** (recommended if it works). t2wOffloader writes the monotonic woofer stamp into `md->atime` before posting, and counterOffload reads it in `processImage`. No new stream and no geometry change.
+    - It depends on `ImageStreamIO_UpdateIm` (called by the milkImage post) not overwriting `atime`; I believe it sets only `writetime`, but I could not check the installed ImageStreamIO source from this Mac. Please run on the RTC: `grep -n -A20 "ImageStreamIO_UpdateIm" $(find / -name ImageStreamIO.c 2>/dev/null | head -1) | grep -n time`
+    - It also repurposes a field meant for acquisition time.
+  - (b) **A sidecar stream** `aol0_tweeterOffload_time`, 1×2 int64: woofer `cnt0` and the monotonic stamp, written just before the tweeterOffload post. It is explicit and unambiguous, but it is one more stream, and counterOffload has to check that it matches.
+- **L-Q2. Definition of "the new tweeter command".** Should it be the first command in which the offload contributes (`frac > 0`, proposed)? The alternative is the first slot published after receipt, even when the ramp has not started yet. The first measures when the counter-offload begins to act. The second measures pure pipeline latency, which the proposal also reports as `waitUs`, plus one slot when frac = 0.
+- **L-Q3. Ramp reference.** With the woofer stamp available, `t0` could be referenced to the woofer publish instead of the wake time (Q4(b) of the original plan). That removes the handoff jitter from the ramp timing. It is not proposed now, because it would change the meaning of `rampStartUs` and of the existing calibration results. Do you want it as an INDI option (default off)?
+- **L-Q4.** Is a 250-event window right for the INDI statistics? Should the CSV columns go in now, or only the INDI property?
+
+### Reducing the INDI Property Count (implemented 2026-11-21, not yet built)
+
+**Request (2026-11-21).** counterOffload publishes far too many INDI properties. They crowd cursesINDI and make it hard to use. Stop adding unnecessary counterOffload properties. **Do not remove any framework properties** (`logs_*`, `th-*`, `sm_*`, `psds_*`, `fsm_*`), and make no framework or cursesINDI changes.
+
+**Findings.**
+- **What counts is elements, not properties.** cursesINDI shows one row per *element* (`cursesINDI.hpp:254-276`). A standard number has 2 rows (`current`, `target`), and a grid has 3.
+- **Today's count is about 87 rows:** 19 from the framework (unchanged by this plan) and 68 from counterOffload.
+  - 6 operating numbers = 12;
+  - 13 `calib*` numbers = 26;
+  - 3 grids = 9;
+  - `enable` 1, `zero` 1, `calibrate` 1;
+  - `stats` 6;
+  - `calibration` 12.
+
+**Decisions (user, 2026-11-21).**
+- Framework properties stay.
+- **The 13 `calib*` numbers** come off INDI and keep their current defaults. Their values are logged at DEBUG.
+  - `calibHalfWidthHz`, `calibModeMax`, `calibNAverage`, `calibBaselineEvery`, `calibSettleS`, `calibTimeoutS`, `calibAbortRatio`, `calibLeak`, `calibReplicates`, `calibConfirmPairs`, `calibMoveSigma`, `calibSigmaFloor`, `calibRounds`.
+- **The three grids** stay on INDI.
+- **`leak`** stays on INDI.
+- **The trims to `stats` and `calibration`** are approved.
+
+**Proposed change.**
+1. **The 13 `calib*` numbers.**
+   - Remove their INDI properties, callbacks and `setCalibNumber` uses.
+   - The members and their current defaults are unchanged. The range checks in `applyCalibSetting` stay, because the config path uses them.
+   - **Optional config keys under `[calibrate]`** with the same names minus the `calib` prefix: `halfWidthHz`, `modeMax`, `nAverage`, `baselineEvery`, `settleS`, `timeoutS`, `abortRatio`, `leak`, `replicates`, `confirmPairs`, `moveSigma`, `sigmaFloor`, `rounds`. They default to the current values, so they can still be changed without a rebuild. An out-of-range value fails `validateConfig`, which logs the offending key.
+   - **No config edit is required:** an instance config without these keys uses the defaults.
+   - **DEBUG log:**
+     - At startup, after config is loaded, one DEBUG `text_log` lists all 13 values plus the three grids.
+     - At the start of each calibration run, the same line is logged again, so every run's log records the settings it used.
+2. **Operating settings.**
+   - Stay on INDI: `gain`, `rampStartUs`, `rampDurationUs`, `leak` (8 rows).
+   - `maxCommand` and `timeOffsetUs` come off INDI. Their existing config keys and defaults are kept (−4 rows).
+3. **Grids:** `calibStartGridUs`, `calibDurationGridUs`, `calibGainGrid` are unchanged (9 rows).
+4. **`stats`:** keep `events`, `published`, `failed`, `clipped`. Drop `overflows` (logged at WARNING when it happens) and `active` (−2 rows).
+5. **`calibration`:** keep `stage`, `point`, `ratio`, `bestStartUs`, `bestDurationUs`, `bestGain`, `bestRatio`, `confirmRatio`. Drop `fom`, `fomOff`, `sigma` and `confirmStd`; they are still in the CSV and the INFO logs (−4 rows).
+6. **Result:** counterOffload's own rows go from 68 to 32. With the framework's 19, the total goes from about 87 to about 51.
+7. **Latency plan.** The `latency` property proposed above is reduced to 4 elements: `totalUs`, `targetUs` (means over the window), `totalMaxUs` and `count`. min/max and the handoff/wait split go to the CSV and a periodic INFO log.
+8. **Tests and docs.**
+   - Update the "calibration settings" unit test: setting values through the config path; no INDI-only setters.
+   - Update the INDI and config tables in `doc/counterOffload.md`, and the example config with the optional `[calibrate]` keys commented out.
+
+**Questions.**
+- **L-Q5 (answered).** No framework properties are removed; only counterOffload's own properties change.
+- **L-Q6 (answered).** The `calib*` numbers come off INDI, with DEBUG logging and the current defaults. The grids stay on INDI. Optional config keys are proposed so the numbers stay changeable without a rebuild; nothing needs to be added to the config file.
+- **L-Q7 (answered).** `leak` stays on INDI. `maxCommand` and `timeOffsetUs` are config-only, as proposed.
+- **L-Q8 (answered).** The trims to `stats` and `calibration` are approved.
+
+**Implementation log (2026-11-21).**
+- **Removed INDI properties (15):**
+  - the 13 `calib*` numbers;
+  - `maxCommand` and `timeOffsetUs`, which keep their existing `[counterOffload]` config keys.
+  - Their callbacks and `setCalibNumber()` are gone. Framework properties are untouched.
+- **Still on INDI:**
+  - `enable`, `zero`, `gain`, `leak`, `rampStartUs`, `rampDurationUs`;
+  - `calibrate`, and the three grids;
+  - `stats`: `events`, `published`, `failed`, `clipped`;
+  - `calibration`: `stage`, `point`, `ratio`, `bestStartUs`, `bestDurationUs`, `bestGain`, `bestRatio`, `confirmRatio`.
+- **Optional `[calibrate]` config keys:** `halfWidthHz`, `modeMax`, `nAverage`, `baselineEvery`, `settleS`, `timeoutS`, `abortRatio`, `leak`, `replicates`, `confirmPairs`, `moveSigma`, `sigmaFloor`, `rounds`.
+  - One table, `calibKeys()`, gives each key, its member, its limits and its help text. `setupConfig()` and `loadConfigImpl()` both loop over it.
+  - Values go through `applyCalibKey()` → `applyCalibSetting()`. A rejected value logs `invalid calibrate.<key>: <value>` at ERROR, and startup fails.
+  - The defaults are unchanged, so **no config edit is needed**.
+- **DEBUG log:** `calibSettingsString()` writes all 13 settings and the three grids on one line, once at startup and again at the start of every calibration run.
+- **Ramp-pool overflows** are now a WARNING from `appLogic`, at most one per cycle, giving the number of offloads folded since the last warning.
+- **Removed state members:** `m_lastFom`, `m_calibSigma` and `m_confirmStd` were only read for INDI. Their values are still in the CSV (`fom`, `sigma`) and in the completion log (± confirmed standard error).
+- **Tests:** the "calibration settings" case gains two sections:
+  - all 13 keys present, unique, and with accepted defaults; `applyCalibKey` checks range and integrality;
+  - the content of the DEBUG log line.
+- **Rows in cursesINDI:** counterOffload's own go from 68 to 32.
