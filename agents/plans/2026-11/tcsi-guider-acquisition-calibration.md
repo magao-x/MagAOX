@@ -1,8 +1,8 @@
 # tcsInterface guider acquisition calibration
 
-Recorded 2026-11-18; updated 2026-11-21. Status: preliminary calibration from two
-full-transfer measurements with `zdSign=+1`. Both points determine the four
-angular coefficients exactly; a third measurement is needed to test the model.
+Recorded 2026-11-18; updated 2026-11-21. Status: preliminary equal-weight
+least-squares calibration from three full-transfer measurements with
+`zdSign=+1`. The RMS residual is 0.497 command units per scalar coordinate.
 The recorded quantities are only synchronized to roughly a couple of minutes,
 so the fit uses nominal elevations rather than precisely simultaneous samples.
 No application code or operational configuration was changed by this work.
@@ -11,9 +11,10 @@ The guider-to-instrument acquisition offsets have changed. The current model
 combines a vector rotating with zenith distance and a constant azimuth/elevation
 offset. The first measurement produced a conditional solution that retained the
 local configuration's constant offsets. The second measurement allows both
-components to be fitted. The two-point candidate below supersedes the one-point
-candidate for evaluation, subject to consistent measurement references and
-command conventions.
+components to be fitted. The third measurement provides a consistency check and
+an overdetermined fit. The three-point candidate below is the current nominal
+fit for evaluation, subject to consistent measurement references and command
+conventions. Repeated measurements are needed to characterize the scatter.
 
 ## Algorithm and configuration
 
@@ -77,7 +78,7 @@ focus=0
 This is a local reference, not a verified copy of the active instrument
 configuration. Its `zdSign=+1` differs from the source default of `-1`.
 The first calculation assumes this sign and these constant offsets. The
-two-point fit retains the sign but solves for both constant offsets as well.
+subsequent fits retain the sign but solve for both constant offsets as well.
 A local read on 2026-11-21 found the one-point candidate documented below in
 `tcsi.conf`, with `focus=0`; this does not establish what the instrument loaded.
 
@@ -89,18 +90,21 @@ position**, rather than additional corrections after Acquire. The raw rows were:
 ```text
 1:10:06 49.90 -40 -10
 E00:23:39 75.0902 -38.61 5.947
+E00:36:21 62.4588 -39.1257 -3.0252
 ```
 
 | Date supplied | Hour angle as supplied | Elevation in degrees | Full azimuth move | Full elevation move |
 | --- | --- | --- | --- | --- |
 | 2026-11-18 | 1:10:06 | 49.90 | -40 | -10 |
 | 2026-11-21 | E00:23:39 | 75.0902 | -38.61 | 5.947 |
+| 2026-11-21 | E00:36:21 | 62.4588 | -39.1257 | -3.0252 |
 
 The first hour angle is interpreted as +1.16833333 hours. Interpreting the second
-point's `E` prefix as east of the meridian gives -0.39416667 hours. The raw
-notation is preserved for confirmation; hour-angle sign does not affect this
-fit. Observation timestamps were not supplied, so the dates above record when
-the measurements were supplied rather than asserting observation dates.
+and third points' `E` prefixes as east of the meridian gives -0.39416667 and
+-0.60583333 hours, respectively. The raw notation is preserved for confirmation;
+hour-angle sign does not affect these fits. Observation timestamps were not
+supplied, so the dates above record when the measurements were supplied rather
+than asserting observation dates.
 
 On 2026-11-21, the user clarified that the individual quantities may be recorded
 at different times, with timing only good to roughly a couple of minutes. Treat
@@ -204,14 +208,74 @@ Independent offline calculations agree on the fitted coefficients. Forward
 evaluation with the rounded coefficients and the source's approximate pi and
 float arithmetic reproduces both measured pairs within approximately 0.00003
 command units. This numerical agreement does not establish measurement accuracy.
-The coefficients remain the nominal two-point solution; no timing correction
-can be inferred from the approximate timing precision alone.
+These coefficients are the historical two-point solution; no timing correction
+was inferred from the approximate timing precision alone.
 
-At elevation 60 degrees, the new candidate predicts approximately
+At elevation 60 degrees, the two-point candidate predicts approximately
 `(-40.289, -3.545)`; the previous one-point candidate predicts
-`(-37.451, -3.156)`. An independent full-transfer measurement near that elevation
-would help test the new model. Additional elevations and repeats are needed to
-measure residual scatter and distinguish systematic dependence.
+`(-37.451, -3.156)`. The third measurement near that elevation is analyzed below.
+
+## Preliminary calibration from three measurements
+
+The third measurement, at elevation 62.4588 degrees, is
+`(-39.1257, -3.0252)`. Before refitting, the two-point candidate predicts
+`(-40.18694942, -1.97296834)`, giving a measured-minus-predicted difference of
+`(+1.06124942, -1.05223166)` and a vector magnitude of 1.494 command units.
+
+Fit all three full-transfer pairs with equal weights and `zdSign=+1`. No
+per-measurement uncertainties or local elevation rates have been supplied, so
+equal weights are a provisional choice rather than an assertion that all
+measurements have equal precision. The resulting replacement coefficients are:
+
+```ini
+[acqFromGuider]
+zdSign=1
+az0=-30.890558
+el0=19.472707
+azoff=-3.436428
+eloff=-5.309210
+```
+
+Leave the active `focus` value unchanged. Each pair below is
+`(azimuth offset, elevation offset)` in command units, and residuals are measured
+minus fitted values:
+
+| Elevation in degrees | Measured | Three-point fit | Residual |
+| --- | --- | --- | --- |
+| 49.90 | (-40.000, -10.000) | (-39.608, -10.311) | (-0.392, +0.311) |
+| 75.0902 | (-38.610, +5.947) | (-38.297, +5.560) | (-0.313, +0.387) |
+| 62.4588 | (-39.126, -3.025) | (-39.830, -2.327) | (+0.705, -0.699) |
+
+The fit has rank 4 and two residual degrees of freedom. Its sum of squared
+scalar residuals is 1.482937, giving an RMS of 0.497148 per coordinate over all
+six scalar observations, or 0.703073 for the two-dimensional residual vectors.
+These describe this dataset's residuals; they are not independently established
+measurement uncertainties. The design matrix's 2-norm condition number is 11.12.
+An independent numerical solve confirms the coefficients and residuals.
+
+Timing uncertainty remains relevant, but a shift in only the third point's
+elevation cannot explain its entire discrepancy from the fixed two-point model.
+At this point, that model's derivatives are approximately `(0.0552, 0.6382)`
+command units per degree, while the observed residual components have opposite
+signs. More generally, changing elevation rotates the vector without changing
+its radius: the two-point model's rotating-vector magnitude is 36.7043, whereas
+the third measurement is 35.5692 from its constant-offset center. This leaves
+at least 1.1351 command units of residual for any change in the third elevation
+alone. The first two points also have uncertainty, so this does not establish
+model failure or a new hour-angle dependence.
+
+As a diagnostic, fitting `zdSign=-1` gives a lower sum of squared residuals,
+0.860480, compared with 1.482937 for `+1`. Three noisy observations with unknown
+uncertainties are insufficient grounds to change the established rotation sign;
+retain `+1` while gathering independent measurements. The comparison should be
+revisited with wider elevation coverage and repeatability estimates if the sign
+is physically in question.
+
+At elevation 60 degrees, the three-point candidate predicts approximately
+`(-39.925, -3.891)`. Repeat a full transfer near 62.46 degrees to assess the third
+point's repeatability, and add more separated elevations. Continue to preserve
+raw measurements and timing information rather than forcing each point onto the
+model.
 
 ## Calibration with additional measurements
 
@@ -272,16 +336,16 @@ either sign can fit two distinct elevations exactly.
 ## Follow up
 
 - Confirm the active `[acqFromGuider]` configuration and the measurement's units
-  and command convention, and that both points used consistent guider and
+  and command convention, and that all points used consistent guider and
   instrument references.
 - Record additional full transfers as
   `HA_hours elevation_deg az_offset el_offset`, using the same guider reference
   and final instrument reference. Include TCS zenith distance when available,
   since it is the app's direct input. Retain the raw measurements and
   configuration with each calibration set.
-- Obtain a third independent elevation, for example near 60 degrees, to test
-  the two-point model, then additional points and repeats to assess residuals
-  and repeatability. Retain hour angle to check for dependence beyond elevation.
+- Repeat a full transfer near 62.46 degrees and add more separated elevations
+  to assess residuals and repeatability. Retain hour angle to check for
+  dependence beyond elevation; the current three points do not isolate it.
 - Where available, retain timestamps for offsets and coordinates together with
   nearby TCS samples, so the local elevation rate and timing uncertainty can be
   included in later fits. Differences at the few-hundredths level between the
