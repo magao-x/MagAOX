@@ -1,8 +1,9 @@
 # tcsInterface guider acquisition calibration
 
-Recorded 2026-11-18; updated 2026-11-21. Status: preliminary equal-weight
-least-squares calibration from three full-transfer measurements with
-`zdSign=+1`. The RMS residual is 0.497 command units per scalar coordinate.
+Recorded 2026-11-18; updated 2026-11-22. Status: tuning considered satisfactory
+by the user. The numerical reference is the equal-weight least-squares fit from
+three full-transfer measurements with `zdSign=+1`; its RMS residual is 0.497
+command units per scalar coordinate.
 The recorded quantities are only synchronized to roughly a couple of minutes,
 so the fit uses nominal elevations rather than precisely simultaneous samples.
 No application code or operational configuration was changed by this work.
@@ -12,9 +13,11 @@ combines a vector rotating with zenith distance and a constant azimuth/elevation
 offset. The first measurement produced a conditional solution that retained the
 local configuration's constant offsets. The second measurement allows both
 components to be fitted. The third measurement provides a consistency check and
-an overdetermined fit. The three-point candidate below is the current nominal
-fit for evaluation, subject to consistent measurement references and command
-conventions. Repeated measurements are needed to characterize the scatter.
+an overdetermined fit. The three-point coefficients below remain the nominal
+fit, subject to consistent measurement references and command conventions.
+The operational assessment below closes the current tuning effort; additional
+measurements are optional follow-up if performance changes or a more precise
+error budget is needed.
 
 ## Algorithm and configuration
 
@@ -267,15 +270,14 @@ model failure or a new hour-angle dependence.
 As a diagnostic, fitting `zdSign=-1` gives a lower sum of squared residuals,
 0.860480, compared with 1.482937 for `+1`. Three noisy observations with unknown
 uncertainties are insufficient grounds to change the established rotation sign;
-retain `+1` while gathering independent measurements. The comparison should be
-revisited with wider elevation coverage and repeatability estimates if the sign
-is physically in question.
+retain `+1`. The comparison can be revisited with wider elevation coverage and
+repeatability estimates if the sign is physically in question.
 
 At elevation 60 degrees, the three-point candidate predicts approximately
-`(-39.925, -3.891)`. Repeat a full transfer near 62.46 degrees to assess the third
-point's repeatability, and add more separated elevations. Continue to preserve
-raw measurements and timing information rather than forcing each point onto the
-model.
+`(-39.925, -3.891)`. If further characterization is needed, repeat a full transfer
+near 62.46 degrees to assess the third point's repeatability and add more
+separated elevations. Preserve raw measurements and timing information rather
+than forcing each point onto the model.
 
 ## Calibration with additional measurements
 
@@ -333,7 +335,23 @@ Keep `zdSign` fixed initially. If orientation may have changed, compare fits for
 both signs using at least three distinct elevations and independent validation;
 either sign can fit two distinct elevations exactly.
 
-## Follow up
+## Operational assessment
+
+On 2026-11-22, the user reported that the acquisition is now well tuned and
+believes the remaining error is within the uncertainty of the telescope's
+initial acquisition. This is an operational assessment of satisfactory
+performance, not a measured statistical error budget.
+
+Close the current tuning effort without further coefficient changes. Preserve
+the measurements and three-point fit as the calibration record. Exact agreement
+with each recorded point is not a tuning objective given the initial acquisition
+scatter and the approximate synchronization of the measurements.
+
+## Optional follow up
+
+The following checks are available if performance changes or more precise
+characterization is needed; they are not prerequisites for accepting the user's
+reported operational result.
 
 - Confirm the active `[acqFromGuider]` configuration and the measurement's units
   and command convention, and that all points used consistent guider and
@@ -351,6 +369,7 @@ either sign can fit two distinct elevations exactly.
   included in later fits. Differences at the few-hundredths level between the
   reported and recomputed second-point predictions are consistent with the
   stated recording precision.
-- Have the operator apply and validate the chosen configuration on the
-  instrument. Instrument measurements and commands are performed by the user;
-  this analysis used local files and offline arithmetic only.
+- If future recalibration changes coefficients, have the operator apply and
+  validate them on the instrument. Instrument measurements and commands are
+  performed by the user; this analysis used local files and offline arithmetic
+  only.
