@@ -4,6 +4,10 @@
 
 
 #include <mutex>
+
+#include <cmath>
+#include <QToolTip>
+
 #include "ui_loopCtrl.h"
 
 #include "../xWidgets/xWidget.hpp"
@@ -40,6 +44,8 @@ protected:
    bool m_loopWaiting {false}; //indicates slider is waiting on loop_state update to be re-enabled
 
    bool m_procState {false};
+
+   bool m_flatVectorAvailable {false}; ///< Whether the gain controller has advertised the flat-vector command.
 
    std::vector<int> m_modes;
    std::vector<gainCtrl *> m_blockCtrls;
@@ -78,6 +84,9 @@ public slots:
    void updateGUI();
 
    void on_button_LoopZero_pressed();
+
+   /// Request that every mode use the gain shown in the first block.
+   void on_button_flatVector_clicked();
 
    void on_button_zeroall_pressed();
 
@@ -139,6 +148,7 @@ loopCtrl::loopCtrl( std::string & procName,
     setXwFont(ui.label_trackog);
     setXwFont(ui.button_autoGainDump);
 
+    setXwFont( ui.button_flatVector );
     setXwFont(ui.button_zeroall);
 
 
@@ -177,7 +187,7 @@ void loopCtrl::subscribe()
    m_parent->addSubscriber(ui.opticalGain);
 
    m_parent->addSubscriberProperty(this, m_gainCtrl, "modes");
-
+   m_parent->addSubscriberProperty( this, m_gainCtrl, "flat_vector" );
 
    m_parent->addSubscriber(ui.gainCtrl);
    m_parent->addSubscriber(ui.mcCtrl);
@@ -226,19 +236,21 @@ void loopCtrl::onDisconnect()
 
     ui.opticalGain->onDisconnect();
 
-   setEnableDisable(false);
+    m_flatVectorAvailable = false;
+    setEnableDisable( false );
 
-   //xWidget::onDisconnect();
-   ui.gainCtrl->onDisconnect();
-   ui.mcCtrl->onDisconnect();
+    //xWidget::onDisconnect();
+    ui.gainCtrl->onDisconnect();
+    ui.mcCtrl->onDisconnect();
 
-
-   std::lock_guard<std::mutex> lock(m_blockMutex);
-   for(size_t n = 0; n < m_blockCtrls.size(); ++n)
-   {
-      if(m_blockCtrls[n]) m_blockCtrls[n]->onDisconnect();
-   }
-
+    std::lock_guard<std::mutex> lock( m_blockMutex );
+    for( size_t n = 0; n < m_blockCtrls.size(); ++n )
+    {
+        if( m_blockCtrls[n] )
+        {
+            m_blockCtrls[n]->onDisconnect();
+        }
+    }
 }
 
 void loopCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -307,29 +319,37 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
    }
    if(ipRecv.getDevice() == m_gainCtrl)
    {
-      if(ipRecv.getName() == "modes")
-      {
-         if(ipRecv.find("blocks"))
-         {
-            size_t nB = ipRecv["blocks"].get<int>();
+       if( ipRecv.getName() == "flat_vector" )
+       {
+           m_flatVectorAvailable = true;
+       }
+       else if( ipRecv.getName() == "modes" && ipRecv.find( "blocks" ) )
+       {
+           int nB = ipRecv["blocks"].get<int>();
+           if( nB < 0 )
+           {
+               return;
+           }
 
-            m_modes.resize(nB,0);
+           std::vector<int> modes;
+           for( int n = 0; n < nB; ++n )
+           {
+               char block[24];
+               snprintf( block, sizeof( block ), "block%02d", n );
+               if( !ipRecv.find( block ) )
+               {
+                   return;
+               }
 
-            for(size_t n = 0; n<nB; ++n)
-            {
-               char mstr[24];
-               snprintf(mstr, sizeof(mstr), "%02zu", n);
-               std::string blockstr = std::string("block")+mstr;
-               int nM = ipRecv[std::string("block")+mstr].get<int>();
-               m_modes[n] = nM;
+               modes.push_back( ipRecv[block].get<int>() );
+           }
 
-            }
-
-            if(nB != m_blockCtrls.size()) emit blocksChanged(nB);
-
-
-         }
-      }
+           if( modes != m_modes )
+           {
+               m_modes = std::move( modes );
+               emit blocksChanged( nB );
+           }
+       }
    }
 
 
@@ -338,21 +358,32 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
 void loopCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
 {
-   std::lock_guard<std::mutex> lock(m_blockMutex);
+    if( ipRecv.getDevice() != m_gainCtrl )
+    {
+        return;
+    }
 
+    const std::string &name           = ipRecv.getName();
+    bool               deviceDeleted  = name.empty() || name == "fsm";
+    bool               modesDeleted   = deviceDeleted || name == "modes";
+    bool               commandDeleted = deviceDeleted || name == "flat_vector";
+    if( !modesDeleted && !commandDeleted )
+    {
+        return;
+    }
 
-   if(ipRecv.getDevice() == m_gainCtrl)
-   {
-      for(size_t n =0; n < m_blockCtrls.size(); ++n)
-      {
-         m_parent->unsubscribe(m_blockCtrls[n]);
-         ui.horizontalLayout_2->removeWidget(m_blockCtrls[n]);
-         m_blockCtrls[n]->deleteLater();
-      }
+    if( commandDeleted )
+    {
+        m_flatVectorAvailable = false;
+    }
 
-      m_blockCtrls.clear();
-   }
+    if( modesDeleted )
+    {
+        m_modes.clear();
+        emit blocksChanged( 0 );
+    }
 
+    emit doUpdateGUI();
 }
 
 void loopCtrl::setEnableDisable( bool tf,
@@ -375,6 +406,29 @@ void loopCtrl::setEnableDisable( bool tf,
 
 
    std::lock_guard<std::mutex> lock(m_blockMutex);
+   bool                        flatVectorEnabled = tf && m_flatVectorAvailable && !m_blockCtrls.empty();
+   ui.button_flatVector->setEnabled( flatVectorEnabled );
+
+   QString flatVectorTip;
+   if( !m_flatVectorAvailable )
+   {
+       flatVectorTip = tr( "Waiting for the Flat Vector command from the gain controller. "
+                           "The server must run the updated userGainCtrl." );
+   }
+   else if( m_blockCtrls.empty() )
+   {
+       flatVectorTip = tr( "Waiting for the gain controller to report its mode blocks." );
+   }
+   else
+   {
+       flatVectorTip = tr( "Apply the value in the first block gain field to every mode." );
+   }
+
+   if( flatVectorTip != ui.button_flatVector->toolTip() )
+   {
+       ui.button_flatVector->setToolTip( flatVectorTip );
+   }
+
    for(size_t n = 0; n < m_blockCtrls.size(); ++n)
    {
       if(m_blockCtrls[n]) m_blockCtrls[n]->setEnabled(tf);
@@ -417,6 +471,38 @@ void loopCtrl::on_button_LoopZero_pressed()
    sendNewProperty(ipFreq);
 }
 
+void loopCtrl::on_button_flatVector_clicked()
+{
+    QString input;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_blockMutex );
+        if( !m_flatVectorAvailable || m_blockCtrls.empty() )
+        {
+            return;
+        }
+
+        input = m_blockCtrls.front()->inputText();
+    }
+
+    bool  ok   = false;
+    float gain = input.toFloat( &ok );
+    if( !ok || !std::isfinite( gain ) || gain < 0 )
+    {
+        QToolTip::showText( ui.button_flatVector->mapToGlobal( ui.button_flatVector->rect().bottomLeft() ),
+                            tr( "Enter a non-negative gain in the first block." ),
+                            ui.button_flatVector );
+        return;
+    }
+
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+    ip.setDevice( m_gainCtrl );
+    ip.setName( "flat_vector" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = gain;
+
+    sendNewProperty( ip );
+}
+
 void loopCtrl::on_button_zeroall_pressed()
 {
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
@@ -436,9 +522,16 @@ void loopCtrl::setupBlocks(int nB)
 
     for(size_t n =0; n < m_blockCtrls.size(); ++n)
     {
-        if(m_blockCtrls[n] == nullptr) continue;
+        if( m_blockCtrls[n] == nullptr )
+        {
+            continue;
+        }
 
-        m_parent->unsubscribe(m_blockCtrls[n]);
+        if( m_parent )
+        {
+            m_parent->unsubscribe( m_blockCtrls[n] );
+        }
+
         ui.horizontalLayout_2->removeWidget(m_blockCtrls[n]);
         m_blockCtrls[n]->deleteLater();
     }

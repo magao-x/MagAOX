@@ -7,7 +7,9 @@
 #ifndef userGainCtrl_hpp
 #define userGainCtrl_hpp
 
+#include <algorithm>
 #include <limits>
+#include <sstream>
 
 #include <mx/improc/eigenCube.hpp>
 #include <mx/improc/eigenImage.hpp>
@@ -407,6 +409,8 @@ protected:
 
     pcf::IndiProperty m_indiP_zeroAll;
 
+    pcf::IndiProperty m_indiP_flatVector; ///< Request carrying the gain to write to every mode.
+
     std::vector<pcf::IndiProperty> m_indiP_blockGains;
     std::vector<pcf::IndiProperty> m_indiP_blockMCs;
     std::vector<pcf::IndiProperty> m_indiP_blockLimits;
@@ -422,6 +426,9 @@ protected:
 public:
 
     INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_zeroAll);
+
+    /// Handle a request to assign one gain to every mode.
+    INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_flatVector );
 
     INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleModeNo);
 
@@ -570,6 +577,15 @@ int userGainCtrl::appStartup()
    {
       log<software_error>({__FILE__,__LINE__});
       return -1;
+   }
+
+   createStandardIndiNumber<float>(
+       m_indiP_flatVector, "flat_vector", 0.0, 10.0, 0.01, "%0.3f", "Flat Vector", "Loop Controls" );
+   m_indiP_flatVector.remove( "current" );
+   m_indiP_flatVector.setPerm( pcf::IndiProperty::WriteOnly );
+   if( registerIndiPropertyNew( m_indiP_flatVector, INDI_NEWCALLBACK( m_indiP_flatVector ) ) < 0 )
+   {
+       return -1;
    }
 
    createStandardIndiNumber<int>( m_indiP_singleModeNo, "singleModeNo", 0, 2400 ,0, "%0d", "");
@@ -1423,6 +1439,45 @@ INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_zeroAll)(const pcf::IndiProperty &ip
    }
 
    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( userGainCtrl, m_indiP_flatVector )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_flatVector, ipRecv );
+
+    if( !ipRecv.find( "target" ) )
+    {
+        return 0;
+    }
+
+    std::istringstream target( ipRecv["target"].get() );
+    float              gain;
+    if( !( target >> gain ) || !( target >> std::ws ).eof() || gain < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Invalid flat-vector gain" } );
+    }
+
+    std::lock_guard<std::mutex> lock( m_modeBlockMutex );
+    if( !shmimMonitorT::m_imageStream.md || !shmimMonitorT::m_imageStream.array.raw || m_gainsTarget.size() == 0 ||
+        m_gainsTarget.rows() != shmimMonitorT::m_width || m_gainsTarget.cols() != shmimMonitorT::m_height )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Gain stream is unavailable" } );
+    }
+
+    m_gainsTarget.setConstant( gain );
+    writeGains();
+
+    // Keep subsequent gain requests based on the vector just written.
+    m_gainsCurrent.setConstant( gain );
+    std::fill( m_modeBlockGains.begin(), m_modeBlockGains.end(), gain );
+    std::fill( m_modeBlockGainsConstant.begin(), m_modeBlockGainsConstant.end(), 1 );
+
+    for( auto &blockGain : m_indiP_blockGains )
+    {
+        updateIfChanged( blockGain, "target", gain );
+    }
+
+    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN(userGainCtrl, m_indiP_singleModeNo)(const pcf::IndiProperty &ipRecv)

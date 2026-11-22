@@ -370,6 +370,19 @@
           </spacer>
          </item>
          <item>
+          <widget class="QPushButton" name="button_flatVector">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>Flat Vector</string>
+           </property>
+          </widget>
+         </item>
+         <item>
           <widget class="QPushButton" name="button_zeroall">
            <property name="text">
             <string>Zero All</string>

@@ -83,6 +83,9 @@ public:
 
    QString formattedValue();
 
+   /// Return the text in the numeric entry, including an active edit.
+   QString inputText() const;
+
    /// Set the read only flag
    /** If set to true, the widget will not accept focus and will not enter edit mode.
      * The default is false.
@@ -319,6 +322,11 @@ QString statusEntry::formattedValue()
       default:
          return QString(m_current.c_str());
    }
+}
+
+QString statusEntry::inputText() const
+{
+    return ui.value->text();
 }
 
 void statusEntry::readOnly(bool ro)

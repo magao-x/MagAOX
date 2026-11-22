@@ -80,6 +80,9 @@ public:
 
    void setGain( float g );
 
+   /// Return the text in the numeric entry, including an active edit.
+   QString inputText() const;
+
 public slots:
 
    void on_button_plus_pressed();
@@ -317,6 +320,11 @@ void gainCtrl::setGain( float g )
 
    m_current = g; //do this so multiple pushes update fast
 
+}
+
+QString gainCtrl::inputText() const
+{
+    return ui.status->inputText();
 }
 
 void gainCtrl::on_button_plus_pressed()
