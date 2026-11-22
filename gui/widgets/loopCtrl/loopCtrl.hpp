@@ -1,4 +1,6 @@
-
+/** \file loopCtrl.hpp
+ * \brief GUI controls for the AO loop and its mode-block gains.
+ */
 #ifndef loopCtrl_hpp
 #define loopCtrl_hpp
 
@@ -17,92 +19,103 @@
 namespace xqt
 {
 
+/// Display and command the AO loop and its mode-block gains.
 class loopCtrl : public xWidget
 {
    Q_OBJECT
 
 protected:
+  std::string m_procName;   ///< INDI device providing the loop controls.
+  std::string m_loopName;   ///< Loop name reported by the loop controller.
+  std::string m_loopNumber; ///< Cacao loop number reported by the loop controller.
+  std::string m_goptName;   ///< INDI device providing gain optimization.
+  std::string m_gainCtrl;   ///< INDI device providing mode-block gain controls.
+  std::string m_appState;   ///< Last reported loop controller FSM state.
 
-   std::string m_procName;
+  double m_gain{ 0.0 };             ///< Last reported overall loop gain.
+  double m_gainScale{ 0.01 };       ///< Overall loop gain step.
+  double m_multcoeff{ 1 };          ///< Last reported overall loop multiplier.
+  double m_multcoeffScale{ 0.001 }; ///< Overall loop multiplier step.
 
-   std::string m_loopName;
-   std::string m_loopNumber;
+  bool m_loopState{ false };           ///< Whether the loop is closed.
+  bool m_loopWaiting{ false };         ///< Whether the loop slider is waiting for a state update.
+  bool m_procState{ false };           ///< Loop-process state.
+  bool m_flatVectorAvailable{ false }; ///< Whether the gain controller has advertised the flat-vector command.
 
-   std::string m_goptName;
+  std::vector<int>        m_modes;      ///< Number of modes in each block.
+  std::vector<gainCtrl *> m_blockCtrls; ///< Gain controls for the currently reported mode blocks.
+  std::mutex              m_blockMutex; ///< Serializes access to the block controls.
 
-   std::string m_gainCtrl;
-
-   std::string m_appState;
-
-   double m_gain {0.0};;
-   double m_gainScale {0.01};
-
-   double m_multcoeff {1};
-   double m_multcoeffScale {0.001};
-
-   bool m_loopState {false};
-   bool m_loopWaiting {false}; //indicates slider is waiting on loop_state update to be re-enabled
-
-   bool m_procState {false};
-
-   bool m_flatVectorAvailable {false}; ///< Whether the gain controller has advertised the flat-vector command.
-
-   std::vector<int> m_modes;
-   std::vector<gainCtrl *> m_blockCtrls;
-   std::mutex m_blockMutex;
-
-   QTimer * m_updateTimer {nullptr};
+  QTimer *m_updateTimer{ nullptr }; ///< Timer for refreshing the displayed controls.
 
 public:
-   loopCtrl( std::string & procName,
-             QWidget * Parent = 0,
-             Qt::WindowFlags f = Qt::WindowFlags()
-           );
+  /// Construct the loop controls for the given loop prefix.
+  loopCtrl( std::string    &procName /**< [in] Prefix for the loop, gain controller, and gain optimizer devices. */,
+            QWidget        *Parent = 0 /**< [in] Optional Qt parent. */,
+            Qt::WindowFlags f      = Qt::WindowFlags() /**< [in] Qt window flags. */
+  );
 
-   ~loopCtrl();
+  /// Destroy the loop controls.
+  ~loopCtrl();
 
-   void subscribe();
+  /// Subscribe the widget and its controls to their INDI properties.
+  void subscribe();
 
-   void onConnect();
+  /// Notify the controls that the INDI connection opened.
+  void onConnect();
 
-   void onDisconnect();
+  /// Reset the controls when the INDI connection closes.
+  void onDisconnect();
 
-   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+  /// Process a newly defined INDI property.
+  void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Property definition. */ );
 
-   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+  /// Invalidate controls for a deleted INDI property.
+  void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] Property or device deletion. */ );
 
-   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+  /// Process a loop or gain-controller property update.
+  void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Updated property. */ );
 
-   void sendNewGain(double ng);
-   void sendNewMultCoeff(double nm);
+  /// Request a new overall loop gain.
+  void sendNewGain( double ng /**< [in] Requested gain. */ );
 
-   void setEnableDisable( bool tf,
-                          bool all = true
-                        );
+  /// Request a new overall loop multiplier.
+  void sendNewMultCoeff( double nm /**< [in] Requested multiplier. */ );
+
+  /// Enable or disable the loop controls.
+  void setEnableDisable( bool tf /**< [in] Whether to enable the controls. */,
+                         bool all = true /**< [in] Whether to include the loop on/off control and its state label. */
+  );
 
 public slots:
-   void updateGUI();
+  /// Refresh the loop state and control availability.
+  void updateGUI();
 
-   void on_button_LoopZero_pressed();
+  /// Request that the loop correction channel be zeroed.
+  void on_button_LoopZero_pressed();
 
-   /// Request that every mode use the gain shown in the first block.
-   void on_button_flatVector_clicked();
+  /// Request that every mode use the gain shown in the first block.
+  void on_button_flatVector_clicked();
 
-   void on_button_zeroall_pressed();
+  /// Request that all modal gains be zeroed.
+  void on_button_zeroall_pressed();
 
-   void setupBlocks(int nB);
+  /// Rebuild the block widgets to reflect the reported block count.
+  void setupBlocks( int nB /**< [in] Number of mode blocks. */ );
 
-   void on_button_autoGainDump_pressed();
+  /// Request a gain-optimizer dump.
+  void on_button_autoGainDump_pressed();
 
 signals:
 
-   void doUpdateGUI();
+  /// Schedule a refresh of the controls.
+  void doUpdateGUI();
 
-   void blocksChanged(int nB);
+  /// Announce a change in the number of mode blocks.
+  void blocksChanged( int nB /**< [in] New number of mode blocks. */ );
 
 private:
-
-   Ui::loopCtrl ui;
+  Ui::loopCtrl ui; ///< Qt Designer controls for this widget.
 };
 
 loopCtrl::loopCtrl( std::string & procName,

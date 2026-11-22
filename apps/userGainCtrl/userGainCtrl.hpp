@@ -23,7 +23,8 @@ namespace MagAOX
 namespace app
 {
 
-uint16_t modesAtBlock( uint16_t b )
+/// Calculate the cumulative Fourier mode count through a zero-based block.
+uint16_t modesAtBlock( uint16_t b /**< [in] Zero-based block index. */ )
 {
     int16_t N = 2* (2*b+1 + 1);
 
@@ -50,12 +51,12 @@ uint16_t modesInBlock( uint16_t b /**< [in] the block number */)
   * Complicating this is the usual practice of putting pure Zernike modes into the beginning of the basis.  This accounts for
   * this if desired, always splitting Tip/Tilt and Focus into separate blocks.  Tip/Tilt can optionally be 2 separate blocks.
   */
-int blockModes( std::vector<uint16_t> & blocks,   ///< [out] the block structure.  The size is the number of blocks, and each entry contains the nubmer of modes in that block
-                std::vector<std::string> & names, ///< [out] the name of each block
-                uint16_t Nmodes,                  ///< [in] the total number of modes
-                uint16_t Nzern,                   ///< [in] the number of Zernikes appended at the front
-                bool splitTT                      ///< [in] whether or not to split tip and tilt
-              )
+int blockModes( std::vector<uint16_t>    &blocks, /**< [out] Number of modes in each block. */
+                std::vector<std::string> &names,  /**< [out] Display name of each block. */
+                uint16_t                  Nmodes, /**< [in] Total number of modes. */
+                uint16_t                  Nzern,  /**< [in] Number of leading Zernike modes. */
+                bool                      splitTT /**< [in] Whether to split tip and tilt into separate blocks. */
+)
 {
     double Nblocksd = (sqrt(1.0+Nmodes) - 1)/4.;
     int Nblocks = Nblocksd;
@@ -176,43 +177,52 @@ int blockModes( std::vector<uint16_t> & blocks,   ///< [out] the block structure
 
 }
 
+/// Identifies the gain stream monitor.
 struct gainShmimT
 {
-   static std::string configSection()
-   {
-      return "gainShmim";
-   };
+    /// Return the configuration section for the gain stream.
+    static std::string configSection()
+    {
+        return "gainShmim";
+    };
 
-   static std::string indiPrefix()
-   {
-      return "gainShmim";
-   };
+    /// Return the INDI property prefix for the gain stream.
+    static std::string indiPrefix()
+    {
+        return "gainShmim";
+    };
 };
 
+/// Identifies the multiplier stream monitor.
 struct multcoeffShmimT
 {
-   static std::string configSection()
-   {
-      return "multcoeffShmim";
-   };
+    /// Return the configuration section for the multiplier stream.
+    static std::string configSection()
+    {
+        return "multcoeffShmim";
+    };
 
-   static std::string indiPrefix()
-   {
-      return "multcoeffShmim";
-   };
+    /// Return the INDI property prefix for the multiplier stream.
+    static std::string indiPrefix()
+    {
+        return "multcoeffShmim";
+    };
 };
 
+/// Identifies the limit stream monitor.
 struct limitShmimT
 {
-   static std::string configSection()
-   {
-      return "limitShmim";
-   };
+    /// Return the configuration section for the limit stream.
+    static std::string configSection()
+    {
+        return "limitShmim";
+    };
 
-   static std::string indiPrefix()
-   {
-      return "limitShmim";
-   };
+    /// Return the INDI property prefix for the limit stream.
+    static std::string indiPrefix()
+    {
+        return "limitShmim";
+    };
 };
 
 /** \defgroup userGainCtrl User Interface to Cacao Gains
@@ -245,80 +255,86 @@ class userGainCtrl : public MagAOXApp<true>, public dev::shmimMonitor<userGainCt
     friend class dev::shmimMonitor<userGainCtrl,multcoeffShmimT>;
     friend class dev::shmimMonitor<userGainCtrl,limitShmimT>;
 
+    /// Base providing block gain telemetry.
     typedef dev::telemeter<userGainCtrl> telemeterT;
 
     friend class dev::telemeter<userGainCtrl>;
 
 public:
+  /// Base monitoring the modal gain stream.
+  typedef dev::shmimMonitor<userGainCtrl, gainShmimT> shmimMonitorT;
 
-    //The base shmimMonitor type
-    typedef dev::shmimMonitor<userGainCtrl,gainShmimT> shmimMonitorT;
-    typedef dev::shmimMonitor<userGainCtrl,multcoeffShmimT> mcShmimMonitorT;
-    typedef dev::shmimMonitor<userGainCtrl,limitShmimT> limitShmimMonitorT;
+  /// Base monitoring the modal multiplier stream.
+  typedef dev::shmimMonitor<userGainCtrl, multcoeffShmimT> mcShmimMonitorT;
 
-    ///Floating point type in which to do all calculations.
-    typedef float realT;
+  /// Base monitoring the modal limit stream.
+  typedef dev::shmimMonitor<userGainCtrl, limitShmimT> limitShmimMonitorT;
+
+  ///Floating point type in which to do all calculations.
+  typedef float realT;
 
 protected:
+  /** \name Configurable Parameters - Data
+   *@{
+   */
+  int  m_loopNumber{ -1 }; ///< Cacao loop number used to select the gain streams.
+  int  m_nZern{ 0 };       ///< Number of Zernike modes preceding the Fourier modes.
+  bool m_splitTT{ false }; ///< Whether tip and tilt are reported in separate blocks.
 
-    /** \name Configurable Parameters
-      *@{
-      */
-    int m_loopNumber {-1};
-    int m_nZern {0};
-    bool m_splitTT {false};
+  bool m_individualModes{ false }; ///< Whether to expose a separate block for every mode.
 
-    bool m_individualModes {false};
+  ///@}
 
-    ///@}
+  mx::improc::eigenImage<realT> m_gainsCurrent; ///< The current gains.
+  mx::improc::eigenImage<realT> m_gainsTarget;  ///< The target gains.
 
-    mx::improc::eigenImage<realT> m_gainsCurrent; ///< The current gains.
-    mx::improc::eigenImage<realT> m_gainsTarget; ///< The target gains.
+  realT ( *pixget )( void *, size_t ){
+      nullptr }; ///< Pointer to a function to extract the image data as our desired type realT.
 
-    realT (*pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
+  mx::improc::eigenImage<realT> m_mcsCurrent; ///< Most recently read modal multipliers.
+  mx::improc::eigenImage<realT> m_mcsTarget;  ///< Staging buffer for modal multiplier writes.
 
-    mx::improc::eigenImage<realT> m_mcsCurrent; ///< The current gains.
-    mx::improc::eigenImage<realT> m_mcsTarget; ///< The target gains.
+  realT ( *mc_pixget )( void *, size_t ){
+      nullptr }; ///< Pointer to a function to extract the image data as our desired type realT.
 
-    realT (*mc_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
+  mx::improc::eigenImage<realT> m_limitsCurrent; ///< Most recently read modal limits.
+  mx::improc::eigenImage<realT> m_limitsTarget;  ///< Staging buffer for modal limit writes.
 
-    mx::improc::eigenImage<realT> m_limitsCurrent; ///< The current gains.
-    mx::improc::eigenImage<realT> m_limitsTarget; ///< The target gains.
+  realT ( *limit_pixget )( void *, size_t ){
+      nullptr }; ///< Pointer to a function to extract the image data as our desired type realT.
 
-    realT (*limit_pixget)(void *, size_t) {nullptr}; ///< Pointer to a function to extract the image data as our desired type realT.
+  std::vector<uint16_t>    m_modeBlockStart; ///< Offset of the first mode in each block.
+  std::vector<uint16_t>    m_modeBlockN;     ///< Number of modes in each block.
+  std::vector<std::string> m_modeBlockNames; ///< Display names for the blocks.
 
-    std::vector<uint16_t> m_modeBlockStart;
-    std::vector<uint16_t> m_modeBlockN;
-    std::vector<std::string> m_modeBlockNames;
+  int m_totalNModes{ 0 }; ///< The total number of WFS modes in the calib.
 
-    int m_totalNModes {0}; ///< The total number of WFS modes in the calib.
+  std::vector<float>   m_modeBlockGains;         ///< Mean gain in each block.
+  std::vector<uint8_t> m_modeBlockGainsConstant; ///< Whether each block has a uniform gain.
 
-    std::vector<float> m_modeBlockGains;
-    std::vector<uint8_t> m_modeBlockGainsConstant;
+  std::vector<float>   m_modeBlockMCs;         ///< Mean multiplier in each block.
+  std::vector<uint8_t> m_modeBlockMCsConstant; ///< Whether each block has a uniform multiplier.
 
-    std::vector<float> m_modeBlockMCs;
-    std::vector<uint8_t> m_modeBlockMCsConstant;
+  std::vector<float>   m_modeBlockLims;         ///< Mean limit in each block.
+  std::vector<uint8_t> m_modeBlockLimsConstant; ///< Whether each block has a uniform limit.
 
-    std::vector<float> m_modeBlockLims;
-    std::vector<uint8_t> m_modeBlockLimsConstant;
+  std::mutex m_modeBlockMutex; ///< Serializes modal buffer operations.
 
-    std::mutex m_modeBlockMutex;
+  mx::fits::fitsFile<float> m_ff; ///< FITS helper reserved for calibration data.
 
-    mx::fits::fitsFile<float> m_ff;
+  int m_singleModeNo{ 0 }; ///< Selected mode for individual gain and multiplier controls.
 
-    int m_singleModeNo {0};
-
-    float m_powerLawIndex {2};
-    float m_powerLawFloor {0.05};
+  float m_powerLawIndex{ 2 };    ///< Exponent for power-law gain scaling.
+  float m_powerLawFloor{ 0.05 }; ///< Additive floor for power-law gains.
 
 public:
     /// Default c'tor.
     userGainCtrl();
 
-    /// D'tor, declared and defined for noexcept.
-    ~userGainCtrl() noexcept
-    {}
+    /// Destroy the gain controller.
+    ~userGainCtrl() noexcept = default;
 
+    /// Register the app and stream-monitor configuration options.
     virtual void setupConfig();
 
     /// Implementation of loadConfig logic, separated for testing.
@@ -326,12 +342,10 @@ public:
       */
     int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
 
+    /// Load the app configuration.
     virtual void loadConfig();
 
-    /// Startup function
-    /**
-      *
-      */
+    /// Register INDI properties and start the stream monitors and telemetry.
     virtual int appStartup();
 
     /// Implementation of the FSM for userGainCtrl.
@@ -341,167 +355,196 @@ public:
       */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-      *
-      */
+    /// Stop the stream monitors and telemetry.
     virtual int appShutdown();
 
 protected:
+  /// Rebuild the mode blocks and their INDI controls for the gain stream.
+  int getModeBlocks();
 
-    //int checkAOCalib(); ///< Test if the AO calib is accessible.
+  /// Allocate gain buffers and rebuild the mode blocks.
+  int allocate( const gainShmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-    //int getAOCalib();
+  /// Load a gain frame and update block statistics.
+  int processImage( void             *curr_src, /**< [in] Start of the current gain frame. */
+                    const gainShmimT &dummy     /**< [in] Tag selecting the gain monitor. */
+  );
 
-    int getModeBlocks();
+  /// Publish the staged modal gains to shared memory.
+  int writeGains();
 
-    int allocate( const gainShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
+  /// Set the gain of one block.
+  int setBlockGain( int   n, /**< [in] Zero-based block index. */
+                    float g  /**< [in] Requested block gain. */
+  );
 
-    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                      const gainShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
-                    );
+  /// Allocate the modal multiplier buffers.
+  int allocate( const multcoeffShmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-    int writeGains();
+  /// Load a multiplier frame and update block statistics.
+  int processImage( void                  *curr_src, /**< [in] Start of the current multiplier frame. */
+                    const multcoeffShmimT &dummy     /**< [in] Tag selecting the multiplier monitor. */
+  );
 
-    int setBlockGain( int n,
-                      float g
-                    );
+  /// Publish the staged modal multipliers to shared memory.
+  int writeMCs();
 
-    int allocate( const multcoeffShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
+  /// Set the multiplier of one block.
+  int setBlockMC( int   n, /**< [in] Zero-based block index. */
+                  float mc /**< [in] Requested block multiplier. */
+  );
 
-    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                      const multcoeffShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
-                    );
+  /// Allocate the modal limit buffers.
+  int allocate( const limitShmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-    int writeMCs();
+  /// Load a limit frame and update block statistics.
+  int processImage( void              *curr_src, /**< [in] Start of the current limit frame. */
+                    const limitShmimT &dummy     /**< [in] Tag selecting the limit monitor. */
+  );
 
-    int setBlockMC( int n,
-                     float mc
-                  );
+  /// Publish the staged modal limits to shared memory.
+  int writeLimits();
 
-    int allocate( const limitShmimT & dummy /**< [in] tag to differentiate shmimMonitor parents.*/);
+  /// Set the limit of one block.
+  int setBlockLimit( int   n, /**< [in] Zero-based block index. */
+                     float l  /**< [in] Requested block limit. */
+  );
 
-    int processImage( void * curr_src,          ///< [in] pointer to start of current frame.
-                      const limitShmimT & dummy ///< [in] tag to differentiate shmimMonitor parents.
-                    );
+  /// Select a mode for the individual controls.
+  int setSingleModeNo( int m /**< [in] Zero-based mode index. */ );
 
-    int writeLimits();
+  /// Set the gain of the selected mode.
+  int setSingleGain( float g /**< [in] Requested modal gain. */ );
 
-    int setBlockLimit( int n,
-                       float l
-                     );
+  /// Set the multiplier of the selected mode.
+  int setSingleMC( float mc /**< [in] Requested modal multiplier. */ );
 
-    int setSingleModeNo (int m);
+  /// Publish the selected mode's gain and multiplier.
+  void updateSingles();
 
-    int setSingleGain( float g );
+  /// Set the exponent used for power-law gain scaling.
+  void powerLawIndex( float pli /**< [in] Requested exponent. */ );
 
-    int setSingleMC( float mc );
+  /// Set the additive floor used for power-law gains.
+  void powerLawFloor( float plf /**< [in] Requested gain floor. */ );
 
-    void updateSingles();
+  /// Apply power-law scaling to the Fourier mode blocks.
+  void powerLawSet();
 
-    void powerLawIndex( float pli );
+  pcf::IndiProperty m_indiP_modes; ///< Mode count and block structure.
 
-    void powerLawFloor( float plf );
+  pcf::IndiProperty m_indiP_zeroAll; ///< Request to zero all modal gains.
 
-    void powerLawSet();
+  pcf::IndiProperty m_indiP_flatVector; ///< Request carrying the gain to write to every mode.
 
-    pcf::IndiProperty m_indiP_modes;
+  std::vector<pcf::IndiProperty> m_indiP_blockGains;  ///< Gain control of each block.
+  std::vector<pcf::IndiProperty> m_indiP_blockMCs;    ///< Multiplier control of each block.
+  std::vector<pcf::IndiProperty> m_indiP_blockLimits; ///< Limit control of each block.
 
-    pcf::IndiProperty m_indiP_zeroAll;
+  pcf::IndiProperty m_indiP_singleModeNo; ///< Mode selection for individual controls.
+  pcf::IndiProperty m_indiP_singleGain;   ///< Gain control of the selected mode.
+  pcf::IndiProperty m_indiP_singleMC;     ///< Multiplier control of the selected mode.
 
-    pcf::IndiProperty m_indiP_flatVector; ///< Request carrying the gain to write to every mode.
-
-    std::vector<pcf::IndiProperty> m_indiP_blockGains;
-    std::vector<pcf::IndiProperty> m_indiP_blockMCs;
-    std::vector<pcf::IndiProperty> m_indiP_blockLimits;
-
-    pcf::IndiProperty m_indiP_singleModeNo;
-    pcf::IndiProperty m_indiP_singleGain;
-    pcf::IndiProperty m_indiP_singleMC;
-
-    pcf::IndiProperty m_indiP_powerLawIndex;
-    pcf::IndiProperty m_indiP_powerLawFloor;
-    pcf::IndiProperty m_indiP_powerLawSet;
+  pcf::IndiProperty m_indiP_powerLawIndex; ///< Power-law exponent control.
+  pcf::IndiProperty m_indiP_powerLawFloor; ///< Power-law gain floor control.
+  pcf::IndiProperty m_indiP_powerLawSet;   ///< Request to apply power-law gain scaling.
 
 public:
+  /// Handle a request to zero all modal gains.
+  INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_zeroAll );
 
-    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_zeroAll);
+  /// Handle a request to assign one gain to every mode.
+  INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_flatVector );
 
-    /// Handle a request to assign one gain to every mode.
-    INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_flatVector );
+  /// Handle a change to the mode selected for individual controls.
+  INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_singleModeNo );
 
-    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleModeNo);
+  /// Handle a gain request for the selected mode.
+  INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_singleGain );
 
-    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleGain);
+  /// Handle a multiplier request for the selected mode.
+  INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_singleMC );
 
-    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_singleMC);
+  /// Handle a change to the power-law exponent.
+  INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_powerLawIndex );
 
-    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_powerLawIndex);
-    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_powerLawFloor);
-    INDI_NEWCALLBACK_DECL(userGainCtrl, m_indiP_powerLawSet);
+  /// Handle a change to the power-law gain floor.
+  INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_powerLawFloor );
 
-    /// The static callback function to be registered for block gains
-    /** Dispatches to the relevant handler
-      *
-      * \returns 0 on success.
-      * \returns -1 on error.
-      */
-    static int st_newCallBack_blockGains( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                          const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                        );
+  /// Handle a request to apply the power-law gain profile.
+  INDI_NEWCALLBACK_DECL( userGainCtrl, m_indiP_powerLawSet );
 
-    /// Callback to process a NEW block gain request
-    /**
-      * \returns 0 on success.
-      * \returns -1 on error.
-      */
-    int newCallBack_blockGains( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+  /// The static callback function to be registered for block gains
+  /** Dispatches to the relevant handler
+   *
+   * \returns 0 on success.
+   * \returns -1 on error.
+   */
+  static int st_newCallBack_blockGains(
+      void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+      const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+  );
 
-    /// The static callback function to be registered for block mult. coeff.s
-    /** Dispatches to the relevant handler
-      *
-      * \returns 0 on success.
-      * \returns -1 on error.
-      */
-    static int st_newCallBack_blockMCs( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                        const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                      );
+  /// Callback to process a NEW block gain request
+  /**
+   * \returns 0 on success.
+   * \returns -1 on error.
+   */
+  int newCallBack_blockGains(
+      const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
 
-    /// Callback to process a NEW block mult. coeff.s
-    /**
-      * \returns 0 on success.
-      * \returns -1 on error.
-      */
-    int newCallBack_blockMCs( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+  /// The static callback function to be registered for block mult. coeff.s
+  /** Dispatches to the relevant handler
+   *
+   * \returns 0 on success.
+   * \returns -1 on error.
+   */
+  static int st_newCallBack_blockMCs(
+      void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+      const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+  );
 
-    /// The static callback function to be registered for block limits
-    /** Dispatches to the relevant handler
-      *
-      * \returns 0 on success.
-      * \returns -1 on error.
-      */
-    static int st_newCallBack_blockLimits( void * app, ///< [in] a pointer to this, will be static_cast-ed to derivedT.
-                                         const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
-                                       );
+  /// Callback to process a NEW block mult. coeff.s
+  /**
+   * \returns 0 on success.
+   * \returns -1 on error.
+   */
+  int newCallBack_blockMCs(
+      const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
 
-    /// Callback to process a NEW block limits
-    /**
-      * \returns 0 on success.
-      * \returns -1 on error.
-      */
-    int newCallBack_blockLimits( const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/);
+  /// The static callback function to be registered for block limits
+  /** Dispatches to the relevant handler
+   *
+   * \returns 0 on success.
+   * \returns -1 on error.
+   */
+  static int st_newCallBack_blockLimits(
+      void                    *app,   ///< [in] a pointer to this, will be static_cast-ed to derivedT.
+      const pcf::IndiProperty &ipRecv ///< [in] the INDI property sent with the the new property request.
+  );
 
-    /** \name Telemeter Interface
-      *
-      * @{
-      */
-    int checkRecordTimes();
+  /// Callback to process a NEW block limits
+  /**
+   * \returns 0 on success.
+   * \returns -1 on error.
+   */
+  int newCallBack_blockLimits(
+      const pcf::IndiProperty &ipRecv /**< [in] the INDI property sent with the the new property request.*/ );
 
-    int recordTelem( const telem_blockgains * );
+  /** \name Telemeter Interface
+   *
+   * @{
+   */
+  /// Check whether block telemetry is due.
+  int checkRecordTimes();
 
-    int recordBlockGains( bool force = false );
+  /// Record the current block telemetry.
+  int recordTelem( const telem_blockgains * /**< [in] Tag selecting block gain telemetry. */ );
 
-    ///@}
+  /// Record block telemetry when values have changed or recording is forced.
+  int recordBlockGains( bool force = false /**< [in] Whether to record even when values are unchanged. */ );
+
+  ///@}
 };
 
 inline

@@ -1,3 +1,6 @@
+/** \file gainCtrl.hpp
+ * \brief INDI widget for a gain or multiplier with numeric and slider controls.
+ */
 #ifndef gainCtrl_hpp
 #define gainCtrl_hpp
 
@@ -12,89 +15,112 @@
 namespace xqt
 {
 
+/// Control an INDI gain or multiplier.
 class gainCtrl : public xWidget
 {
    Q_OBJECT
 
 protected:
+  std::string m_device;   ///< INDI device owning the controlled property.
+  std::string m_property; ///< Name of the controlled INDI number property.
+  std::string m_label;    ///< Display label, populated from INDI if initially empty.
 
-   std::string m_device;
-   std::string m_property;
-   std::string m_label;
+  int m_modes{ 0 };      ///< Number of modes in this block, or -1 for a loop-wide control.
+  int m_modesTotal{ 0 }; ///< Cumulative mode count through this block, or -1 for a loop-wide control.
 
-   int m_modes {0};
-   int m_modesTotal {0};
+  float m_current{ 0 }; ///< Current control value, including optimistic updates from local controls.
+  float m_target{ 0 };  ///< Last received target value.
 
-   float m_current {0};
-   float m_target {0};
+  bool m_valChanged{ false }; ///< Whether the reported current value has changed.
+  bool m_newSent{ false };    ///< Whether the next property update follows a locally sent command.
 
-   bool m_valChanged {false};
-   bool m_newSent {false};
+  float m_scale{ 0.05 }; ///< Step used by the plus and minus buttons.
 
-   float m_scale {0.05};
-
-   int m_ctrlType {GAIN};
-   float m_maxVal {1.5};
-   bool m_enforceMax {false};
+  int   m_ctrlType{ GAIN };    ///< Whether this widget is configured for a gain or multiplier.
+  float m_maxVal{ 1.5 };       ///< Value at the top of the slider range.
+  bool  m_enforceMax{ false }; ///< Whether button and slider commands are capped at the slider maximum.
 public:
+  /// Construct an unconfigured gain control.
+  gainCtrl( QWidget        *Parent = 0 /**< [in] Optional Qt parent. */,
+            Qt::WindowFlags f      = Qt::WindowFlags() /**< [in] Qt window flags. */
+  );
 
-   gainCtrl( QWidget * Parent = 0,
-             Qt::WindowFlags f = Qt::WindowFlags()
-           );
+  /// Construct a control bound to an INDI gain property.
+  gainCtrl( const std::string &device /**< [in] INDI device name. */,
+            const std::string &property /**< [in] INDI property name. */,
+            const std::string &label /**< [in] Display label, or empty to use the property label. */,
+            int                modes /**< [in] Modes in the block, or -1 to hide the count. */,
+            int                modesTotal /**< [in] Cumulative modes through the block, or -1 to hide the count. */,
+            QWidget           *Parent = 0 /**< [in] Optional Qt parent. */,
+            Qt::WindowFlags    f      = Qt::WindowFlags() /**< [in] Qt window flags. */
+  );
 
-   gainCtrl( const std::string & device,
-             const std::string & property,
-             const std::string & label,
-             int modes,
-             int modesTotal,
-             QWidget * Parent = 0,
-             Qt::WindowFlags f = Qt::WindowFlags()
-           );
+  /// Destroy the gain control.
+  ~gainCtrl();
 
-   ~gainCtrl();
+  /// Bind the widget and numeric entry to an INDI gain property.
+  void setup( const std::string &device /**< [in] INDI device name. */,
+              const std::string &property /**< [in] INDI property name. */,
+              const std::string &label /**< [in] Display label, or empty to use the property label. */,
+              int                modes /**< [in] Modes in the block, or -1 to hide the count. */,
+              int                modesTotal /**< [in] Cumulative modes through the block, or -1 to hide the count. */
+  );
 
-   void setup( const std::string & device,
-               const std::string & property,
-               const std::string & label,
-               int modes,
-               int modesTotal
-             );
+  /// Set the display and control steps for gain values.
+  void makeGainCtrl();
 
-   void makeGainCtrl();
+  /// Set the display and control steps for multiplier values.
+  void makeMultCoeffCtrl();
 
-   void makeMultCoeffCtrl();
+  /// Subscribe the slider and numeric entry to this INDI property.
+  virtual void subscribe();
 
-   virtual void subscribe();
+  /// Notify the numeric entry that the INDI connection opened.
+  virtual void onConnect();
 
-   virtual void onConnect();
+  /// Reset the slider and numeric entry when the INDI connection closes.
+  virtual void onDisconnect();
 
-   virtual void onDisconnect();
+  /// Initialize the controls from a property definition.
+  virtual void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Property definition. */ );
 
-   virtual void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+  /// Reset the controls when their property is deleted.
+  virtual void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] Deleted property. */ );
 
-   virtual void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+  /// Refresh the controls from an INDI property update.
+  virtual void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Updated property. */ );
 
-   virtual void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+  /// Refresh the slider position from the cached current value.
+  virtual void updateGUI();
 
-   virtual void updateGUI();
+  /// Send a numeric target using the current control limits.
+  void setGain( float g /**< [in] Requested gain or multiplier. */ );
 
-   void setGain( float g );
-
-   /// Return the text in the numeric entry, including an active edit.
-   QString inputText() const;
+  /// Return the text in the numeric entry, including an active edit.
+  QString inputText() const;
 
 public slots:
 
-   void on_button_plus_pressed();
-   void on_button_scale_pressed();
-   void on_button_minus_pressed();
-   void on_button_zero_pressed();
-   void on_slider_sliderMoved(int s);
-   void on_slider_sliderReleased();
+  /// Increase the value by one step.
+  void on_button_plus_pressed();
+
+  /// Cycle the adjustment step.
+  void on_button_scale_pressed();
+
+  /// Decrease the value by one step.
+  void on_button_minus_pressed();
+
+  /// Reset the gain to zero or the multiplier to one.
+  void on_button_zero_pressed();
+
+  /// Preview a slider position in the numeric entry.
+  void on_slider_sliderMoved( int s /**< [in] New slider position. */ );
+
+  /// Send the value selected with the slider.
+  void on_slider_sliderReleased();
 
 protected:
-
-   Ui::gainCtrl ui;
+  Ui::gainCtrl ui; ///< Qt Designer controls for this widget.
 };
 
 gainCtrl::gainCtrl( QWidget * Parent,
