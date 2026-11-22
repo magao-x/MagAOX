@@ -262,3 +262,35 @@ What the results mean:
   write, restart) is required. Mid-capture switching isn't possible, which closes that follow-up.
 - No code changes were needed. Still to do: run `orcaCtrl_test` on the build machine, and the hardware
   switching check.
+
+**2026-11-22: startup flood of "could not set the readout speed" errors, fixed.**
+
+Reported: restarting orcaCtrl with the camera powered on filled the log with `software_error` "could not
+set the readout speed", and acquisition didn't start.
+
+- **Why it flooded.** Any readout-speed failure made `configureAcquisition()` return -1. The framegrabber
+  then sleeps 1 s and calls it again, so a persistent failure logged one error per second and acquisition
+  never started.
+- **Probable trigger.** For `standard` the code wrote `DCAMPROP_READOUTSPEED__FASTEST` (0x7FFFFFFF). The
+  probe shows the Quest2's `READOUTSPEED` range is [1, 2], so the camera most likely rejects that value
+  as out of range rather than clamping it, as the fake DCAM did (which hid the problem in the tests).
+  This is unconfirmed: the log line's DCAM error text would settle it. The code was also writing the speed
+  on every reconfigure, even when nothing had changed.
+- **Fix, in the "Readout Speed" section of `configureAcquisition()`:**
+  - It reads `dcamprop_getattr()` and the current value first, then writes the real limit (`valuemax` for
+    `standard`, `valuemin` for `ultra_quiet`) with `dcamprop_setgetvalue`, and only if it differs from the
+    current value. So there's no write at all at startup in Standard. No more `__FASTEST` / `__SLOWEST`
+    sentinels.
+  - A failed read or write is now a single `LOG_WARNING` that includes the DCAM error text.
+    `m_readoutSpeedNameSet` is reset to the speed actually in use, so the failed request isn't retried on
+    every reconfigure, and configuration continues at the camera's current speed. A power-off still
+    returns -1 quietly.
+- **Tests:**
+  - The fake DCAM now starts at speed 2 like the camera, and returns `DCAMERR_OUTOFRANGE` for
+    readout-speed writes outside [1, 2] instead of clamping them.
+  - It counts readout-speed writes and can inject read or write failures (`m_speedGetResult`,
+    `m_speedSetResult`). `tests/dcam/dcamapi4.h` gained `DCAMERR_BUSY` and `DCAMERR_OUTOFRANGE`.
+  - The switching test now checks that startup in Standard writes nothing and that one switch writes once.
+  - New test "orcaCtrl keeps acquiring when the readout speed can't be read or set": each failure gives one
+    warning, no error logs, acquisition starts, and a failed request isn't retried on the next reconfigure.
+- **Not built or run yet**, because this workstation has no mxlib.
