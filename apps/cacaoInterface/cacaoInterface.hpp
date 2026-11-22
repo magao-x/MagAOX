@@ -41,6 +41,7 @@ class cacaoInterface : public MagAOXApp<true>, public dev::telemeter<cacaoInterf
    //Give the test harness access.
    friend class cacaoInterface_test;
 
+   /// Base providing loop telemetry.
    typedef dev::telemeter<cacaoInterface> telemeterT;
 
    friend class dev::telemeter<cacaoInterface>;
@@ -54,16 +55,14 @@ protected:
 
    ///@}
 
-   std::string m_aoCalDir;
-   std::string m_aoCalArchiveTime;
-   std::string m_aoCalLoadTime;
+   std::string m_aoCalDir;         ///< Directory of the active loop calibration.
+   std::string m_aoCalArchiveTime; ///< Archive timestamp of the active calibration.
+   std::string m_aoCalLoadTime;    ///< Load timestamp of the active calibration.
 
    std::string m_loopName; ///< the loop name
 
-
-   std::string m_fpsName;
-   std::string m_fpsFifo;
-
+   std::string m_fpsName; ///< Name of the loop function parameter structure.
+   std::string m_fpsFifo; ///< Command FIFO for the loop's FPS controller.
 
    std::atomic<int> m_loopState{ 0 };          ///< Latest loop state. 0 is open, 1 is paused, 2 is closed.
    bool             m_loopStateKnown{ false }; ///< Whether CACAO has reported an open or closed state.
@@ -97,15 +96,14 @@ protected:
    float m_multCoeff {0.0}; ///< The current multiplicative coefficient (1-leak)
    float m_multCoeff_target {0.0}; ///< The target multiplicative coefficient (1-leak)
 
-   std::vector<int> m_modeBlockStart;
-   std::vector<int> m_modeBlockN;
+   std::vector<int> m_modeBlockStart; ///< First mode index of each calibration block.
+   std::vector<int> m_modeBlockN;     ///< Mode count of each calibration block.
 
-   std::vector<float> m_modeBlockGains;
-   std::vector<float> m_modeBlockMCs;
-   std::vector<float> m_modeBlockLims;
+   std::vector<float> m_modeBlockGains; ///< Block gain values.
+   std::vector<float> m_modeBlockMCs;   ///< Block multiplier values.
+   std::vector<float> m_modeBlockLims;  ///< Block limit values.
 
-   std::mutex m_modeBlockMutex;
-
+   std::mutex m_modeBlockMutex; ///< Mutex for block data.
 
    float m_maxLim {0.0}; ///< The current max limit
    float m_maxLim_target {0.0}; ///< The target max limit
@@ -118,6 +116,7 @@ public:
    ~cacaoInterface() noexcept
    {}
 
+   /// Register the loop configuration options.
    virtual void setupConfig();
 
    /// Implementation of loadConfig logic, separated for testing.
@@ -125,6 +124,7 @@ public:
      */
    int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
 
+   /// Load configuration for this loop.
    virtual void loadConfig();
 
    /// Startup function
@@ -161,19 +161,20 @@ public:
                   const std::string &val /**< [in] Value to set. */,
                   bool               waitForReader = true /**< [in] Whether to wait for the FIFO reader. */ );
 
-   template<typename T>
-   int setFPSVal( const std::string & fps,
-                  const std::string & param,
-                  const T & val
-                );
+   template <typename T>
+   /// Set an FPS parameter to the string representation of a numeric value.
+   int setFPSVal( const std::string &fps /**< [in] FPS prefix. */,
+                  const std::string &param /**< [in] FPS parameter. */,
+                  const T           &val /**< [in] Value to set. */ );
 
    /// Read a string-valued FPS parameter.
    std::string getFPSValStr( const std::string &fps /**< [in] FPS prefix. */,
                              const std::string &param /**< [in] FPS parameter. */,
                              bool commandReadback = false /**< [in] Use a distinct reply file and a short wait. */ );
 
-   std::string getFPSValNum(const std::string & fps,
-                                          const std::string & param );
+   /// Read the numeric fields of an FPS parameter.
+   std::string getFPSValNum( const std::string &fps /**< [in] FPS prefix. */,
+                             const std::string &param /**< [in] FPS parameter. */ );
 
    /// Get the calibration details
    /** This is done each loop
@@ -183,6 +184,7 @@ public:
      */
    int getAOCalib();
 
+   /// Determine mode blocks from the active calibration.
    int getModeBlocks();
 
    /// Check if the loop processes are running
@@ -231,11 +233,11 @@ public:
      */
    int loopOff();
 
-   /// Zero the loop control channel
+   /// Request that CACAO zero the loop control channel.
    /**
-     * \returns 0 on success
-     * \returns -1 on an error
-     */
+    * \returns 0 on success
+    * \returns -1 on an error
+    */
    int loopZero();
 
    /// Publish the result of the pending zero after CACAO clears its request flag.
@@ -295,19 +297,22 @@ public:
 
    ///@}
 
-   pcf::IndiProperty m_indiP_loop;
-   pcf::IndiProperty m_indiP_loopProcesses;
+   pcf::IndiProperty m_indiP_loop;          ///< Name and number of the configured loop.
+   pcf::IndiProperty m_indiP_loopProcesses; ///< Whether the loop processes are running.
 
-   pcf::IndiProperty m_indiP_loopState;
-   pcf::IndiProperty m_indiP_loopZero;
-   pcf::IndiProperty m_indiP_loopGain;
-   pcf::IndiProperty m_indiP_multCoeff;
-   pcf::IndiProperty m_indiP_maxLim;
+   pcf::IndiProperty m_indiP_loopState;       ///< Loop closed/open state and command.
+   pcf::IndiProperty m_indiP_loopZero;        ///< Loop zero request and completion status.
+   pcf::IndiProperty m_indiP_loopGain;        ///< Current and requested loop gain.
+   pcf::IndiProperty m_indiP_multCoeff;       ///< Current and requested loop multiplier.
+   pcf::IndiProperty m_indiP_maxLim;          ///< Current and requested loop correction limit.
    pcf::IndiProperty m_indiP_offloadLink;     ///< HO-only switch selecting linked operation.
    pcf::IndiProperty m_indiP_offloaderFsm;    ///< Subscription to tweeter-to-woofer offloader readiness.
    pcf::IndiProperty m_indiP_offloaderToggle; ///< Subscription to tweeter-to-woofer offload state.
 
+   /// Handle a loop state command.
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopState);
+
+   /// Handle a loop zero request.
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopZero);
 
    /// Set whether offloading is linked to the HO loop.
@@ -319,19 +324,27 @@ public:
    /// Retain settled offloading state and advance linked commands.
    INDI_SETCALLBACK_DECL( cacaoInterface, m_indiP_offloaderToggle );
 
+   /// Handle a loop gain command.
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopGain);
+
+   /// Handle a loop multiplier command.
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_multCoeff);
+
+   /// Handle a loop limit command.
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_maxLim);
 
    /** \name Telemeter Interface
      *
      * @{
      */
+   /// Check when loop telemetry is due.
    int checkRecordTimes();
 
-   int recordTelem( const telem_loopgain * );
+   /// Record loop gain telemetry.
+   int recordTelem( const telem_loopgain * /**< [in] Tag selecting loop gain telemetry. */ );
 
-   int recordLoopGain( bool force = false );
+   /// Record loop state and gain settings when changed or forced.
+   int recordLoopGain( bool force = false /**< [in] Whether to record unchanged values. */ );
 
    ///@}
 
