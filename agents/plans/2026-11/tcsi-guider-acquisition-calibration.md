@@ -3,6 +3,8 @@
 Recorded 2026-11-18; updated 2026-11-21. Status: preliminary calibration from two
 full-transfer measurements with `zdSign=+1`. Both points determine the four
 angular coefficients exactly; a third measurement is needed to test the model.
+The recorded quantities are only synchronized to roughly a couple of minutes,
+so the fit uses nominal elevations rather than precisely simultaneous samples.
 No application code or operational configuration was changed by this work.
 
 The guider-to-instrument acquisition offsets have changed. The current model
@@ -100,6 +102,12 @@ notation is preserved for confirmation; hour-angle sign does not affect this
 fit. Observation timestamps were not supplied, so the dates above record when
 the measurements were supplied rather than asserting observation dates.
 
+On 2026-11-21, the user clarified that the individual quantities may be recorded
+at different times, with timing only good to roughly a couple of minutes. Treat
+this as approximate relative timing precision, not a stated statistical standard
+deviation or strict bound. Preserve the supplied digits for reproducibility;
+they do not establish simultaneous coordinate and offset accuracy.
+
 For the second point, the user also reported a prediction of
 `(-31.542, 5.947)`. The measured minus reported-predicted difference is
 `(-7.068, 0)`.
@@ -178,10 +186,12 @@ Each pair below is `(azimuth offset, elevation offset)` in command units.
 The recomputed one-point prediction at exactly 75.0902 degrees is
 `(-31.51412488, 5.97887980)`. This differs from the user's reported prediction by
 approximately `(+0.028, +0.032)`. Preserve the reported prediction as an
-independent record; a difference in sampled zenith distance or loaded
-configuration could explain it, but the cause has not been established. The
-source's pi approximation is too small to explain this discrepancy. The fit
-uses the reported elevation and measured full moves, not either prediction.
+independent record. An elevation near 75.032 degrees gives approximately the
+reported vector under the one-point model, about 0.058 degrees below the recorded
+elevation. This small discrepancy is consistent with the user's stated timing
+precision; it is not evidence by itself of a configuration difference. The
+source's pi approximation is much smaller. The fit uses the reported elevation
+and measured full moves, not either prediction.
 
 The elevations are separated by 25.1902 degrees. The design matrix has rank 4
 and a 2-norm condition number of approximately 9.06. Four scalar measurements
@@ -194,6 +204,8 @@ Independent offline calculations agree on the fitted coefficients. Forward
 evaluation with the rounded coefficients and the source's approximate pi and
 float arithmetic reproduces both measured pairs within approximately 0.00003
 command units. This numerical agreement does not establish measurement accuracy.
+The coefficients remain the nominal two-point solution; no timing correction
+can be inferred from the approximate timing precision alone.
 
 At elevation 60 degrees, the new candidate predicts approximately
 `(-40.289, -3.545)`; the previous one-point candidate predicts
@@ -224,6 +236,26 @@ constant components. Prefer several well-separated elevations across the normal
 observing range, repeats to measure scatter, and independent validation points.
 Use measurement uncertainties as weights when available.
 
+Account for timing uncertainty in the elevation input as well as scatter in the
+measured offsets. Estimate the local elevation rate from nearby recorded TCS
+samples, then use `delta_E ~= (dE/dt)*delta_t` to explore plausible coordinate
+shifts. A couple of minutes of timing uncertainty does not imply a fixed
+elevation uncertainty across targets or hour angles. For a small elevation
+error in degrees, the model sensitivities are:
+
+```text
+dA/dE =  zdSign * (B - eloff) * pi/180
+dB/dE = -zdSign * (A - azoff) * pi/180
+```
+
+At the second point, the one-point model has sensitivities of approximately
+`(0.471, 0.550)` command units per degree. An elevation decrease of about
+0.058 degrees therefore changes its prediction by approximately `(-0.027, -0.032)`,
+consistent with the small recorded prediction discrepancy. Use timing-aware
+weights or perturb the input elevations and refit when enough measurements are
+available. Any assumed timing distribution must be stated explicitly. Do not
+derive a formal coefficient uncertainty from an exact two-point fit alone.
+
 For a simpler update, compare full-transfer measurements with the existing
 model. If the residual vectors are constant across elevation, update only
 `azoff/eloff`. If the residual vectors become constant after inverse rotation,
@@ -250,9 +282,11 @@ either sign can fit two distinct elevations exactly.
 - Obtain a third independent elevation, for example near 60 degrees, to test
   the two-point model, then additional points and repeats to assess residuals
   and repeatability. Retain hour angle to check for dependence beyond elevation.
-- Where available, retain the acquisition log and simultaneous TCS zenith
-  distance for the second point to reconcile the reported and recomputed
-  predictions.
+- Where available, retain timestamps for offsets and coordinates together with
+  nearby TCS samples, so the local elevation rate and timing uncertainty can be
+  included in later fits. Differences at the few-hundredths level between the
+  reported and recomputed second-point predictions are consistent with the
+  stated recording precision.
 - Have the operator apply and validate the chosen configuration on the
   instrument. Instrument measurements and commands are performed by the user;
   this analysis used local files and offline arithmetic only.
