@@ -864,6 +864,34 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
 - **L-Q3. Ramp reference.** With the woofer stamp available, `t0` could be referenced to the woofer publish instead of the wake time (Q4(b) of the original plan). That removes the handoff jitter from the ramp timing. It is not proposed now, because it would change the meaning of `rampStartUs` and of the existing calibration results. Do you want it as an INDI option (default off)?
 - **L-Q4.** Is a 250-event window right for the INDI statistics? Should the CSV columns go in now, or only the INDI property?
 
+**Purpose clarified (user, 2026-11-21).** The latency is measured to find out whether computation limits how quickly an offload reaches the tweeter, or whether the limit is inherent: the 8 kHz slot rate plus the tweeter rise time.
+
+**Revised proposal: a breakdown of the delay, one term per cause.** All times are `CLOCK_MONOTONIC`, per offload, for the first slot that carries it.
+
+| Term | Interval | Cause |
+| --- | --- | --- |
+| `handoffUs` | woofer post → counterOffload wakes | **computation**: t2wOffloader's `calcTweeterOffload()` and post, plus the wake latency |
+| `slotWaitUs` | wake → compute start of the slot used | **slot quantization**: 0–125 µs if the offload phase is random against the 8 kHz grid, plus a whole slot if the offload just missed a compute deadline |
+| `computeUs` | compute start → `buildCommand()` done | **computation**: counterOffload |
+| `writeUs` | publish start → `UpdateIm` done | **computation**: the copy into `_aux` |
+| `leadUs` | compute start → slot target | **configuration**: `computeLeadUs + writeLeadUs + readyLeadUs` = 20 + 10 + 70 = 100 µs, constant |
+| after target | slot target → tweeter surface | **hardware**: the tweeter rise (t10/t50/t90 ≈ 266/314/391 µs, deconvolved), not measured by the app |
+
+- **How to read it:**
+  - **Computation is the limit** if `handoffUs + computeUs + writeUs` approaches the 125 µs slot. Another sign is offloads that miss the slot they could have made.
+  - **The limit is structural** if those terms are a few µs and the delay is dominated by `slotWaitUs` (at most 125 µs), the fixed `leadUs`, and the tweeter rise after the target.
+  - If `computeUs` and `writeUs` are far below `computeLeadUs` (20) and `writeLeadUs` (10), those leads can be reduced. `readyLeadUs` (70) belongs to dmSyncopation.
+- **`missed`:** counts offloads that arrived after the compute deadline of the slot they would otherwise have made, so they waited an extra slot. This is the most direct sign that computation, or the leads, cost a slot. To find it, compare the wake time with the compute deadline of the slot before the one used. Any slot the producer polled but that ended before the event arrived is not counted.
+
+**Effect on the questions.**
+- **L-Q1:** unchanged. The woofer stamp is needed for `handoffUs`, which is the t2wOffloader computation term. Please still run the `ImageStreamIO_UpdateIm` grep on the RTC.
+- **L-Q2 (proposed answer):** use the **first slot published after the offload arrives**, whatever its ramp fraction. `rampStartUs` is a deliberate delay, not a limitation, so it should not count in the latency. `firstFrac` is still recorded, so slots published before the ramp starts are visible.
+- **L-Q3 (proposed answer):** not needed for this purpose. Leave the ramp reference as it is.
+- **L-Q4 (proposed answer):**
+  - **On INDI, one property `latency`:** `handoffUs`, `slotWaitUs`, `computeUs`, `writeUs` (means over the window), `computeMaxUs`, and `missed`. That is 6 rows; `leadUs` is constant and is logged once at startup.
+  - **An INFO log line every 10 s** with min/mean/max of each term, for analysis after a run.
+  - **No new CSV columns.** The latency does not depend on the calibration parameters except through `rampStartUs`, which L-Q2 excludes.
+
 ### Reducing the INDI Property Count (implemented 2026-11-21, not yet built)
 
 **Request (2026-11-21).** counterOffload publishes far too many INDI properties. They crowd cursesINDI and make it hard to use. Stop adding unnecessary counterOffload properties. **Do not remove any framework properties** (`logs_*`, `th-*`, `sm_*`, `psds_*`, `fsm_*`), and make no framework or cursesINDI changes.
@@ -934,3 +962,39 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
   - all 13 keys present, unique, and with accepted defaults; `applyCalibKey` checks range and integrality;
   - the content of the DEBUG log line.
 - **Rows in cursesINDI:** counterOffload's own go from 68 to 32.
+
+### Clipping Recorded, Not Excluded, During Calibration (plan, 2026-11-22; not implemented)
+**Request (user, 2026-11-22).** "a clip shouldn't cause the point to be thrown out of the calibration. it should be noted, but a lot of the time the saturation is due to the strength of the applied turbulence, not the calibration itself."
+
+**Current behaviour (C2, 2026-11-20).**
+- `measure()` returns 0 as soon as `m_clipped` changes, counting from `m_clipDelayS` (1 s) after the change. The point stops early and is logged "point skipped".
+- `measurePoint()` records it as stage `clipped`, with empty `fom`, `fomStd` and ratios.
+- `sweep()` sets `clipAt`: larger values on that axis are not measured, and those already measured are left out of the fit. A gain sweep therefore ends at the first gain that clips.
+- `replicate()` leaves clipped measurements out of the noise estimate and the confirmation.
+- A baseline that clips fails the run. This can't really happen, because gain 0 adds nothing new and `A` leaks away within the 1 s delay.
+
+**Proposed change.**
+1. `measure()` no longer stops on a clip. It completes the point normally and returns, alongside `fom`, the number of clipped slots and the number of published slots in the point's window (from `m_clipDelayS` after the change to the last PSD used).
+2. Every point is used in the fit, the noise estimate and the confirmation, clipped or not. `clipAt` and the skipping of larger values are removed.
+3. Each measurement row records the clipping: new CSV columns `clippedSlots` and `clipFrac` (clipped / published slots in the window). These are empty on fit rows.
+4. A point that clipped is logged at INFO with its parameters and `clipFrac`, instead of the "point skipped" WARNING. The existing once-per-second "command clipped" WARNING from `appLogic` is unchanged.
+5. The run summary logs how many points clipped.
+6. Safety is unchanged. `buildCommand()` still limits `A` and the command to ±`maxCommand`, so the tweeter cannot wind up, and `abortRatio` still aborts a run whose point is far above the baseline.
+
+**Questions:**
+- **K-Q1. Stage `clipped`.** It will no longer be produced. Remove it, which renumbers INDI stages 7–9 (the start, duration and gain decisions) to 6–8, or keep index 6 unused so that the numbers and the analysis notebook stay valid? Recommended: keep it unused.
+- **K-Q2. Threshold.** Should a point with a very large `clipFrac` (for example > 0.5, the counter mostly saturated) still be excluded or flagged? Recommended: no threshold, only record it, as requested.
+- **K-Q3. INDI.** Add no INDI element, keeping the INDI trim? Recommended: no element; the clip fraction goes only in the CSV and the log.
+
+**Answers (user, 2026-11-22).**
+- K-A1: "keep the numbers the same." Stage index 6 (`clipped`) stays defined but is no longer produced; stages 7–9 keep their numbers.
+- K-A2: "just record it, don't exclude it." No threshold.
+- K-A3: "yes, that is fine." `clippedSlots` and `clipFrac` go only in the CSV and the log; no INDI element.
+
+**Implementation (2026-11-22, not yet built).**
+- `measure()` returns bool and no longer stops on a clip. It also returns the clipped and published slot counts from `m_clipDelayS` after the change to the last PSD used. `m_published` is now atomic so it can be read without `m_stateMutex`.
+- `measurePoint()` returns bool; every point is recorded under its own stage. `replicate()` uses every point, and `sweep()` no longer has `clipAt`.
+- `calibRowT` has `clippedSlots` and `publishedSlots`. `addRow()` logs a clipped measurement at INFO ("... clipped in N of M slots (f), kept") and counts it. The run logs "the command clipped during N of M measurements; all were kept" when it ends.
+- CSV: new last columns `clippedSlots,clipFrac` on measurement rows, empty on fit rows.
+- `stageClipped` (6) is kept, documented as no longer produced.
+- New static `clipFraction()`, with a unit test.

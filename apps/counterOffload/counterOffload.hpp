@@ -132,7 +132,7 @@ class counterOffload : public MagAOXApp<true>,
         stageDuration,    ///< A point of the rampDurationUs sweep.
         stageGain,        ///< A point of the gain sweep.
         stageConfirm,     ///< A replicate of the chosen parameters.
-        stageClipped,     ///< A point skipped because the command clipped.
+        stageClipped,     ///< No longer produced: clipped points are kept.  Kept so later stage numbers don't change.
         stageFitStart,    ///< The rampStartUs decision.
         stageFitDuration, ///< The rampDurationUs decision.
         stageFitGain      ///< The gain decision.
@@ -215,6 +215,10 @@ class counterOffload : public MagAOXApp<true>,
         double fomStd{ 0 }; ///< Standard deviation of the band powers.
 
         double fomOff{ 0 }; ///< Latest baseline when measured.
+
+        uint64_t clippedSlots{ 0 }; ///< Slots that clipped in the measurement's clip window.
+
+        uint64_t publishedSlots{ 0 }; ///< Slots published in the measurement's clip window.
     };
 
     static constexpr double m_clipDelayS{ 1 }; ///< Clipping is counted from this long after a change, s.
@@ -325,7 +329,7 @@ class counterOffload : public MagAOXApp<true>,
 
     uint64_t m_events{ 0 }; ///< Offload updates accepted.
 
-    uint64_t m_published{ 0 }; ///< Commands successfully published.
+    std::atomic<uint64_t> m_published{ 0 }; ///< Commands successfully published.  Atomic so calibration can read it.
 
     uint64_t m_failed{ 0 }; ///< Commands not published by syncopationPublish.
 
@@ -400,6 +404,10 @@ class counterOffload : public MagAOXApp<true>,
     noiseT m_noise; ///< The run's noise estimate.  Calibration thread only.
 
     bool m_lastWasOff{ false }; ///< Whether the latest measurement was a baseline.  Calibration thread only.
+
+    int m_measuredRows{ 0 }; ///< Measurements, baselines included, in this run.  Calibration thread only.
+
+    int m_clippedRows{ 0 }; ///< Measurements in this run during which the command clipped.  Calibration thread only.
 
     ///@}
 
@@ -589,6 +597,10 @@ class counterOffload : public MagAOXApp<true>,
     /// Name of a calibration stage, for logs and the CSV.
     static const char *calibStageName( int stage /**< [in] the stage index */ );
 
+    /// Fraction of published slots that clipped, 0 if none were published.
+    static double clipFraction( uint64_t clipped /**< [in] slots that clipped */,
+                                uint64_t published /**< [in] slots published */ );
+
     /// Whether a scan grid is min, max, step with min <= max, both within limits, and 0 < step <= hi - lo.
     static bool gridValid( const std::vector<double> &grid /**< [in] the grid */,
                            double                     lo /**< [in] smallest allowed value */,
@@ -710,16 +722,17 @@ class counterOffload : public MagAOXApp<true>,
     bool openCsv();
 
     /// Apply parameters, wait for settled PSDs, and average their band powers.
-    /** Clipping is counted from m_clipDelayS after the change, so that the previous point's held contribution can
-     * leak away first.
+    /** Clipping does not stop the measurement; it is counted from m_clipDelayS after the change to the end of the
+     * measurement, so that the previous point's held contribution can leak away first.
      *
-     * \returns 1 on success
-     * \returns 0 if the counter command clipped at maxCommand
-     * \returns -1 on abort, disable, timeout or a change of the offloader's rate or numModes
+     * \returns true on success
+     * \returns false on abort, disable, timeout or a change of the offloader's rate or numModes
      */
-    int measure( const calibParamsT &p /**< [in] parameters to apply */,
+    bool measure( const calibParamsT &p /**< [in] parameters to apply */,
                   double             &fom /**< [out] mean band power */,
-                  double             &fomStd /**< [out] standard deviation of the band powers */ );
+                  double             &fomStd /**< [out] standard deviation of the band powers */,
+                  uint64_t           &clipped /**< [out] slots that clipped in the clip window */,
+                  uint64_t           &published /**< [out] slots published in the clip window */ );
 
     /// Measure the gain-0 baseline at the given ramp, and record it.
     /**
@@ -733,19 +746,18 @@ class counterOffload : public MagAOXApp<true>,
      */
     bool ensureBaseline( const calibParamsT &p /**< [in] parameters; the gain is replaced by 0 */ );
 
-    /// Measure one point and hold its row.  A point that clips is held as stage "clipped".
+    /// Measure one point and hold its row, with its clipping recorded.  A point that clipped is used like any other.
     /**
-     * \returns 1 on success
-     * \returns 0 if the point clipped
-     * \returns -1 on failure, or if the ratio to the latest baseline exceeds m_abortRatio
+     * \returns true on success
+     * \returns false on failure, or if the ratio to the latest baseline exceeds m_abortRatio
      */
-    int measurePoint( const calibParamsT &p /**< [in] parameters */,
+    bool measurePoint( const calibParamsT &p /**< [in] parameters */,
                       int                 stage /**< [in] stage index */,
                       double             &fom /**< [out] mean band power */ );
 
     /// Measure parameters n times, each between baselines, and return their interpolated ratios.
     /**
-     * \returns true on success; clipped measurements are left out of the ratios
+     * \returns true on success
      */
     bool replicate( const calibParamsT  &p /**< [in] parameters */,
                     int                  stage /**< [in] stage index */,
@@ -753,8 +765,7 @@ class counterOffload : public MagAOXApp<true>,
                     std::vector<double> &ratios /**< [out] ratios to the interpolated baseline */ );
 
     /// Sweep one parameter, then choose its value, see chooseValue().
-    /** The sweep is bracketed by baselines, with one after every m_baselineEvery points.  After a point clips, larger
-     * values are not measured, and larger values already measured are not used.
+    /** The sweep is bracketed by baselines, with one after every m_baselineEvery points.
      *
      * \returns true on success
      */
@@ -766,7 +777,9 @@ class counterOffload : public MagAOXApp<true>,
     void addRow( int                 stage /**< [in] stage index */,
                  const calibParamsT &p /**< [in] parameters */,
                  double              fom /**< [in] mean band power */,
-                 double              fomStd /**< [in] standard deviation of the band powers */ );
+                 double              fomStd /**< [in] standard deviation of the band powers */,
+                 uint64_t            clipped /**< [in] slots that clipped in the clip window */,
+                 uint64_t            published /**< [in] slots published in the clip window */ );
 
     /// Write the held rows, with ratios to the latest and to the interpolated baseline.
     void flushRows();
@@ -1963,6 +1976,11 @@ inline const char *counterOffload::calibStageName( int stage )
     return ( stage >= stageOff && stage <= stageFitGain ) ? names[stage] : "unknown";
 }
 
+inline double counterOffload::clipFraction( uint64_t clipped, uint64_t published )
+{
+    return ( published > 0 ) ? double( clipped ) / published : 0;
+}
+
 inline bool counterOffload::gridValid( const std::vector<double> &grid, double lo, double hi )
 {
     auto inRange = []( double v, double a, double b )
@@ -2173,8 +2191,10 @@ inline void counterOffload::runCalibration()
     m_offTimes.clear();
     m_offFoms.clear();
     m_rows.clear();
-    m_noise      = noiseT();
-    m_lastWasOff = false;
+    m_noise        = noiseT();
+    m_lastWasOff   = false;
+    m_measuredRows = 0;
+    m_clippedRows  = 0;
 
     const int    points  = estimatePoints();
     const double minutes = points * ( m_settleS + 0.5 * m_nAverage ) / 60;
@@ -2247,6 +2267,13 @@ inline void counterOffload::runCalibration()
     }
 
     flushRows(); // anything held when a run aborts
+
+    if( m_clippedRows > 0 )
+    {
+        log<text_log>( "calibration: the command clipped during " + std::to_string( m_clippedRows ) + " of " +
+                           std::to_string( m_measuredRows ) + " measurements; all were kept",
+                       logPrio::LOG_INFO );
+    }
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
@@ -2374,7 +2401,7 @@ inline bool counterOffload::openCsv()
     }
 
     m_csv << "time,stage,rampStartUs,rampDurationUs,gain,offloadHz,numModes,halfWidthHz,nAverage,fom,fomStd,fomOff,"
-             "ratio,ratioInterp,fitCurrent,fitCandidate,threshold,moved,sigma\n";
+             "ratio,ratioInterp,fitCurrent,fitCandidate,threshold,moved,sigma,clippedSlots,clipFrac\n";
 
     log<text_log>( "calibration started at " + std::to_string( m_bandCenterHz ) + " Hz over " +
                        std::to_string( m_bandModes ) + " modes, writing " + path,
@@ -2383,7 +2410,8 @@ inline bool counterOffload::openCsv()
     return true;
 }
 
-inline int counterOffload::measure( const calibParamsT &p, double &fom, double &fomStd )
+inline bool counterOffload::measure(
+    const calibParamsT &p, double &fom, double &fomStd, uint64_t &clipped, uint64_t &published )
 {
     setCalibParams( p );
 
@@ -2396,21 +2424,17 @@ inline int counterOffload::measure( const calibParamsT &p, double &fom, double &
     const int64_t deadline   = m_psdAfterNs + static_cast<int64_t>( m_timeoutS * 1e9 );
     const int64_t clipFromNs = changed + static_cast<int64_t>( m_clipDelayS * 1e9 );
 
-    bool     clipRef   = false;
-    uint64_t clipStart = 0;
+    bool     clipRef        = false;
+    uint64_t clipStart      = 0;
+    uint64_t publishedStart = 0;
 
     while( m_psdPowers.size() < static_cast<size_t>( m_nAverage ) )
     {
         if( !clipRef && synco::monotonicNs() >= clipFromNs )
         {
-            clipStart = m_clipped;
-            clipRef   = true;
-        }
-
-        if( clipRef && m_clipped != clipStart && !m_calibAbort && !m_shutdown )
-        {
-            log<text_log>( "calibration: counter command clipped at maxCommand, point skipped", logPrio::LOG_WARNING );
-            return 0;
+            clipStart      = m_clipped;
+            publishedStart = m_published;
+            clipRef        = true;
         }
 
         std::string why;
@@ -2436,7 +2460,7 @@ inline int counterOffload::measure( const calibParamsT &p, double &fom, double &
         if( !why.empty() )
         {
             log<text_log>( "calibration: " + why, logPrio::LOG_WARNING );
-            return -1;
+            return false;
         }
 
         m_calibCond.wait_for( lock, std::chrono::milliseconds( 100 ) );
@@ -2455,7 +2479,10 @@ inline int counterOffload::measure( const calibParamsT &p, double &fom, double &
     fom    = sum / n;
     fomStd = std::sqrt( std::max( 0.0, ( sum2 - sum * sum / n ) / ( n - 1 ) ) );
 
-    return 1;
+    clipped   = clipRef ? m_clipped - clipStart : 0;
+    published = clipRef ? m_published - publishedStart : 0;
+
+    return true;
 }
 
 inline bool counterOffload::measureBaseline( const calibParamsT &p )
@@ -2463,9 +2490,10 @@ inline bool counterOffload::measureBaseline( const calibParamsT &p )
     calibParamsT off = p;
     off[2]           = 0;
 
-    double fom, fomStd;
+    double   fom, fomStd;
+    uint64_t clipped, published;
 
-    if( measure( off, fom, fomStd ) < 1 )
+    if( !measure( off, fom, fomStd, clipped, published ) )
     {
         log<text_log>( "calibration: the gain-0 baseline could not be measured", logPrio::LOG_WARNING );
         return false;
@@ -2483,7 +2511,7 @@ inline bool counterOffload::measureBaseline( const calibParamsT &p )
         m_calibStage = stageOff;
     }
 
-    addRow( stageOff, off, fom, fomStd );
+    addRow( stageOff, off, fom, fomStd, clipped, published );
 
     m_offTimes.push_back( m_rows.back().tNs );
     m_offFoms.push_back( fom );
@@ -2497,46 +2525,37 @@ inline bool counterOffload::ensureBaseline( const calibParamsT &p )
     return m_lastWasOff || measureBaseline( p );
 }
 
-inline int counterOffload::measurePoint( const calibParamsT &p, int stage, double &fom )
+inline bool counterOffload::measurePoint( const calibParamsT &p, int stage, double &fom )
 {
-    double    fomStd;
-    const int m = measure( p, fom, fomStd );
+    double   fomStd;
+    uint64_t clipped, published;
 
-    if( m < 0 )
+    if( !measure( p, fom, fomStd, clipped, published ) )
     {
-        return -1;
+        return false;
     }
 
     m_lastWasOff = false;
 
-    addRow( ( m > 0 ) ? stage : int( stageClipped ), p, fom, fomStd );
+    addRow( stage, p, fom, fomStd, clipped, published );
 
     const double ratio = fom / m_fomOff;
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
-        m_calibStage = ( m > 0 ) ? stage : int( stageClipped );
+        m_calibStage = stage;
         ++m_calibPoint;
-
-        if( m > 0 )
-        {
-            m_lastRatio = ratio;
-        }
-    }
-
-    if( m == 0 )
-    {
-        return 0;
+        m_lastRatio = ratio;
     }
 
     if( ratio > m_abortRatio )
     {
         log<text_log>( "calibration: band power " + std::to_string( ratio ) + " times the baseline, aborting",
                        logPrio::LOG_WARNING );
-        return -1;
+        return false;
     }
 
-    return 1;
+    return true;
 }
 
 inline bool counterOffload::replicate( const calibParamsT &p, int stage, int n, std::vector<double> &ratios )
@@ -2552,18 +2571,14 @@ inline bool counterOffload::replicate( const calibParamsT &p, int stage, int n, 
 
     for( int i = 0; i < n; ++i )
     {
-        double    fom;
-        const int r = measurePoint( p, stage, fom );
+        double fom;
 
-        if( r < 0 )
+        if( !measurePoint( p, stage, fom ) )
         {
             return false;
         }
 
-        if( r > 0 )
-        {
-            rows.push_back( m_rows.size() - 1 );
-        }
+        rows.push_back( m_rows.size() - 1 );
 
         if( !measureBaseline( p ) )
         {
@@ -2597,17 +2612,11 @@ inline bool counterOffload::sweep( int axis, calibParamsT &cur, double &curRatio
     std::vector<double> xs;
     std::vector<size_t> rows;
 
-    double clipAt = std::numeric_limits<double>::max(); // smallest value that clipped
-    int    since  = 0;                                  // points since the latest baseline
+    int since = 0; // points since the latest baseline
 
     for( size_t i : sweepOrder( n ) )
     {
         const double x = grid[0] + i * grid[2];
-
-        if( x >= clipAt - 1e-9 )
-        {
-            continue;
-        }
 
         if( since == m_baselineEvery )
         {
@@ -2622,21 +2631,14 @@ inline bool counterOffload::sweep( int axis, calibParamsT &cur, double &curRatio
         calibParamsT p = cur;
         p[axis]        = x;
 
-        double    fom;
-        const int r = measurePoint( p, stage, fom );
+        double fom;
 
-        ++since;
-
-        if( r < 0 )
+        if( !measurePoint( p, stage, fom ) )
         {
             return false;
         }
 
-        if( r == 0 )
-        {
-            clipAt = std::min( clipAt, x );
-            continue;
-        }
+        ++since;
 
         xs.push_back( x );
         rows.push_back( m_rows.size() - 1 );
@@ -2647,16 +2649,13 @@ inline bool counterOffload::sweep( int axis, calibParamsT &cur, double &curRatio
         return false;
     }
 
-    // Ratios to the interpolated baseline, leaving out values at or above one that clipped.
+    // Ratios to the interpolated baseline, clipped points included.
     std::vector<double> fx, fr;
 
     for( size_t k = 0; k < xs.size(); ++k )
     {
-        if( xs[k] < clipAt - 1e-9 )
-        {
-            fx.push_back( xs[k] );
-            fr.push_back( m_rows[rows[k]].fom / interpBaseline( m_rows[rows[k]].tNs, m_offTimes, m_offFoms ) );
-        }
+        fx.push_back( xs[k] );
+        fr.push_back( m_rows[rows[k]].fom / interpBaseline( m_rows[rows[k]].tNs, m_offTimes, m_offFoms ) );
     }
 
     const quadFitT fit = ( fx.size() >= 4 ) ? fitQuadratic( fx, fr ) : quadFitT();
@@ -2712,7 +2711,8 @@ inline bool counterOffload::sweep( int axis, calibParamsT &cur, double &curRatio
     return true;
 }
 
-inline void counterOffload::addRow( int stage, const calibParamsT &p, double fom, double fomStd )
+inline void counterOffload::addRow(
+    int stage, const calibParamsT &p, double fom, double fomStd, uint64_t clipped, uint64_t published )
 {
     calibRowT row;
 
@@ -2724,7 +2724,24 @@ inline void counterOffload::addRow( int stage, const calibParamsT &p, double fom
     row.fomStd = fomStd;
     row.fomOff = m_fomOff;
 
+    row.clippedSlots   = clipped;
+    row.publishedSlots = published;
+
     m_rows.push_back( row );
+
+    ++m_measuredRows;
+
+    if( clipped > 0 )
+    {
+        ++m_clippedRows;
+
+        log<text_log>( std::string( "calibration: " ) + calibStageName( stage ) + " rampStartUs=" +
+                           std::to_string( p[0] ) + " rampDurationUs=" + std::to_string( p[1] ) +
+                           " gain=" + std::to_string( p[2] ) + " clipped in " + std::to_string( clipped ) + " of " +
+                           std::to_string( published ) + " slots (" +
+                           std::to_string( clipFraction( clipped, published ) ) + "), kept",
+                       logPrio::LOG_INFO );
+    }
 }
 
 inline void counterOffload::flushRows()
@@ -2735,17 +2752,9 @@ inline void counterOffload::flushRows()
     {
         writeCsvPrefix( row.wall, row.stage, row.p );
 
-        if( row.stage == stageClipped )
-        {
-            m_csv << ",,," << row.fomOff << ",,";
-        }
-        else
-        {
-            m_csv << "," << row.fom << "," << row.fomStd << "," << row.fomOff << "," << row.fom / row.fomOff << ","
-                  << row.fom / interpBaseline( row.tNs, m_offTimes, m_offFoms );
-        }
-
-        m_csv << ",,,,,\n";
+        m_csv << "," << row.fom << "," << row.fomStd << "," << row.fomOff << "," << row.fom / row.fomOff << ","
+              << row.fom / interpBaseline( row.tNs, m_offTimes, m_offFoms ) << ",,,,,," << row.clippedSlots << ","
+              << clipFraction( row.clippedSlots, row.publishedSlots ) << "\n";
     }
 
     m_rows.clear();
@@ -2775,7 +2784,7 @@ inline void counterOffload::writeFitRow( int stage, const calibParamsT &p, const
         m_csv << ch.rCurrent;
     }
 
-    m_csv << "," << ch.rCandidate << "," << ch.threshold << "," << int( ch.move ) << "," << sigma << "\n";
+    m_csv << "," << ch.rCandidate << "," << ch.threshold << "," << int( ch.move ) << "," << sigma << ",,\n";
     m_csv.flush();
 }
 

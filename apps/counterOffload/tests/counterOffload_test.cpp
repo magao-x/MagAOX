@@ -855,7 +855,7 @@ TEST_CASE( "counterOffload chooses parameter values beyond the noise", "[counter
     }
 }
 
-/// Verify the pooled noise estimate and the run length.
+/// Verify the pooled noise estimate, the run length, the stage names and the clip fraction.
 /**
  * \ingroup counterOffload_unit_test
  */
@@ -865,6 +865,7 @@ TEST_CASE( "counterOffload noise estimate and run length", "[counterOffload]" )
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::estimatePoints();
     counterOffload::calibStageName(0);
+    counterOffload::clipFraction(0, 0);
     #endif
     // clang-format on
 
@@ -895,6 +896,13 @@ TEST_CASE( "counterOffload noise estimate and run length", "[counterOffload]" )
         REQUIRE( std::string( counterOffload::calibStageName( counterOffload::stageClipped ) ) == "clipped" );
         REQUIRE( std::string( counterOffload::calibStageName( counterOffload::stageFitGain ) ) == "fit gain" );
         REQUIRE( std::string( counterOffload::calibStageName( 99 ) ) == "unknown" );
+    }
+
+    SECTION( "the clip fraction is clipped over published slots, 0 with none published" )
+    {
+        REQUIRE( counterOffload::clipFraction( 103, 8000 ) == Approx( 103.0 / 8000 ) );
+        REQUIRE( counterOffload::clipFraction( 0, 8000 ) == 0 );
+        REQUIRE( counterOffload::clipFraction( 5, 0 ) == 0 );
     }
 }
 
