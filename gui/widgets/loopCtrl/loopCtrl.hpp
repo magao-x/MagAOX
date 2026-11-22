@@ -40,6 +40,7 @@ protected:
   bool m_loopState{ false };           ///< Whether the loop is closed.
   bool m_loopWaiting{ false };         ///< Whether the loop slider is waiting for a state update.
   bool m_procState{ false };           ///< Loop-process state.
+  bool m_offloadLinkAvailable{ false }; ///< Whether the HO controller has advertised its offload link.
   bool m_flatVectorAvailable{ false }; ///< Whether the gain controller has advertised the flat-vector command.
   bool m_saveVectorAvailable{ false }; ///< Whether the gain controller has advertised the save-vector command.
   bool m_loadSavedAvailable{ false };  ///< Whether the gain controller has advertised the load-saved command.
@@ -93,6 +94,9 @@ public slots:
   /// Refresh the loop state and control availability.
   void updateGUI();
 
+  /// Set the server-side offload link for the high-order loop.
+  void on_checkBox_offload_clicked( bool linked /**< [in] Whether to link offloading to the HO loop. */ );
+
   /// Request that the loop correction channel be zeroed.
   void on_button_LoopZero_pressed();
 
@@ -144,6 +148,8 @@ loopCtrl::loopCtrl( std::string & procName,
 
     ui.slider_loop->setup(m_procName, "loop_state", "toggle", "");
     ui.slider_loop->setStretch(0,0,10, true, true);
+    ui.checkBox_offload->setVisible( m_procName == "holoop" );
+    setXwFont( ui.checkBox_offload );
 
     ui.gainCtrl->setup(m_procName, "loop_gain", "Gain", -1, -1);
 
@@ -207,6 +213,11 @@ void loopCtrl::subscribe()
    m_parent->addSubscriber(ui.slider_loop);
    m_parent->addSubscriberProperty(this, m_procName, "loop_state");
 
+   if( m_procName == "holoop" )
+   {
+       m_parent->addSubscriberProperty( this, m_procName, "offload_link" );
+   }
+
    m_parent->addSubscriber(ui.slider_autogain);
    m_parent->addSubscriber(ui.slider_trackog);
 
@@ -263,6 +274,9 @@ void loopCtrl::onDisconnect()
     ui.slider_trackog->onDisconnect();
 
     ui.opticalGain->onDisconnect();
+
+    m_offloadLinkAvailable = false;
+    ui.checkBox_offload->setChecked( false );
 
     m_flatVectorAvailable = false;
     m_saveVectorAvailable = false;
@@ -346,6 +360,11 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
          m_loopWaiting = false;
       }
    }
+   else if( ipRecv.getName() == "offload_link" && ipRecv.find( "toggle" ) )
+   {
+       m_offloadLinkAvailable = true;
+       ui.checkBox_offload->setChecked( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On );
+   }
    }
    if(ipRecv.getDevice() == m_gainCtrl)
    {
@@ -403,6 +422,15 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
 void loopCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
 {
+    if( ipRecv.getDevice() == m_procName &&
+        ( ipRecv.getName().empty() || ipRecv.getName() == "fsm" || ipRecv.getName() == "offload_link" ) )
+    {
+        m_offloadLinkAvailable = false;
+        ui.checkBox_offload->setChecked( false );
+        ui.checkBox_offload->setEnabled( false );
+        return;
+    }
+
     if( ipRecv.getDevice() != m_gainCtrl )
     {
         return;
@@ -455,7 +483,7 @@ void loopCtrl::setEnableDisable( bool tf,
    ui.slider_trackog->setEnabled(tf);
 
    ui.opticalGain->setEnabled(tf);
-
+   ui.checkBox_offload->setEnabled( tf && m_offloadLinkAvailable );
 
    std::lock_guard<std::mutex> lock(m_blockMutex);
    bool                        haveBlocks = tf && !m_blockCtrls.empty();
@@ -511,6 +539,20 @@ void loopCtrl::updateGUI()
 
 
 } //updateGUI()
+
+void loopCtrl::on_checkBox_offload_clicked( bool linked )
+{
+    if( !m_offloadLinkAvailable )
+    {
+        return;
+    }
+
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.setDevice( m_procName );
+    request.setName( "offload_link" );
+    request.add( pcf::IndiElement( "toggle", linked ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+    sendNewProperty( request );
+}
 
 void loopCtrl::on_button_LoopZero_pressed()
 {

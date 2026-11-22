@@ -7,6 +7,9 @@
 #ifndef cacaoInterface_hpp
 #define cacaoInterface_hpp
 
+#include <atomic>
+#include <chrono>
+
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -62,7 +65,28 @@ protected:
    std::string m_fpsFifo;
 
 
-   int m_loopState {0}; ///< The loop state.  0 = off, 1 = paused (on, 0 gain), 2 = on
+   std::atomic<int> m_loopState{ 0 };          ///< Latest loop state. 0 is open, 1 is paused, 2 is closed.
+   bool             m_loopStateKnown{ false }; ///< Whether CACAO has reported an open or closed state.
+   unsigned         m_loopCommand{ 0 };        ///< Revision of the last command written to the loop on/off flag.
+   std::chrono::steady_clock::time_point m_loopZeroDeadline{}; ///< Pending zero deadline, guarded by m_indiMutex.
+   bool m_zeroOffload{ false }; ///< Whether the pending loop zero also applies to offloading.
+
+   /// Confirmation awaited by the offload-linked loop command.
+   enum class OffloadWait
+   {
+       idle,
+       offloadOn,
+       loopClosed,
+       loopOpen,
+       offloadOff
+   };
+
+   bool m_offloadLinked{ false }; ///< Whether HO commands and manual opens coordinate offloading.
+   bool m_offloadReady{ false };  ///< Whether the offloader reports READY or OPERATING.
+   pcf::IndiElement::SwitchStateType m_offloadState{
+       pcf::IndiElement::UnknownSwitchState };                               ///< Last settled offload state.
+   OffloadWait                           m_offloadWait{ OffloadWait::idle }; ///< Pending stage, guarded by m_indiMutex.
+   std::chrono::steady_clock::time_point m_offloadDeadline{};                ///< Deadline for the current linked stage.
 
    bool m_loopProcesses {false}; ///< Status of the loop processes.
    bool m_loopProcesses_stat {false}; ///< What the cacao status file says the state of loop processes is.
@@ -127,11 +151,15 @@ public:
      * @{
      */
 
-   int setFPSVal( const std::string & fps,
-                  const std::string & param,
-                  const std::string & val
-                );
+   /// Write a command to the CACAO FPS controller.
+   int writeFPSCommand( const std::string &command /**< [in] Complete line to send to the controller. */,
+                        bool               waitForReader /**< [in] Whether to wait for the FIFO reader. */ );
 
+   /// Set a string-valued FPS parameter.
+   int setFPSVal( const std::string &fps /**< [in] FPS prefix. */,
+                  const std::string &param /**< [in] FPS parameter. */,
+                  const std::string &val /**< [in] Value to set. */,
+                  bool               waitForReader = true /**< [in] Whether to wait for the FIFO reader. */ );
 
    template<typename T>
    int setFPSVal( const std::string & fps,
@@ -139,8 +167,10 @@ public:
                   const T & val
                 );
 
-   std::string getFPSValStr(const std::string & fps,
-                                          const std::string & param );
+   /// Read a string-valued FPS parameter.
+   std::string getFPSValStr( const std::string &fps /**< [in] FPS prefix. */,
+                             const std::string &param /**< [in] FPS parameter. */,
+                             bool commandReadback = false /**< [in] Use a distinct reply file and a short wait. */ );
 
    std::string getFPSValNum(const std::string & fps,
                                           const std::string & param );
@@ -208,6 +238,35 @@ public:
      */
    int loopZero();
 
+   /// Publish the result of the pending zero after CACAO clears its request flag.
+   void checkLoopZero();
+
+   /// Apply a requested HO state and sequence offloading if linked.
+   int requestLoopState( bool closed /**< [in] Desired loop state. */ );
+
+   /// Handle a fresh settled loop state, including an external open.
+   void observeLoopState( bool closed /**< [in] State read from CACAO. */ );
+
+   /// Record the stage and start the confirmation deadline.
+   void waitForOffload( OffloadWait stage /**< [in] Stage to wait for. */ );
+
+   /// Fail a linked command whose confirmation deadline has passed.
+   void checkOffloadDeadline();
+
+   /// Publish the result of a linked state command and clear the pending stage.
+   int finishOffloadCommand( const std::string &error = {} /**< [in] Failure message, if any. */ );
+
+   /// Send a switch command to the tweeter-to-woofer offloader.
+   int sendOffloaderSwitch( const char                       *name /**< [in] Offloader property name. */,
+                            const char                       *element /**< [in] Offloader switch element. */,
+                            pcf::IndiElement::SwitchStateType requested /**< [in] Requested switch state. */ );
+
+   /// Request closing after offload activation has been confirmed.
+   int closeLinkedLoop();
+
+   /// Request stopping offloading after CACAO has confirmed that the loop is open.
+   void stopLinkedOffload();
+
    /// @}
 
    /** \name File Monitoring Thread
@@ -244,9 +303,22 @@ public:
    pcf::IndiProperty m_indiP_loopGain;
    pcf::IndiProperty m_indiP_multCoeff;
    pcf::IndiProperty m_indiP_maxLim;
+   pcf::IndiProperty m_indiP_offloadLink;     ///< HO-only switch selecting linked operation.
+   pcf::IndiProperty m_indiP_offloaderFsm;    ///< Subscription to tweeter-to-woofer offloader readiness.
+   pcf::IndiProperty m_indiP_offloaderToggle; ///< Subscription to tweeter-to-woofer offload state.
 
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopState);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopZero);
+
+   /// Set whether offloading is linked to the HO loop.
+   INDI_NEWCALLBACK_DECL( cacaoInterface, m_indiP_offloadLink );
+
+   /// Retain the offloader's reported readiness.
+   INDI_SETCALLBACK_DECL( cacaoInterface, m_indiP_offloaderFsm );
+
+   /// Retain settled offloading state and advance linked commands.
+   INDI_SETCALLBACK_DECL( cacaoInterface, m_indiP_offloaderToggle );
+
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopGain);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_multCoeff);
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_maxLim);
@@ -320,6 +392,18 @@ int cacaoInterface::appStartup()
    createStandardIndiRequestSw( m_indiP_loopZero, "loop_zero", "Loop Zero", "Loop Controls");
    registerIndiPropertyNew( m_indiP_loopZero,INDI_NEWCALLBACK(m_indiP_loopZero) );
 
+   if( configName() == "holoop" )
+   {
+       createStandardIndiToggleSw( m_indiP_offloadLink, "offload_link", "Link Offload", "Loop Controls" );
+       if( registerIndiPropertyNew( m_indiP_offloadLink, INDI_NEWCALLBACK( m_indiP_offloadLink ) ) < 0 )
+       {
+           return -1;
+       }
+
+       REG_INDI_SETPROP( m_indiP_offloaderFsm, "t2wOffloader", "fsm" );
+       REG_INDI_SETPROP( m_indiP_offloaderToggle, "t2wOffloader", "offload" );
+   }
+
    createStandardIndiNumber<float>( m_indiP_loopGain, "loop_gain", 0.0, 10.0, 0.01, "%0.3f", "Loop Gain", "Loop Controls");
    registerIndiPropertyNew( m_indiP_loopGain, INDI_NEWCALLBACK(m_indiP_loopGain) );
 
@@ -383,7 +467,13 @@ int cacaoInterface::appLogic()
       updateSwitchIfChanged(m_indiP_loopProcesses, "toggle", pcf::IndiElement::Off, INDI_IDLE);
    }
 
-   if(m_loopState == 0)
+   checkOffloadDeadline();
+   if( m_offloadWait != OffloadWait::idle )
+   {
+       updateSwitchIfChanged(
+           m_indiP_loopState, "toggle", m_loopState == 0 ? pcf::IndiElement::Off : pcf::IndiElement::On, INDI_BUSY );
+   }
+   else if( m_loopState == 0 )
    {
       updateSwitchIfChanged(m_indiP_loopState, "toggle", pcf::IndiElement::Off, INDI_IDLE);
    }
@@ -425,33 +515,33 @@ int cacaoInterface::appShutdown()
    return 0;
 }
 
-int cacaoInterface::setFPSVal( const std::string & fps,
-                               const std::string & param,
-                               const std::string & val
-                             )
+int cacaoInterface::writeFPSCommand( const std::string &command, bool waitForReader )
 {
-   std::string comout = "setval " + fps + "-" + m_loopNumber + "." + param +  " "  + val + "\n";
+    int wfd = open( m_fpsFifo.c_str(), waitForReader ? O_WRONLY : O_WRONLY | O_NONBLOCK );
+    if( wfd < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, errno, "error opening " + m_fpsFifo } );
+    }
 
-   int wfd = open( m_fpsFifo.c_str(), O_WRONLY);
-   if(wfd < 0)
-   {
-      log<software_error>({__FILE__, __LINE__, errno, "error opening " + m_fpsFifo});
-      return -1;
-   }
+    ssize_t written = write( wfd, command.c_str(), command.size() );
+    int     error   = errno;
+    close( wfd );
 
-   int w = write(wfd, comout.c_str(), comout.size());
+    if( written != static_cast<ssize_t>( command.size() ) )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, error, "error on write to " + m_fpsFifo } );
+    }
 
-   if(w != (int) comout.size())
-   {
-      log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
-      return -1;
-   }
-
-   close(wfd);
-
-   return 0;
+    return 0;
 }
 
+int cacaoInterface::setFPSVal( const std::string &fps,
+                               const std::string &param,
+                               const std::string &val,
+                               bool               waitForReader )
+{
+    return writeFPSCommand( "setval " + fps + "-" + m_loopNumber + "." + param + " " + val + "\n", waitForReader );
+}
 
 template<typename T>
 int cacaoInterface::setFPSVal( const std::string & fps,
@@ -462,36 +552,29 @@ int cacaoInterface::setFPSVal( const std::string & fps,
    return setFPSVal( fps, param, std::to_string(val));
 }
 
-std::string cacaoInterface::getFPSValStr( const std::string & fps,
-                                          const std::string & param
-                                        )
+std::string cacaoInterface::getFPSValStr( const std::string &fps, const std::string &param, bool commandReadback )
 {
-    std::string outfile = "/dev/shm/" + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
-
-    std::string comout = "fwrval " + fps + "-" + m_loopNumber + "." + param + " "  + outfile + "\n";
-
-    int wfd = open( m_fpsFifo.c_str(), O_WRONLY);
-    if(wfd < 0)
+    std::string replyDir = commandReadback ? m_fpsFifo.substr( 0, m_fpsFifo.find_last_of( '/' ) + 1 ) : "/dev/shm/";
+    std::string outfile  = replyDir + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
+    if( commandReadback )
     {
-        log<software_error>({__FILE__, __LINE__, errno, "error opening " + m_fpsFifo});
-        return "";
+        // A late reply to an earlier read must not acknowledge this command.
+        outfile += "." + std::to_string( getpid() ) + "." +
+                   std::to_string( std::chrono::steady_clock::now().time_since_epoch().count() );
     }
 
-    int w = write(wfd, comout.c_str(), comout.size());
-
-    if(w != (int) comout.size())
+    if( writeFPSCommand( "fwrval " + fps + "-" + m_loopNumber + "." + param + " " + outfile + "\n", !commandReadback ) <
+        0 )
     {
-        log<software_error>({__FILE__, __LINE__, errno, "error on write to " + m_fpsFifo});
         return "";
     }
-
-    close(wfd);
 
     char inbuff [4096];
 
     int rfd = -1;
     int nr =0;
-    while(rfd < 0 && nr < 500)
+    int attempts = commandReadback ? 50 : 500;
+    while( rfd < 0 && nr < attempts )
     {
         rfd = open(outfile.c_str(), O_RDONLY);
         ++nr;
@@ -504,7 +587,7 @@ std::string cacaoInterface::getFPSValStr( const std::string & fps,
         return "";
     }
 
-    int r = read(rfd, inbuff, sizeof(inbuff));
+    int r = read( rfd, inbuff, sizeof( inbuff ) - 1 );
 
     if(r < 0)
     {
@@ -536,7 +619,7 @@ std::string cacaoInterface::getFPSValStr( const std::string & fps,
         return "";
     }
 
-    return instr.substr(nst+1);
+    return instr.substr( nst + 1, ned - nst );
 }
 
 std::string cacaoInterface::getFPSValNum( const std::string & fps,
@@ -732,11 +815,12 @@ int cacaoInterface::setMaxLim()
 int cacaoInterface::loopOn()
 {
    recordLoopGain(true);
-   if( setFPSVal("mfilt", "loopON", std::string("ON")) != 0)
+   if( setFPSVal( "mfilt", "loopON", std::string( "ON" ), false ) != 0 )
    {
       return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
    }
 
+   ++m_loopCommand;
    log<loop_closed>();
 
    return 0;
@@ -746,11 +830,12 @@ int cacaoInterface::loopOn()
 int cacaoInterface::loopOff()
 {
    recordLoopGain(true);
-   if( setFPSVal("mfilt", "loopON", std::string("OFF")) != 0)
+   if( setFPSVal( "mfilt", "loopON", std::string( "OFF" ), false ) != 0 )
    {
       return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
    }
 
+   ++m_loopCommand;
    if(m_gain == 0)
    {
       log<loop_open>();
@@ -766,15 +851,187 @@ int cacaoInterface::loopOff()
 
 int cacaoInterface::loopZero()
 {
-   if( setFPSVal("mfilt", "loopZERO", std::string("ON")) != 0)
-   {
-      return log<software_error,-1>({__FILE__, __LINE__, "error setting FPS val"});
-   }
+    return setFPSVal( "mfilt", "loopZERO", std::string( "ON" ), false );
+}
 
-   log<text_log>("loop zeroed", logPrio::LOG_NOTICE);
+void cacaoInterface::checkLoopZero()
+{
+    using clock = std::chrono::steady_clock;
+    clock::time_point deadline;
 
-   return 0;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiMutex );
+        deadline = m_loopZeroDeadline;
+    }
 
+    if( deadline == clock::time_point{} )
+    {
+        return;
+    }
+
+    // CACAO clears this flag only after publishing the zeroed correction.
+    bool completed = clock::now() < deadline && getFPSValStr( "mfilt", "loopZERO", true ) == "OFF";
+    if( !completed && clock::now() < deadline )
+    {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_loopZeroDeadline = {};
+    if( completed )
+    {
+        log<text_log>( "loop zeroed", logPrio::LOG_NOTICE );
+        if( m_zeroOffload )
+        {
+            if( !m_offloadReady || sendOffloaderSwitch( "zero", "request", pcf::IndiElement::On ) < 0 )
+            {
+                log<software_error>(
+                    { __FILE__, __LINE__, "HO loop zeroed, but the offloader zero could not be sent" } );
+                completed = false;
+            }
+        }
+    }
+    else
+    {
+        log<software_error>( { __FILE__, __LINE__, "Timed out waiting for CACAO loop zero" } );
+    }
+
+    m_zeroOffload = false;
+    updateSwitchIfChanged( m_indiP_loopZero, "request", pcf::IndiElement::Off, completed ? INDI_OK : INDI_ALERT );
+}
+
+int cacaoInterface::requestLoopState( bool closed )
+{
+    checkOffloadDeadline();
+    if( !m_offloadLinked )
+    {
+        m_offloadWait = OffloadWait::idle;
+        return closed ? loopOn() : loopOff();
+    }
+
+    if( !closed )
+    {
+        if( loopOff() < 0 )
+        {
+            return finishOffloadCommand( "Could not request opening the HO loop" );
+        }
+
+        waitForOffload( OffloadWait::loopOpen );
+        return 0;
+    }
+
+    if( m_offloadWait != OffloadWait::idle )
+    {
+        return 0;
+    }
+
+    if( !m_offloadReady || m_offloadState == pcf::IndiElement::UnknownSwitchState )
+    {
+        return finishOffloadCommand( "Offloader unavailable. The HO loop close was not sent." );
+    }
+
+    if( m_offloadState == pcf::IndiElement::On )
+    {
+        return closeLinkedLoop();
+    }
+
+    if( sendOffloaderSwitch( "offload", "toggle", pcf::IndiElement::On ) < 0 )
+    {
+        return finishOffloadCommand( "Could not request starting offloading" );
+    }
+
+    waitForOffload( OffloadWait::offloadOn );
+    return 0;
+}
+
+void cacaoInterface::observeLoopState( bool closed )
+{
+    bool opened      = m_loopStateKnown && m_loopState == 2 && !closed;
+    m_loopState      = closed ? 2 : 0;
+    m_loopStateKnown = true;
+
+    checkOffloadDeadline();
+    if( !closed && ( m_offloadWait == OffloadWait::loopOpen ||
+                     ( opened && m_offloadLinked && m_offloadWait != OffloadWait::offloadOff ) ) )
+    {
+        stopLinkedOffload();
+    }
+    else if( closed && m_offloadWait == OffloadWait::loopClosed )
+    {
+        finishOffloadCommand();
+    }
+}
+
+void cacaoInterface::waitForOffload( OffloadWait stage )
+{
+    m_offloadWait     = stage;
+    m_offloadDeadline = std::chrono::steady_clock::now() + std::chrono::seconds( 10 );
+}
+
+void cacaoInterface::checkOffloadDeadline()
+{
+    if( m_offloadWait != OffloadWait::idle && std::chrono::steady_clock::now() >= m_offloadDeadline )
+    {
+        finishOffloadCommand( "Timed out waiting for linked loop/offload confirmation" );
+    }
+}
+
+int cacaoInterface::finishOffloadCommand( const std::string &error )
+{
+    m_offloadWait = OffloadWait::idle;
+    bool closed   = m_loopState == 2;
+    auto state    = closed ? INDI_OK : INDI_IDLE;
+    if( !error.empty() )
+    {
+        log<software_error>( { __FILE__, __LINE__, error } );
+        state = INDI_ALERT;
+    }
+
+    updateSwitchIfChanged( m_indiP_loopState, "toggle", closed ? pcf::IndiElement::On : pcf::IndiElement::Off, state );
+    return error.empty() ? 0 : -1;
+}
+
+int cacaoInterface::sendOffloaderSwitch( const char                       *name,
+                                         const char                       *element,
+                                         pcf::IndiElement::SwitchStateType requested )
+{
+    pcf::IndiProperty command( pcf::IndiProperty::Switch );
+    command.setDevice( "t2wOffloader" );
+    command.setName( name );
+    command.add( pcf::IndiElement( element, requested ) );
+    return sendNewProperty( command );
+}
+
+int cacaoInterface::closeLinkedLoop()
+{
+    if( m_loopStateKnown && m_loopState == 2 )
+    {
+        return finishOffloadCommand();
+    }
+
+    if( loopOn() < 0 )
+    {
+        return finishOffloadCommand( "Could not request closing the HO loop" );
+    }
+
+    waitForOffload( OffloadWait::loopClosed );
+    return 0;
+}
+
+void cacaoInterface::stopLinkedOffload()
+{
+    if( sendOffloaderSwitch( "offload", "toggle", pcf::IndiElement::Off ) < 0 )
+    {
+        finishOffloadCommand( "HO loop open, but the command to stop offloading could not be sent" );
+    }
+    else if( m_offloadState == pcf::IndiElement::Off && m_offloadWait != OffloadWait::offloadOn )
+    {
+        finishOffloadCommand();
+    }
+    else
+    {
+        waitForOffload( OffloadWait::offloadOff );
+    }
 }
 
 void cacaoInterface::fmThreadStart( cacaoInterface * c )
@@ -800,13 +1057,25 @@ void cacaoInterface::fmThreadExec( )
          continue;
       }
 
-      std::string ans = getFPSValStr("mfilt", "loopON");
+      checkLoopZero();
 
-      if(ans[1] == 'F')
-      {
-         m_loopState = 0;
+      unsigned loopCommand;
+      bool     commandReadback;
+      { //mutex scope
+          std::lock_guard<std::mutex> lock( m_indiMutex );
+          loopCommand     = m_loopCommand;
+          commandReadback = m_offloadLinked || m_offloadWait != OffloadWait::idle;
       }
-      else m_loopState = 2; //closed
+
+      std::string ans = getFPSValStr( "mfilt", "loopON", commandReadback );
+      if( ans == "ON" || ans == "OFF" )
+      {
+          std::lock_guard<std::mutex> lock( m_indiMutex );
+          if( loopCommand == m_loopCommand )
+          {
+              observeLoopState( ans == "ON" );
+          }
+      }
 
       ans = getFPSValNum("mfilt", "loopgain");
 
@@ -857,11 +1126,11 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopState )(const pcf::IndiPropert
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On)
     {
-        return loopOn();
+        return requestLoopState( true );
     }
     else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off)
     {
-        return loopOff();
+        return requestLoopState( false );
     }
 
     log<software_error>({__FILE__,__LINE__, "switch state fall through."});
@@ -905,13 +1174,99 @@ INDI_NEWCALLBACK_DEFN(cacaoInterface, m_indiP_loopZero )(const pcf::IndiProperty
 {
     INDI_VALIDATE_CALLBACK_PROPS(m_indiP_loopZero, ipRecv);
 
-    if(!ipRecv.find("request")) return 0;
-
-    std::unique_lock<std::mutex> lock(m_indiMutex);
-
-    if( ipRecv["request"].getSwitchState() == pcf::IndiElement::On)
+    if( !ipRecv.find( "request" ) || ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
     {
-        return loopZero();
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    if( m_loopZeroDeadline != std::chrono::steady_clock::time_point{} )
+    {
+        return 0;
+    }
+
+    updateSwitchIfChanged( m_indiP_loopZero, "request", pcf::IndiElement::On, INDI_BUSY );
+    if( loopZero() < 0 )
+    {
+        updateSwitchIfChanged( m_indiP_loopZero, "request", pcf::IndiElement::Off, INDI_ALERT );
+        return -1;
+    }
+
+    m_loopZeroDeadline = std::chrono::steady_clock::now() + std::chrono::seconds( 5 );
+    m_zeroOffload      = m_offloadLinked;
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( cacaoInterface, m_indiP_offloadLink )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadLink, ipRecv );
+    if( !ipRecv.find( "toggle" ) )
+    {
+        return 0;
+    }
+
+    auto toggle = ipRecv["toggle"].getSwitchState();
+    if( toggle != pcf::IndiElement::On && toggle != pcf::IndiElement::Off )
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_offloadLinked = toggle == pcf::IndiElement::On;
+    updateSwitchIfChanged( m_indiP_offloadLink, "toggle", toggle, m_offloadLinked ? INDI_OK : INDI_IDLE );
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( cacaoInterface, m_indiP_offloaderFsm )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloaderFsm, ipRecv );
+    if( !ipRecv.find( "state" ) )
+    {
+        return 0;
+    }
+
+    std::string                 state = ipRecv["state"].get<std::string>();
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_offloadReady = state == "READY" || state == "OPERATING";
+
+    if( !m_offloadReady && m_offloadWait == OffloadWait::offloadOn )
+    {
+        return finishOffloadCommand( "Offloader became unavailable before the HO loop closed" );
+    }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( cacaoInterface, m_indiP_offloaderToggle )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloaderToggle, ipRecv );
+    if( !ipRecv.find( "toggle" ) || ipRecv.getState() == INDI_BUSY )
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    checkOffloadDeadline();
+
+    if( ipRecv.getState() == INDI_ALERT )
+    {
+        m_offloadState = pcf::IndiElement::UnknownSwitchState;
+        if( m_offloadWait == OffloadWait::offloadOn || m_offloadWait == OffloadWait::offloadOff )
+        {
+            return finishOffloadCommand( "The offloader rejected the linked command" );
+        }
+        return 0;
+    }
+
+    m_offloadState = ipRecv["toggle"].getSwitchState();
+    if( m_offloadWait == OffloadWait::offloadOn && m_offloadReady && m_offloadState == pcf::IndiElement::On )
+    {
+        return closeLinkedLoop();
+    }
+
+    if( m_offloadWait == OffloadWait::offloadOff && m_offloadState == pcf::IndiElement::Off )
+    {
+        return finishOffloadCommand();
     }
 
     return 0;
