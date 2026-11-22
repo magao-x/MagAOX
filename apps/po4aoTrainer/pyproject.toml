@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xapp-po4aoTrainer"
+version = "2026.11.02"
+description = "PO4AO training supervisor and nonlinear notebook training core"
+requires-python = ">=3.11"
+dependencies = ["numpy", "torch", "xconf", "purepyindi2", "psutil", "onnx", "onnxscript"]
+
+[project.scripts]
+po4aoTrainer = "xapp.po4aoTrainer.app:main"
+
+[project.optional-dependencies]
+test = ["pytest", "tomli-w"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["xapp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.data-files]
+"share/po4aoTrainer" = ["configs/po4aoTrainer.conf", "configs/po4ao_training.conf"]

@@ -1,0 +1,151 @@
+# PO4AO trainer
+
+`po4aoTrainer` is an optional Python `XDevice` companion to the native `po4ao`
+application. A lightweight supervisor owns configuration, INDI requests and one
+numerical worker. Training and engine builds run in the worker and its export
+child; the real-time loop stays in C++. `po4aoGUI` also supports native inference
+without the trainer, and its NN controls belong independently to `nnReconstructor`.
+
+## Installation and configuration
+
+The app uses the standard `Make/pythonApp.mk` installation rules. Its Makefile
+selects the `po4aoTrainer` environment unless `INSTRUMENT_CONDA_ENV` is supplied.
+Use an administrator-managed environment containing the repository's
+`magaox-python`, the xwcl `xconf` and `purepyindi2` packages, and the dependencies
+in `pyproject.toml`. GPU operation also requires compatible CUDA/TensorRT,
+`trtexec` and ImageStreamIO Python bindings.
+
+- `configs/po4aoTrainer.conf`: runtime device, shared artifact paths and operation
+  deadlines. Provision an absolute writable artifact root accessible to the
+  trainer and native PO4AO app. Match the native engine path to its `current`
+  publication directory. `saved_engines` defaults beneath this root.
+- `configs/po4ao_training.conf`: model, optimization, replay and diagnostic
+  settings. Native geometry, gains and command limits come from the C++ config.
+  Assign the training/build GPU separately from the inference GPU.
+
+Configuration is validated as a whole. `configuration.HOT` lists settings that
+apply at iteration boundaries; other changes wait for Reset. Hot learning-rate
+changes retain Adam state. Invalid edits retain the last valid configuration.
+The public delta-policy penalty is `[policy_update] penalty`; the legacy `weight`
+spelling remains accepted, but specifying both is rejected.
+
+The GUI's command regularization, delta-policy regularization and learning-rate
+controls submit session overrides without writing configuration files. Overrides
+survive Reset and Set policy, but restart restores file defaults. Pending settings
+remain Busy until the worker acknowledges their request. Set `source_revision`
+to the installed branch/commit so records identify the running software.
+
+## Session and control behavior
+
+The native PO4AO app processes frames continuously and starts with predictive
+control disabled. Enable/Disable selects the policy or fallback; there is no
+separate whole-app Start/Stop command or automatic downstream routing/calibration
+change. NN/CACAO handover remains a separate reconstructor control. The GUI labels
+modulation state 4 as "Modulating" and state 3 as "Not modulating".
+
+- Start/Resume and Pause retain the same worker, models, Adam state, normalization
+  and policy references. Pause settles issued publications before acknowledging.
+  The GUI follows worker state and the supervisor operation phase for these
+  desired-state actions; a missed switch acknowledgement does not latch the
+  controls. Conflicting requests are rejected by the supervisor, not retried.
+- Enable selects the latest eligible learned policy. Disable pauses learning and
+  selects fallback; Enable does not automatically resume learning.
+- Reset invalidates the managed session and runtime policy, stops its worker and
+  waits for completion. A timed-out Reset remains pending across restart. Reset
+  does not require fresh warmup: a new worker may use complete ready replay and
+  warmup published before Reset. Recollection is an explicit operator decision.
+- Recollect pauses learning, obtains fresh exploration data and resumes only a
+  previously running session after collection completes. Partial data is rejected.
+- Save policy copies one acknowledged engine and matching policy/dynamics snapshot
+  into an immutable, checksummed library bundle. The completion message includes
+  its saved bundle ID; `policy_catalog` lists the available bundles.
+- Set policy validates and restores both networks in a new worker. Normalization
+  is retained, current hyperparameters apply, and Adam/replay/history/iteration
+  start fresh. Learning stays paused. Enable if needed and recollect fresh warmup
+  before resuming. An interrupted activation requires Set policy again or Reset.
+
+A saved pair is initialization, not an optimizer checkpoint. `session.json` stores
+eligibility and pending operations, not a resumable training session. Supervisor
+restart never automatically starts learning; losing the worker requires Reset or
+explicit Set policy. Old files alone do not establish eligibility.
+
+Runtime restart/reset, stale readbacks and unknown external policies invalidate or
+pause managed operations. Publication completion requires the matching runtime
+acknowledgement. Temporary fallback retains the known numerical policy reference.
+Closing the GUI leaves inference/training alone; losing supervisor supervision
+stops its worker.
+
+The operator owns loop state and the choice of notebook or managed training. The
+trainer does not control notebook processes or adopt their optimizer state. Reset
+and Set policy replace the managed session, while saved library files remain.
+
+## Python API and diagnostics
+
+The numerical core can be used directly with synthetic data or operator-supplied
+acquisition. Importing it does not open streams, connect to INDI or initialize a
+GPU. Create one session and repeatedly call `step`:
+
+```python
+from xapp.po4aoTrainer.training import TrainingSession
+from xapp.po4aoTrainer.po4ao_runtime import ReplaySnapshot
+
+session = TrainingSession(resolved_config, device="cpu")
+result = session.step(recent_snapshot, warmup_snapshot,
+                      active_model_id=observed_loaded_model_id)
+```
+
+The worker keeps training on its complete private replay pair if refreshing the
+rolling buffer times out while warmup remains unchanged and coherent. It adopts
+refreshed replay/warmup together, discards the cache on recollection, and propagates
+stream errors. The shared snapshot helpers retain their strict copy checks.
+The GUI label "Waiting" also covers publication acknowledgements, not just data.
+
+Snapshots contain float32 `[stream modes, samples, 2]` data in newest-first order,
+with observation/command planes and coherent counter, valid-length, episode and
+model identities. The GUI's Residual RMS is the mean over valid rolling replay
+frames of the quadrature sum of the controlled modal residuals. It uses the CACAO
+modal scale of 1000 nm/µm and updates on replay publication, including when the
+trainer is paused. Recollection clears the display until the next rolling publication.
+`session.invalidate_replay()` marks a recollection boundary.
+Learned policies load as TensorRT engines. Existing PO4AO configurations may omit
+`parameters.linear_inference_backend` or retain `auto` or `tensorrt`. The old
+CPU-only notebook artifacts require re-export as TensorRT engines for use with this runtime.
+The synchronous `po4ao_runtime.publish_tensorrt_engine` helper remains available
+for explicitly operator-managed export; it does not confer managed eligibility.
+
+`observer.save_diagnostics` and `load_diagnostics` write/read bounded portable
+snapshots. Observing notebooks can plot the saved observations, actions and metrics history.
+Metrics JSONL can contain revised
+publication outcomes: the last record for each session/iteration is authoritative.
+Timing fields include `training_seconds`, `replay_seconds`, `diagnostics_seconds`,
+`export_seconds` and `activation_seconds`. Training/replay timings describe the
+sampled diagnostic iteration, not the interval since the previous record; initial
+dynamics pretraining may therefore be absent. Diagnostic file writing is not
+included in `diagnostics_seconds`. The managed worker snapshots one eligible
+iteration to disk, then continues optimizing while its child builds the engine
+and the supervisor waits for reload. Later diagnostic iterations do not queue
+another candidate while that one is in flight. The worker follows the effective
+controller ID and binds it to the weights from the exported iteration. Pause
+cancels an unfinished build. An issued reload is settled by the supervisor.
+
+The export and activation timings are elapsed wall time that can overlap
+training. Diagnostic snapshots show the history as of capture. The final
+outcome is appended to `metrics.jsonl` under the source iteration, even if
+learning has since advanced or paused.
+
+## Local tests
+
+With the actual framework dependencies installed in a workstation environment:
+
+```sh
+python -m pip install './apps/po4aoTrainer[test]'
+python -m pytest apps/po4aoTrainer/tests
+```
+
+Tests use synthetic CPU inputs, offline INDI boundaries and owned local child
+processes. The independent `tests/fixtures/notebook_iteration.npz` reference uses
+`rtol=1e-5`, `atol=1e-7`; pause/resume also checks exact CPU results. The parity test in
+`tests/test_training.py` records the original notebook and helper hashes,
+seeds and library versions.
+CPU/fake-backend tests do not establish CUDA/TensorRT ABI, GPU release, installed
+utility behavior or live instrument readiness; these require target validation.
