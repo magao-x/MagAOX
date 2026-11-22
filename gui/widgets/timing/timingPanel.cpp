@@ -128,8 +128,7 @@ timingPanel::timingPanel( QWidget *parent ) : xWidget( parent )
     auto *syncoActions = new QHBoxLayout;
     syncoLayout->addLayout( syncoActions );
     addRequest( syncoActions, "dmtweeter-synco", "reacquire", "Reacquire", "Reset the synco timing estimate" );
-    addRequest(
-        syncoActions, "dmtweeter-synco", "zero", "Zero Channels", "Requires an open AO loop and disabled synco" );
+    addRequest( syncoActions, "dmtweeter-synco", "zero", "Zero Channels", "Clear the applied synco contributions" );
     layout->addWidget( synco );
 
     auto *modulators = new QHBoxLayout;

@@ -830,3 +830,35 @@ snapshot, passive step-zero copy and final-slot INDI readback at 500 Hz, 1 kHz,
 2 kHz, 2.5 kHz and approximately 3.6 kHz. The live 2-to-1 kHz case checks
 schedule withdrawal and new slot spacing after reacquisition. Delivered rate
 and misses at the endpoints still require instrument qualification.
+
+## 2026-11-22 Channel clearing in either enable state
+
+The operator reports repeated saturation trips when enabling synco with a
+1 kHz main loop and the DM running at 8 kHz. The same symptom did not occur
+at 2 kHz main. For the captured attempt, the rate change started near
+05:51:32.16 UTC and the saturation interlock paused the loop at 05:51:35.254.
+The accepted main timings through 05:51:34.998 remained near 1 ms apart.
+The available telemetry establishes the trip time while the cause of the
+first clipped command remains open.
+
+The operator requested that Zero Channels accept the request with either loop
+state and either synco enable state. Queue the request under the existing cycle
+mutex and withdraw the provider schedule. Clear the numbered destinations
+within a protected interval when the primary is live, and let the next genuine
+combination consume the batch. If the primary is idle, publish one destination
+counter to trigger dmcomb. Retry unavailable required streams and busy
+destinations on the ordinary thread. The operator clarified that triggering
+dmcomb completes the request. Acknowledge the next primary publication after
+the passive copy or the explicit trigger when the primary is idle. The combined
+stream supplies pre-copy timing for reader safety. Resume using the current
+enable setting. The provider generation fences prior tagged commands. Legacy
+source publications predating the clear are ineligible during the current app
+session.
+
+The workstation application and GUI builds passed. All 166 scheduler tests and
+both offline GUI tests passed. The private stream tests cover both enable
+states, live and idle primary publications, retry while a destination is busy,
+the main-to-idle transition after a passive copy, and legacy source eligibility
+on reattachment. The trigger can complete a request with the combined counter
+unchanged, and the idle path can clear inputs with the combined stream absent.
+Live timing and recovery at the instrument remain to be qualified.
