@@ -180,6 +180,25 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
             } );
     addElementRow( statusGrid, "ACC sync", "ddspc_control", "accel_sync" );
     addElementRow( statusGrid, "Aux DM output", "safety", "output_state" );
+    addRow( statusGrid,
+            "mainLoopTT",
+            "Main-loop tip/tilt",
+            [this]()
+            {
+                const auto state = value( "ddspc_control", "main_loop_tt" );
+
+                if( state == "zeroed" )
+                {
+                    return QStringLiteral( "zeroed (DDSPC only)" );
+                }
+
+                if( state == "passthrough" )
+                {
+                    return QStringLiteral( "passed through (main loop)" );
+                }
+
+                return state.empty() ? c_missing : QString::fromStdString( state );
+            } );
     addElementRow( statusGrid, "Learning overruns", "ddspc_performance", "learn_overruns" );
 
     m_warnings = new QLabel( statusBox );
@@ -518,8 +537,14 @@ void loPredCtrlAccPanel::refresh()
             banner = QStringLiteral( "PREDICTION INHIBITED: inputs not valid, tip/tilt uncorrected" );
             style  = QStringLiteral( "background: #9b2c2c; color: white;" );
         }
+        else if( value( "ddspc_control", "main_loop_tt" ) == "passthrough" )
+        {
+            banner = QStringLiteral( "PREDICTION OFF: main loop is correcting tip/tilt" );
+            style  = QStringLiteral( "background: #2f5f8a; color: white;" );
+        }
         else
         {
+            // Main-loop tip/tilt stays zeroed until the DDSPC contribution's removal is confirmed.
             banner = QStringLiteral( "PREDICTION OFF: tip/tilt is not corrected" );
             style  = QStringLiteral( "background: #9b2c2c; color: white;" );
         }

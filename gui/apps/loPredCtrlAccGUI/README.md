@@ -11,7 +11,7 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 - **Controls are disabled when the readback is missing**, when the controller is not `OPERATING`, after a lost connection, and when the device leaves the INDI server.
 - **Controller mode and Reset models** are offered only when prediction is off and `safety.zero_confirmed=true`, the state in which `loPredCtrlAcc` accepts them. The controller still validates every request.
 - **Reset models asks for confirmation.**
-- **Prediction off leaves tip/tilt uncorrected.** `loPredCtrlAcc` always publishes zero for modes 0 and 1 to the main AO loop, so turning prediction off does not restore main-loop tip/tilt correction. The prediction banner says so whenever prediction is off.
+- **Who corrects tip/tilt.** With prediction on, `loPredCtrlAcc` sends zero for modes 0 and 1 to the main AO loop, so DDSPC alone corrects tip/tilt. With prediction off, the main loop receives unchanged frames and corrects tip/tilt itself, but only after DDSPC's own-channel zero is confirmed; until then tip/tilt is uncorrected. The prediction banner and the Main-loop tip/tilt row show which (`ddspc_control.main_loop_tt`).
 
 ## Controls
 
@@ -28,11 +28,12 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 
 | Display | INDI source |
 | --- | --- |
-| Prediction banner | `ddspc_control.prediction` |
+| Prediction banner | `ddspc_control.prediction`, `main_loop_tt` |
 | Controller | `fsm.state` |
 | Standard / ACC-assisted model | `ddspc_control.standard_ready`/`standard_state`, `assisted_ready`/`assisted_state` |
 | ACC rate, ACC sync | `adc_values.rate_hz`/`valid`, `ddspc_control.accel_sync` |
 | Aux DM output | `safety.output_state` |
+| Main-loop tip/tilt | `ddspc_control.main_loop_tt`: `zeroed` (DDSPC only) or `passthrough` (main loop) |
 | Learning overruns | `ddspc_performance.learn_overruns` (assisted-mode WFS-thread work that delays the next main-loop frame) |
 | Warnings | A controller that is not `OPERATING`, and an alert state on `safety` or `predict` |
 

@@ -163,6 +163,7 @@ void Fixture::defineAll()
             { "learning", "false" },
             { "prediction", "off" },
             { "accel_sync", "false" },
+            { "main_loop_tt", "passthrough" },
             { "standard_state", "awaiting_wfs" },
             { "assisted_state", "wfs_stale" } } );
     text( "safety", { { "output_state", "disabled" }, { "dm_write_enabled", "false" }, { "zero_confirmed", "true" } } );
@@ -206,7 +207,8 @@ TEST_CASE( "loPredCtrlAccGUI opens without commands and enables only from readba
     CHECK( fixture.widget<QPushButton>( "reset_model" )->isEnabled() );
     CHECK( fixture.widget<QWidget>( "gain.entry" )->isEnabled() );
     CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().toStdString() ==
-           "PREDICTION OFF: tip/tilt is not corrected" );
+           "PREDICTION OFF: main loop is correcting tip/tilt" );
+    CHECK( fixture.status( "mainLoopTT" ) == "passed through (main loop)" );
     CHECK( fixture.status( "fsm.state" ) == "OPERATING" );
     CHECK( fixture.status( "safety.output_state" ) == "disabled" );
     CHECK( fixture.status( "accRate" ) == "8000.0" );
@@ -243,7 +245,17 @@ TEST_CASE( "loPredCtrlAccGUI follows external INDI changes", "[loPredCtrlAccGUI]
     fixture.publishText( "ddspc_control", "assisted_ready", "true" );
     CHECK( fixture.status( "assisted" ) == "ready" );
     fixture.publishText( "ddspc_control", "prediction", "active" );
+    fixture.publishText( "ddspc_control", "main_loop_tt", "zeroed" );
     CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().startsWith( "PREDICTION ACTIVE" ) );
+    CHECK( fixture.status( "mainLoopTT" ) == "zeroed (DDSPC only)" );
+
+    // Prediction off while the DDSPC zero is unconfirmed: the main loop's tip/tilt is still withheld.
+    fixture.publishText( "ddspc_control", "prediction", "off" );
+    CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().toStdString() ==
+           "PREDICTION OFF: tip/tilt is not corrected" );
+    fixture.publishText( "ddspc_control", "main_loop_tt", "passthrough" );
+    CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().toStdString() ==
+           "PREDICTION OFF: main loop is correcting tip/tilt" );
 
     pcf::IndiProperty performance( pcf::IndiProperty::Number, "loPredCtrlAcc", "ddspc_performance" );
     performance.add( pcf::IndiElement( "learn_overruns", 3.0 ) );
