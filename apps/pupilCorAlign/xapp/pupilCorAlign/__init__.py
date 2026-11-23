@@ -30,12 +30,14 @@ class CameraConfig:
 
 @xconf.config
 class CalibrationConfig:
-    """
-    """
+    """Reference files and initial settings for pupil alignment."""
     path : str = xconf.field(help="Path to the calibration files for the pupil alignment.")
     superuser : bool = xconf.field(default=False, help="Whether to enable super user options for calibration.")
     fwpupil_modes : list[str] = xconf.field(help="List of calibrated fwpupil masks.")
     fwlyot_modes : list[str] = xconf.field(help="List of calibrated fwlyot masks.")
+    gain : float = xconf.field(default=0.25, help="Initial loop gain for position corrections.")
+    nrepeat : int = xconf.field(default=1, help="Number of probe pairs per centroid measurement.")
+    nstack : int = xconf.field(default=1, help="Number of science frames to average per measurement.")
 
 @xconf.config
 class DMConfig:
@@ -148,33 +150,23 @@ class pupilCorAlign(XDevice):
         self.fwpupil_reconstruction_matrix = np.linalg.pinv(fwpupil_response_matrix)
         self.fwlyot_reconstruction_matrix = np.linalg.pinv(fwlyot_response_matrix)
 
-        # These also need to be exposed to indi
-        self.num_stack = 1
-        self.gain = 0.25
-        self.pattern_repeat = 1
+        # Initialize the alignment loop from the calibration settings.
+        self.num_stack = self.config.calibration.nstack
+        self.gain = self.config.calibration.gain
+        self.pattern_repeat = self.config.calibration.nrepeat
         self.amp = 0.25
         self.sleep_time = 2.0
 
+        # Publish the initial stack size.
         nv = properties.NumberVector(name='nstack')
-        nv.add_element(DefNumber(
-            name='current', label='Number of frames', format='%i',
-            min=1, max=150, step=1, _value=1
-        ))
-        nv.add_element(DefNumber(
-            name='target', label='Number of frames', format='%i',
-            min=1, max=150, step=1, _value=1
-        ))
+        nv.add_element(DefNumber(name='current', label='Number of frames', format='%i', min=1, max=150, step=1, _value=self.num_stack))
+        nv.add_element(DefNumber(name='target', label='Number of frames', format='%i', min=1, max=150, step=1, _value=self.num_stack))
         self.add_property(nv, callback=self.handle_nstack)
 
+        # Publish the initial loop gain.
         nv = properties.NumberVector(name='gain')
-        nv.add_element(DefNumber(
-            name='current', label='Loop Gain', format='%.2f',
-            min=0.00, max=1.00, step=0.01, _value=0.10
-        ))
-        nv.add_element(DefNumber(
-            name='target', label='Loop Gain', format='%.2f',
-            min=0.00, max=1.00, step=0.01, _value=0.10
-        ))
+        nv.add_element(DefNumber(name='current', label='Loop Gain', format='%.2f', min=0.00, max=1.00, step=0.01, _value=self.gain))
+        nv.add_element(DefNumber(name='target', label='Loop Gain', format='%.2f', min=0.00, max=1.00, step=0.01, _value=self.gain))
         self.add_property(nv, callback=self.handle_gain)
 
         # These need to be exposed to INDI
