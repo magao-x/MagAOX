@@ -1,0 +1,9 @@
+# Qt/qmake build products for gui/apps/* and gui/rtimv/plugins/*
+bin/
+moc/
+obj/
+res/
+ui/
+ui_*.h
+makefile.*
+.qmake.stash
