@@ -140,9 +140,12 @@ void Fixture::defineAll()
     toggle( "learn" );
     toggle( "learn_std" );
     toggle( "predict" );
-    pcf::IndiProperty reset( pcf::IndiProperty::Switch, "loPredCtrlAcc", "reset_model" );
-    reset.add( pcf::IndiElement( "request", pcf::IndiElement::Off ) );
-    publish( reset, true );
+    for( const char *name : { "reset_model", "zero_dm", "release_tt" } )
+    {
+        pcf::IndiProperty request( pcf::IndiProperty::Switch, "loPredCtrlAcc", name );
+        request.add( pcf::IndiElement( "request", pcf::IndiElement::Off ) );
+        publish( request, true );
+    }
 
     // As createStandardIndiNumber<float>( m_indiP_gain, "gain", -10, 10, .001, "%0.4f" ).
     pcf::IndiProperty gain( pcf::IndiProperty::Number, "loPredCtrlAcc", "gain" );
@@ -187,7 +190,8 @@ TEST_CASE( "loPredCtrlAccGUI opens without commands and enables only from readba
     {
         CHECK_FALSE( fixture.widget<QWidget>( name )->isEnabled() );
     }
-    for( const char *name : { "ddspc_mode.standard", "ddspc_mode.accel_assisted", "reset_model" } )
+    for( const char *name :
+         { "ddspc_mode.standard", "ddspc_mode.accel_assisted", "reset_model", "zero_dm", "release_tt" } )
     {
         CHECK_FALSE( fixture.widget<QPushButton>( name )->isEnabled() );
     }
@@ -205,6 +209,8 @@ TEST_CASE( "loPredCtrlAccGUI opens without commands and enables only from readba
     CHECK( fixture.widget<QPushButton>( "ddspc_mode.standard" )->isChecked() );
     CHECK_FALSE( fixture.widget<QPushButton>( "ddspc_mode.accel_assisted" )->isChecked() );
     CHECK( fixture.widget<QPushButton>( "reset_model" )->isEnabled() );
+    CHECK( fixture.widget<QPushButton>( "zero_dm" )->isEnabled() );
+    CHECK( fixture.widget<QPushButton>( "release_tt" )->isEnabled() );
     CHECK( fixture.widget<QWidget>( "gain.entry" )->isEnabled() );
     CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().toStdString() ==
            "PREDICTION OFF: main loop is correcting tip/tilt" );
@@ -217,6 +223,7 @@ TEST_CASE( "loPredCtrlAccGUI opens without commands and enables only from readba
     fixture.publishText( "fsm", "state", "READY" ); // Not OPERATING: nothing may be operated.
     CHECK_FALSE( fixture.widget<QWidget>( "predict" )->isEnabled() );
     CHECK_FALSE( fixture.widget<QPushButton>( "reset_model" )->isEnabled() );
+    CHECK_FALSE( fixture.widget<QPushButton>( "zero_dm" )->isEnabled() );
     CHECK( fixture.widget<QLabel>( "warnings" )->text().contains( "not OPERATING" ) );
 
     fixture.m_panel.close();
@@ -313,6 +320,33 @@ TEST_CASE( "loPredCtrlAccGUI enforces the controller's mode and reset interlock"
     CHECK( fixture.m_publisher.m_commands.back()["request"].getSwitchState() == pcf::IndiElement::On );
 }
 
+/** \brief Zero and tip/tilt release stay available during prediction, the case they recover from, and each sends
+ * exactly its request switch.
+ */
+TEST_CASE( "loPredCtrlAccGUI sends DM recovery requests at any time", "[loPredCtrlAccGUI]" )
+{
+    Fixture fixture;
+    fixture.defineAll();
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::On );
+    fixture.publishText( "safety", "zero_confirmed", "false" );
+
+    for( const char *name : { "zero_dm", "release_tt" } )
+    {
+        auto *button = fixture.widget<QPushButton>( name );
+        REQUIRE( button->isEnabled() );
+        button->click();
+        QApplication::processEvents();
+        const auto &command = fixture.m_publisher.m_commands.back();
+        CHECK( command.getDevice() == "loPredCtrlAcc" );
+        CHECK( command.getName() == name );
+        CHECK( command.getElements().size() == 1 );
+        CHECK( command["request"].getSwitchState() == pcf::IndiElement::On );
+    }
+
+    CHECK( fixture.m_publisher.m_commands.size() == 2 );
+    CHECK( fixture.m_confirmations == 0 ); // Neither asks: both only stop prediction.
+}
+
 /** \brief A lost connection or a departed device clears every readback and disables every control. */
 TEST_CASE( "loPredCtrlAccGUI disables everything when the controller disappears", "[loPredCtrlAccGUI]" )
 {
@@ -338,7 +372,8 @@ TEST_CASE( "loPredCtrlAccGUI disables everything when the controller disappears"
         {
             CHECK_FALSE( fixture.widget<QWidget>( name )->isEnabled() );
         }
-        for( const char *name : { "ddspc_mode.standard", "ddspc_mode.accel_assisted", "reset_model" } )
+        for( const char *name :
+             { "ddspc_mode.standard", "ddspc_mode.accel_assisted", "reset_model", "zero_dm", "release_tt" } )
         {
             CHECK_FALSE( fixture.widget<QPushButton>( name )->isEnabled() );
         }

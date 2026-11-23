@@ -90,6 +90,8 @@ class loPredCtrlAccPanel : public xWidget
     QPushButton *m_standard{ nullptr };  ///< ddspc_mode.standard selector.
     QPushButton *m_assisted{ nullptr };  ///< ddspc_mode.accel_assisted selector.
     QPushButton *m_reset{ nullptr };     ///< reset_model request.
+    QPushButton *m_zeroDm{ nullptr };    ///< zero_dm request: stop prediction and re-zero the DDSPC DM channel.
+    QPushButton *m_releaseTT{ nullptr }; ///< release_tt request: stop prediction and return tip/tilt to the main loop.
     QLabel      *m_interlock{ nullptr }; ///< Why mode change and reset are unavailable.
     QLabel      *m_banner{ nullptr };    ///< Prominent prediction state.
     QLabel      *m_warnings{ nullptr };  ///< Controller and output alerts.
@@ -139,6 +141,9 @@ class loPredCtrlAccPanel : public xWidget
 
     /// Ask for confirmation, then request reset_model.
     void requestReset();
+
+    /// Send a request switch's On request when the controller is operating and has defined it.
+    void sendRequest( const char *property /**< [in] Request switch property. */ );
 
     /// Recompute every readback, indicator and control availability.
     void refresh();

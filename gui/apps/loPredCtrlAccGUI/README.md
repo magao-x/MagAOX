@@ -11,6 +11,7 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 - **Controls are disabled when the readback is missing**, when the controller is not `OPERATING`, after a lost connection, and when the device leaves the INDI server.
 - **Controller mode and Reset models** are offered only when prediction is off and `safety.zero_confirmed=true`, the state in which `loPredCtrlAcc` accepts them. The controller still validates every request.
 - **Reset models asks for confirmation.**
+- **DM recovery is always offered while the controller is `OPERATING`,** including during prediction, because both requests only turn prediction off. Neither changes the main loop's own integrator; a tip/tilt command it held while DDSPC owned tip/tilt stays until the main loop corrects it.
 - **Who corrects tip/tilt.** With prediction on, `loPredCtrlAcc` sends zero for modes 0 and 1 to the main AO loop, so DDSPC alone corrects tip/tilt. With prediction off, the main loop receives unchanged frames and corrects tip/tilt itself, but only after DDSPC's own-channel zero is confirmed; until then tip/tilt is uncorrected. The prediction banner and the Main-loop tip/tilt row show which (`ddspc_control.main_loop_tt`).
 
 ## Controls
@@ -23,6 +24,8 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 | Reset models | `reset_model.request` |
 | Prediction | `predict.toggle` |
 | Gain | `gain.current`/`target` |
+| Zero DDSPC DM | `zero_dm.request`. Turns prediction off and writes a fresh zero to the DDSPC auxiliary channel (`dm01disp09_aux`), even if the last zero was already confirmed. |
+| Return tip/tilt to main loop | `release_tt.request`. Turns prediction off and passes main-loop tip/tilt through from the next WFS frame without waiting for `safety.zero_confirmed`; the zero is still retried. |
 
 ## Status
 

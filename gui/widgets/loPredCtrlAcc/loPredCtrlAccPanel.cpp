@@ -132,6 +132,35 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
              } );
     ctrlLayout->addWidget( m_reset );
     controls->addWidget( ctrlBox );
+
+    auto *recoverBox    = new QGroupBox( QStringLiteral( "DM recovery" ), this );
+    auto *recoverLayout = new QHBoxLayout( recoverBox );
+    m_zeroDm            = new QPushButton( QStringLiteral( "Zero DDSPC DM" ), recoverBox );
+    m_releaseTT         = new QPushButton( QStringLiteral( "Return tip/tilt to main loop" ), recoverBox );
+    m_zeroDm->setObjectName( QStringLiteral( "zero_dm" ) );
+    m_releaseTT->setObjectName( QStringLiteral( "release_tt" ) );
+    m_zeroDm->setToolTip(
+        QStringLiteral( "Turn prediction off and write a fresh zero to the DDSPC auxiliary DM channel, "
+                        "even if the last zero was already confirmed." ) );
+    m_releaseTT->setToolTip(
+        QStringLiteral( "Turn prediction off and pass main-loop tip/tilt through from the next WFS "
+                        "frame, without waiting for the DDSPC zero to be confirmed. The main loop's "
+                        "integrator is not changed." ) );
+
+    for( auto *button : { m_zeroDm, m_releaseTT } )
+    {
+        setXwFont( button );
+        recoverLayout->addWidget( button );
+        connect( button,
+                 &QPushButton::clicked,
+                 this,
+                 [this, button]()
+                 {
+                     sendRequest( button->objectName().toLatin1().constData() );
+                 } );
+    }
+
+    controls->addWidget( recoverBox );
     controls->addStretch( 1 );
 
     auto *statusBox  = new QGroupBox( QStringLiteral( "Status" ), this );
@@ -279,6 +308,8 @@ void loPredCtrlAccPanel::subscribe()
                                   "learn_std",
                                   "predict",
                                   "reset_model",
+                                  "zero_dm",
+                                  "release_tt",
                                   "gain",
                                   "ddspc_control",
                                   "ddspc_performance",
@@ -483,7 +514,17 @@ void loPredCtrlAccPanel::requestReset()
         return; // Re-checked after the question: the state may have changed while it was open.
     }
 
-    pcf::IndiProperty request( pcf::IndiProperty::Switch, m_device, "reset_model" );
+    sendRequest( "reset_model" );
+}
+
+void loPredCtrlAccPanel::sendRequest( const char *property )
+{
+    if( !operating() || !m_readbacks.count( property ) )
+    {
+        return;
+    }
+
+    pcf::IndiProperty request( pcf::IndiProperty::Switch, m_device, property );
     request.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
     sendNewProperty( request );
 }
@@ -514,6 +555,10 @@ void loPredCtrlAccPanel::refresh()
 
     m_reset->setEnabled( blocked.isEmpty() && m_readbacks.count( "reset_model" ) );
     m_reset->setToolTip( blocked.isEmpty() ? QStringLiteral( "Reset both models after confirmation." ) : blocked );
+
+    // Recovery is always offered while operating: it only ever stops prediction.
+    m_zeroDm->setEnabled( ops && m_readbacks.count( "zero_dm" ) );
+    m_releaseTT->setEnabled( ops && m_readbacks.count( "release_tt" ) );
 
     const auto prediction = value( "ddspc_control", "prediction" );
     QString    banner     = QStringLiteral( "Controller unavailable" );
