@@ -1,9 +1,15 @@
-
+/** \file loopCtrl.hpp
+ * \brief GUI controls for the AO loop and its mode-block gains.
+ */
 #ifndef loopCtrl_hpp
 #define loopCtrl_hpp
 
 
 #include <mutex>
+
+#include <cmath>
+#include <QToolTip>
+
 #include "ui_loopCtrl.h"
 
 #include "../xWidgets/xWidget.hpp"
@@ -13,87 +19,118 @@
 namespace xqt
 {
 
+/// Display and command the AO loop and its mode-block gains.
 class loopCtrl : public xWidget
 {
    Q_OBJECT
 
 protected:
+  std::string m_procName;   ///< INDI device providing the loop controls.
+  std::string m_loopName;   ///< Loop name reported by the loop controller.
+  std::string m_loopNumber; ///< Cacao loop number reported by the loop controller.
+  std::string m_goptName;   ///< INDI device providing gain optimization.
+  std::string m_gainCtrl;   ///< INDI device providing mode-block gain controls.
+  std::string m_appState;   ///< Last reported loop controller FSM state.
 
-   std::string m_procName;
+  double m_gain{ 0.0 };             ///< Last reported overall loop gain.
+  double m_gainScale{ 0.01 };       ///< Overall loop gain step.
+  double m_multcoeff{ 1 };          ///< Last reported overall loop multiplier.
+  double m_multcoeffScale{ 0.001 }; ///< Overall loop multiplier step.
 
-   std::string m_loopName;
-   std::string m_loopNumber;
+  bool m_loopState{ false };           ///< Whether the loop is closed.
+  bool m_loopWaiting{ false };         ///< Whether the loop slider is waiting for a state update.
+  bool m_procState{ false };           ///< Loop-process state.
+  bool m_offloadLinkAvailable{ false }; ///< Whether the HO controller has advertised its offload link.
+  bool m_flatVectorAvailable{ false }; ///< Whether the gain controller has advertised the flat-vector command.
+  bool m_saveVectorAvailable{ false }; ///< Whether the gain controller has advertised the save-vector command.
+  bool m_loadSavedAvailable{ false };  ///< Whether the gain controller has advertised the load-saved command.
 
-   std::string m_goptName;
+  std::vector<int>        m_modes;      ///< Number of modes in each block.
+  std::vector<gainCtrl *> m_blockCtrls; ///< Gain controls for the currently reported mode blocks.
+  std::mutex              m_blockMutex; ///< Serializes access to the block controls.
 
-   std::string m_gainCtrl;
-
-   std::string m_appState;
-
-   double m_gain {0.0};;
-   double m_gainScale {0.01};
-
-   double m_multcoeff {1};
-   double m_multcoeffScale {0.001};
-
-   bool m_loopState {false};
-   bool m_loopWaiting {false}; //indicates slider is waiting on loop_state update to be re-enabled
-
-   bool m_procState {false};
-
-   std::vector<int> m_modes;
-   std::vector<gainCtrl *> m_blockCtrls;
-   std::mutex m_blockMutex;
-
-   QTimer * m_updateTimer {nullptr};
+  QTimer *m_updateTimer{ nullptr }; ///< Timer for refreshing the displayed controls.
 
 public:
-   loopCtrl( std::string & procName,
-             QWidget * Parent = 0,
-             Qt::WindowFlags f = Qt::WindowFlags()
-           );
+  /// Construct the loop controls for the given loop prefix.
+  loopCtrl( std::string    &procName /**< [in] Prefix for the loop, gain controller, and gain optimizer devices. */,
+            QWidget        *Parent = 0 /**< [in] Optional Qt parent. */,
+            Qt::WindowFlags f      = Qt::WindowFlags() /**< [in] Qt window flags. */
+  );
 
-   ~loopCtrl();
+  /// Destroy the loop controls.
+  ~loopCtrl();
 
-   void subscribe();
+  /// Subscribe the widget and its controls to their INDI properties.
+  void subscribe();
 
-   void onConnect();
+  /// Notify the controls that the INDI connection opened.
+  void onConnect();
 
-   void onDisconnect();
+  /// Reset the controls when the INDI connection closes.
+  void onDisconnect();
 
-   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+  /// Process a newly defined INDI property.
+  void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Property definition. */ );
 
-   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+  /// Invalidate controls for a deleted INDI property.
+  void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] Property or device deletion. */ );
 
-   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+  /// Process a loop or gain-controller property update.
+  void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Updated property. */ );
 
-   void sendNewGain(double ng);
-   void sendNewMultCoeff(double nm);
+  /// Request a new overall loop gain.
+  void sendNewGain( double ng /**< [in] Requested gain. */ );
 
-   void setEnableDisable( bool tf,
-                          bool all = true
-                        );
+  /// Request a new overall loop multiplier.
+  void sendNewMultCoeff( double nm /**< [in] Requested multiplier. */ );
+
+  /// Enable or disable the loop controls.
+  void setEnableDisable( bool tf /**< [in] Whether to enable the controls. */,
+                         bool all = true /**< [in] Whether to include the loop on/off control and its state label. */
+  );
 
 public slots:
-   void updateGUI();
+  /// Refresh the loop state and control availability.
+  void updateGUI();
 
-   void on_button_LoopZero_pressed();
+  /// Set the server-side offload link for the high-order loop.
+  void on_checkBox_offload_clicked( bool linked /**< [in] Whether to link offloading to the HO loop. */ );
 
-   void on_button_zeroall_pressed();
+  /// Request that the loop correction channel be zeroed.
+  void on_button_LoopZero_pressed();
 
-   void setupBlocks(int nB);
+  /// Request that every mode use the gain shown in the first block.
+  void on_button_flatVector_clicked();
 
-   void on_button_autoGainDump_pressed();
+  /// Request that the current modal gains be saved.
+  void on_button_saveVector_clicked();
+
+  /// Request that the saved modal gains be applied.
+  void on_button_loadSaved_clicked();
+
+  /// Request that all modal gains be zeroed.
+  void on_button_zeroall_pressed();
+
+  /// Rebuild the block widgets to reflect the reported block count.
+  void setupBlocks( int nB /**< [in] Number of mode blocks. */ );
+
+  /// Request a gain-optimizer dump.
+  void on_button_autoGainDump_pressed();
 
 signals:
 
-   void doUpdateGUI();
+  /// Schedule a refresh of the controls.
+  void doUpdateGUI();
 
-   void blocksChanged(int nB);
+  /// Announce a change in the number of mode blocks.
+  void blocksChanged( int nB /**< [in] New number of mode blocks. */ );
 
 private:
+  /// Send a momentary request to the gain controller.
+  void sendGainRequest( const char *name /**< [in] INDI switch property to request. */ );
 
-   Ui::loopCtrl ui;
+  Ui::loopCtrl ui; ///< Qt Designer controls for this widget.
 };
 
 loopCtrl::loopCtrl( std::string & procName,
@@ -111,6 +148,8 @@ loopCtrl::loopCtrl( std::string & procName,
 
     ui.slider_loop->setup(m_procName, "loop_state", "toggle", "");
     ui.slider_loop->setStretch(0,0,10, true, true);
+    ui.checkBox_offload->setVisible( m_procName == "holoop" );
+    setXwFont( ui.checkBox_offload );
 
     ui.gainCtrl->setup(m_procName, "loop_gain", "Gain", -1, -1);
 
@@ -139,6 +178,9 @@ loopCtrl::loopCtrl( std::string & procName,
     setXwFont(ui.label_trackog);
     setXwFont(ui.button_autoGainDump);
 
+    setXwFont( ui.button_flatVector );
+    setXwFont( ui.button_saveVector );
+    setXwFont( ui.button_loadSaved );
     setXwFont(ui.button_zeroall);
 
 
@@ -171,13 +213,20 @@ void loopCtrl::subscribe()
    m_parent->addSubscriber(ui.slider_loop);
    m_parent->addSubscriberProperty(this, m_procName, "loop_state");
 
+   if( m_procName == "holoop" )
+   {
+       m_parent->addSubscriberProperty( this, m_procName, "offload_link" );
+   }
+
    m_parent->addSubscriber(ui.slider_autogain);
    m_parent->addSubscriber(ui.slider_trackog);
 
    m_parent->addSubscriber(ui.opticalGain);
 
    m_parent->addSubscriberProperty(this, m_gainCtrl, "modes");
-
+   m_parent->addSubscriberProperty( this, m_gainCtrl, "flat_vector" );
+   m_parent->addSubscriberProperty( this, m_gainCtrl, "save_vector" );
+   m_parent->addSubscriberProperty( this, m_gainCtrl, "load_saved" );
 
    m_parent->addSubscriber(ui.gainCtrl);
    m_parent->addSubscriber(ui.mcCtrl);
@@ -226,19 +275,26 @@ void loopCtrl::onDisconnect()
 
     ui.opticalGain->onDisconnect();
 
-   setEnableDisable(false);
+    m_offloadLinkAvailable = false;
+    ui.checkBox_offload->setChecked( false );
 
-   //xWidget::onDisconnect();
-   ui.gainCtrl->onDisconnect();
-   ui.mcCtrl->onDisconnect();
+    m_flatVectorAvailable = false;
+    m_saveVectorAvailable = false;
+    m_loadSavedAvailable  = false;
+    setEnableDisable( false );
 
+    //xWidget::onDisconnect();
+    ui.gainCtrl->onDisconnect();
+    ui.mcCtrl->onDisconnect();
 
-   std::lock_guard<std::mutex> lock(m_blockMutex);
-   for(size_t n = 0; n < m_blockCtrls.size(); ++n)
-   {
-      if(m_blockCtrls[n]) m_blockCtrls[n]->onDisconnect();
-   }
-
+    std::lock_guard<std::mutex> lock( m_blockMutex );
+    for( size_t n = 0; n < m_blockCtrls.size(); ++n )
+    {
+        if( m_blockCtrls[n] )
+        {
+            m_blockCtrls[n]->onDisconnect();
+        }
+    }
 }
 
 void loopCtrl::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -304,32 +360,60 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
          m_loopWaiting = false;
       }
    }
+   else if( ipRecv.getName() == "offload_link" && ipRecv.find( "toggle" ) )
+   {
+       m_offloadLinkAvailable = true;
+       ui.checkBox_offload->setChecked( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On );
+   }
    }
    if(ipRecv.getDevice() == m_gainCtrl)
    {
-      if(ipRecv.getName() == "modes")
-      {
-         if(ipRecv.find("blocks"))
-         {
-            size_t nB = ipRecv["blocks"].get<int>();
+       if( ipRecv.getName() == "flat_vector" )
+       {
+           m_flatVectorAvailable = true;
+       }
+       else if( ipRecv.getName() == "save_vector" || ipRecv.getName() == "load_saved" )
+       {
+           bool  save      = ipRecv.getName() == "save_vector";
+           bool &available = save ? m_saveVectorAvailable : m_loadSavedAvailable;
+           if( available && ipRecv.getState() == pcf::IndiProperty::Alert )
+           {
+               auto *button = save ? ui.button_saveVector : ui.button_loadSaved;
+               QToolTip::showText( button->mapToGlobal( button->rect().bottomLeft() ),
+                                   save ? tr( "Could not save the gain vector. See the userGainCtrl log." )
+                                        : tr( "Could not load the saved vector. See the userGainCtrl log." ),
+                                   button );
+           }
 
-            m_modes.resize(nB,0);
+           available = true;
+       }
+       else if( ipRecv.getName() == "modes" && ipRecv.find( "blocks" ) )
+       {
+           int nB = ipRecv["blocks"].get<int>();
+           if( nB < 0 )
+           {
+               return;
+           }
 
-            for(size_t n = 0; n<nB; ++n)
-            {
-               char mstr[24];
-               snprintf(mstr, sizeof(mstr), "%02zu", n);
-               std::string blockstr = std::string("block")+mstr;
-               int nM = ipRecv[std::string("block")+mstr].get<int>();
-               m_modes[n] = nM;
+           std::vector<int> modes;
+           for( int n = 0; n < nB; ++n )
+           {
+               char block[24];
+               snprintf( block, sizeof( block ), "block%02d", n );
+               if( !ipRecv.find( block ) )
+               {
+                   return;
+               }
 
-            }
+               modes.push_back( ipRecv[block].get<int>() );
+           }
 
-            if(nB != m_blockCtrls.size()) emit blocksChanged(nB);
-
-
-         }
-      }
+           if( modes != m_modes )
+           {
+               m_modes = std::move( modes );
+               emit blocksChanged( nB );
+           }
+       }
    }
 
 
@@ -338,21 +422,48 @@ void loopCtrl::handleSetProperty( const pcf::IndiProperty & ipRecv)
 
 void loopCtrl::handleDelProperty( const pcf::IndiProperty & ipRecv)
 {
-   std::lock_guard<std::mutex> lock(m_blockMutex);
+    if( ipRecv.getDevice() == m_procName &&
+        ( ipRecv.getName().empty() || ipRecv.getName() == "fsm" || ipRecv.getName() == "offload_link" ) )
+    {
+        m_offloadLinkAvailable = false;
+        ui.checkBox_offload->setChecked( false );
+        ui.checkBox_offload->setEnabled( false );
+        return;
+    }
 
+    if( ipRecv.getDevice() != m_gainCtrl )
+    {
+        return;
+    }
 
-   if(ipRecv.getDevice() == m_gainCtrl)
-   {
-      for(size_t n =0; n < m_blockCtrls.size(); ++n)
-      {
-         m_parent->unsubscribe(m_blockCtrls[n]);
-         ui.horizontalLayout_2->removeWidget(m_blockCtrls[n]);
-         m_blockCtrls[n]->deleteLater();
-      }
+    const std::string &name           = ipRecv.getName();
+    bool               deviceDeleted  = name.empty() || name == "fsm";
+    bool               modesDeleted   = deviceDeleted || name == "modes";
+    if( deviceDeleted || name == "flat_vector" )
+    {
+        m_flatVectorAvailable = false;
+    }
 
-      m_blockCtrls.clear();
-   }
+    if( deviceDeleted || name == "save_vector" )
+    {
+        m_saveVectorAvailable = false;
+    }
 
+    if( deviceDeleted || name == "load_saved" )
+    {
+        m_loadSavedAvailable = false;
+    }
+
+    if( modesDeleted )
+    {
+        m_modes.clear();
+        emit blocksChanged( 0 );
+    }
+
+    if( modesDeleted || name == "flat_vector" || name == "save_vector" || name == "load_saved" )
+    {
+        emit doUpdateGUI();
+    }
 }
 
 void loopCtrl::setEnableDisable( bool tf,
@@ -372,9 +483,34 @@ void loopCtrl::setEnableDisable( bool tf,
    ui.slider_trackog->setEnabled(tf);
 
    ui.opticalGain->setEnabled(tf);
-
+   ui.checkBox_offload->setEnabled( tf && m_offloadLinkAvailable );
 
    std::lock_guard<std::mutex> lock(m_blockMutex);
+   bool                        haveBlocks = tf && !m_blockCtrls.empty();
+   ui.button_flatVector->setEnabled( haveBlocks && m_flatVectorAvailable );
+   ui.button_saveVector->setEnabled( haveBlocks && m_saveVectorAvailable );
+   ui.button_loadSaved->setEnabled( haveBlocks && m_loadSavedAvailable );
+
+   QString flatVectorTip;
+   if( !m_flatVectorAvailable )
+   {
+       flatVectorTip = tr( "Waiting for the Flat Vector command from the gain controller. "
+                           "The server must run the updated userGainCtrl." );
+   }
+   else if( m_blockCtrls.empty() )
+   {
+       flatVectorTip = tr( "Waiting for the gain controller to report its mode blocks." );
+   }
+   else
+   {
+       flatVectorTip = tr( "Apply the value in the first block gain field to every mode." );
+   }
+
+   if( flatVectorTip != ui.button_flatVector->toolTip() )
+   {
+       ui.button_flatVector->setToolTip( flatVectorTip );
+   }
+
    for(size_t n = 0; n < m_blockCtrls.size(); ++n)
    {
       if(m_blockCtrls[n]) m_blockCtrls[n]->setEnabled(tf);
@@ -404,6 +540,20 @@ void loopCtrl::updateGUI()
 
 } //updateGUI()
 
+void loopCtrl::on_checkBox_offload_clicked( bool linked )
+{
+    if( !m_offloadLinkAvailable )
+    {
+        return;
+    }
+
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.setDevice( m_procName );
+    request.setName( "offload_link" );
+    request.add( pcf::IndiElement( "toggle", linked ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+    sendNewProperty( request );
+}
+
 void loopCtrl::on_button_LoopZero_pressed()
 {
    pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
@@ -417,17 +567,67 @@ void loopCtrl::on_button_LoopZero_pressed()
    sendNewProperty(ipFreq);
 }
 
+void loopCtrl::on_button_flatVector_clicked()
+{
+    QString input;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_blockMutex );
+        if( !m_flatVectorAvailable || m_blockCtrls.empty() )
+        {
+            return;
+        }
+
+        input = m_blockCtrls.front()->inputText();
+    }
+
+    bool  ok   = false;
+    float gain = input.toFloat( &ok );
+    if( !ok || !std::isfinite( gain ) || gain < 0 )
+    {
+        QToolTip::showText( ui.button_flatVector->mapToGlobal( ui.button_flatVector->rect().bottomLeft() ),
+                            tr( "Enter a non-negative gain in the first block." ),
+                            ui.button_flatVector );
+        return;
+    }
+
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
+    ip.setDevice( m_gainCtrl );
+    ip.setName( "flat_vector" );
+    ip.add( pcf::IndiElement( "target" ) );
+    ip["target"] = gain;
+
+    sendNewProperty( ip );
+}
+
+void loopCtrl::on_button_saveVector_clicked()
+{
+    if( ui.button_saveVector->isEnabled() )
+    {
+        sendGainRequest( "save_vector" );
+    }
+}
+
+void loopCtrl::on_button_loadSaved_clicked()
+{
+    if( ui.button_loadSaved->isEnabled() )
+    {
+        sendGainRequest( "load_saved" );
+    }
+}
+
 void loopCtrl::on_button_zeroall_pressed()
 {
-   pcf::IndiProperty ipFreq(pcf::IndiProperty::Switch);
+    sendGainRequest( "zero_all" );
+}
 
-   ipFreq.setDevice(m_gainCtrl);
-   ipFreq.setName("zero_all");
-   ipFreq.add(pcf::IndiElement("request"));
+void loopCtrl::sendGainRequest( const char *name )
+{
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.setDevice( m_gainCtrl );
+    request.setName( name );
+    request.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
 
-   ipFreq["request"] = pcf::IndiElement::On;
-
-   sendNewProperty(ipFreq);
+    sendNewProperty( request );
 }
 
 void loopCtrl::setupBlocks(int nB)
@@ -436,9 +636,16 @@ void loopCtrl::setupBlocks(int nB)
 
     for(size_t n =0; n < m_blockCtrls.size(); ++n)
     {
-        if(m_blockCtrls[n] == nullptr) continue;
+        if( m_blockCtrls[n] == nullptr )
+        {
+            continue;
+        }
 
-        m_parent->unsubscribe(m_blockCtrls[n]);
+        if( m_parent )
+        {
+            m_parent->unsubscribe( m_blockCtrls[n] );
+        }
+
         ui.horizontalLayout_2->removeWidget(m_blockCtrls[n]);
         m_blockCtrls[n]->deleteLater();
     }

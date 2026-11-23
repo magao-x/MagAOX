@@ -88,7 +88,8 @@ apps_rtc = \
 	modalFilter \
 	dmRecon
 pythonapps_rtc = \
-	efcControl
+	efcControl \
+	po4aoTrainer
 
 # Apps needed on ICC
 apps_icc = \
@@ -240,6 +241,7 @@ ifeq ($(ALL_APPS),1)
 endif
 
 all_guis = \
+	po4aoGUI \
 	dmCtrlGUI \
 	dmModeGUI \
 	offloadCtrlGUI \
@@ -250,7 +252,8 @@ all_guis = \
 	timingGUI \
 	roiGUI \
 	cameraGUI \
-	stageGUI
+	stageGUI \
+	polarimetryGUI \
 
 # If building for coverage, don't build guis for now
 ifeq ($(NO_GUIS),1)

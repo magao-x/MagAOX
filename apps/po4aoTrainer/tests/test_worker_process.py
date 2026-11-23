@@ -1,0 +1,527 @@
+## \file test_worker_process.py
+# \brief Real managed worker/pipe lifecycle with synthetic CPU numerical boundaries.
+# \ingroup po4aoTrainer_unit_test
+"""Exercise production worker control without instrument streams, GPU allocation or model publication."""
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+import pytest
+
+from xapp.po4aoTrainer.process import Worker
+from xapp.po4aoTrainer.configuration import revision
+
+BOOTSTRAP = r"""
+import sys, types, numpy as np
+from pathlib import Path
+import xapp.po4aoTrainer.training as training
+import xapp.po4aoTrainer.po4ao_runtime as runtime
+original=training.TrainingSession
+training.TrainingSession=lambda config, device: original(config, device="cpu")
+runtime.configure_compute_resources=lambda *args:None
+class Image:
+    def open(self,name):
+        self.name=name
+        return 0
+    @property
+    def md(self):
+        counter = int(Path(sys.argv[1]).parent.joinpath("warmup-counter").read_text()) if "warm" in self.name else 1
+        busy = Path(sys.argv[1]).parent.joinpath("busy")
+        mode = busy.read_text() if busy.exists() else ""
+        return types.SimpleNamespace(cnt0=counter, write=self.name == mode or (self.name == "replay" and mode == "error"))
+sys.modules["ImageStreamIOWrap"]=types.SimpleNamespace(Image=Image)
+rng=np.random.default_rng(42)
+data=rng.normal(size=(6,96,2)).astype(np.float32)
+def snapshot(image,metadata,**kwargs):
+    if image.md.write:
+        mode = Path(sys.argv[1]).parent.joinpath("busy").read_text()
+        if mode == "error":
+            raise RuntimeError("broken replay stream")
+        raise TimeoutError("rolling writer busy")
+    with Path(sys.argv[1]).joinpath("copies.log").open("a") as output:
+        output.write(image.name + "\n")
+    return runtime.ReplaySnapshot(data, image.md.cnt0,96,3,"0000000000000000")
+runtime.stable_replay_snapshot=snapshot
+from xapp.po4aoTrainer.worker import run
+run(sys.argv[1])
+"""
+
+
+@pytest.mark.parametrize("stream_failure", [False, True])
+def test_owned_worker_pauses_resumes_recollects_and_exits_on_eof(
+    tmp_path, monkeypatch, stream_failure
+):
+    """Keep cached training live, invalidate on recollection, and stop on stream/pipe failure."""
+    config = json.loads(
+        (Path(__file__).parent / "fixtures/session_config.json").read_text()
+    )
+    config["compute"] = dict(inference_device=0, training_device=1, build_device=1)
+    config["training"].update(
+        training_iterations=10000,
+        first_model_publish_iteration=20000,
+        diagnostics_interval=50,
+    )
+    original = subprocess.Popen
+
+    def launch(command, **kwargs):
+        """Replace only GPU/shared-memory boundaries around the production worker module."""
+        return original([sys.executable, "-c", BOOTSTRAP, command[-1]], **kwargs)
+
+    monkeypatch.setattr("xapp.po4aoTrainer.process.subprocess.Popen", launch)
+    worker = Worker(
+        tmp_path / "run",
+        dict(
+            config=config,
+            generation="test",
+            streams=["replay", "meta", "warmup", "warmmeta"],
+            heartbeat_timeout=5,
+            build_timeout=5,
+            trtexec="unused",
+        ),
+    )
+    (tmp_path / "warmup-counter").write_text("1")
+    pid = worker.process.pid
+
+    def wait(predicate, message=None):
+        """Keep the real heartbeat flowing while pumping protocol acknowledgements."""
+        end = time.monotonic() + 20
+        while not predicate():
+            worker.send(
+                {
+                    "active_id": "0" * 16,
+                    "collection": "ready",
+                    "generation": "1",
+                    **(message or {}),
+                }
+            )
+            worker.events()
+            assert worker.process.poll() is None, worker.run.joinpath(
+                "worker.log"
+            ).read_text()
+            assert time.monotonic() < end, worker.run.joinpath("worker.log").read_text()
+            time.sleep(0.03)
+
+    try:
+        wait(lambda: worker.iteration > 1)
+        worker.send({"run": False})
+        wait(lambda: worker.state == "paused")
+        iteration = worker.iteration
+        time.sleep(0.1)
+        worker.events()
+        assert worker.iteration == iteration
+        assert worker.process.pid == pid
+        assert sorted((worker.run / "copies.log").read_text().splitlines()) == [
+            "replay",
+            "warmup",
+        ]
+        # A busy rolling writer cannot stop optimization on the complete private pair.
+        (tmp_path / "busy").write_text("replay")
+        worker.send({"run": True})
+        wait(lambda: worker.iteration > iteration + 1)
+        worker.send({"run": False})
+        wait(lambda: worker.state == "paused")
+        iteration = worker.iteration
+        # A warmup refresh with a failed replay refresh must not mix or replace the pair.
+        (tmp_path / "warmup-counter").write_text("2")
+        worker.send({"run": True})
+        wait(lambda: worker.state == "waiting")
+        # Cooperative Pause can suspend an iteration which finishes before the next refresh.
+        assert worker.iteration <= iteration + 1
+        iteration = worker.iteration
+        for _ in range(5):
+            worker.send({"collection": "ready", "generation": "1"})
+            time.sleep(0.03)
+            worker.events()
+        assert worker.iteration == iteration
+        # Explicit recollection discards the old pair even while the writer remains busy.
+        worker.send({"generation": "2"})
+        for _ in range(5):
+            worker.send({"collection": "ready", "generation": "2"})
+            time.sleep(0.03)
+            worker.events()
+        assert worker.iteration == iteration
+        (tmp_path / "busy").write_text("")
+        wait(lambda: worker.iteration > iteration, {"generation": "2"})
+        worker.send({"run": False})
+        wait(lambda: worker.state == "paused", {"generation": "2"})
+        iteration = worker.iteration
+        config["training"]["policy_learning_rate"] *= 2
+        changed = tmp_path / "hot.json"
+        changed.write_text(json.dumps(config))
+        worker.send({"config_path": str(changed), "config_ticket": 1})
+        time.sleep(0.1)
+        worker.events()
+        assert worker.config_ticket == 0  # Paused edits have not been applied.
+        worker.send({"run": True})
+        wait(
+            lambda: worker.revision == revision(config)
+            and worker.config_ticket == 1
+            and worker.iteration > iteration,
+            {"generation": "2"},
+        )
+        worker.send({"run": False})
+        wait(lambda: worker.state == "paused", {"generation": "2"})
+        iteration = worker.iteration
+        # Resume after recollection unwinds stale replay without losing Adam/session state.
+        (tmp_path / "warmup-counter").write_text("3")
+        worker.send({"generation": "3", "run": True})
+        end = time.monotonic() + 10
+        while worker.iteration <= iteration:
+            worker.send(
+                {"active_id": "0" * 16, "collection": "ready", "generation": "3"}
+            )
+            worker.events()
+            assert time.monotonic() < end, worker.run.joinpath("worker.log").read_text()
+            time.sleep(0.03)
+        assert worker.process.pid == pid
+        if stream_failure:
+            (tmp_path / "busy").write_text("error")
+            end = time.monotonic() + 10
+            while worker.state != "error":
+                worker.events()
+                assert time.monotonic() < end
+                time.sleep(0.03)
+            assert "broken replay stream" in worker.error
+        else:
+            worker.process.stdin.close()
+        worker.process.wait(timeout=10)
+        # Stream errors and control-channel loss both stop the worker.
+        assert worker.process.returncode == 1
+    finally:
+        worker.stop()
+
+
+def test_reset_stops_owned_child_group_and_preserves_unrelated_process(
+    tmp_path, monkeypatch
+):
+    """Reset kills a worker's child, never an unrelated process or notebook kernel."""
+    import psutil
+
+    original = subprocess.Popen
+    bootstrap = """import subprocess,sys,time,json
+child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
+print(json.dumps(dict(event='build',pid=child.pid)),flush=True)
+time.sleep(60)
+"""
+
+    def launch(command, **kwargs):
+        """Place an actual child in the production worker's owned process group."""
+        return original([sys.executable, "-c", bootstrap], **kwargs)
+
+    unrelated = original([sys.executable, "-c", "import time;time.sleep(60)"])
+    monkeypatch.setattr("xapp.po4aoTrainer.process.subprocess.Popen", launch)
+    worker = Worker(tmp_path / "owned", {})
+    try:
+        end = time.monotonic() + 5
+        while not worker.children:
+            worker.events()
+            assert time.monotonic() < end
+            time.sleep(0.02)
+        child = worker.children[0]
+        worker.stop(timeout=1)
+        assert worker.process.poll() is not None
+        assert not child.is_running() or child.status() == psutil.STATUS_ZOMBIE
+        assert unrelated.poll() is None
+    finally:
+        worker.stop(timeout=1)
+        unrelated.terminate()
+        unrelated.wait(timeout=5)
+
+
+@pytest.mark.parametrize("outcome", [None, "loaded", "failed", "rejected", "recollect"])
+def test_export_pause_and_publication_outcome(tmp_path, monkeypatch, outcome):
+    """Exercise real worker cancellation, delayed issuance and persisted final publication outcomes."""
+    import psutil
+
+    config = json.loads(
+        (Path(__file__).parent / "fixtures/session_config.json").read_text()
+    )
+    config["compute"] = dict(inference_device=0, training_device=1, build_device=1)
+    config["training"].update(training_iterations=1000, diagnostics_interval=1)
+    export_boundary = r"""
+import torch
+import xapp.po4aoTrainer.worker as managed
+actual_popen=managed.subprocess.Popen
+def fake_export(command, **kwargs):
+    gate = str(Path(sys.argv[1]) / "finish-export")
+    wait = "import os,sys,time\nwhile not os.path.exists(sys.argv[1]): time.sleep(.01)"
+    return actual_popen([sys.executable, "-c", wait, gate], **kwargs)
+managed.subprocess.Popen=fake_export
+actual_session=training.TrainingSession
+def ready_session(config, device):
+    session=actual_session(config, device)
+    actual_step=session.step
+    def step(*args, **kwargs):
+        result=actual_step(*args, **kwargs)
+        if result is not None and result['record'] is not None and not session.last_publish_iteration:
+            result['record']['publication_status']='ready'
+        return result
+    session.step=step
+    stage=session.stage_candidate
+    def check_export(model_id, policy, record):
+        root=Path(sys.argv[1])
+        saved=torch.load(next(root.glob("candidate-*/weights.pt")), weights_only=True)["policy"]
+        stage(model_id, policy, record)
+        frozen=session.policy_update.pending[1].state_dict()
+        assert all(torch.equal(t, frozen[k]) for k, t in saved.items())
+        assert session.iteration > record["training_iteration"] == session.last_publish_iteration
+    session.stage_candidate=check_export
+    return session
+training.TrainingSession=ready_session
+managed.run(sys.argv[1])
+"""
+    bootstrap = BOOTSTRAP.replace(
+        "from xapp.po4aoTrainer.worker import run\nrun(sys.argv[1])", export_boundary
+    )
+    original = subprocess.Popen
+
+    def launch(command, **kwargs):
+        """Use production control/build sequencing with only numerical/export boundaries replaced."""
+        return original([sys.executable, "-c", bootstrap, command[-1]], **kwargs)
+
+    monkeypatch.setattr("xapp.po4aoTrainer.process.subprocess.Popen", launch)
+    (tmp_path / "warmup-counter").write_text("1")
+    worker = Worker(
+        tmp_path / "run",
+        dict(
+            config=config,
+            generation="test",
+            streams=["replay", "meta", "warmup", "warmmeta"],
+            heartbeat_timeout=10,
+            build_timeout=30,
+            trtexec="unused",
+        ),
+    )
+    try:
+        deadline = time.monotonic() + 20
+        candidates = []
+
+        def wait_until(predicate):
+            """Drive the heartbeat while observing actual worker progress."""
+            while not predicate():
+                worker.send(dict(collection="ready", generation="1"))
+                candidates.extend(e for e in worker.events() if e["event"] == "candidate")
+                assert not worker.error, (worker.run / "worker.log").read_text()
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+
+        wait_until(lambda: worker.children and worker.iteration >= 4)
+        build = worker.children[0]
+        assert build.is_running() and not candidates
+        if outcome == "recollect":
+            worker.send(dict(collection="collecting", generation="2"))
+            while worker.state != "waiting" or build.is_running():
+                candidates.extend(e for e in worker.events() if e["event"] == "candidate")
+                assert not worker.error, (worker.run / "worker.log").read_text()
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+            candidates.extend(e for e in worker.events() if e["event"] == "candidate")
+            assert not candidates
+            assert "export cancelled" in (worker.run / "metrics.jsonl").read_text()
+            return
+        if outcome is not None:
+            (worker.run / "finish-export").touch()
+            wait_until(lambda: candidates)
+            path = candidates[0]["path"]
+            offered_at = worker.iteration
+            wait_until(lambda: worker.iteration >= offered_at + 2)
+            if outcome != "rejected":
+                worker.send({"candidate_path": path, "candidate_id": "a" * 16})
+                issued_at = worker.iteration
+                wait_until(lambda: worker.iteration >= issued_at + 2)
+        assert len(list(worker.run.glob("candidate-*"))) == 1
+        worker.send({"run": False})
+        while worker.state != "paused":
+            worker.events()
+            assert not worker.error, (worker.run / "worker.log").read_text()
+            assert time.monotonic() < deadline
+            time.sleep(0.03)
+        assert worker.process.poll() is None
+        assert (
+            build is None
+            or not build.is_running()
+            or build.status() == psutil.STATUS_ZOMBIE
+        )
+        if outcome is not None:
+            if outcome == "rejected":
+                worker.send({"candidate_path": path, "candidate_id": ""})
+            else:
+                worker.send({"candidate_outcome_path": path, "candidate_outcome": outcome})
+            records = []
+            while not any(
+                record.get("publication_outcome") == outcome for record in records
+            ):
+                records = [
+                    json.loads(line)
+                    for line in (worker.run / "metrics.jsonl").read_text().splitlines()
+                ]
+                worker.events()
+                assert not worker.error, (worker.run / "worker.log").read_text()
+                assert time.monotonic() < deadline
+                time.sleep(0.03)
+            from xapp.po4aoTrainer.observer import load_diagnostics
+
+            matching = next(
+                record
+                for record in records
+                if record.get("publication_outcome") == outcome
+            )
+            assert matching["published_model_id"] == (None if outcome == "rejected" else "a" * 16)
+            assert matching["training_iteration"] == json.loads(
+                (Path(path) / "request.json").read_text()
+            )["iteration"]
+            paused_at = worker.iteration
+            active_id = "a" * 16 if outcome == "loaded" else "0" * 16
+            worker.send({"active_id": active_id, "run": True})
+            wait_until(lambda: worker.iteration >= paused_at + 2)
+            worker.send({"run": False})
+            wait_until(lambda: worker.state == "paused")
+            snapshot = load_diagnostics(sorted((worker.run / "diagnostics").glob("*.npz"))[-1])
+            history = snapshot.metadata["history"]
+            history_by_iteration = {r["training_iteration"]: r for r in history}
+            assert history_by_iteration[matching["training_iteration"]] == matching
+            assert all(
+                check["policy_update_reference_id"] == active_id
+                for check in history[-1]["policy_update"]
+            )
+            assert matching["export_seconds"] >= 0
+            assert matching["activation_seconds"] >= 0
+            assert worker.process.poll() is None and worker.state == "paused"
+    finally:
+        worker.stop()
+
+
+def test_export_restores_models_without_allocating_a_training_session(
+    tmp_path, monkeypatch
+):
+    """Check exported weights, device and build arguments without a GPU or extra Adam/policy copy."""
+    import torch
+    from unittest.mock import Mock
+    from xapp.po4aoTrainer.worker import export_candidate
+    from xapp.po4aoTrainer import po4ao_runtime, po4ao_nonlinear_models, training
+
+    config = json.loads(
+        (Path(__file__).parent / "fixtures/session_config.json").read_text()
+    )
+    config["compute"] = dict(inference_device=0, training_device=1, build_device=1)
+    metadata = dict(config=config, trtexec="test-trtexec")
+    (tmp_path / "request.json").write_text(json.dumps(metadata))
+    weights = dict(policy={"policy": 1}, dynamics={"dynamics": 2})
+    dynamics, policy = Mock(), Mock()
+    policy.eval.return_value = policy
+    publisher = Mock()
+    session = Mock(
+        side_effect=AssertionError("Export must not create a TrainingSession")
+    )
+    loader = Mock(return_value=weights)
+    zeros = Mock(return_value="sample")
+    monkeypatch.setattr(training, "TrainingSession", session)
+    monkeypatch.setattr(
+        po4ao_nonlinear_models,
+        "build_nonlinear_models",
+        lambda config: (dynamics, policy),
+    )
+    monkeypatch.setattr(
+        po4ao_runtime, "configure_compute_resources", lambda *args: None
+    )
+    monkeypatch.setattr(po4ao_runtime, "publish_tensorrt_engine", publisher)
+    monkeypatch.setattr(torch, "load", loader)
+    monkeypatch.setattr(torch, "zeros", zeros)
+    export_candidate(tmp_path)
+    session.assert_not_called()
+    policy.load_state_dict.assert_called_once_with(weights["policy"])
+    dynamics.load_state_dict.assert_called_once_with(weights["dynamics"])
+    policy.to.assert_called_once_with(torch.device("cuda:1"))
+    dynamics.to.assert_called_once_with(torch.device("cuda:1"))
+    loader.assert_called_once_with(
+        tmp_path / "weights.pt", weights_only=True, map_location=torch.device("cuda:1")
+    )
+    zeros.assert_called_once_with(
+        (
+            1,
+            2 * config["MDP"]["n_history"] - 1,
+            1,
+            config["runtime"]["n_modes_controlled"],
+        ),
+        device=torch.device("cuda:1"),
+    )
+    assert publisher.call_args.args == (policy, "sample", tmp_path / "policy.trt")
+    assert publisher.call_args.kwargs["dynamics"] is dynamics
+    assert publisher.call_args.kwargs["build_device"] == 1
+    assert publisher.call_args.kwargs["metadata"] == metadata
+
+
+def test_restored_worker_prepares_paused_and_accepts_activation(tmp_path, monkeypatch):
+    """Exercise the real restore/export protocol while replacing only GPU, streams and engine compilation."""
+    from test_library import candidate
+    from test_training import make_session
+    from xapp.po4aoTrainer.po4ao_runtime import ReplaySnapshot
+    import numpy as np
+
+    config = json.loads(
+        (Path(__file__).parent / "fixtures/session_config.json").read_text()
+    )
+    config["compute"] = dict(inference_device=0, training_device=1, build_device=1)
+    session = make_session(config)
+    data = np.random.default_rng(43).normal(size=(6, 96, 2)).astype(np.float32)
+    replay = ReplaySnapshot(data, 1, 96, 3, "0" * 16)
+    session.step(replay, replay, active_model_id="0")
+    source = tmp_path / "source"
+    model_id = candidate(source, session, "original-generation")
+    bootstrap = BOOTSTRAP.replace(
+        "from xapp.po4aoTrainer.worker import run\nrun(sys.argv[1])",
+        "import xapp.po4aoTrainer.worker as managed\n"
+        "managed.export_candidate=lambda directory: directory.joinpath('compiled').write_text('CPU test only')\n"
+        "managed.run(sys.argv[1])",
+    )
+    original = subprocess.Popen
+
+    def launch(command, **kwargs):
+        """Keep the production worker process/pipe and restore code around synthetic hardware boundaries."""
+        return original([sys.executable, "-c", bootstrap, command[-1]], **kwargs)
+
+    monkeypatch.setattr("xapp.po4aoTrainer.process.subprocess.Popen", launch)
+    worker = Worker(
+        tmp_path / "restored",
+        dict(
+            config=config,
+            config_ticket=7,
+            generation="new-generation",
+            streams=["replay", "meta", "warmup", "warmmeta"],
+            heartbeat_timeout=5,
+            build_timeout=5,
+            trtexec="unused",
+            initial_snapshot=str(source / "policy.trt.training.npz"),
+            source_bundle="internal-test",
+        ),
+    )
+    try:
+        end = time.monotonic() + 20
+        while worker.prepared_path is None or worker.state != "paused":
+            worker.send({"run": False})
+            worker.events()
+            assert not worker.error, worker.error
+            assert time.monotonic() < end
+            time.sleep(0.03)
+        assert worker.iteration == 0 and worker.config_ticket == 7
+        metadata = json.loads((Path(worker.prepared_path) / "request.json").read_text())
+        assert metadata["generation"] == "new-generation"
+        assert metadata["session_id"] != session.session_id
+        assert metadata["origin"]["bundle_id"] == "internal-test"
+        assert metadata["origin"]["model_id"] == model_id
+        assert not (worker.run / "copies.log").exists()
+        worker.send({"restore_id": model_id, "active_id": model_id, "run": True})
+        while worker.state != "waiting":
+            worker.send({"collection": "unknown"})
+            worker.events()
+            assert not worker.error, worker.error
+            assert time.monotonic() < end
+            time.sleep(0.03)
+        assert (
+            worker.iteration == 0
+        )  # Preparing and activation never inject noise or train.
+    finally:
+        worker.stop()

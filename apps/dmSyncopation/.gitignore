@@ -1,0 +1,3 @@
+# Build products specific to this app. Generic patterns (*.o, tests/*_test,
+# build/, ...) are in the top-level .gitignore.
+/dmSyncopation

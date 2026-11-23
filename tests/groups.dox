@@ -259,6 +259,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup polarimetryGUI_unit_test Polarimetry GUI Unit Tests
+ * \brief Offline hwpSequencer subscription, control availability, status, and command tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup rtimvROI_unit_test rtimv ROI Plugin Unit Tests
  * \brief Offline INDI command lifecycle and ROI interaction tests.
  * \ingroup application_unit_test
@@ -357,4 +362,29 @@ report from their counters and then returns nonzero. An HTML report therefore do
 /** \defgroup dmSyncopationProducer_unit_test DM Syncopation Producer Unit Tests
  * \brief Same-host tagged request, source ownership and private-snapshot acknowledgement tests.
  * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup dlDataCollection_unit_test dlDataCollection Unit Tests
+ * \brief Tests of command-bank validation, synchronized capture and checked file output.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup nnReconstructor_unit_test nnReconstructor Unit Tests
+ * \brief Reconstruction, native handover and FPS/FIFO transport tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup po4aoTrainer_unit_test PO4AO Trainer Unit Tests
+ * \brief Offline configuration, worker lifecycle and PO4AO publication tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup po4ao_unit_test PO4AO Unit Tests
+ * \brief Model handoff, modal history, and command-safety tests for PO4AO.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup po4aoGUI_unit_test PO4AO GUI Unit Tests
+ * \brief Offline state, request, reconnect and layout tests for the shared NN/PO4AO panel.
+ * \ingroup application_unit_test
  */
