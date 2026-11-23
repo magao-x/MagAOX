@@ -61,8 +61,10 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_indiP_mode;
     using loPredCtrlAcc_operational::m_indiP_predicting;
     using loPredCtrlAcc_operational::m_indiP_qualification;
+    using loPredCtrlAcc_operational::m_indiP_releaseTT;
     using loPredCtrlAcc_operational::m_indiP_reset;
     using loPredCtrlAcc_operational::m_indiP_sync;
+    using loPredCtrlAcc_operational::m_indiP_zeroDm;
     using loPredCtrlAcc_operational::m_learning;
     using loPredCtrlAcc_operational::m_learnUs;
     using loPredCtrlAcc_operational::m_modalEngaged;
@@ -1607,6 +1609,76 @@ TEST_CASE( "Modal output zeroes tip/tilt only while DDSPC owns it", "[rtc-contro
     REQUIRE( app.appLogic() == 0 );
     CHECK_FALSE( app.m_modalEngaged ); // Removed: the startup-zero case again.
     CHECK( app.m_indiP_control["main_loop_tt"].get<std::string>() == "passthrough" );
+    std::filesystem::remove( path );
+}
+
+/** \brief zero_dm stops prediction and writes a fresh own-channel zero; release_tt also returns main-loop tip/tilt at
+ * once, before that zero is confirmed.
+ */
+TEST_CASE( "Operator zero and tip/tilt release controls", "[rtc-controller][modal-output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_zeroDm;
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_releaseTT;
+    MagAOX::app::loPredCtrlAcc_operational::stopPrediction;
+#endif
+    // clang-format on
+    const std::string name = "ddspc_modal_release_test";
+    char              path[4096];
+    REQUIRE( ImageStreamIO_filename( path, sizeof( path ), name.c_str() ) == 0 );
+    std::filesystem::create_directories( std::filesystem::path( path ).parent_path() );
+    std::filesystem::remove( path );
+    Controller           app( true );
+    IMAGE_METADATA       md{};
+    std::array<float, 6> wfs{ 1, 2, 3, 4, 5, 6 };
+    app.m_imageStream.array.F = wfs.data();
+    md.naxis                  = 2;
+    md.size[0]                = 6;
+    md.size[1]                = 1;
+    prepareModal( app, md, name );
+    REQUIRE( app.configureAcquisition() == 0 );
+    app.qualifyOutput();
+    app.train();
+    app.m_predicting = false;
+
+    std::uint64_t counter = 0;
+    const auto    publish = [&]()
+    {
+        md.cnt0 = ++counter;
+        REQUIRE( app.processImage( wfs.data(), {} ) == 0 );
+        std::vector<float> out( wfs.size(), -1 );
+        REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
+        return out;
+    };
+    const std::vector<float> input( wfs.begin(), wfs.end() ), zeroed{ 0, 0, 3, 4, 5, 6 };
+    auto                     predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+
+    // zero_dm: prediction stops and a new zero is required even though nothing is outstanding.
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+    auto zero = app.m_indiP_zeroDm;
+    zero["request"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_zeroDm( zero ) == 0 );
+    CHECK_FALSE( app.m_predicting );
+    CHECK( app.m_indiP_predicting["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK_FALSE( app.m_output.status().m_requested );
+    CHECK_FALSE( app.m_output.status().m_zeroConfirmed ); // The fresh zero is pending.
+    CHECK( publish() == zeroed );                         // DDSPC was engaged: tip/tilt waits for the zero.
+
+    // release_tt: the main loop takes tip/tilt back on the next frame, with the zero still unconfirmed.
+    auto release = app.m_indiP_releaseTT;
+    release["request"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_releaseTT( release ) == 0 );
+    CHECK_FALSE( app.m_modalEngaged );
+    CHECK_FALSE( app.m_output.status().m_zeroConfirmed );
+    CHECK( publish() == input );
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_control["main_loop_tt"].get<std::string>() == "passthrough" );
+
+    // A zero with prediction already off never withholds main-loop tip/tilt.
+    REQUIRE( app.newCallBack_m_indiP_zeroDm( zero ) == 0 );
+    CHECK( publish() == input );
     std::filesystem::remove( path );
 }
 

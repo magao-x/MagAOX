@@ -297,6 +297,9 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Every assisted-mode qualification condition and the upstream values behind it.
     pcf::IndiProperty m_indiP_qualification;
 
+    /// Operator recovery requests: re-zero the own DM channel, and return tip/tilt to the main loop.
+    pcf::IndiProperty m_indiP_zeroDm, m_indiP_releaseTT;
+
     /// Per-phase ddspc_performance element names (rmse_phase<k>, acc_phase<k>), owned for the INDI update vector.
     std::vector<std::string> m_phaseNames;
 
@@ -405,6 +408,9 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Reject mode/reset changes until output is off and its own zero has been acknowledged.
     bool removed() const;
 
+    /// Turn prediction off, which schedules removal of the own-channel contribution; called under both INDI locks.
+    void stopPrediction();
+
     /// Register operator controls without opening inputs or the auxiliary transport.
     int setupINDI();
 
@@ -501,6 +507,12 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
     /// Reset both models after confirmed command removal.
     INDI_NEWCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_reset );
+
+    /// Stop prediction and write a fresh zero to the own DM channel, even if its removal was already confirmed.
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_zeroDm );
+
+    /// Stop prediction and pass main-loop tip/tilt through at once, without waiting for the zero to be confirmed.
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_releaseTT );
 
     /// Select the active independent fit; learning follows the selection.
     INDI_NEWCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_mode );
@@ -1609,6 +1621,13 @@ inline bool loPredCtrlAcc_operational::removed() const
     return !output.m_requested && output.m_zeroConfirmed;
 }
 
+inline void loPredCtrlAcc_operational::stopPrediction()
+{
+    m_output.request( false ); // Off is always accepted and schedules removal of the DDSPC contribution.
+    m_predicting = false;
+    updateSwitchIfChanged( m_indiP_predicting, "toggle", pcf::IndiElement::Off, INDI_OK );
+}
+
 inline std::vector<loPredCtrlAcc_operational::Stage>
 loPredCtrlAcc_operational::parseExploration( const std::string &text )
 {
@@ -1646,6 +1665,16 @@ inline int loPredCtrlAcc_operational::setupINDI()
     createStandardIndiRequestSw( m_indiP_reset, "reset_model", "Reset models", "DDSPC" );
     if( registerIndiPropertyNew( m_indiP_reset, INDI_NEWCALLBACK( m_indiP_reset ) ) < 0 )
         return -1;
+    createStandardIndiRequestSw( m_indiP_zeroDm, "zero_dm", "Zero DDSPC DM channel", "DDSPC" );
+    if( registerIndiPropertyNew( m_indiP_zeroDm, INDI_NEWCALLBACK( m_indiP_zeroDm ) ) < 0 )
+    {
+        return -1;
+    }
+    createStandardIndiRequestSw( m_indiP_releaseTT, "release_tt", "Return tip/tilt to main loop", "DDSPC" );
+    if( registerIndiPropertyNew( m_indiP_releaseTT, INDI_NEWCALLBACK( m_indiP_releaseTT ) ) < 0 )
+    {
+        return -1;
+    }
     createStandardIndiSelectionSw( m_indiP_mode, "ddspc_mode", { "standard", "accel_assisted" }, "Mode", "DDSPC" );
     m_indiP_mode["standard"].setSwitchState( pcf::IndiElement::On );
     if( registerIndiPropertyNew( m_indiP_mode, INDI_NEWCALLBACK( m_indiP_mode ) ) < 0 )
@@ -2142,6 +2171,50 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_reset )( const 
     m_exploration.clear();
     resetModels();
     updateSwitchIfChanged( m_indiP_reset, "request", pcf::IndiElement::Off, INDI_OK );
+    return 0;
+}
+
+inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_zeroDm )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_zeroDm, ipRecv );
+    if( !ipRecv.find( "request" ) || ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
+    std::lock_guard<std::mutex> modelLock( m_modelMutex );
+    stopPrediction();
+
+    // A confirmed removal is written again, as at startup; this never withholds main-loop tip/tilt by itself.
+    if( !m_output.initialize() )
+    {
+        return -1;
+    }
+
+    log<text_log>( "DDSPC DM channel " + m_channel + " zero requested", logPrio::LOG_NOTICE );
+    updateSwitchIfChanged( m_indiP_zeroDm, "request", pcf::IndiElement::Off, INDI_OK );
+    return 0;
+}
+
+inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_releaseTT )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_releaseTT, ipRecv );
+    if( !ipRecv.find( "request" ) || ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
+    std::lock_guard<std::mutex> modelLock( m_modelMutex );
+    stopPrediction();
+
+    // Operator override: the zero is still retried, but the main loop takes tip/tilt back on the next WFS frame.
+    m_modalEngaged.store( false );
+    log<text_log>( std::string( "Main-loop tip/tilt returned by operator" ) +
+                       ( m_output.status().m_zeroConfirmed ? "" : " before the DDSPC zero was confirmed" ),
+                   logPrio::LOG_NOTICE );
+    updateSwitchIfChanged( m_indiP_releaseTT, "request", pcf::IndiElement::Off, INDI_OK );
     return 0;
 }
 
