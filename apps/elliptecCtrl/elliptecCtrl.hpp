@@ -37,6 +37,11 @@ namespace app
  *
  * The stage is modeled as a single 360 degree circle: positions are wrapped into [0, 360).
  *
+ * As in `zaberCtrl` and `smc100ccCtrl`, a `none` preset is prepended to the configured presets at startup. It is
+ * preset number 0, is reported whenever the stage is not within `stage.presetTolerance` of a configured preset,
+ * and selecting it does not move the stage. Configured presets are numbered from 1, including in
+ * `stage.homePreset`, where 0 (`none`) or a negative value disables the post-home move.
+ *
  * \ingroup elliptecCtrl
  */
 class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl>, public dev::telemeter<elliptecCtrl>
@@ -85,10 +90,12 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
     /// Begin a homing sequence. Caller holds `m_indiMutex`.
     int startHoming();
 
-    /// Resolve the active 0-based preset index for the current angle, or -1 if not at a preset.
+    /// Resolve the active preset index for the current angle, 0 (`none`) if not at a preset.
     float presetNumber();
 
     /// Move to a target supplied by `stdMotionStage`. Caller holds `m_indiMutex`.
+    /** Preset 0 (`none`), by number or by name, does not move the stage.
+     */
     int moveTo( float target /**< [in] preset number (m_movingState == 0) or preset position in degrees */ );
 
     /// Check whether staged telemetry records need to be forced.
@@ -209,7 +216,7 @@ class elliptecCtrl : public MagAOXApp<>, public dev::stdMotionStage<elliptecCtrl
                                         double b  /**< [in] second angle in degrees */
     );
 
-    /// Resolve the preset index matching an angle on the circle, or -1.
+    /// Resolve the preset index matching an angle on the circle, or 0 (`none`) if no configured preset matches.
     int presetIndexForPosition_( double deg /**< [in] angle in degrees */ ) const;
 
     /// Check that distinct preset positions are separable by the tolerance.
@@ -301,12 +308,18 @@ inline int elliptecCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
         return log<software_error, -1>( { __FILE__, __LINE__, "Error from stdMotionStage::loadConfig" } );
     }
 
+    if( m_presetNames.size() != m_presetPositions.size() )
+    {
+        return log<text_log, -1>( "must set a position for each preset", logPrio::LOG_CRITICAL );
+    }
+
     if( validatePresets_() < 0 )
     {
         return -1;
     }
 
-    if( m_homePreset >= static_cast<int>( std::min( m_presetPositions.size(), m_presetNames.size() ) ) )
+    // stage.homePreset is a preset number: 0 is "none" (no post-home move) and 1 is the first configured preset.
+    if( m_homePreset > static_cast<int>( m_presetNames.size() ) )
     {
         return log<text_log, -1>( "stage.homePreset is not a configured preset", logPrio::LOG_CRITICAL );
     }
@@ -340,6 +353,10 @@ inline int elliptecCtrl::appStartup()
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
+
+    // Preset 0 is "none", reported away from every configured preset, as in zaberCtrl and smc100ccCtrl.
+    m_presetNames.insert( m_presetNames.begin(), "none" );
+    m_presetPositions.insert( m_presetPositions.begin(), -1 );
 
     if( dev::stdMotionStage<elliptecCtrl>::appStartup() < 0 )
     {
@@ -447,17 +464,24 @@ inline int elliptecCtrl::moveTo( float target )
 
     if( m_movingState == 0 )
     {
-        if( m_presetPositions.empty() )
+        idx = std::min( static_cast<int>( std::lround( target ) ), static_cast<int>( m_presetPositions.size() ) - 1 );
+        if( idx < 1 )
         {
-            return -1;
+            return 0; // preset 0 is "none"
         }
 
-        idx = static_cast<int>( std::lround( target ) ) - 1;
-        idx = std::max( 0, std::min( idx, static_cast<int>( m_presetPositions.size() ) - 1 ) );
         deg = m_presetPositions[static_cast<size_t>( idx )];
     }
     else
     {
+        if( m_presetNameIndex == 0 )
+        {
+            // "none" was selected by name: nothing to move to.
+            clearPresetNameTracking();
+            m_preset_target = m_preset;
+            return 0;
+        }
+
         idx = presetIndexForPosition_( deg );
     }
 
@@ -466,9 +490,9 @@ inline int elliptecCtrl::moveTo( float target )
         return 0;
     }
 
-    if( idx >= 0 )
+    if( idx > 0 )
     {
-        m_preset_target = static_cast<float>( idx + 1 );
+        m_preset_target = static_cast<float>( idx );
     }
 
     return moveToDeg_( deg );
@@ -680,7 +704,8 @@ inline double elliptecCtrl::circularDistanceDeg_( double a, double b )
 
 inline int elliptecCtrl::presetIndexForPosition_( double deg ) const
 {
-    for( size_t i = 0; i < m_presetPositions.size(); ++i )
+    // Index 0 is "none", whose placeholder position must not match (-1 would match 359 degrees).
+    for( size_t i = 1; i < m_presetPositions.size(); ++i )
     {
         if( circularDistanceDeg_( m_presetPositions[i], deg ) <= m_presetToleranceDeg )
         {
@@ -688,7 +713,7 @@ inline int elliptecCtrl::presetIndexForPosition_( double deg ) const
         }
     }
 
-    return -1;
+    return 0;
 }
 
 inline int elliptecCtrl::validatePresets_()
@@ -714,9 +739,7 @@ inline int elliptecCtrl::validatePresets_()
 
 inline void elliptecCtrl::syncPresetState_()
 {
-    const int idx = presetIndexForPosition_( m_posDeg );
-
-    m_preset = ( idx < 0 ) ? 0 : static_cast<float>( idx + 1 );
+    m_preset = static_cast<float>( presetIndexForPosition_( m_posDeg ) );
 
     if( m_moving <= 0 )
     {
@@ -782,12 +805,12 @@ inline void elliptecCtrl::applyState_( const std::string &st )
         state( stateCodes::READY );
         m_moving = 0;
 
-        if( homed && m_homePreset >= 0 )
+        if( homed && m_homePreset > 0 )
         {
-            // The home finished: move to the configured preset (stdMotionStage presets are 1-based).
+            // The home finished: move to the configured preset (preset 0 is "none", so it does not move).
             log<text_log>( "homed; moving to preset " + m_presetNames[static_cast<size_t>( m_homePreset )] );
             m_movingState = 0;
-            moveTo( m_homePreset + 1 );
+            moveTo( m_homePreset );
         }
     }
     else
