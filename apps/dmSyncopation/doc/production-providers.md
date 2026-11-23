@@ -109,6 +109,35 @@ is an alias for `logdump --dir=/opt/MagAOX/telem --ext=.bintel`, not a separate
 reader to build. Restart the affected applications through the normal operator
 procedure after installing their instance configurations.
 
+### Woofer offload startup
+
+When `t2wOffloader` manages the woofer offload rate, set the following on
+`dmtweeter-synco` to coordinate the averaging change with the first auxiliary
+write. Use versions of `t2wOffloader` and `shmimIntegrator` that support the
+acknowledgement and leave `offloadRate` set to a positive value.
+
+```ini
+[production]
+offloadDevice=t2wOffloader
+```
+
+Synco qualifies the main clock and publishes `timing.offloadPrepareHz`.
+`t2wOffloader` requests the frame count for that future cadence and reports
+`offloadReady.frames` once `dmtweeter-avg` reports that the count and
+publication stride are active. Synco continues observing genuine main
+commands with `timing.active=0` and health reason `waiting for woofer averaging`
+until it receives the acknowledgement for the current request. At 1 kHz main,
+8 kHz combined and 250 Hz offloading, this means applying 32 frames before
+auxiliary writes begin. Offloading may briefly slow while the new count runs
+at the main cadence. If confirmation is missing when the 30-second startup
+window expires, synco disables the enable request.
+
+Disabling synco withdraws the preparation so the offloader can restore the
+main-rate count. One-step operation and the production dry run have no
+auxiliary hardware cadence to prepare.
+
+### Tested 8 kHz setup
+
 The tested 8 kHz setup uses the BMC controller's full
 [preparation / SDK / post pipeline](../../bmcCtrl/doc/sdk-worker.md#full-preparation--sdk--post-pipeline),
 with distinct isolated cores for the monitor, SDK worker, post worker, synco
