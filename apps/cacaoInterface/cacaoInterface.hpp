@@ -168,9 +168,10 @@ public:
                   const T           &val /**< [in] Value to set. */ );
 
    /// Read a string-valued FPS parameter.
-   std::string getFPSValStr( const std::string &fps /**< [in] FPS prefix. */,
-                             const std::string &param /**< [in] FPS parameter. */,
-                             bool commandReadback = false /**< [in] Use a distinct reply file and a short wait. */ );
+   std::string
+   getFPSValStr( const std::string &fps /**< [in] FPS prefix. */,
+                 const std::string &param /**< [in] FPS parameter. */,
+                 bool commandReadback = false /**< [in] Use a distinct reply file for a pending command. */ );
 
    /// Read the numeric fields of an FPS parameter.
    std::string getFPSValNum( const std::string &fps /**< [in] FPS prefix. */,
@@ -567,8 +568,7 @@ int cacaoInterface::setFPSVal( const std::string & fps,
 
 std::string cacaoInterface::getFPSValStr( const std::string &fps, const std::string &param, bool commandReadback )
 {
-    std::string replyDir = commandReadback ? m_fpsFifo.substr( 0, m_fpsFifo.find_last_of( '/' ) + 1 ) : "/dev/shm/";
-    std::string outfile  = replyDir + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
+    std::string outfile = "/dev/shm/" + m_loopName + "_out_" + fps + "-" + m_loopNumber + "." + param;
     if( commandReadback )
     {
         // A late reply to an earlier read must not acknowledge this command.
@@ -586,17 +586,16 @@ std::string cacaoInterface::getFPSValStr( const std::string &fps, const std::str
 
     int rfd = -1;
     int nr =0;
-    int attempts = commandReadback ? 50 : 500;
-    while( rfd < 0 && nr < attempts )
+    while( rfd < 0 && nr < 500 )
     {
         rfd = open(outfile.c_str(), O_RDONLY);
         ++nr;
         mx::sys::milliSleep(10);
     }
 
-    if(rfd < 0)
+    if( rfd < 0 )
     {
-        log<software_error>({__FILE__, __LINE__, "could not get an open fd on " + m_fpsFifo});
+        log<software_error>( { __FILE__, __LINE__, "could not open FPS reply " + outfile } );
         return "";
     }
 
@@ -1077,7 +1076,7 @@ void cacaoInterface::fmThreadExec( )
       { //mutex scope
           std::lock_guard<std::mutex> lock( m_indiMutex );
           loopCommand     = m_loopCommand;
-          commandReadback = m_offloadLinked || m_offloadWait != OffloadWait::idle;
+          commandReadback = m_offloadWait == OffloadWait::loopClosed || m_offloadWait == OffloadWait::loopOpen;
       }
 
       std::string ans = getFPSValStr( "mfilt", "loopON", commandReadback );
