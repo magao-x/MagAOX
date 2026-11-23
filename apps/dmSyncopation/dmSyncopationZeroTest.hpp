@@ -1108,7 +1108,7 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     }
     drainZeroTestReader( m_now() );
 
-    if( m_channelZero.pending )
+    if( m_channelZero.state == ChannelZero::State::ordinary )
     {
         return 0;
     }
@@ -1725,6 +1725,13 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
 
         if( published == 0 && m_zeroChannel.md->cnt0 == m_zeroExpected && !m_zeroChannel.md->write )
         {
+            if( m_channelZero.state == ChannelZero::State::scheduled )
+            {
+                // Retire earlier provider commitments while preserving the established primary grid.
+                ++m_generation;
+                m_channelZero.state = ChannelZero::State::triggered;
+            }
+
             while( zeroTestWait( m_now(), primary ) && m_now() <= ackDeadline )
             {
                 if( zeroTestCombined( combined ) && combined.counter != m_zeroLastCombined.counter )
@@ -2019,8 +2026,8 @@ inline void dmSyncopation::publishZeroTestStatus( int64_t now, bool force )
 
     const bool activeExpired = !m_productionEnabled && m_zeroStats.startedNs > 0 &&
                                now - m_zeroStats.startedNs >= int64_t( m_zeroDurationSec * 1e9 );
-    const bool warmExpired =
-        !m_channelZero.pending && !m_zeroStats.startedNs && m_zeroArmedAt > 0 && now - m_zeroArmedAt >= 30000000000LL;
+    const bool warmExpired = m_channelZero.state != ChannelZero::State::ordinary && !m_zeroStats.startedNs &&
+                             m_zeroArmedAt > 0 && now - m_zeroArmedAt >= 30000000000LL;
 
     if( m_enabled && ( activeExpired || warmExpired ) )
     {
@@ -2101,8 +2108,8 @@ inline void dmSyncopation::updateZeroTest( bool record )
             drainZeroTestReader( now );
             sampleZeroTestSdk( now );
 
-            if( !m_channelZero.pending && m_enabled && !m_zeroStats.startedNs && m_zeroArmedAt > 0 &&
-                now - m_zeroArmedAt >= 30000000000LL )
+            if( m_channelZero.state != ChannelZero::State::ordinary && m_enabled && !m_zeroStats.startedNs &&
+                m_zeroArmedAt > 0 && now - m_zeroArmedAt >= 30000000000LL )
             {
                 m_enabled          = false;
                 m_zeroStats.active = m_zeroStats.warming = false;

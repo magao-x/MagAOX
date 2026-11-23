@@ -712,11 +712,20 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Publication state of a pending operator clear, serialized with the scheduler cycle.
     struct ChannelZero
     {
-        bool                  pending{ false }; ///< An accepted clear suspends ordinary contribution copies.
-        std::vector<ino_t>    destinations;     ///< Numbered backing files cleared in the current attempt.
-        std::vector<uint64_t> counters;         ///< Numbered publication counters expected until the trigger.
-        uint64_t              primary{ 0 };     ///< Last main counter before a passive clear.
-        int64_t               copiedNs{ 0 };    ///< Producer-clock time after the completed zero batch.
+        /// Select the writer and track whether it has posted the trigger.
+        enum class State
+        {
+            idle,
+            ordinary,  ///< Suspend scheduler copies while the ordinary thread clears the channels.
+            scheduled, ///< Use a qualified production auxiliary slot to clear the channels.
+            triggered  ///< The production scheduler posted the clear and the ordinary thread owes an INDI reply.
+        };
+
+        State                 state{ State::idle }; ///< Current request state.
+        std::vector<ino_t>    destinations;         ///< Numbered backing files cleared in the current attempt.
+        std::vector<uint64_t> counters;             ///< Numbered publication counters expected until the trigger.
+        uint64_t              primary{ 0 };         ///< Last main counter before a passive clear.
+        int64_t               copiedNs{ 0 };        ///< Producer-clock time after the completed zero batch.
     };
 
     ChannelZero m_channelZero;                   ///< Cycle-owned clear request and acknowledgement state.
@@ -3858,7 +3867,7 @@ inline void dmSyncopation::readPrimaryCadence( int64_t observed )
 
 inline int dmSyncopation::processPrimary( int64_t observed )
 {
-    if( m_channelZero.pending )
+    if( m_channelZero.state == ChannelZero::State::ordinary )
     {
         return 0;
     }
@@ -5143,8 +5152,9 @@ inline int dmSyncopation::appLogic()
                 m_reason = m_simulationSnapshot.valid ? "simulation observing" : "simulation warming or stale";
             }
 
-            if( !m_channelZero.pending && m_productionEnabled && m_enabled && m_zeroClockCounter &&
-                m_previousCallbackEnd > 0 && m_now() - m_previousCallbackEnd > int64_t( 2e9 / m_minRate ) )
+            if( m_channelZero.state != ChannelZero::State::ordinary && m_productionEnabled && m_enabled &&
+                m_zeroClockCounter && m_previousCallbackEnd > 0 &&
+                m_now() - m_previousCallbackEnd > int64_t( 2e9 / m_minRate ) )
             {
                 ++m_generation;
                 m_zeroStats.active  = false;
@@ -5155,7 +5165,7 @@ inline int dmSyncopation::appLogic()
                 publishSchedule( 0, -1 );
                 m_reason = "production main timeout; reacquiring";
             }
-            if( !m_channelZero.pending && !zeroEngine() && m_enabled && m_lastMain &&
+            if( m_channelZero.state != ChannelZero::State::ordinary && !zeroEngine() && m_enabled && m_lastMain &&
                 m_now() - m_lastMain > int64_t( 2e9 / m_minRate ) )
             {
                 invalidate( "main timeout", Fault::primary );
@@ -5661,15 +5671,21 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_zero )( const pcf::IndiProperty &i
 
     std::lock_guard<std::mutex> control( m_channelZeroMutex );
     { //mutex scope
-        // The cycle owns all destination writes. Finish its current batch before fencing the provider schedule.
+        // The cycle owns all destination writes. Queue the request between complete scheduler cycles.
         std::lock_guard<std::mutex> cycle( m_cycleMutex );
 
-        if( !m_channelZero.pending )
+        if( m_channelZero.state == ChannelZero::State::idle )
         {
-            m_channelZero         = {};
-            m_channelZero.pending = true;
-            m_zeroStats.active    = false;
-            invalidate( "clearing synco channels" );
+            if( m_productionEnabled && m_enabled && m_zeroStats.active && scheduleSteps() > 1 )
+            {
+                m_channelZero.state = ChannelZero::State::scheduled;
+            }
+            else
+            {
+                m_channelZero.state = ChannelZero::State::ordinary;
+                m_zeroStats.active  = false;
+                invalidate( "clearing synco channels" );
+            }
         }
     }
 

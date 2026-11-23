@@ -204,15 +204,30 @@ inline void dmSyncopation::publishProductionSchedule( synco::GridTime grid, uint
 
 inline bool dmSyncopation::productionSnapshot( const synco::Request &request, int64_t now )
 {
-    const auto started = m_now();
+    const auto started  = m_now();
+    const bool clearing = m_channelZero.state == ChannelZero::State::scheduled;
+    const bool fenced =
+        m_channelZero.state == ChannelZero::State::triggered && m_record[synco::generation] != m_generation;
 
     for( auto &mapping : m_mappings )
     {
+        if( clearing && request.step > 0 )
+        {
+            std::fill( mapping.m_stage.begin(), mapping.m_stage.end(), 0.0F );
+            continue;
+        }
+
         std::copy( mapping.m_cache.begin(), mapping.m_cache.end(), mapping.m_stage.begin() );
 
         if( m_productionDryRun )
         {
             ++mapping.m_missing;
+            continue;
+        }
+
+        // Retain the applied value through step zero and discard the retired generation at the next snapshot.
+        if( clearing || fenced )
+        {
             continue;
         }
 

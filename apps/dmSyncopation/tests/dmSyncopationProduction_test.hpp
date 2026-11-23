@@ -1193,6 +1193,145 @@ TEST_CASE( "production dry run measures startup without touching live command st
     // clang-format on
 }
 
+/** \brief Clear a running 1 kHz loop's auxiliary inputs while preserving all eight scheduled DM writes.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "production clears channels at the running cadence", "[dmSyncopation][production][integration]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    const bool         waitForOffload = GENERATE( false, true );
+    ZeroClock::connect( app, streams, 4 );
+    app.m_productionEnabled     = true;
+    app.m_zeroTestEnabled       = false;
+    app.m_productionReadyLeadUs = 70;
+    app.m_zeroLateUs            = 6;
+    app.m_zeroWakeAheadUs       = 10;
+    app.m_bounds.copy           = 30000;
+    app.m_maxCadence            = 8000;
+    app.m_requested             = 0;
+
+    if( waitForOffload )
+    {
+        app.m_offloadDevice = "test-woofer-offload";
+    }
+
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+    REQUIRE( app.configureZeroTest() );
+    app.m_enabled = true;
+
+    auto &trigger  = streams.images[2];
+    auto &other    = streams.images[3];
+    auto &combined = streams.images[1];
+    std::fill_n( trigger.array.F, 9, 2.0F );
+
+    constexpr int64_t period = 1000000;
+    int64_t           main   = 1000000000;
+
+    for( ; main < 12000000000LL && !app.m_zeroStats.active && !app.m_offloadPrepareSequence; main += period )
+    {
+        ZeroClock::primary( main );
+    }
+
+    const auto offloadSequence = app.m_offloadPrepareSequence;
+
+    if( waitForOffload )
+    {
+        REQUIRE( offloadSequence > 0 );
+        REQUIRE_FALSE( app.m_zeroStats.active );
+        pcf::IndiProperty ready( pcf::IndiProperty::Number, app.m_offloadDevice, "offloadReady" );
+        ready.add( pcf::IndiElement( "epoch", app.offloadEpoch() ) );
+        ready.add( pcf::IndiElement( "sequence", offloadSequence ) );
+        ready.add( pcf::IndiElement( "frames", 32 ) );
+        REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+        ZeroClock::primary( main );
+        main += period;
+    }
+
+    REQUIRE( app.m_zeroStats.active );
+    REQUIRE( app.m_record[synco::steps] == 8 );
+    REQUIRE( app.m_zeroStats.acknowledged == 7 );
+    REQUIRE( trigger.array.F[0] == 2.0F );
+    REQUIRE( other.array.F[0] == 3.0F );
+
+    const auto generation  = app.m_generation;
+    const auto trial       = app.m_zeroTrial;
+    const auto oldCommand  = productionCommand( app, 0, synco::request( app.m_record, 0 ), 12.0F );
+    const auto firstBefore = trigger.md->cnt0;
+    const auto otherBefore = other.md->cnt0;
+    auto       request     = app.m_indiP_zero;
+    request["request"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_zero( request ) == 0 );
+    app.serviceChannelZero();
+    REQUIRE( app.m_indiP_zero.getState() == INDI_BUSY );
+    CHECK( app.m_record[synco::state] == synco::armed );
+    CHECK( app.m_generation == generation );
+
+    const bool mainContinues = GENERATE( true, false );
+
+    if( mainContinues )
+    {
+        const auto combinedBefore = combined.md->cnt0;
+        ZeroClock::posts.clear();
+        ZeroClock::primary( main );
+        app.serviceChannelZero();
+        REQUIRE( ZeroClock::posts.size() == 7 );
+        CHECK( combined.md->cnt0 == combinedBefore + 8 );
+        CHECK( trigger.md->cnt0 == firstBefore + 7 );
+        CHECK( app.m_zeroStats.acknowledged == 14 );
+        CHECK( app.m_mappings.front().m_accepted == 0 );
+        CHECK( app.m_zeroStats.active );
+        CHECK( app.m_zeroIdle );
+        CHECK( app.m_zeroTrial == trial );
+        CHECK( app.m_scheduleState == synco::armed );
+        CHECK( app.m_generation == generation + 1 );
+
+        for( int step = 1; step < 8; ++step )
+        {
+            const auto target = main + step * period / 8;
+            CHECK( ZeroClock::posts[step - 1] >= target );
+            CHECK( ZeroClock::posts[step - 1] <= target + 6000 );
+        }
+
+        ZeroClock::primary( main + period );
+        CHECK( app.m_record[synco::generation] == generation + 1 );
+        CHECK( app.m_zeroStats.acknowledged == 21 );
+        CHECK( app.m_offloadPrepareSequence == offloadSequence );
+        const auto ack = productionAck( app, 0 );
+        CHECK( synco::acknowledges( ack, oldCommand ) );
+        CHECK( ack[synco::ackStatus] == synco::discarded );
+    }
+    else
+    {
+        ZeroClock::time += 5 * period;
+        app.serviceChannelZero();
+        CHECK( trigger.md->cnt0 == firstBefore + 1 );
+        CHECK_FALSE( app.m_zeroStats.active );
+    }
+
+    CHECK( app.m_indiP_zero.getState() == INDI_OK );
+    CHECK( app.m_indiP_zero["request"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_enabled );
+    CHECK( other.md->cnt0 == otherBefore );
+
+    for( size_t pixel = 0; pixel < 9; ++pixel )
+    {
+        CHECK( trigger.array.F[pixel] == 0 );
+        CHECK( other.array.F[pixel] == 0 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_zero;
+    MagAOX::app::dmSyncopation::serviceChannelZero;
+    MagAOX::app::dmSyncopation::productionSnapshot;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
 /// Fixed and automatic scheduling qualify a clean 1 kHz grid and recover from an active 2 kHz grid.
 TEST_CASE( "production qualifies a 1 kHz primary grid", "[dmSyncopation][production][integration]" )
 {

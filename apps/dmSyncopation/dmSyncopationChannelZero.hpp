@@ -285,29 +285,51 @@ inline void dmSyncopation::serviceChannelZero()
         return;
     }
 
+    ChannelZero::State state;
     { //mutex scope
         std::unique_lock<std::mutex> lock( m_cycleMutex, std::try_to_lock );
 
-        if( !lock.owns_lock() || !m_channelZero.pending )
+        if( !lock.owns_lock() || m_channelZero.state == ChannelZero::State::idle )
         {
             return;
         }
-    }
 
-    try
-    {
-        if( !zeroDestinations() )
+        if( m_channelZero.state == ChannelZero::State::scheduled )
         {
-            return;
+            if( m_enabled && m_zeroStats.active && scheduleSteps() > 1 && m_previousCallbackEnd > 0 &&
+                m_now() - m_previousCallbackEnd <= int64_t( 2e9 / m_minRate ) )
+            {
+                return;
+            }
+
+            m_channelZero.state = ChannelZero::State::ordinary;
+            m_zeroStats.active  = false;
+            invalidate( "clearing synco channels" );
+        }
+
+        state = m_channelZero.state;
+
+        if( state == ChannelZero::State::triggered )
+        {
+            m_channelZero = {};
         }
     }
-    catch( const std::exception &error )
-    {
-        log<text_log>( std::string( "synco channel clear still pending: " ) + error.what(), logPrio::LOG_WARNING );
-        return;
-    }
 
-    { //mutex scope
+    if( state == ChannelZero::State::ordinary )
+    {
+        try
+        {
+            if( !zeroDestinations() )
+            {
+                return;
+            }
+        }
+        catch( const std::exception &error )
+        {
+            log<text_log>( std::string( "synco channel clear still pending: " ) + error.what(), logPrio::LOG_WARNING );
+            return;
+        }
+
         std::lock_guard<std::mutex> lock( m_cycleMutex );
         closeResources();
         m_nextAttach          = 0;

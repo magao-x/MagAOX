@@ -863,6 +863,25 @@ on reattachment. The trigger can complete a request with the combined counter
 unchanged, and the idle path can clear inputs with the combined stream absent.
 Live timing and recovery at the instrument remain to be qualified.
 
+### Preserve the running cadence during channel clearing
+
+The operator saw the DM write rate drop from 8 kHz when requesting Zero
+Channels with the AO loop closed and synco enabled. The clear suspended
+auxiliary triggers and reopened the production streams, which restarted the
+one-second ownership warmup. A running production scheduler now substitutes
+zeros for provider payloads at its next eligible auxiliary slot and preserves
+the existing release checks, copy budget, trigger and primary grid. Posting the
+clear retires the provider generation. The rest of the cycle uses the cleared
+cache, and the next primary advertises the new generation. If the production
+schedule stops before the clear, the ordinary live or idle path takes over.
+
+The private-stream regression checks one primary and seven auxiliary writes
+at 1 kHz during the clear, rejection of a stale provider command, and the
+explicit idle trigger when the primary stops before the scheduled clear.
+It runs with and without startup averaging confirmation and checks that a
+clear at the running cadence keeps the existing confirmation.
+The dry-run branch built and all 169 scheduler cases passed with this fix.
+
 ### Closed-loop disturbance on enable
 
 The operator now sees an enable transient at 2 kHz that the loop recovers
