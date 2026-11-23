@@ -43,6 +43,7 @@ class DMConfig:
     """
     shmim : str = xconf.field(help="Name of the DM device (specifically, the associate shmim, if different).")
     channel : int = xconf.field(help="The DM channel number.")
+    offset : int = xconf.field(default=0, help="The DM y-offset to apply to the actuators.")
 
 @xconf.config
 class pupilCorAlignConfig(BaseConfig):
@@ -129,7 +130,7 @@ class pupilCorAlign(XDevice):
 
         # Load all the calibration files
         self.actuators_shift = np.array([0.0, 0.0])
-        self.actuator_probe_pattern = make_ncpc_alignment_poke_pattern()
+        self.actuator_probe_pattern = make_ncpc_alignment_poke_pattern(self.config.dm.offset)
 
         self.pupil_targets = ['ttmperi.axis1_voltage', 'ttmperi.axis2_voltage']
         self.fwpupil_targets = ['picomotors.picopupil_pos', 'fwpupil.filter']
@@ -301,7 +302,7 @@ class pupilCorAlign(XDevice):
         current_name = self.get_current_state('fwpupil.filterName')
         filename = "reference_{:s}_image.fits".format(current_name.replace('-', '_'))
         hp.write_field(im, self.config.calibration.path + filename)
-        self._reference_state_machine.transition_to_idle()
+        #self._reference_state_machine.transition_to_idle()
 
     def handle_fwlyot_ref(self):
         '''
@@ -316,15 +317,15 @@ class pupilCorAlign(XDevice):
         hp.write_field(im, self.config.calibration.path + filename)
 
         print("transition back")
-        self._reference_state_machine.transition_to_idle()
+        #self._reference_state_machine.transition_to_idle()
 
     def handle_centroid_ref(self):
         '''
         '''
         actuator_im = self.measure_actuator()
         filename = "actuator_reference_image.fits"
-        hp.write_field(im, self.config.calibration.path + filename)
-        self._reference_state_machine.transition_to_idle()
+        hp.write_field(actuator_im, self.config.calibration.path + filename)
+        #self._reference_state_machine.transition_to_idle()
 
     def _indi_disconnected(self, status):
         """Return to idle even when INDI reconnects between loop iterations."""

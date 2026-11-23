@@ -1937,17 +1937,48 @@
       </layout>
      </item>
      <item row="1" column="1">
-      <spacer name="verticalSpacer_7">
-       <property name="orientation">
-        <enum>Qt::Vertical</enum>
-       </property>
-       <property name="sizeHint" stdset="0">
-        <size>
-         <width>20</width>
-         <height>40</height>
-        </size>
-       </property>
-      </spacer>
+      <layout class="QHBoxLayout" name="maskAlignmentLayout">
+       <item>
+        <widget class="QPushButton" name="button_measureReference">
+         <property name="text">
+          <string>Measure actuator reference</string>
+         </property>
+         <property name="toolTip">
+          <string>Measure the actuator centroid as the reference position for both mask alignments.</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="button_startPupilAlignment">
+         <property name="text">
+          <string>Start pupil alignment</string>
+         </property>
+         <property name="toolTip">
+          <string>Align the selected fwpupil mask using the existing centroid reference.</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="button_startLyotAlignment">
+         <property name="text">
+          <string>Start Lyot alignment</string>
+         </property>
+         <property name="toolTip">
+          <string>Align the selected fwlyot mask using the existing centroid reference.</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="button_stopAlignment">
+         <property name="text">
+          <string>Stop alignment</string>
+         </property>
+         <property name="toolTip">
+          <string>Return the running mask alignment to idle.</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
      </item>
     </layout>
    </item>
