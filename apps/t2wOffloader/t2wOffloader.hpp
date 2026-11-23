@@ -1010,9 +1010,6 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_offloadToggle )( const pcf::IndiPro
     {
         if( !m_offloading ) // not offloading so change
         {
-            m_woofer.setZero(); // always zero when offloading starts
-            log<text_log>( "zeroed", logPrio::LOG_NOTICE );
-
             recordLoopGain( true );
             m_offloading = true;
             recordLoopGain();
