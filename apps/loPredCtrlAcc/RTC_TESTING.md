@@ -80,7 +80,7 @@ getINDI 'loPredCtrlAcc.safety.*' 'loPredCtrlAcc.ddspc_control.*' 'loPredCtrlAcc.
 getINDI 'acc000.timingDiag.mode_code' 'acc000.timingDiag.delay_lock'   # both 1 for assisted mode
 ```
 
-Wait for `safety.zero_confirmed=true`, the consumer's receipt for the initial own-channel zero. If it stays false, check the scheduler, the channel and `safety.output_state`. If a readiness flag stays false, `ddspc_control.standard_state` and `assisted_state` give the reason. Possible reasons are an absent WFS, the upstream lock, sensor history, insufficient training or excitation, and numerical faults.
+Wait for `safety.zero_confirmed=true`, the consumer's receipt for the initial own-channel zero. If it stays false, check the scheduler, the channel and `safety.output_state`. If a readiness flag stays false, `ddspc_control.standard_state` and `assisted_state` give the reason. A refused `predict` or `learn_std` request is answered at once with its unchanged state and Alert; `predict` stays Alert until a request is accepted, which `loPredCtrlAccGUI` shows as a warning. Possible reasons are an absent WFS, the upstream lock, sensor history, insufficient training or excitation, and numerical faults.
 
 Start the disturbance and record a 60 s baseline with prediction off:
 
