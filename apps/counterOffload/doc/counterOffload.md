@@ -139,30 +139,60 @@ an older t2wOffloader, which does not store it, `handoffUs`, `pipelineUs` and `p
 
 ## Calibrate mode
 
-Calibrate mode tunes `rampStartUs`, `rampDurationUs` and `gain` to minimize the wavefront error spike that offloading
-causes, measured in the closed-loop WFS PSDs.
+Calibrate mode tunes `rampStartUs`, `rampDurationUs` and `gain` to minimize the wavefront error that offloading
+causes. It makes the offloads itself, by stepping one woofer mode, so that every measurement repeats the same
+disturbance.
 
-**Figure of merit.** The power of the averaged closed-loop PSDs (`aol1_clpsds`, from modalPSDs) within `calibrate.halfWidthHz` of
-the offload rate `t2wOffloader.fps`, summed over the first `t2wOffloader.numModes` modes. It is reported as a ratio to a
-baseline measured at gain 0, the counter-offload off. The baseline drifts (about ±16% over 8 min on the bench), so
-each ratio uses the baseline linearly interpolated in time between the baselines measured before and after it.
+**Why steps, not PSDs.** A WFS frame (500 µs) contains the whole woofer rise (about 300 µs), so a timing error shows only
+as a short error in one or two frames, while a gain error lasts several frames. In closed-loop PSD band power the timing
+effect was about 1% of the ratio, under 5–7% noise from turbulence, so `rampStartUs` and `rampDurationUs` looked flat.
 
-**Averaging.** `aol1_clpsds` is the mean of the raw PSDs over the last `psdAvgTime` (10 s), republished every 0.5 s. Its
-oldest data are `psdAvgTime + psdTime` (10.5 s) old. After each change, an evaluation therefore waits `calibrate.settleS` (11 s),
-so that only PSDs made entirely of data taken after the change are used. It then averages the next `calibrate.nAverage` (3)
-published PSDs, 0.5 s apart.
+**How a step makes offloads.** With the loop closed and offloading on, stepping a woofer mode (`wooferModes`, which
+writes a woofer channel separate from t2wOffloader's) by 2a is corrected by the tweeter loop, and t2wOffloader then
+offloads it back to the woofer as a train of shrinking offloads. Every step gives the same train. Steps alternate
+between base + a and base − a, where base is the mode's amplitude when the run starts; a run first moves to base − a so
+that every measured step is a full 2a step.
 
-These samples share most of their data. Their standard deviation (`fomStd`) shows whether the value is stable; it is
-not an independent noise estimate. If you change modalPSDs `psdAvgTime` or `psdTime`, change `calibrate.settleS` to match.
+**Figure of merit.** The per-frame modal residual is read from the circular buffer `aol1_modevalWFS_cbuff`, not the loop
+stream. For each step:
 
-**Scan.** Repeated measurements of the same parameters scatter by about 0.05–0.08 in ratio, as much as many of the
-effects being measured, so the run is built to choose values from many points, not from the single lowest one.
+1. The mean and noise of the 100 frames before the command are measured. The onset is the first frame whose squared
+   deviation from that mean, summed over the modes, exceeds its pre-step mean by `calibrate.onsetSigma` (5) standard
+   deviations.
+2. Each offload is placed at the first frame whose `atime` is at or after its woofer stamp (the `atime` t2wOffloader
+   writes on `aol0_tweeterOffload`). The first offload after the onset is lag 0.
+3. The error at each lag is the step's sign times the residual less the pre-step mean, less the response to the step
+   alone at the same time after the onset (see below).
+
+The errors are averaged over the steps, aligned on the first offload: the offloads come at a different point of the
+step in each step, and aligning on the step would smear them. The figure of merit is the energy of the average, summed
+over lags and over the first `t2wOffloader.numModes` modes, less the noise bias. `fomTiming` is the part in the first
+two frames after each offload and `fomGain` the rest. A step whose onset is not found, or whose first offload is more
+than 16 frames after its onset, is not used; a measurement needs at least half the steps (and 2).
+
+**Step-only response.** The step's own transient is not counter-offloaded and is the same at every setting. It is
+measured with t2wOffloader's `offload` toggle off, at the start of the run and again before the confirmation, and
+subtracted from every step, so a perfect counter-offload gives ratio 0. Its energy is written as a `step only` CSV row,
+and the change between the two measurements is logged as a drift check. Offloading is turned back on after each, and
+the run waits two step periods for the resulting offload train.
+
+**Ratio.** The figure of merit is reported as a ratio to a baseline measured at gain 0, the counter-offload off. Each
+ratio uses the baseline linearly interpolated in time between the baselines measured before and after it. `fomStd` is
+half the difference of the figures of merit of the two halves of the steps.
+
+**Time per point.** After a change, a point waits `calibrate.settleS` (0.2 s) for the held contribution to leak away,
+then makes `calibrate.stepCount` (10) steps `calibrate.stepPeriodS` (0.5 s) apart: about 5.2 s. The period must be
+longer than the offload train takes to settle; if the residual has not settled before the next step, increase it.
+
+**Scan.** Repeated measurements scatter, so the run is built to choose values from many points, not from the single
+lowest one.
 
 1. **Setup.** Set `leak` to `calibrate.leak` (default 0.0025 per slot, about 50 ms at 8 kHz), so that the held
    contribution stays at a few offloads.
-2. **Noise estimate.** Measure the starting parameters `calibrate.replicates` (3) times, each between baselines. Their
+2. **Step-only response.** Measure the step alone, as above.
+3. **Noise estimate.** Measure the starting parameters `calibrate.replicates` (3) times, each between baselines. Their
    scatter is the first estimate σ of the noise of one ratio.
-3. **Sweeps.** In round 1, sweep `rampStartUs`, then `gain`, then `rampDurationUs`. In later rounds (`calibrate.rounds`,
+4. **Sweeps.** In round 1, sweep `rampStartUs`, then `gain`, then `rampDurationUs`. In later rounds (`calibrate.rounds`,
    default 2), sweep `rampStartUs` and `gain` again with the updated values, since they may interact. In each sweep:
    - the grid is measured in a scrambled order (for example 0, 100, 50, 150, 25, 125, 75), so slow drift does not
      look like a trend;
@@ -173,22 +203,29 @@ effects being measured, so the run is built to choose values from many points, n
    - the parameter moves to the candidate only if the predicted improvement over its current value exceeds
      `calibrate.moveSigma` × σ × √(6 / n), with n the number of points (1.5 standard errors by default). Otherwise it keeps
      its value. A current value outside the swept range always moves.
-4. **Confirmation.** Measure the chosen parameters `calibrate.confirmPairs` (3) times, each between baselines. If their mean
+5. **Confirmation.** Remeasure the step alone, then measure the chosen parameters `calibrate.confirmPairs` (3) times, each between baselines. If their mean
    ratio is below 1, apply them and log them, with the confirmed ratio ± its standard error, at INFO as values to copy
    into the config. Otherwise restore the parameters from before the run, with a WARNING.
-5. Restore the original `leak`.
+6. Restore the original `leak`, the stepped mode's amplitude, and t2wOffloader's `offload` toggle. These are also
+   restored on an abort.
 
-With the defaults a run is 58 measurements of about 12.5 s each, so about 12 minutes. The estimate is logged when a run
+With the defaults a run is 58 measurements of about 5.2 s each, plus two step-only measurements, so about 5 minutes. The estimate is logged when a run
 starts, as a WARNING if it is over 20 minutes, for example after widening a grid.
 
 **Clipping.** A point is never skipped because the counter command clips at `maxCommand`: strong turbulence can
 saturate the counter whatever the parameters, so every point is used in the fits, the noise estimate and the
-confirmation. Clipping is recorded instead, counted from 1 s after each change (so the previous point's held
-contribution can leak away first) to the end of the point. Each measurement row of the CSV has `clippedSlots` and
+confirmation. Clipping is recorded instead, counted from the first step of each point (after `settleS`, so the previous
+point's held contribution has leaked away) to the end of the point. Each measurement row of the CSV has `clippedSlots` and
 `clipFrac` (clipped / published slots), a point that clipped is logged at INFO, and the run logs how many measurements
 clipped when it ends.
 
-**Running it.** With the loop closed, offloading, and the app enabled:
+**Running it.** With the loop closed, no turbulence (it only adds noise), and the app enabled, a run starts only if:
+
+- t2wOffloader is OPERATING with its `offload` toggle on;
+- `wooferModes` is READY and reports the `calibStep` mode in its `current_amps`;
+- the residual stream is connected, with at least `numModes` values per frame.
+
+Otherwise it logs "calibration not started" with the reason, and nothing changes.
 
 ```bash
 setINDI -s <instance>.calibrate.toggle=On
@@ -197,9 +234,10 @@ setINDI -s <instance>.calibrate.toggle=On
 Turning `calibrate` off aborts the run. The run also aborts if:
 
 - a point exceeds `calibrate.abortRatio` times the latest baseline;
-- no settled PSDs arrive within `calibrate.timeoutS` (for example the loop opened or modalPSDs stopped);
-- `t2wOffloader.fps` or `numModes` changes;
-- the app is disabled, or the PSD stream is reallocated;
+- no residual frames arrive for `calibrate.timeoutS` (5 s), or t2wOffloader's `offload` does not change within it;
+- too few step onsets or usable steps are found;
+- t2wOffloader's `offload` is turned off during a measurement, or `numModes` changes;
+- the app is disabled, or the residual stream is reallocated;
 - the gain-0 baseline cannot be measured.
 
 On an abort, the parameters chosen so far are applied, with a WARNING, if their predicted ratio is below 1. Otherwise
@@ -211,16 +249,17 @@ contribution already held leaks away within about 50 ms at the calibration leak.
 **Results.** The read-only `calibration` property shows:
 
 - `stage` (0 off, 1 initial, 2 start, 3 duration, 4 gain, 5 confirm, 6 no longer used, 7–9 the start, duration and gain
-  decisions) and `point`, the number of points measured;
+  decisions, 10 the step-only response) and `point`, the number of points measured;
 - the latest `ratio` (to the latest baseline);
 - `bestStartUs`, `bestDurationUs`, `bestGain` and `bestRatio`: the parameters chosen so far and their predicted ratio;
 - `confirmRatio`, the mean confirmed ratio, at the end.
 
-The band powers, the noise estimate σ and the standard error of the confirmed ratio are in the CSV and the INFO logs.
+The figures of merit, the noise estimate σ and the standard error of the confirmed ratio are in the CSV and the INFO logs.
 
 Each run writes `<instance>_calib_<UTC time>.csv` in `csvDir`. Measurement rows have the time, stage, parameters,
-offload rate, modes, band, `nAverage`, `fom`, `fomStd`, `fomOff` (the latest baseline), `ratio` (to it) and
-`ratioInterp` (to the interpolated baseline, the value the run uses), then `clippedSlots` and `clipFrac`. They are written when their sweep closes. After
+`stepMode` (the element), `stepAmp`, `stepCount`, `numModes`, `fom`, `fomStd`, `fomOff` (the latest baseline), `ratio`
+(to it), `ratioInterp` (to the interpolated baseline, the value the run uses), `fomTiming` and `fomGain`, then
+`clippedSlots` and `clipFrac`. They are written when their sweep closes. After
 each sweep a `fit start`, `fit duration` or `fit gain` row records the decision: the parameters with the swept one at
 the candidate, then `fitCurrent` and `fitCandidate` (the predicted ratios; `fitCurrent` is empty if the current value
 was outside the sweep), `threshold`, `moved` (1 or 0) and `sigma`.
@@ -229,9 +268,9 @@ These are set in the config:
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `psds.shmimName` | `aol1_clpsds` | Averaged closed-loop PSD stream, frequency × mode. |
-| `calibrate.freqStream` | `aol1_freq` | Frequency axis of the PSDs. |
-| `calibrate.offloadDevice` | `t2wOffloader` | Source of `fps` and `numModes`. |
+| `residual.shmimName` | `aol1_modevalWFS_cbuff` | Per-frame modal residual, from its circular buffer. |
+| `calibrate.offloadDevice` | `t2wOffloader` | Source of `numModes`; its `offload` toggle is switched for the step-only response. |
+| `calibrate.stepDevice` | `wooferModes` | dmMode device whose mode is stepped. |
 | `calibrate.csvDir` | `/home/xsup/counterOffload` | Directory for the run CSVs. |
 
 These numeric settings are optional config keys in the `[calibrate]` section. None needs to be set: leave them out
@@ -240,12 +279,13 @@ not start. All of them, and the grids, are logged at DEBUG at startup and at the
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `calibrate.halfWidthHz` | 10 | Band half width around the offload rate, Hz. |
-| `calibrate.modeMax` | 0 | Modes summed; 0 uses `t2wOffloader.numModes`. |
-| `calibrate.nAverage` | 3 | Settled PSDs averaged per evaluation, 2 to 1000. |
+| `calibrate.modeMax` | 0 | Residual modes summed; 0 uses `t2wOffloader.numModes`. |
 | `calibrate.baselineEvery` | 4 | Sweep points between baselines. |
-| `calibrate.settleS` | 11 | Wait after each change before PSDs count; must cover `psdAvgTime + psdTime`, s. |
-| `calibrate.timeoutS` | 5 | Longest wait for an evaluation's PSDs after settling, s. |
+| `calibrate.settleS` | 0.2 | Wait after each change, for the held contribution to leak away, before the steps, s. |
+| `calibrate.timeoutS` | 5 | Longest wait for residual frames or a change of the `offload` toggle, s. |
+| `calibrate.stepPeriodS` | 0.5 | Time between steps; must exceed the offload train's settling, s. |
+| `calibrate.stepCount` | 10 | Steps per measurement, alternating in sign, 2 to 1000. |
+| `calibrate.onsetSigma` | 5 | Onset threshold, in standard deviations of the pre-step residual energy. |
 | `calibrate.abortRatio` | 3 | Abort above this multiple of the baseline. |
 | `calibrate.leak` | 0.0025 | `leak` used during a run, restored afterwards; must be above 0. |
 | `calibrate.replicates` | 3 | Measurements of the starting parameters for the first noise estimate, 2 to 20. |
@@ -254,14 +294,16 @@ not start. All of them, and the grids, are logged at DEBUG at startup and at the
 | `calibrate.sigmaFloor` | 0.02 | Smallest noise estimate of the ratio used. |
 | `calibrate.rounds` | 2 | Rounds of sweeps; rounds after the first sweep only `rampStartUs` and `gain`, 1 to 5. |
 
-The scan grids are INDI properties only, not config keys. A change lasts until restart, and they cannot be changed while
-a run is in progress. A rejected value is logged as an error and the grid keeps its value.
+The scan grids and the step mode and amplitude are INDI properties only, not config keys. A change lasts until restart,
+and they cannot be changed while a run is in progress. A rejected value is logged as an error and the property keeps
+its value.
 
 | INDI property | Default | Meaning |
 | --- | --- | --- |
 | `calibStartGridUs` | 0, 150, 25 | `rampStartUs` scan; elements `min`, `max`, `step`. |
 | `calibDurationGridUs` | 200, 600, 100 | `rampDurationUs` scan; elements `min`, `max`, `step`. |
 | `calibGainGrid` | 0.3, 1.0, 0.1 | `gain` scan; elements `min`, `max`, `step`. |
+| `calibStep` | 5, 0.7 | `mode`: the `wooferModes` mode index stepped (5 is element `0005`, astig00); `amp`: the step amplitude a, > 0. |
 
 For example, to scan gains from 0.5 to 1.2:
 
