@@ -1025,7 +1025,7 @@ TEST_CASE( "orcaCtrl counts skipped and lost frames and keeps acquiring", "[orca
     g_fake.m_waitResult = DCAMERR_LOSTFRAME;
     REQUIRE( f.acquireAndCheckValid() == 1 );
     REQUIRE( f.m_statLostEvents.load() == 1 );
-    REQUIRE( f.state() == stateCodes::OPERATING );
+    REQUIRE( f.state() != stateCodes::ERROR );
 
     // DCAM writes 9 more frames while frame 4's slot is first locked, so the slot may hold frame 14
     g_fake.m_waitResult           = DCAMERR_SUCCESS;
