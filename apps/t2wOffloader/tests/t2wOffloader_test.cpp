@@ -1,7 +1,7 @@
 /** \file t2wOffloader_test.cpp
  * \brief Catch2 tests for the t2wOffloader app.
  *
- * \ingroup t2wOffloader_files
+ * \ingroup t2wOffloader_unit_test
  */
 
 #include "../../../tests/testXWC.hpp"
@@ -30,6 +30,12 @@ class t2wOffloader_test : public t2wOffloader
 
     using t2wOffloader::m_fps;
 
+    using t2wOffloader::m_indiP_navgSource;
+
+    using t2wOffloader::m_navgRequested;
+
+    using t2wOffloader::m_syncoPrepareHz;
+
     using t2wOffloader::m_syncoMainHz;
 
     using t2wOffloader::m_syncoSteps;
@@ -41,6 +47,10 @@ class t2wOffloader_test : public t2wOffloader
     using t2wOffloader::m_tModesOrtho;
 
     using t2wOffloader::m_tweeter;
+
+    using t2wOffloader::offloadPrepared;
+
+    using t2wOffloader::setCallBack_m_indiP_navgSource;
 
     /// Set up three orthonormal 4x4 tweeter modes and the per-mode offload changes.
     t2wOffloader_test()
@@ -81,12 +91,6 @@ class atimeMilkImage_test : public atimeMilkImage<float>
 
 namespace libXWCTest
 {
-
-/** \defgroup t2wOffloader_unit_test t2wOffloader Unit Tests
- * \brief Unit tests for the t2wOffloader application.
- *
- * \ingroup application_unit_test
- */
 
 /// Namespace for `t2wOffloader` unit tests.
 /** \ingroup t2wOffloader_unit_test
@@ -256,7 +260,7 @@ TEST_CASE( "t2wOffloader back-projects the offload change onto the tweeter", "[t
  */
 TEST_CASE( "t2wOffloader chooses navg for a requested offload rate", "[t2wOffloader]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
     t2wOffloader::navgForRate(0,0);
     #endif
@@ -293,7 +297,7 @@ TEST_CASE( "t2wOffloader chooses navg for a requested offload rate", "[t2wOffloa
  */
 TEST_CASE( "t2wOffloader DM rate follows dmSyncopation", "[t2wOffloader]" )
 {
-// clang-format off
+    // clang-format off
     #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
     t2wOffloader::dmRate();
     #endif
@@ -376,6 +380,43 @@ TEST_CASE( "t2wOffloader posts the tweeter offload with the woofer stamp as atim
     }
 
     std::filesystem::remove_all( dir );
+}
+
+/// Require a running averager with the target count, target stride and no pending rollback.
+/** \ingroup t2wOffloader_unit_test */
+TEST_CASE( "t2wOffloader confirms only applied block averaging", "[t2wOffloader]" )
+{
+    // clang-format off
+    #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
+    t2wOffloader::offloadPrepared;
+    t2wOffloader::setCallBack_m_indiP_navgSource;
+    #endif
+    // clang-format on
+
+    t2wOffloader_test app;
+    app.m_syncoPrepareHz   = 8000;
+    auto average           = pcf::IndiProperty( pcf::IndiProperty::Number, "test-averager", "nAverage" );
+    app.m_indiP_navgSource = average;
+    app.m_navgRequested    = 32;
+    average.add( pcf::IndiElement( "current", 32 ) );
+
+    REQUIRE( app.setCallBack_m_indiP_navgSource( average ) == 0 );
+    CHECK( app.m_navgRequested == 0 );
+    CHECK_FALSE( app.offloadPrepared( 32 ) );
+
+    average.add( pcf::IndiElement( "applied", 32 ) );
+    average.add( pcf::IndiElement( "stride", 1 ) );
+    REQUIRE( app.setCallBack_m_indiP_navgSource( average ) == 0 );
+    CHECK_FALSE( app.offloadPrepared( 32 ) );
+
+    average["stride"] = 32;
+    REQUIRE( app.setCallBack_m_indiP_navgSource( average ) == 0 );
+    CHECK( app.offloadPrepared( 32 ) );
+
+    app.m_navgRequested = 4;
+    REQUIRE( app.setCallBack_m_indiP_navgSource( average ) == 0 );
+    CHECK( app.m_navgRequested == 4 );
+    CHECK_FALSE( app.offloadPrepared( 32 ) );
 }
 
 } // namespace t2wOffloaderTest

@@ -174,7 +174,12 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
 
     uint32_t m_syncoSteps{ 0 }; ///< dmSyncopation steps actually running, from its timing.active.  0 when inactive.
 
-    uint32_t m_navgRequested{ 0 }; ///< navg last sent to the averager and not yet reported back.  0 if none.
+    uint32_t m_navgRequested{ 0 };        ///< navg last sent to the averager and not yet reported back.  0 if none.
+    double   m_navgApplied{ 0 };          ///< Frame count active in the averager's running generation.
+    double   m_navgStride{ 0 };           ///< Frames between publications in the active averaging generation.
+    double   m_syncoPrepareHz{ 0 };       ///< Future DM cadence to stage, or zero when no preparation is requested.
+    double   m_syncoOffloadEpoch{ 0 };    ///< Restart identity of the pending preparation.
+    double   m_syncoOffloadSequence{ 0 }; ///< Request identity within the synco instance.
 
     /// Requested offload rate in Hz, kept by setting the averager's navg.  0 = unmanaged.
     /** Set only through INDI (offloadRate), so the config stays compatible with versions without this feature.
@@ -246,6 +251,9 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
      * count while it is running.
      */
     int updateFPS();
+
+    /// Check that the averager is running with the requested window and cadence.
+    bool offloadPrepared( uint32_t navg /**< [in] Required frame count and publication stride. */ ) const;
 
     /// The DM command rate feeding the tweeter averager, in Hz.
     float dmRate() const;
@@ -336,6 +344,8 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
 
     pcf::IndiProperty m_indiP_syncoSource; ///< Property monitoring the timing of m_syncoSource.
     INDI_SETCALLBACK_DECL( t2wOffloader, m_indiP_syncoSource );
+
+    pcf::IndiProperty m_indiP_offloadReady; ///< Synco preparation identity and applied averaging confirmation.
 
     pcf::IndiProperty m_indiP_fps; ///< Read-only property reporting the effective offload rate.
 
@@ -630,6 +640,22 @@ inline int t2wOffloader::appStartup()
     m_indiP_navgTarget.setName( "nAverage" );
     m_indiP_navgTarget.add( pcf::IndiElement( "target" ) );
 
+    if( createROIndiNumber( m_indiP_offloadReady, "offloadReady" ) < 0 )
+    {
+        return -1;
+    }
+
+    for( const auto *name : { "epoch", "sequence", "frames" } )
+    {
+        m_indiP_offloadReady.add( pcf::IndiElement( name ) );
+        m_indiP_offloadReady[name] = 0.0;
+    }
+
+    if( registerIndiPropertyReadOnly( m_indiP_offloadReady ) < 0 )
+    {
+        return -1;
+    }
+
     createROIndiNumber( m_indiP_fps, "fps" );
     m_indiP_fps.add( pcf::IndiElement( "current" ) );
     if( registerIndiPropertyReadOnly( m_indiP_fps ) < 0 )
@@ -707,10 +733,20 @@ inline int t2wOffloader::updateFPS()
 
     updateIfChanged( m_indiP_fps, "current", m_effFPS );
 
-    // Keep the offload rate constant by requesting the matching navg from the averager.
-    uint32_t navg = navgForRate( dmRate(), m_offloadRate );
+    const auto targetRate = m_syncoPrepareHz > 0 ? m_syncoPrepareHz : dmRate();
+    const auto navg       = navgForRate( targetRate, m_offloadRate );
+    const bool ready      = offloadPrepared( navg );
 
-    if( navg > 0 && navg != m_navg && navg != m_navgRequested )
+    if( m_indiP_offloadReady.find( "frames" ) )
+    {
+        updateIfChanged<double>( m_indiP_offloadReady,
+                                 { "epoch", "sequence", "frames" },
+                                 { m_syncoOffloadEpoch, m_syncoOffloadSequence, ready ? double( navg ) : 0.0 },
+                                 ready ? INDI_OK : INDI_IDLE );
+    }
+
+    // Keep only one request in flight. A pending rollback must be acknowledged before rearming synco.
+    if( navg > 0 && navg != m_navg && m_navgRequested == 0 )
     {
         if( sendNewProperty( m_indiP_navgTarget, "target", navg ) == 0 )
         {
@@ -719,12 +755,18 @@ inline int t2wOffloader::updateFPS()
                                         m_navgSource,
                                         navg,
                                         m_offloadRate,
-                                        dmRate() ),
+                                        targetRate ),
                            logPrio::LOG_NOTICE );
         }
     }
 
     return 0;
+}
+
+inline bool t2wOffloader::offloadPrepared( uint32_t navg ) const
+{
+    return m_syncoPrepareHz > 0 && navg > 0 && navg == m_navg && navg == m_navgApplied && navg == m_navgStride &&
+           m_navgRequested == 0;
 }
 
 inline float t2wOffloader::dmRate() const
@@ -1299,12 +1341,27 @@ INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_navgSource )( const pcf::IndiProper
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    realT navg = ipRecv["current"].get<float>();
+    const auto navg    = ipRecv["current"].get<double>();
+    const auto applied = ipRecv.find( "applied" ) ? ipRecv["applied"].get<double>() : 0.0;
+    const auto stride  = ipRecv.find( "stride" ) ? ipRecv["stride"].get<double>() : 0.0;
 
-    if( navg != m_navg )
+    if( !mx::math::isFinite( navg ) || navg < 1 || navg > std::numeric_limits<uint32_t>::max() ||
+        std::floor( navg ) != navg )
     {
-        m_navg          = navg;
-        m_navgRequested = 0; // the averager has reported back, so a different value is re-requested
+        return 0;
+    }
+
+    if( navg != m_navg || applied != m_navgApplied || stride != m_navgStride || navg == m_navgRequested )
+    {
+        m_navg        = static_cast<uint32_t>( navg );
+        m_navgApplied = applied;
+        m_navgStride  = stride;
+
+        if( navg == m_navgRequested )
+        {
+            m_navgRequested = 0;
+        }
+
         updateFPS();
     }
 
@@ -1322,13 +1379,25 @@ INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_syncoSource )( const pcf::IndiPrope
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    float    mainHz = ipRecv["mainHz"].get<float>();
-    uint32_t steps  = static_cast<uint32_t>( std::max( 0.0f, ipRecv["active"].get<float>() ) );
+    float      mainHz   = ipRecv["mainHz"].get<float>();
+    uint32_t   steps    = static_cast<uint32_t>( std::max( 0.0f, ipRecv["active"].get<float>() ) );
+    const auto rate     = ipRecv.find( "offloadPrepareHz" ) ? ipRecv["offloadPrepareHz"].get<double>() : 0.0;
+    const auto epoch    = ipRecv.find( "offloadEpoch" ) ? ipRecv["offloadEpoch"].get<double>() : 0.0;
+    const auto sequence = ipRecv.find( "offloadSequence" ) ? ipRecv["offloadSequence"].get<double>() : 0.0;
+    const bool prepare  = mx::math::isFinite( rate ) && rate > 0 && mx::math::isFinite( epoch ) && epoch > 0 &&
+                         mx::math::isFinite( sequence ) && sequence > 0;
+    const auto prepareHz       = prepare ? rate : 0.0;
+    const auto prepareEpoch    = prepare ? epoch : 0.0;
+    const auto prepareSequence = prepare ? sequence : 0.0;
 
-    if( steps != m_syncoSteps || ( steps > 0 && mainHz != m_syncoMainHz ) )
+    if( steps != m_syncoSteps || ( steps > 0 && mainHz != m_syncoMainHz ) || prepareHz != m_syncoPrepareHz ||
+        prepareEpoch != m_syncoOffloadEpoch || prepareSequence != m_syncoOffloadSequence )
     {
-        m_syncoSteps  = steps;
-        m_syncoMainHz = mainHz;
+        m_syncoSteps           = steps;
+        m_syncoMainHz          = mainHz;
+        m_syncoPrepareHz       = prepareHz;
+        m_syncoOffloadEpoch    = prepareEpoch;
+        m_syncoOffloadSequence = prepareSequence;
         updateFPS();
     }
 
@@ -1350,8 +1419,7 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_offloadRate )( const pcf::IndiPrope
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    m_offloadRate   = target;
-    m_navgRequested = 0;
+    m_offloadRate = target;
 
     updateIfChanged( m_indiP_offloadRate, "current", m_offloadRate );
     updateIfChanged( m_indiP_offloadRate, "target", m_offloadRate );
