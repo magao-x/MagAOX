@@ -277,16 +277,31 @@ class orcaCtrl : public MagAOXApp<>,
     /// Number of frames lost to DCAM ring-buffer overruns since the last reconfigure.
     std::atomic<uint64_t> m_statDropped{ 0 };
 
-    /// Number of published frames whose framestamp didn't match the expected frame number.
+    /// Number of camera frames skipped since the last reconfigure: read out by the camera but never
+    /// transferred to the DCAM ring buffer, counted from framestamp gaps (see orcaFramestampSkipped()).
+    std::atomic<uint64_t> m_statSkipped{ 0 };
+
+    /// Number of DCAMERR_LOSTFRAME or DCAMERR_MISSINGFRAME_TROUBLE results from dcamwait_start() since the
+    /// last reconfigure.
+    std::atomic<uint64_t> m_statLostEvents{ 0 };
+
+    /// Number of locked frames whose framestamp advanced by less than the frame number, or whose cached
+    /// ring-slot address moved, since the last reconfigure.
     std::atomic<uint64_t> m_statStampErrors{ 0 };
 
     /// Dropped-frame count already reported in the log, so appLogic() only logs new drops.
     uint64_t m_statDroppedLogged{ 0 };
 
+    /// Skipped-frame count already reported in the log, so appLogic() only logs new skips.
+    uint64_t m_statSkippedLogged{ 0 };
+
+    /// Lost-frame event count already reported in the log, so appLogic() only logs new events.
+    uint64_t m_statLostEventsLogged{ 0 };
+
     /// Framestamp-error count already reported in the log, so appLogic() only logs new errors.
     uint64_t m_statStampErrorsLogged{ 0 };
 
-    /// Time of the last dropped-frame or framestamp warning [s, CLOCK_MONOTONIC], to rate-limit them.
+    /// Time of the last frame-statistics warning [s, CLOCK_MONOTONIC], to rate-limit them.
     double m_lastStatWarningTime{ 0 };
 
     /// Frame number at which to next verify the cached frame pointer and framestamp with dcambuf_lockframe().
@@ -769,12 +784,18 @@ class orcaCtrl : public MagAOXApp<>,
      * event. If the backlog grows beyond the ring buffer, the overwritten frames are skipped and counted
      * in m_statDropped. Each ring slot is locked with dcambuf_lockframe() (about 1 ms) only the first time
      * it is used; after that its cached address in m_framePtrs is read without a DCAM call. About once a
-     * second a frame is locked again to verify the cached address and the framestamp; mismatches are
-     * counted in m_statStampErrors. Acquisition times come from the host clock.
+     * second a frame is locked again to verify the cached address and the framestamp.
+     *
+     * After each lock the transfer count is refreshed; a frame that DCAM may have overwritten during the
+     * lock is not published and is counted in m_statDropped. Framestamp gaps between locked frames are
+     * camera frames that never reached the ring buffer and are counted in m_statSkipped; a framestamp
+     * that advanced too little or a moved slot address is counted in m_statStampErrors. A
+     * DCAMERR_LOSTFRAME or DCAMERR_MISSINGFRAME_TROUBLE wait result is counted in m_statLostEvents and
+     * capture continues. Acquisition times come from the host clock.
      *
      * \returns 0 when a frame is ready
-     * \returns 1 on timeout, abort or capture stopped, so the framegrabber can check for reconfigure or
-     *          power off
+     * \returns 1 on timeout, abort, lost frames, an overwritten frame or capture stopped, so the
+     *          framegrabber can check for reconfigure or power off
      * \returns -1 on error
      */
     int acquireAndCheckValid();
@@ -804,8 +825,10 @@ class orcaCtrl : public MagAOXApp<>,
 
     /// Read-only INDI property `acq_stats` publishing acquisition statistics since the last reconfigure.
     /** Elements: `frames` (published), `frames_per_wait` (frames published per frame-ready wait),
-     * `dropped` (lost to ring-buffer overrun), `stamp_errors` (framestamp mismatches; only checked with
-     * DCAM-owned buffers) and `buffer_frames` (DCAM ring-buffer size).
+     * `dropped` (transferred but overwritten in the ring buffer before publishing), `skipped` (read out by
+     * the camera but never transferred, from framestamp gaps), `lost_events` (DCAM lost-frame wait
+     * results), `stamp_errors` (framestamp or slot-address mismatches) and `buffer_frames` (DCAM
+     * ring-buffer size).
      */
     pcf::IndiProperty m_indiP_acqStats;
 
@@ -965,6 +988,10 @@ inline int orcaCtrl::appStartup()
                                     "frames per frame-ready wait" );
     indi::addNumberElement<double>(
         m_indiP_acqStats, "dropped", 0.0, std::numeric_limits<double>::max(), 1.0, "%0.0f", "frames dropped" );
+    indi::addNumberElement<double>(
+        m_indiP_acqStats, "skipped", 0.0, std::numeric_limits<double>::max(), 1.0, "%0.0f", "frames skipped" );
+    indi::addNumberElement<double>(
+        m_indiP_acqStats, "lost_events", 0.0, std::numeric_limits<double>::max(), 1.0, "%0.0f", "lost-frame events" );
     indi::addNumberElement<double>(
         m_indiP_acqStats, "stamp_errors", 0.0, std::numeric_limits<double>::max(), 1.0, "%0.0f", "framestamp errors" );
     indi::addNumberElement<double>( m_indiP_acqStats,
@@ -1126,19 +1153,21 @@ inline int orcaCtrl::appLogic()
             return 0;
         }
 
-        // Publish acquisition statistics, and log any new dropped frames or framestamp errors.
+        // Publish acquisition statistics, and log any new skipped or dropped frames or framestamp errors.
         const uint64_t waits       = m_statWaits;
         const uint64_t frames      = m_statFrames;
         const uint64_t dropped     = m_statDropped;
+        const uint64_t skipped     = m_statSkipped;
+        const uint64_t lostEvents  = m_statLostEvents;
         const uint64_t stampErrors = m_statStampErrors;
 
-        if( dropped < m_statDroppedLogged ) // counters were reset by a reconfigure
+        // A count below the logged count means the counters were reset by a reconfigure
+        if( dropped < m_statDroppedLogged || skipped < m_statSkippedLogged || lostEvents < m_statLostEventsLogged ||
+            stampErrors < m_statStampErrorsLogged )
         {
-            m_statDroppedLogged = 0;
-        }
-
-        if( stampErrors < m_statStampErrorsLogged )
-        {
+            m_statDroppedLogged     = 0;
+            m_statSkippedLogged     = 0;
+            m_statLostEventsLogged  = 0;
             m_statStampErrorsLogged = 0;
         }
 
@@ -1147,17 +1176,25 @@ inline int orcaCtrl::appLogic()
         const double tNow = monoNow.tv_sec + 1.0e-9 * monoNow.tv_nsec;
 
         // At most one warning every 10 s
-        if( ( dropped > m_statDroppedLogged || stampErrors > m_statStampErrorsLogged ) &&
+        if( ( skipped > m_statSkippedLogged || lostEvents > m_statLostEventsLogged || dropped > m_statDroppedLogged ||
+              stampErrors > m_statStampErrorsLogged ) &&
             tNow - m_lastStatWarningTime >= 10.0 )
         {
-            log<text_log>( std::to_string( dropped - m_statDroppedLogged ) +
-                               " frames dropped (DCAM ring buffer overrun) and " +
+            log<text_log>( "num frames skipped: " + std::to_string( skipped - m_statSkippedLogged ) +
+                               " (camera frames not transferred), lost-frame events: " +
+                               std::to_string( lostEvents - m_statLostEventsLogged ) +
+                               ", dropped: " + std::to_string( dropped - m_statDroppedLogged ) +
+                               " (ring buffer overrun), mapping errors: " +
                                std::to_string( stampErrors - m_statStampErrorsLogged ) +
-                               " frame-mapping errors since the last warning (totals since reconfigure: " +
-                               std::to_string( dropped ) + " dropped, " + std::to_string( stampErrors ) + " errors)",
+                               " since the last warning (totals since reconfigure: " + std::to_string( skipped ) +
+                               " skipped, " + std::to_string( lostEvents ) + " lost-frame events, " +
+                               std::to_string( dropped ) + " dropped, " + std::to_string( stampErrors ) +
+                               " errors, " + std::to_string( frames ) + " published)",
                            logPrio::LOG_WARNING );
 
             m_statDroppedLogged     = dropped;
+            m_statSkippedLogged     = skipped;
+            m_statLostEventsLogged  = lostEvents;
             m_statStampErrorsLogged = stampErrors;
             m_lastStatWarningTime   = tNow;
         }
@@ -1165,6 +1202,8 @@ inline int orcaCtrl::appLogic()
         updateIfChanged( m_indiP_acqStats, "frames", static_cast<double>( frames ) );
         updateIfChanged( m_indiP_acqStats, "frames_per_wait", waits > 0 ? static_cast<double>( frames ) / waits : 0.0 );
         updateIfChanged( m_indiP_acqStats, "dropped", static_cast<double>( dropped ) );
+        updateIfChanged( m_indiP_acqStats, "skipped", static_cast<double>( skipped ) );
+        updateIfChanged( m_indiP_acqStats, "lost_events", static_cast<double>( lostEvents ) );
         updateIfChanged( m_indiP_acqStats, "stamp_errors", static_cast<double>( stampErrors ) );
         updateIfChanged( m_indiP_acqStats, "buffer_frames", static_cast<double>( m_frameCount ) );
 
@@ -2482,6 +2521,8 @@ inline int orcaCtrl::configureAcquisition()
     m_statWaits         = 0;
     m_statFrames        = 0;
     m_statDropped       = 0;
+    m_statSkipped       = 0;
+    m_statLostEvents    = 0;
     m_statStampErrors   = 0;
 
     error = dcamcap_start( m_cameraHandle, DCAMCAP_START_SEQUENCE );
@@ -2586,6 +2627,14 @@ inline int orcaCtrl::acquireAndCheckValid()
                 return 1; // This sends it back to framegrabber to check for reconfig, power-off, etc.
             }
 
+            // The camera or driver lost frames before they reached the ring buffer. Capture continues;
+            // the number lost is counted from the framestamps, and appLogic() restarts capture if it stopped.
+            if( error == DCAMERR_LOSTFRAME || error == DCAMERR_MISSINGFRAME_TROUBLE )
+            {
+                ++m_statLostEvents;
+                return 1;
+            }
+
             if( failed( error ) )
             {
                 log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
@@ -2655,14 +2704,6 @@ inline int orcaCtrl::acquireAndCheckValid()
             return 1;
         }
 
-        // The framestamp must advance by exactly the number of frames since the last one locked, and a
-        // cached slot address must not have moved.
-        if( m_lastVerifyFrame >= 0 &&
-            !orcaFramestampAdvanceOk( m_lastVerifyStamp, frame.framestamp, sel.frame - m_lastVerifyFrame ) )
-        {
-            ++m_statStampErrors;
-        }
-
         if( cached != nullptr && cached != frame.buf )
         {
             ++m_statStampErrors;
@@ -2670,12 +2711,44 @@ inline int orcaCtrl::acquireAndCheckValid()
 
         m_framePtrs[sel.ringIndex] = frame.buf;
 
+        // The lock can take about 1 ms. If DCAM may have overwritten the slot meanwhile, its contents and
+        // framestamp belong to a later frame, so don't publish it or use its framestamp.
+        if( updateTransferInfo() < 0 )
+        {
+            return -1;
+        }
+
+        if( m_framesTransferred - sel.frame > m_frameCount - c_ringMargin )
+        {
+            ++m_statDropped;
+            return 1;
+        }
+
+        // The framestamp advances by the frame-number difference plus any camera frames that never reached
+        // the ring buffer. An advance that is too small means a frame-mapping error. The 16-bit comparison
+        // limits the interval between checks to 16384 frames.
+        if( m_lastVerifyFrame >= 0 )
+        {
+            const int32_t skipped =
+                orcaFramestampSkipped( m_lastVerifyStamp, frame.framestamp, sel.frame - m_lastVerifyFrame );
+
+            if( skipped > 0 )
+            {
+                m_statSkipped += skipped;
+            }
+            else if( skipped < 0 )
+            {
+                ++m_statStampErrors;
+            }
+        }
+
         m_lastVerifyFrame = sel.frame;
         m_lastVerifyStamp = frame.framestamp;
 
         if( cached != nullptr ) // a verification, not a first lock of this slot
         {
-            m_nextVerifyFrame = sel.frame + std::max<int64_t>( 1, static_cast<int64_t>( m_FrameRateCalculation ) );
+            m_nextVerifyFrame =
+                sel.frame + std::clamp<int64_t>( static_cast<int64_t>( m_FrameRateCalculation ), 1, 16384 );
         }
 
         m_currentFrame = frame;

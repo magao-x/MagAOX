@@ -576,3 +576,60 @@ no errors, 1024×1024 at 120.4 Hz).
     so the check used a plain `-O0` build.
 - Not changed (out of scope): `apps/cred2Ctrl/tests/cred2Utils_test.cpp` uses the same `*(T *)nullptr`
   pattern in its Doxygen reference blocks.
+
+### Unstable readout and frame skips on camscc (2026-11-23)
+
+The user reported unstable readout on `camscc` (which runs on another machine) with frames apparently
+skipped, while `camscc.acq_stats.dropped` stayed at 0. They asked for a "num frames skipped" message in
+the INDI log, like the per-frame `std::cerr` "Skipped frame(s)!" message removed in step 2.
+
+Diagnosis, from `camscc_20261115123443932659433.binlog` (build `dc780bc9`, read with `strings`/`xxd`,
+since `logdump` isn't built on the workstation):
+
+- Capture ran at 256×256 (10-frame ring) from 15:24 to 16:45:55 UTC on 2026-11-15. Then
+  `dcamwait_start()` returned **`DCAMERR_LOSTFRAME`** (`0x80000301`, "frame data is lost"), logged as
+  `software_error` "Lost Frame detected!" at `orcaCtrl.hpp:2258`. `acquireAndCheckValid()` treated
+  every wait error except timeout and abort as fatal, so the app went to ERROR and the stream stopped
+  until it recovered.
+- **Why `dropped` was 0:** it counts only DCAM ring-buffer overruns (orcaCtrl too slow). Frames the
+  camera or driver loses never enter DCAM's `nFrameCount`, so they can't appear in `dropped`. They
+  show only as a framestamp gap, which was checked about once a second, counted as a single
+  `stamp_errors`, and logged as a "frame-mapping error".
+- The removed `std::cerr` check compared consecutive camera timestamps, so it did catch these frames.
+  The framestamp gives the exact count instead.
+
+Changes:
+
+- `orcaFramestampSkipped()` (`orcaUtils.hpp`) returns the framestamp advance minus the frame-number
+  advance, modulo 2^16, as a signed count. `orcaFramestampAdvanceOk()` uses it.
+- `acquireAndCheckValid()`:
+  - `DCAMERR_LOSTFRAME` and `DCAMERR_MISSINGFRAME_TROUBLE` from `dcamwait_start()` are counted in
+    `m_statLostEvents`, and the call returns 1 instead of setting ERROR. If DCAM stopped capture,
+    `getAcquisitionState()` restarts it as before ("acquisition stopped. restarting").
+  - At every `dcambuf_lockframe()` (first use of a slot, and the roughly 1 Hz verification), a
+    positive framestamp gap is added to `m_statSkipped`. A negative one is still a `stamp_errors`.
+  - After each lock, `dcamcap_transferinfo()` is refreshed. If the frame may have been overwritten
+    during the roughly 1 ms lock, it is counted as dropped and not published, and its framestamp isn't
+    used. This fixes the round 2d first-pass glitch, which would otherwise show up as false skips.
+  - The verification interval is capped at 16,384 frames so the 16-bit comparison stays unambiguous.
+- `acq_stats` gains `skipped` and `lost_events`.
+- The appLogic warning (still at most every 10 s) now begins `num frames skipped: N`, followed by the
+  lost-frame events, drops and mapping errors since the last warning, and the totals since the last
+  reconfigure.
+- Tests: the `orcaFramestampSkipped()` cases in `orcaUtils_test.cpp` pass locally with GCC 11
+  (**82 assertions in 6 test cases**). A new `orcaCtrl_test.cpp` case drives `acquireAndCheckValid()`
+  through a scripted fake ring: in-order publishing, a 5-frame camera skip, `DCAMERR_LOSTFRAME`
+  without ERROR, an overwrite during a first lock, and the appLogic message and INDI values. The fake
+  DCAM gained a ring buffer with framestamps and a configurable wait result, and the test stub gained
+  the two error codes. `orcaCtrl_test` needs mxlib and libMagAOX, so it hasn't been built yet; build it
+  on a MagAO-X build machine. clang-format isn't installed on the workstation either.
+
+Still open:
+
+- **Why the camera or driver loses frames.** 256×256 with a 10-frame ring means the camera rate was
+  under about 100 Hz, so orcaCtrl falling behind is unlikely. Possible causes are the CoaXPress link
+  or frame-grabber DMA, or DCAM's normal-priority worker thread being starved on that host (E3). The
+  new `skipped` and `lost_events` counters, together with `fg_timing`, are the data to collect: does
+  `skipped` grow steadily, or in bursts that match `lost_events`?
+- If a lost frame **is** counted in `nFrameCount` with stale slot data (not expected), it would show as
+  a negative gap, i.e. `stamp_errors`, rather than `skipped`.

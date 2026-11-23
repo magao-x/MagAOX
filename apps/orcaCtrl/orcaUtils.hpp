@@ -3,8 +3,6 @@
  *
  * These helpers have no DCAM dependency so they can be unit tested without the camera SDK.
  *
- * \author Joshua Liberman (jliberman54@gmail.com)
- *
  * \ingroup orcaCtrl_files
  */
 
@@ -78,10 +76,33 @@ inline int orcaSelectFrame( orcaFrameSelection &sel,               /**< [out] th
     return 0;
 }
 
-/// Check that a DCAM framestamp advanced by the expected number of frames.
-/** The comparison is modulo 2^16. On the ORCA-Quest2 the framestamp behaves as a 16-bit counter:
+/// Number of camera frames skipped between two DCAM frames, from their framestamps.
+/** The camera numbers every frame it reads out with its framestamp, while orcaCtrl's frame numbers count
+ * only the frames DCAM transferred. Frames the camera or driver lost before reaching the DCAM ring buffer
+ * (e.g. with DCAMERR_LOSTFRAME) make the framestamp advance by more than the frame number.
+ *
+ * The comparison is modulo 2^16. On the ORCA-Quest2 the framestamp behaves as a 16-bit counter:
  * hardware tests (agents/plans/2026-10/orcaCtrl-latency-new.md) showed about one mismatch per 65,536 frames
- * when compared as a full 32-bit value. Comparing the low 16 bits also works for a 32-bit counter.
+ * when compared as a full 32-bit value. Comparing the low 16 bits also works for a 32-bit counter. The
+ * result is therefore only meaningful if the true difference is within +/-32767 frames.
+ *
+ * \returns the framestamp advance minus `frames`: 0 if no frames were skipped, > 0 the number of frames
+ *          skipped, < 0 if the framestamp advanced by less than the frame number (a frame-mapping error)
+ *
+ * \ingroup orcaCtrl
+ */
+inline int32_t orcaFramestampSkipped( int32_t lastStamp, /**< [in] framestamp of the earlier frame */
+                                      int32_t stamp,     /**< [in] framestamp of the later frame */
+                                      int64_t frames     /**< [in] frame-number difference between them */
+)
+{
+    const uint32_t stampDelta = static_cast<uint32_t>( stamp ) - static_cast<uint32_t>( lastStamp );
+
+    return static_cast<int16_t>( static_cast<uint16_t>( stampDelta - static_cast<uint64_t>( frames ) ) );
+}
+
+/// Check that a DCAM framestamp advanced by the expected number of frames.
+/** See orcaFramestampSkipped() for the 16-bit comparison.
  *
  * \returns true if the framestamp advanced by `frames`, modulo 2^16
  * \returns false otherwise
@@ -93,9 +114,7 @@ inline bool orcaFramestampAdvanceOk( int32_t lastStamp, /**< [in] framestamp of 
                                      int64_t frames     /**< [in] frame-number difference between them */
 )
 {
-    const uint32_t stampDelta = static_cast<uint32_t>( stamp ) - static_cast<uint32_t>( lastStamp );
-
-    return ( stampDelta & 0xFFFFu ) == ( static_cast<uint64_t>( frames ) & 0xFFFFu );
+    return orcaFramestampSkipped( lastStamp, stamp, frames ) == 0;
 }
 
 /// Number of DCAM ring-buffer frames to allocate.
