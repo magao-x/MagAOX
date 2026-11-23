@@ -998,6 +998,7 @@ TEST_CASE( "orcaCtrl counts skipped and lost frames and keeps acquiring", "[orca
     // clang-format on
 
     Fixture f;
+    f.driver(); // updateIfChanged() only sets property values with an INDI driver attached
     f.start( 1 );
     REQUIRE( f.loop() == 0 );
     REQUIRE( f.configureAcquisition() == 0 );
