@@ -64,6 +64,10 @@ struct Fake
     /// If positive, dcambuf_lockframe sets m_transferred to this, as if the camera kept writing during the lock.
     int32 m_transferredAfterLock{ 0 };
 
+    /// The single image buffer dcambuf_lockframe returns; like the real DCAM, it only holds the frame locked
+    /// by the latest call. Its one "pixel" is that frame's framestamp.
+    int32 m_lockBuffer{ -1 };
+
     /// Call counts by function name.
     std::map<std::string, unsigned> m_calls;
 };
@@ -244,12 +248,13 @@ extern "C"
             return DCAMERR_TIMEOUT;
         }
 
-        // The newest frame number held in this slot, and a distinct non-null address per slot
+        // The newest frame number held in this slot, copied into the one lock buffer
         const int32 newest = f.m_transferred - 1;
         const int32 frame  = newest - ( ( newest - pFrame->iFrame ) % f.m_ringSize + f.m_ringSize ) % f.m_ringSize;
 
-        pFrame->buf        = reinterpret_cast<void *>( 0x10000 + 0x100 * static_cast<intptr_t>( pFrame->iFrame ) );
         pFrame->framestamp = frame + f.m_stampOffset;
+        f.m_lockBuffer     = pFrame->framestamp;
+        pFrame->buf        = &f.m_lockBuffer;
 
         if( f.m_transferredAfterLock > 0 )
         {
@@ -1055,6 +1060,44 @@ TEST_CASE( "orcaCtrl counts skipped and lost frames and keeps acquiring", "[orca
 
     REQUIRE( f.loop() == 0 );
     REQUIRE( f.count( "num frames skipped" ) == 1 );
+    REQUIRE( f.errors() == 0 );
+}
+
+/// Each published frame carries its own image data, not a stale copy of an earlier one.
+/** DCAM's dcambuf_lockframe() address only holds the frame locked by that call. Build 690b40c1 cached it
+ * per ring slot and locked again only about once a second, so camscc at 12.5 Hz published one image under
+ * about 12 consecutive frame counts and DM +/- measurements came out identical
+ * (agents/plans/2026-10/orcaCtrl-latency-new.md, 2026-11-23).
+ *
+ * \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl publishes fresh image data for every frame", "[orcaCtrl][frames]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaCtrl::acquireAndCheckValid();
+    #endif
+    // clang-format on
+
+    Fixture f;
+    g_fake.m_props[DCAM_IDPROP_INTERNALFRAMERATE] = 12.5;
+    f.start( 1 );
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE( g_fake.m_ringSize == 10 );
+
+    // Three passes through the ring, one new frame at a time
+    for( int32 n = 0; n < 30; ++n )
+    {
+        g_fake.m_transferred = n + 1;
+        REQUIRE( f.acquireAndCheckValid() == 0 );
+        REQUIRE( *static_cast<int32 *>( f.m_currentFrame.buf ) == n );
+    }
+
+    REQUIRE( g_fake.m_calls["dcambuf_lockframe"] == 30 );
+    REQUIRE( f.m_statFrames.load() == 30 );
+    REQUIRE( f.m_statSkipped.load() == 0 );
+    REQUIRE( f.m_statStampErrors.load() == 0 );
     REQUIRE( f.errors() == 0 );
 }
 
