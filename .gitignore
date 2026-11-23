@@ -2,6 +2,7 @@
 *.gch
 *.o
 *.a
+!/libs/BrainStem2/libBrainStem2.a
 *.so
 *.log
 doc/output
