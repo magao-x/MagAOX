@@ -179,7 +179,7 @@ loPredCtrlAcc always republishes every new `aol1_modevalWFS` frame to the main A
 | Prediction on (`predict` or `learn_std` accepted) | zero | unchanged | `zeroed` |
 | Prediction turned off or faulted, own-channel zero not yet confirmed | zero | unchanged | `zeroed` |
 
-With prediction off the main loop sees exactly the WFS frame, as if loPredCtrlAcc were not there. From the moment a prediction request is accepted, tip/tilt is zero on the next WFS frame and DDSPC, through its 8 kHz auxiliary channel, is the only tip/tilt controller. After prediction stops, tip/tilt stays zero until `safety.zero_confirmed=true`, so the main loop and DDSPC never both correct tip/tilt. If that zero is never confirmed (for example, the scheduler stopped), tip/tilt stays zero until it is, or until loPredCtrlAcc restarts. The startup zero of the auxiliary channel does not withhold tip/tilt. Every other mode is always copied bit-for-bit. Nothing else changes:
+With prediction off the main loop sees exactly the WFS frame, as if loPredCtrlAcc were not there. From the moment a prediction request is accepted, tip/tilt is zero on the next WFS frame and DDSPC, through its 8 kHz auxiliary channel, is the only tip/tilt controller. After prediction stops, tip/tilt stays zero until `safety.zero_confirmed=true`, so the main loop and DDSPC never both correct tip/tilt. If that zero is never confirmed (for example, the scheduler stopped), tip/tilt stays zero until it is, until the operator sends `release_tt`, or until loPredCtrlAcc restarts. The startup zero of the auxiliary channel does not withhold tip/tilt. Every other mode is always copied bit-for-bit. Nothing else changes:
 - DDSPC still learns, predicts and applies feedback from the unmodified `aol1_modevalWFS` tip/tilt.
 - The input stream is never written.
 - Learning, predictive gains, ACC handling, scheduler timing and the auxiliary channel are unchanged.
@@ -221,6 +221,20 @@ getINDI 'loPredCtrlAcc.safety.*'   # zero_confirmed=true
 setINDI -s 'acc000.dm_enable.toggle=Off'
 xctrl stop loPredCtrlAcc
 ```
+
+Two operator requests recover from a correction left on the DM:
+
+| Request | Effect |
+| --- | --- |
+| `zero_dm.request` | Turns prediction off and writes a fresh zero to `dm.channelName`, even if the last removal was already confirmed. Main-loop tip/tilt follows the usual rule: zeroed until that zero is confirmed if DDSPC was engaged, otherwise unchanged. |
+| `release_tt.request` | Turns prediction off and passes main-loop tip/tilt through from the next WFS frame, without waiting for `zero_confirmed`. The zero is still retried. Use it when the zero cannot be confirmed and the main loop must take tip/tilt back. |
+
+```bash
+setINDI -s 'loPredCtrlAcc.zero_dm.request=On'
+setINDI -s 'loPredCtrlAcc.release_tt.request=On'
+```
+
+Neither touches the main loop's own integrator. A tip/tilt command the main loop held while DDSPC owned tip/tilt stays on its channel until the main loop corrects it, or until the main loop is opened.
 
 Prediction turns off and own-channel zero is requested when any of these occur:
 
