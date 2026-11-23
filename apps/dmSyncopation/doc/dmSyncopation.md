@@ -1349,22 +1349,22 @@ Existing dmSpeckle INDI `frequency`, `amp`, `modulating` and `zero` controls app
 
 Use **Zero Channels** or send `dmtweeter-synco.zero.request=On` to remove the
 syncopation contribution with the AO loop open or closed and synco enabled or
-disabled. The request pauses synco contribution updates and clears every numbered
-channel in `streams.destinations`. With primary publications flowing, it waits
-for a protected copy interval and the next genuine main combination carries
-the cleared inputs. With the primary idle, it asks dmcomb to recompute by
-publishing on the first destination. Keep dmcomb and the DM controller running
-so the updated sum reaches the mirror.
+disabled. The request clears every numbered channel in `streams.destinations`.
+Running production syncopation uses its next safe auxiliary slot and keeps its
+selected write cadence. Otherwise, with primary publications flowing, synco
+copies the zeros in a protected interval for the next primary trigger. With the
+primary idle, synco posts a trigger on the first destination. Keep dmcomb and
+the DM controller running so the updated sum reaches the mirror.
 
 The request remains Busy while required streams are unavailable, the app is
 waiting for a safe copy interval, or the cleared inputs are waiting for a
-trigger. It returns to Off with state OK when the next primary publication
-triggers dmcomb or when synco posts the explicit trigger. The controller's own
+trigger. It returns to Off with state OK once the scheduled auxiliary trigger,
+next primary trigger, or explicit idle trigger is posted. The controller's own
 status and telemetry report subsequent DM delivery. Read-only observation and
 finite zero trials omit this control.
 
-Synco resumes according to its enable setting. A new schedule generation
-invalidates earlier tagged provider commands. In legacy mode, sources published
+The clear preserves the enable setting. A new schedule generation invalidates
+earlier tagged provider commands. In legacy mode, sources published
 before the clear are ignored for the rest of that app session. Provider-owned
 `_aux` streams retain their contents, so a new publication can apply a new
 contribution. Pause modulation if the mapped channels should stay at zero.

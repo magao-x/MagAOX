@@ -391,7 +391,9 @@ alone does not remove the last copied contribution.
 
 Use `dmtweeter-synco.zero.request=On` to clear all configured destinations,
 including while synco is enabled or the AO loop is closed. Synco fences old
-provider commands and resumes after dmcomb is triggered.
+provider commands. Running production synco clears on a scheduled auxiliary
+trigger and keeps its selected cadence. Providers can submit new commands with
+the following schedule generation.
 [Channel clearing procedure](dmSyncopation.md#controller-clearing-and-maintenance)
 
 ## Production startup dry run
