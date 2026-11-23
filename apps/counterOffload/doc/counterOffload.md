@@ -102,6 +102,41 @@ The read-only `stats` property reports these counters:
 If the ramp pool fills, so that offloads are folded into `A` without a ramp, the app logs a WARNING with the number
 of offloads affected.
 
+## Latency
+
+The read-only `latency` property shows where the time goes between a woofer offload and the counter command reaching
+dmSyncopation. Its purpose is to tell whether computation limits how fast the tweeter is commanded, or whether the limit
+is structural: the slot rate, the fixed leads and the tweeter rise.
+
+Each offload is measured once, at the first slot published after it arrives. The values are over the last 250 offloads
+(about 1 s at 250 Hz), all in µs except `missed`. A value with no data yet is −1.
+
+| Element | Meaning | Cause |
+| --- | --- | --- |
+| `pipelineUs` | Mean of `handoffUs + computeUs + writeUs`: all the computation from the woofer post to the command reaching dmSyncopation. Compare it with `slotUs`. | computation |
+| `pipelineRmsUs` | RMS deviation of that sum about its mean (its jitter). | computation |
+| `slotUs` | The slot period, from successive slot targets (125 at 8 kHz). | configuration |
+| `handoffUs` | Woofer post to counterOffload receiving the offload: t2wOffloader's projection and post, plus the wake-up. | computation |
+| `slotWaitUs` | Receipt to the start of computing the slot that carries the offload: waiting for the slot grid. | slot timing |
+| `computeUs` | Time to build the command. | computation |
+| `writeUs` | Time from the start of the copy into `dm01disp08_aux` to the end of the publication. | computation |
+| `computeMaxUs` | The largest `computeUs` in the window. Above `computeLeadUs` (20), slots fail. | computation |
+| `missed` | Offloads that waited at least one whole slot before being carried, since startup. | scheduling |
+
+After a slot's command is computed, a fixed lead remains before its target: `computeLeadUs + writeLeadUs` plus
+dmSyncopation's `readyLeadUs` (20 + 10 + 70 = 100 µs). It is logged once, at the first slot. After the target comes the
+tweeter rise, about 314 µs to 50%, which the app does not measure.
+
+How to read it:
+
+- **Computation is the limit** if `pipelineUs` is a large part of `slotUs`, or `missed` keeps increasing.
+- **The limit is structural** if `pipelineUs` is a few µs. The delay is then dominated by `slotWaitUs` (0 to one
+  slot), the fixed lead and the tweeter rise.
+- **The leads can be reduced** if `computeMaxUs` and `writeUs` are well below `computeLeadUs` and `writeLeadUs`.
+
+`handoffUs` needs the woofer post time, which t2wOffloader stores in the `atime` of each `aol0_tweeterOffload` frame. With
+an older t2wOffloader, which does not store it, `handoffUs`, `pipelineUs` and `pipelineRmsUs` stay at −1.
+
 ## Calibrate mode
 
 Calibrate mode tunes `rampStartUs`, `rampDurationUs` and `gain` to minimize the wavefront error spike that offloading
