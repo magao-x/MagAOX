@@ -1,106 +1,104 @@
+/** \file pwfsAlignment.hpp
+ * \brief Declare the measured and target PWFS pupil overlay.
+ */
 #ifndef pwfsAlignment_hpp
 #define pwfsAlignment_hpp
 
 #include <rtimv/rtimvInterfaces.hpp>
 
-#include <QObject>
-#include <QtPlugin>
-#include <QGraphicsLineItem>
+#include <QGraphicsScene>
+#include <QGraphicsWidget>
+#include <QPointer>
+#include <array>
 
-#include <iostream>
-
+/// Display the fitter's three- or four-pupil geometry in image coordinates.
 class pwfsAlignment : public rtimvOverlayInterface
 {
     Q_OBJECT
-    Q_PLUGIN_METADATA(IID "rtimv.overlayInterface/1.4")
-    Q_INTERFACES(rtimvOverlayInterface)
+    Q_PLUGIN_METADATA( IID "rtimv.overlayInterface/1.4" )
+    Q_INTERFACES( rtimvOverlayInterface )
 
-protected:
-    rtimvOverlayAccess m_roa;
+  protected:
+    /// Scene items for one measured or target constellation, owned by the common graphics parent.
+    struct drawing
+    {
+        /// Pupil outlines indexed by fitter quadrant.
+        std::array<QGraphicsEllipseItem *, 4> m_circles{};
 
-    bool m_enabled{false};
+        /// Lines between adjacent pupils.
+        std::array<QGraphicsLineItem *, 4> m_edges{};
+    };
 
-    char m_blob[512]; ///< Memory for copying rtimvDictionary blobs
+    /// Borrowed dictionary registered by the host.
+    dictionaryT *m_dictionary{ nullptr };
 
-    double m_1x{0};
-    double m_1y{0};
-    double m_1D{0};
+    /// Scene to receive this instance's items.
+    QPointer<QGraphicsScene> m_scene;
 
-    double m_set1x{0};
-    double m_set1y{0};
-    double m_set1D{0};
+    /// Scene-owned graphics parent, also removed on detach.
+    QPointer<QGraphicsWidget> m_items;
 
-    double m_2x{0};
-    double m_2y{0};
-    double m_2D{0};
+    /// Red outlines of the measured pupil fits.
+    drawing m_measured;
 
-    double m_set2x{0};
-    double m_set2y{0};
-    double m_set2D{0};
+    /// Lime outlines of the commanded set points.
+    drawing m_target;
 
-    double m_3x{0};
-    double m_3y{0};
-    double m_3D{0};
-
-    double m_set3x{0};
-    double m_set3y{0};
-    double m_set3D{0};
-
-    double m_4x{0};
-    double m_4y{0};
-    double m_4D{0};
-
-    double m_set4x{0};
-    double m_set4y{0};
-    double m_set4D{0};
-
-    QGraphicsScene *qgs;
-
-    QGraphicsLineItem *m_1to2{nullptr};
-    QGraphicsLineItem *m_1to3{nullptr};
-    QGraphicsLineItem *m_3to4{nullptr};
-    QGraphicsLineItem *m_2to4{nullptr};
-
-    QGraphicsLineItem *m_1to2s{nullptr};
-    QGraphicsLineItem *m_1to3s{nullptr};
-    QGraphicsLineItem *m_3to4s{nullptr};
-    QGraphicsLineItem *m_2to4s{nullptr};
-
-    QGraphicsEllipseItem *m_c1{nullptr};
-    QGraphicsEllipseItem *m_c2{nullptr};
-    QGraphicsEllipseItem *m_c3{nullptr};
-    QGraphicsEllipseItem *m_c4{nullptr};
-
-    QGraphicsEllipseItem *m_c1s{nullptr};
-    QGraphicsEllipseItem *m_c2s{nullptr};
-    QGraphicsEllipseItem *m_c3s{nullptr};
-    QGraphicsEllipseItem *m_c4s{nullptr};
-
+    /// INDI device publishing the pupil fits.
     std::string m_deviceName;
-    int m_numPupils{0};
-    int m_width{0};
-    int m_height{0};
 
-public:
-    pwfsAlignment();
+    /// User's display preference independent of fitter availability.
+    bool m_enabled{ false };
 
-    virtual ~pwfsAlignment();
+    /// Read one finite fitter element, returning false if missing or invalidated.
+    bool number( const std::string &key,  /**< [in] Fully qualified INDI element. */
+                 double            &value /**< [out] Decoded number on success. */
+    ) const;
 
-    virtual int attachOverlay(rtimvOverlayAccess &,
-                              mx::app::appConfigurator &config);
+    /// Allocate one set of passive outlines beneath the shared graphics parent.
+    void createDrawing( drawing    &items, /**< [out] Child item pointers. */
+                        const QPen &stroke /**< [in] Measured or target line style. */
+    );
 
-    virtual int updateOverlay();
+    /// Update available circles and connecting lines in the current layout.
+    void updateDrawing( drawing           &items,  /**< [in,out] Outlines to update. */
+                        const std::string &prefix, /**< [in] Empty for measurements or set- for target values. */
+                        int                count,  /**< [in] Number of fitted pupils. */
+                        double             height  /**< [in] Detector height in pixels. */
+    );
 
-    virtual void keyPressEvent(QKeyEvent *ke);
+  public:
+    /// Construct a disabled overlay without scene items.
+    pwfsAlignment() = default;
 
-    virtual bool overlayEnabled();
+    /// Remove the instance's graphics before releasing its subscriptions.
+    ~pwfsAlignment() override;
 
-    virtual void enableOverlay();
+    /// Attach the configured fitter and register its property subscriptions.
+    int attachOverlay( rtimvOverlayAccess       &access, /**< [in] Viewer scene and shared dictionary. */
+                       mx::app::appConfigurator &config  /**< [in] Configuration containing pwfsAlignment.name. */
+                       ) override;
 
-    virtual void disableOverlay();
+    /// Remove this instance's scene items and release borrowed state.
+    void detachOverlay();
 
-public:
-    virtual std::vector<std::string> info();
+    /// Redraw measured and target geometry from the dictionary.
+    int updateOverlay() override;
+
+    /// Toggle the overlay on uppercase P.
+    void keyPressEvent( QKeyEvent *event /**< [in] Key pressed in the viewer. */ ) override;
+
+    /// Return whether the user has requested the overlay.
+    bool overlayEnabled() override;
+
+    /// Request display when geometry is available.
+    void enableOverlay() override;
+
+    /// Hide all pupil geometry.
+    void disableOverlay() override;
+
+    /// Identify the overlay in the viewer's information panel.
+    std::vector<std::string> info() override;
 };
 
 #endif // pwfsAlignment_hpp
