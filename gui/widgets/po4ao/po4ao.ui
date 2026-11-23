@@ -1,0 +1,370 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<ui version="4.0">
+  <class>po4ao</class>
+  <widget class="QWidget" name="po4ao">
+    <property name="geometry">
+      <rect>
+        <x>0</x>
+        <y>0</y>
+        <width>540</width>
+        <height>400</height>
+      </rect>
+    </property>
+    <property name="windowTitle">
+      <string>NN / PO4AO</string>
+    </property>
+    <layout class="QVBoxLayout" name="layoutPanel">
+      <property name="spacing">
+        <number>6</number>
+      </property>
+      <item>
+        <widget class="xqt::statusLabel" name="labelConnection">
+          <property name="text">
+            <string>Disconnected</string>
+          </property>
+          <property name="wordWrap">
+            <bool>true</bool>
+          </property>
+          <property name="sizePolicy">
+            <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+            </sizepolicy>
+          </property>
+          <property name="textFormat">
+            <enum>Qt::PlainText</enum>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="QLabel" name="labelNNTitle">
+          <property name="font"><font><bold>true</bold></font></property>
+          <property name="text"><string>nnReconstructor</string></property>
+          <property name="textFormat"><enum>Qt::PlainText</enum></property>
+        </widget>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutEngine">
+          <item>
+            <widget class="QLabel" name="labelEngine">
+              <property name="text">
+                <string>CNN Reconstructor:</string>
+              </property>
+              <property name="wordWrap">
+                <bool>true</bool>
+              </property>
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Maximum" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="textFormat">
+                <enum>Qt::PlainText</enum>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="QComboBox" name="comboEngine">
+              <property name="sizeAdjustPolicy">
+                <enum>QComboBox::AdjustToMinimumContentsLengthWithIcon</enum>
+              </property>
+              <property name="minimumContentsLength">
+                <number>18</number>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="QPushButton" name="buttonEnableNN">
+              <property name="text">
+                <string>Set reconstructor</string>
+              </property>
+            </widget>
+          </item>
+        </layout>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutReconstructor">
+          <item>
+            <widget class="QPushButton" name="buttonReconstructor">
+              <property name="text">
+                <string>Switch to CACAO</string>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="xqt::statusLabel" name="labelReconstructor">
+              <property name="text">
+                <string>Active: Unknown</string>
+              </property>
+              <property name="wordWrap">
+                <bool>true</bool>
+              </property>
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="textFormat">
+                <enum>Qt::PlainText</enum>
+              </property>
+            </widget>
+          </item>
+        </layout>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutModulation">
+          <item>
+            <widget class="QCheckBox" name="checkModulation">
+              <property name="text">
+                <string>Link modulation</string>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="xqt::statusLabel" name="labelModulation">
+              <property name="text">
+                <string>Modulation: Unknown</string>
+              </property>
+              <property name="wordWrap">
+                <bool>true</bool>
+              </property>
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="textFormat">
+                <enum>Qt::PlainText</enum>
+              </property>
+            </widget>
+          </item>
+        </layout>
+      </item>
+      <item>
+        <widget class="QFrame" name="line">
+          <property name="frameShape">
+            <enum>QFrame::HLine</enum>
+          </property>
+          <property name="frameShadow">
+            <enum>QFrame::Sunken</enum>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="QLabel" name="labelPO4AOTitle">
+          <property name="font"><font><bold>true</bold></font></property>
+          <property name="text"><string>PO4AO</string></property>
+          <property name="textFormat"><enum>Qt::PlainText</enum></property>
+        </widget>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutSavedPolicy">
+          <item><widget class="QLabel" name="labelSavedPolicy"><property name="text"><string>Policy:</string></property></widget></item>
+          <item><widget class="QComboBox" name="comboPolicy">
+            <property name="sizeAdjustPolicy"><enum>QComboBox::AdjustToMinimumContentsLengthWithIcon</enum></property>
+            <property name="minimumContentsLength"><number>18</number></property>
+          </widget></item>
+          <item><widget class="QPushButton" name="buttonSetPolicy"><property name="text"><string>Set policy</string></property></widget></item>
+          <item><widget class="QPushButton" name="buttonSavePolicy"><property name="text"><string>Save policy</string></property></widget></item>
+        </layout>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutPO4AO">
+          <item>
+            <widget class="QPushButton" name="buttonPO4AO">
+              <property name="text">
+                <string>Enable policy</string>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="QPushButton" name="buttonReset">
+              <property name="text">
+                <string>Reset PO4AO</string>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="xqt::statusLabel" name="labelController">
+              <property name="text">
+                <string>Unknown</string>
+              </property>
+              <property name="wordWrap">
+                <bool>true</bool>
+              </property>
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="textFormat">
+                <enum>Qt::PlainText</enum>
+              </property>
+            </widget>
+          </item>
+        </layout>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutWarmup">
+          <item>
+            <widget class="QPushButton" name="buttonWarmup">
+              <property name="text">
+                <string>Recollect warmup</string>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="xqt::statusLabel" name="labelCollection">
+              <property name="text">
+                <string>Unknown</string>
+              </property>
+              <property name="wordWrap">
+                <bool>true</bool>
+              </property>
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="textFormat">
+                <enum>Qt::PlainText</enum>
+              </property>
+            </widget>
+          </item>
+        </layout>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutParameters">
+          <item><layout class="QVBoxLayout" name="layoutCommandRegularization">
+            <item><widget class="QLabel" name="labelCommandRegularization"><property name="text"><string>Command regularization</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+            <item><widget class="xqt::statusLineEdit" name="entryCommandRegularization"/></item>
+          </layout></item>
+          <item><layout class="QVBoxLayout" name="layoutDeltaRegularization">
+            <item><widget class="QLabel" name="labelDeltaRegularization"><property name="text"><string>Delta policy regularization</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+            <item><widget class="xqt::statusLineEdit" name="entryDeltaRegularization"/></item>
+          </layout></item>
+          <item><layout class="QVBoxLayout" name="layoutLearningRate">
+            <item><widget class="QLabel" name="labelLearningRate"><property name="text"><string>Learning rate</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+            <item><widget class="xqt::statusLineEdit" name="entryLearningRate"/></item>
+          </layout></item>
+        </layout>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutLearning">
+          <item>
+            <widget class="QPushButton" name="buttonLearning">
+              <property name="text">
+                <string>Start learning</string>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="xqt::statusLabel" name="labelLearning">
+              <property name="text">
+                <string>Unknown</string>
+              </property>
+              <property name="wordWrap">
+                <bool>true</bool>
+              </property>
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="textFormat">
+                <enum>Qt::PlainText</enum>
+              </property>
+            </widget>
+          </item>
+        </layout>
+      </item>
+      <item>
+        <layout class="QHBoxLayout" name="layoutPolicy">
+          <item>
+            <widget class="xqt::statusLabel" name="labelPolicy">
+              <property name="text">
+                <string>Policy: Unknown</string>
+              </property>
+              <property name="wordWrap">
+                <bool>true</bool>
+              </property>
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="textFormat">
+                <enum>Qt::PlainText</enum>
+              </property>
+            </widget>
+          </item>
+          <item>
+            <widget class="xqt::statusLabel" name="labelIteration">
+              <property name="text">
+                <string>Iteration: —</string>
+              </property>
+              <property name="wordWrap">
+                <bool>true</bool>
+              </property>
+              <property name="sizePolicy">
+                <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+                  <horstretch>0</horstretch>
+                  <verstretch>0</verstretch>
+                </sizepolicy>
+              </property>
+              <property name="textFormat">
+                <enum>Qt::PlainText</enum>
+              </property>
+            </widget>
+          </item>
+        </layout>
+      </item>
+      <item>
+        <widget class="xqt::statusLabel" name="labelResidualRms">
+          <property name="text">
+            <string>Residual RMS: —</string>
+          </property>
+          <property name="toolTip">
+            <string>Mean per-frame quadrature sum of the controlled modal residuals in the rolling replay buffer (1 µm = 1000 nm).</string>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="xqt::statusLabel" name="labelStatus">
+          <property name="text">
+            <string>Status: —</string>
+          </property>
+          <property name="wordWrap">
+            <bool>true</bool>
+          </property>
+          <property name="sizePolicy">
+            <sizepolicy hsizetype="Ignored" vsizetype="Preferred">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+            </sizepolicy>
+          </property>
+          <property name="textFormat">
+            <enum>Qt::PlainText</enum>
+          </property>
+        </widget>
+      </item>
+    </layout>
+  </widget>
+  <customwidgets>
+    <customwidget><class>xqt::statusLineEdit</class><extends>QLineEdit</extends><header>../xWidgets/statusLineEdit.hpp</header></customwidget>
+    <customwidget>
+      <class>xqt::statusLabel</class>
+      <extends>QLabel</extends>
+      <header>../xWidgets/statusLabel.hpp</header>
+    </customwidget>
+  </customwidgets>
+  <resources />
+  <connections />
+</ui>

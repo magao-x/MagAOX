@@ -1,639 +1,1028 @@
 /** \file dlDataCollection.hpp
- * \brief The MagAO-X generic ImageStreamIO stream integrator
- *
- * \ingroup app_files
+ * \brief Collect synchronized PWFS images and recorded tweeter commands.
+ * \ingroup dlDataCollection_files
  */
-
 #ifndef dlDataCollection_hpp
 #define dlDataCollection_hpp
 
-#include <NvInfer.h>
-#include <cuda_fp16.h>
-#include <cuda_runtime_api.h>
-#include <iostream>
-#include <fstream>
-#include <vector>
-#include <limits>
+#include <atomic>
+#include <sys/stat.h>
 
-#include <mx/improc/eigenCube.hpp>
-#include <mx/improc/eigenImage.hpp>
-
-#include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
-#include "../../magaox_git_version.h"
-
-using namespace nvinfer1;
-
-bool loadCSV(const std::string& filename, int numValues, float*& dest) {
-    std::ifstream file(filename);
-
-    if (!file.is_open()) {
-        std::cerr << "Error opening file!" << std::endl;
-        return false;
-    }
-
-    std::string line;
-
-
-    for (int i = 0; i < numValues; ++i) {
-        std::getline(file, line);
-        dest[i] = std::stof(line);
-    }
-    file.close();
-    return true;
-}
-
-
-class ImageBuffer {
-    private:
-        size_t num_channels, num_rows, num_cols;     // Dimensions of each image (rows x columns)
-        size_t num_images;             // Total number of images the buffer can hold
-        float* buffer;                 // Buffer holding the images
-        size_t size;                   // Total number of elements in each image (rows * columns)
-        size_t head;                   // Index for the next write position
-        bool is_full;                  // Flag to check if buffer is full
-
-    public:
-        ImageBuffer(size_t _num_channels, size_t _num_rows, size_t _num_cols, size_t _num_images)
-            : num_channels(_num_channels), num_rows(_num_rows), num_cols(_num_cols),
-              num_images(_num_images),
-              size(_num_channels * _num_rows * _num_cols),
-              head(0), is_full(false) {
-
-            buffer = new float[size * num_images];
-            memset( buffer, 0, sizeof( float) * size * num_images);
-        }
-
-        ~ImageBuffer(){
-            delete buffer;
-        }
-
-        // Adds an image (array of floats) to the buffer (overwrites if full)
-        void add(float* image) {
-            memcpy(&buffer[head  * size], image, sizeof(float) * size);
-            head = head + 1;
-        }
-
-        void clear(){
-            head = 0;
-            is_full = false;
-        }
-
-        void save(const std::string& filename) {
-            std::ofstream file(filename, std::ios::out | std::ios::binary);
-            if (!file) {
-                std::cerr << "Error opening file for writing: " << filename << std::endl;
-                return;
-            }
-
-            file.write(reinterpret_cast<char*>(buffer), sizeof(float) * size * num_images);
-
-            file.close();
-        }
-
-
-};
+#ifndef DLDATACOLLECTION_TEST
+    #include "../../libMagAOX/libMagAOX.hpp" // Included on the command line to trigger pch.
+    #include "../../magaox_git_version.h"
+#endif
+#include "dlCollection.hpp"
+#include "dlObservation.hpp"
 
 namespace MagAOX
 {
 namespace app
 {
+/** \defgroup dlDataCollection Deep-learning data collection
+ * \brief Validated command banks and synchronized four-pupil PWFS datasets.
+ * \ingroup apps
+ */
+/** \defgroup dlDataCollection_files dlDataCollection Files
+ * \ingroup dlDataCollection
+ */
 
+/// Instrument adapter for the CPU-only collection state machine.
+/** The monitor uses READY while idle and attaches in OPERATING for a pending or active run.
+ * Start is explicit; construction, stream attachment and bank preparation send no command.
+ * \ingroup dlDataCollection
+ */
 class dlDataCollection : public MagAOXApp<true>, public dev::shmimMonitor<dlDataCollection>
 {
-    // Give the test harness access.
-    friend class dlDataCollection_test;
-
     friend class dev::shmimMonitor<dlDataCollection>;
 
-    // The base shmimMonitor type
+    /// Standard source-stream monitor.
     typedef dev::shmimMonitor<dlDataCollection> shmimMonitorT;
 
-    /// Floating point type in which to do all calculations.
-    typedef float realT;
-
-  public:
-    /** \name app::dev Configurations
-     *@{
+  protected:
+    /** \name Collection Configuration - Data
+     * @{
      */
+    /// Parent for unique run directories; retains parameters.dataDirs.
+    std::string m_output;
 
+    /// Offline-prepared bank directory; retains parameters.ampsDir.
+    std::string m_bank;
+
+    /// Dedicated 50x50 float32 tweeter command channel.
+    std::string m_channel;
+
+    /// Required actuator count; only the 2500-element layout is supported.
+    int m_modes{ 2500 };
+
+    /// Expected samples per set, or zero to use the bank manifest.
+    int m_samples{ 0 };
+
+    /// Number of bank sets to acquire, or zero to use all sets.
+    int m_sets{ 0 };
+
+    /// Minimum fresh-frame counter advance after publication; zero still requires a new frame.
+    int m_skip{ 8 };
+
+    /// Padded pupil width and height, including two zero pixels on each edge.
+    int m_pupil{ 64 };
+
+    /// Left/right pupil offsets in source columns.
+    std::array<int, 2> m_x{ 0, 60 };
+
+    /// Top/bottom pupil offsets in source rows.
+    std::array<int, 2> m_y{ 0, 60 };
+
+    /// Intensity scaling applied only to accepted WFS images.
+    float m_imageNorm{ 1 };
+
+    /// Legacy unused option; only unity is accepted to prevent implicit command rescaling.
+    float m_modalNorm{ 1 };
+
+    /// Maximum time without a unique source frame during collection, in seconds.
+    double m_frameTimeout{ 1 };
     ///@}
 
-  protected:
-    /** \name Configurable Parameters
-     *@{
-     */
-    std::string dataDirs;     // Location where the data (onnx file, engine, WFS reference) is stored
-    std::string ampsDir;     // Location where the data (onnx file, engine, WFS reference) is stored
+    /// Session owns all image and command buffers; its publisher checks stream ownership.
+    dlCollection::Session m_session;
 
-    int Nperset {0}; // Number of images per dataset file
-    int Nset {0}; // Number of images per dataset file
-    int NumFrameSkip {0}; // Number of frames to skip to ensure latency is not an issue
-    int Nmodes {0}; // Number of modes to control
+    /// Output stream handle, closed only under m_streamMutex.
+    IMAGE m_commandStream{};
 
-    int inputC {0};
-    int inputH {0};
-    int inputW {0};
+    /// Serialize output attachment, publication, release, and shutdown.
+    std::mutex m_streamMutex;
 
-    float imageNorm; // Normalization constant for the image intensities
-    float modalNorm; // Normalization constant for the modal coefficients
+    /// Whether the output mapping is valid.
+    bool m_commandOpened{ false };
 
-    int m_pupPix;      // Number of pixels in the pupil used for the Neural Network
-    int pup_offset1_x; // Horizontal offset to the first set of pupils
-    int pup_offset1_y; // Vertical offset to the first set of pupils
-    int pup_offset2_x; // Horizontal offset to the second set of pupils
-    int pup_offset2_y; // Horizontal offset to the second set of pupils
-    int pixels_per_quadrant;
-    unsigned long frame_counter{ 0 };
-    int long frame_wait{ 0 };
-    int long frame_saved{ 0 };
+    /// Whether this app has issued a command on the initially zero channel.
+    bool m_commandOwned{ false };
 
-    int Npup{ 4 };        // Number of pupils
-    float *modeval{ nullptr };
-    float *pp_image{ nullptr };
-    float *randomAmps{ nullptr };
-    ImageBuffer* imagebuffer{ nullptr };
-	eigenImage<realT> m_shaped_command;	// 50x50
+    /// Output counter after this app's last write; detect an intervening writer.
+    uint64_t m_commandCounter{ 0 };
 
-    size_t m_pwfsWidth{ 0 };  ///< The width of the image
-    size_t m_pwfsHeight{ 0 }; ///< The height of the image.
+    /// File identity of the attached output mapping.
+    ino_t m_commandInode{ 0 };
 
-    uint8_t m_pwfsDataType{ 0 }; ///< The ImageStreamIO type code.
-    size_t m_pwfsTypeSize{ 0 };  ///< The size of the type, in bytes.
+    /// Semaphore mapping size established during output attachment.
+    uint16_t m_commandSemaphores{ 0 };
 
-    // variables for sending the output to aol_modevals
-    std::string m_modevalChannel;
-    IMAGE m_modevalStream;
-    uint32_t m_modevalWidth {0}; ///< The width of the shmim
-    uint32_t m_modevalHeight {0}; ///< The height of the shmim
-    uint8_t m_modevalDataType {0}; ///< The ImageStreamIO type code.
-    size_t m_modevalTypeSize {0};  ///< The size of the type, in bytes.
+    /// Filename used to detect output deletion/recreation before a write.
+    std::string m_commandFilename;
 
-    bool m_modevalOpened {false};
-    bool m_modevalRestart {false};
-    int dataset_i{ 0 };
-    int Nact_across{ 50 };
-    int zeroPad { 2 };
+    /// Source and output attachment have passed preflight.
+    std::atomic<bool> m_connected{ false };
+
+    /// Source dimensions copied on attachment, guarded by m_indiMutex.
+    std::array<size_t, 2> m_sourceSize{ 0, 0 };
+
+    /// INDI callbacks only queue requests; appLogic performs run transitions.
+    std::atomic<bool> m_startRequested{ false };
+
+    /// Queued operator Stop.
+    std::atomic<bool> m_stopRequested{ false };
+
+    /// Ordinary-priority coefficient loader and writer.
+    std::thread m_ioThread;
+
+    /// Standard threadStart initialization handshake.
+    bool m_ioThreadInit{ true };
+
+    /// Published I/O thread identity.
+    pid_t m_ioThreadID{ 0 };
+
+    /// Standard thread status property.
+    pcf::IndiProperty m_indiP_ioThread;
+
+    /// Explicit Start control.
+    pcf::IndiProperty m_indiP_start;
+
+    /// Stop and preserve the valid partial prefix.
+    pcf::IndiProperty m_indiP_stop;
+
+    /// Idle-only output-root control.
+    pcf::IndiProperty m_indiP_output;
+
+    /// Idle-only bank-directory control.
+    pcf::IndiProperty m_indiP_bank;
+
+    /// Read-only phase, output directory, counters, rate, and failure.
+    pcf::IndiProperty m_indiP_collection;
+
+    /// Wall duration used to report effective saved-sample throughput.
+    std::chrono::steady_clock::time_point m_started;
+
+    /// Final observed run duration; negative while the run is active.
+    double m_finishedElapsed{ 0 };
+
+    /// Visible control-request failure, separate from a run's data-integrity failure.
+    std::string m_controlError;
+
+    /// Latest internal-source wheel readback, guarded by m_indiMutex.
+    dlCollection::PresetReadback m_nd;
+
+    /// Latest WFS flipper readback, guarded by m_indiMutex.
+    dlCollection::PresetReadback m_flipwfsf;
+
+    /// Latest camwfs frame rate in Hz, guarded by m_indiMutex.
+    dlCollection::CameraReadback m_fps;
+
+    /// Latest camwfs E.M. gain factor, guarded by m_indiMutex.
+    dlCollection::CameraReadback m_emgain;
+
+    /// Read-only subscription and refresh request for camwfs.fps.
+    pcf::IndiProperty m_indiP_fps;
+
+    /// Read-only subscription and refresh request for camwfs.emgain.
+    pcf::IndiProperty m_indiP_emgain;
+
+    /// Subscription and read-only refresh request for fwtelsim.filterName.
+    pcf::IndiProperty m_indiP_nd;
+
+    /// Subscription and read-only refresh request for flipwfsf.presetName.
+    pcf::IndiProperty m_indiP_flipwfsf;
+
+    /// Controller status subscription for the ND wheel.
+    pcf::IndiProperty m_indiP_ndState;
+
+    /// Controller status subscription for the WFS flipper.
+    pcf::IndiProperty m_indiP_flipwfsfState;
+
+    /// Display the current automatically read positions and camera settings in cursesINDI.
+    pcf::IndiProperty m_indiP_observation;
+
+    /// Wheel position frozen at Start, guarded by m_indiMutex.
+    std::string m_runND;
+
+    /// Flipper position frozen at Start, guarded by m_indiMutex.
+    std::string m_runFlipwfsf;
+
+    /// Frame rate frozen at Start, guarded by m_indiMutex.
+    double m_runFPS{ 0 };
+
+    /// E.M. gain frozen at Start, guarded by m_indiMutex.
+    double m_runEMGain{ 0 };
+
+    /// Whether readback changes invalidate the current run; guarded by m_indiMutex.
+    bool m_observationActive{ false };
+
+    /// Latch a change until the next Start; capture and publication check this flag.
+    std::atomic<bool> m_observationChanged{ false };
+
+    /// Start waits for new readbacks; text callbacks reject edits during this wait.
+    std::atomic<bool> m_startPending{ false };
+
+    /// Bound the main-thread wait for fresh observing readbacks after Start.
+    std::chrono::steady_clock::time_point m_observationDeadline{};
+
+    /// Refresh observing readbacks once per second, outside the image callback.
+    std::chrono::steady_clock::time_point m_observationPoll{};
 
   public:
-    /// Default c'tor.
+    /// Construct the inert instrument adapter.
     dlDataCollection();
 
-    /// D'tor, declared and defined for noexcept.
-    ~dlDataCollection() noexcept
-    {
-    }
+    /// Destroy only after the normal main-thread shutdown has joined workers.
+    ~dlDataCollection() noexcept;
 
-    virtual void setupConfig();
+    /// Register old configuration keys and the source watchdog.
+    void setupConfig() override;
 
-    /// Implementation of loadConfig logic, separated for testing.
-    /** This is called by loadConfig().
-     */
-    int loadConfigImpl(
-        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
+    /// Load and validate options without opening streams or issuing commands.
+    int loadConfigImpl( mx::app::appConfigurator &cfg /**< [in] Configuration to consume. */ );
 
-    virtual void loadConfig();
+    /// Apply configuration, propagating validation failure to the application.
+    void loadConfig() override;
 
-    /// Startup function
-    /**
-     *
-     */
-    virtual int appStartup();
+    /// Publish INDI controls and start inert monitor and ordinary-priority file work.
+    int appStartup() override;
 
-    /// Implementation of the FSM for dlDataCollection.
-    /**
-     * \returns 0 on no critical error
-     * \returns -1 on an error requiring shutdown
-     */
-    virtual int appLogic();
+    /// Process queued controls, source watchdog and user-visible progress.
+    int appLogic() override;
 
-    /// Shutdown the app.
-    /**
-     *
-     */
-    virtual int appShutdown();
+    /// Stop capture, join both workers, preserve partial data and close output.
+    int appShutdown() override;
 
-    // Custom functions
-    int send_to_shmim();
+    /// Queue Start from INDI.
+    INDI_NEWCALLBACK_DECL( dlDataCollection, m_indiP_start );
 
-    void loadRandomAmps(int dataset_i);
+    /// Queue Stop from INDI.
+    INDI_NEWCALLBACK_DECL( dlDataCollection, m_indiP_stop );
 
-    // void build_engine(){};
+    /// Update the output root while idle.
+    INDI_NEWCALLBACK_DECL( dlDataCollection, m_indiP_output );
+
+    /// Update the command bank while idle.
+    INDI_NEWCALLBACK_DECL( dlDataCollection, m_indiP_bank );
+
+    /// Track the internal-source wheel's reported named position.
+    INDI_SETCALLBACK_DECL( dlDataCollection, m_indiP_nd );
+
+    /// Track the WFS flipper's reported in/out position.
+    INDI_SETCALLBACK_DECL( dlDataCollection, m_indiP_flipwfsf );
+
+    /// Invalidate wheel positions when its controller is disconnected or unhealthy.
+    INDI_SETCALLBACK_DECL( dlDataCollection, m_indiP_ndState );
+
+    /// Invalidate flipper positions when its controller is disconnected or unhealthy.
+    INDI_SETCALLBACK_DECL( dlDataCollection, m_indiP_flipwfsfState );
+
+    /// Track camwfs frame rate and invalidate runs on a reported change.
+    INDI_SETCALLBACK_DECL( dlDataCollection, m_indiP_fps );
+
+    /// Track camwfs E.M. gain and invalidate runs on a reported change.
+    INDI_SETCALLBACK_DECL( dlDataCollection, m_indiP_emgain );
 
   protected:
-    int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
+    /// Validate/attach streams; reconnection aborts rather than relabeling a partial run.
+    int allocate( const dev::shmimT &dummy /**< [in] Source-monitor tag. */ );
 
-    int processImage( void *curr_src,          ///< [in] pointer to start of current frame.
-                      const dev::shmimT &dummy ///< [in] tag to differentiate shmimMonitor parents.
-    );
+    /// Forward a unique stable float32 source snapshot to the capture state machine.
+    int processImage( void              *src /**< [in] Current source frame. */,
+                      const dev::shmimT &dummy /**< [in] Source-monitor tag. */ );
+
+    /// Build an immutable run request from current settings and attached dimensions.
+    dlCollection::Settings settings();
+
+    /// Publish/release the owned output channel and return the source counter afterwards.
+    uint64_t publish( const float *command /**< [in] 2500 floats, or null to release. */ );
+
+    /// Check mapping identity and write continuity; a new run may adopt a stable zero channel.
+    /** Caller holds m_streamMutex. */
+    void checkCommandStream( bool newRun /**< [in] Validate a zero channel and refresh its idle counter. */ = false );
+
+    /// Accept an image only if its source snapshot and held command remain valid.
+    bool snapshotStable( uint64_t counter /**< [in] Producer counter recorded before copying. */ );
+
+    /// Start the standard file-thread handshake and its session worker.
+    static void ioStart( dlDataCollection *app /**< [in] Owning application. */ );
+
+    /// Refresh observations, start after readback, and abort changed-state runs.
+    void checkObservation();
+
+    /// Apply one idle-only text request using standard target/current elements.
+    int textRequest( const pcf::IndiProperty &request /**< [in] Received property. */,
+                     pcf::IndiProperty       &property /**< [in/out] Registered property. */,
+                     std::string             &value /**< [in/out] Corresponding setting. */ );
 };
 
-inline int dlDataCollection::send_to_shmim()
+inline dlDataCollection::dlDataCollection()
+    : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED ), m_session(
+                                                                  [this]( const float *command )
+                                                                  {
+                                                                      return publish( command );
+                                                                  } )
 {
-	int ki = 0;
-	for(uint32_t col_i=0; col_i < Nact_across; ++col_i){
-		for(uint32_t row_i=0; row_i < Nact_across; ++row_i){
-			m_shaped_command(row_i, col_i) = modeval[ki];
-			ki += 1;
-		}
-	}
-
-    m_modevalStream.md[0].write = 1;
-	memcpy(m_modevalStream.array.raw, m_shaped_command.data(),  Nmodes * sizeof(float));
-    m_modevalStream.md[0].cnt0++;
-    m_modevalStream.md[0].write = 0;
-
-    ImageStreamIO_sempost( &m_modevalStream, -1 );
-
-    return 0;
 }
 
-inline dlDataCollection::dlDataCollection() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
-{
-    return;
-}
+inline dlDataCollection::~dlDataCollection() noexcept = default;
 
 inline void dlDataCollection::setupConfig()
 {
-    std::cout << "setupConfig()" << std::endl;
-    shmimMonitorT::setupConfig( config );
-
-    config.add( "parameters.dataDirs",
-                "",
-                "parameters.dataDirs",
-                argType::Required,
-                "parameters",
-                "dataDirs",
-                false,
-                "string",
-                "The path to the directory with the onnx model." );
-
-    config.add( "parameters.ampsDir",
-                "",
-                "parameters.ampsDir",
-                argType::Required,
-                "parameters",
-                "ampsDir",
-                false,
-                "string",
-                "The path to the directory with the random amplitudes." );
-
-    config.add( "parameters.Nperset",
-                "",
-                "parameters.Nperset",
-                argType::Required,
-                "parameters",
-                "Nperset",
-                false,
-                "int",
-                "Number of images per dataset file" );
-
-    config.add( "parameters.Nset",
-                "",
-                "parameters.Nset",
-                argType::Required,
-                "parameters",
-                "Nset",
-                false,
-                "int",
-                "Number of dataset files to generate" );
-
-    config.add( "parameters.NumFrameSkip",
-                "",
-                "parameters.NumFrameSkip",
-                argType::Required,
-                "parameters",
-                "NumFrameSkip",
-                false,
-                "int",
-                "Number of frames to skip to ensure latency is not an issue" );
-
-    config.add( "parameters.imageNorm",
-                "",
-                "parameters.imageNorm",
-                argType::Required,
-                "parameters",
-                "imageNorm",
-                false,
-                "float",
-                "Normalization term for the preprocessed images." );
-
-    config.add( "parameters.modalNorm",
-                "",
-                "parameters.modalNorm",
-                argType::Required,
-                "parameters",
-                "modalNorm",
-                false,
-                "float",
-                "Normalization term for the modal coefficients." );
-
-    config.add( "parameters.channel",
-                "",
-                "parameters.channel",
-                argType::Required,
-                "parameters",
-                "channel",
-                false,
-                "string",
-                "The output channel." );
-
-    config.add( "parameters.Nmodes",
-                "",
-                "parameters.Nmodes",
-                argType::Required,
-                "parameters",
-                "Nmodes",
-                false,
-                "int",
-                "Number of modes to control." );
-
-    config.add( "parameters.m_pupPix",
-                "",
-                "parameters.m_pupPix",
-                argType::Required,
-                "parameters",
-                "m_pupPix",
-                false,
-                "int",
-                "Number of pixels across a PWFS pupil." );
-
-    config.add( "parameters.pup_offset1_x",
-                "",
-                "parameters.pup_offset1_x",
-                argType::Required,
-                "parameters",
-                "pup_offset1_x",
-                false,
-                "int",
-                "Horizontal offset to the top left of the closest set op PWFS pupils." );
-
-    config.add( "parameters.pup_offset1_y",
-                "",
-                "parameters.pup_offset1_y",
-                argType::Required,
-                "parameters",
-                "pup_offset1_y",
-                false,
-                "int",
-                "Vertical offset to the top left of the closest set op PWFS pupils." );
-
-    config.add( "parameters.pup_offset2_x",
-                "",
-                "parameters.pup_offset2_x",
-                argType::Required,
-                "parameters",
-                "pup_offset2_x",
-                false,
-                "int",
-                "Horizontal offset to the top left of the furthest set op PWFS pupils." );
-
-    config.add( "parameters.pup_offset2_y",
-                "",
-                "parameters.pup_offset2_y",
-                argType::Required,
-                "parameters",
-                "pup_offset2_y",
-                false,
-                "int",
-                "Vertical offset to the top left of the furthest set op PWFS pupils." );
-
+    SHMIMMONITOR_SETUP_CONFIG( config );
+    const std::array<std::array<const char *, 3>, 15> entries{
+        { { "dataDirs", "string", "Parent directory for unique acquisition runs." },
+          { "ampsDir", "string", "Offline-prepared float32 command bank with manifest.conf." },
+          { "channel", "string", "Dedicated initially-zero 50x50 float32 tweeter channel." },
+          { "Nperset", "int", "Samples per set; zero uses the bank manifest." },
+          { "Nset", "int", "Sets to acquire; zero uses all bank sets." },
+          { "Nmodes", "int", "Full actuator count; must be 2500." },
+          { "NumFrameSkip",
+            "int",
+            "Minimum source-counter advance after publication; zero still requires a fresh frame." },
+          { "imageNorm", "float", "Scaling of saved WFS images." },
+          { "modalNorm", "float", "Legacy unused command normalization; must remain 1." },
+          { "m_pupPix", "int", "Padded pupil size including two zero pixels on each edge." },
+          { "pup_offset1_x", "int", "Left pupil source-column offset." },
+          { "pup_offset2_x", "int", "Right pupil source-column offset." },
+          { "pup_offset1_y", "int", "Top pupil source-row offset." },
+          { "pup_offset2_y", "int", "Bottom pupil source-row offset." },
+          { "frameTimeout", "double", "Maximum seconds without a fresh frame during collection." } } };
+    for( size_t i = 0; i < entries.size(); ++i )
+    {
+        const auto       &entry = entries[i];
+        const std::string key   = std::string( "parameters." ) + entry[0];
+        config.add( key, "", key, argType::Required, "parameters", entry[0], false, entry[1], entry[2] );
+    }
 }
 
-inline int dlDataCollection::loadConfigImpl( mx::app::appConfigurator &_config )
+inline int dlDataCollection::loadConfigImpl( mx::app::appConfigurator &cfg )
 {
-    std::cout << "loadConfigImpl()" << std::endl;
-    shmimMonitorT::loadConfig( config );
-
-    _config( dataDirs, "parameters.dataDirs" );
-    _config( ampsDir, "parameters.ampsDir" );
-    _config( Nperset, "parameters.Nperset" );
-    _config( Nset, "parameters.Nset" );
-    _config( NumFrameSkip, "parameters.NumFrameSkip" );
-
-    _config( imageNorm, "parameters.imageNorm" );
-    _config( modalNorm, "parameters.modalNorm" );
-    _config( m_modevalChannel, "parameters.channel");
-
-    _config( Nmodes, "parameters.Nmodes" );
-    _config( m_pupPix, "parameters.m_pupPix" );
-    _config( pup_offset1_x, "parameters.pup_offset1_x" );
-    _config( pup_offset1_y, "parameters.pup_offset1_y" );
-    _config( pup_offset2_x, "parameters.pup_offset2_x" );
-    _config( pup_offset2_y, "parameters.pup_offset2_y" );
-
-    if( true )
+    SHMIMMONITOR_LOAD_CONFIG( cfg );
+    cfg( m_output, "parameters.dataDirs" );
+    cfg( m_bank, "parameters.ampsDir" );
+    cfg( m_channel, "parameters.channel" );
+    cfg( m_samples, "parameters.Nperset" );
+    cfg( m_sets, "parameters.Nset" );
+    cfg( m_modes, "parameters.Nmodes" );
+    cfg( m_skip, "parameters.NumFrameSkip" );
+    cfg( m_imageNorm, "parameters.imageNorm" );
+    cfg( m_modalNorm, "parameters.modalNorm" );
+    cfg( m_pupil, "parameters.m_pupPix" );
+    cfg( m_x[0], "parameters.pup_offset1_x" );
+    cfg( m_x[1], "parameters.pup_offset2_x" );
+    cfg( m_y[0], "parameters.pup_offset1_y" );
+    cfg( m_y[1], "parameters.pup_offset2_y" );
+    cfg( m_frameTimeout, "parameters.frameTimeout" );
+    if( m_modes != 2500 || m_samples < 0 || m_sets < 0 || m_skip < 0 || m_pupil <= 4 || m_x[0] < 0 || m_x[1] < 0 ||
+        m_y[0] < 0 || m_y[1] < 0 || !dlCollection::finite( m_imageNorm ) || m_imageNorm <= 0 ||
+        !dlCollection::finite( m_modalNorm ) || m_modalNorm != 1 || !dlCollection::finite( m_frameTimeout ) ||
+        !( m_frameTimeout > 0 ) || m_frameTimeout > 3600 || m_bank.empty() || m_output.empty() ||
+        m_channel.size() != 10 || m_channel.substr( 0, 8 ) != "dm01disp" || m_channel[8] < '0' || m_channel[8] > '9' ||
+        m_channel[9] < '0' || m_channel[9] > '9' )
     {
-        std::cout << "Debug configuration loading: " << std::endl;
-        std::cout << "dataDirs: " << dataDirs << std::endl;
-        std::cout << "ampsDir: " << ampsDir << std::endl;
-        std::cout << "Nperset: " << Nperset << std::endl;
-        std::cout << "Nset: " << Nset << std::endl;
-        std::cout << "NumFrameSkip: " << NumFrameSkip << std::endl;
-        std::cout << "imageNorm: " << imageNorm << std::endl;
-        std::cout << "modalNorm: " << modalNorm << std::endl;
-        std::cout << "modeval Channel: " << m_modevalChannel << std::endl;
-
-        std::cout << "m_pupPix: " << m_pupPix << std::endl;
-        std::cout << "pup_offset1_x: " << pup_offset1_x << std::endl;
-        std::cout << "pup_offset1_y: " << pup_offset1_y << std::endl;
-        std::cout << "pup_offset2_x: " << pup_offset2_x << std::endl;
-        std::cout << "pup_offset2_y: " << pup_offset2_y << std::endl;
+        return log<software_error, -1>( { __FILE__, __LINE__, "Invalid collection configuration" } );
     }
-
     return 0;
 }
 
 inline void dlDataCollection::loadConfig()
 {
-    loadConfigImpl( config );
+    if( loadConfigImpl( config ) < 0 )
+    {
+        m_shutdown = true;
+    }
+}
+
+inline dlCollection::Settings dlDataCollection::settings()
+{
+    dlCollection::Settings s;
+    s.m_bank      = m_bank;
+    s.m_output    = m_output;
+    s.m_samples   = m_samples;
+    s.m_sets      = m_sets;
+    s.m_skip      = m_skip;
+    s.m_pupil     = m_pupil;
+    s.m_x         = { size_t( m_x[0] ), size_t( m_x[1] ) };
+    s.m_y         = { size_t( m_y[0] ), size_t( m_y[1] ) };
+    s.m_height    = m_sourceSize[0];
+    s.m_width     = m_sourceSize[1];
+    s.m_imageNorm = m_imageNorm;
+    s.m_timeout   = m_frameTimeout;
+    s.m_context   = "revision=" + std::string( MAGAOX_CURRENT_SHA1 ) +
+                    "\nrepo_modified=" + std::to_string( MAGAOX_REPO_MODIFIED ) +
+                    "\nsource=" + shmimMonitorT::m_shmimName + "\nchannel=" + m_channel + "\n";
+    return s;
 }
 
 inline int dlDataCollection::appStartup()
 {
-    if( shmimMonitorT::appStartup() < 0 )
+    REG_INDI_SETPROP( m_indiP_nd, "fwtelsim", "filterName" );
+    REG_INDI_SETPROP( m_indiP_flipwfsf, "flipwfsf", "presetName" );
+    REG_INDI_SETPROP( m_indiP_ndState, "fwtelsim", "fsm" );
+    REG_INDI_SETPROP( m_indiP_flipwfsfState, "flipwfsf", "fsm" );
+    REG_INDI_SETPROP( m_indiP_fps, "camwfs", "fps" );
+    REG_INDI_SETPROP( m_indiP_emgain, "camwfs", "emgain" );
+    if( createStandardIndiRequestSw( m_indiP_start, "start" ) < 0 ||
+        createStandardIndiRequestSw( m_indiP_stop, "stop" ) < 0 ||
+        createStandardIndiText( m_indiP_output, "output" ) < 0 || createStandardIndiText( m_indiP_bank, "bank" ) < 0 ||
+        createROIndiText( m_indiP_collection, "collection", "phase" ) < 0 ||
+        createROIndiText( m_indiP_observation, "observation", "nd" ) < 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
+        return -1;
     }
-
-    // state(stateCodes::READY);
-    state( stateCodes::OPERATING );
+    m_indiP_observation.add( pcf::IndiElement( "flipwfsf" ) );
+    m_indiP_observation.add( pcf::IndiElement( "camwfs_fps" ) );
+    m_indiP_observation.add( pcf::IndiElement( "camwfs_emgain" ) );
+    for( const auto *name : { "directory", "error", "saved", "written", "duplicates", "torn", "samples_per_second" } )
+    {
+        m_indiP_collection.add( pcf::IndiElement( name ) );
+    }
+    m_indiP_output["current"] = m_output;
+    m_indiP_output["target"]  = m_output;
+    m_indiP_bank["current"]   = m_bank;
+    m_indiP_bank["target"]    = m_bank;
+    m_indiP_collection.setPerm( pcf::IndiProperty::ReadOnly );
+    if( registerIndiPropertyNew( m_indiP_start, INDI_NEWCALLBACK( m_indiP_start ) ) < 0 ||
+        registerIndiPropertyNew( m_indiP_stop, INDI_NEWCALLBACK( m_indiP_stop ) ) < 0 ||
+        registerIndiPropertyNew( m_indiP_output, INDI_NEWCALLBACK( m_indiP_output ) ) < 0 ||
+        registerIndiPropertyNew( m_indiP_bank, INDI_NEWCALLBACK( m_indiP_bank ) ) < 0 ||
+        registerIndiPropertyReadOnly( m_indiP_collection ) < 0 ||
+        registerIndiPropertyReadOnly( m_indiP_observation ) < 0 )
+    {
+        return -1;
+    }
+    if( threadStart(
+            m_ioThread, m_ioThreadInit, m_ioThreadID, m_indiP_ioThread, 0, "", "collection-io", this, ioStart ) < 0 )
+    {
+        return -1;
+    }
+    SHMIMMONITOR_APP_STARTUP;
+    state( stateCodes::READY );
     return 0;
+}
+
+inline void dlDataCollection::ioStart( dlDataCollection *app )
+{
+    app->m_ioThreadID = syscall( SYS_gettid );
+    while( app->m_ioThreadInit && !app->shutdown() )
+    {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    }
+    app->m_session.ioLoop();
 }
 
 inline int dlDataCollection::appLogic()
 {
-    if( shmimMonitorT::appLogic() < 0 )
+    SHMIMMONITOR_APP_LOGIC;
+    const bool stop = m_stopRequested.exchange( false );
+    if( stop )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
+        m_startPending = false;
+        m_session.abort();
+        m_connected = false;
+        state( stateCodes::READY );
     }
-
-    std::unique_lock<std::mutex> lock( m_indiMutex );
-
-    if( shmimMonitorT::updateINDI() < 0 )
+    if( m_startRequested.exchange( false ) && !stop )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
+        try
+        {
+            if( m_startPending || !m_session.canStart() )
+            {
+                throw std::runtime_error( "collection is busy or retains failed-run buffers" );
+            }
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( m_indiMutex );
+                m_connected                = false;
+                m_nd.m_received            = {};
+                m_flipwfsf.m_received      = {};
+                m_nd.m_stateReceived       = {};
+                m_flipwfsf.m_stateReceived = {};
+                m_fps.m_received           = {};
+                m_emgain.m_received        = {};
+            }
+            m_startPending = true;
+            state( stateCodes::OPERATING );
+            m_observationDeadline = std::chrono::steady_clock::now() + std::chrono::seconds( 5 );
+            m_observationPoll     = {};
+            std::lock_guard<std::mutex> lock( m_indiMutex );
+            m_controlError.clear();
+        }
+        catch( const std::exception &e )
+        {
+            std::lock_guard<std::mutex> lock( m_indiMutex );
+            m_controlError = e.what();
+            log<software_error>( { __FILE__, __LINE__, e.what() } );
+        }
     }
-
+    checkObservation();
+    m_session.checkTimeout();
+    const auto p = m_session.progress();
+    if( !m_startPending && ( p.m_phase == "idle" || p.m_phase == "draining" || p.m_phase == "complete" ||
+                             p.m_phase == "cancelled" || p.m_phase == "failed" ) )
+    {
+        m_connected = false;
+        state( stateCodes::READY );
+    }
+    const double elapsed = std::chrono::duration<double>( std::chrono::steady_clock::now() - m_started ).count();
+    if( m_finishedElapsed < 0 && ( p.m_phase == "complete" || p.m_phase == "cancelled" || p.m_phase == "failed" ) )
+    {
+        m_finishedElapsed = elapsed;
+    }
+    const double                duration = m_finishedElapsed < 0 ? elapsed : m_finishedElapsed;
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    if( p.m_phase == "idle" || p.m_phase == "complete" || p.m_phase == "cancelled" || p.m_phase == "failed" )
+    {
+        m_observationActive = false;
+    }
+    SHMIMMONITOR_UPDATE_INDI;
+    const auto status = m_startPending                                      ? pcf::IndiProperty::Busy
+                        : ( !p.m_error.empty() || !m_controlError.empty() ) ? pcf::IndiProperty::Alert
+                        : m_session.canStart()                              ? pcf::IndiProperty::Ok
+                                                                            : pcf::IndiProperty::Busy;
+    const std::vector<std::string> names{
+        "phase", "directory", "error", "saved", "written", "duplicates", "torn", "samples_per_second" };
+    const std::vector<std::string> values{ m_startPending ? "checking_observation" : p.m_phase,
+                                           p.m_directory,
+                                           p.m_error.empty() ? m_controlError : p.m_error,
+                                           std::to_string( p.m_saved ),
+                                           std::to_string( p.m_written ),
+                                           std::to_string( p.m_duplicates ),
+                                           std::to_string( p.m_torn ),
+                                           std::to_string( duration > 0 ? p.m_saved / duration : 0 ) };
+    updateIfChanged( m_indiP_collection, names, values, status );
+    const auto now      = std::chrono::steady_clock::now();
+    const bool observed = m_nd.valid( now ) && m_flipwfsf.valid( now ) && m_fps.valid( now ) && m_emgain.valid( now );
+    updateIfChanged( m_indiP_observation,
+                     std::vector<std::string>{ "nd", "flipwfsf", "camwfs_fps", "camwfs_emgain" },
+                     std::vector<std::string>{ m_nd.m_value,
+                                               m_flipwfsf.m_value,
+                                               m_fps.valid( now ) ? std::to_string( m_fps.m_value ) : "unknown",
+                                               m_emgain.valid( now ) ? std::to_string( m_emgain.m_value ) : "unknown" },
+                     observed ? pcf::IndiProperty::Ok : pcf::IndiProperty::Alert );
     return 0;
+}
+
+inline void dlDataCollection::checkObservation()
+{
+    const auto now = std::chrono::steady_clock::now();
+    if( m_indiDriver && now - m_observationPoll >= std::chrono::seconds( 1 ) )
+    {
+        m_observationPoll = now;
+        try
+        {
+            m_indiDriver->sendGetProperties( m_indiP_nd );
+            m_indiDriver->sendGetProperties( m_indiP_flipwfsf );
+            m_indiDriver->sendGetProperties( m_indiP_ndState );
+            m_indiDriver->sendGetProperties( m_indiP_flipwfsfState );
+            m_indiDriver->sendGetProperties( m_indiP_fps );
+            m_indiDriver->sendGetProperties( m_indiP_emgain );
+        }
+        catch( const std::exception &e )
+        {
+            log<software_error>( { __FILE__, __LINE__, e.what() } );
+        }
+    }
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    const auto                  checked = std::chrono::steady_clock::now();
+    const bool                  valid =
+        m_nd.valid( checked ) && m_flipwfsf.valid( checked ) && m_fps.valid( checked ) && m_emgain.valid( checked );
+    if( m_observationActive && ( !valid || m_observationChanged.load() ) )
+    {
+        m_observationChanged = true;
+        m_session.abort( "fwtelsim, flipwfsf or camwfs settings changed or have invalid/stale readback" );
+    }
+    if( !m_startPending )
+    {
+        return;
+    }
+    try
+    {
+        if( !valid )
+        {
+            if( checked < m_observationDeadline )
+            {
+                return;
+            }
+            std::string missing;
+            if( !m_nd.valid( checked ) )
+            {
+                missing += " fwtelsim.filterName/fsm";
+            }
+            if( !m_flipwfsf.valid( checked ) )
+            {
+                missing += " flipwfsf.presetName/fsm";
+            }
+            if( !m_fps.valid( checked ) )
+            {
+                missing += " camwfs.fps.current";
+            }
+            if( !m_emgain.valid( checked ) )
+            {
+                missing += " camwfs.emgain.current";
+            }
+            throw std::runtime_error( "no fresh settled readback:" + missing );
+        }
+        if( !m_connected.load() )
+        {
+            if( checked < m_observationDeadline )
+            {
+                return;
+            }
+            throw std::runtime_error( "source/channel attachment timed out" );
+        }
+        auto s = settings();
+        s.m_context += dlCollection::observationContext( m_nd, m_flipwfsf, m_fps, m_emgain );
+        m_runND              = m_nd.m_value;
+        m_runFlipwfsf        = m_flipwfsf.m_value;
+        m_runFPS             = m_fps.m_value;
+        m_runEMGain          = m_emgain.m_value;
+        m_observationChanged = false;
+        { //mutex scope
+            std::lock_guard<std::mutex> streamLock( m_streamMutex );
+            checkCommandStream( true );
+        }
+        if( m_stopRequested.load() )
+        {
+            throw std::runtime_error( "collection start cancelled" );
+        }
+        if( !m_session.start( s ) )
+        {
+            throw std::runtime_error( "collection is busy or retains failed-run buffers" );
+        }
+        m_observationActive = true;
+        m_started           = checked;
+        m_finishedElapsed   = -1;
+        m_controlError.clear();
+    }
+    catch( const std::exception &e )
+    {
+        m_controlError = e.what();
+        log<software_error>( { __FILE__, __LINE__, e.what() } );
+    }
+    m_startPending = false;
 }
 
 inline int dlDataCollection::appShutdown()
 {
-    shmimMonitorT::appShutdown();
-    for( int i = 0; i < Nmodes; ++i )
+    m_shutdown = true;
+    m_session.abort();
+    SHMIMMONITOR_APP_SHUTDOWN;
+    m_session.shutdown();
+    if( m_ioThread.joinable() )
     {
-        modeval[i] = 0;
+        m_ioThread.join();
     }
-    send_to_shmim();
-
-    if( pp_image )
+    std::lock_guard<std::mutex> lock( m_streamMutex );
+    if( m_commandOpened )
     {
-        delete[] pp_image;
+        ImageStreamIO_closeIm( &m_commandStream );
     }
-    if( randomAmps )
-    {
-        delete[] randomAmps;
-    }
-
-    if( modeval )
-    {
-        delete[] modeval;
-    }
-
+    m_commandOpened = false;
+    m_connected     = false;
     return 0;
 }
 
 inline int dlDataCollection::allocate( const dev::shmimT &dummy )
 {
-    std::cout << "allocate()" << std::endl;
-    static_cast<void>( dummy ); // be unused
-
-    // Wavefront sensor setup
-    m_pwfsWidth = shmimMonitorT::m_width;
-    m_pwfsHeight = shmimMonitorT::m_height;
-    std::cout << "Width: " << m_pwfsWidth << " Height: " << m_pwfsHeight << std::endl;
-
-    pixels_per_quadrant = m_pupPix * m_pupPix;
-    std::cout << "Pixels: " << pixels_per_quadrant << std::endl;
-    pp_image = new float[Npup * pixels_per_quadrant];
-    modeval = new float[Nmodes];
-    randomAmps = new float[Nperset * Nmodes];
-    imagebuffer = new ImageBuffer(Npup, m_pupPix, m_pupPix, Nperset);
-    memset( pp_image, 0, sizeof( float ) * Npup * pixels_per_quadrant );
-    memset( modeval, 0, sizeof( float) * Nmodes);
-    memset( randomAmps, 0, sizeof( float) * Nperset * Nmodes);
-    loadRandomAmps(0);
-	m_shaped_command.resize(Nact_across, Nact_across);
-    std::cout << "Close shmims" << std::endl;
-    // Allocate the DM shmim interface
-    if(m_modevalOpened){
-        ImageStreamIO_closeIm(&m_modevalStream);
+    static_cast<void>( dummy );
+    m_connected      = false;
+    const auto phase = m_session.progress().m_phase;
+    if( phase != "idle" && phase != "complete" && phase != "cancelled" && phase != "failed" )
+    {
+        m_session.abort( "source stream reconnected; partial run aborted" );
     }
+    try
+    {
+        if( shmimMonitorT::m_dataType != _DATATYPE_FLOAT || shmimMonitorT::m_imageStream.md[0].naxis != 2 ||
+            shmimMonitorT::m_imageStream.md[0].location != -1 || !shmimMonitorT::m_imageStream.array.raw )
+        {
+            throw std::runtime_error( "WFS stream must be a CPU-backed 2D float32 image" );
+        }
+        dlCollection::Settings s;
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_indiMutex );
+            m_sourceSize = { shmimMonitorT::m_height, shmimMonitorT::m_width };
+            s            = settings();
+        }
+        dlCollection::validate( s );
+        std::lock_guard<std::mutex> lock( m_streamMutex );
+        if( m_commandOpened )
+        {
+            ImageStreamIO_closeIm( &m_commandStream );
+        }
+        m_commandOpened = false;
+        m_commandOwned  = false;
+        if( ImageStreamIO_openIm( &m_commandStream, m_channel.c_str() ) != 0 )
+        {
+            throw std::runtime_error( "cannot attach command channel" );
+        }
+        m_commandOpened = true;
+        if( !m_commandStream.md || !m_commandStream.array.raw || !m_commandStream.semptr )
+        {
+            throw std::runtime_error( "invalid command channel mapping" );
+        }
+        const auto &md = m_commandStream.md[0];
+        if( md.naxis != 2 || md.size[0] != 50 || md.size[1] != 50 || md.datatype != _DATATYPE_FLOAT ||
+            md.location != -1 || md.shared != 1 || md.nelement != 2500 || md.imdatamemsize != 10000 ||
+            md.sem < SEMAPHORE_MAXVAL )
+        {
+            throw std::runtime_error( "command channel must be a semaphore-backed 50x50 float32 image" );
+        }
+        for( uint16_t i = 0; i < md.sem; ++i )
+        {
+            if( !m_commandStream.semptr[i] )
+            {
+                throw std::runtime_error( "command channel semaphore is not attached" );
+            }
+        }
+        m_commandSemaphores = md.sem;
+        char filename[4096];
+        if( ImageStreamIO_filename( filename, sizeof( filename ), m_channel.c_str() ) != 0 )
+        {
+            throw std::runtime_error( "cannot resolve command channel filename" );
+        }
+        m_commandFilename = filename;
+        struct stat info;
+        if( ::stat( filename, &info ) != 0 )
+        {
+            throw std::runtime_error( "cannot identify command channel" );
+        }
+        m_commandInode   = info.st_ino;
+        m_commandCounter = md.cnt0;
+        m_connected      = m_startPending.load();
+        return 0;
+    }
+    catch( const std::exception &e )
+    {
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_indiMutex );
+            m_controlError = e.what();
+            m_startPending = false;
+        }
+        // appLogic requests READY after observing the failed attachment.
+        return log<software_error>( { __FILE__, __LINE__, e.what() } );
+    }
+}
 
-    std::cout << "Open shmims" << std::endl;
-    m_modevalOpened = false;
-    m_modevalRestart = false; //Set this up front, since we're about to restart.
+inline void dlDataCollection::checkCommandStream( bool newRun )
+{
+    struct stat info;
+    if( !m_commandOpened || ::stat( m_commandFilename.c_str(), &info ) != 0 || info.st_ino != m_commandInode )
+    {
+        m_commandOwned = false;
+        throw std::runtime_error( "command channel deleted or recreated" );
+    }
+    volatile auto &md = m_commandStream.md[0];
+    if( md.naxis != 2 || md.size[0] != 50 || md.size[1] != 50 || md.datatype != _DATATYPE_FLOAT || md.location != -1 ||
+        md.shared != 1 || md.nelement != 2500 || md.imdatamemsize != 10000 || md.sem != m_commandSemaphores ||
+        md.write || ( !newRun && md.cnt0 != m_commandCounter ) )
+    {
+        m_commandOwned = false;
+        throw std::runtime_error( "command channel changed or another writer intervened" );
+    }
+    if( newRun )
+    {
+        if( m_commandOwned )
+        {
+            throw std::runtime_error( "previous command channel ownership has not been released" );
+        }
+        const uint64_t counter = md.cnt0;
+        std::atomic_thread_fence( std::memory_order_acquire );
+        for( size_t i = 0; i < 2500; ++i )
+        {
+            if( !dlCollection::finite( m_commandStream.array.F[i] ) || m_commandStream.array.F[i] != 0.F )
+            {
+                throw std::runtime_error( "dedicated command channel is not zero" );
+            }
+        }
+        std::atomic_thread_fence( std::memory_order_acquire );
+        if( md.write || md.cnt0 != counter )
+        {
+            throw std::runtime_error( "command channel changed during Start preflight" );
+        }
+        m_commandCounter = counter;
+    }
+}
 
-    if( ImageStreamIO_openIm(&m_modevalStream, m_modevalChannel.c_str()) == 0){
-        if(m_modevalStream.md[0].sem < 10){
-            ImageStreamIO_closeIm(&m_modevalStream);
-        }else{
-            m_modevalOpened = true;
+inline uint64_t dlDataCollection::publish( const float *command )
+{
+    std::lock_guard<std::mutex> lock( m_streamMutex );
+    if( command && m_observationChanged.load() )
+    {
+        throw std::runtime_error( "observing configuration changed during collection" );
+    }
+    if( !command && !m_commandOwned )
+    {
+        return 0;
+    }
+    checkCommandStream();
+    volatile auto &md = m_commandStream.md[0];
+    if( command && !m_commandOwned )
+    {
+        for( size_t i = 0; i < 2500; ++i )
+        {
+            if( !dlCollection::finite( m_commandStream.array.F[i] ) || m_commandStream.array.F[i] != 0.F )
+            {
+                throw std::runtime_error( "dedicated command channel is not zero" );
+            }
         }
     }
-
-    std::cout << "Done!" << std::endl;
-    if(!m_modevalOpened){
-        log<text_log>( m_modevalChannel + " not opened.", logPrio::LOG_NOTICE);
-        return -1;
-    }else{
-        m_modevalWidth = m_modevalStream.md->size[0];
-        m_modevalHeight = m_modevalStream.md->size[1];
-
-        m_modevalDataType = m_modevalStream.md->datatype;
-        m_modevalTypeSize = sizeof(float);
-
-        log<text_log>( "Opened " + m_modevalChannel + " " + std::to_string(m_modevalWidth) + " x " + std::to_string(m_modevalHeight) + " with data type: " + std::to_string(m_modevalDataType), logPrio::LOG_NOTICE);
+    md.write = 1;
+    std::atomic_thread_fence( std::memory_order_seq_cst );
+    if( command )
+    {
+        std::memcpy( m_commandStream.array.raw, command, 2500 * sizeof( float ) );
     }
+    else
+    {
+        std::memset( m_commandStream.array.raw, 0, 2500 * sizeof( float ) );
+    }
+    std::atomic_thread_fence( std::memory_order_release );
+    md.cnt0          = m_commandCounter + 1;
+    m_commandCounter = md.cnt0;
+    md.write         = 0;
+    m_commandOwned   = command != nullptr;
+    if( ImageStreamIO_sempost( &m_commandStream, -1 ) != 0 )
+    {
+        throw std::runtime_error( "command notification failed" );
+    }
+    if( !command )
+    {
+        return 0; // Source may already be detached during timeout/shutdown.
+    }
+    const volatile auto &source = shmimMonitorT::m_imageStream.md[0];
+    return source.cnt0;
+}
 
+inline bool dlDataCollection::snapshotStable( uint64_t counter )
+{
+    if( m_observationChanged.load() )
+    {
+        return false;
+    }
+    const volatile auto &md = shmimMonitorT::m_imageStream.md[0];
+    std::atomic_thread_fence( std::memory_order_acquire );
+    if( md.write || md.cnt0 != counter )
+    {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock( m_streamMutex );
+    checkCommandStream();
+    if( !m_commandOwned )
+    {
+        throw std::runtime_error( "held command ownership was lost" );
+    }
+    return true;
+}
 
+inline int dlDataCollection::processImage( void *src, const dev::shmimT &dummy )
+{
+    if( m_startPending.load() && !m_connected.load() )
+    {
+        // A quick Start can reuse an attachment whose monitor never observed READY.
+        // Revalidate on the monitor thread before admitting frames to the new session.
+        return allocate( dummy );
+    }
+    if( m_observationChanged.load() )
+    {
+        return 0;
+    }
+    const volatile auto &md = shmimMonitorT::m_imageStream.md[0];
+    if( md.write )
+    {
+        return 0;
+    }
+    const uint64_t counter = md.cnt0;
+    const uint64_t time    = md.atime.tv_sec > 0 ? uint64_t( md.atime.tv_sec ) * 1000000000ULL + md.atime.tv_nsec : 0;
+    std::atomic_thread_fence( std::memory_order_acquire );
+    m_session.onFrame( counter,
+                       time,
+                       static_cast<const float *>( src ),
+                       [this, counter]
+                       {
+                           return snapshotStable( counter );
+                       } );
     return 0;
 }
 
-inline void dlDataCollection::loadRandomAmps(int dataset_index){
-    std::string filename = ampsDir + "modeval_dataset_" + std::to_string(dataset_index) + ".csv";
-    std::cout << "Loading dataset from: " << filename << std::endl;
-    loadCSV(filename, Nperset*Nmodes, randomAmps);
+inline int
+dlDataCollection::textRequest( const pcf::IndiProperty &request, pcf::IndiProperty &property, std::string &value )
+{
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    if( !m_session.canStart() || m_startRequested.load() || m_startPending || !request.find( "target" ) )
+    {
+        return -1;
+    }
+    const auto target = request["target"].get<std::string>();
+    if( target.empty() || target.find_first_of( "\r\n" ) != std::string::npos )
+    {
+        return -1;
+    }
+    value = target;
+    updateIfChanged( property, "target", value );
+    updateIfChanged( property, "current", value );
+    return 0;
 }
 
-inline int dlDataCollection::processImage( void *curr_src, const dev::shmimT &dummy )
+INDI_NEWCALLBACK_DEFN( dlDataCollection, m_indiP_start )( const pcf::IndiProperty &ipRecv )
 {
-    static_cast<void>( dummy ); // be unused
-
-    // aol_imwfs2 is reference and dark subtracted and is power normalized.
-    //Eigen::Map<eigenImage<unsigned short>> pwfsIm(static_cast<unsigned short *>( curr_src ), m_pwfsHeight, m_pwfsWidth );
-    Eigen::Map<eigenImage<float>> pwfsIm(reinterpret_cast<float*>(curr_src), m_pwfsHeight, m_pwfsWidth);
-
-    // Split up the four pupils for the Neural Network.
-    int ki = 0;
-
-    for( int col_i = -zeroPad; col_i < (m_pupPix - zeroPad); ++col_i )
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_start, ipRecv );
+    if( ipRecv.find( "request" ) && ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
-        for( int row_i = -zeroPad; row_i < (m_pupPix - zeroPad); ++row_i )
-        {
-            if ((col_i < 0) or (col_i >= (m_pupPix - 2*zeroPad)) or (row_i < 0) or (row_i >= (m_pupPix - 2*zeroPad))){
-                pp_image[ki] = 0;
-                pp_image[ki + pixels_per_quadrant] = 0;
-                pp_image[ki + 2 * pixels_per_quadrant] = 0;
-                pp_image[ki + 3 * pixels_per_quadrant] = 0;
-            }
-            else {
-                pp_image[ki] = imageNorm * (realT)pwfsIm(pup_offset1_y + row_i, pup_offset1_x + col_i );
-                pp_image[ki + pixels_per_quadrant] = imageNorm * (realT)pwfsIm( pup_offset1_y + row_i, pup_offset2_x + col_i );
-                pp_image[ki + 2 * pixels_per_quadrant] = imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset1_x + col_i );
-                pp_image[ki + 3 * pixels_per_quadrant] = imageNorm * (realT)pwfsIm( pup_offset2_y + row_i, pup_offset2_x + col_i );
-            }
-            ++ki;
-        }
+        m_startRequested = true;
     }
+    return 0;
+}
 
-    for( int i = 0; i < Nmodes; ++i )
+INDI_NEWCALLBACK_DEFN( dlDataCollection, m_indiP_stop )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stop, ipRecv );
+    if( ipRecv.find( "request" ) && ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
     {
-        modeval[i] = randomAmps[Nmodes * frame_saved + i];
+        m_stopRequested = true;
     }
+    return 0;
+}
 
-    // Send to DM
-    send_to_shmim();
+INDI_NEWCALLBACK_DEFN( dlDataCollection, m_indiP_output )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_output, ipRecv );
+    return textRequest( ipRecv, m_indiP_output, m_output );
+}
 
+INDI_NEWCALLBACK_DEFN( dlDataCollection, m_indiP_bank )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_bank, ipRecv );
+    return textRequest( ipRecv, m_indiP_bank, m_bank );
+}
 
-    // Check if we need to add image to buffer
-    if (frame_wait==NumFrameSkip){
-        imagebuffer->add(pp_image);
-        frame_wait=0;
-        frame_saved++;
+INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_nd )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_nd, ipRecv );
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_nd.update( ipRecv );
+    if( m_observationActive && m_nd.m_value != m_runND )
+    {
+        m_observationChanged = true;
     }
+    return 0;
+}
 
-    // Save dataset
-    if ((frame_saved%Nperset==0) and (frame_saved!=0)){
-        std::cout << "Saving dataset " << dataset_i << std::endl;
-        imagebuffer->save(dataDirs + "images_dataset_" + std::to_string(dataset_i) + ".bin");
-        imagebuffer->clear();
-        dataset_i++;
-        if (dataset_i > Nset){
-            appShutdown();
-         }
-        loadRandomAmps(dataset_i);
-        frame_saved = 0;
+INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_flipwfsf )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_flipwfsf, ipRecv );
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_flipwfsf.update( ipRecv );
+    if( m_flipwfsf.m_value != "in" && m_flipwfsf.m_value != "out" )
+    {
+        m_flipwfsf.m_value.clear();
     }
-    frame_wait++;
-    frame_counter++;
+    if( m_observationActive && m_flipwfsf.m_value != m_runFlipwfsf )
+    {
+        m_observationChanged = true;
+    }
+    return 0;
+}
 
+INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_ndState )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_ndState, ipRecv );
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_nd.updateState( ipRecv );
+    if( m_observationActive && !m_nd.valid( std::chrono::steady_clock::now() ) )
+    {
+        m_observationChanged = true;
+    }
+    return 0;
+}
 
+INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_flipwfsfState )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_flipwfsfState, ipRecv );
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_flipwfsf.updateState( ipRecv );
+    if( m_observationActive && !m_flipwfsf.valid( std::chrono::steady_clock::now() ) )
+    {
+        m_observationChanged = true;
+    }
+    return 0;
+}
 
+INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_fps )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fps, ipRecv );
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_fps.update( ipRecv );
+    if( m_observationActive && m_fps.m_value != m_runFPS )
+    {
+        m_observationChanged = true;
+    }
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( dlDataCollection, m_indiP_emgain )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_emgain, ipRecv );
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_emgain.update( ipRecv );
+    if( m_observationActive && m_emgain.m_value != m_runEMGain )
+    {
+        m_observationChanged = true;
+    }
     return 0;
 }
 
 } // namespace app
 } // namespace MagAOX
-
 #endif // dlDataCollection_hpp
