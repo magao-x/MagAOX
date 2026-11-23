@@ -1,7 +1,7 @@
 /** \file t2wOffloader.hpp
  * \brief The MagAO-X tweeter to woofer offloading manager
  *
- * \ingroup app_files
+ * \ingroup t2wOffloader_files
  */
 
 #ifndef t2wOffloader_hpp
@@ -63,18 +63,18 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     typedef float realT;
 
   protected:
-    /** \name Configurable Parameters
+    /** \name Configuration - Data
      *@{
      */
 
-    std::string m_twRespMPath; ///< Path to the tweeter-to-woofer response matrix FITS file.
+    std::string m_twRespMPath; ///< Path to the tweeter-to-woofer response matrix.
 
-    std::string m_dmChannel; ///< The woofer DM channel shmim that offload commands are written to.
+    std::string m_dmChannel; ///< Woofer command channel receiving the offload.
 
-    std::string m_fpsSource{ "camwfs" };         ///< INDI device providing the loop fps.
-    std::string m_navgSource{ "dmtweeter-avg" }; ///< INDI device providing the tweeter averager's navg.
-    float       m_gain{ 0.1 };                   ///< Offload integrator gain.
-    float       m_leak{ 0.0 };                   ///< Offload integrator leak.
+    std::string m_fpsSource{ "camwfs" };         ///< INDI device providing the input frame rate.
+    std::string m_navgSource{ "dmtweeter-avg" }; ///< INDI device providing the number of averaged frames.
+    float       m_gain{ 0.1 };                   ///< Gain applied to each new offload increment.
+    float       m_leak{ 0.0 };                   ///< Fraction of the accumulated command leaked per update.
 
     float m_actLim{ 7.0 }; ///< the upper limit on woofer actuator commands.  default is 7.0.
 
@@ -126,6 +126,38 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     mx::improc::eigenCube<float> m_wModes; ///< Woofer modes corresponding to each of m_tModesOrtho.
 
     IMAGE *m_wModesStream{ nullptr }; ///< Stream aol<loop>_CMmodesDM publishing m_wModes.
+    std::string m_tweeterMaskFile; ///< File containing the tweeter actuator mask.
+
+    std::string m_wooferMaskFile; ///< File containing the woofer actuator mask.
+
+    uint32_t m_maxModes{ 50 }; ///< Maximum number of modes supported by the offloader.
+
+    uint32_t m_numModes{ 0 }; ///< Number of modes to offload, with zero selecting actuator offloading.
+
+    int m_loopNumber{ 0 }; ///< CACAO loop number used to name the woofer mode and mask streams.
+    ///@}
+
+    mx::improc::eigenImage<realT> m_twRespM;       ///< Response matrix mapping tweeter commands to woofer commands.
+    mx::improc::eigenImage<realT> m_tweeter;       ///< Buffer sized to the tweeter input image.
+    mx::improc::eigenImage<realT> m_woofer;        ///< Accumulated actuator command, held across offload toggles.
+    mx::improc::eigenImage<realT> m_wooferDelta;   ///< Woofer actuator increment for the current frame.
+    mx::improc::eigenImage<realT> m_modeDeltaAmps; ///< Modal increments for the current frame.
+
+    mx::improc::milkImage<realT> m_modevalDM;  ///< Shared stream holding the accumulated modal command.
+    mx::improc::milkImage<realT> m_modevalDMf; ///< Shared stream supplying reconstructed woofer modal feedback.
+
+    uint64_t m_lastDMf_cnt0{ 0 }; ///< Feedback stream counter last observed by the modal integrator.
+    uint64_t m_updatedDMf{ 0 };   ///< Number of feedback updates incorporated by the modal integrator.
+
+    mx::improc::eigenImage<realT> m_tweeterMask; ///< Mask used to select valid tweeter actuators.
+
+    mx::improc::eigenCube<float> m_tModesOrtho; ///< Orthonormal tweeter modes used for projection.
+
+    mx::improc::milkImage<float> m_wooferMask; ///< Published mask of valid woofer actuators.
+
+    mx::improc::eigenCube<float> m_wModes; ///< Woofer shapes corresponding to the tweeter modes.
+
+    IMAGE *m_wModesStream{ nullptr }; ///< Published stream of woofer mode shapes.
 
     float    m_fps{ 0 };  ///< Current FPS from the FPS source.
     uint32_t m_navg{ 0 }; ///< Current navg from the averager
@@ -151,35 +183,41 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     IMAGE    m_dmStream;      ///< The woofer DM channel stream, opened in allocate().
     uint32_t m_dmWidth{ 0 };  ///< The width of the image
     uint32_t m_dmHeight{ 0 }; ///< The height of the image.
+    float m_effFPS{ 0 }; ///< Effective offload update rate after frame averaging.
 
-    uint8_t m_dmDataType{ 0 }; ///< The ImageStreamIO type code.
-    size_t  m_dmTypeSize{ 0 }; ///< The size of the type, in bytes.
+    IMAGE    m_dmStream;      ///< Open woofer command stream.
+    uint32_t m_dmWidth{ 0 };  ///< Width of the woofer command image.
+    uint32_t m_dmHeight{ 0 }; ///< Height of the woofer command image.
 
-    bool m_dmOpened{ false };  ///< Whether m_dmStream is currently open.
-    bool m_dmRestart{ false }; ///< Flag to reopen m_dmStream.
+    uint8_t m_dmDataType{ 0 }; ///< ImageStreamIO type code of the woofer command stream.
+    size_t  m_dmTypeSize{ 0 }; ///< Size of a command pixel in bytes.
 
-    bool m_offloading{ false }; ///< Whether offloading is enabled.
+    bool m_dmOpened{ false };  ///< Whether the offload channel is open.
+    bool m_dmRestart{ false }; ///< Woofer channel restart flag, cleared when reallocating.
+
+    bool m_offloading{ false }; ///< Whether incoming tweeter frames drive the offload integrator.
 
     /// Mutex for locking shared memory access.
     std::mutex m_shmimMutex;
 
   public:
-    /// Default c'tor.
+    /// Construct the tweeter-to-woofer offloader.
     t2wOffloader();
 
-    /// D'tor, declared and defined for noexcept.
+    /// Destroy the offloader.
     ~t2wOffloader() noexcept
     {
     }
 
-    /// Set up the configuration system.
+    /** \name Configuration
+     * @{
+     */
+
+    /// Register the application and base-class configuration options.
     virtual void setupConfig();
 
-    /// Implementation of loadConfig logic, separated for testing.
-    /** This is called by loadConfig().
-     */
-    int loadConfigImpl(
-        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
+    /// Read the offloader settings from a configurator.
+    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] The application configuration. */ );
 
     /// Load the configuration.
     virtual void loadConfig();
@@ -261,24 +299,32 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
      *
      * @{
      */
-    pcf::IndiProperty m_indiP_gain;   ///< Property to set the offload gain.
-    pcf::IndiProperty m_indiP_leak;   ///< Property to set the offload leak.
-    pcf::IndiProperty m_indiP_actLim; ///< Property to set the woofer actuator command limit.
+    pcf::IndiProperty m_indiP_gain;   ///< Offload gain control.
+    pcf::IndiProperty m_indiP_leak;   ///< Integrator leak control.
+    pcf::IndiProperty m_indiP_actLim; ///< Woofer actuator limit control.
 
-    pcf::IndiProperty m_indiP_zero; ///< Request switch to zero the offload.
+    pcf::IndiProperty m_indiP_zero; ///< Explicit request to zero the offloaded command.
 
-    pcf::IndiProperty m_indiP_numModes; ///< Property to set the number of offloaded modes.
+    pcf::IndiProperty m_indiP_numModes; ///< Number of modes to offload.
 
-    pcf::IndiProperty m_indiP_offloadToggle; ///< Toggle switch to start and stop offloading.
+    pcf::IndiProperty m_indiP_offloadToggle; ///< Switch controlling offload updates.
 
+    /// Apply a new offload gain.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_gain );
+
+    /// Apply a new integrator leak.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_leak );
+
+    /// Apply a new woofer actuator limit.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_actLim );
 
+    /// Zero the offloaded command on request.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_zero );
 
+    /// Select the number of modes to offload.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_numModes );
 
+    /// Start or stop offload updates while preserving the accumulated correction.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_offloadToggle );
 
     pcf::IndiProperty m_indiP_fpsSource; ///< Property monitoring the fps of m_fpsSource.
@@ -296,6 +342,17 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
 
     pcf::IndiProperty m_indiP_offloadRate; ///< Property to set the requested offload rate, Hz.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_offloadRate );
+    pcf::IndiProperty m_indiP_fpsSource; ///< Subscription to the input frame rate.
+
+    /// Update the input frame rate from its INDI source.
+    INDI_SETCALLBACK_DECL( t2wOffloader, m_indiP_fpsSource );
+
+    pcf::IndiProperty m_indiP_navgSource; ///< Subscription to the input averaging count.
+
+    /// Update the averaging count from its INDI source.
+    INDI_SETCALLBACK_DECL( t2wOffloader, m_indiP_navgSource );
+
+    pcf::IndiProperty m_indiP_fps; ///< Published effective offload rate.
 
     ///@}
 
@@ -303,21 +360,20 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
      *
      * @{
      */
-
-    /// Check whether any telemetry records are due.
+    /// Check whether offload or loop gain telemetry is due.
     int checkRecordTimes();
 
-    /// Record the loop gain telemetry, called by the telemeter.
-    int recordTelem( const telem_loopgain * );
+    /// Record the loop gain telemetry on demand.
+    int recordTelem( const telem_loopgain *tag /**< [in] Telemetry type tag. */ );
 
-    /// Record the loop gain telemetry if it changed.
-    int recordLoopGain( bool force = false /**< [in] record even if nothing changed */ );
+    /// Record the offload state and integrator settings.
+    int recordLoopGain( bool force = false /**< [in] Record even when the settings are unchanged. */ );
 
-    /// Record the offloading telemetry, called by the telemeter.
-    int recordTelem( const telem_offloading * );
+    /// Record the offloading telemetry on demand.
+    int recordTelem( const telem_offloading *tag /**< [in] Telemetry type tag. */ );
 
-    /// Record the offloading telemetry if it changed.
-    int recordOffloading( bool force = false /**< [in] record even if nothing changed */ );
+    /// Record the mode count, averaging count, and effective offload rate.
+    int recordOffloading( bool force = false /**< [in] Record even when the settings are unchanged. */ );
 
     ///@}
 };
@@ -1190,9 +1246,6 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_offloadToggle )( const pcf::IndiPro
     {
         if( !m_offloading ) // not offloading so change
         {
-            m_woofer.setZero(); // always zero when offloading starts
-            log<text_log>( "zeroed", logPrio::LOG_NOTICE );
-
             recordLoopGain( true );
             m_offloading = true;
             recordLoopGain();

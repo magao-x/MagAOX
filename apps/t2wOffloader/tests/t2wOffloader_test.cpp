@@ -78,24 +78,95 @@ namespace libXWCTest
 namespace t2wOffloaderTest
 {
 
-/// Verify the placeholder t2wOffloader test harness instantiates the app cleanly.
+/// \cond
+class t2wOffloaderHarness : public t2wOffloader
+{
+  public:
+    /// Initialize one tweeter actuator and one in-memory woofer command pixel.
+    t2wOffloaderHarness();
+
+    /// Send an offloading switch command to the app.
+    int setOffloading( bool enabled /**< [in] Requested offloading state. */ );
+
+    /// Feed a single actuator value to the frame callback.
+    int processActuator( float command /**< [in] Averaged tweeter actuator command. */ );
+
+    /// Return the most recently published woofer actuator command.
+    float wooferCommand() const;
+
+  private:
+    IMAGE_METADATA m_wooferMetadata{};   ///< Metadata for the in-memory output with no attached semaphores.
+    float          m_wooferCommand{ 0 }; ///< Storage for the in-memory woofer command pixel.
+};
+
+t2wOffloaderHarness::t2wOffloaderHarness()
+{
+    m_configName = "test_t2wOffloader";
+    createStandardIndiToggleSw( m_indiP_offloadToggle, "offload" );
+
+    m_numModes = 0;
+    m_gain     = 0.5F;
+    m_width    = 1;
+    m_height   = 1;
+    m_typeSize = sizeof( float );
+
+    m_twRespM.setOnes( 1, 1 );
+    m_woofer.setZero( 1, 1 );
+
+    m_dmWidth            = 1;
+    m_dmHeight           = 1;
+    m_dmStream           = {};
+    m_dmStream.md        = &m_wooferMetadata;
+    m_dmStream.array.raw = &m_wooferCommand;
+}
+
+int t2wOffloaderHarness::setOffloading( bool enabled )
+{
+    auto request = m_indiP_offloadToggle;
+    request["toggle"].setSwitchState( enabled ? pcf::IndiElement::On : pcf::IndiElement::Off );
+    return newCallBack_m_indiP_offloadToggle( request );
+}
+
+int t2wOffloaderHarness::processActuator( float command )
+{
+    return processImage( &command, dev::shmimT{} );
+}
+
+float t2wOffloaderHarness::wooferCommand() const
+{
+    return m_wooferCommand;
+}
+/// \endcond
+
+/// Verify actuator offloading holds its correction while off and resumes integration from that correction.
 /**
  * \ingroup t2wOffloader_unit_test
  */
-TEST_CASE( "t2wOffloader placeholder harness instantiates the app", "[t2wOffloader]" )
+TEST_CASE( "t2wOffloader resumes actuator integration after toggling off and on", "[t2wOffloader]" )
 {
     // clang-format off
     #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
-    t2wOffloader();
+    t2wOffloader::newCallBack_m_indiP_offloadToggle( pcf::IndiProperty() );
+    t2wOffloader::processImage( nullptr, dev::shmimT{} );
     #endif
     // clang-format on
 
-    SECTION( "default construction succeeds" )
-    {
-        t2wOffloader app;
+    t2wOffloaderHarness app;
 
-        REQUIRE( true );
-    }
+    REQUIRE( app.setOffloading( true ) == 0 );
+    REQUIRE( app.processActuator( 2.0F ) == 0 );
+    REQUIRE( app.wooferCommand() == Approx( 1.0F ) );
+
+    REQUIRE( app.setOffloading( false ) == 0 );
+    REQUIRE( app.processActuator( 6.0F ) == 0 );
+    CHECK( app.wooferCommand() == Approx( 1.0F ) );
+
+    REQUIRE( app.setOffloading( true ) == 0 );
+    REQUIRE( app.processActuator( 0.0F ) == 0 );
+    CHECK( app.wooferCommand() == Approx( 1.0F ) );
+
+    REQUIRE( app.processActuator( 2.0F ) == 0 );
+    CHECK( app.wooferCommand() == Approx( 2.0F ) );
 }
 
 /// Verify the modal offload change is back-projected onto the tweeter modes.
