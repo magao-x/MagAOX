@@ -43,8 +43,11 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_finalZero;
     using counterOffload::m_gain;
     using counterOffload::m_gainGrid;
+    using counterOffload::m_latency;
+    using counterOffload::m_latencyCount;
     using counterOffload::m_leak;
     using counterOffload::m_maxCommand;
+    using counterOffload::m_missed;
     using counterOffload::m_modeMax;
     using counterOffload::m_nAverage;
     using counterOffload::m_overflows;
@@ -56,6 +59,7 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_ramps;
     using counterOffload::m_rampStartUs;
     using counterOffload::m_settleS;
+    using counterOffload::m_slotNs;
     using counterOffload::m_startGridUs;
     using counterOffload::m_syncopationTiming;
     using counterOffload::m_timeOffsetUs;
@@ -951,6 +955,190 @@ TEST_CASE( "counterOffload collects PSD band powers after a change", "[counterOf
         app.processImage( psd.data(), psdShmimT() );
         REQUIRE( app.m_psdPowers.size() == 2 );
         REQUIRE( app.m_psdPowers[0] == Approx( 3 * 5 ) );
+    }
+}
+
+/// Verify the woofer-to-receipt handoff taken from the offload frame's timestamps.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload measures the handoff from the woofer stamp", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::stampedHandoffNs(timespec(), timespec(), timespec());
+    #endif
+    // clang-format on
+
+    const timespec atime{ 100, 999990000 };
+    const timespec writetime{ 100, 999995000 };
+
+    SECTION( "a stamped frame gives receipt minus atime, across a second boundary" )
+    {
+        REQUIRE( counterOffload::stampedHandoffNs( atime, writetime, timespec{ 101, 20000 } ) == 30000 );
+    }
+
+    SECTION( "a frame posted without a woofer stamp is rejected" )
+    {
+        REQUIRE( counterOffload::stampedHandoffNs( writetime, writetime, timespec{ 101, 0 } ) == -1 );
+    }
+
+    SECTION( "negative and stale handoffs are rejected" )
+    {
+        REQUIRE( counterOffload::stampedHandoffNs( atime, writetime, timespec{ 100, 0 } ) == -1 );
+        REQUIRE( counterOffload::stampedHandoffNs( atime, writetime, timespec{ 102, 0 } ) == -1 );
+    }
+}
+
+/// Verify the latency window statistics.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload summarizes the latency window", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::summarizeLatency(nullptr, 0);
+    counterOffload::latencyElements();
+    #endif
+    // clang-format on
+
+    SECTION( "an empty window has no data" )
+    {
+        const counterOffload::latencySummaryT sum = counterOffload::summarizeLatency( nullptr, 0 );
+
+        REQUIRE( sum.pipelineUs == -1 );
+        REQUIRE( sum.slotWaitUs == -1 );
+        REQUIRE( sum.computeMaxUs == -1 );
+    }
+
+    SECTION( "means, pipeline RMS and largest compute; unstamped offloads leave out handoff and pipeline" )
+    {
+        // pipelines 10 + 2 + 1 = 13 and 20 + 4 + 1 = 25; the third has no stamp
+        const counterOffload::latencySampleT samples[] = {
+            { 10, 50, 2, 1 }, { 20, 70, 4, 1 }, { -1, 90, 6, 1 } };
+
+        const counterOffload::latencySummaryT sum = counterOffload::summarizeLatency( samples, 3 );
+
+        REQUIRE( sum.handoffUs == Approx( 15 ) );
+        REQUIRE( sum.pipelineUs == Approx( 19 ) );
+        REQUIRE( sum.pipelineRmsUs == Approx( 6 ) );
+        REQUIRE( sum.slotWaitUs == Approx( 70 ) );
+        REQUIRE( sum.computeUs == Approx( 4 ) );
+        REQUIRE( sum.writeUs == Approx( 1 ) );
+        REQUIRE( sum.computeMaxUs == Approx( 6 ) );
+    }
+
+    SECTION( "the INDI element order" )
+    {
+        REQUIRE( counterOffload::latencyElements().size() == 9 );
+        REQUIRE( counterOffload::latencyElements().front() == "pipelineUs" );
+        REQUIRE( counterOffload::latencyElements().back() == "missed" );
+    }
+}
+
+/// Verify latency is recorded once per offload, at the first slot published after it arrived.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload records each offload's latency at its first slot", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::recordLatency(0, 0, 0, 0);
+    counterOffload::updateSlotPeriod(synco::Request());
+    #endif
+    // clang-format on
+
+    counterOffload_test app;
+
+    const std::vector<float> d( 4, 1.0f );
+    const int64_t            us = 1000;
+
+    counterOffload::rampT *early = app.addRamp( d.data(), 0 );
+    counterOffload::rampT *late  = app.addRamp( d.data(), 0 );
+    REQUIRE( early != nullptr );
+    REQUIRE( late != nullptr );
+
+    early->wakeNs         = 1000 * us;
+    early->handoffNs      = 12 * us;
+    early->latencyPending = true;
+
+    late->wakeNs         = 1200 * us; // after this slot's compute start
+    late->latencyPending = true;
+
+    SECTION( "only offloads received before the compute start are recorded, once" )
+    {
+        app.recordLatency( 1100 * us, 1103 * us, 1150 * us, 1151 * us );
+
+        REQUIRE( app.m_latencyCount == 1 );
+        REQUIRE( app.m_latency[0].handoffUs == Approx( 12 ) );
+        REQUIRE( app.m_latency[0].slotWaitUs == Approx( 100 ) );
+        REQUIRE( app.m_latency[0].computeUs == Approx( 3 ) );
+        REQUIRE( app.m_latency[0].writeUs == Approx( 1 ) );
+        REQUIRE_FALSE( early->latencyPending );
+        REQUIRE( late->latencyPending );
+
+        app.recordLatency( 1225 * us, 1228 * us, 1275 * us, 1276 * us );
+
+        REQUIRE( app.m_latencyCount == 2 );
+        REQUIRE( app.m_latency[1].handoffUs == -1 ); // no woofer stamp
+        REQUIRE( app.m_latency[1].slotWaitUs == Approx( 25 ) );
+    }
+
+    SECTION( "an offload that waited a whole slot or more is missed" )
+    {
+        app.m_slotNs = 125 * us;
+        app.recordLatency( 1100 * us, 1103 * us, 1150 * us, 1151 * us );
+        REQUIRE( app.m_missed == 0 ); // the early offload waited 100 us
+
+        app.recordLatency( 1330 * us, 1333 * us, 1380 * us, 1381 * us );
+        REQUIRE( app.m_missed == 1 ); // the late offload waited 130 us
+    }
+
+    SECTION( "a zero drops pending offloads" )
+    {
+        app.clearState();
+        app.recordLatency( 2000 * us, 2003 * us, 2050 * us, 2051 * us );
+
+        REQUIRE( app.m_latencyCount == 0 );
+    }
+
+    SECTION( "the window keeps the latest samples" )
+    {
+        for( size_t k = 0; k < counterOffload::m_latencyWindow + 5; ++k )
+        {
+            early->latencyPending = true;
+            app.recordLatency( 1100 * us, 1103 * us, 1150 * us, 1151 * us );
+        }
+
+        REQUIRE( app.m_latencyCount == counterOffload::m_latencyWindow );
+    }
+
+    SECTION( "the slot period comes from consecutive steps of one cycle" )
+    {
+        synco::Request a{};
+        a.cycle    = 7;
+        a.step     = 1;
+        a.targetNs = 10000 * us;
+
+        synco::Request b = a;
+        b.step           = 2;
+        b.targetNs       = 10125 * us;
+
+        synco::Request c = b;
+        c.cycle          = 8;
+        c.step           = 0;
+        c.targetNs       = 10500 * us; // a new cycle, not consecutive steps
+
+        app.updateSlotPeriod( a );
+        REQUIRE( app.m_slotNs == 0 );
+
+        app.updateSlotPeriod( b );
+        REQUIRE( app.m_slotNs == 125 * us );
+
+        app.updateSlotPeriod( c );
+        REQUIRE( app.m_slotNs == 125 * us );
     }
 }
 

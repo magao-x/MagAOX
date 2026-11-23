@@ -892,6 +892,45 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261120T202
   - **An INFO log line every 10 s** with min/mean/max of each term, for analysis after a run.
   - **No new CSV columns.** The latency does not depend on the calibration parameters except through `rampStartUs`, which L-Q2 excludes.
 
+**Combined computation metric (user, 2026-11-22).** "if handoffUs + computeUs + writeUs is the metric that I'm comparing to the 125 us slot for, there should also be a parameter that displays that for easy reading."
+- **New term `pipelineUs`.** It is computed per offload as `handoffUs + computeUs + writeUs`. It is the computation time on the path from the woofer post to the command reaching synco, excluding slot waiting and the fixed leads. It is the number to compare with the slot period.
+- **INDI.** `latency` gains two elements: `pipelineUs` (window mean) and `pipelineMaxUs` (window maximum). The maximum is of the per-offload sum, not the sum of the individual maxima, so it is a delay some offload actually saw.
+- **The 10 s INFO log** also gives min/mean/max of `pipelineUs`.
+- **Proposed `latency` elements (8):** `pipelineUs`, `pipelineMaxUs`, `handoffUs`, `slotWaitUs`, `computeUs`, `writeUs`, `computeMaxUs`, `missed`.
+- **Revised (user, 2026-11-22): "I don't want the pipelineMaxUs, I want an RMS instead."**
+  - `pipelineMaxUs` is replaced by `pipelineRmsUs`: the RMS deviation of the per-offload `pipelineUs` about its window mean (the standard deviation), which shows the jitter. The RMS about zero would be nearly equal to the mean and add little.
+  - The 10 s INFO log keeps min/mean/max and adds the RMS.
+  - Elements (8): `pipelineUs`, `pipelineRmsUs`, `handoffUs`, `slotWaitUs`, `computeUs`, `writeUs`, `computeMaxUs`, `missed`.
+- **L-Q5.** Should the slot period also be shown, as `slotUs` (1e6 / (synco mainHz × active steps), 125 at 8 kHz), or `pipelineUs` as a fraction of the slot, so the comparison needs no arithmetic? Recommended: add `slotUs` only.
+
+**L-Q1 result (user, RTC, 2026-11-22).** In `/opt/MagAOX/source/milk/src/ImageStreamIO/ImageStreamIO.c`:
+- `ImageStreamIO_UpdateIm(image)` is `ImageStreamIO_UpdateIm_atime(image, NULL)` (line 2292).
+- `UpdateIm_atime` sets `md->writetime = ts` (2256). If `atime == NULL` it sets `md->atime = ts` (2260); otherwise it sets `md->atime = *atime` (2264).
+
+So a plain post overwrites `atime`, and option (a) as written fails. But the writer can supply `atime` through `ImageStreamIO_UpdateIm_atime`.
+
+**Revised L-Q1 proposal, option (a′).**
+- **t2wOffloader.**
+  - Read `CLOCK_ISIO` right after the woofer `ImageStreamIO_sempost`.
+  - Publish `aol0_tweeterOffload` with `ImageStreamIO_UpdateIm_atime(image, &wooferStamp)` and its semaphore post, instead of `milkImage::post()`.
+  - `atime` then means the time of the source event (the woofer post), in the stream's own clock, and `writetime` is still the tweeterOffload post.
+- **counterOffload.**
+  - In `processImage`, read `md->atime`, and take `CLOCK_ISIO` and `CLOCK_MONOTONIC` at wake.
+  - `handoffUs` = wake(ISIO) − atime. This uses the same clock on both sides, so no `PublicationClock` conversion is needed. The other terms stay monotonic.
+  - Optionally also report `projectUs` = writetime − atime (t2wOffloader's projection and post alone) and `wakeUs` = wake(ISIO) − writetime.
+- **Check before implementing.** What `mx::improc::milkImage::post()` does (mxlib), so the replacement keeps its write flag, `cnt0` and semaphore handling. Requested from the user: `grep -n -A15 "post()" $(find /opt /usr/local -name milkImage.hpp 2>/dev/null | head -1)`.
+
+**`milkImage::post()` (mxlib, RTC, 2026-11-22).**
+- **Non-passive streams** (t2wOffloader creates `aol0_tweeterOffload`, so this applies): `ImageStreamIO_UpdateIm(m_image)`, then `md->atime = md->writetime`. There is no separate semaphore post, so `UpdateIm` does the `cnt0`, write-flag and semaphore handling.
+- **Passive streams:** `writetime` is set by `clock_gettime(CLOCK_ISIO)`, then `atime = writetime`, `write = 0` and `ImageStreamIO_sempost(m_image, -1)`.
+- **Accessors.** `operator()()` returns an `eigenMap` (a plain view), so `m_tweeterOffload() = m_tweeter` does not post. `m_image` is protected, and there is no public `IMAGE*` accessor.
+
+**Resolved L-Q1 design.**
+- In t2wOffloader, a small derived class (e.g. `tweeterOffloadImage : public mx::improc::milkImage<realT>`) with one method, `postAtime(const timespec &atime)`, which calls `ImageStreamIO_UpdateIm_atime(m_image, &atime)` and checks the return value. That is the non-passive branch of `post()` with the given `atime` kept.
+- `m_tweeterOffload` uses that type. `create()`, `setWrite()` and `operator()` are unchanged, and only the `post()` call becomes `postAtime(wooferStamp)`.
+- `wooferStamp` is `CLOCK_ISIO`, read right after the woofer `ImageStreamIO_sempost`.
+- **Follow-up (outside this repo).** Propose `milkImage::post(const timespec &atime)` to mxlib, which its own `\todo` asks for. The derived class could then be removed.
+
 ### Reducing the INDI Property Count (implemented 2026-11-21, not yet built)
 
 **Request (2026-11-21).** counterOffload publishes far too many INDI properties. They crowd cursesINDI and make it hard to use. Stop adding unnecessary counterOffload properties. **Do not remove any framework properties** (`logs_*`, `th-*`, `sm_*`, `psds_*`, `fsm_*`), and make no framework or cursesINDI changes.
@@ -1034,3 +1073,36 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261122T184
 - **Abort.** The predicted ratio of the chosen parameters (0.58) was below 1, so the abort should have applied 25/330/0.4, not restored the starting values. Check the "calibration aborted, applied …" log line.
 
 **Default `rampStartUs` changed 25 → 0 (user request, 2026-11-22).** Start 0 was at least as good as 25 µs in every paired comparison: 183157Z rounds 1 and 2 (0.65 against 0.74; 0.63 against 0.76) and 184435Z (0.54 against 0.55). Its value is "as soon as possible", since the first slot lands 100–225 µs after the offload arrives. The calibration start grid is unchanged (0–150/25).
+
+### Latency Measurement: Answers (user, 2026-11-22)
+"confirm the rest of the open question recommendations, except do not log at every 10 s"
+- **L-A1:** option (a′). `CLOCK_ISIO` woofer stamp carried in `aol0_tweeterOffload` `atime` via a `milkImage` subclass `postAtime()` calling `ImageStreamIO_UpdateIm_atime`.
+- **L-A2:** the first slot published after the offload arrives, whatever its ramp fraction. No `firstFrac` element, since INDI only and `rampStartUs` now defaults to 0.
+- **L-A3:** the ramp reference is unchanged.
+- **L-A4:**
+  - **INDI only.** One read-only `latency` property, with window means over the last 250 events (about 1 s at 250 Hz).
+  - **No periodic log.** The `leadUs` constant is logged once at startup.
+  - **No CSV columns.**
+  - **No `projectUs`/`wakeUs` split,** since it was only for the dropped log.
+- **L-A5:** add `slotUs`, the actual slot period, from the spacing of successive slot targets in the dmSyncopation schedule counterOffload already reads (125 µs at 8 kHz). It needs no new INDI subscription.
+- **Final `latency` elements (9):** `pipelineUs`, `pipelineRmsUs`, `slotUs`, `handoffUs`, `slotWaitUs`, `computeUs`, `writeUs`, `computeMaxUs`, `missed`.
+- Waiting for "implement".
+
+### Latency Measurement: Implementation (2026-11-22, not yet built)
+- **t2wOffloader.**
+  - New template `atimeMilkImage<dataT>` derived from `milkImage`, whose `postAtime(atime)` calls `ImageStreamIO_UpdateIm_atime` and throws on error.
+  - `m_tweeterOffload` is now `atimeMilkImage<realT>`.
+  - `processImage` reads `CLOCK_ISIO` right after the woofer sempost and publishes with `postAtime(wooferStamp)`.
+  - Unit test: in a private `MILK_SHM_DIR`, `postAtime` keeps the stamp in `atime`, sets `writetime`, increments `cnt0`, clears `write`.
+- **counterOffload.**
+  - `rampT` gains `wakeNs`, `handoffNs` (−1 if unstamped) and `latencyPending`. `addRamp()` now returns the pool entry.
+  - `processImage` takes `CLOCK_ISIO` at receipt and computes `stampedHandoffNs(atime, writetime, receipt)`. It returns −1 when atime == writetime (no stamp, for example an older t2wOffloader), when the handoff is negative, or when it is over 10 ms.
+  - The producer thread times the compute (under `m_stateMutex`) and the write. The write runs from max(now, cutoff − writeLead) to the return of `syncopationPublish`.
+  - After a successful non-zero publish, `recordLatency()` records every pending offload received before the compute start into a 250-sample ring.
+  - `clearState()` drops pending offloads.
+  - `updateSlotPeriod()` sets `m_slotNs` from consecutive steps of one cycle.
+  - The slot lead (compute + write + synco ready) is logged once, at the first slot. That replaces "at startup", since `readyLeadUs` is known only from a slot request.
+  - `missed`, as implemented: offloads whose slot wait was ≥ one slot period, i.e. at least one slot passed after arrival without carrying them (late producer, a failed publish). It counts since startup.
+  - New read-only INDI `latency`: `pipelineUs`, `pipelineRmsUs`, `slotUs`, `handoffUs`, `slotWaitUs`, `computeUs`, `writeUs`, `computeMaxUs`, `missed`. It is updated in `appLogic` from `summarizeLatency()`, and −1 means no data.
+  - Unit tests: `stampedHandoffNs`; `summarizeLatency` (means, population RMS, max, unstamped samples excluded from handoff/pipeline); `recordLatency` (only offloads before compute start, recorded once, `missed`, zero drops pending, ring wraps); `updateSlotPeriod`.
+- **Known gap.** If a ramp completes within its first slot (duration shorter than about 100 µs), and a new offload reuses the freed pool entry before the publish returns, the first offload's latency is not recorded. This is rare and only drops a sample.

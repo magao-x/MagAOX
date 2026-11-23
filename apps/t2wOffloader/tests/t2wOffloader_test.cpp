@@ -8,7 +8,12 @@
 
 #include "../t2wOffloader.hpp"
 
+#include <cstdlib>
+#include <filesystem>
 #include <limits>
+#include <string>
+
+#include <unistd.h>
 
 using namespace MagAOX::app;
 
@@ -57,6 +62,17 @@ class t2wOffloader_test : public t2wOffloader
         m_deltavalDM( 2, 0 ) = 2;
 
         m_tweeter.resize( 4, 4 );
+    }
+};
+
+/// Expose the IMAGE of an atimeMilkImage so a test can check its metadata.
+class atimeMilkImage_test : public atimeMilkImage<float>
+{
+  public:
+    /// The underlying ImageStreamIO image.
+    IMAGE *rawImage()
+    {
+        return m_image;
     }
 };
 } // namespace app
@@ -305,6 +321,61 @@ TEST_CASE( "t2wOffloader DM rate follows dmSyncopation", "[t2wOffloader]" )
         app.m_syncoMainHz = 0;
         REQUIRE( app.dmRate() == 2000 );
     }
+}
+
+/// Verify the tweeter offload post keeps the supplied woofer stamp as atime and still updates the stream.
+/**
+ * \ingroup t2wOffloader_unit_test
+ */
+TEST_CASE( "t2wOffloader posts the tweeter offload with the woofer stamp as atime", "[t2wOffloader]" )
+{
+    // clang-format off
+    #ifdef T2WOFFLOADER_TEST_DOXYGEN_REF
+    atimeMilkImage<float>::postAtime;
+    #endif
+    // clang-format on
+
+    // Create the stream in a private directory so no instrument stream is touched.
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / ( "t2wOffloader_atime_" + std::to_string( getpid() ) );
+    std::filesystem::create_directories( dir );
+
+    const char       *oldDir = getenv( "MILK_SHM_DIR" );
+    const std::string saved  = oldDir ? oldDir : "";
+    REQUIRE( setenv( "MILK_SHM_DIR", dir.c_str(), 1 ) == 0 );
+
+    {
+        atimeMilkImage_test image;
+        image.create( "t2w_atime_test", 2, 2 );
+
+        IMAGE *raw = image.rawImage();
+        REQUIRE( raw != nullptr );
+
+        const uint64_t cnt0 = raw->md->cnt0;
+        const timespec stamp{ 1234, 5678 };
+
+        image.setWrite( true );
+        image().setConstant( 1.5f );
+        image.postAtime( stamp );
+
+        REQUIRE( raw->md->atime.tv_sec == 1234 );
+        REQUIRE( raw->md->atime.tv_nsec == 5678 );
+        REQUIRE( raw->md->writetime.tv_sec != 1234 ); // the write time is the post itself
+        REQUIRE( raw->md->cnt0 == cnt0 + 1 );
+        REQUIRE( raw->md->write == 0 );
+        REQUIRE( raw->array.F[3] == 1.5f );
+    }
+
+    if( oldDir )
+    {
+        setenv( "MILK_SHM_DIR", saved.c_str(), 1 );
+    }
+    else
+    {
+        unsetenv( "MILK_SHM_DIR" );
+    }
+
+    std::filesystem::remove_all( dir );
 }
 
 } // namespace t2wOffloaderTest

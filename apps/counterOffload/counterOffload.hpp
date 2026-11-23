@@ -82,6 +82,9 @@ struct psdShmimT
  * rampStartUs, gain and rampDurationUs, then rampStartUs and gain again, choosing each from a quadratic fit and moving
  * only for an improvement beyond the noise, and applies the result if replicates confirm it.
  *
+ * The latency INDI property breaks each offload's delay into the handoff from the woofer post (whose time t2wOffloader
+ * stores in the input frame's atime), the wait for a slot, and the compute and write times of that slot.
+ *
  * \ingroup counterOffload
  */
 class counterOffload : public MagAOXApp<true>,
@@ -114,9 +117,67 @@ class counterOffload : public MagAOXApp<true>,
         int64_t t0Ns{ 0 }; ///< CLOCK_MONOTONIC reference time of the woofer command, in ns.
 
         bool used{ false }; ///< Whether this pool entry holds an unfinished ramp.
+
+        int64_t wakeNs{ 0 }; ///< CLOCK_MONOTONIC time the offload was received, in ns.
+
+        int64_t handoffNs{ -1 }; ///< Woofer post to receipt, in ns; -1 if the offload carried no woofer stamp.
+
+        bool latencyPending{ false }; ///< Whether this offload's latency is still to be recorded.
     };
 
     static constexpr size_t m_maxRamps{ 8 }; ///< Size of the preallocated ramp pool.
+
+    /// The latency terms of one offload, measured at the first slot published after it arrived.
+    struct latencySampleT
+    {
+        double handoffUs{ -1 }; ///< Woofer post to receipt; negative if the offload carried no woofer stamp, us.
+
+        double slotWaitUs{ 0 }; ///< Receipt to the start of computing the slot that carried it, us.
+
+        double computeUs{ 0 }; ///< Time to build that slot's command, us.
+
+        double writeUs{ 0 }; ///< Time from the start of the copy to the end of the publication, us.
+    };
+
+    /// Statistics of the latency terms over a window of offloads.  A value with no data in the window is -1.
+    struct latencySummaryT
+    {
+        double pipelineUs{ -1 }; ///< Mean of handoff + compute + write, over offloads with a woofer stamp, us.
+
+        double pipelineRmsUs{ -1 }; ///< RMS deviation of handoff + compute + write about its mean, us.
+
+        double handoffUs{ -1 }; ///< Mean handoff, over offloads with a woofer stamp, us.
+
+        double slotWaitUs{ -1 }; ///< Mean slot wait, us.
+
+        double computeUs{ -1 }; ///< Mean compute time, us.
+
+        double writeUs{ -1 }; ///< Mean write time, us.
+
+        double computeMaxUs{ -1 }; ///< Largest compute time, us.
+    };
+
+    static constexpr size_t m_latencyWindow{ 250 }; ///< Offloads in the latency statistics window.
+
+    static constexpr int64_t m_maxHandoffNs{ 10000000 }; ///< Longer woofer-to-receipt times are rejected as stale, ns.
+
+    /// Woofer post to receipt, from the offload frame's atime and writetime and the CLOCK_ISIO receipt time.
+    /** t2wOffloader stores the woofer post time in atime.  A frame whose atime equals its writetime was posted without
+     * a woofer stamp (for example by an older t2wOffloader).
+     *
+     * \returns the handoff in ns
+     * \returns -1 if the frame has no woofer stamp, or the handoff is negative or longer than m_maxHandoffNs
+     */
+    static int64_t stampedHandoffNs( const timespec &atime /**< [in] the frame's atime, the woofer post */,
+                                     const timespec &writetime /**< [in] the frame's writetime */,
+                                     const timespec &receivedIsio /**< [in] CLOCK_ISIO receipt time */ );
+
+    /// Summarize a window of latency samples.
+    /**
+     * \returns the means, the pipeline RMS and the largest compute time; -1 for values with no data
+     */
+    static latencySummaryT summarizeLatency( const latencySampleT *samples /**< [in] the samples */,
+                                             size_t                n /**< [in] number of samples */ );
 
     static constexpr realT m_zeroTol{ 1e-7 }; ///< A leaking contribution below this magnitude is set to zero.
 
@@ -341,6 +402,20 @@ class counterOffload : public MagAOXApp<true>,
 
     uint64_t m_overflowsLogged{ 0 }; ///< m_overflows at the last ramp-pool overflow warning.  appLogic only.
 
+    std::array<latencySampleT, m_latencyWindow> m_latency{}; ///< Ring of the latest latency samples.  m_stateMutex.
+
+    size_t m_latencyCount{ 0 }; ///< Valid samples in m_latency, up to m_latencyWindow.  m_stateMutex.
+
+    size_t m_latencyNext{ 0 }; ///< Index in m_latency for the next sample.  m_stateMutex.
+
+    uint64_t m_missed{ 0 }; ///< Offloads that waited at least a whole slot before being carried.  m_stateMutex.
+
+    std::atomic<int64_t> m_slotNs{ 0 }; ///< Slot period from successive slot targets, ns; 0 until measured.
+
+    synco::Request m_lastRequest{}; ///< The previous slot request, for m_slotNs.  Producer thread only.
+
+    bool m_leadLogged{ false }; ///< Whether the slot lead has been logged.  Producer thread only.
+
     ///@}
 
     /** \name Calibrate State - Data
@@ -496,8 +571,12 @@ class counterOffload : public MagAOXApp<true>,
                                double durationUs /**< [in] ramp duration, in us */ );
 
     /// Start a ramp of an offload change.  The caller must hold m_stateMutex.
-    void addRamp( const realT *delta /**< [in] offload change, sized like m_accum */,
-                  int64_t      t0Ns /**< [in] CLOCK_MONOTONIC ramp reference time, in ns */ );
+    /**
+     * \returns the pool entry holding the new ramp
+     * \returns nullptr if the buffers are not set up
+     */
+    rampT *addRamp( const realT *delta /**< [in] offload change, sized like m_accum */,
+                    int64_t      t0Ns /**< [in] CLOCK_MONOTONIC ramp reference time, in ns */ );
 
     /// Whether the next slot needs a publication.  The caller must hold m_stateMutex.
     bool needPublish();
@@ -512,6 +591,18 @@ class counterOffload : public MagAOXApp<true>,
 
     /// Apply the leak after a successful publication.  The caller must hold m_stateMutex.
     void afterPublish();
+
+    /// Record the latency of every offload received before this slot's compute start and not yet recorded.
+    /** Called after a successful publication.  An offload that waited at least one slot period is counted in
+     * m_missed.  The caller must hold m_stateMutex.
+     */
+    void recordLatency( int64_t computeStartNs /**< [in] CLOCK_MONOTONIC start of building the command, ns */,
+                        int64_t computeEndNs /**< [in] CLOCK_MONOTONIC end of building the command, ns */,
+                        int64_t writeStartNs /**< [in] CLOCK_MONOTONIC start of the copy into the source, ns */,
+                        int64_t writeEndNs /**< [in] CLOCK_MONOTONIC end of the publication, ns */ );
+
+    /// Update m_slotNs from a new slot request, when it directly follows the previous one.  Producer thread only.
+    void updateSlotPeriod( const synco::Request &request /**< [in] the new slot request */ );
 
     /// Enable or disable accepting offloads; disabling also requests a zero of the contribution.
     /** \returns true if the enabled state changed
@@ -596,6 +687,9 @@ class counterOffload : public MagAOXApp<true>,
 
     /// Name of a calibration stage, for logs and the CSV.
     static const char *calibStageName( int stage /**< [in] the stage index */ );
+
+    /// Names of the latency INDI elements, in the order appLogic publishes them.
+    static const std::vector<std::string> &latencyElements();
 
     /// Fraction of published slots that clipped, 0 if none were published.
     static double clipFraction( uint64_t clipped /**< [in] slots that clipped */,
@@ -815,6 +909,8 @@ class counterOffload : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_rampDuration; ///< Property to set the ramp duration.
 
     pcf::IndiProperty m_indiP_stats; ///< Read-only counters.
+
+    pcf::IndiProperty m_indiP_latency; ///< Read-only offload latency statistics.
 
     pcf::IndiProperty m_indiP_calibrate; ///< Toggle switch: On starts a calibration run, Off aborts it.
 
@@ -1180,6 +1276,17 @@ inline int counterOffload::appStartup()
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
+    createROIndiNumber( m_indiP_latency, "latency", "Offload Latency" );
+    for( const std::string &el : latencyElements() )
+    {
+        m_indiP_latency.add( pcf::IndiElement( el ) );
+        m_indiP_latency[el] = -1;
+    }
+    if( registerIndiPropertyReadOnly( m_indiP_latency ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
     createStandardIndiToggleSw( m_indiP_calibrate, "calibrate" );
     if( registerIndiPropertyNew( m_indiP_calibrate, INDI_NEWCALLBACK( m_indiP_calibrate ) ) < 0 )
     {
@@ -1281,6 +1388,29 @@ inline int counterOffload::appLogic()
     }
 
     updateIfChanged( m_indiP_stats, std::vector<std::string>{ "events", "published", "failed", "clipped" }, stats );
+
+    latencySummaryT lat;
+    double          missed;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_stateMutex );
+
+        lat    = summarizeLatency( m_latency.data(), m_latencyCount );
+        missed = double( m_missed );
+    }
+
+    const int64_t slotNs = m_slotNs;
+
+    updateIfChanged( m_indiP_latency,
+                     latencyElements(),
+                     std::vector<double>{ lat.pipelineUs,
+                                          lat.pipelineRmsUs,
+                                          ( slotNs > 0 ) ? slotNs / 1000.0 : -1,
+                                          lat.handoffUs,
+                                          lat.slotWaitUs,
+                                          lat.computeUs,
+                                          lat.writeUs,
+                                          lat.computeMaxUs,
+                                          missed } );
 
     if( overflows != m_overflowsLogged ) // at most one warning per appLogic cycle
     {
@@ -1424,14 +1554,28 @@ inline int counterOffload::processImage( void *curr_src, const dev::shmimT &dumm
 
     const int64_t received = synco::monotonicNs();
 
+    timespec receivedIsio;
+    clock_gettime( CLOCK_ISIO, &receivedIsio );
+
     if( !m_enabled )
     {
         return 0;
     }
 
+    const int64_t handoff =
+        stampedHandoffNs( shmimMonitorT::currAtime(), shmimMonitorT::currWritetime(), receivedIsio );
+
     std::lock_guard<std::mutex> guard( m_stateMutex );
 
-    addRamp( static_cast<const realT *>( curr_src ), received + static_cast<int64_t>( m_timeOffsetUs * 1000 ) );
+    rampT *r =
+        addRamp( static_cast<const realT *>( curr_src ), received + static_cast<int64_t>( m_timeOffsetUs * 1000 ) );
+
+    if( r )
+    {
+        r->wakeNs         = received;
+        r->handoffNs      = handoff;
+        r->latencyPending = true;
+    }
 
     return 0;
 }
@@ -1451,11 +1595,11 @@ inline counterOffload::realT counterOffload::rampFraction( double tauUs, double 
     return 0.5 - 0.5 * std::cos( M_PI * ( tauUs - startUs ) / durationUs );
 }
 
-inline void counterOffload::addRamp( const realT *delta, int64_t t0Ns )
+inline counterOffload::rampT *counterOffload::addRamp( const realT *delta, int64_t t0Ns )
 {
     if( m_accum.size() == 0 )
     {
-        return;
+        return nullptr;
     }
 
     rampT *slot = nullptr;
@@ -1490,7 +1634,13 @@ inline void counterOffload::addRamp( const realT *delta, int64_t t0Ns )
     slot->t0Ns  = t0Ns;
     slot->used  = true;
 
+    slot->wakeNs         = 0;
+    slot->handoffNs      = -1;
+    slot->latencyPending = false;
+
     ++m_events;
+
+    return slot;
 }
 
 inline bool counterOffload::needPublish()
@@ -1563,7 +1713,8 @@ inline void counterOffload::clearState()
 {
     for( auto &r : m_ramps )
     {
-        r.used = false;
+        r.used           = false;
+        r.latencyPending = false; // dropped offloads are never carried
     }
 
     m_accum.setZero();
@@ -1595,6 +1746,50 @@ inline void counterOffload::afterPublish()
         m_accumNonzero = false;
         m_finalZero    = true;
     }
+}
+
+inline void
+counterOffload::recordLatency( int64_t computeStartNs, int64_t computeEndNs, int64_t writeStartNs, int64_t writeEndNs )
+{
+    const int64_t slotNs = m_slotNs;
+
+    for( auto &r : m_ramps )
+    {
+        if( !r.latencyPending || r.wakeNs > computeStartNs ) // arrived after this slot was computed
+        {
+            continue;
+        }
+
+        latencySampleT &s = m_latency[m_latencyNext];
+
+        s.handoffUs  = ( r.handoffNs >= 0 ) ? r.handoffNs / 1000.0 : -1;
+        s.slotWaitUs = ( computeStartNs - r.wakeNs ) / 1000.0;
+        s.computeUs  = ( computeEndNs - computeStartNs ) / 1000.0;
+        s.writeUs    = ( writeEndNs - writeStartNs ) / 1000.0;
+
+        m_latencyNext  = ( m_latencyNext + 1 ) % m_latencyWindow;
+        m_latencyCount = std::min( m_latencyCount + 1, m_latencyWindow );
+
+        if( slotNs > 0 && computeStartNs - r.wakeNs >= slotNs )
+        {
+            ++m_missed;
+        }
+
+        r.latencyPending = false;
+    }
+}
+
+inline void counterOffload::updateSlotPeriod( const synco::Request &request )
+{
+    // Consecutive steps of the same cycle are exactly one slot apart.
+    if( request.epoch == m_lastRequest.epoch && request.generation == m_lastRequest.generation &&
+        request.cycle == m_lastRequest.cycle && request.step == m_lastRequest.step + 1 &&
+        request.targetNs > m_lastRequest.targetNs )
+    {
+        m_slotNs = request.targetNs - m_lastRequest.targetNs;
+    }
+
+    m_lastRequest = request;
 }
 
 inline bool counterOffload::setEnabled( bool on )
@@ -1979,6 +2174,74 @@ inline const char *counterOffload::calibStageName( int stage )
 inline double counterOffload::clipFraction( uint64_t clipped, uint64_t published )
 {
     return ( published > 0 ) ? double( clipped ) / published : 0;
+}
+
+inline const std::vector<std::string> &counterOffload::latencyElements()
+{
+    static const std::vector<std::string> names{ "pipelineUs", "pipelineRmsUs", "slotUs",       "handoffUs", "slotWaitUs",
+                                                 "computeUs",  "writeUs",       "computeMaxUs", "missed" };
+
+    return names;
+}
+
+inline int64_t
+counterOffload::stampedHandoffNs( const timespec &atime, const timespec &writetime, const timespec &receivedIsio )
+{
+    if( atime.tv_sec == writetime.tv_sec && atime.tv_nsec == writetime.tv_nsec ) // posted without a woofer stamp
+    {
+        return -1;
+    }
+
+    const int64_t handoff = ( static_cast<int64_t>( receivedIsio.tv_sec ) - atime.tv_sec ) * 1000000000 +
+                            ( static_cast<int64_t>( receivedIsio.tv_nsec ) - atime.tv_nsec );
+
+    return ( handoff >= 0 && handoff <= m_maxHandoffNs ) ? handoff : -1;
+}
+
+inline counterOffload::latencySummaryT counterOffload::summarizeLatency( const latencySampleT *samples, size_t n )
+{
+    latencySummaryT out;
+
+    double sumWait = 0, sumCompute = 0, sumWrite = 0, maxCompute = 0;
+    double sumHandoff = 0, sumPipe = 0, sumPipe2 = 0;
+    size_t nStamped = 0;
+
+    for( size_t k = 0; k < n; ++k )
+    {
+        const latencySampleT &s = samples[k];
+
+        sumWait += s.slotWaitUs;
+        sumCompute += s.computeUs;
+        sumWrite += s.writeUs;
+        maxCompute = std::max( maxCompute, s.computeUs );
+
+        if( s.handoffUs >= 0 )
+        {
+            const double pipe = s.handoffUs + s.computeUs + s.writeUs;
+
+            sumHandoff += s.handoffUs;
+            sumPipe += pipe;
+            sumPipe2 += pipe * pipe;
+            ++nStamped;
+        }
+    }
+
+    if( n > 0 )
+    {
+        out.slotWaitUs   = sumWait / n;
+        out.computeUs    = sumCompute / n;
+        out.writeUs      = sumWrite / n;
+        out.computeMaxUs = maxCompute;
+    }
+
+    if( nStamped > 0 )
+    {
+        out.handoffUs     = sumHandoff / nStamped;
+        out.pipelineUs    = sumPipe / nStamped;
+        out.pipelineRmsUs = std::sqrt( std::max( 0.0, sumPipe2 / nStamped - out.pipelineUs * out.pipelineUs ) );
+    }
+
+    return out;
 }
 
 inline bool counterOffload::gridValid( const std::vector<double> &grid, double lo, double hi )
@@ -2832,6 +3095,19 @@ inline void counterOffload::coThreadExec()
             continue;
         }
 
+        updateSlotPeriod( request );
+
+        if( !m_leadLogged )
+        {
+            log<text_log>( "slot lead: computeLeadUs " + std::to_string( m_computeLeadUs ) + " + writeLeadUs " +
+                           std::to_string( m_writeLeadUs ) + " + synco readyLeadUs " +
+                           std::to_string( ( request.targetNs - request.cutoffNs ) / 1000.0 ) + " = " +
+                           std::to_string( ( request.targetNs - request.cutoffNs ) / 1000.0 + m_writeLeadUs +
+                                           m_computeLeadUs ) +
+                           " us" );
+            m_leadLogged = true;
+        }
+
         // Compute as late as possible so the most recent offload is included.
         const int64_t computeAt = request.cutoffNs - static_cast<int64_t>( ( m_writeLeadUs + m_computeLeadUs ) * 1000 );
         const timespec wake     = synco::toTimespec( computeAt );
@@ -2841,7 +3117,9 @@ inline void counterOffload::coThreadExec()
             clock_nanosleep( CLOCK_MONOTONIC, TIMER_ABSTIME, &wake, nullptr );
         }
 
-        bool zero = false;
+        bool    zero           = false;
+        int64_t computeStartNs = 0;
+        int64_t computeEndNs   = 0;
 
         { //mutex scope
             std::lock_guard<std::mutex> guard( m_stateMutex );
@@ -2850,6 +3128,8 @@ inline void counterOffload::coThreadExec()
             {
                 continue;
             }
+
+            computeStartNs = synco::monotonicNs();
 
             zero = m_zeroRequested;
 
@@ -2861,9 +3141,18 @@ inline void counterOffload::coThreadExec()
             {
                 buildCommand( request.targetNs );
             }
+
+            computeEndNs = synco::monotonicNs();
         }
 
+        // syncopationPublish waits until its publish lead before copying, so the write starts at the later of the two.
+        const int64_t publishAt =
+            request.cutoffNs - static_cast<int64_t>( std::ceil( m_writeLeadUs * 1000 ) );
+        const int64_t writeStartNs = std::max( synco::monotonicNs(), publishAt );
+
         const bool published = dmSyncopationProducerT::syncopationPublish( m_command.data(), request, m_auxStream );
+
+        const int64_t writeEndNs = synco::monotonicNs();
 
         std::lock_guard<std::mutex> guard( m_stateMutex );
 
@@ -2877,6 +3166,10 @@ inline void counterOffload::coThreadExec()
         {
             m_zeroRequested = false;
             log<text_log>( "zero submitted for syncopation" );
+        }
+        else
+        {
+            recordLatency( computeStartNs, computeEndNs, writeStartNs, writeEndNs );
         }
 
         afterPublish();

@@ -39,6 +39,39 @@ namespace app
  * \ingroup t2wOffloader
  */
 
+/// A milkImage whose post sets the acquisition time to a supplied stamp instead of the write time.
+/** milkImage::post() sets atime to the write time.  postAtime() keeps the given atime, so a reader can recover the time
+ * of the event the frame describes.  Only for streams this process created (not passive).
+ *
+ * \ingroup t2wOffloader
+ */
+template <typename dataT>
+class atimeMilkImage : public mx::improc::milkImage<dataT>
+{
+  public:
+    /// Update the metadata with the given acquisition time and post all semaphores.
+    /**
+     * \throws mx::exception if the image is not open or ImageStreamIO_UpdateIm_atime fails
+     */
+    void postAtime( const timespec &atime /**< [in] the acquisition time to store in md->atime */ );
+};
+
+template <typename dataT>
+void atimeMilkImage<dataT>::postAtime( const timespec &atime )
+{
+    if( this->m_image == nullptr )
+    {
+        throw( mx::exception( mx::error_t::invalidconfig, "Image is not open" ) );
+    }
+
+    timespec stamp = atime; // ImageStreamIO_UpdateIm_atime takes a non-const pointer
+
+    if( ImageStreamIO_UpdateIm_atime( this->m_image, &stamp ) != IMAGESTREAMIO_SUCCESS )
+    {
+        throw( mx::exception( mx::error_t::liberr, "ImageStreamIO_UpdateIm_atime returned an error" ) );
+    }
+}
+
 /** MagAO-X application to control offloading the tweeter to the woofer.
  *
  * \ingroup t2wOffloader
@@ -111,7 +144,9 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     mx::improc::milkImage<realT> m_modevalDMf; ///< Stream aol0_modevalDMf, written externally to resync m_modevalDM.
 
     /// Stream aol<loop>_tweeterOffload publishing m_tweeter after each modal offload.
-    mx::improc::milkImage<realT> m_tweeterOffload;
+    /** Its atime is the CLOCK_ISIO time of the woofer post the offload belongs to; its writetime is its own post.
+     */
+    atimeMilkImage<realT> m_tweeterOffload;
 
     uint64_t m_lastDMf_cnt0{ 0 }; ///< m_modevalDMf cnt0 at the last check, used to detect new resyncs.
 
@@ -231,7 +266,8 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
     /// Offload the averaged tweeter shape to the woofer.
-    /** In modal mode, also publishes the offload change as it appears on the tweeter to m_tweeterOffload.
+    /** In modal mode, also publishes the offload change as it appears on the tweeter to m_tweeterOffload, with the
+     * CLOCK_ISIO time of the woofer post as its atime.
      *
      * \returns 0 always
      */
@@ -924,6 +960,10 @@ inline int t2wOffloader::processImage( void *curr_src, const dev::shmimT &dummy 
         m_dmStream.md->write = 0;
         ImageStreamIO_sempost( &m_dmStream, -1 );
 
+        // Stamp the woofer post, carried to counterOffload as the tweeter offload's atime for latency measurement
+        timespec wooferStamp;
+        clock_gettime( CLOCK_ISIO, &wooferStamp );
+
         // Publish the offload as it appears on the tweeter, after the woofer so its timing is unaffected
         for( int p = 0; p < m_deltavalDM.rows(); ++p )
         {
@@ -934,7 +974,7 @@ inline int t2wOffloader::processImage( void *curr_src, const dev::shmimT &dummy 
 
         m_tweeterOffload.setWrite( true );
         m_tweeterOffload() = m_tweeter;
-        m_tweeterOffload.post();
+        m_tweeterOffload.postAtime( wooferStamp );
     }
 
     return 0;
