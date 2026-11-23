@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <sstream>
 #include <type_traits>
@@ -50,22 +51,22 @@ namespace MagAOX
 namespace app
 {
 
-/// Tag for the closed-loop PSD stream monitor used by calibrate mode.
+/// Tag for the per-frame modal residual stream monitor used by calibrate mode.
 /**
  * \ingroup counterOffload
  */
-struct psdShmimT
+struct residualShmimT
 {
-    /// Config section of the PSD stream monitor.
+    /// Config section of the residual stream monitor.
     static std::string configSection()
     {
-        return "psds";
+        return "residual";
     };
 
-    /// INDI prefix of the PSD stream monitor.
+    /// INDI prefix of the residual stream monitor.
     static std::string indiPrefix()
     {
-        return "psds";
+        return "residual";
     };
 };
 
@@ -77,10 +78,12 @@ struct psdShmimT
  * change therefore affects only new offloads.  Disabling stops accepting new offloads and requests a zero, so the contribution is
  * cleared at the next slot.
  *
- * Calibrate mode minimizes the closed-loop WFS PSD power in a band around the offload rate, summed over the offloaded
- * modes, as a ratio to a gain-0 baseline interpolated in time.  It estimates the noise from replicates, sweeps
- * rampStartUs, gain and rampDurationUs, then rampStartUs and gain again, choosing each from a quadratic fit and moving
- * only for an improvement beyond the noise, and applies the result if replicates confirm it.
+ * Calibrate mode drives repeatable offloads by stepping one woofer mode (wooferModes) and reads the per-frame modal
+ * residual.  For each step it subtracts the response to the step alone (measured with the offloader paused), aligns on
+ * the first offload after the step, and averages over the steps.  The figure of merit is the energy left, summed over
+ * the offloaded modes, as a ratio to a gain-0 baseline interpolated in time.  It estimates the noise from replicates,
+ * sweeps rampStartUs, gain and rampDurationUs, then rampStartUs and gain again, choosing each from a quadratic fit and
+ * moving only for an improvement beyond the noise, and applies the result if replicates confirm it.
  *
  * The latency INDI property breaks each offload's delay into the handoff from the woofer post (whose time t2wOffloader
  * stores in the input frame's atime), the wait for a slot, and the compute and write times of that slot.
@@ -89,20 +92,20 @@ struct psdShmimT
  */
 class counterOffload : public MagAOXApp<true>,
                        public dev::shmimMonitor<counterOffload>,
-                       public dev::shmimMonitor<counterOffload, psdShmimT>,
+                       public dev::shmimMonitor<counterOffload, residualShmimT>,
                        public dev::dmSyncopationProducer<counterOffload>
 {
     typedef float realT; ///< Floating point type of the tweeter commands.
 
     typedef dev::shmimMonitor<counterOffload> shmimMonitorT; ///< The input stream monitor base.
 
-    typedef dev::shmimMonitor<counterOffload, psdShmimT> psdShmimMonitorT; ///< The PSD stream monitor base.
+    typedef dev::shmimMonitor<counterOffload, residualShmimT> residualShmimMonitorT; ///< The residual monitor base.
 
     typedef dev::dmSyncopationProducer<counterOffload> dmSyncopationProducerT; ///< The syncopation producer base.
 
     friend class dev::shmimMonitor<counterOffload>;
 
-    friend class dev::shmimMonitor<counterOffload, psdShmimT>;
+    friend class dev::shmimMonitor<counterOffload, residualShmimT>;
 
     friend class dev::dmSyncopationProducer<counterOffload>;
 
@@ -196,7 +199,8 @@ class counterOffload : public MagAOXApp<true>,
         stageClipped,     ///< No longer produced: clipped points are kept.  Kept so later stage numbers don't change.
         stageFitStart,    ///< The rampStartUs decision.
         stageFitDuration, ///< The rampDurationUs decision.
-        stageFitGain      ///< The gain decision.
+        stageFitGain,     ///< The gain decision.
+        stageStepOnly     ///< The response to the woofer step alone, with the offloader paused.
     };
 
     /// Least-squares quadratic r(x) = c0 + c1 u + c2 u^2 in the scaled coordinate u = (x - x0) / scale.
@@ -271,18 +275,76 @@ class counterOffload : public MagAOXApp<true>,
 
         calibParamsT p{ 0, 0, 0 }; ///< Parameters.
 
-        double fom{ 0 }; ///< Mean band power.
+        double fom{ 0 }; ///< Step figure of merit, see stepFom().
 
-        double fomStd{ 0 }; ///< Standard deviation of the band powers.
+        double fomStd{ 0 }; ///< Half the difference of the figures of merit of the two halves of the steps.
 
         double fomOff{ 0 }; ///< Latest baseline when measured.
 
-        uint64_t clippedSlots{ 0 }; ///< Slots that clipped in the measurement's clip window.
+        double fomTiming{ 0 }; ///< Part of fom in the first two frames after each offload.
 
-        uint64_t publishedSlots{ 0 }; ///< Slots published in the measurement's clip window.
+        double fomGain{ 0 }; ///< Part of fom in the other frames.
+
+        uint64_t clippedSlots{ 0 }; ///< Slots that clipped from the first step to the end of the measurement.
+
+        uint64_t publishedSlots{ 0 }; ///< Slots published from the first step to the end of the measurement.
     };
 
-    static constexpr double m_clipDelayS{ 1 }; ///< Clipping is counted from this long after a change, s.
+    /// Residual frames and offload times collected during one series of woofer steps.
+    struct stepDataT
+    {
+        uint32_t nModes{ 0 }; ///< Residual values stored per frame: the first nModes of each frame.
+
+        std::vector<float> frames; ///< Residual frames, nModes values each, in arrival order.
+
+        std::vector<int64_t> frameNs; ///< CLOCK_ISIO atime of each frame, ns.
+
+        std::vector<int64_t> offloadNs; ///< CLOCK_ISIO woofer stamps of the offloads received, ns, ascending.
+
+        std::vector<size_t> cmdIndex; ///< Frames collected when each step was commanded.
+
+        std::vector<int> signs; ///< Sign of each step, +1 or -1.
+    };
+
+    /// One woofer step located in the residual.
+    struct stepT
+    {
+        bool found{ false }; ///< Whether the onset was detected.
+
+        size_t onset{ 0 }; ///< Frame index of the onset.
+
+        size_t end{ 0 }; ///< One past the last frame before the next step command.
+
+        long offload{ -1 }; ///< Frame index of the first offload at or after the onset; -1 if none.
+
+        std::vector<size_t> offloads; ///< Frame indices of the offloads from the onset to end.
+
+        std::vector<double> preMean; ///< Mean of each mode over the frames before the command.
+
+        double noiseVar{ 0 }; ///< Per-frame variance summed over the modes, from the frames before the command.
+    };
+
+    /// The step figure of merit of one measurement.
+    struct stepFomT
+    {
+        double fom{ 0 }; ///< Energy of the averaged error, summed over lags and modes, less the noise bias.
+
+        double fomStd{ 0 }; ///< Half the difference of the figures of merit of the two halves of the steps.
+
+        double fomTiming{ 0 }; ///< Part of fom in the first two frames after each offload.
+
+        double fomGain{ 0 }; ///< Part of fom in the other frames.
+
+        size_t used{ 0 }; ///< Steps used.
+    };
+
+    static constexpr size_t m_preFrames{ 100 }; ///< Frames before a step command used for its mean and noise.
+
+    static constexpr size_t m_minPreFrames{ 10 }; ///< Fewest frames before a step command for it to be used.
+
+    static constexpr size_t m_guardFrames{ 8 }; ///< Frames before the next step left out of the step-only response.
+
+    static constexpr size_t m_maxPhaseFrames{ 16 }; ///< Largest onset-to-first-offload offset allowed, frames.
 
     static constexpr double m_maxRunMin{ 20 }; ///< A run estimated to take longer than this logs a warning, min.
 
@@ -314,29 +376,35 @@ class counterOffload : public MagAOXApp<true>,
     ///@}
 
     /** \name Calibrate Parameters - Data
-     * The stream, device, directory and numeric settings are optional config keys in the calibrate section, see
-     * calibKeys().  The scan grids are set over INDI only, and are reset to these defaults on restart.  None can be
-     * changed while a calibration runs.
+     * The devices, directory and numeric settings are optional config keys in the calibrate section, see calibKeys();
+     * the residual stream is set in the residual section.  The scan grids and the step mode and amplitude are set over
+     * INDI only, and are reset to these defaults on restart.  None can be changed while a calibration runs.
      *@{
      */
 
-    std::string m_freqStream{ "aol1_freq" }; ///< Stream holding the frequency axis of the PSD stream, Hz.
+    std::string m_offloadDevice{ "t2wOffloader" }; ///< INDI device providing numModes and the offload toggle.
 
-    std::string m_offloadDevice{ "t2wOffloader" }; ///< INDI device providing the offload rate (fps) and numModes.
+    std::string m_stepDevice{ "wooferModes" }; ///< dmMode INDI device whose mode is stepped.
 
     std::string m_csvDir{ "/home/xsup/counterOffload" }; ///< Directory for the per-run calibration CSV files.
 
-    double m_halfWidthHz{ 10 }; ///< Half width of the band integrated around the offload rate, Hz.
-
-    int m_modeMax{ 0 }; ///< Number of PSD modes summed.  0 uses the offloader's numModes.
-
-    int m_nAverage{ 3 }; ///< Settled averaged PSDs, published 0.5 s apart, averaged for each evaluation, at least 2.
+    int m_modeMax{ 0 }; ///< Number of residual modes summed.  0 uses the offloader's numModes.
 
     int m_baselineEvery{ 4 }; ///< Measure a gain-0 baseline after every this many points of a sweep.
 
-    double m_settleS{ 11 }; ///< Wait after a change before PSDs are collected; covers the modalPSDs average, s.
+    double m_settleS{ 0.2 }; ///< Wait after a change for the held contribution to leak away before the steps, s.
 
-    double m_timeoutS{ 5 }; ///< Longest wait for the PSDs of one evaluation, after settling, s.
+    double m_timeoutS{ 5 }; ///< Longest wait for residual frames or a change of the offload toggle, s.
+
+    double m_stepPeriodS{ 0.5 }; ///< Time between woofer steps, s.
+
+    int m_stepCount{ 10 }; ///< Woofer steps per measurement, alternating in sign.
+
+    double m_onsetSigma{ 5 }; ///< Onset threshold, in standard deviations of the pre-step residual energy.
+
+    int m_stepMode{ 5 }; ///< Index of the stepDevice mode stepped (0005, astig00).  INDI only.
+
+    double m_stepAmp{ 0.7 }; ///< Step amplitude about the starting amplitude; steps alternate +a and -a.  INDI only.
 
     double m_abortRatio{ 3 }; ///< Abort when an evaluation exceeds this multiple of the baseline.
 
@@ -422,9 +490,9 @@ class counterOffload : public MagAOXApp<true>,
      *@{
      */
 
-    std::mutex m_calibMutex; ///< Protects the band, collected PSD powers, offloader values and calibration readbacks.
+    std::mutex m_calibMutex; ///< Protects the collected frames, the remote device values and calibration readbacks.
 
-    std::condition_variable m_calibCond; ///< Signals that a PSD band power was collected.
+    std::condition_variable m_calibCond; ///< Wakes calibration waits early, on abort.
 
     std::atomic<bool> m_calibStart{ false }; ///< Request to start a run, consumed by the calibration thread.
 
@@ -432,29 +500,43 @@ class counterOffload : public MagAOXApp<true>,
 
     std::atomic<bool> m_calibAbort{ false }; ///< Request to abort the run and restore the original parameters.
 
-    float m_offloadFps{ 0 }; ///< Effective offload rate reported by the offloader, Hz.
-
     uint32_t m_offloadModes{ 0 }; ///< Number of offloaded modes reported by the offloader.
 
-    uint32_t m_psdNFreq{ 0 }; ///< Number of frequencies in each PSD.
+    std::string m_offloadState; ///< FSM state reported by the offloader.
 
-    uint32_t m_psdNModes{ 0 }; ///< Number of modes in each PSD.
+    std::atomic<bool> m_offloading{ false }; ///< Whether the offloader reports its offload toggle on.
 
-    bool m_bandValid{ false }; ///< Whether a band is set and PSD band powers are collected.
+    std::string m_stepState; ///< FSM state reported by the step device.
 
-    double m_df{ 0 }; ///< PSD frequency resolution for the current run, Hz.
+    std::map<std::string, double> m_stepAmps; ///< Current amplitudes reported by the step device, by element name.
 
-    double m_bandCenterHz{ 0 }; ///< Band center for the current run: the offload rate, Hz.
+    uint32_t m_residualValues{ 0 }; ///< Values in each frame of the residual stream; 0 until connected.
 
-    double m_bandHalfWidthHz{ 0 }; ///< Band half width for the current run, Hz.
+    std::atomic<bool> m_collecting{ false }; ///< Whether residual frames and offload times are being collected.
 
-    uint32_t m_bandModes{ 0 }; ///< Number of modes summed in the current run.
+    stepDataT m_stepData; ///< Frames collected for the current series of steps.  m_calibMutex.
 
-    int64_t m_psdAfterNs{ 0 }; ///< Only PSDs received after this CLOCK_MONOTONIC time, in ns, are collected.
+    std::mutex m_stampMutex; ///< Protects m_offloadStamps, so the offload path never waits on frame collection.
 
-    std::vector<double> m_psdPowers; ///< Band powers of the PSDs collected for the current evaluation.
+    std::vector<int64_t> m_offloadStamps; ///< Woofer stamps of offloads received while collecting, ns.
 
-    double m_fomOff{ 0 }; ///< Latest gain-0 baseline band power.
+    std::atomic<int64_t> m_lastFrameNs{ 0 }; ///< CLOCK_MONOTONIC arrival of the latest residual frame, ns.
+
+    uint32_t m_stepModes{ 0 }; ///< Residual modes summed in the current run.  Calibration thread only.
+
+    std::string m_stepElement; ///< Step device element stepped in the current run.  Calibration thread only.
+
+    double m_stepBase{ 0 }; ///< Starting amplitude of the stepped mode, restored afterwards.  Calibration thread only.
+
+    int m_stepPos{ -1 }; ///< Current step position, -1 or +1 about m_stepBase.  Calibration thread only.
+
+    std::vector<double> m_stepOnly; ///< Step-only response by lag from the onset, nModes per lag.  Calibration thread.
+
+    size_t m_stepOnlyCount{ 0 }; ///< Steps averaged into m_stepOnly.  Calibration thread only.
+
+    size_t m_lagFrames{ 0 }; ///< Lags from the first offload in the figure of merit.  Calibration thread only.
+
+    double m_fomOff{ 0 }; ///< Latest gain-0 baseline figure of merit.
 
     int m_calibStage{ 0 }; ///< Stage of the latest measurement or decision, an index into calibStageName().
 
@@ -609,34 +691,59 @@ class counterOffload : public MagAOXApp<true>,
      */
     bool setEnabled( bool on /**< [in] true to accept new offloads */ );
 
-    /// Record the PSD stream geometry.  Aborts a running calibration, since its band no longer applies.
+    /// Record the residual stream geometry.  Aborts a running calibration, since its frames no longer apply.
     /**
      * \returns 0 on success
      * \returns -1 if the stream is not float
      */
-    int allocate( const psdShmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
+    int allocate( const residualShmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
 
-    /// Collect the band power of a new PSD while a calibration evaluation is waiting for it.
+    /// Store a residual frame and its atime while a calibration is collecting.
     /**
      * \returns 0 always
      */
-    int processImage( void            *curr_src, /**< [in] pointer to the start of the current PSD.*/
-                      const psdShmimT &dummy     /**< [in] tag to differentiate shmimMonitor parents.*/
+    int processImage( void                 *curr_src, /**< [in] pointer to the start of the current frame.*/
+                      const residualShmimT &dummy     /**< [in] tag to differentiate shmimMonitor parents.*/
     );
 
-    /// Integrate a PSD over a band and the first modes.
-    /** The PSD is nFreq x nModes, frequency fastest, so element (n, m) is psd[n + m * nFreq] at frequency n * df.
+    /// A timespec in ns.
+    static int64_t toNs( const timespec &ts /**< [in] the time */ );
+
+    /// Locate each step of a series in the residual: its onset, its offloads, and the pre-step mean and noise.
+    /** The pre-step frames are the up to m_preFrames frames before the step command.  The onset is the first frame at
+     * or after the command whose squared deviation from the pre-step mean, summed over the modes, exceeds the pre-step
+     * mean of that quantity by onsetSigma of its standard deviations.  Each offload is placed at the first frame whose
+     * atime is at or after its woofer stamp.
      *
-     * \returns sum of PSD * df over |f - centerHz| <= halfWidthHz and modes below min(modeMax, nModes)
-     * \returns -1 if the band or the mode range is empty
+     * \returns the number of steps whose onset was found
      */
-    static double bandPower( const realT *psd /**< [in] the PSD */,
-                             uint32_t     nFreq /**< [in] number of frequencies */,
-                             uint32_t     nModes /**< [in] number of modes */,
-                             double       df /**< [in] frequency resolution, Hz */,
-                             double       centerHz /**< [in] band center, Hz */,
-                             double       halfWidthHz /**< [in] band half width, Hz */,
-                             uint32_t     modeMax /**< [in] number of modes to sum */ );
+    static size_t findSteps( const stepDataT    &d /**< [in] the collected series */,
+                             double              onsetSigma /**< [in] onset threshold, standard deviations */,
+                             std::vector<stepT> &steps /**< [out] one entry per step command */ );
+
+    /// Average the onset-aligned, sign-corrected response over the steps found, for lags 0 to len - 1.
+    /**
+     * \returns the number of steps averaged; 0 if no step has len frames after its onset
+     */
+    static size_t stepOnlyResponse( const stepDataT          &d /**< [in] the collected series */,
+                                    const std::vector<stepT> &steps /**< [in] the steps, from findSteps() */,
+                                    size_t                    len /**< [in] lags from the onset */,
+                                    std::vector<double>      &response /**< [out] len x nModes, mode fastest */ );
+
+    /// The step figure of merit of a series.
+    /** For each step with an offload at most m_maxPhaseFrames after its onset, the error at lag l from that offload is
+     * its sign times the residual less the pre-step mean, less the step-only response at the same lag from the onset.
+     * The errors are averaged over the steps.  The figure of merit is the sum over lags and modes of the squared
+     * average, less the noise bias (pre-step noise times 1/used + 1/stepOnlyCount per lag).  A lag is a timing lag if
+     * an offload of more than half the steps falls on it or on the lag before.
+     *
+     * \returns the figure of merit; used is 0 if no step could be used
+     */
+    static stepFomT stepFom( const stepDataT           &d /**< [in] the collected series */,
+                             const std::vector<stepT>  &steps /**< [in] the steps, from findSteps() */,
+                             const std::vector<double> &stepOnly /**< [in] the step-only response, see stepOnlyResponse() */,
+                             size_t                     stepOnlyCount /**< [in] steps averaged into stepOnly */,
+                             size_t                     lags /**< [in] lags from the first offload */ );
 
     /// Baseline at a time, linearly interpolated between baselines and constant beyond the first and last.
     /**
@@ -722,6 +829,17 @@ class counterOffload : public MagAOXApp<true>,
                         double                     lo /**< [in] smallest allowed value */,
                         double                     hi /**< [in] largest allowed value */ );
 
+    /// Set the step mode and amplitude, unless a calibration is running.
+    /**
+     * \returns 0 on success
+     * \returns -1 if a calibration is running, the mode is not an integer >= 0, or the amplitude is not finite and > 0
+     */
+    int applyCalibStep( double mode /**< [in] the step device mode index */,
+                        double amp /**< [in] the step amplitude */ );
+
+    /// The step device element name of a mode index, as dmMode names them (e.g. 0005).
+    static std::string stepElementName( int mode /**< [in] the mode index */ );
+
     /// A numeric calibration setting, configured with an optional key in the calibrate section.
     struct calibKeyT
     {
@@ -797,17 +915,20 @@ class counterOffload : public MagAOXApp<true>,
     /// Calibration thread function.  Runs a calibration on each start request until m_shutdown is true.
     void calibThreadExec();
 
-    /// Run one calibration: noise estimate, sweeps, and confirmation.
+    /// Run one calibration: step-only response, noise estimate, sweeps, and confirmation.
     /** The chosen parameters are applied if their confirmed ratio is below 1, otherwise the originals are restored.  On
-     * abort, the parameters chosen so far are applied if their predicted ratio is below 1.
+     * abort, the parameters chosen so far are applied if their predicted ratio is below 1.  The stepped mode's
+     * amplitude and the offload toggle are always restored.
      */
     void runCalibration();
 
-    /// Set the band for a run from the frequency stream and the offloader's rate and numModes.
-    /**
-     * \returns true on success
+    /// Check that a run can start, and set the run's modes, step element and starting amplitude.
+    /** A run needs the offloader OPERATING with its offload toggle on, the step device READY and reporting the step
+     * element, and residual frames with at least as many values as modes summed.
+     *
+     * \returns true if the run can start; otherwise the reason is logged
      */
-    bool setupBand();
+    bool startChecks();
 
     /// Open the run's CSV file in m_csvDir and write the header.
     /**
@@ -815,18 +936,54 @@ class counterOffload : public MagAOXApp<true>,
      */
     bool openCsv();
 
-    /// Apply parameters, wait for settled PSDs, and average their band powers.
-    /** Clipping does not stop the measurement; it is counted from m_clipDelayS after the change to the end of the
-     * measurement, so that the previous point's held contribution can leak away first.
+    /// Wait, checking for an abort, a disable, a change of numModes, and residual frames stopping.
+    /**
+     * \returns true if the full time passed
+     * \returns false otherwise, with the reason logged
+     */
+    bool calibWait( double seconds /**< [in] time to wait, s */,
+                    bool   needOffload /**< [in] whether the offload toggle must stay on */ );
+
+    /// Send the stepped mode's amplitude to the step device.
+    /**
+     * \returns true on success
+     */
+    bool sendStepAmp( double amp /**< [in] the amplitude */ );
+
+    /// Turn the offloader's offload toggle on or off, and wait for it to report the change.
+    /**
+     * \returns true if the offloader reported the change within m_timeoutS
+     */
+    bool setOffloading( bool on /**< [in] the new state */ );
+
+    /// Wait m_settleS, then make m_stepCount woofer steps m_stepPeriodS apart, collecting the residual and offloads.
+    /** Clipping is counted from the first step to the end, after the previous point's held contribution leaked away.
      *
      * \returns true on success
-     * \returns false on abort, disable, timeout or a change of the offloader's rate or numModes
+     * \returns false on abort, disable, residual timeout, a change of numModes, or (if needOffload) offload turned off
+     */
+    bool collectSteps( stepDataT &d /**< [out] the collected series */,
+                       bool       needOffload /**< [in] whether the offload toggle must stay on */,
+                       uint64_t  &clipped /**< [out] slots that clipped from the first step */,
+                       uint64_t  &published /**< [out] slots published from the first step */ );
+
+    /// Measure the response to the woofer step alone, with the offloader's offload toggle off, and restore it.
+    /** Sets m_stepOnly, m_stepOnlyCount and m_lagFrames, logs the change from the previous measurement, and writes a
+     * CSV row whose fom is the response energy.
+     *
+     * \returns true on success
+     */
+    bool measureStepOnly( bool &offloadOff /**< [out] true while this function has the offload toggle off */ );
+
+    /// Apply parameters, make the woofer steps, and compute the step figure of merit.
+    /**
+     * \returns true on success
+     * \returns false if the steps could not be made, or fewer than max(2, m_stepCount / 2) were usable
      */
     bool measure( const calibParamsT &p /**< [in] parameters to apply */,
-                  double             &fom /**< [out] mean band power */,
-                  double             &fomStd /**< [out] standard deviation of the band powers */,
-                  uint64_t           &clipped /**< [out] slots that clipped in the clip window */,
-                  uint64_t           &published /**< [out] slots published in the clip window */ );
+                  stepFomT           &f /**< [out] the figure of merit */,
+                  uint64_t           &clipped /**< [out] slots that clipped from the first step */,
+                  uint64_t           &published /**< [out] slots published from the first step */ );
 
     /// Measure the gain-0 baseline at the given ramp, and record it.
     /**
@@ -847,7 +1004,7 @@ class counterOffload : public MagAOXApp<true>,
      */
     bool measurePoint( const calibParamsT &p /**< [in] parameters */,
                       int                 stage /**< [in] stage index */,
-                      double             &fom /**< [out] mean band power */ );
+                      double             &fom /**< [out] the step figure of merit */ );
 
     /// Measure parameters n times, each between baselines, and return their interpolated ratios.
     /**
@@ -870,15 +1027,14 @@ class counterOffload : public MagAOXApp<true>,
     /// Hold a measurement row.
     void addRow( int                 stage /**< [in] stage index */,
                  const calibParamsT &p /**< [in] parameters */,
-                 double              fom /**< [in] mean band power */,
-                 double              fomStd /**< [in] standard deviation of the band powers */,
-                 uint64_t            clipped /**< [in] slots that clipped in the clip window */,
-                 uint64_t            published /**< [in] slots published in the clip window */ );
+                 const stepFomT     &f /**< [in] the figure of merit */,
+                 uint64_t            clipped /**< [in] slots that clipped from the first step */,
+                 uint64_t            published /**< [in] slots published from the first step */ );
 
     /// Write the held rows, with ratios to the latest and to the interpolated baseline.
     void flushRows();
 
-    /// Write the time, stage, parameters and band columns of a CSV row.  The caller must hold m_calibMutex.
+    /// Write the time, stage, parameters and step columns of a CSV row.  The caller must hold m_calibMutex.
     void writeCsvPrefix( const timespec     &wall /**< [in] CLOCK_REALTIME of the row */,
                          int                 stage /**< [in] stage index */,
                          const calibParamsT &p /**< [in] parameters */ );
@@ -920,11 +1076,19 @@ class counterOffload : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_gainGrid; ///< Property to set the gain scan grid: min, max, step.
 
+    pcf::IndiProperty m_indiP_calibStep; ///< Property to set the step mode and amplitude.
+
     pcf::IndiProperty m_indiP_calibration; ///< Read-only calibration progress and best parameters.
 
-    pcf::IndiProperty m_indiP_offloadFps; ///< The offloader's effective offload rate (SET).
-
     pcf::IndiProperty m_indiP_offloadModes; ///< The offloader's numModes (SET).
+
+    pcf::IndiProperty m_indiP_offloadFsm; ///< The offloader's FSM state (SET).
+
+    pcf::IndiProperty m_indiP_offloadToggle; ///< The offloader's offload toggle (SET).
+
+    pcf::IndiProperty m_indiP_stepFsm; ///< The step device's FSM state (SET).
+
+    pcf::IndiProperty m_indiP_stepAmps; ///< The step device's current amplitudes (SET).
 
     /// Update a numeric parameter from an INDI new-property request, within limits.
     /**
@@ -979,9 +1143,17 @@ class counterOffload : public MagAOXApp<true>,
 
     INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_gainGrid );
 
-    INDI_SETCALLBACK_DECL( counterOffload, m_indiP_offloadFps );
+    INDI_NEWCALLBACK_DECL( counterOffload, m_indiP_calibStep );
 
     INDI_SETCALLBACK_DECL( counterOffload, m_indiP_offloadModes );
+
+    INDI_SETCALLBACK_DECL( counterOffload, m_indiP_offloadFsm );
+
+    INDI_SETCALLBACK_DECL( counterOffload, m_indiP_offloadToggle );
+
+    INDI_SETCALLBACK_DECL( counterOffload, m_indiP_stepFsm );
+
+    INDI_SETCALLBACK_DECL( counterOffload, m_indiP_stepAmps );
 
     ///@}
 };
@@ -995,7 +1167,7 @@ inline void counterOffload::setupConfig()
 {
     SHMIMMONITOR_SETUP_CONFIG( config );
 
-    SHMIMMONITORT_SETUP_CONFIG( psdShmimMonitorT, config );
+    SHMIMMONITORT_SETUP_CONFIG( residualShmimMonitorT, config );
 
     DMSYNCOPATIONPRODUCER_SETUP_CONFIG( config );
 
@@ -1100,16 +1272,6 @@ inline void counterOffload::setupConfig()
                 "string",
                 "The cpuset for the producer thread." );
 
-    config.add( "calibrate.freqStream",
-                "",
-                "calibrate.freqStream",
-                argType::Required,
-                "calibrate",
-                "freqStream",
-                false,
-                "string",
-                "Stream holding the PSD frequency axis.  Default is aol1_freq." );
-
     config.add( "calibrate.offloadDevice",
                 "",
                 "calibrate.offloadDevice",
@@ -1118,7 +1280,17 @@ inline void counterOffload::setupConfig()
                 "offloadDevice",
                 false,
                 "string",
-                "INDI device providing fps and numModes.  Default is t2wOffloader." );
+                "INDI device providing numModes and the offload toggle.  Default is t2wOffloader." );
+
+    config.add( "calibrate.stepDevice",
+                "",
+                "calibrate.stepDevice",
+                argType::Required,
+                "calibrate",
+                "stepDevice",
+                false,
+                "string",
+                "dmMode INDI device whose mode is stepped.  Default is wooferModes." );
 
     config.add( "calibrate.csvDir",
                 "",
@@ -1144,9 +1316,9 @@ inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
 
     SHMIMMONITOR_LOAD_CONFIG( _config );
 
-    psdShmimMonitorT::m_shmimName = "aol1_clpsds";
+    residualShmimMonitorT::m_shmimName = "aol1_modevalWFS_cbuff";
 
-    SHMIMMONITORT_LOAD_CONFIG( psdShmimMonitorT, _config );
+    SHMIMMONITORT_LOAD_CONFIG( residualShmimMonitorT, _config );
 
     DMSYNCOPATIONPRODUCER_LOAD_CONFIG( _config );
 
@@ -1161,8 +1333,8 @@ inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_threadCpuset, "counterOffload.cpuset" );
     _config( m_maxCommand, "counterOffload.maxCommand" );
 
-    _config( m_freqStream, "calibrate.freqStream" );
     _config( m_offloadDevice, "calibrate.offloadDevice" );
+    _config( m_stepDevice, "calibrate.stepDevice" );
     _config( m_csvDir, "calibrate.csvDir" );
 
     for( const auto &k : calibKeys() )
@@ -1265,6 +1437,18 @@ inline int counterOffload::appStartup()
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
+    createROIndiNumber( m_indiP_calibStep, "calibStep", "calibStep" );
+    m_indiP_calibStep.setPerm( pcf::IndiProperty::ReadWrite );
+    indi::addNumberElement<double>( m_indiP_calibStep, "mode", 0, 1e6, 1, "%g" );
+    indi::addNumberElement<double>( m_indiP_calibStep, "amp", 0, 1e6, 0, "%g" );
+    m_indiP_calibStep["mode"] = m_stepMode;
+    m_indiP_calibStep["amp"]  = m_stepAmp;
+
+    if( registerIndiPropertyNew( m_indiP_calibStep, INDI_NEWCALLBACK( m_indiP_calibStep ) ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
     createROIndiNumber( m_indiP_stats, "stats", "Counters" );
     for( const char *el : { "events", "published", "failed", "clipped" } )
     {
@@ -1307,13 +1491,19 @@ inline int counterOffload::appStartup()
 
     log<text_log>( calibSettingsString(), logPrio::LOG_DEBUG );
 
-    REG_INDI_SETPROP( m_indiP_offloadFps, m_offloadDevice, std::string( "fps" ) );
-
     REG_INDI_SETPROP( m_indiP_offloadModes, m_offloadDevice, std::string( "numModes" ) );
+
+    REG_INDI_SETPROP( m_indiP_offloadFsm, m_offloadDevice, std::string( "fsm" ) );
+
+    REG_INDI_SETPROP( m_indiP_offloadToggle, m_offloadDevice, std::string( "offload" ) );
+
+    REG_INDI_SETPROP( m_indiP_stepFsm, m_stepDevice, std::string( "fsm" ) );
+
+    REG_INDI_SETPROP( m_indiP_stepAmps, m_stepDevice, std::string( "current_amps" ) );
 
     SHMIMMONITOR_APP_STARTUP;
 
-    SHMIMMONITORT_APP_STARTUP( psdShmimMonitorT );
+    SHMIMMONITORT_APP_STARTUP( residualShmimMonitorT );
 
     if( threadStart( m_coThread,
                      m_coThreadInit,
@@ -1370,13 +1560,13 @@ inline int counterOffload::appLogic()
 
     SHMIMMONITOR_APP_LOGIC;
 
-    SHMIMMONITORT_APP_LOGIC( psdShmimMonitorT );
+    SHMIMMONITORT_APP_LOGIC( residualShmimMonitorT );
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
     SHMIMMONITOR_UPDATE_INDI;
 
-    SHMIMMONITORT_UPDATE_INDI( psdShmimMonitorT );
+    SHMIMMONITORT_UPDATE_INDI( residualShmimMonitorT );
 
     std::vector<double> stats;
     uint64_t            overflows;
@@ -1501,7 +1691,7 @@ inline int counterOffload::appShutdown()
 
     SHMIMMONITOR_APP_SHUTDOWN;
 
-    SHMIMMONITORT_APP_SHUTDOWN( psdShmimMonitorT );
+    SHMIMMONITORT_APP_SHUTDOWN( residualShmimMonitorT );
 
     DMSYNCOPATIONPRODUCER_APP_SHUTDOWN;
 
@@ -1557,16 +1747,24 @@ inline int counterOffload::processImage( void *curr_src, const dev::shmimT &dumm
     timespec receivedIsio;
     clock_gettime( CLOCK_ISIO, &receivedIsio );
 
-    if( !m_enabled )
-    {
-        return 0;
-    }
-
     // The timestamps are read from the stream metadata, absent when the frame does not come from an attached stream.
     const int64_t handoff =
         ( shmimMonitorT::m_imageStream.md != nullptr )
             ? stampedHandoffNs( shmimMonitorT::currAtime(), shmimMonitorT::currWritetime(), receivedIsio )
             : -1;
+
+    if( m_collecting ) // calibration: the woofer stamp locates this offload in the residual frames
+    {
+        const int64_t stampNs = ( handoff >= 0 ) ? toNs( receivedIsio ) - handoff : toNs( receivedIsio );
+
+        std::lock_guard<std::mutex> stampGuard( m_stampMutex );
+        m_offloadStamps.push_back( stampNs );
+    }
+
+    if( !m_enabled )
+    {
+        return 0;
+    }
 
     std::lock_guard<std::mutex> guard( m_stateMutex );
 
@@ -1812,96 +2010,329 @@ inline bool counterOffload::setEnabled( bool on )
     return true;
 }
 
-inline int counterOffload::allocate( const psdShmimT &dummy )
+inline int counterOffload::allocate( const residualShmimT &dummy )
 {
     static_cast<void>( dummy ); // be unused
 
-    if( psdShmimMonitorT::m_dataType != _DATATYPE_FLOAT )
+    if( residualShmimMonitorT::m_dataType != _DATATYPE_FLOAT )
     {
-        return log<text_log, -1>( "PSD stream is not float", logPrio::LOG_ERROR );
+        return log<text_log, -1>( "residual stream is not float", logPrio::LOG_ERROR );
     }
 
     std::lock_guard<std::mutex> lock( m_calibMutex );
 
-    if( m_bandValid )
+    if( m_calibRunning )
     {
         m_calibAbort = true;
-        log<text_log>( "PSD stream changed during calibration", logPrio::LOG_WARNING );
+        log<text_log>( "residual stream changed during calibration", logPrio::LOG_WARNING );
     }
 
-    m_psdNFreq  = psdShmimMonitorT::m_width;
-    m_psdNModes = psdShmimMonitorT::m_height;
+    m_residualValues = residualShmimMonitorT::m_width * residualShmimMonitorT::m_height;
 
     return 0;
 }
 
-inline int counterOffload::processImage( void *curr_src, const psdShmimT &dummy )
+inline int counterOffload::processImage( void *curr_src, const residualShmimT &dummy )
 {
     static_cast<void>( dummy ); // be unused
 
-    const int64_t received = synco::monotonicNs();
-
-    std::lock_guard<std::mutex> lock( m_calibMutex );
-
-    if( !m_bandValid || received < m_psdAfterNs ) // only PSDs whose window is entirely after the change
+    if( !m_collecting )
     {
         return 0;
     }
 
-    const double p = bandPower( static_cast<const realT *>( curr_src ),
-                                m_psdNFreq,
-                                m_psdNModes,
-                                m_df,
-                                m_bandCenterHz,
-                                m_bandHalfWidthHz,
-                                m_bandModes );
+    timespec atime;
 
-    if( p >= 0 )
+    if( residualShmimMonitorT::m_imageStream.md != nullptr )
     {
-        m_psdPowers.push_back( p );
-        m_calibCond.notify_all();
+        atime = residualShmimMonitorT::currAtime();
     }
+    else // not from an attached stream
+    {
+        clock_gettime( CLOCK_ISIO, &atime );
+    }
+
+    m_lastFrameNs = synco::monotonicNs();
+
+    std::lock_guard<std::mutex> lock( m_calibMutex );
+
+    if( !m_collecting || m_stepData.nModes > m_residualValues )
+    {
+        return 0;
+    }
+
+    const float *src = static_cast<const float *>( curr_src );
+
+    m_stepData.frames.insert( m_stepData.frames.end(), src, src + m_stepData.nModes );
+    m_stepData.frameNs.push_back( toNs( atime ) );
 
     return 0;
 }
 
-inline double counterOffload::bandPower( const realT *psd,
-                                         uint32_t     nFreq,
-                                         uint32_t     nModes,
-                                         double       df,
-                                         double       centerHz,
-                                         double       halfWidthHz,
-                                         uint32_t     modeMax )
+inline int64_t counterOffload::toNs( const timespec &ts )
 {
-    const uint32_t modes = std::min( nModes, modeMax );
+    return static_cast<int64_t>( ts.tv_sec ) * 1000000000 + ts.tv_nsec;
+}
 
-    if( !( df > 0 ) || modes == 0 || nFreq == 0 )
+inline size_t counterOffload::findSteps( const stepDataT &d, double onsetSigma, std::vector<stepT> &steps )
+{
+    const size_t M       = d.nModes;
+    const size_t nFrames = ( M > 0 ) ? std::min( d.frames.size() / M, d.frameNs.size() ) : 0;
+
+    steps.assign( d.cmdIndex.size(), stepT() );
+
+    size_t found = 0;
+
+    for( size_t k = 0; k < d.cmdIndex.size(); ++k )
     {
-        return -1;
-    }
+        stepT &st = steps[k];
 
-    const double lo = std::max( 0.0, std::ceil( ( centerHz - halfWidthHz ) / df - 1e-9 ) );
-    const double hi = std::min( double( nFreq - 1 ), std::floor( ( centerHz + halfWidthHz ) / df + 1e-9 ) );
+        const size_t cmd = std::min( d.cmdIndex[k], nFrames );
+        st.end           = ( k + 1 < d.cmdIndex.size() ) ? std::min( d.cmdIndex[k + 1], nFrames ) : nFrames;
 
-    if( hi < lo )
-    {
-        return -1;
-    }
+        const size_t pre0 = ( cmd > m_preFrames ) ? cmd - m_preFrames : 0;
+        const size_t nPre = cmd - pre0;
 
-    double sum = 0;
-
-    const uint32_t n0 = static_cast<uint32_t>( lo );
-    const uint32_t n1 = static_cast<uint32_t>( hi );
-
-    for( uint32_t m = 0; m < modes; ++m )
-    {
-        for( uint32_t n = n0; n <= n1; ++n )
+        if( nPre < m_minPreFrames || M == 0 )
         {
-            sum += psd[n + m * nFreq];
+            continue;
+        }
+
+        st.preMean.assign( M, 0 );
+
+        for( size_t i = pre0; i < cmd; ++i )
+        {
+            for( size_t m = 0; m < M; ++m )
+            {
+                st.preMean[m] += d.frames[i * M + m];
+            }
+        }
+
+        for( double &v : st.preMean )
+        {
+            v /= nPre;
+        }
+
+        auto dev2 = [&]( size_t i )
+        {
+            double e = 0;
+            for( size_t m = 0; m < M; ++m )
+            {
+                const double x = d.frames[i * M + m] - st.preMean[m];
+                e += x * x;
+            }
+            return e;
+        };
+
+        double sum = 0, sum2 = 0;
+
+        for( size_t i = pre0; i < cmd; ++i )
+        {
+            const double e = dev2( i );
+            sum += e;
+            sum2 += e * e;
+        }
+
+        const double mean = sum / nPre;
+        const double sd   = std::sqrt( std::max( 0.0, sum2 / nPre - mean * mean ) );
+
+        st.noiseVar = mean;
+
+        for( size_t i = cmd; i < st.end; ++i )
+        {
+            if( dev2( i ) > mean + onsetSigma * sd )
+            {
+                st.onset = i;
+                st.found = true;
+                break;
+            }
+        }
+
+        if( !st.found )
+        {
+            continue;
+        }
+
+        ++found;
+
+        for( int64_t t : d.offloadNs )
+        {
+            const size_t i = std::lower_bound( d.frameNs.begin(), d.frameNs.begin() + nFrames, t ) - d.frameNs.begin();
+
+            if( i >= st.onset && i < st.end )
+            {
+                st.offloads.push_back( i );
+            }
+        }
+
+        if( !st.offloads.empty() )
+        {
+            st.offload = static_cast<long>( st.offloads.front() );
         }
     }
 
-    return sum * df;
+    return found;
+}
+
+inline size_t counterOffload::stepOnlyResponse( const stepDataT          &d,
+                                                const std::vector<stepT> &steps,
+                                                size_t                    len,
+                                                std::vector<double>      &response )
+{
+    const size_t M = d.nModes;
+
+    response.assign( len * M, 0 );
+
+    size_t n = 0;
+
+    for( size_t k = 0; k < steps.size(); ++k )
+    {
+        const stepT &st = steps[k];
+
+        if( !st.found || st.onset + len > st.end )
+        {
+            continue;
+        }
+
+        for( size_t j = 0; j < len; ++j )
+        {
+            for( size_t m = 0; m < M; ++m )
+            {
+                response[j * M + m] += d.signs[k] * ( d.frames[( st.onset + j ) * M + m] - st.preMean[m] );
+            }
+        }
+
+        ++n;
+    }
+
+    if( n > 0 )
+    {
+        for( double &v : response )
+        {
+            v /= n;
+        }
+    }
+
+    return n;
+}
+
+inline counterOffload::stepFomT counterOffload::stepFom( const stepDataT           &d,
+                                                         const std::vector<stepT>  &steps,
+                                                         const std::vector<double> &stepOnly,
+                                                         size_t                     stepOnlyCount,
+                                                         size_t                     lags )
+{
+    stepFomT out;
+
+    const size_t M   = d.nModes;
+    const size_t len = ( M > 0 ) ? stepOnly.size() / M : 0;
+
+    if( M == 0 || lags == 0 || stepOnlyCount == 0 )
+    {
+        return out;
+    }
+
+    std::vector<double> sum( lags * M, 0 );
+    std::vector<double> half[2] = { std::vector<double>( lags * M, 0 ), std::vector<double>( lags * M, 0 ) };
+    std::vector<size_t> onLag( lags, 0 );
+
+    size_t nHalf[2] = { 0, 0 };
+    double noise    = 0;
+
+    for( size_t k = 0; k < steps.size(); ++k )
+    {
+        const stepT &st = steps[k];
+
+        if( !st.found || st.offload < 0 )
+        {
+            continue;
+        }
+
+        const size_t off   = static_cast<size_t>( st.offload );
+        const size_t phase = off - st.onset;
+
+        if( phase > m_maxPhaseFrames || phase + lags > len || off + lags > st.end )
+        {
+            continue;
+        }
+
+        std::vector<double> &h = half[out.used % 2];
+
+        for( size_t l = 0; l < lags; ++l )
+        {
+            for( size_t m = 0; m < M; ++m )
+            {
+                const double e = d.signs[k] * ( d.frames[( off + l ) * M + m] - st.preMean[m] ) -
+                                 stepOnly[( phase + l ) * M + m];
+
+                sum[l * M + m] += e;
+                h[l * M + m] += e;
+            }
+        }
+
+        for( size_t q : st.offloads )
+        {
+            if( q >= off && q < off + lags )
+            {
+                ++onLag[q - off];
+
+                if( q - off + 1 < lags )
+                {
+                    ++onLag[q - off + 1];
+                }
+            }
+        }
+
+        noise += st.noiseVar;
+        ++nHalf[out.used % 2];
+        ++out.used;
+    }
+
+    if( out.used == 0 )
+    {
+        return out;
+    }
+
+    noise /= out.used;
+
+    // Energy of an average over n steps, less its noise bias, for each lag.
+    auto energy = [&]( const std::vector<double> &acc, size_t n, size_t l )
+    {
+        double e = 0;
+        for( size_t m = 0; m < M; ++m )
+        {
+            const double v = acc[l * M + m] / n;
+            e += v * v;
+        }
+        return e - noise * ( 1.0 / n + 1.0 / stepOnlyCount );
+    };
+
+    double halfFom[2] = { 0, 0 };
+
+    for( size_t l = 0; l < lags; ++l )
+    {
+        const double e = energy( sum, out.used, l );
+
+        out.fom += e;
+
+        if( 2 * onLag[l] > out.used )
+        {
+            out.fomTiming += e;
+        }
+
+        for( int h = 0; h < 2; ++h )
+        {
+            if( nHalf[h] > 0 )
+            {
+                halfFom[h] += energy( half[h], nHalf[h], l );
+            }
+        }
+    }
+
+    out.fomGain = out.fom - out.fomTiming;
+    out.fomStd  = ( nHalf[1] > 0 ) ? std::fabs( halfFom[0] - halfFom[1] ) / 2 : 0;
+
+    return out;
 }
 
 inline double counterOffload::interpBaseline( int64_t                     tNs,
@@ -2168,10 +2599,10 @@ inline void counterOffload::setCalibParams( const calibParamsT &p )
 
 inline const char *counterOffload::calibStageName( int stage )
 {
-    static const char *names[] = {
-        "off", "initial", "start", "duration", "gain", "confirm", "clipped", "fit start", "fit duration", "fit gain" };
+    static const char *names[] = { "off",       "initial",      "start",    "duration", "gain",    "confirm",
+                                   "clipped",   "fit start",    "fit duration", "fit gain", "step only" };
 
-    return ( stage >= stageOff && stage <= stageFitGain ) ? names[stage] : "unknown";
+    return ( stage >= stageOff && stage <= stageStepOnly ) ? names[stage] : "unknown";
 }
 
 inline double counterOffload::clipFraction( uint64_t clipped, uint64_t published )
@@ -2290,24 +2721,12 @@ counterOffload::applyCalibGrid( std::vector<double> &grid, const std::vector<dou
 inline std::vector<counterOffload::calibKeyT> counterOffload::calibKeys()
 {
     return {
-        { "halfWidthHz",
-          &m_halfWidthHz,
-          nullptr,
-          0,
-          1e6,
-          "Half width of the band integrated around the offload rate, Hz.  Default is 10." },
         { "modeMax",
           nullptr,
           &m_modeMax,
           0,
           1e6,
-          "Number of PSD modes summed.  0 uses the offloader's numModes.  Default is 0." },
-        { "nAverage",
-          nullptr,
-          &m_nAverage,
-          2,
-          1000,
-          "Settled averaged PSDs averaged for each measurement, at least 2.  Default is 3." },
+          "Number of residual modes summed.  0 uses the offloader's numModes.  Default is 0." },
         { "baselineEvery",
           nullptr,
           &m_baselineEvery,
@@ -2319,13 +2738,13 @@ inline std::vector<counterOffload::calibKeyT> counterOffload::calibKeys()
           nullptr,
           0,
           1e3,
-          "Wait after a change before PSDs are collected, s.  Default is 11." },
+          "Wait after a change, for the held contribution to leak away, before the steps, s.  Default is 0.2." },
         { "timeoutS",
           &m_timeoutS,
           nullptr,
           1,
           1e4,
-          "Longest wait for the PSDs of one measurement, after settling, s.  Default is 5." },
+          "Longest wait for residual frames or a change of the offload toggle, s.  Default is 5." },
         { "abortRatio",
           &m_abortRatio,
           nullptr,
@@ -2362,7 +2781,48 @@ inline std::vector<counterOffload::calibKeyT> counterOffload::calibKeys()
           &m_rounds,
           1,
           5,
-          "Rounds of sweeps; rounds after the first sweep only rampStartUs and gain.  Default is 2." } };
+          "Rounds of sweeps; rounds after the first sweep only rampStartUs and gain.  Default is 2." },
+        { "stepPeriodS",
+          &m_stepPeriodS,
+          nullptr,
+          0.05,
+          1e3,
+          "Time between woofer steps; must exceed the offload train's convergence, s.  Default is 0.5." },
+        { "stepCount",
+          nullptr,
+          &m_stepCount,
+          2,
+          1000,
+          "Woofer steps per measurement, alternating in sign.  Default is 10." },
+        { "onsetSigma",
+          &m_onsetSigma,
+          nullptr,
+          0,
+          1e3,
+          "Step onset threshold, in standard deviations of the pre-step residual energy.  Default is 5." } };
+}
+
+inline int counterOffload::applyCalibStep( double mode, double amp )
+{
+    if( m_calibRunning || !mx::math::isFinite( mode ) || mode < 0 || mode > 9999 || mode != std::round( mode ) ||
+        !mx::math::isFinite( amp ) || !( amp > 0 ) )
+    {
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> guard( m_stateMutex );
+    m_stepMode = static_cast<int>( mode );
+    m_stepAmp  = amp;
+
+    return 0;
+}
+
+inline std::string counterOffload::stepElementName( int mode )
+{
+    std::ostringstream out;
+    out << std::setw( 4 ) << std::setfill( '0' ) << mode;
+
+    return out.str();
 }
 
 inline int counterOffload::applyCalibKey( const calibKeyT &k, double value )
@@ -2401,6 +2861,8 @@ inline std::string counterOffload::calibSettingsString()
         out << ' ' << name << '=' << ( *grid )[0] << ',' << ( *grid )[1] << ',' << ( *grid )[2];
     }
 
+    out << " stepDevice=" << m_stepDevice << " stepMode=" << m_stepMode << " stepAmp=" << m_stepAmp;
+
     return out.str();
 }
 
@@ -2438,6 +2900,12 @@ inline void counterOffload::runCalibration()
 
     log<text_log>( calibSettingsString(), logPrio::LOG_DEBUG ); // record the settings this run uses
 
+    if( !startChecks() )
+    {
+        m_calibRunning = false;
+        return;
+    }
+
     double originalLeak;
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_stateMutex );
@@ -2462,21 +2930,31 @@ inline void counterOffload::runCalibration()
     m_measuredRows = 0;
     m_clippedRows  = 0;
 
-    const int    points  = estimatePoints();
-    const double minutes = points * ( m_settleS + 0.5 * m_nAverage ) / 60;
+    m_stepOnly.clear();
+    m_stepOnlyCount = 0;
+    m_lagFrames     = 0;
+
+    const double perPoint = m_settleS + m_stepCount * m_stepPeriodS;
+    const int    points   = estimatePoints();
+    const double minutes  = ( points * perPoint + 2 * ( perPoint + 3 * m_stepPeriodS ) ) / 60;
 
     log<text_log>( "calibration: about " + std::to_string( points ) + " measurements, " +
                        std::to_string( minutes ) + " min",
                    ( minutes > m_maxRunMin ) ? logPrio::LOG_WARNING : logPrio::LOG_INFO );
 
-    calibParamsT        cur      = original;
-    double              curRatio = none;
-    double              confirm  = none;
+    calibParamsT        cur       = original;
+    double              curRatio  = none;
+    double              confirm   = none;
     double              confirmSe = 0;
     std::vector<double> rs;
+    bool                offloadOff = false;
 
-    // Noise estimate from replicates of the starting point.
-    bool ok = setupBand() && openCsv() && replicate( original, stageInitial, m_replicates, rs );
+    // Start at the -a position so that every measured step is a full 2a step, then measure the step alone, then
+    // estimate the noise from replicates of the starting point.
+    m_stepPos = -1;
+
+    bool ok = openCsv() && sendStepAmp( m_stepBase - m_stepAmp ) && calibWait( m_stepPeriodS, true ) &&
+              measureStepOnly( offloadOff ) && replicate( original, stageInitial, m_replicates, rs );
 
     if( ok && !rs.empty() )
     {
@@ -2510,10 +2988,10 @@ inline void counterOffload::runCalibration()
         }
     }
 
-    // Confirm the chosen parameters.
+    // Remeasure the step alone (its change over the run is logged), then confirm the chosen parameters.
     if( ok )
     {
-        ok = replicate( cur, stageConfirm, m_confirmPairs, rs );
+        ok = measureStepOnly( offloadOff ) && replicate( cur, stageConfirm, m_confirmPairs, rs );
     }
 
     if( ok && !rs.empty() )
@@ -2541,9 +3019,17 @@ inline void counterOffload::runCalibration()
                        logPrio::LOG_INFO );
     }
 
-    { //mutex scope
-        std::lock_guard<std::mutex> lock( m_calibMutex );
-        m_bandValid = false;
+    // Always restore the stepped mode and the offloader, whatever happened.
+    if( !sendStepAmp( m_stepBase ) )
+    {
+        log<text_log>( "calibration could not restore " + m_stepDevice + " mode " + m_stepElement + " to " +
+                           std::to_string( m_stepBase ),
+                       logPrio::LOG_ERROR );
+    }
+
+    if( offloadOff && !setOffloading( true ) )
+    {
+        log<text_log>( "calibration could not turn " + m_offloadDevice + " offload back on", logPrio::LOG_ERROR );
     }
 
     const std::string params = "rampStartUs=" + std::to_string( cur[0] ) + " rampDurationUs=" +
@@ -2589,57 +3075,59 @@ inline void counterOffload::runCalibration()
     m_calibRunning = false;
 }
 
-inline bool counterOffload::setupBand()
+inline bool counterOffload::startChecks()
 {
-    double   df = 0;
-    uint64_t nf = 0;
-
-    IMAGE freq{};
-
-    if( ImageStreamIO_openIm( &freq, m_freqStream.c_str() ) != 0 )
-    {
-        log<text_log>( "calibration could not open " + m_freqStream, logPrio::LOG_ERROR );
-        return false;
-    }
-
-    if( freq.md->datatype == _DATATYPE_FLOAT && freq.md->nelement > 1 )
-    {
-        nf = freq.md->nelement;
-        df = freq.array.F[1] - freq.array.F[0];
-    }
-
-    ImageStreamIO_closeIm( &freq );
-
-    double halfWidth;
+    int mode;
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_stateMutex );
-        halfWidth = m_halfWidthHz;
+        mode = m_stepMode;
     }
 
-    std::lock_guard<std::mutex> lock( m_calibMutex );
+    std::string why;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_calibMutex );
 
-    const uint32_t modes = ( m_modeMax > 0 ) ? m_modeMax : m_offloadModes;
+        m_stepModes   = ( m_modeMax > 0 ) ? m_modeMax : m_offloadModes;
+        m_stepElement = stepElementName( mode );
 
-    if( !( df > 0 ) || nf != m_psdNFreq || m_psdNModes == 0 )
+        const auto amp = m_stepAmps.find( m_stepElement );
+
+        if( stateCodes::str2Code( m_offloadState ) != stateCodes::OPERATING )
+        {
+            why = m_offloadDevice + " is not OPERATING";
+        }
+        else if( !m_offloading )
+        {
+            why = m_offloadDevice + " offload is off";
+        }
+        else if( stateCodes::str2Code( m_stepState ) != stateCodes::READY )
+        {
+            why = m_stepDevice + " is not READY";
+        }
+        else if( amp == m_stepAmps.end() )
+        {
+            why = m_stepDevice + " has no mode " + m_stepElement;
+        }
+        else if( m_stepModes == 0 )
+        {
+            why = "no numModes from " + m_offloadDevice;
+        }
+        else if( m_residualValues < m_stepModes )
+        {
+            why = "the residual stream is not connected, or has fewer values than the " +
+                  std::to_string( m_stepModes ) + " modes";
+        }
+        else
+        {
+            m_stepBase = amp->second;
+        }
+    }
+
+    if( !why.empty() )
     {
-        log<text_log>( "calibration: PSD stream and " + m_freqStream + " do not match, or no PSDs yet",
-                       logPrio::LOG_ERROR );
+        log<text_log>( "calibration not started: " + why, logPrio::LOG_WARNING );
         return false;
     }
-
-    if( !( m_offloadFps > 0 ) || modes == 0 || m_offloadFps - halfWidth > ( nf - 1 ) * df )
-    {
-        log<text_log>( "calibration: no offload rate or numModes from " + m_offloadDevice + ", or band above the PSDs",
-                       logPrio::LOG_ERROR );
-        return false;
-    }
-
-    m_df              = df;
-    m_bandCenterHz    = m_offloadFps;
-    m_bandHalfWidthHz = halfWidth;
-    m_bandModes       = modes;
-    m_psdAfterNs      = std::numeric_limits<int64_t>::max(); // nothing is collected until the first measure()
-    m_bandValid       = true;
 
     return true;
 }
@@ -2666,42 +3154,27 @@ inline bool counterOffload::openCsv()
         return false;
     }
 
-    m_csv << "time,stage,rampStartUs,rampDurationUs,gain,offloadHz,numModes,halfWidthHz,nAverage,fom,fomStd,fomOff,"
-             "ratio,ratioInterp,fitCurrent,fitCandidate,threshold,moved,sigma,clippedSlots,clipFrac\n";
+    m_csv << "time,stage,rampStartUs,rampDurationUs,gain,stepMode,stepAmp,stepCount,numModes,fom,fomStd,fomOff,"
+             "ratio,ratioInterp,fomTiming,fomGain,fitCurrent,fitCandidate,threshold,moved,sigma,clippedSlots,clipFrac\n";
 
-    log<text_log>( "calibration started at " + std::to_string( m_bandCenterHz ) + " Hz over " +
-                       std::to_string( m_bandModes ) + " modes, writing " + path,
+    log<text_log>( "calibration started, stepping " + m_stepDevice + " mode " + m_stepElement + " by +/- " +
+                       std::to_string( m_stepAmp ) + " about " + std::to_string( m_stepBase ) + ", over " +
+                       std::to_string( m_stepModes ) + " modes, writing " + path,
                    logPrio::LOG_INFO );
 
     return true;
 }
 
-inline bool counterOffload::measure(
-    const calibParamsT &p, double &fom, double &fomStd, uint64_t &clipped, uint64_t &published )
+inline bool counterOffload::calibWait( double seconds, bool needOffload )
 {
-    setCalibParams( p );
+    const int64_t until     = synco::monotonicNs() + static_cast<int64_t>( seconds * 1e9 );
+    const int64_t timeoutNs = static_cast<int64_t>( m_timeoutS * 1e9 );
 
     std::unique_lock<std::mutex> lock( m_calibMutex );
 
-    const int64_t changed = synco::monotonicNs();
-
-    m_psdPowers.clear();
-    m_psdAfterNs             = changed + static_cast<int64_t>( m_settleS * 1e9 );
-    const int64_t deadline   = m_psdAfterNs + static_cast<int64_t>( m_timeoutS * 1e9 );
-    const int64_t clipFromNs = changed + static_cast<int64_t>( m_clipDelayS * 1e9 );
-
-    bool     clipRef        = false;
-    uint64_t clipStart      = 0;
-    uint64_t publishedStart = 0;
-
-    while( m_psdPowers.size() < static_cast<size_t>( m_nAverage ) )
+    while( true )
     {
-        if( !clipRef && synco::monotonicNs() >= clipFromNs )
-        {
-            clipStart      = m_clipped;
-            publishedStart = m_published;
-            clipRef        = true;
-        }
+        const int64_t now = synco::monotonicNs();
 
         std::string why;
 
@@ -2713,14 +3186,17 @@ inline bool counterOffload::measure(
         {
             why = "app disabled";
         }
-        else if( std::fabs( m_offloadFps - m_bandCenterHz ) > 0.5 ||
-                 ( m_modeMax == 0 && m_offloadModes != m_bandModes ) )
+        else if( m_modeMax == 0 && m_offloadModes != m_stepModes )
         {
-            why = "offload rate or numModes changed";
+            why = "numModes changed";
         }
-        else if( synco::monotonicNs() > deadline )
+        else if( needOffload && !m_offloading )
         {
-            why = "timed out waiting for PSDs";
+            why = m_offloadDevice + " offload turned off";
+        }
+        else if( m_collecting && now - m_lastFrameNs > timeoutNs )
+        {
+            why = "no residual frames for " + std::to_string( m_timeoutS ) + " s";
         }
 
         if( !why.empty() )
@@ -2729,24 +3205,257 @@ inline bool counterOffload::measure(
             return false;
         }
 
-        m_calibCond.wait_for( lock, std::chrono::milliseconds( 100 ) );
+        if( now >= until )
+        {
+            return true;
+        }
+
+        m_calibCond.wait_for( lock, std::chrono::nanoseconds( std::min<int64_t>( until - now, 10000000 ) ) );
     }
+}
 
-    double sum = 0, sum2 = 0;
+inline bool counterOffload::sendStepAmp( double amp )
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Number );
 
-    for( double v : m_psdPowers )
+    ip.setDevice( m_stepDevice );
+    ip.setName( "target_amps" );
+    ip.add( pcf::IndiElement( m_stepElement ) );
+    ip[m_stepElement] = amp;
+
+    if( sendNewProperty( ip ) < 0 )
     {
-        sum += v;
-        sum2 += v * v;
+        log<text_log>( "calibration could not send " + m_stepDevice + ".target_amps", logPrio::LOG_ERROR );
+        return false;
     }
 
-    const double n = m_psdPowers.size();
+    return true;
+}
 
-    fom    = sum / n;
-    fomStd = std::sqrt( std::max( 0.0, ( sum2 - sum * sum / n ) / ( n - 1 ) ) );
+inline bool counterOffload::setOffloading( bool on )
+{
+    if( sendNewStandardIndiToggle( m_offloadDevice, "offload", on ) < 0 )
+    {
+        log<text_log>( "calibration could not send " + m_offloadDevice + ".offload", logPrio::LOG_ERROR );
+        return false;
+    }
 
-    clipped   = clipRef ? m_clipped - clipStart : 0;
-    published = clipRef ? m_published - publishedStart : 0;
+    const int64_t until = synco::monotonicNs() + static_cast<int64_t>( m_timeoutS * 1e9 );
+
+    while( m_offloading != on )
+    {
+        if( m_shutdown || synco::monotonicNs() > until )
+        {
+            log<text_log>( "calibration: " + m_offloadDevice + " offload did not turn " + ( on ? "on" : "off" ),
+                           logPrio::LOG_WARNING );
+            return false;
+        }
+
+        mx::sys::milliSleep( 10 );
+    }
+
+    return true;
+}
+
+inline bool counterOffload::collectSteps( stepDataT &d, bool needOffload, uint64_t &clipped, uint64_t &published )
+{
+    const double seriesS = m_settleS + m_stepCount * m_stepPeriodS;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+
+        // Room for the series at up to 4 kHz, so collecting does not reallocate while holding the lock.
+        const size_t frames = static_cast<size_t>( seriesS * 4000 ) + 1;
+
+        m_stepData        = stepDataT();
+        m_stepData.nModes = m_stepModes;
+        m_stepData.frames.reserve( frames * m_stepModes );
+        m_stepData.frameNs.reserve( frames );
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_stampMutex );
+        m_offloadStamps.clear();
+        m_offloadStamps.reserve( static_cast<size_t>( seriesS * 2000 ) + 1 );
+    }
+
+    m_lastFrameNs = synco::monotonicNs();
+    m_collecting  = true;
+
+    bool ok = calibWait( m_settleS, needOffload ); // the previous point's held contribution leaks away
+
+    const uint64_t clipStart      = m_clipped;
+    const uint64_t publishedStart = m_published;
+
+    for( int k = 0; ok && k < m_stepCount; ++k )
+    {
+        m_stepPos = -m_stepPos;
+
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_calibMutex );
+            m_stepData.cmdIndex.push_back( m_stepData.frameNs.size() );
+            m_stepData.signs.push_back( m_stepPos );
+        }
+
+        ok = sendStepAmp( m_stepBase + m_stepPos * m_stepAmp ) && calibWait( m_stepPeriodS, needOffload );
+    }
+
+    m_collecting = false;
+
+    clipped   = m_clipped - clipStart;
+    published = m_published - publishedStart;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        d          = std::move( m_stepData );
+        m_stepData = stepDataT();
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_stampMutex );
+        d.offloadNs.swap( m_offloadStamps );
+        m_offloadStamps.clear();
+    }
+
+    std::sort( d.offloadNs.begin(), d.offloadNs.end() );
+
+    return ok;
+}
+
+inline bool counterOffload::measureStepOnly( bool &offloadOff )
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_calibStage = stageStepOnly;
+    }
+
+    if( !setOffloading( false ) )
+    {
+        return false;
+    }
+
+    offloadOff = true;
+
+    stepDataT d;
+    uint64_t  clipped, published;
+
+    const bool collected = collectSteps( d, false, clipped, published );
+
+    if( setOffloading( true ) ) // whatever happened
+    {
+        offloadOff = false;
+    }
+
+    if( !collected || offloadOff )
+    {
+        return false;
+    }
+
+    std::vector<stepT> steps;
+    const size_t       found = findSteps( d, m_onsetSigma, steps );
+    const size_t       need  = std::max<size_t>( 2, m_stepCount / 2 );
+
+    size_t span = std::numeric_limits<size_t>::max();
+
+    for( const stepT &st : steps )
+    {
+        if( st.found )
+        {
+            span = std::min( span, st.end - st.onset );
+        }
+    }
+
+    if( found < need || span <= m_guardFrames + m_maxPhaseFrames + 1 )
+    {
+        log<text_log>( "calibration: found the onset of " + std::to_string( found ) + " of " +
+                           std::to_string( steps.size() ) +
+                           " woofer steps; check the step device, calibStep and onsetSigma",
+                       logPrio::LOG_WARNING );
+        return false;
+    }
+
+    const size_t        len = span - m_guardFrames;
+    std::vector<double> response;
+    const size_t        n = stepOnlyResponse( d, steps, len, response );
+
+    double energy = 0;
+
+    for( double v : response )
+    {
+        energy += v * v;
+    }
+
+    // RMS change from the previous measurement over the lags both have, relative to the previous response.
+    std::string change;
+
+    if( !m_stepOnly.empty() )
+    {
+        const size_t common = std::min( m_stepOnly.size(), response.size() );
+        double       diff = 0, prev = 0;
+
+        for( size_t i = 0; i < common; ++i )
+        {
+            diff += ( response[i] - m_stepOnly[i] ) * ( response[i] - m_stepOnly[i] );
+            prev += m_stepOnly[i] * m_stepOnly[i];
+        }
+
+        if( prev > 0 )
+        {
+            change = ", RMS change from the previous " + std::to_string( std::sqrt( diff / prev ) );
+        }
+    }
+
+    m_stepOnly      = std::move( response );
+    m_stepOnlyCount = n;
+    m_lagFrames     = len - m_maxPhaseFrames;
+
+    log<text_log>( "calibration: step-only response from " + std::to_string( n ) + " steps over " +
+                       std::to_string( len ) + " frames, energy " + std::to_string( energy ) + change,
+                   logPrio::LOG_INFO );
+
+    timespec wall;
+    clock_gettime( CLOCK_REALTIME, &wall );
+
+    const calibParamsT p = calibParams();
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+
+        writeCsvPrefix( wall, stageStepOnly, p );
+        m_csv << "," << energy << ",,,,,,,,,,,,,\n";
+        m_csv.flush();
+    }
+
+    return calibWait( 2 * m_stepPeriodS, true ); // the offload train started by turning offload back on settles
+}
+
+inline bool counterOffload::measure( const calibParamsT &p, stepFomT &f, uint64_t &clipped, uint64_t &published )
+{
+    setCalibParams( p );
+
+    stepDataT d;
+
+    if( !collectSteps( d, true, clipped, published ) )
+    {
+        return false;
+    }
+
+    std::vector<stepT> steps;
+    const size_t       found = findSteps( d, m_onsetSigma, steps );
+
+    f = stepFom( d, steps, m_stepOnly, m_stepOnlyCount, m_lagFrames );
+
+    const size_t need = std::max<size_t>( 2, m_stepCount / 2 );
+
+    if( f.used < need )
+    {
+        log<text_log>( "calibration: only " + std::to_string( f.used ) + " of " + std::to_string( steps.size() ) +
+                           " woofer steps usable (" + std::to_string( found ) + " onsets, " +
+                           std::to_string( d.offloadNs.size() ) +
+                           " offloads); check the offload stamps and the residual atime",
+                       logPrio::LOG_WARNING );
+        return false;
+    }
 
     return true;
 }
@@ -2756,31 +3465,31 @@ inline bool counterOffload::measureBaseline( const calibParamsT &p )
     calibParamsT off = p;
     off[2]           = 0;
 
-    double   fom, fomStd;
+    stepFomT f;
     uint64_t clipped, published;
 
-    if( !measure( off, fom, fomStd, clipped, published ) )
+    if( !measure( off, f, clipped, published ) )
     {
         log<text_log>( "calibration: the gain-0 baseline could not be measured", logPrio::LOG_WARNING );
         return false;
     }
 
-    if( !( fom > 0 ) )
+    if( !( f.fom > 0 ) )
     {
-        log<text_log>( "calibration: the gain-0 baseline has no power in the band", logPrio::LOG_WARNING );
+        log<text_log>( "calibration: the gain-0 baseline shows no offload error", logPrio::LOG_WARNING );
         return false;
     }
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
-        m_fomOff     = fom;
+        m_fomOff     = f.fom;
         m_calibStage = stageOff;
     }
 
-    addRow( stageOff, off, fom, fomStd, clipped, published );
+    addRow( stageOff, off, f, clipped, published );
 
     m_offTimes.push_back( m_rows.back().tNs );
-    m_offFoms.push_back( fom );
+    m_offFoms.push_back( f.fom );
     m_lastWasOff = true;
 
     return true;
@@ -2793,17 +3502,18 @@ inline bool counterOffload::ensureBaseline( const calibParamsT &p )
 
 inline bool counterOffload::measurePoint( const calibParamsT &p, int stage, double &fom )
 {
-    double   fomStd;
+    stepFomT f;
     uint64_t clipped, published;
 
-    if( !measure( p, fom, fomStd, clipped, published ) )
+    if( !measure( p, f, clipped, published ) )
     {
         return false;
     }
 
+    fom          = f.fom;
     m_lastWasOff = false;
 
-    addRow( stage, p, fom, fomStd, clipped, published );
+    addRow( stage, p, f, clipped, published );
 
     const double ratio = fom / m_fomOff;
 
@@ -2816,7 +3526,7 @@ inline bool counterOffload::measurePoint( const calibParamsT &p, int stage, doub
 
     if( ratio > m_abortRatio )
     {
-        log<text_log>( "calibration: band power " + std::to_string( ratio ) + " times the baseline, aborting",
+        log<text_log>( "calibration: step error " + std::to_string( ratio ) + " times the baseline, aborting",
                        logPrio::LOG_WARNING );
         return false;
     }
@@ -2977,18 +3687,20 @@ inline bool counterOffload::sweep( int axis, calibParamsT &cur, double &curRatio
     return true;
 }
 
-inline void counterOffload::addRow(
-    int stage, const calibParamsT &p, double fom, double fomStd, uint64_t clipped, uint64_t published )
+inline void
+counterOffload::addRow( int stage, const calibParamsT &p, const stepFomT &f, uint64_t clipped, uint64_t published )
 {
     calibRowT row;
 
     clock_gettime( CLOCK_REALTIME, &row.wall );
-    row.tNs    = synco::monotonicNs();
-    row.stage  = stage;
-    row.p      = p;
-    row.fom    = fom;
-    row.fomStd = fomStd;
-    row.fomOff = m_fomOff;
+    row.tNs       = synco::monotonicNs();
+    row.stage     = stage;
+    row.p         = p;
+    row.fom       = f.fom;
+    row.fomStd    = f.fomStd;
+    row.fomOff    = m_fomOff;
+    row.fomTiming = f.fomTiming;
+    row.fomGain   = f.fomGain;
 
     row.clippedSlots   = clipped;
     row.publishedSlots = published;
@@ -3019,7 +3731,8 @@ inline void counterOffload::flushRows()
         writeCsvPrefix( row.wall, row.stage, row.p );
 
         m_csv << "," << row.fom << "," << row.fomStd << "," << row.fomOff << "," << row.fom / row.fomOff << ","
-              << row.fom / interpBaseline( row.tNs, m_offTimes, m_offFoms ) << ",,,,,," << row.clippedSlots << ","
+              << row.fom / interpBaseline( row.tNs, m_offTimes, m_offFoms ) << "," << row.fomTiming << ","
+              << row.fomGain << ",,,,,," << row.clippedSlots << ","
               << clipFraction( row.clippedSlots, row.publishedSlots ) << "\n";
     }
 
@@ -3031,7 +3744,7 @@ inline void counterOffload::writeCsvPrefix( const timespec &wall, int stage, con
 {
     m_csv << std::fixed << wall.tv_sec << "." << std::setw( 9 ) << std::setfill( '0' ) << wall.tv_nsec
           << std::setfill( ' ' ) << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << "," << p[1]
-          << "," << p[2] << "," << m_bandCenterHz << "," << m_bandModes << "," << m_bandHalfWidthHz << "," << m_nAverage;
+          << "," << p[2] << "," << m_stepElement << "," << m_stepAmp << "," << m_stepCount << "," << m_stepModes;
 }
 
 inline void counterOffload::writeFitRow( int stage, const calibParamsT &p, const choiceT &ch, double sigma )
@@ -3043,7 +3756,7 @@ inline void counterOffload::writeFitRow( int stage, const calibParamsT &p, const
 
     writeCsvPrefix( wall, stage, p );
 
-    m_csv << ",,,,,,";
+    m_csv << ",,,,,,,,";
 
     if( !ch.outside )
     {
@@ -3371,15 +4084,38 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_gainGrid )( const pcf::IndiProper
     return setCalibGrid( m_indiP_gainGrid, ipRecv, m_gainGrid, 0, 2 );
 }
 
-INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_offloadFps )( const pcf::IndiProperty &ipRecv )
+INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_calibStep )( const pcf::IndiProperty &ipRecv )
 {
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadFps, ipRecv );
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_calibStep, ipRecv );
 
-    if( ipRecv.find( "current" ) )
-    {
-        std::lock_guard<std::mutex> lock( m_calibMutex );
-        m_offloadFps = ipRecv["current"].get<float>();
+    double mode, amp;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_stateMutex );
+        mode = m_stepMode;
+        amp  = m_stepAmp;
     }
+
+    if( ipRecv.find( "mode" ) )
+    {
+        mode = ipRecv["mode"].get<double>();
+    }
+
+    if( ipRecv.find( "amp" ) )
+    {
+        amp = ipRecv["amp"].get<double>();
+    }
+
+    if( applyCalibStep( mode, amp ) < 0 )
+    {
+        return log<text_log, -1>( "rejected calibStep: need an integer mode from 0 to 9999 and amp > 0, and no "
+                                  "calibration running",
+                                  logPrio::LOG_ERROR );
+    }
+
+    updateIfChanged( m_indiP_calibStep, std::vector<std::string>{ "mode", "amp" }, std::vector<double>{ mode, amp } );
+
+    log<text_log>( "set calibStep to mode " + std::to_string( int( mode ) ) + " amp " + std::to_string( amp ),
+                   logPrio::LOG_NOTICE );
 
     return 0;
 }
@@ -3392,6 +4128,58 @@ INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_offloadModes )( const pcf::IndiPr
     {
         std::lock_guard<std::mutex> lock( m_calibMutex );
         m_offloadModes = std::max( 0, ipRecv["current"].get<int>() );
+    }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_offloadFsm )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadFsm, ipRecv );
+
+    if( ipRecv.find( "state" ) )
+    {
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_offloadState = ipRecv["state"].get<std::string>();
+    }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_offloadToggle )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadToggle, ipRecv );
+
+    if( ipRecv.find( "toggle" ) )
+    {
+        m_offloading = ( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On );
+    }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_stepFsm )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stepFsm, ipRecv );
+
+    if( ipRecv.find( "state" ) )
+    {
+        std::lock_guard<std::mutex> lock( m_calibMutex );
+        m_stepState = ipRecv["state"].get<std::string>();
+    }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( counterOffload, m_indiP_stepAmps )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_stepAmps, ipRecv );
+
+    std::lock_guard<std::mutex> lock( m_calibMutex );
+
+    for( const auto &[name, el] : ipRecv.getElements() )
+    {
+        m_stepAmps[name] = el.get<double>();
     }
 
     return 0;

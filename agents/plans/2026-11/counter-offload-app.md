@@ -1106,3 +1106,170 @@ File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261122T184
   - New read-only INDI `latency`: `pipelineUs`, `pipelineRmsUs`, `slotUs`, `handoffUs`, `slotWaitUs`, `computeUs`, `writeUs`, `computeMaxUs`, `missed`. It is updated in `appLogic` from `summarizeLatency()`, and −1 means no data.
   - Unit tests: `stampedHandoffNs`; `summarizeLatency` (means, population RMS, max, unstamped samples excluded from handoff/pipeline); `recordLatency` (only offloads before compute start, recorded once, `missed`, zero drops pending, ring wraps); `updateSlotPeriod`.
 - **Known gap.** If a ramp completes within its first slot (duration shorter than about 100 µs), and a new offload reuses the freed pool entry before the publish returns, the first offload's latency is not recorded. This is rare and only drops a sample.
+
+### Step-Driven Calibration Figure of Merit (plan, 2026-11-23; not implemented)
+
+**Problem.** In every run `rampStartUs` and `rampDurationUs` measured as nearly flat, though a better match to the woofer rise should help. The PSD figure of merit is the likely cause:
+- The 500 µs WFS frame contains the whole 300 µs woofer rise, so a timing error δ appears only as a frame-integrated area of about g·Δ·δ/500 µs in one or two frames.
+- The gain error (1 − g)·Δ lasts several frames and dominates the band power. A 150 µs start error is estimated at about 1% of the ratio, against 5–7% noise.
+- Band power within ±10 Hz of 250 Hz includes turbulence and vibration power that is unrelated to offloads.
+
+**User direction (2026-11-23).**
+- Drive the offloads with repeatable `wooferModes` steps instead of simulated turbulence.
+- `wooferModes` (a `dmMode` instance) writes a woofer channel separate from t2wOffloader's, on purpose.
+- The calibrator reads the residual stream directly in real time, as it now reads the PSDs. The user runs streamWriter separately when the raw data should be saved.
+
+**Mechanism.**
+- With the loop closed, offloading on and no turbulence, a woofer mode step of 2a is corrected by the tweeter loop. t2wOffloader then offloads it back to the woofer as a shrinking train of Δs in that mode.
+- Every step gives the same train, so the residual can be averaged coherently against frames since the step.
+- Turbulence, if present, only adds noise that averages away.
+
+**Real-time feasibility.** It is easy.
+- Read `aol1_modevalWFS_cbuff` with a third `shmimMonitor`, as modalPSDs does.
+- streamCircBuff relays every frame with its upstream `cnt0` and keeps `cntarray`/`atimearray` per slot, so the calibrator can read any slots it missed and detect gaps.
+- It adds no reader on the loop stream `aol1_modevalWFS` (AGENTS.md §28). The cbuff runs on `spare50`.
+- The work per frame is a sign-corrected add of a numModes vector into a lag accumulator.
+
+**Measurement of one point.**
+1. Apply the parameters, wait for the counter's held contribution to leak away (about 0.2 s), and clear the accumulators.
+2. For `stepCount` steps, alternating sign:
+   - send `wooferModes.target_amps.<stepMode>` = ±`stepAmp`;
+   - find the onset frame in the residual;
+   - add sign·r(k) for lags 0…L−1 into R̄(ℓ). L covers `stepPeriodS`, minus a guard of a few frames before the next step.
+3. Compute the error curve e(ℓ) = R̄(ℓ) − S̄(ℓ), where S̄ is the step-only response (see below).
+4. The figure of merit is Σℓ Σₘ eₘ(ℓ)² over the offloaded modes. Summing over modes makes it independent of the basis, since the woofer and tweeter mode bases differ.
+5. Remove the noise bias, which is the per-frame residual variance from the pre-step frames divided by `stepCount`.
+6. Get `fomStd` from a split-half or jackknife over the steps.
+
+**Step-only response S̄.**
+- The step's own transient is not counter-offloaded and is the same at every setting. Left in, it would set a floor under the ratio. It could dominate, because the first offload is only about the offload gain × 2a.
+- Measure S̄ once per run (and at the confirmation) with t2wOffloader's `offload` toggle off for the duration of those steps, then turn it back on.
+- With S̄ subtracted, a perfect counter-offload gives ratio 0, and the existing baseline, ratio and decision logic carry over unchanged. Counter off is gain 0, as now.
+
+**Proposed `[calibrate]` keys** (optional, like the existing ones):
+- `fom` = `psd` (default) | `step`;
+- `stepDevice` = `wooferModes`;
+- `stepMode` = the dmMode element, e.g. `0002`;
+- `stepAmp`;
+- `stepPeriodS`;
+- `stepCount`;
+- `residualStream` = `aol1_modevalWFS_cbuff`.
+
+**Restore and abort.** Restore the `wooferModes` amplitude and the t2wOffloader `offload` state on completion and on abort, as `leak` is now. The calibrator sends these as an INDI client and never writes a loop channel, so R4 holds.
+
+**CSV.** Add the error-curve energy for lags 0–1 (timing) and for lags ≥ 2 (gain) as two columns, so the analysis can see which one moved.
+
+**Open questions.**
+- **S-Q1. Step-only response.** Should it be measured with t2wOffloader `offload` off, so the calibrator toggles t2wOffloader? Recommended. The alternative is to start the window at the first offload after the step and accept a floor.
+    - Yes
+- **S-Q2. Onset alignment.** dmMode posts without setting `atime`/`writetime`, so the step time is not stamped.
+  - Recommended: detect the onset in the residual, the first frame where the stepped mode's projection exceeds a threshold.
+  - Alternatives: the time the calibrator sent the command (ms jitter), or a woofer-channel `cnt0` reader (one more reader on a DM channel).
+    - detect it in the residual
+- **S-Q3. Defaults.** Choose the mode, amplitude, period and count from a hand trial:
+  - the period must exceed the offload train's convergence time;
+  - the amplitude must keep the counter peak under `maxCommand` and the woofer within stroke.
+    - for now, use astig00 (should be wooferMode n005) and amplitude 0.7 as the default. I will correct on bench if this is not a good value.
+- **S-Q4. `fom` selection.** Config-only (recommended, like the other numeric keys), or an INDI selection?
+    - eliminate the PSD fom. we're doing only step-based now.
+- **S-Q5. Option B.** Also fit the per-offload signed blip h(ℓ) within the train for a direct timing estimate? Recommended later, after the energy figure of merit is qualified.
+    - not yet.
+
+### Step-Driven Figure of Merit: Resolved Design (2026-11-23; not implemented)
+
+**Answers.**
+- S-Q1: measure S̄ with t2wOffloader `offload` off.
+- S-Q2: detect the onset in the residual.
+- S-Q3: default mode astig00 (`wooferModes` element `0005`), amplitude 0.7; to be corrected on the bench.
+- S-Q4: **remove the PSD figure of merit**; calibration is step-based only.
+- S-Q5: not yet.
+
+**New finding: offloads land at a different phase in each step.**
+- The 250 Hz offload clock runs independently of the step. A step sent over INDI lands at a random one of the 8 frames in the offload cycle.
+- Averaged on the step onset, the offload spikes fall at different lags in each step. The average smears them over 8 frames and shrinks their energy, which is the part being measured.
+- **Fix: align on the offload grid, subtract the step response per step.**
+  - For each step j, find the onset frame (residual detection) and the frame of the first offload after it.
+    - The offload frame comes from the offload's woofer `atime` stamp, located in the cbuff's per-slot `atimearray`. Both are `CLOCK_ISIO`.
+  - The onset-to-offload offset φⱼ is 0–7 frames.
+  - Per step: eⱼ(ℓ) = sign·rⱼ(ℓ) − S̄(ℓ + φⱼ), with ℓ counted from the first offload. S̄ is onset-aligned, measured with `offload` off.
+  - Average the eⱼ over the steps on the offload grid. The figure of merit is Σℓ Σₘ ē(ℓ)².
+  - Then the timing/gain split in the CSV has its meaning:
+    - "timing" = lags 0–1 after each offload (ℓ mod 8 ∈ {0, 1});
+    - "gain" = the other lags.
+  - The steps for S̄ need lags up to L + 7, so S̄ is recorded over a longer window.
+
+**Removed (PSD figure of merit).**
+- The `psdShmimT` monitor (`aol1_clpsds`), `bandPower`, the band state, `m_psdPowers`/`m_psdAfterNs`.
+- The `fps` subscription to t2wOffloader. `numModes` is still needed.
+- Config keys:
+  - `calibrate.freqStream`, `calibrate.halfWidthHz`, `calibrate.nAverage`;
+  - the PSD monitor's `shmimMonitor` section for `aol1_clpsds`.
+- No framework INDI properties are removed. The `calibration` property has no PSD elements.
+- Tests for `bandPower` go. The docs' figure-of-merit section is rewritten.
+
+**Kept or changed.**
+- `calibrate.modeMax`: residual modes summed; 0 uses `t2wOffloader.numModes`.
+- `calibrate.settleS`: now the wait after a parameter change for the counter's held contribution to leak away. New default 0.2 s.
+- `calibrate.timeoutS`: abort if no residual frames arrive for this long, or no onset is detected within one `stepPeriodS`. Default 5 s.
+- All other keys, grids, replicates, baselines, the decision rule and confirmation are unchanged.
+
+**New `[calibrate]` keys and proposed defaults.**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `residualStream` | `aol1_modevalWFS_cbuff` | Per-frame modal residual, read by a new `shmimMonitor` (§28: not the loop stream). |
+| `stepDevice` | `wooferModes` | dmMode instance stepped over INDI (`target_amps`). |
+| `stepPeriodS` | 0.5 | Time between steps; must exceed the offload train's convergence. |
+| `stepCount` | 10 | Steps per point (5 of each sign). |
+| `onsetSigma` | 5 | Onset threshold: residual energy over the summed modes above this many SDs of the pre-step frames. |
+
+**Step mode and amplitude: INDI only (user, 2026-11-23).**
+- They are not config keys. They form one INDI number property, `calibStep`, like the scan grids:
+  - `mode`: the dmMode element index, default 5 (`0005`, astig00);
+  - `amp`: the amplitude, default 0.7, alternating +a, −a.
+- A change lasts until restart and is refused while a run is in progress. A rejected value is logged as an error.
+- Validation:
+  - `mode` must be an integer ≥ 0. Whether the element exists in `stepDevice` is checked at run start, and the run refuses to start if it does not.
+  - `amp` must be finite and > 0.
+
+**Per run.**
+1. Startup checks:
+   - the residual stream is connected;
+   - `stepDevice` is READY;
+   - the starting amplitude of `stepMode` is recorded.
+2. S̄: turn t2wOffloader `offload` off, run `stepCount` steps, record S̄ onset-aligned, then turn `offload` back on.
+3. Sweeps as now, each point measured as above.
+4. Measure S̄ again before the confirmation. The run logs the RMS change between the two S̄s as a drift check.
+5. On completion and on abort, restore the `stepMode` amplitude, t2wOffloader `offload`, and `leak`.
+
+**CSV columns.** `time,stage,rampStartUs,rampDurationUs,gain,stepMode,stepAmp,stepCount,numModes,fom,fomStd,fomOff,ratio,ratioInterp,fomTiming,fomGain,fitCurrent,fitCandidate,threshold,moved,sigma,clippedSlots,clipFrac`. These replace `offloadHz`, `halfWidthHz`, `nAverage`.
+
+**Timing.** One point takes about `settleS` + `stepCount` × `stepPeriodS` ≈ 5.2 s with the defaults, less than half the time of a PSD point (about 12.5 s). A full 2-round run takes about 4–5 min instead of about 9.
+
+**Open questions.**
+- **SD-Q1.** Are the defaults `stepPeriodS` 1.0 s and `stepCount` 10 acceptable as starting values, to be corrected on the bench like the amplitude?
+    - step period can be 0.5 s
+- **SD-Q2.** Is aligning on the offload grid, with the step response subtracted per step at its onset offset, acceptable? It is needed for the energy of the offload spikes to survive the averaging.
+    -yes
+- **SD-Q3.** Should calibrate mode refuse to start while `offload` is already off, or if t2wOffloader is not READY? Recommended: refuse, and log why.
+    - refuse and log
+    
+
+**SD answers recorded (2026-11-23).** `stepPeriodS` default 0.5 s, `stepCount` 10; offload-grid alignment with per-step subtraction of S̄; refuse to start, with a log, while t2wOffloader is not READY or `offload` is off. All questions are answered; the design is ready to implement.
+
+
+### Step-Driven Figure of Merit: Implementation (2026-11-23, not yet built)
+
+Implemented as designed, in `counterOffload.hpp`, the unit tests and the example config. Deviations and details:
+- **Residual stream.** It is set in the residual monitor's own config section, `[residual] shmimName` (default `aol1_modevalWFS_cbuff`), as the PSD stream was in `[psds]`. There is no `calibrate.residualStream` key.
+- **Start checks.** t2wOffloader goes to OPERATING, never READY, so the check is "t2wOffloader OPERATING with offload on, wooferModes READY and reporting the `calibStep` element, residual frames with at least numModes values". A failed check logs "calibration not started: …" and changes nothing.
+- **Subscriptions.** t2wOffloader `numModes`, `fsm`, `offload`; wooferModes `fsm`, `current_amps`. The `fps` subscription is removed.
+- **Step positions.** A run first moves the mode to base − a (unmeasured, one period), so every measured step is a full 2a step. The base amplitude is `current_amps` at the start and is restored at the end and on abort.
+- **Clip window.** Clipping is now counted from the first step to the end of the measurement, after `settleS`. The old fixed 1 s delay (`m_clipDelayS`) is removed.
+- **Onset.** The squared deviation from the pre-step mean, summed over the modes, compared against its own mean + `onsetSigma` × SD over the up to 100 frames before the command. At least 10 pre-step frames are needed.
+- **Offload stamps.** Each offload's woofer stamp is the input frame's atime (receipt time if it has none). The stamps are collected under their own mutex, so the offload path never waits on residual collection. The residual buffers are reserved for 4 kHz so that collecting does not reallocate under the lock.
+- **Step-only response.** Its length is the shortest onset-to-next-command span less 8 frames. The figure of merit uses that length − 16 lags from the first offload, and steps whose first offload is more than 16 frames after the onset are skipped. It is measured at the start and again before the confirmation, logged with the RMS change, and written as a CSV row with stage `step only` (stage 10), whose `fom` is the response energy.
+- **Usable steps.** A measurement needs at least max(2, stepCount / 2) usable steps, otherwise it fails like a timeout, with the onset and offload counts logged.
+- **Config keys.** Removed `freqStream`, `halfWidthHz`, `nAverage` and the `[psds]` monitor section. Added `stepDevice`, `stepPeriodS`, `stepCount`, `onsetSigma`. `settleS` now defaults to 0.2 s.
+- **New INDI.** `calibStep` (`mode` 5, `amp` 0.7). No framework or other properties were removed.
+- **Unit tests.** The `bandPower` and PSD-collection tests are removed. New tests cover `findSteps` (onsets, offload placement, no response, too few pre-step frames), `stepOnlyResponse`, `stepFom` (zero error, the timing/gain split, skipped late offloads, noise bias, empty inputs), collection of frames and stamps, `calibStep` validation, and the new defaults and key count (14).

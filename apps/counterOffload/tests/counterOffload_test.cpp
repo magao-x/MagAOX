@@ -27,16 +27,12 @@ class counterOffload_test : public counterOffload
   public:
     using counterOffload::m_accum;
     using counterOffload::m_accumNonzero;
-    using counterOffload::m_bandCenterHz;
-    using counterOffload::m_bandHalfWidthHz;
-    using counterOffload::m_bandModes;
-    using counterOffload::m_bandValid;
     using counterOffload::m_calibLeak;
     using counterOffload::m_calibRunning;
     using counterOffload::m_channel;
     using counterOffload::m_clipped;
+    using counterOffload::m_collecting;
     using counterOffload::m_command;
-    using counterOffload::m_df;
     using counterOffload::m_durationGridUs;
     using counterOffload::m_enabled;
     using counterOffload::m_events;
@@ -49,18 +45,21 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_maxCommand;
     using counterOffload::m_missed;
     using counterOffload::m_modeMax;
-    using counterOffload::m_nAverage;
+    using counterOffload::m_offloadStamps;
+    using counterOffload::m_onsetSigma;
     using counterOffload::m_overflows;
-    using counterOffload::m_psdAfterNs;
-    using counterOffload::m_psdNFreq;
-    using counterOffload::m_psdNModes;
-    using counterOffload::m_psdPowers;
     using counterOffload::m_rampDurationUs;
     using counterOffload::m_ramps;
     using counterOffload::m_rampStartUs;
+    using counterOffload::m_residualValues;
     using counterOffload::m_settleS;
     using counterOffload::m_slotNs;
     using counterOffload::m_startGridUs;
+    using counterOffload::m_stepAmp;
+    using counterOffload::m_stepCount;
+    using counterOffload::m_stepData;
+    using counterOffload::m_stepMode;
+    using counterOffload::m_stepPeriodS;
     using counterOffload::m_syncopationTiming;
     using counterOffload::m_timeOffsetUs;
     using counterOffload::m_timeoutS;
@@ -535,7 +534,9 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
     // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
     counterOffload::gridValid({},0,0);
-    counterOffload::applyCalibSetting(m_nAverage,0,0,0);
+    counterOffload::applyCalibSetting(m_stepCount,0,0,0);
+    counterOffload::applyCalibStep(0,0);
+    counterOffload::stepElementName(0);
     counterOffload::applyCalibGrid(m_gainGrid,{},0,0);
     counterOffload::calibKeys();
     counterOffload::applyCalibKey({},0);
@@ -546,10 +547,14 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
 
     counterOffload_test app;
 
-    SECTION( "the defaults wait out the 10.5 s modalPSDs average, take 3 samples, and use valid grids" )
+    SECTION( "the defaults step astig00 by 0.7 ten times 0.5 s apart, and use valid grids" )
     {
-        REQUIRE( app.m_settleS == 11 );
-        REQUIRE( app.m_nAverage == 3 );
+        REQUIRE( app.m_settleS == 0.2 );
+        REQUIRE( app.m_stepPeriodS == 0.5 );
+        REQUIRE( app.m_stepCount == 10 );
+        REQUIRE( app.m_onsetSigma == 5 );
+        REQUIRE( app.m_stepMode == 5 );
+        REQUIRE( app.m_stepAmp == 0.7 );
         REQUIRE( app.m_timeoutS == 5 );
         REQUIRE( app.m_calibLeak > 0 );
         REQUIRE( app.m_startGridUs == std::vector<double>{ 0, 150, 25 } );
@@ -571,11 +576,11 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
 
     SECTION( "settings are range checked, and integer settings must be integral" )
     {
-        REQUIRE( app.applyCalibSetting( app.m_nAverage, 1, 2, 1000 ) < 0 ); // a single PSD is never used for a score
-        REQUIRE( app.applyCalibSetting( app.m_nAverage, 4.5, 2, 1000 ) < 0 );
-        REQUIRE( app.m_nAverage == 3 );
-        REQUIRE( app.applyCalibSetting( app.m_nAverage, 5, 2, 1000 ) == 0 );
-        REQUIRE( app.m_nAverage == 5 );
+        REQUIRE( app.applyCalibSetting( app.m_stepCount, 1, 2, 1000 ) < 0 ); // the halves need at least 2 steps
+        REQUIRE( app.applyCalibSetting( app.m_stepCount, 4.5, 2, 1000 ) < 0 );
+        REQUIRE( app.m_stepCount == 10 );
+        REQUIRE( app.applyCalibSetting( app.m_stepCount, 6, 2, 1000 ) == 0 );
+        REQUIRE( app.m_stepCount == 6 );
 
         REQUIRE( app.applyCalibSetting( app.m_calibLeak, 0, 1e-9, 1 ) < 0 ); // calibration must leak
         REQUIRE( app.applyCalibSetting( app.m_calibLeak, std::numeric_limits<double>::quiet_NaN(), 1e-9, 1 ) < 0 );
@@ -583,10 +588,10 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
         REQUIRE( app.m_calibLeak == 0.005 );
     }
 
-    SECTION( "the config keys cover the 13 numeric settings, and every default is accepted" )
+    SECTION( "the config keys cover the 14 numeric settings, and every default is accepted" )
     {
         const auto keys = app.calibKeys();
-        REQUIRE( keys.size() == 13 );
+        REQUIRE( keys.size() == 14 );
 
         std::set<std::string> names;
         for( const auto &k : keys )
@@ -597,21 +602,42 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
         }
         REQUIRE( names.size() == keys.size() );
 
-        const auto nAverage = std::find_if(
-            keys.begin(), keys.end(), []( const auto &k ) { return std::string( k.key ) == "nAverage"; } );
-        REQUIRE( nAverage != keys.end() );
-        REQUIRE( app.applyCalibKey( *nAverage, 4.5 ) < 0 ); // integer settings must be integral
-        REQUIRE( app.applyCalibKey( *nAverage, 1 ) < 0 );   // below the limit
-        REQUIRE( app.applyCalibKey( *nAverage, 6 ) == 0 );
-        REQUIRE( app.m_nAverage == 6 );
+        const auto stepCount = std::find_if(
+            keys.begin(), keys.end(), []( const auto &k ) { return std::string( k.key ) == "stepCount"; } );
+        REQUIRE( stepCount != keys.end() );
+        REQUIRE( app.applyCalibKey( *stepCount, 4.5 ) < 0 ); // integer settings must be integral
+        REQUIRE( app.applyCalibKey( *stepCount, 1 ) < 0 );   // below the limit
+        REQUIRE( app.applyCalibKey( *stepCount, 6 ) == 0 );
+        REQUIRE( app.m_stepCount == 6 );
     }
 
     SECTION( "the settings are logged on one line" )
     {
         const std::string s = app.calibSettingsString();
-        REQUIRE( s.find( "nAverage=3" ) != std::string::npos );
+        REQUIRE( s.find( "stepCount=10" ) != std::string::npos );
+        REQUIRE( s.find( "stepMode=5" ) != std::string::npos );
+        REQUIRE( s.find( "stepAmp=0.7" ) != std::string::npos );
         REQUIRE( s.find( "leak=0.0025" ) != std::string::npos );
         REQUIRE( s.find( "gainGrid=0.3,1,0.1" ) != std::string::npos );
+    }
+
+    SECTION( "the step mode must be an integer >= 0 and the amplitude finite and > 0" )
+    {
+        REQUIRE( app.applyCalibStep( 5.5, 0.7 ) < 0 );
+        REQUIRE( app.applyCalibStep( -1, 0.7 ) < 0 );
+        REQUIRE( app.applyCalibStep( 6, 0 ) < 0 );
+        REQUIRE( app.applyCalibStep( 6, std::numeric_limits<double>::quiet_NaN() ) < 0 );
+        REQUIRE( app.m_stepMode == 5 );
+        REQUIRE( app.m_stepAmp == 0.7 );
+        REQUIRE( app.applyCalibStep( 6, 0.5 ) == 0 );
+        REQUIRE( app.m_stepMode == 6 );
+        REQUIRE( app.m_stepAmp == 0.5 );
+    }
+
+    SECTION( "step modes are named as dmMode names its elements" )
+    {
+        REQUIRE( counterOffload::stepElementName( 5 ) == "0005" );
+        REQUIRE( counterOffload::stepElementName( 12 ) == "0012" );
     }
 
     SECTION( "grids are checked before they are set" )
@@ -629,57 +655,8 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
         REQUIRE( app.m_modeMax == 0 );
         REQUIRE( app.applyCalibGrid( app.m_startGridUs, { 0, 100, 25 }, 0, 1e6 ) < 0 );
         REQUIRE( app.m_startGridUs == std::vector<double>{ 0, 150, 25 } );
-    }
-}
-
-/// Verify the PSD band integral used as the calibration figure of merit.
-/**
- * \ingroup counterOffload_unit_test
- */
-TEST_CASE( "counterOffload integrates the PSD band", "[counterOffload]" )
-{
-    // clang-format off
-    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
-    counterOffload::bandPower(nullptr,0,0,0,0,0,0);
-    #endif
-    // clang-format on
-
-    // 11 frequencies 0-50 Hz at 5 Hz, 3 modes; mode m has value (m+1) at every frequency, plus 100 at 25 Hz in mode 0.
-    constexpr uint32_t nf = 11, nm = 3;
-    std::vector<float> psd( nf * nm );
-    for( uint32_t m = 0; m < nm; ++m )
-    {
-        for( uint32_t n = 0; n < nf; ++n )
-        {
-            psd[n + m * nf] = m + 1;
-        }
-    }
-    psd[5] += 100;
-
-    SECTION( "the band includes its edges and is weighted by df" )
-    {
-        // 20, 25, 30 Hz in mode 0
-        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 25, 5, 1 ) == Approx( ( 3 + 100 ) * 5 ) );
-    }
-
-    SECTION( "only the first modeMax modes are summed" )
-    {
-        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 25, 0, 2 ) == Approx( ( 101 + 2 ) * 5 ) );
-        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 25, 0, 10 ) == Approx( ( 101 + 2 + 3 ) * 5 ) );
-    }
-
-    SECTION( "a band past the last frequency is clipped" )
-    {
-        // 45, 50 Hz in mode 0
-        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 50, 7, 1 ) == Approx( 2 * 5 ) );
-    }
-
-    SECTION( "an empty band or mode range returns -1" )
-    {
-        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 80, 5, 1 ) == -1 );
-        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 22, 1, 1 ) == -1 ); // between bins
-        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 5, 25, 5, 0 ) == -1 );
-        REQUIRE( counterOffload::bandPower( psd.data(), nf, nm, 0, 25, 5, 1 ) == -1 );
+        REQUIRE( app.applyCalibStep( 6, 0.5 ) < 0 );
+        REQUIRE( app.m_stepMode == 5 );
     }
 }
 
@@ -896,13 +873,14 @@ TEST_CASE( "counterOffload noise estimate and run length", "[counterOffload]" )
         counterOffload_test app;
 
         REQUIRE( app.estimatePoints() == 58 );
-        REQUIRE( app.estimatePoints() * ( app.m_settleS + 0.5 * app.m_nAverage ) / 60 < 20 );
+        REQUIRE( app.estimatePoints() * ( app.m_settleS + app.m_stepCount * app.m_stepPeriodS ) / 60 < 20 );
     }
 
     SECTION( "stage names" )
     {
         REQUIRE( std::string( counterOffload::calibStageName( counterOffload::stageClipped ) ) == "clipped" );
         REQUIRE( std::string( counterOffload::calibStageName( counterOffload::stageFitGain ) ) == "fit gain" );
+        REQUIRE( std::string( counterOffload::calibStageName( counterOffload::stageStepOnly ) ) == "step only" );
         REQUIRE( std::string( counterOffload::calibStageName( 99 ) ) == "unknown" );
     }
 
@@ -914,51 +892,234 @@ TEST_CASE( "counterOffload noise estimate and run length", "[counterOffload]" )
     }
 }
 
-/// Verify that PSDs are collected only during an evaluation and after the settling time.
+/// Build a series of 3 woofer steps of 2 modes, 200 frames 500 us apart, whose onset is 3 frames after each command.
+/** The residual is an offset of 0.1 in mode 0, plus each step's sign times its response: exp(-j/5) in mode 0 and half
+ * that in mode 1, for 40 frames after the onset.  Offloads arrive 2 frames after the onset and every 8 frames after
+ * that.  With error, the first offload of each step leaves the sign times 0.2 in mode 0 for 2 frames, then 0.1 for 6.
+ */
+counterOffload::stepDataT stepSeries( bool withError /**< [in] add the counter-offload error */,
+                                      bool respond1 = true /**< [in] whether the second step has a response */ )
+{
+    counterOffload::stepDataT d;
+
+    d.nModes   = 2;
+    d.cmdIndex = { 150, 350, 550 };
+    d.signs    = { 1, -1, 1 };
+
+    constexpr size_t nFrames = 750;
+
+    d.frames.assign( nFrames * 2, 0 );
+
+    for( size_t i = 0; i < nFrames; ++i )
+    {
+        d.frames[i * 2] = 0.1f;
+        d.frameNs.push_back( 1000000 + static_cast<int64_t>( i ) * 500000 );
+    }
+
+    for( size_t k = 0; k < d.cmdIndex.size(); ++k )
+    {
+        const size_t onset = d.cmdIndex[k] + 3;
+        const size_t end   = ( k + 1 < d.cmdIndex.size() ) ? d.cmdIndex[k + 1] : nFrames;
+
+        if( k == 1 && !respond1 )
+        {
+            continue;
+        }
+
+        for( size_t j = 0; j < 40; ++j )
+        {
+            d.frames[( onset + j ) * 2] += d.signs[k] * std::exp( -double( j ) / 5 );
+            d.frames[( onset + j ) * 2 + 1] += d.signs[k] * 0.5 * std::exp( -double( j ) / 5 );
+        }
+
+        for( size_t i = onset + 2; i < end; i += 8 )
+        {
+            d.offloadNs.push_back( d.frameNs[i] - 100 ); // just before the frame it lands in
+        }
+
+        if( withError )
+        {
+            for( size_t l = 0; l < 8; ++l )
+            {
+                d.frames[( onset + 2 + l ) * 2] += d.signs[k] * ( ( l < 2 ) ? 0.2f : 0.1f );
+            }
+        }
+    }
+
+    return d;
+}
+
+/// Verify that each step's onset, offloads, pre-step mean and noise are found in the residual.
 /**
  * \ingroup counterOffload_unit_test
  */
-TEST_CASE( "counterOffload collects PSD band powers after a change", "[counterOffload]" )
+TEST_CASE( "counterOffload locates woofer steps in the residual", "[counterOffload]" )
 {
     // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
-    counterOffload::processImage(nullptr, psdShmimT());
+    counterOffload::findSteps({},0,{});
+    #endif
+    // clang-format on
+
+    std::vector<counterOffload::stepT> steps;
+
+    SECTION( "the onset is the first frame off the pre-step level, and offloads are placed by their stamps" )
+    {
+        REQUIRE( counterOffload::findSteps( stepSeries( false ), 5, steps ) == 3 );
+        REQUIRE( steps.size() == 3 );
+
+        for( size_t k = 0; k < 3; ++k )
+        {
+            REQUIRE( steps[k].found );
+            REQUIRE( steps[k].onset == 150 + 200 * k + 3 );
+            REQUIRE( steps[k].offload == long( steps[k].onset + 2 ) );
+            REQUIRE( steps[k].offloads.size() > 1 );
+            REQUIRE( steps[k].preMean[0] == Approx( 0.1 ) );
+            REQUIRE( steps[k].preMean[1] == Approx( 0 ).margin( 1e-12 ) );
+            REQUIRE( steps[k].noiseVar == Approx( 0 ).margin( 1e-12 ) );
+        }
+
+        REQUIRE( steps[0].end == 350 );
+        REQUIRE( steps[2].end == 750 );
+    }
+
+    SECTION( "a step with no response is not found" )
+    {
+        REQUIRE( counterOffload::findSteps( stepSeries( false, false ), 5, steps ) == 2 );
+        REQUIRE_FALSE( steps[1].found );
+    }
+
+    SECTION( "a step with too few frames before its command is not used" )
+    {
+        counterOffload::stepDataT d = stepSeries( false );
+        d.cmdIndex[0]               = 5;
+
+        counterOffload::findSteps( d, 5, steps );
+        REQUIRE_FALSE( steps[0].found );
+    }
+}
+
+/// Verify the step-only response and the step figure of merit with its timing and gain parts.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload computes the step figure of merit", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::stepOnlyResponse({},{},0,{});
+    counterOffload::stepFom({},{},{},0,0);
+    #endif
+    // clang-format on
+
+    const counterOffload::stepDataT    only = stepSeries( false );
+    std::vector<counterOffload::stepT> steps;
+    counterOffload::findSteps( only, 5, steps );
+
+    std::vector<double> response;
+    REQUIRE( counterOffload::stepOnlyResponse( only, steps, 60, response ) == 3 );
+    REQUIRE( response.size() == 60 * 2 );
+    REQUIRE( response[0] == Approx( 1 ) );
+    REQUIRE( response[1] == Approx( 0.5 ) );
+    REQUIRE( response[5 * 2] == Approx( std::exp( -1.0 ) ) );
+    REQUIRE( response[50 * 2] == Approx( 0 ).margin( 1e-12 ) );
+
+    SECTION( "a step whose response is the step alone has no error" )
+    {
+        const counterOffload::stepFomT f = counterOffload::stepFom( only, steps, response, 3, 30 );
+
+        REQUIRE( f.used == 3 );
+        REQUIRE( f.fom == Approx( 0 ).margin( 1e-12 ) );
+    }
+
+    SECTION( "the error after the first offload is split into timing and gain lags" )
+    {
+        const counterOffload::stepDataT    d = stepSeries( true );
+        std::vector<counterOffload::stepT> ws;
+        counterOffload::findSteps( d, 5, ws );
+
+        const counterOffload::stepFomT f = counterOffload::stepFom( d, ws, response, 3, 30 );
+
+        REQUIRE( f.used == 3 );
+        REQUIRE( f.fom == Approx( 2 * 0.04 + 6 * 0.01 ) );
+        REQUIRE( f.fomTiming == Approx( 2 * 0.04 ) ); // lags 0 and 1 after each offload
+        REQUIRE( f.fomGain == Approx( 6 * 0.01 ) );
+        REQUIRE( f.fomStd == Approx( 0 ).margin( 1e-9 ) ); // every step has the same error
+    }
+
+    SECTION( "a step whose first offload is too long after its onset is not used" )
+    {
+        counterOffload::stepDataT d = stepSeries( true );
+        d.offloadNs.erase( std::remove_if( d.offloadNs.begin(),
+                                           d.offloadNs.end(),
+                                           [&d]( int64_t t ) { return t > d.frameNs[353] && t < d.frameNs[375]; } ),
+                           d.offloadNs.end() );
+
+        std::vector<counterOffload::stepT> ws;
+        counterOffload::findSteps( d, 5, ws );
+
+        REQUIRE( ws[1].offload - long( ws[1].onset ) > long( counterOffload::m_maxPhaseFrames ) );
+        REQUIRE( counterOffload::stepFom( d, ws, response, 3, 30 ).used == 2 );
+    }
+
+    SECTION( "the noise bias is removed" )
+    {
+        std::vector<counterOffload::stepT> noisy = steps;
+        for( auto &st : noisy )
+        {
+            st.noiseVar = 0.01;
+        }
+
+        // 30 lags of 0.01 * (1/3 + 1/3)
+        REQUIRE( counterOffload::stepFom( only, noisy, response, 3, 30 ).fom == Approx( -30 * 0.01 * 2.0 / 3 ) );
+    }
+
+    SECTION( "nothing can be used without a step-only response or lags" )
+    {
+        REQUIRE( counterOffload::stepFom( only, steps, response, 0, 30 ).used == 0 );
+        REQUIRE( counterOffload::stepFom( only, steps, response, 3, 0 ).used == 0 );
+    }
+}
+
+/// Verify that residual frames and offload stamps are collected only while a calibration is collecting.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload collects residual frames and offload stamps", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::processImage(nullptr, residualShmimT());
     #endif
     // clang-format on
 
     counterOffload_test app;
 
-    std::vector<float> psd( 11 * 2, 1.0f );
+    std::vector<float> frame{ 1, 2, 3, 4 };
+    auto               d = delta( 1 );
 
-    app.m_psdNFreq        = 11;
-    app.m_psdNModes       = 2;
-    app.m_df              = 5;
-    app.m_bandCenterHz    = 25;
-    app.m_bandHalfWidthHz = 5;
-    app.m_bandModes       = 1;
+    app.m_residualValues   = 4;
+    app.m_stepData.nModes  = 2;
 
-    SECTION( "nothing is collected without a band" )
+    SECTION( "nothing is collected while not collecting" )
     {
-        app.processImage( psd.data(), psdShmimT() );
-        REQUIRE( app.m_psdPowers.empty() );
+        app.processImage( frame.data(), residualShmimT() );
+        app.processImage( d.data(), dev::shmimT() );
+        REQUIRE( app.m_stepData.frames.empty() );
+        REQUIRE( app.m_offloadStamps.empty() );
     }
 
-    SECTION( "PSDs received before the settled time are ignored" )
+    SECTION( "the first nModes values of each frame are collected, and offloads even while disabled" )
     {
-        app.m_bandValid  = true;
-        app.m_psdAfterNs = synco::monotonicNs() + 1000000000000LL;
-        app.processImage( psd.data(), psdShmimT() );
-        REQUIRE( app.m_psdPowers.empty() );
-    }
+        app.m_collecting = true;
+        app.processImage( frame.data(), residualShmimT() );
+        app.processImage( frame.data(), residualShmimT() );
+        app.processImage( d.data(), dev::shmimT() );
 
-    SECTION( "PSDs received after the settled time are collected" )
-    {
-        app.m_bandValid  = true;
-        app.m_psdAfterNs = 0;
-        app.processImage( psd.data(), psdShmimT() );
-        app.processImage( psd.data(), psdShmimT() );
-        REQUIRE( app.m_psdPowers.size() == 2 );
-        REQUIRE( app.m_psdPowers[0] == Approx( 3 * 5 ) );
+        REQUIRE( app.m_stepData.frames == std::vector<float>{ 1, 2, 1, 2 } );
+        REQUIRE( app.m_stepData.frameNs.size() == 2 );
+        REQUIRE( app.m_offloadStamps.size() == 1 );
+        REQUIRE( app.m_events == 0 ); // disabled: the offload is not ramped
     }
 }
 
