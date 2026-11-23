@@ -254,13 +254,14 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
-/** \defgroup psfAcqGUI_unit_test psfAcq GUI Unit Tests
+/** \defgroup psfAcqGUI_unit_test psfAcq Star-Acquisition Panel Unit Tests
  * \brief Offline star selection, seeing display, and acquire command tests.
  * \ingroup application_unit_test
  */
 
 /** \defgroup cameraGUI_unit_test Camera GUI Unit Tests
- * \brief Offline discovery, command routing, and availability tests for camera controls.
+ * rief Offline discovery, command routing, and availability tests for camera controls and the star-acquisition
+ * panel.
  * \ingroup application_unit_test
  */
 

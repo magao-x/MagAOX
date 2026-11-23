@@ -1,5 +1,5 @@
 /** \file psfAcq.hpp
- * \brief PSF acquisition control: select a detected star, view its seeing, and acquire it.
+ * \brief PSF acquisition panel embedded in cameraGUI: select a detected star, view its seeing, and acquire it.
  */
 #ifndef psfAcq_hpp
 #define psfAcq_hpp
@@ -10,8 +10,6 @@
 #include <QSignalBlocker>
 #include <QThread>
 #include <QTimer>
-
-#include <mx/app/appConfigurator.hpp>
 
 #include "ui_psfAcq.h"
 
@@ -64,17 +62,8 @@ class psfAcq : public xWidget
     /// Destroy the widget and its Qt-owned timer.
     ~psfAcq();
 
-    /// Add widget configuration options (none are currently defined).
-    static void setupConfig( mx::app::appConfigurator &config /**< [out] Configurator receiving widget options. */ );
-
-    /// Load widget configuration options (none are currently defined).
-    void loadConfig( mx::app::appConfigurator &config /**< [in] Configured widget options. */ );
-
-    /// Subscribe to the device state, star count, and every possible `star_N` property.
+    /// Subscribe to the device state and every possible `star_N` property.
     void subscribe();
-
-    /// Restore the connected window title.
-    virtual void onConnect();
 
     /// Clear cached state and disable commands until fresh properties arrive.
     virtual void onDisconnect();
@@ -109,6 +98,7 @@ psfAcq::psfAcq( std::string &devName, QWidget *Parent, Qt::WindowFlags f ) : xWi
 {
     ui.setupUi( this );
 
+    setXwFont( ui.label_title );
     setXwFont( ui.label_star );
     setXwFont( ui.combo_star );
     setXwFont( ui.label_seeing );
@@ -129,16 +119,6 @@ psfAcq::~psfAcq()
 {
 }
 
-void psfAcq::setupConfig( mx::app::appConfigurator &config )
-{
-    static_cast<void>( config );
-}
-
-void psfAcq::loadConfig( mx::app::appConfigurator &config )
-{
-    static_cast<void>( config );
-}
-
 void psfAcq::subscribe()
 {
     if( !m_parent )
@@ -152,23 +132,6 @@ void psfAcq::subscribe()
     {
         m_parent->addSubscriberProperty( this, m_devName, "star_" + std::to_string( n ) );
     }
-}
-
-void psfAcq::onConnect()
-{
-    if( QThread::currentThread() != thread() )
-    {
-        QMetaObject::invokeMethod(
-            this,
-            [this]
-            {
-                onConnect();
-            },
-            Qt::QueuedConnection );
-        return;
-    }
-
-    setWindowTitle( QString( m_devName.c_str() ) );
 }
 
 void psfAcq::onDisconnect()
@@ -187,8 +150,6 @@ void psfAcq::onDisconnect()
 
     m_appState.clear();
     m_stars.fill( starState{} );
-
-    setWindowTitle( QString( m_devName.c_str() ) + QString( " (disconnected)" ) );
 
     updateGUI();
 }
