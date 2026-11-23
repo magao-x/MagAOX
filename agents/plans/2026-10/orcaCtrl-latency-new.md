@@ -621,8 +621,10 @@ Changes:
   through a scripted fake ring: in-order publishing, a 5-frame camera skip, `DCAMERR_LOSTFRAME`
   without ERROR, an overwrite during a first lock, and the appLogic message and INDI values. The fake
   DCAM gained a ring buffer with framestamps and a configurable wait result, and the test stub gained
-  the two error codes. `orcaCtrl_test` needs mxlib and libMagAOX, so it hasn't been built yet; build it
-  on a MagAO-X build machine. clang-format isn't installed on the workstation either.
+  the two error codes. The user built and ran `orcaCtrl_test` on the build machine. Two test-only fixes
+  were needed: the app is READY, not OPERATING, until appLogic runs, and `acq_stats` values only update
+  with an INDI driver attached (`f.driver()`). After that, **all 12 test cases passed**. clang-format
+  isn't installed on the workstation and hasn't been run on these files.
 
 Still open:
 
