@@ -198,7 +198,7 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
 
     pcf::IndiProperty m_indiP_numModes; ///< Number of modes to offload.
 
-    pcf::IndiProperty m_indiP_offloadToggle; ///< Switch controlling offload updates.
+    pcf::IndiProperty m_indiP_offloadToggle; ///< Offload switch with an optional link marker on incoming commands.
 
     /// Apply a new offload gain.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_gain );
@@ -215,7 +215,7 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     /// Select the number of modes to offload.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_numModes );
 
-    /// Start or stop offload updates while preserving the accumulated correction.
+    /// Start or stop offload updates and release the HO link on a separate state change.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_offloadToggle );
 
     pcf::IndiProperty m_indiP_fpsSource; ///< Subscription to the input frame rate.
@@ -503,6 +503,10 @@ inline int t2wOffloader::appStartup()
     }
 
     createStandardIndiToggleSw( m_indiP_offloadToggle, "offload" );
+    m_indiP_offloadToggle.setRule( pcf::IndiProperty::AnyOfMany );
+    // Only commands from the HO link set this marker. It stays off in published state.
+    m_indiP_offloadToggle.add( pcf::IndiElement( "linked_request", pcf::IndiElement::Off ) );
+
     if( registerIndiPropertyNew( m_indiP_offloadToggle, INDI_NEWCALLBACK( m_indiP_offloadToggle ) ) < 0 )
     {
         log<software_error>( { "" } );
@@ -1027,35 +1031,42 @@ INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_offloadToggle )( const pcf::IndiPro
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadToggle, ipRecv );
 
-    // switch is toggled to on
-    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+    if( !ipRecv.find( "toggle" ) )
     {
-        if( !m_offloading ) // not offloading so change
-        {
-            recordLoopGain( true );
-            m_offloading = true;
-            recordLoopGain();
-
-            log<text_log>( "started offloading", logPrio::LOG_NOTICE );
-            updateSwitchIfChanged( m_indiP_offloadToggle, "toggle", pcf::IndiElement::On, INDI_OK );
-        }
         return 0;
     }
 
-    // switch is toggle to off
-    if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
-    {
-        if( m_offloading ) // offloading so change it
-        {
-            recordLoopGain( true );
-            m_offloading = false;
-            recordLoopGain();
+    auto toggle = ipRecv["toggle"].getSwitchState();
 
-            log<text_log>( "stopped offloading", logPrio::LOG_NOTICE );
-            updateSwitchIfChanged( m_indiP_offloadToggle, "toggle", pcf::IndiElement::Off, INDI_IDLE );
-        }
+    if( toggle != pcf::IndiElement::On && toggle != pcf::IndiElement::Off )
+    {
         return 0;
     }
+
+    bool enabled = toggle == pcf::IndiElement::On;
+
+    if( enabled == m_offloading )
+    {
+        return 0;
+    }
+
+    recordLoopGain( true );
+    m_offloading = enabled;
+    recordLoopGain();
+
+    bool linked = ipRecv.find( "linked_request" ) && ipRecv["linked_request"].getSwitchState() == pcf::IndiElement::On;
+
+    if( !linked )
+    {
+        pcf::IndiProperty overrideLink( pcf::IndiProperty::Switch );
+        overrideLink.setDevice( "holoop" );
+        overrideLink.setName( "offload_override" );
+        overrideLink.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
+        sendNewProperty( overrideLink );
+    }
+
+    log<text_log>( enabled ? "started offloading" : "stopped offloading", logPrio::LOG_NOTICE );
+    updateSwitchIfChanged( m_indiP_offloadToggle, "toggle", toggle, enabled ? INDI_OK : INDI_IDLE );
 
     return 0;
 }

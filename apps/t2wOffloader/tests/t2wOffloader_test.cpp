@@ -32,7 +32,7 @@ class t2wOffloaderHarness : public t2wOffloader
     /// Initialize one tweeter actuator and one in-memory woofer command pixel.
     t2wOffloaderHarness();
 
-    /// Send an offloading switch command to the app.
+    /// Send a linked offloading switch command to the app.
     int setOffloading( bool enabled /**< [in] Requested offloading state. */ );
 
     /// Feed a single actuator value to the frame callback.
@@ -71,6 +71,7 @@ int t2wOffloaderHarness::setOffloading( bool enabled )
 {
     auto request = m_indiP_offloadToggle;
     request["toggle"].setSwitchState( enabled ? pcf::IndiElement::On : pcf::IndiElement::Off );
+    request.add( pcf::IndiElement( "linked_request", pcf::IndiElement::On ) );
     return newCallBack_m_indiP_offloadToggle( request );
 }
 
