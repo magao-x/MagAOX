@@ -85,7 +85,7 @@ int main(int argc, char **argv){
     DDSPC::realT initial_regularization = 100.0;
     DDSPC::realT initial_covariance = 1e-5;
 
-    int num_history = 25;
+    int num_history = 10;
     int num_future = 2;
     int num_actuators = 1;
 
@@ -185,14 +185,21 @@ int main(int argc, char **argv){
             update_controller_qrd += std::chrono::duration_cast<std::chrono::nanoseconds>(end - begin).count();
         }
     }
-    std::cout << "RLS Method: " << std::endl;
+    std::cout << "Timing RLS Method: " << std::endl;
     std::cout << command_calc / num_steps / 1000.0 << "   " << update_controller / num_steps / 1000.0 << std::endl;
-    std::cout << "QRD Method: " << std::endl;
+    std::cout << "Timing QRD Method: " << std::endl;
     std::cout << command_calc_qrd / num_steps / 1000.0 << "  " << update_controller_qrd / num_steps / 1000.0 << std::endl;
 
+    std::cout << "Disturbance: " << std::endl;
     std::cout<< standard_dev(x, num_steps, 1000) << std::endl;
+
+    std::cout << "Integrator: " << std::endl;
     std::cout<< standard_dev(err[0].data(), num_steps, 1000) << std::endl;
+
+    std::cout << "RLS DDSPC: " << std::endl;
     std::cout<< standard_dev(err_pc[0].data(), num_steps, 1000) << std::endl;
+
+    std::cout << "QRD DDSPC: " << std::endl;
     std::cout<< standard_dev(err_pc_qrd[0].data(), num_steps, 1000) << std::endl;
 
     write_to_file("./tests/x.csv", x, num_steps);

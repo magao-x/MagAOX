@@ -29,7 +29,7 @@ int main(int argc, char **argv){
     int n = 2;
     int m = 4;
     DDSPC::realT forgetting_factor = 0.999;
-    DDSPC::realT delta = 1.0;
+    DDSPC::realT delta = 1e-5;
     
     DDSPC::RecursiveLeastSquares rls = DDSPC::RecursiveLeastSquares(n, m, forgetting_factor, delta);
     DDSPC::QRDRecursiveLeastSquares qrd_rls = DDSPC::QRDRecursiveLeastSquares(n, m, forgetting_factor, delta);
