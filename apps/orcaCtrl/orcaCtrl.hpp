@@ -285,8 +285,8 @@ class orcaCtrl : public MagAOXApp<>,
     /// last reconfigure.
     std::atomic<uint64_t> m_statLostEvents{ 0 };
 
-    /// Number of locked frames whose framestamp advanced by less than the frame number, or whose cached
-    /// ring-slot address moved, since the last reconfigure.
+    /// Number of locked frames whose framestamp advanced by less than the frame number since the last
+    /// reconfigure.
     std::atomic<uint64_t> m_statStampErrors{ 0 };
 
     /// Dropped-frame count already reported in the log, so appLogic() only logs new drops.
@@ -303,9 +303,6 @@ class orcaCtrl : public MagAOXApp<>,
 
     /// Time of the last frame-statistics warning [s, CLOCK_MONOTONIC], to rate-limit them.
     double m_lastStatWarningTime{ 0 };
-
-    /// Frame number at which to next verify the cached frame pointer and framestamp with dcambuf_lockframe().
-    int64_t m_nextVerifyFrame{ 0 };
 
     /// Frame number of the last frame locked with dcambuf_lockframe(), or -1 if none since the last reconfigure.
     int64_t m_lastVerifyFrame{ -1 };
@@ -348,13 +345,6 @@ class orcaCtrl : public MagAOXApp<>,
 
     /// True while DCAM capture buffers are allocated and must be released.
     bool m_dcamBuffersAllocated{ false };
-
-    /// Cached address of each DCAM ring-buffer frame, indexed by ring index; nullptr until first locked.
-    /** A ring slot's address in DCAM's buffer is fixed from dcambuf_alloc() until dcambuf_release(), so
-     * each slot is locked with dcambuf_lockframe() once, and later frames in that slot are read through
-     * the cached pointer without a DCAM call. Cleared by allocateBuffers().
-     */
-    std::vector<void *> m_framePtrs;
 
     /// True when the camera exposes a writable DCAM_IDPROP_SENSORCOOLERFAN property.
     bool m_fanControlSupported{ false };
@@ -587,8 +577,7 @@ class orcaCtrl : public MagAOXApp<>,
     int getFanSpeed();
 
     /// Allocate the DCAM capture ring buffer for the current frame size and rate.
-    /** Sizes the ring with orcaBufferFrames(), allocates it with dcambuf_alloc(), and clears the
-     * m_framePtrs cache. App-owned buffers (dcambuf_attach()) aren't used: DCAM 4.0.6898 segfaulted in
+    /** Sizes the ring with orcaBufferFrames() and allocates it with dcambuf_alloc(). App-owned buffers (dcambuf_attach()) aren't used: DCAM 4.0.6898 segfaulted in
      * dcambuf_release() of attached buffers (agents/plans/2026-10/orcaCtrl-latency-new.md).
      *
      * \returns 0 on success
@@ -782,14 +771,14 @@ class orcaCtrl : public MagAOXApp<>,
     /** Every frame DCAM transfers is published in order. If frames are already waiting in the DCAM ring
      * buffer, the next one is locked without waiting; otherwise this waits up to 1 s for a frame-ready
      * event. If the backlog grows beyond the ring buffer, the overwritten frames are skipped and counted
-     * in m_statDropped. Each ring slot is locked with dcambuf_lockframe() (about 1 ms) only the first time
-     * it is used; after that its cached address in m_framePtrs is read without a DCAM call. About once a
-     * second a frame is locked again to verify the cached address and the framestamp.
+     * in m_statDropped. Every frame is locked with dcambuf_lockframe() (about 1 ms). The returned address
+     * only holds the frame locked by that call, so it can't be cached per ring slot: doing so republished
+     * stale images (agents/plans/2026-10/orcaCtrl-latency-new.md, 2026-11-23).
      *
      * After each lock the transfer count is refreshed; a frame that DCAM may have overwritten during the
      * lock is not published and is counted in m_statDropped. Framestamp gaps between locked frames are
      * camera frames that never reached the ring buffer and are counted in m_statSkipped; a framestamp
-     * that advanced too little or a moved slot address is counted in m_statStampErrors. A
+     * that advanced too little is counted in m_statStampErrors. A
      * DCAMERR_LOSTFRAME or DCAMERR_MISSINGFRAME_TROUBLE wait result is counted in m_statLostEvents and
      * capture continues. Acquisition times come from the host clock.
      *
@@ -827,7 +816,7 @@ class orcaCtrl : public MagAOXApp<>,
     /** Elements: `frames` (published), `frames_per_wait` (frames published per frame-ready wait),
      * `dropped` (transferred but overwritten in the ring buffer before publishing), `skipped` (read out by
      * the camera but never transferred, from framestamp gaps), `lost_events` (DCAM lost-frame wait
-     * results), `stamp_errors` (framestamp or slot-address mismatches) and `buffer_frames` (DCAM
+     * results), `stamp_errors` (framestamp advances smaller than the frame-number advance) and `buffer_frames` (DCAM
      * ring-buffer size).
      */
     pcf::IndiProperty m_indiP_acqStats;
@@ -2516,7 +2505,6 @@ inline int orcaCtrl::configureAcquisition()
     m_nextFrame         = 0;
     m_framesTransferred = 0;
     m_newestIndex       = -1;
-    m_nextVerifyFrame   = 0;
     m_lastVerifyFrame   = -1;
     m_statWaits         = 0;
     m_statFrames        = 0;
@@ -2562,9 +2550,6 @@ inline int orcaCtrl::allocateBuffers()
         return -1;
     }
     m_dcamBuffersAllocated = true;
-
-    // Frame addresses are cached as each ring slot is first locked
-    m_framePtrs.assign( m_frameCount, nullptr );
 
     log<text_log>( "allocated " + std::to_string( m_frameCount ) + " DCAM buffer frames of " +
                        std::to_string( m_frameSize ) + " bytes",
@@ -2674,89 +2659,66 @@ inline int orcaCtrl::acquireAndCheckValid()
     m_statDropped += sel.dropped;
     m_nextFrame = sel.frame + 1;
 
-    void *cached = m_framePtrs[sel.ringIndex];
+    // Every frame is locked. The address dcambuf_lockframe() returns only holds the frame locked by that
+    // call: caching it per ring slot republished stale images under new frame counts (camscc, 2026-11-23).
+    DCAMBUF_FRAME frame{};
+    frame.size   = sizeof( frame );
+    frame.iFrame = sel.ringIndex;
 
-    // dcambuf_lockframe() costs about 1 ms, so it is only called the first time a ring slot is used (to
-    // cache its address) and about once a second to verify the cached address and the framestamp.
-    if( cached == nullptr || sel.frame >= m_nextVerifyFrame )
+    DCAMERR error = dcambuf_lockframe( m_cameraHandle, &frame );
+
+    if( failed( error ) )
     {
-        DCAMBUF_FRAME frame{};
-        frame.size   = sizeof( frame );
-        frame.iFrame = sel.ringIndex;
-
-        DCAMERR error = dcambuf_lockframe( m_cameraHandle, &frame );
-
-        if( failed( error ) )
+        if( powerState() != 1 || powerStateTarget() != 1 )
         {
-            if( powerState() != 1 || powerStateTarget() != 1 )
-            {
-                return 1; // camera is being powered off; let the framegrabber exit
-            }
-
-            log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
-            state( stateCodes::ERROR );
-
-            return -1;
+            return 1; // camera is being powered off; let the framegrabber exit
         }
 
-        if( frame.buf == nullptr )
-        {
-            return 1;
-        }
+        log<software_error>( { __FILE__, __LINE__, 0, error, dcamErrorString( m_cameraHandle, error ) } );
+        state( stateCodes::ERROR );
 
-        if( cached != nullptr && cached != frame.buf )
+        return -1;
+    }
+
+    if( frame.buf == nullptr )
+    {
+        return 1;
+    }
+
+    // The lock can take about 1 ms. If DCAM may have overwritten the slot meanwhile, its contents and
+    // framestamp belong to a later frame, so don't publish it or use its framestamp.
+    if( updateTransferInfo() < 0 )
+    {
+        return -1;
+    }
+
+    if( m_framesTransferred - sel.frame > m_frameCount - c_ringMargin )
+    {
+        ++m_statDropped;
+        return 1;
+    }
+
+    // The framestamp advances by the frame-number difference plus any camera frames that never reached
+    // the ring buffer. An advance that is too small means a frame-mapping error.
+    if( m_lastVerifyFrame >= 0 )
+    {
+        const int32_t skipped =
+            orcaFramestampSkipped( m_lastVerifyStamp, frame.framestamp, sel.frame - m_lastVerifyFrame );
+
+        if( skipped > 0 )
+        {
+            m_statSkipped += skipped;
+        }
+        else if( skipped < 0 )
         {
             ++m_statStampErrors;
         }
-
-        m_framePtrs[sel.ringIndex] = frame.buf;
-
-        // The lock can take about 1 ms. If DCAM may have overwritten the slot meanwhile, its contents and
-        // framestamp belong to a later frame, so don't publish it or use its framestamp.
-        if( updateTransferInfo() < 0 )
-        {
-            return -1;
-        }
-
-        if( m_framesTransferred - sel.frame > m_frameCount - c_ringMargin )
-        {
-            ++m_statDropped;
-            return 1;
-        }
-
-        // The framestamp advances by the frame-number difference plus any camera frames that never reached
-        // the ring buffer. An advance that is too small means a frame-mapping error. The 16-bit comparison
-        // limits the interval between checks to 16384 frames.
-        if( m_lastVerifyFrame >= 0 )
-        {
-            const int32_t skipped =
-                orcaFramestampSkipped( m_lastVerifyStamp, frame.framestamp, sel.frame - m_lastVerifyFrame );
-
-            if( skipped > 0 )
-            {
-                m_statSkipped += skipped;
-            }
-            else if( skipped < 0 )
-            {
-                ++m_statStampErrors;
-            }
-        }
-
-        m_lastVerifyFrame = sel.frame;
-        m_lastVerifyStamp = frame.framestamp;
-
-        if( cached != nullptr ) // a verification, not a first lock of this slot
-        {
-            m_nextVerifyFrame =
-                sel.frame + std::clamp<int64_t>( static_cast<int64_t>( m_FrameRateCalculation ), 1, 16384 );
-        }
-
-        m_currentFrame = frame;
     }
-    else
-    {
-        m_currentFrame.buf = cached;
-    }
+
+    m_lastVerifyFrame = sel.frame;
+    m_lastVerifyStamp = frame.framestamp;
+
+    m_currentFrame = frame;
 
     // DCAM frame timestamps are not on the CLOCK_REALTIME timescale for this camera, so use the host clock
     clock_gettime( CLOCK_REALTIME, &m_currImageTimestamp );

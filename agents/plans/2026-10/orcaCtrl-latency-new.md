@@ -635,3 +635,57 @@ Still open:
   `skipped` grow steadily, or in bursts that match `lost_events`?
 - If a lost frame **is** counted in `nFrameCount` with stale slot data (not expected), it would show as
   a negative gap, i.e. `stamp_errors`, rather than `skipped`.
+
+### Stale frames from the per-slot pointer cache (2026-11-23)
+
+The user's SCC calibration (`take_scc_calib_magaox.ipynb`) applies a DM mode at +/- amplitude on `dmncpc`,
+skips `num_skip` frames from `camscc`, and averages 2 more. With `num_skip=2` every slope was exactly 0;
+with `num_skip=6` the results were inconsistent. `camscc` ran at 512×512, 0.08 s exposure, 12.5 Hz, with
+0 skipped, dropped or framestamp errors.
+
+A direct read of the stream after one DM command (frame `cnt0`, time after the DM command, and image sum):
+
+| Polarity | `cnt0` | Time after DM command | Image sum |
+| --- | --- | --- | --- |
+| −1 | 28499-28506 | +0.02 to +0.58 s | 61944105 (all 8 identical) |
+| +1 | 28507-28514 | +0.08 to +0.64 s | 61122130 (all 8 identical) |
+
+`cnt0` advanced every 80 ms, but the pixel data did not. Real frames differ at least by noise, so
+orcaCtrl was publishing the same image under new frame counts.
+
+**Cause:** the round 2c per-slot pointer cache. orcaCtrl locked each ring slot once, cached the
+`dcambuf_lockframe()` address, and locked again only about once a second (every `INTERNALFRAMERATE`
+frames, 12 at 12.5 Hz). The address only holds the frame locked by the latest call; it isn't a live view
+of that ring slot. If it were, each slot's content would change every 10 frames. So the stream repeated
+the last locked image until the next verification lock. The address check couldn't catch this, because
+the address doesn't move. The framestamp check couldn't either, because it only sees the frames it
+locks.
+
+**Consequences:**
+
+- The image data changed about once a second on `camscc`. A +/- pair measured within one lock period was
+  identical, which gives exactly 0 slopes. Pairs that straddled a lock gave varying results.
+- **Round 2c's camham rates were not real.** At 128×128 the stream counted 2012.9 Hz, but the images
+  changed only about once per `INTERNALFRAMERATE` frames. R1, R2 and the T7 baseline measured counter
+  rates, not image rates. **R1 and R2 have to be measured again.** Each `dcambuf_lockframe()` takes
+  about 1.2 ms (round 1), so with a lock per frame the expected ceiling is about 780-800 Hz again, with
+  any excess counted in `dropped`.
+
+**Fix:** lock every frame again, as in round 1. `m_framePtrs` and `m_nextVerifyFrame` were removed. Every
+lock now also refreshes the transfer count to check for an overwrite during the lock, and checks the
+framestamp gap. So skipped frames are counted at every frame instead of about once a second. A new
+`orcaCtrl_test` case publishes 30 frames at 12.5 Hz through a fake whose lock buffer, like DCAM's, holds
+only the latest locked frame. It checks that each published frame carries its own data, which fails with
+the cache. Not yet built; the user builds on the build machine.
+
+**For the frame-bundle and latency follow-up:** reaching 2 kHz needs a way to read frames without a
+roughly 1 ms lock per frame. Options to evaluate on hardware:
+
+- `dcambuf_attach()` (DCAM writes into app memory, so no lock is needed). Round 2b showed real, changing
+  images at 1545 Hz, but DCAM 4.0.6898 segfaulted in `dcambuf_release()`. Try an explicit
+  `DCAMBUF_ATTACHKIND_FRAME`, and a newer DCAM.
+- `dcambuf_copyframe()`, if it's cheaper than `dcambuf_lockframe()`.
+- Frame bundling (several images per lock).
+
+Each must be verified by **image content changing every frame**, not by `cnt0` rate. Example: the frame
+sum, or the framestamp in the image's metadata.
