@@ -523,7 +523,7 @@ TEST_CASE( "counterOffload operating defaults", "[counterOffload]" )
 
     counterOffload app; // only one MagAOXApp may exist at a time, so not alongside a test harness
 
-    REQUIRE( app.calibParams() == counterOffload::calibParamsT{ 25, 330, 0.5 } );
+    REQUIRE( app.calibParams() == counterOffload::calibParamsT{ 0, 330, 0.5 } );
 }
 
 /// Verify the calibration setting defaults, and the checks applied when they are set from config or over INDI.
