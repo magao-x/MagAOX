@@ -83,9 +83,9 @@ nstack = 10
                 observer.handle_message(call.args[0])
             assert observer[app.name + '.fsm.state'] == 'NOTCONNECTED'
             assert observer[app.name + '.state.idle'] == constants.SwitchState.ON
-            assert app.num_stack == app.properties['nstack']['current'] == app.properties['nstack']['target'] == 10
+            assert app.nstack == observer[app.name + '.nstack.current'] == observer[app.name + '.nstack.target'] == 10
             assert app.gain == app.properties['gain']['current'] == app.properties['gain']['target'] == 0.25
-            assert app.pattern_repeat == 4
+            assert app.nrepeat == observer[app.name + '.nrepeat.current'] == observer[app.name + '.nrepeat.target'] == 4
             outbound.connection.status = constants.ConnectionStatus.CONNECTED
         elif elapsed == 8:
             assert app.properties['fsm']['state'] == 'CONNECTED'
@@ -112,3 +112,16 @@ nstack = 10
     monkeypatch.setattr(device, 'time', SimpleNamespace(sleep=tick))
     app.run()
     assert elapsed == 11
+
+
+def test_position_relative_to_actuator_reference():
+    """Verify the operational branch's relative and absolute position measurements."""
+    # Supply a nonzero actuator reference so dropping the subtraction is detectable.
+    app = SimpleNamespace(camera=Mock(), nstack=10, actuators_shift=np.array([3., -2.]), log=Mock())
+    correlator = Mock()
+    correlator.measure.side_effect = lambda image, reference: np.array([5., 4.])
+
+    # Wheel measurements default to the delta, with absolute position available on request.
+    np.testing.assert_array_equal(alignment.pupilCorAlign.measure_position(app, correlator), [2., 6.])
+    np.testing.assert_array_equal(alignment.pupilCorAlign.measure_position(app, correlator, calculate_delta=False), [5., 4.])
+    app.camera.grab_stack.assert_called_with(10, check_before_wait=True)
