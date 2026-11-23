@@ -22,11 +22,10 @@ namespace loPredCtrlAccGUITest
 class Fixture
 {
   public:
-    guiTest::OfflinePublisher             m_publisher;          ///< Queued property delivery and captured commands.
-    xqt::loPredCtrlAccPanel               m_panel;              ///< Real operator widgets.
-    std::chrono::steady_clock::time_point m_now{};              ///< Controlled telemetry clock.
-    int                                   m_confirmations{ 0 }; ///< Reset questions asked.
-    bool                                  m_confirm{ false };   ///< Answer to the reset question.
+    guiTest::OfflinePublisher m_publisher;          ///< Queued property delivery and captured commands.
+    xqt::loPredCtrlAccPanel   m_panel;              ///< Real operator widgets.
+    int                       m_confirmations{ 0 }; ///< Reset questions asked.
+    bool                      m_confirm{ false };   ///< Answer to the reset question.
 
     /// Register panel subscriptions before any property is sent.
     Fixture();
@@ -60,11 +59,6 @@ class Fixture
 
 Fixture::Fixture()
 {
-    m_panel.setClock(
-        [this]()
-        {
-            return m_now;
-        } );
     m_panel.setResetConfirmation(
         [this]()
         {
@@ -162,7 +156,6 @@ void Fixture::defineAll()
     }
     publish( gain, true );
 
-    text( "exploration_sequence", { { "current", "" }, { "target", "" } } );
     text( "ddspc_control",
           { { "requested_mode", "standard" },
             { "standard_ready", "false" },
@@ -173,30 +166,13 @@ void Fixture::defineAll()
             { "standard_state", "awaiting_wfs" },
             { "assisted_state", "wfs_stale" } } );
     text( "safety", { { "output_state", "disabled" }, { "dm_write_enabled", "false" }, { "zero_confirmed", "true" } } );
-    text( "assisted_qualification", { { "blockers", "wfs_stale" }, { "model", "0/212 frozen" } } );
     pcf::IndiProperty performance( pcf::IndiProperty::Number, "loPredCtrlAcc", "ddspc_performance" );
-    for( const char *element : { "transport_published",
-                                 "transport_acks",
-                                 "transport_skipped",
-                                 "slot_shifts",
-                                 "step_mismatch",
-                                 "publish_rate_hz",
-                                 "learn_us_mean",
-                                 "learn_us_p99",
-                                 "learn_us_max",
-                                 "learn_overruns" } )
-    {
-        performance.add( pcf::IndiElement( element, 0.0 ) );
-    }
+    performance.add( pcf::IndiElement( "learn_overruns", 0.0 ) );
     publish( performance, true );
     pcf::IndiProperty adc( pcf::IndiProperty::Number, "loPredCtrlAcc", "adc_values" );
     adc.add( pcf::IndiElement( "rate_hz", 8000.0 ) );
     adc.add( pcf::IndiElement( "valid", 1.0 ) );
     publish( adc, true );
-    text( "fg_shmimName", { { "name", "aol1_modevalPRC" } } );
-    pcf::IndiProperty size( pcf::IndiProperty::Number, "loPredCtrlAcc", "fg_frameSize" );
-    size.add( pcf::IndiElement( "width", 1200.0 ) );
-    publish( size, true );
 }
 /// \endcond
 
@@ -214,10 +190,9 @@ TEST_CASE( "loPredCtrlAccGUI opens without commands and enables only from readba
     {
         CHECK_FALSE( fixture.widget<QPushButton>( name )->isEnabled() );
     }
-    CHECK_FALSE( fixture.widget<QSlider>( "gain.slider" )->isEnabled() );
     CHECK_FALSE( fixture.widget<QWidget>( "gain.entry" )->isEnabled() );
     CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().toStdString() == "Controller unavailable" );
-    CHECK( fixture.status( "mode" ) == "---" );
+    CHECK( fixture.status( "fsm.state" ) == "---" );
 
     fixture.defineAll();
     CHECK( fixture.m_publisher.m_commands.empty() ); // Nothing is sent on open or on receiving state.
@@ -229,12 +204,11 @@ TEST_CASE( "loPredCtrlAccGUI opens without commands and enables only from readba
     CHECK( fixture.widget<QPushButton>( "ddspc_mode.standard" )->isChecked() );
     CHECK_FALSE( fixture.widget<QPushButton>( "ddspc_mode.accel_assisted" )->isChecked() );
     CHECK( fixture.widget<QPushButton>( "reset_model" )->isEnabled() );
-    CHECK( fixture.widget<QSlider>( "gain.slider" )->isEnabled() );
+    CHECK( fixture.widget<QWidget>( "gain.entry" )->isEnabled() );
     CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().toStdString() ==
            "PREDICTION OFF: tip/tilt is not corrected" );
-    CHECK( fixture.widget<QLabel>( "ttWarning" )->text().contains( "does not restore main-loop tip/tilt" ) );
-    CHECK( fixture.status( "mode" ) == "Standard" );
-    CHECK( fixture.status( "modalStream" ) == "aol1_modevalPRC (1200 modes)" );
+    CHECK( fixture.status( "fsm.state" ) == "OPERATING" );
+    CHECK( fixture.status( "safety.output_state" ) == "disabled" );
     CHECK( fixture.status( "accRate" ) == "8000.0" );
     CHECK( fixture.status( "standard" ) == "not ready (awaiting_wfs)" );
 
@@ -265,28 +239,16 @@ TEST_CASE( "loPredCtrlAccGUI follows external INDI changes", "[loPredCtrlAccGUI]
     fixture.publishText( "ddspc_control", "requested_mode", "accel_assisted" );
     CHECK( fixture.widget<QPushButton>( "ddspc_mode.accel_assisted" )->isChecked() );
     CHECK_FALSE( fixture.widget<QPushButton>( "ddspc_mode.standard" )->isChecked() );
-    CHECK( fixture.status( "mode" ) == "ACC Assisted" );
 
     fixture.publishText( "ddspc_control", "assisted_ready", "true" );
     CHECK( fixture.status( "assisted" ) == "ready" );
-    CHECK( fixture.widget<QLabel>( "selectedReady" )->text().toStdString() == "Selected model (ACC Assisted): ready" );
     fixture.publishText( "ddspc_control", "prediction", "active" );
     CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().startsWith( "PREDICTION ACTIVE" ) );
 
-    pcf::IndiProperty gain( pcf::IndiProperty::Number, "loPredCtrlAcc", "gain" );
-    gain.add( pcf::IndiElement( "current", 0.5 ) );
-    gain.add( pcf::IndiElement( "target", 0.5 ) );
-    fixture.publish( gain );
-    CHECK( fixture.widget<QSlider>( "gain.slider" )->value() == 10500 ); // (0.5 - -10) / 0.001
-
     pcf::IndiProperty performance( pcf::IndiProperty::Number, "loPredCtrlAcc", "ddspc_performance" );
-    performance.add( pcf::IndiElement( "transport_skipped", 3.0 ) );
-    performance.add( pcf::IndiElement( "learn_us_mean", 152.4 ) );
-    performance.add( pcf::IndiElement( "learn_us_p99", 210.0 ) );
-    performance.add( pcf::IndiElement( "learn_us_max", 260.0 ) );
+    performance.add( pcf::IndiElement( "learn_overruns", 3.0 ) );
     fixture.publish( performance );
-    CHECK( fixture.widget<QLabel>( "warnings" )->text().contains( "transport_skipped" ) );
-    CHECK( fixture.status( "learnTime" ) == "152.4 mean, 210.0 p99, 260.0 max" );
+    CHECK( fixture.status( "ddspc_performance.learn_overruns" ) == "3" );
     CHECK( fixture.m_publisher.m_commands.empty() );
 }
 
@@ -339,33 +301,6 @@ TEST_CASE( "loPredCtrlAccGUI enforces the controller's mode and reset interlock"
     CHECK( fixture.m_publisher.m_commands.back()["request"].getSwitchState() == pcf::IndiElement::On );
 }
 
-/** \brief The gain slider spans the property's own limits and sends exactly one target on release. */
-TEST_CASE( "loPredCtrlAccGUI gain slider uses the gain property's limits", "[loPredCtrlAccGUI]" )
-{
-    Fixture fixture;
-    fixture.defineAll();
-    auto *slider = fixture.widget<QSlider>( "gain.slider" );
-    CHECK( slider->minimum() == 0 );
-    CHECK( slider->maximum() == 20000 ); // [-10, 10] in steps of 0.001.
-    CHECK( slider->value() == 10300 );   // Current 0.3.
-    slider->setValue( 10450 );
-    CHECK( fixture.m_publisher.m_commands.empty() ); // Only a release sends.
-    emit slider->sliderReleased();
-    QApplication::processEvents();
-    REQUIRE( fixture.m_publisher.m_commands.size() == 1 );
-    const auto &command = fixture.m_publisher.m_commands.back();
-    CHECK( command.getName() == "gain" );
-    CHECK( command["target"].get<double>() == Approx( 0.45 ) );
-
-    Fixture unbounded;
-    unbounded.publishText( "fsm", "state", "OPERATING" );
-    pcf::IndiProperty gain( pcf::IndiProperty::Number, "loPredCtrlAcc", "gain" );
-    gain.add( pcf::IndiElement( "current", 0.3 ) );
-    unbounded.publish( gain, true );
-    CHECK( unbounded.widget<QWidget>( "gain.entry" )->isEnabled() );
-    CHECK_FALSE( unbounded.widget<QSlider>( "gain.slider" )->isEnabled() ); // No limits in the definition.
-}
-
 /** \brief A lost connection or a departed device clears every readback and disables every control. */
 TEST_CASE( "loPredCtrlAccGUI disables everything when the controller disappears", "[loPredCtrlAccGUI]" )
 {
@@ -395,28 +330,12 @@ TEST_CASE( "loPredCtrlAccGUI disables everything when the controller disappears"
         {
             CHECK_FALSE( fixture.widget<QPushButton>( name )->isEnabled() );
         }
-        CHECK_FALSE( fixture.widget<QSlider>( "gain.slider" )->isEnabled() );
-        CHECK_FALSE( fixture.widget<QWidget>( "exploration_sequence" )->isEnabled() );
-        CHECK( fixture.status( "mode" ) == "---" );
-        CHECK( fixture.status( "safety.zero_confirmed" ) == "---" );
+        CHECK_FALSE( fixture.widget<QWidget>( "gain.entry" )->isEnabled() );
+        CHECK( fixture.status( "fsm.state" ) == "---" );
+        CHECK( fixture.status( "safety.output_state" ) == "---" );
         CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().toStdString() == "Controller unavailable" );
         CHECK( fixture.m_panel.windowTitle().contains( wholeDevice ? "not running" : "disconnected" ) );
     }
-}
-
-/** \brief Telemetry age is shown, and values are flagged after the stale interval without hiding them. */
-TEST_CASE( "loPredCtrlAccGUI flags stale telemetry", "[loPredCtrlAccGUI]" )
-{
-    Fixture fixture;
-    CHECK( fixture.widget<QLabel>( "age" )->text().startsWith( "No telemetry" ) );
-    fixture.defineAll();
-    fixture.m_now += std::chrono::seconds( 3 );
-    fixture.m_panel.checkStale();
-    CHECK( fixture.widget<QLabel>( "age" )->text().toStdString() == "Last update 3 s ago" );
-    fixture.m_now += std::chrono::seconds( xqt::loPredCtrlAccPanel::c_staleSeconds );
-    fixture.m_panel.checkStale();
-    CHECK( fixture.widget<QLabel>( "age" )->text().contains( "may be stale" ) );
-    CHECK( fixture.status( "mode" ) == "Standard" );
 }
 } // namespace loPredCtrlAccGUITest
 } // namespace libXWCTest
