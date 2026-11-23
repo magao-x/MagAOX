@@ -28,6 +28,7 @@ timespec telem_raid::lastRecord           = { 0, 0 };
 timespec telem_dmmodes::lastRecord        = { 0, 0 };
 timespec telem_dmspeck::lastRecord        = { 0, 0 };
 timespec telem_drivetemps::lastRecord     = { 0, 0 };
+timespec telem_po4ao::lastRecord          = { 0, 0 };
 timespec telem_fgtimings::lastRecord      = { 0, 0 };
 timespec telem_flowrpm::lastRecord        = { 0, 0 };
 timespec telem_fxngen::lastRecord         = { 0, 0 };

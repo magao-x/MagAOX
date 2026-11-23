@@ -89,7 +89,8 @@ apps_rtc = \
 	modalFilter \
 	dmRecon
 pythonapps_rtc = \
-	efcControl
+	efcControl \
+	po4aoTrainer
 
 # Apps needed on ICC
 apps_icc = \
@@ -240,6 +241,7 @@ ifeq ($(ALL_APPS),1)
 endif
 
 all_guis = \
+	po4aoGUI \
 	dmCtrlGUI \
 	dmModeGUI \
 	offloadCtrlGUI \
