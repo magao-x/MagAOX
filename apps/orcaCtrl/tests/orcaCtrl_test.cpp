@@ -49,6 +49,21 @@ struct Fake
     /// Largest valid DCAM_IDPROP_SENSORCOOLER value; DCAMPROP_SENSORCOOLER__MAX when MAX is available.
     double m_coolerMax{ static_cast<double>( DCAMPROP_SENSORCOOLER__MAX ) };
 
+    /// Result of dcamwait_start; DCAMERR_SUCCESS reports a frame-ready event.
+    DCAMERR m_waitResult{ DCAMERR_TIMEOUT };
+
+    /// Number of frames in the ring buffer, from dcambuf_alloc.
+    int32 m_ringSize{ 0 };
+
+    /// Total frames transferred, reported by dcamcap_transferinfo. Frame k is in ring slot k % m_ringSize.
+    int32 m_transferred{ 0 };
+
+    /// Camera frames lost before frame 0's slot was written; a frame's framestamp is its number plus this.
+    int32 m_stampOffset{ 0 };
+
+    /// If positive, dcambuf_lockframe sets m_transferred to this, as if the camera kept writing during the lock.
+    int32 m_transferredAfterLock{ 0 };
+
     /// Call counts by function name.
     std::map<std::string, unsigned> m_calls;
 };
@@ -209,8 +224,9 @@ extern "C"
         return DCAMERR_SUCCESS;
     }
 
-    DCAMERR dcambuf_alloc( HDCAM, int32 )
+    DCAMERR dcambuf_alloc( HDCAM, int32 framecount )
     {
+        orcaHarness::g_fake.m_ringSize = framecount;
         return orcaHarness::call( "dcambuf_alloc" );
     }
 
@@ -219,8 +235,28 @@ extern "C"
         return orcaHarness::call( "dcambuf_release" );
     }
 
-    DCAMERR dcambuf_lockframe( HDCAM, DCAMBUF_FRAME * )
+    DCAMERR dcambuf_lockframe( HDCAM, DCAMBUF_FRAME *pFrame )
     {
+        auto &f = orcaHarness::g_fake;
+
+        if( f.m_transferred <= 0 || f.m_ringSize <= 0 )
+        {
+            return DCAMERR_TIMEOUT;
+        }
+
+        // The newest frame number held in this slot, and a distinct non-null address per slot
+        const int32 newest = f.m_transferred - 1;
+        const int32 frame  = newest - ( ( newest - pFrame->iFrame ) % f.m_ringSize + f.m_ringSize ) % f.m_ringSize;
+
+        pFrame->buf        = reinterpret_cast<void *>( 0x10000 + 0x100 * static_cast<intptr_t>( pFrame->iFrame ) );
+        pFrame->framestamp = frame + f.m_stampOffset;
+
+        if( f.m_transferredAfterLock > 0 )
+        {
+            f.m_transferred          = f.m_transferredAfterLock;
+            f.m_transferredAfterLock = 0;
+        }
+
         return orcaHarness::call( "dcambuf_lockframe" );
     }
 
@@ -244,8 +280,10 @@ extern "C"
 
     DCAMERR dcamcap_transferinfo( HDCAM, DCAMCAP_TRANSFERINFO *param )
     {
-        param->nNewestFrameIndex = -1;
-        param->nFrameCount       = 0;
+        auto &f = orcaHarness::g_fake;
+
+        param->nFrameCount       = f.m_transferred;
+        param->nNewestFrameIndex = f.m_transferred > 0 && f.m_ringSize > 0 ? ( f.m_transferred - 1 ) % f.m_ringSize : -1;
         return DCAMERR_SUCCESS;
     }
 
@@ -260,9 +298,13 @@ extern "C"
         return orcaHarness::call( "dcamwait_close" );
     }
 
-    DCAMERR dcamwait_start( HDCAMWAIT, DCAMWAIT_START * )
+    DCAMERR dcamwait_start( HDCAMWAIT, DCAMWAIT_START *param )
     {
-        return DCAMERR_TIMEOUT;
+        auto &f = orcaHarness::g_fake;
+
+        param->eventhappened = f.m_waitResult == DCAMERR_SUCCESS ? DCAMWAIT_CAPEVENT_FRAMEREADY : 0;
+        ++f.m_calls["dcamwait_start"];
+        return f.m_waitResult;
     }
 
     DCAMERR dcamwait_abort( HDCAMWAIT )
@@ -934,6 +976,84 @@ TEST_CASE( "orcaCtrl keeps acquiring when the readout speed can't be read or set
     }
 
     REQUIRE( g_fake.m_calls["dcamcap_start"] >= 1 );
+    REQUIRE( f.errors() == 0 );
+}
+
+/// Camera frames that never reach the ring buffer are counted from framestamp gaps and logged as
+/// `num frames skipped`, a DCAMERR_LOSTFRAME wait result doesn't put the app in ERROR, and a frame
+/// DCAM overwrites while it is being locked is dropped rather than published.
+/** In build dc780bc9, DCAMERR_LOSTFRAME from dcamwait_start() put camscc in ERROR, and frames lost
+ * before the ring buffer were never counted in `acq_stats.dropped`
+ * (agents/plans/2026-10/orcaCtrl-latency-new.md).
+ *
+ * \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl counts skipped and lost frames and keeps acquiring", "[orcaCtrl][frames]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaCtrl::acquireAndCheckValid();
+    orcaCtrl::appLogic();
+    #endif
+    // clang-format on
+
+    Fixture f;
+    f.start( 1 );
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.configureAcquisition() == 0 );
+    REQUIRE( g_fake.m_ringSize == 10 );
+
+    // Three frames already in the ring buffer are published in order without waiting
+    g_fake.m_transferred = 3;
+
+    for( int n = 0; n < 3; ++n )
+    {
+        REQUIRE( f.acquireAndCheckValid() == 0 );
+    }
+
+    REQUIRE( f.m_statFrames.load() == 3 );
+    REQUIRE( g_fake.m_calls["dcamwait_start"] == 0 );
+
+    // The camera loses 5 frames before the next one reaches the ring buffer
+    g_fake.m_stampOffset = 5;
+    g_fake.m_transferred = 4;
+    REQUIRE( f.acquireAndCheckValid() == 0 );
+    REQUIRE( f.m_statSkipped.load() == 5 );
+    REQUIRE( f.m_statStampErrors.load() == 0 );
+
+    // DCAM reports the lost frames on the next wait; capture continues
+    g_fake.m_waitResult = DCAMERR_LOSTFRAME;
+    REQUIRE( f.acquireAndCheckValid() == 1 );
+    REQUIRE( f.m_statLostEvents.load() == 1 );
+    REQUIRE( f.state() == stateCodes::OPERATING );
+
+    // DCAM writes 9 more frames while frame 4's slot is first locked, so the slot may hold frame 14
+    g_fake.m_waitResult           = DCAMERR_SUCCESS;
+    g_fake.m_transferred          = 5;
+    g_fake.m_transferredAfterLock = 14;
+    REQUIRE( f.acquireAndCheckValid() == 1 );
+    REQUIRE( f.m_statDropped.load() == 1 );
+    REQUIRE( f.m_statFrames.load() == 4 );
+
+    // Publishing resumes at the oldest safe frame (6), dropping frame 5, with no false skips
+    REQUIRE( f.acquireAndCheckValid() == 0 );
+    REQUIRE( f.m_statDropped.load() == 2 );
+    REQUIRE( f.m_statSkipped.load() == 5 );
+    REQUIRE( f.m_statStampErrors.load() == 0 );
+    REQUIRE( f.m_statFrames.load() == 5 );
+
+    // appLogic logs the counts once and publishes them
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.state() == stateCodes::OPERATING );
+    REQUIRE( f.count( "num frames skipped: 5 " ) == 1 );
+    REQUIRE( f.count( "lost-frame events: 1," ) == 1 );
+    REQUIRE( f.count( "dropped: 2 " ) == 1 );
+    REQUIRE( f.m_indiP_acqStats["skipped"].get<double>() == 5 );
+    REQUIRE( f.m_indiP_acqStats["lost_events"].get<double>() == 1 );
+    REQUIRE( f.m_indiP_acqStats["dropped"].get<double>() == 2 );
+
+    REQUIRE( f.loop() == 0 );
+    REQUIRE( f.count( "num frames skipped" ) == 1 );
     REQUIRE( f.errors() == 0 );
 }
 

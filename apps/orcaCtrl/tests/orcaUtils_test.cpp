@@ -221,6 +221,39 @@ TEST_CASE( "orcaCtrl framestamp check allows for a 16-bit counter", "[orcaUtils]
     }
 }
 
+/// Verify `orcaFramestampSkipped()` counts frames lost between framestamps, including across 16-bit wraps.
+/**
+ * \ingroup orcaCtrl_unit_test
+ */
+TEST_CASE( "orcaCtrl counts skipped frames from framestamp gaps", "[orcaUtils]" )
+{
+    // clang-format off
+    #ifdef ORCACTRL_TEST_DOXYGEN_REF
+    orcaFramestampSkipped( 0, 0, 0 );
+    #endif
+    // clang-format on
+
+    SECTION( "no gap is no skip" )
+    {
+        REQUIRE( orcaFramestampSkipped( 100, 2113, 2013 ) == 0 );
+        REQUIRE( orcaFramestampSkipped( 65530, 2006, 2012 ) == 0 );
+        REQUIRE( orcaFramestampSkipped( 2147483647, -2147483648, 1 ) == 0 );
+    }
+
+    SECTION( "a gap is the number of frames skipped" )
+    {
+        REQUIRE( orcaFramestampSkipped( 100, 2114, 2013 ) == 1 );
+        REQUIRE( orcaFramestampSkipped( 65530, 2106, 2012 ) == 100 );
+        REQUIRE( orcaFramestampSkipped( 0, 32767 + 1, 1 ) == 32767 );
+    }
+
+    SECTION( "too small an advance is negative" )
+    {
+        REQUIRE( orcaFramestampSkipped( 100, 2112, 2013 ) == -1 );
+        REQUIRE( orcaFramestampSkipped( 65530, 2006, 2022 ) == -10 );
+    }
+}
+
 /// Verify `orcaClampROI()` rounds ROIs to 4-pixel steps and keeps them on the 4096×2304 sensor.
 /** Includes the full-frame request with an off-center center that caused an ERROR loop in hardware
  * test round 1 (agents/plans/2026-10/orcaCtrl-latency-new.md).

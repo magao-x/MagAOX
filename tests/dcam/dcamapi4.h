@@ -25,15 +25,17 @@ typedef struct DCAMWAIT *HDCAMWAIT;
 /// DCAM error codes, as signed 32-bit values so they convert to int32 without narrowing.
 enum DCAMERR : int32
 {
-    DCAMERR_BUSY              = static_cast<int32>( 0x80000101 ),
-    DCAMERR_ABORT             = static_cast<int32>( 0x80000102 ),
-    DCAMERR_TIMEOUT           = static_cast<int32>( 0x80000106 ),
-    DCAMERR_NOCAMERA          = static_cast<int32>( 0x80000206 ),
-    DCAMERR_OUTOFRANGE        = static_cast<int32>( 0x80000822 ),
-    DCAMERR_INVALIDPROPERTYID = static_cast<int32>( 0x80000825 ),
-    DCAMERR_NOTSUPPORT        = static_cast<int32>( 0x80000f03 ),
-    DCAMERR_NONE              = 0,
-    DCAMERR_SUCCESS           = 1
+    DCAMERR_BUSY                 = static_cast<int32>( 0x80000101 ),
+    DCAMERR_ABORT                = static_cast<int32>( 0x80000102 ),
+    DCAMERR_TIMEOUT              = static_cast<int32>( 0x80000106 ),
+    DCAMERR_LOSTFRAME            = static_cast<int32>( 0x80000301 ),
+    DCAMERR_MISSINGFRAME_TROUBLE = static_cast<int32>( 0x80000f06 ),
+    DCAMERR_NOCAMERA             = static_cast<int32>( 0x80000206 ),
+    DCAMERR_OUTOFRANGE           = static_cast<int32>( 0x80000822 ),
+    DCAMERR_INVALIDPROPERTYID    = static_cast<int32>( 0x80000825 ),
+    DCAMERR_NOTSUPPORT           = static_cast<int32>( 0x80000f03 ),
+    DCAMERR_NONE                 = 0,
+    DCAMERR_SUCCESS              = 1
 };
 
 /// True if a DCAM call failed.
