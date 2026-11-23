@@ -58,6 +58,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_indiP_exploration;
     using loPredCtrlAcc_operational::m_indiP_gain;
     using loPredCtrlAcc_operational::m_indiP_learning;
+    using loPredCtrlAcc_operational::m_indiP_learnStd;
     using loPredCtrlAcc_operational::m_indiP_mode;
     using loPredCtrlAcc_operational::m_indiP_predicting;
     using loPredCtrlAcc_operational::m_indiP_qualification;
@@ -1680,6 +1681,49 @@ TEST_CASE( "Operator zero and tip/tilt release controls", "[rtc-controller][moda
     REQUIRE( app.newCallBack_m_indiP_zeroDm( zero ) == 0 );
     CHECK( publish() == input );
     std::filesystem::remove( path );
+}
+
+/** \brief A refused predict or learn_std request is answered at once with its unchanged state and INDI_ALERT, which
+ * appLogic keeps until a request is accepted, so loPredCtrlAccGUI reverts the toggle and shows the refusal.
+ */
+TEST_CASE( "Refused prediction requests are answered with an alert", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_predicting;
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_learnStd;
+    MagAOX::app::loPredCtrlAcc_operational::appLogic;
+#endif
+    // clang-format on
+    Controller app( true );
+    auto       predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+
+    // Output not qualified: learn_std is refused and keeps its Off state.
+    auto learnStd = app.m_indiP_learnStd;
+    learnStd["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_learnStd( learnStd ) < 0 );
+    CHECK( app.m_indiP_learnStd["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_indiP_learnStd.getState() == pcf::IndiProperty::Alert );
+    CHECK_FALSE( app.m_learning );
+
+    // Nothing to apply yet: predict is refused, and the alert survives appLogic.
+    app.qualifyOutput();
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) < 0 );
+    CHECK_FALSE( app.m_predicting );
+    CHECK( app.m_indiP_predicting["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_indiP_predicting.getState() == pcf::IndiProperty::Alert );
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_predicting.getState() == pcf::IndiProperty::Alert );
+
+    // An accepted request clears it.
+    app.train();
+    app.m_predicting = false;
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+    CHECK( app.m_indiP_predicting["toggle"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( app.m_indiP_predicting.getState() == pcf::IndiProperty::Ok );
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_predicting.getState() == pcf::IndiProperty::Ok );
 }
 
 /** \brief The modal frameGrabber and its telemeter always start and stop with the application, as in loPredCtrl.

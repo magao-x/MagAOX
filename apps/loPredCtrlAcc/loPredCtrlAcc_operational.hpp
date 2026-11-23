@@ -300,6 +300,9 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Operator recovery requests: re-zero the own DM channel, and return tip/tilt to the main loop.
     pcf::IndiProperty m_indiP_zeroDm, m_indiP_releaseTT;
 
+    /// The last predict or learn_std request was refused; predict shows INDI_ALERT until a request is accepted.
+    bool m_predictRejected{ false }; ///< Under m_indiMutex.
+
     /// Per-phase ddspc_performance element names (rmse_phase<k>, acc_phase<k>), owned for the INDI update vector.
     std::vector<std::string> m_phaseNames;
 
@@ -1624,7 +1627,8 @@ inline bool loPredCtrlAcc_operational::removed() const
 inline void loPredCtrlAcc_operational::stopPrediction()
 {
     m_output.request( false ); // Off is always accepted and schedules removal of the DDSPC contribution.
-    m_predicting = false;
+    m_predicting      = false;
+    m_predictRejected = false;
     updateSwitchIfChanged( m_indiP_predicting, "toggle", pcf::IndiElement::Off, INDI_OK );
 }
 
@@ -2045,7 +2049,7 @@ inline int loPredCtrlAcc_operational::appLogic()
     updateSwitchIfChanged( m_indiP_predicting,
                            "toggle",
                            predicting ? pcf::IndiElement::On : pcf::IndiElement::Off,
-                           output.m_fault ? INDI_ALERT : INDI_OK );
+                           output.m_fault || m_predictRejected ? INDI_ALERT : INDI_OK );
     return 0;
 }
 
@@ -2105,18 +2109,24 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
         m_slotPlan.setZero();
         m_fastClear = true;
     }
-    if( enabled && m_mode.load() == DDSPC::ShadowMode::AccelAssisted && m_unlockedTraining.load() )
-        return -1; // Learned without upstream lock: reset the models first.
-    if( enabled && !selectedReady() && !( m_learning && ( m_gain != 0 || !m_exploration.empty() ) ) )
-        return -1;
-    const bool accepted = m_output.request( enabled );
-    m_predicting        = enabled && accepted;
+    // Refused if learned without upstream lock (reset the models first), or with nothing to apply yet.
+    const bool unlocked = m_mode.load() == DDSPC::ShadowMode::AccelAssisted && m_unlockedTraining.load();
+    const bool allowed =
+        !enabled || ( !unlocked && ( selectedReady() || ( m_learning && ( m_gain != 0 || !m_exploration.empty() ) ) ) );
+    const bool accepted = allowed && m_output.request( enabled );
+    m_predictRejected   = !accepted;
+
+    if( accepted )
+    {
+        m_predicting = enabled;
+    }
 
     if( m_predicting )
     {
         m_modalEngaged.store( true ); // Only an accepted request engages; the request itself already zeroes.
     }
 
+    // A refusal is always answered, so a client never waits for a readback that will not come.
     updateSwitchIfChanged( m_indiP_predicting,
                            "toggle",
                            m_predicting ? pcf::IndiElement::On : pcf::IndiElement::Off,
@@ -2142,7 +2152,17 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
         m_fastClear = true;
     }
     if( enabled && !m_output.request( true ) )
+    {
+        m_predictRejected = true;
+        updateSwitchIfChanged( m_indiP_learnStd, "toggle", m_indiP_learnStd["toggle"].getSwitchState(), INDI_ALERT );
         return -1;
+    }
+
+    if( enabled )
+    {
+        m_predictRejected = false;
+    }
+
     m_learning = enabled;
     if( enabled )
     {
