@@ -392,6 +392,10 @@ work during live operation. Actual dmcomb, controller and mirror work remains
 at the genuine-main rate. A configured main timing stream continues to export
 genuine main associations.
 
+`timing.active` remains zero so INDI rate consumers such as `t2wOffloader`
+continue to use the main-loop rate. `timing.plannedHz` describes the dry-run
+schedule.
+
 Find `production dry run startup` and `production dry run cycle` in the synco
 log. Each enable captures up to 32 primary callbacks immediately before enable
 and the first 32 callbacks starting at activation. Turning enable Off flushes
