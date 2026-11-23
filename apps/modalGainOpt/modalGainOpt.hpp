@@ -1,7 +1,6 @@
 /** \file modalGainOpt.hpp
  * \brief The MagAO-X PSD-based gain optimizer header file
  *
- * \author Jared R. Males (jaredmales@gmail.com)
  * \ingroup modalGainOpt_files
  */
 
@@ -11,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cmath>
 
 #include <mx/ao/analysis/clAOLinearPredictor.hpp>
 #include <mx/ao/analysis/clGainOpt.hpp>
@@ -869,9 +869,9 @@ class modalGainOpt : public MagAOXApp<true>,
     std::string m_psdDevice{ "hopsds" }; /**< The INDI device name of the PSD calculator.  Defaults to
                                    aolN_modevalPSDs where N is m_loopNum.*/
 
-    std::string m_opticalGainDevice{ "strehl" };           ///< INDI device supplying the optical gain estimate.
-    std::string m_opticalGainProperty{ "strehl_optimal" }; ///< Name of the optical gain property to monitor.
-    std::string m_opticalGainElement{ "pyramid" };         ///< Element containing the optical gain estimate.
+    std::string m_opticalGainDevice{ "strehl" };           ///< INDI device supplying the Strehl estimate.
+    std::string m_opticalGainProperty{ "strehl_optimal" }; ///< Name of the Strehl property to monitor.
+    std::string m_opticalGainElement{ "pyramid" };         ///< Element containing the Strehl estimate.
 
     bool m_autoUpdate{ false };        ///< Flag controlling whether gains are automatically updated
     bool m_opticalGainUpdate{ false }; ///< Flag controlling whether optical gain is
@@ -969,7 +969,7 @@ class modalGainOpt : public MagAOXApp<true>,
 
     float m_opticalGain{ 1 }; ///< Applied optical gain correction.
 
-    float m_opticalGainSource{ 1 }; ///< Latest optical gain reported by the source device.
+    float m_opticalGainSource{ 1 }; ///< Optical gain derived from the most recent accepted Strehl estimate.
 
     float m_gain{ 0 }; ///< Requested SI gain scale.
 
@@ -1488,8 +1488,8 @@ class modalGainOpt : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_modesOn; ///< INDI property for modes on.
 
-    pcf::IndiProperty m_indiP_opticalGainSource; ///< INDI property for optical gain source.
-    pcf::IndiProperty m_indiP_opticalGainUpdate; ///< INDI property for optical gain update.
+    pcf::IndiProperty m_indiP_opticalGainSource; ///< Subscribed Strehl estimate.
+    pcf::IndiProperty m_indiP_opticalGainUpdate; ///< Switch controlling Strehl-based optical gain tracking.
 
     /// Handle updates to the auto update INDI property.
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_autoUpdate );
@@ -1500,7 +1500,7 @@ class modalGainOpt : public MagAOXApp<true>,
     /// Handle updates to the dump INDI property.
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_dump );
 
-    /// Handle updates to the optical gain INDI property.
+    /// Apply the operator's requested optical gain directly.
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_opticalGain );
 
     /// Handle updates to the gain gain INDI property.
@@ -1614,10 +1614,10 @@ class modalGainOpt : public MagAOXApp<true>,
     /// Handle updates to the pc on INDI property.
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_pcOn );
 
-    /// Handle updates to the optical gain source INDI property.
+    /// Convert the Strehl estimate to optical gain and apply it when tracking is enabled.
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_opticalGainSource );
 
-    /// Handle updates to the optical gain update INDI property.
+    /// Set optical gain tracking and apply the cached estimate when enabled.
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_opticalGainUpdate );
 
     /** \name Telemeter Interface
@@ -5744,11 +5744,11 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGain )
         return -1;
     }
 
-    { // mutex scope
+    { //mutex scope
         recordModalGainOpt( false );
 
         std::lock_guard<std::mutex> lock( m_goptMutex );
-        m_opticalGain = sqrt( target );
+        m_opticalGain = target;
     }
 
     recordModalGainOpt( false );
@@ -5764,7 +5764,8 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGainUpdate )
     if( ipRecv.find( "toggle" ) )
     {
         recordModalGainOpt( false );
-        {
+
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_goptMutex );
 
             if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
@@ -5796,16 +5797,16 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGainSource )
     if( ipRecv.find( m_opticalGainElement ) )
     {
         recordModalGainOpt( false );
-        {
+
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_goptMutex );
 
-            float opticalg = ipRecv[m_opticalGainElement].get<float>();
+            float strehl = ipRecv[m_opticalGainElement].get<float>();
+            strehl       = std::floor( strehl * 100 + 0.5 ) / 100.;
 
-            opticalg = ( floor( opticalg * 100 + 0.5 ) ) / 100.;
-
-            if( opticalg > 0 && opticalg < 1 )
+            if( strehl > 0 && strehl < 1 )
             {
-                m_opticalGainSource = opticalg;
+                m_opticalGainSource = std::sqrt( strehl );
             }
 
             if( m_opticalGainUpdate )
@@ -5816,6 +5817,7 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGainSource )
 
         recordModalGainOpt( false );
     }
+
     return 0;
 }
 
