@@ -1562,8 +1562,11 @@ inline int counterOffload::processImage( void *curr_src, const dev::shmimT &dumm
         return 0;
     }
 
+    // The timestamps are read from the stream metadata, absent when the frame does not come from an attached stream.
     const int64_t handoff =
-        stampedHandoffNs( shmimMonitorT::currAtime(), shmimMonitorT::currWritetime(), receivedIsio );
+        ( shmimMonitorT::m_imageStream.md != nullptr )
+            ? stampedHandoffNs( shmimMonitorT::currAtime(), shmimMonitorT::currWritetime(), receivedIsio )
+            : -1;
 
     std::lock_guard<std::mutex> guard( m_stateMutex );
 

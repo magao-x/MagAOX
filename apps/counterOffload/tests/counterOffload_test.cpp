@@ -423,6 +423,10 @@ TEST_CASE( "counterOffload state handling", "[counterOffload]" )
         app.processImage( d.data(), dev::shmimT() );
         REQUIRE( app.m_events == 1 );
         REQUIRE( app.active() == 1 );
+
+        // with no attached stream there is no woofer stamp, but the latency is still pending
+        REQUIRE( app.m_ramps[0].handoffNs == -1 );
+        REQUIRE( app.m_ramps[0].latencyPending );
     }
 
     SECTION( "disabling requests a zero, enabling does not" )
