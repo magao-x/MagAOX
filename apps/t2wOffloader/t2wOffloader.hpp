@@ -95,7 +95,7 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     /// The latest modal offload change back-projected onto the tweeter, published to m_tweeterOffload.
     mx::improc::eigenImage<realT> m_tweeter;
 
-    mx::improc::eigenImage<realT> m_woofer; ///< The woofer command written to m_dmStream.
+    mx::improc::eigenImage<realT> m_woofer; ///< The woofer command written to m_dmStream, held across offload toggles.
 
     mx::improc::eigenImage<realT> m_wooferDelta; ///< Woofer command change calculated for zonal offloading.
 
@@ -126,38 +126,6 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     mx::improc::eigenCube<float> m_wModes; ///< Woofer modes corresponding to each of m_tModesOrtho.
 
     IMAGE *m_wModesStream{ nullptr }; ///< Stream aol<loop>_CMmodesDM publishing m_wModes.
-    std::string m_tweeterMaskFile; ///< File containing the tweeter actuator mask.
-
-    std::string m_wooferMaskFile; ///< File containing the woofer actuator mask.
-
-    uint32_t m_maxModes{ 50 }; ///< Maximum number of modes supported by the offloader.
-
-    uint32_t m_numModes{ 0 }; ///< Number of modes to offload, with zero selecting actuator offloading.
-
-    int m_loopNumber{ 0 }; ///< CACAO loop number used to name the woofer mode and mask streams.
-    ///@}
-
-    mx::improc::eigenImage<realT> m_twRespM;       ///< Response matrix mapping tweeter commands to woofer commands.
-    mx::improc::eigenImage<realT> m_tweeter;       ///< Buffer sized to the tweeter input image.
-    mx::improc::eigenImage<realT> m_woofer;        ///< Accumulated actuator command, held across offload toggles.
-    mx::improc::eigenImage<realT> m_wooferDelta;   ///< Woofer actuator increment for the current frame.
-    mx::improc::eigenImage<realT> m_modeDeltaAmps; ///< Modal increments for the current frame.
-
-    mx::improc::milkImage<realT> m_modevalDM;  ///< Shared stream holding the accumulated modal command.
-    mx::improc::milkImage<realT> m_modevalDMf; ///< Shared stream supplying reconstructed woofer modal feedback.
-
-    uint64_t m_lastDMf_cnt0{ 0 }; ///< Feedback stream counter last observed by the modal integrator.
-    uint64_t m_updatedDMf{ 0 };   ///< Number of feedback updates incorporated by the modal integrator.
-
-    mx::improc::eigenImage<realT> m_tweeterMask; ///< Mask used to select valid tweeter actuators.
-
-    mx::improc::eigenCube<float> m_tModesOrtho; ///< Orthonormal tweeter modes used for projection.
-
-    mx::improc::milkImage<float> m_wooferMask; ///< Published mask of valid woofer actuators.
-
-    mx::improc::eigenCube<float> m_wModes; ///< Woofer shapes corresponding to the tweeter modes.
-
-    IMAGE *m_wModesStream{ nullptr }; ///< Published stream of woofer mode shapes.
 
     float    m_fps{ 0 };  ///< Current FPS from the FPS source.
     uint32_t m_navg{ 0 }; ///< Current navg from the averager
@@ -183,11 +151,6 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     IMAGE    m_dmStream;      ///< The woofer DM channel stream, opened in allocate().
     uint32_t m_dmWidth{ 0 };  ///< The width of the image
     uint32_t m_dmHeight{ 0 }; ///< The height of the image.
-    float m_effFPS{ 0 }; ///< Effective offload update rate after frame averaging.
-
-    IMAGE    m_dmStream;      ///< Open woofer command stream.
-    uint32_t m_dmWidth{ 0 };  ///< Width of the woofer command image.
-    uint32_t m_dmHeight{ 0 }; ///< Height of the woofer command image.
 
     uint8_t m_dmDataType{ 0 }; ///< ImageStreamIO type code of the woofer command stream.
     size_t  m_dmTypeSize{ 0 }; ///< Size of a command pixel in bytes.
@@ -342,17 +305,6 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
 
     pcf::IndiProperty m_indiP_offloadRate; ///< Property to set the requested offload rate, Hz.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_offloadRate );
-    pcf::IndiProperty m_indiP_fpsSource; ///< Subscription to the input frame rate.
-
-    /// Update the input frame rate from its INDI source.
-    INDI_SETCALLBACK_DECL( t2wOffloader, m_indiP_fpsSource );
-
-    pcf::IndiProperty m_indiP_navgSource; ///< Subscription to the input averaging count.
-
-    /// Update the averaging count from its INDI source.
-    INDI_SETCALLBACK_DECL( t2wOffloader, m_indiP_navgSource );
-
-    pcf::IndiProperty m_indiP_fps; ///< Published effective offload rate.
 
     ///@}
 
