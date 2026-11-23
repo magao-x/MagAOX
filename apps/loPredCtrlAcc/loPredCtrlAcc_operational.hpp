@@ -51,10 +51,11 @@ namespace MagAOX::app
  * arrived. Training uses the commands copied since the previous decision; missed or discarded slots retain the
  * previous copy, as synco does.
  *
- * Main-loop modal output, as the original loPredCtrl: each new WFS frame is republished through the frameGrabber with
- * the controlled tip/tilt modes 0 and 1 set to zero and every other mode copied unchanged, so the main loop keeps
- * correcting higher-order modes while DDSPC alone drives tip/tilt. The WFS input stream and the DDSPC measurement are
- * never modified.
+ * Main-loop modal output, as the original loPredCtrl: each new WFS frame is republished through the frameGrabber.
+ * With prediction off it is copied unchanged, as if DDSPC were absent. While DDSPC owns tip/tilt (prediction accepted,
+ * until its own-channel zero is confirmed after prediction stops) modes 0 and 1 are set to zero and every other mode
+ * is copied unchanged, so the main loop keeps correcting higher-order modes while DDSPC alone drives tip/tilt. The WFS
+ * input stream and the DDSPC measurement are never modified.
  */
 class loPredCtrlAcc_operational : public MagAOXApp<true>,
                                   public dev::shmimMonitor<loPredCtrlAcc_operational>,
@@ -304,7 +305,7 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// parameters.own_shmim, as loPredCtrl: destroy the output at shutdown. Default false keeps it for consumers.
     bool m_modalOwnShmim{ false };
 
-    std::vector<float> m_modalScratch;         ///< WFS-thread copy of the coherent input frame, zeroed before exchange.
+    std::vector<float> m_modalScratch;         ///< WFS-thread copy of the coherent input frame, edited before exchange.
     std::vector<float> m_modalFrame;           ///< Latest output frame, under m_modalMutex.
     timespec           m_modalAtime{};         ///< WFS acquisition time of m_modalFrame, under m_modalMutex.
     bool               m_modalFresh{ false };  ///< m_modalFrame is not yet in the stream, under m_modalMutex.
@@ -313,6 +314,10 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     sem_t              m_modalSemaphore;       ///< Posted once per new frame, as loPredCtrl's m_smSemaphore.
     int                m_modalLock{ -1 };      ///< Exclusive `<stream>.producer` lock held while publishing.
     bool               m_modalLogged{ false }; ///< A refused attachment was logged; frameGrabber thread only.
+
+    /// Prediction was accepted since the own-channel zero was last confirmed; written under m_indiMutex.
+    /** Distinguishes removal of a DDSPC contribution, during which tip/tilt stays zeroed, from the startup zero. */
+    std::atomic<bool> m_modalEngaged{ false };
     /// @}
 
     /// Load the existing calibration or selected finite masked cube planes; derive the request projection by QR.
@@ -413,7 +418,14 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Reject a modal output that could feed back into the WFS input or zero other than modes 0 and 1.
     void validateModalOutput() const;
 
-    /// Zero the controlled tip/tilt in m_modalScratch, exchange it for the frameGrabber and signal it; WFS thread.
+    /// Return whether DDSPC owns tip/tilt, so the main-loop output must carry zero for modes 0 and 1.
+    /** True while prediction is requested, and after it stops until the own-channel zero is confirmed, so DDSPC and the
+     * main loop never both correct tip/tilt. A startup zero alone (engaged false) never withholds main-loop tip/tilt.
+     */
+    static bool modalZeroed( const SyncoOutputStatus &output /**< [in] Own-channel output status. */,
+                             bool engaged /**< [in] Prediction accepted since the last confirmed zero. */ );
+
+    /// Zero tip/tilt in m_modalScratch while DDSPC owns it, exchange it for the frameGrabber and signal it; WFS thread.
     void publishModal( std::uint64_t   counter /**< [in] WFS counter of the copied frame. */,
                        const timespec &atime /**< [in] WFS acquisition time of the copied frame. */ );
 
@@ -1441,12 +1453,26 @@ inline void loPredCtrlAcc_operational::validateModalOutput() const
             "framegrabber.shmimName must name a modal stream distinct from the WFS input and DM transport" );
 }
 
+inline bool loPredCtrlAcc_operational::modalZeroed( const SyncoOutputStatus &output, bool engaged )
+{
+    return output.m_requested || ( engaged && !output.m_zeroConfirmed );
+}
+
 inline void loPredCtrlAcc_operational::publishModal( std::uint64_t counter, const timespec &atime )
 {
     if( counter == m_modalCounter )
+    {
         return;
-    for( int mode = 0; mode < m_settings.m_modes; ++mode ) // Validated to be exactly modes 0 and 1.
-        m_modalScratch[m_calibration.m_indices[mode]] = 0;
+    }
+
+    if( modalZeroed( m_output.status(), m_modalEngaged.load() ) )
+    {
+        for( int mode = 0; mode < m_settings.m_modes; ++mode ) // Validated to be exactly modes 0 and 1.
+        {
+            m_modalScratch[m_calibration.m_indices[mode]] = 0;
+        }
+    }
+
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_modalMutex );
         if( m_modalFrame.size() != m_modalScratch.size() )
@@ -1639,8 +1665,11 @@ inline int loPredCtrlAcc_operational::setupINDI()
                              "prediction",
                              "accel_sync",
                              "standard_state",
-                             "assisted_state" } )
+                             "assisted_state",
+                             "main_loop_tt" } )
+    {
         m_indiP_control.add( pcf::IndiElement( key, "false" ) );
+    }
     if( registerIndiPropertyReadOnly( m_indiP_control ) < 0 )
         return -1;
     createROIndiNumber( m_indiP_performance, "ddspc_performance" );
@@ -1774,6 +1803,12 @@ inline int loPredCtrlAcc_operational::appLogic()
         std::lock_guard<std::mutex> modelLock( m_modelMutex );
         if( !output.m_requested )
             m_predicting = false;
+
+        if( !output.m_requested && output.m_zeroConfirmed )
+        {
+            m_modalEngaged.store( false ); // DDSPC's contribution is removed: main-loop tip/tilt passes through.
+        }
+
         standard   = m_models->status( DDSPC::ShadowMode::Standard );
         assisted   = m_multirate->status();
         learning   = m_learning;
@@ -1863,7 +1898,8 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      "prediction",
                                      "accel_sync",
                                      "standard_state",
-                                     "assisted_state" },
+                                     "assisted_state",
+                                     "main_loop_tt" },
                                    { selected ? "standard" : "accel_assisted",
                                      standard.m_ready && fresh ? "true" : "false",
                                      assisted.m_ready && fresh && samples && locked ? "true" : "false",
@@ -1877,7 +1913,8 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      !fresh             ? "awaiting_wfs"
                                      : standard.m_ready ? "ready"
                                                         : DDSPC::shadow_reason( standard.m_reason ),
-                                     assistedState },
+                                     assistedState,
+                                     modalZeroed( output, m_modalEngaged.load() ) ? "zeroed" : "passthrough" },
                                    INDI_OK );
     updatesIfChanged<std::string>( m_indiP_qualification,
                                    { "blockers",
@@ -2045,6 +2082,12 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
         return -1;
     const bool accepted = m_output.request( enabled );
     m_predicting        = enabled && accepted;
+
+    if( m_predicting )
+    {
+        m_modalEngaged.store( true ); // Only an accepted request engages; the request itself already zeroes.
+    }
+
     updateSwitchIfChanged( m_indiP_predicting,
                            "toggle",
                            m_predicting ? pcf::IndiElement::On : pcf::IndiElement::Off,
@@ -2076,6 +2119,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
     {
         m_exploration = parseExploration( "1000,0.05,100,1000,0.05,3,1000,0.05,0.1" );
         m_predicting  = true;
+        m_modalEngaged.store( true );
     }
     else
         m_exploration.clear();

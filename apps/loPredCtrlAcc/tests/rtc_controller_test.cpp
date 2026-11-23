@@ -65,6 +65,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_indiP_sync;
     using loPredCtrlAcc_operational::m_learning;
     using loPredCtrlAcc_operational::m_learnUs;
+    using loPredCtrlAcc_operational::m_modalEngaged;
     using loPredCtrlAcc_operational::m_modalFresh;
     using loPredCtrlAcc_operational::m_modalLock;
     using loPredCtrlAcc_operational::m_mode;
@@ -72,6 +73,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_modelMutex;
     using loPredCtrlAcc_operational::m_models;
     using loPredCtrlAcc_operational::m_multirate;
+    using loPredCtrlAcc_operational::m_output;
     using loPredCtrlAcc_operational::m_outputThread;
     using loPredCtrlAcc_operational::m_planBase;
     using loPredCtrlAcc_operational::m_predicting;
@@ -86,6 +88,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_syncopationTiming;
     using loPredCtrlAcc_operational::m_unlockedTraining;
     using loPredCtrlAcc_operational::m_wfsCounter;
+    using loPredCtrlAcc_operational::modalZeroed;
     using loPredCtrlAcc_operational::outputCandidate;
     using loPredCtrlAcc_operational::outputValid;
     using loPredCtrlAcc_operational::parseExploration;
@@ -141,6 +144,9 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
 
     /// Freeze both independent fits without stopping correction.
     void freeze();
+
+    /// Qualify the own-channel output without a DM worker, so prediction requests are accepted.
+    void qualifyOutput();
 };
 
 Controller::Controller( bool qr )
@@ -170,6 +176,18 @@ void Controller::train( const char *sequence )
     m_learning = m_predicting = true;
     m_exploration             = parseExploration( sequence );
     applyTraining();
+}
+
+void Controller::qualifyOutput()
+{
+    m_output.start(
+        []
+        {
+            return true;
+        },
+        {},
+        {},
+        false );
 }
 
 void Controller::deliver( std::uint64_t last )
@@ -1299,6 +1317,8 @@ ModalRun runModal( bool monitor /**< [in] Use the WFS monitor callback. */ )
     REQUIRE( app.configureAcquisition() == 0 );
     app.m_gain = .2f;
     app.train();
+    app.qualifyOutput();
+    REQUIRE( app.m_output.request( true ) ); // Prediction requested: DDSPC owns tip/tilt.
     ModalRun run;
     for( unsigned n = 1; n <= 600; ++n )
     {
@@ -1357,9 +1377,9 @@ void prepareModal( Controller        &app /**< [in,out] Application under test. 
 } // namespace
 /// \endcond
 
-/** \brief Every WFS frame yields a main-loop modal frame with exactly modes 0 and 1 zeroed and every higher mode copied
- * bitwise; the WFS input is never written, and DDSPC learning and every rendered DM slot are bitwise identical to the
- * same measurements stepped without the modal path.
+/** \brief While DDSPC owns tip/tilt, every WFS frame yields a main-loop modal frame with exactly modes 0 and 1 zeroed
+ * and every higher mode copied bitwise; the WFS input is never written, and DDSPC learning and every rendered DM slot
+ * are bitwise identical to the same measurements stepped without the modal path.
  */
 TEST_CASE( "Modal output zeroes tip/tilt only and leaves DDSPC unchanged", "[rtc-controller][modal-output]" )
 {
@@ -1484,6 +1504,109 @@ TEST_CASE( "Modal output never shares or reshapes another publisher's stream", "
     writer.join();
     REQUIRE( active == -1 );
     REQUIRE( grabber.m_imageStream == nullptr );
+    std::filesystem::remove( path );
+}
+
+/** \brief Main-loop tip/tilt passes through unchanged with prediction off and is zeroed from the accepted prediction
+ * request until DDSPC's own-channel zero is confirmed, including after a fault; the startup zero never withholds it.
+ */
+TEST_CASE( "Modal output zeroes tip/tilt only while DDSPC owns it", "[rtc-controller][modal-output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::modalZeroed;
+    MagAOX::app::loPredCtrlAcc_operational::publishModal;
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_predicting;
+    MagAOX::app::loPredCtrlAcc_operational::appLogic;
+#endif
+    // clang-format on
+
+    // The ownership rule through the real own-channel interlock.
+    MagAOX::app::SyncoOutputConfig config;
+    config.m_authorized = config.m_routingVerified = config.m_producerDefaults = true;
+    MagAOX::app::SyncoOutputState output( config, 2, true );
+    const std::vector<float>      zero( 2, 0 ), command{ .1f, -.2f };
+    const auto                    owned = [&]( bool engaged )
+    {
+        return Controller::modalZeroed( output.status(), engaged );
+    };
+
+    REQUIRE( output.initialize() );
+    CHECK_FALSE( owned( false ) ); // The startup zero, still unconfirmed, never withholds main-loop tip/tilt.
+    output.submitted( zero, true, 0 );
+    output.acknowledge( true );
+    REQUIRE( output.status().m_zeroConfirmed );
+
+    REQUIRE( output.request( true, true ) );
+    CHECK( owned( false ) ); // Zeroed from the accepted request, before the application records it.
+    output.submitted( command, false, 0 );
+    output.acknowledge( true );
+    CHECK( owned( true ) );
+
+    REQUIRE( output.request( false, true ) );
+    CHECK( owned( true ) ); // The DDSPC contribution is still on the DM.
+    output.submitted( zero, true, 0 );
+    CHECK( owned( true ) ); // Its removal is not yet confirmed.
+    output.acknowledge( true );
+    CHECK_FALSE( owned( true ) );
+
+    REQUIRE( output.request( true, true ) );
+    output.submitted( command, false, 0 );
+    output.acknowledge( true );
+    output.fault( "test_fault" );
+    CHECK( owned( true ) ); // A fault keeps tip/tilt zeroed until the removal is confirmed.
+    output.submitted( zero, true, 0 );
+    output.acknowledge( true );
+    CHECK_FALSE( owned( true ) );
+
+    // The same rule on the WFS monitor path, driven by the operator's prediction requests.
+    const std::string name = "ddspc_modal_owner_test";
+    char              path[4096];
+    REQUIRE( ImageStreamIO_filename( path, sizeof( path ), name.c_str() ) == 0 );
+    std::filesystem::create_directories( std::filesystem::path( path ).parent_path() );
+    std::filesystem::remove( path );
+    Controller           app( true );
+    IMAGE_METADATA       md{};
+    std::array<float, 6> wfs{ 1, 2, 3, 4, 5, 6 };
+    app.m_imageStream.array.F = wfs.data();
+    md.naxis                  = 2;
+    md.size[0]                = 6;
+    md.size[1]                = 1;
+    prepareModal( app, md, name );
+    REQUIRE( app.configureAcquisition() == 0 );
+    app.qualifyOutput();
+    app.train();
+    app.m_predicting = false;
+
+    std::uint64_t counter = 0;
+    const auto    publish = [&]()
+    {
+        md.cnt0 = ++counter;
+        REQUIRE( app.processImage( wfs.data(), {} ) == 0 );
+        std::vector<float> out( wfs.size(), -1 );
+        REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
+        return out;
+    };
+    const std::vector<float> input( wfs.begin(), wfs.end() ), zeroed{ 0, 0, 3, 4, 5, 6 };
+
+    CHECK( publish() == input ); // Prediction off: unchanged, as if DDSPC were absent.
+    auto predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+    REQUIRE( app.m_modalEngaged );
+    CHECK( publish() == zeroed );
+    CHECK( publish() == zeroed );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_modalEngaged ); // Still requested.
+    CHECK( app.m_indiP_control["main_loop_tt"].get<std::string>() == "zeroed" );
+
+    predict["toggle"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+    CHECK( publish() == input ); // Nothing was written here, so the removal is already confirmed.
+    REQUIRE( app.m_output.status().m_zeroConfirmed );
+    REQUIRE( app.appLogic() == 0 );
+    CHECK_FALSE( app.m_modalEngaged ); // Removed: the startup-zero case again.
+    CHECK( app.m_indiP_control["main_loop_tt"].get<std::string>() == "passthrough" );
     std::filesystem::remove( path );
 }
 
