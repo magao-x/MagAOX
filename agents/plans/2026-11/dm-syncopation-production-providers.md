@@ -958,3 +958,24 @@ last reported DM rate and count, and can miss the initial burst.
 The dry run uses the real main rate on the command streams. Report zero live
 steps through `timing.active`, preserving the virtual `plannedHz` and capture
 so the rate manager keeps the main-rate count during a dry-run comparison.
+
+### Startup averaging confirmation
+
+For installations with managed woofer offload, `production.offloadDevice` opts
+in to a preparation exchange over INDI. Synco advertises the selected future
+cadence with an instance epoch and request sequence. The offloader sets the
+corresponding average count and waits for the averager to report the active
+window and publication stride from its running generation, then echoes the
+request identity with the frame count. Synco defers the provider schedule and
+auxiliary writes until it sees the corresponding confirmation. A pending
+averager request is serialized through its current-count response so a fast
+disable and re-enable cannot acknowledge the preceding window before an
+already-queued rollback takes effect. Main-rate averaging is requested after
+synco withdraws its preparation. The dry run bypasses the exchange.
+
+The offline 1 kHz test rejects stale epoch and sequence replies and a
+zero-frame acknowledgement, then posts seven auxiliary slots after a
+32-frame confirmation. Withdrawal stops auxiliary posts on the next main.
+Averager and offloader tests cover activation of the new generation and
+matching the publication stride. The on-sky enable transient still needs
+an instrument comparison.

@@ -1170,7 +1170,8 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         publishSchedule( 0, -1 );
     }
 
-    bool rateReady = false;
+    bool rateReady    = false;
+    bool offloadReady = true;
 
     if( m_productionEnabled )
     {
@@ -1201,6 +1202,11 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         rateReady          = selected > 0 && selected <= capacity;
 
         if( m_enabled && clockReady && rateReady && m_zeroIdle )
+        {
+            offloadReady = prepareOffload( selected, selected * 1e9 / period );
+        }
+
+        if( m_enabled && clockReady && rateReady && m_zeroIdle && offloadReady )
         {
             publishProductionSchedule( grid, periodQ32, primary );
         }
@@ -1248,7 +1254,7 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         m_zeroArmed   = true;
         m_zeroArmedAt = observed;
     }
-    m_zeroStats.warming = !clockReady || !rateReady || !m_zeroIdle;
+    m_zeroStats.warming = !clockReady || !rateReady || !m_zeroIdle || !offloadReady;
 
     if( !m_zeroStats.startedNs && m_zeroArmedAt > 0 && observed - m_zeroArmedAt >= 30000000000LL )
     {
@@ -1256,7 +1262,7 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
         m_zeroStats.active = m_zeroStats.warming = false;
         m_zeroStats.finished                     = true;
         m_zeroStats.stoppedNs                    = observed;
-        m_reason                                 = "zero trial warmup timed out";
+        m_reason = offloadReady ? "zero trial warmup timed out" : "woofer averaging confirmation timed out";
         return 0;
     }
 
@@ -1275,7 +1281,9 @@ inline int dmSyncopation::processZeroTestPrimary( int64_t observed, int64_t rece
     if( m_zeroStats.warming )
     {
         m_zeroStats.active = false;
-        m_reason = m_productionEnabled ? "production clock/ownership warming" : "zero trial clock/ownership warming";
+        m_reason           = !offloadReady         ? "waiting for woofer averaging"
+                             : m_productionEnabled ? "production clock/ownership warming"
+                                                   : "zero trial clock/ownership warming";
         zeroTestCombined( m_zeroLastCombined );
         m_zeroHaveCombined = synco::ZeroTiming::valid( m_zeroLastCombined );
         return 0;
@@ -2100,7 +2108,9 @@ inline void dmSyncopation::updateZeroTest( bool record )
                 m_zeroStats.active = m_zeroStats.warming = false;
                 m_zeroStats.finished                     = true;
                 m_zeroStats.stoppedNs                    = now;
-                m_reason                                 = "zero trial warmup timed out";
+                m_reason = m_offloadPrepareHz > 0 && m_offloadReadySequence != m_offloadPrepareSequence
+                               ? "woofer averaging confirmation timed out"
+                               : "zero trial warmup timed out";
             }
 
             if( !m_productionEnabled && m_zeroStats.startedNs && m_enabled &&

@@ -264,14 +264,15 @@ class dmSyncopation : public MagAOXApp<true>,
     bool        m_diagnosticsOnly{ false };    ///< Observe arbitrary primary metadata without attaching DM resources.
     bool        m_simulationEnabled{ false };  ///< Startup-only shadow policy; live scheduling is prohibited.
     bool        m_productionEnabled{ false };  ///< Continuous tagged-provider operation on the qualified counter grid.
-    bool     m_productionDryRun{ false }; ///< Run production timing with process-local writes and virtual auxiliaries.
-    double   m_dryCombineUs{ 5 };         ///< Modeled trigger-to-combined-publication delay, us.
-    double   m_dryReleaseUs{ 30 };        ///< Modeled trigger-to-last-auxiliary-reader delay, us.
-    int      m_productionSteps{ 0 };      ///< Selected automatic count, zero until qualified.
-    double   m_productionReadyLeadUs{ 50 }; ///< Source completion cutoff ahead of each slot.
-    double   m_productionStep0LeadUs{ 20 }; ///< Passive-copy completion lead before the next predicted main.
-    uint64_t m_passiveCopied{ 0 }, m_passiveSkipped{ 0 }; ///< Completed and suppressed passive batches.
-    pcf::IndiProperty m_indiP_production;                 ///< Continuous-mode per-provider admission diagnostics.
+    bool m_productionDryRun{ false };      ///< Run production timing with process-local writes and virtual auxiliaries.
+    std::string       m_offloadDevice;     ///< Optional offloader which must confirm the next hardware cadence.
+    double            m_dryCombineUs{ 5 }; ///< Modeled trigger-to-combined-publication delay, us.
+    double            m_dryReleaseUs{ 30 };          ///< Modeled trigger-to-last-auxiliary-reader delay, us.
+    int               m_productionSteps{ 0 };        ///< Selected automatic count, zero until qualified.
+    double            m_productionReadyLeadUs{ 50 }; ///< Source completion cutoff ahead of each slot.
+    double            m_productionStep0LeadUs{ 20 }; ///< Passive-copy completion lead before the next predicted main.
+    uint64_t          m_passiveCopied{ 0 }, m_passiveSkipped{ 0 }; ///< Completed and suppressed passive batches.
+    pcf::IndiProperty m_indiP_production;          ///< Continuous-mode per-provider admission diagnostics.
     bool              m_zeroTestEnabled{ false };  ///< Startup-only finite empirical coordinated zero-write trial.
     std::string m_zeroTestChannel{ "dm01disp07" }; ///< Existing exclusive zero auxiliary; never created or cleared.
     std::string m_zeroSdkStream{ "dmtweeter_sdk_done" }; ///< Optional exact native-entry/result observer.
@@ -695,13 +696,18 @@ class dmSyncopation : public MagAOXApp<true>,
     int64_t m_step0Wake{ 0 };       ///< Latest passive-copy start lateness relative to the requested wake, ns.
     int64_t m_step0WakeMax{ 0 };    ///< Maximum observed passive-copy wake/check lateness, ns.
 
-    pcf::IndiProperty m_indiP_enable;    ///< Enable request and acknowledged quiescence.
-    pcf::IndiProperty m_indiP_reacquire; ///< Request fresh synchronization.
-    pcf::IndiProperty m_indiP_zero;      ///< Clear the applied contributions in every numbered mapping.
-    pcf::IndiProperty m_indiP_settings;  ///< Disabled-only essential numeric controls.
-    pcf::IndiProperty m_indiP_status;    ///< Compact rates/counts/outcome summary.
-    pcf::IndiProperty m_indiP_health;    ///< Scheduler phase, last fault and mode.
-    pcf::IndiProperty m_indiP_camera;    ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_enable;                ///< Enable request and acknowledged quiescence.
+    pcf::IndiProperty m_indiP_reacquire;             ///< Request fresh synchronization.
+    pcf::IndiProperty m_indiP_zero;                  ///< Clear the applied contributions in every numbered mapping.
+    pcf::IndiProperty m_indiP_settings;              ///< Disabled-only essential numeric controls.
+    pcf::IndiProperty m_indiP_status;                ///< Compact rates/counts/outcome summary.
+    pcf::IndiProperty m_indiP_health;                ///< Scheduler phase, last fault and mode.
+    pcf::IndiProperty m_indiP_camera;                ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_offloadReady;          ///< Offloader's applied averaging acknowledgement.
+    double            m_offloadPrepareHz{ 0 };       ///< Candidate hardware cadence advertised to the offloader.
+    int               m_offloadPrepareSteps{ 0 };    ///< Subdivision count used to select the pending hardware cadence.
+    uint32_t          m_offloadPrepareSequence{ 0 }; ///< Current preparation request within this app instance.
+    double            m_offloadReadySequence{ 0 };   ///< Preparation sequence confirmed for this app instance, or zero.
 
     /// Publication state of a pending operator clear, serialized with the scheduler cycle.
     struct ChannelZero
@@ -847,6 +853,9 @@ class dmSyncopation : public MagAOXApp<true>,
 
     /// Accept measured camera FPS and optional acquisition statistics as one coherent report.
     INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_camera );
+
+    /// Accept or withdraw confirmation of the selected offload averaging configuration.
+    INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_offloadReady );
 
   protected:
     /// Register the operator interface, camera subscription and build-selected diagnostic readbacks.
@@ -1109,6 +1118,13 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Report the active hardware subdivision count for INDI rate consumers.
     int liveSteps() const;
 
+    /// Return a restart identity that can be represented exactly in an INDI number.
+    double offloadEpoch() const;
+
+    /// Offer the next hardware cadence and decide whether its averaging has been confirmed.
+    bool prepareOffload( int    steps /**< [in] Selected main plus auxiliary subdivision count. */,
+                         double rateHz /**< [in] Candidate hardware cadence from the qualified grid. */ );
+
     /// Attach production mappings and tagged command sidecars before arming.
     bool openProduction();
 
@@ -1316,6 +1332,7 @@ inline void dmSyncopation::setupConfig()
         { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
         { "production.enabled", "Continuous tagged same-host producers on the qualified counter-publication grid." },
         { "production.dryRun", "Run production timing and copies without publishing live auxiliary commands." },
+        { "production.offloadDevice", "Wait for this offloader to confirm averaging before auxiliary writes." },
         { "production.dryRunCombineUs", "Dry-run trigger-to-combined delay, us." },
         { "production.dryRunReleaseUs", "Dry-run trigger-to-reader-release delay, us." },
         { "production.readyLeadUs", "Input-ready deadline lead before the counter target, us." },
@@ -1395,6 +1412,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_outputTimeoutUs, "scheduler.outputTimeoutUs" );
     config( m_productionEnabled, "production.enabled" );
     config( m_productionDryRun, "production.dryRun" );
+    config( m_offloadDevice, "production.offloadDevice" );
     config( m_dryCombineUs, "production.dryRunCombineUs" );
     config( m_dryReleaseUs, "production.dryRunReleaseUs" );
 
@@ -4844,6 +4862,9 @@ inline int dmSyncopation::setupINDI()
              "feasible",
              "missed",
              "faults",
+             "offloadPrepareHz",
+             "offloadEpoch",
+             "offloadSequence",
 #if DMSYNCOPATION_DIAGNOSTIC_INDI
              "cameraHz",
              "delivered",
@@ -4906,6 +4927,11 @@ inline int dmSyncopation::setupINDI()
     if( !m_cameraDevice.empty() )
     {
         REG_INDI_SETPROP( m_indiP_camera, m_cameraDevice, m_cameraProperty );
+    }
+
+    if( m_productionEnabled && !m_productionDryRun && !m_offloadDevice.empty() )
+    {
+        REG_INDI_SETPROP( m_indiP_offloadReady, m_offloadDevice, std::string( "offloadReady" ) );
     }
 
     if( !m_diagnosticsOnly && !m_simulationEnabled && !m_zeroTestEnabled && !m_productionDryRun )
@@ -5167,6 +5193,9 @@ inline int dmSyncopation::appLogic()
                 "feasible",
                 "missed",
                 "faults",
+                "offloadPrepareHz",
+                "offloadEpoch",
+                "offloadSequence",
 #if DMSYNCOPATION_DIAGNOSTIC_INDI
                 "cameraHz",
                 "delivered",
@@ -5206,7 +5235,8 @@ inline int dmSyncopation::appLogic()
                 "faultEntryToCounterUs",
 #endif
             };
-            const int plannedSteps = m_requested != 0 ? m_requested : ( m_primed ? scheduleSteps() : 0 );
+            const int  plannedSteps = m_requested != 0 ? m_requested : ( m_primed ? scheduleSteps() : 0 );
+            const auto prepareHz    = m_enabled ? m_offloadPrepareHz : 0.0;
             const std::vector<double> values{
                 1e9 / m_period,
                 plannedSteps * 1e9 / m_period,
@@ -5216,6 +5246,9 @@ inline int dmSyncopation::appLogic()
                 double( m_feasible ),
                 double( m_missed ),
                 double( m_faults ),
+                prepareHz,
+                prepareHz > 0 ? offloadEpoch() : 0.0,
+                prepareHz > 0 ? double( m_offloadPrepareSequence ) : 0.0,
 #if DMSYNCOPATION_DIAGNOSTIC_INDI
                 m_cameraReport.m_fps,
                 double( m_delivered ),
@@ -5522,6 +5555,8 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
             else if( !m_enabled )
             {
                 ++m_generation;
+                m_offloadPrepareHz     = 0;
+                m_offloadReadySequence = 0;
                 if( m_productionEnabled )
                 {
                     m_reportTime        = 0;

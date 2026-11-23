@@ -46,6 +46,9 @@ class ProductionHarness : public Harness
     using dmSyncopation::m_generation;
     using dmSyncopation::m_indiP_production;
     using dmSyncopation::m_indiP_zeroPublication;
+    using dmSyncopation::m_offloadDevice;
+    using dmSyncopation::m_offloadPrepareHz;
+    using dmSyncopation::m_offloadPrepareSequence;
     using dmSyncopation::m_passiveCopied;
     using dmSyncopation::m_productionDryRun;
     using dmSyncopation::m_productionEnabled;
@@ -53,6 +56,7 @@ class ProductionHarness : public Harness
     using dmSyncopation::m_productionStep0LeadUs;
     using dmSyncopation::m_snapshotMax;
     using dmSyncopation::m_zeroTrial;
+    using dmSyncopation::offloadEpoch;
     using dmSyncopation::openProduction;
     using dmSyncopation::productionCopy;
     using dmSyncopation::productionSnapshot;
@@ -982,6 +986,93 @@ TEST_CASE( "production chooses the fastest rated cadence", "[dmSyncopation][prod
     // clang-format on
 }
 
+/** \brief Run genuine mains while waiting for a current, applied offload acknowledgement.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "production waits for applied woofer averaging before posting", "[dmSyncopation][production][integration]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_productionEnabled     = true;
+    app.m_zeroTestEnabled       = false;
+    app.m_productionReadyLeadUs = 70;
+    app.m_zeroLateUs            = 6;
+    app.m_zeroWakeAheadUs       = 10;
+    app.m_bounds.copy           = 30000;
+    app.m_maxCadence            = 8000;
+    app.m_requested             = 0;
+    app.m_offloadDevice         = "test-woofer-offload";
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+    REQUIRE( app.configureZeroTest() );
+
+    auto enable = app.m_indiP_enable;
+    enable["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+
+    constexpr int64_t period = 1000000;
+    int64_t           main   = 1000000000;
+
+    for( ; main < 12000000000LL && !app.m_offloadPrepareSequence; main += period )
+    {
+        ZeroClock::primary( main );
+    }
+
+    REQUIRE( app.m_offloadPrepareHz == 8000 );
+    REQUIRE( app.m_offloadPrepareSequence > 0 );
+    CHECK( app.m_reason == std::string( "waiting for woofer averaging" ) );
+    CHECK( app.liveSteps() == 0 );
+    CHECK( ZeroClock::posts.empty() );
+    CHECK( streams.images[1].md->cnt0 == streams.images[0].md->cnt0 );
+
+    pcf::IndiProperty ready( pcf::IndiProperty::Number, app.m_offloadDevice, "offloadReady" );
+    const auto        sequence = app.m_offloadPrepareSequence;
+    ready.add( pcf::IndiElement( "epoch", app.offloadEpoch() ) );
+    ready.add( pcf::IndiElement( "sequence", sequence - 1 ) );
+    ready.add( pcf::IndiElement( "frames", 32 ) );
+    REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+    ZeroClock::primary( main );
+    CHECK( ZeroClock::posts.empty() );
+
+    ready["sequence"] = sequence;
+    ready["epoch"]    = app.offloadEpoch() + 1;
+    REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+    main += period;
+    ZeroClock::primary( main );
+    CHECK( ZeroClock::posts.empty() );
+
+    ready["epoch"]  = app.offloadEpoch();
+    ready["frames"] = 0;
+    REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+    main += period;
+    ZeroClock::primary( main );
+    CHECK( ZeroClock::posts.empty() );
+
+    ready["frames"] = 32;
+    REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+    main += period;
+    ZeroClock::primary( main );
+    CHECK( app.liveSteps() == 8 );
+    REQUIRE( ZeroClock::posts.size() == 7 );
+
+    ready["frames"] = 0;
+    REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+    ZeroClock::posts.clear();
+    ZeroClock::primary( main + period );
+    CHECK( app.liveSteps() == 0 );
+    CHECK( ZeroClock::posts.empty() );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::prepareOffload;
+    MagAOX::app::dmSyncopation::setCallBack_m_indiP_offloadReady;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
 /** \brief Run production startup against a genuine-main fixture and keep every auxiliary write private.
  * \ingroup dmSyncopation_unit_test
  */
@@ -993,6 +1084,7 @@ TEST_CASE( "production dry run measures startup without touching live command st
     ZeroClock::connect( app, streams, 4 );
     app.m_productionEnabled     = true;
     app.m_productionDryRun      = true;
+    app.m_offloadDevice         = "test-woofer-offload";
     app.m_zeroTestEnabled       = false;
     app.m_productionReadyLeadUs = 70;
     app.m_zeroLateUs            = 6;

@@ -10711,7 +10711,7 @@ TEST_CASE( "syncopation advertises the build-selected INDI interface", "[dmSynco
 
     CHECK( ( definitions.find( "<defNumberVector device=\"synco_test\" name=\"production\"" ) != std::string::npos ) ==
            ( production && DMSYNCOPATION_DIAGNOSTIC_INDI ) );
-    CHECK( app.m_indiP_status.getElements().size() == ( DMSYNCOPATION_DIAGNOSTIC_INDI ? 44 : 8 ) );
+    CHECK( app.m_indiP_status.getElements().size() == ( DMSYNCOPATION_DIAGNOSTIC_INDI ? 47 : 11 ) );
     CHECK( app.m_indiP_health.getElements().size() == ( DMSYNCOPATION_DIAGNOSTIC_INDI ? 8 : 3 ) );
 
     if( !production )

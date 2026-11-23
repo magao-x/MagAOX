@@ -28,6 +28,65 @@ inline int dmSyncopation::liveSteps() const
     return m_primed && !m_productionDryRun ? scheduleSteps() : 0;
 }
 
+inline double dmSyncopation::offloadEpoch() const
+{
+    // INDI formats floating-point values with 15 significant decimal digits.
+    return double( 1 + ( uint64_t( m_epoch ) & ( ( uint64_t{ 1 } << 49 ) - 1 ) ) );
+}
+
+inline bool dmSyncopation::prepareOffload( int steps, double rateHz )
+{
+    if( m_offloadDevice.empty() || m_productionDryRun || steps <= 1 )
+    {
+        m_offloadPrepareHz     = 0;
+        m_offloadReadySequence = 0;
+        return true;
+    }
+
+    if( m_offloadPrepareSteps != steps || m_offloadPrepareHz <= 0 ||
+        std::abs( rateHz - m_offloadPrepareHz ) > m_rateTolerance * m_offloadPrepareHz )
+    {
+        m_offloadPrepareSteps  = steps;
+        m_offloadPrepareHz     = rateHz;
+        m_offloadReadySequence = 0;
+
+        if( ++m_offloadPrepareSequence == 0 )
+        {
+            ++m_offloadPrepareSequence;
+        }
+    }
+
+    return m_offloadReadySequence == m_offloadPrepareSequence;
+}
+
+INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_offloadReady )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadReady, ipRecv );
+
+    if( ipRecv.getType() != pcf::IndiProperty::Number || !ipRecv.find( "epoch" ) || !ipRecv.find( "sequence" ) ||
+        !ipRecv.find( "frames" ) )
+    {
+        return 0;
+    }
+
+    const auto                  epoch    = ipRecv["epoch"].get<double>();
+    const auto                  sequence = ipRecv["sequence"].get<double>();
+    const auto                  frames   = ipRecv["frames"].get<double>();
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+
+    if( epoch == offloadEpoch() && sequence == m_offloadPrepareSequence && m_offloadPrepareHz > 0 )
+    {
+        m_offloadReadySequence =
+            mx::math::isFinite( frames ) && frames >= 1 && std::floor( frames ) == frames ? sequence : 0;
+    }
+    else if( epoch == 0 && sequence == 0 )
+    {
+        m_offloadReadySequence = 0;
+    }
+
+    return 0;
+}
+
 inline void dmSyncopation::closeProduction()
 {
     for( auto &mapping : m_mappings )
