@@ -1,400 +1,203 @@
 /** \file pwfsAlignment.cpp
- * \brief Draws measured and target pyramid wavefront sensor pupils in rtimv.
+ * \brief Draw measured and target pyramid wavefront sensor pupils in rtimv.
  */
-
 #include "pwfsAlignment.hpp"
 
-pwfsAlignment::pwfsAlignment() : rtimvOverlayInterface()
-{
-}
+#include <cmath>
 
 pwfsAlignment::~pwfsAlignment()
 {
+    detachOverlay();
 }
 
-int pwfsAlignment::attachOverlay( rtimvOverlayAccess &roa, mx::app::appConfigurator &config )
+void pwfsAlignment::detachOverlay()
 {
-    m_roa = roa;
+    delete m_items.data();
+    m_scene.clear();
+    m_measured   = {};
+    m_target     = {};
+    m_enabled    = false;
+    m_dictionary = nullptr;
+    m_deviceName.clear();
+}
 
-    m_enabled = false;
-
-    config.configUnused( m_deviceName, mx::app::iniFile::makeKey( "pwfsAlignment", "name" ) );
+int pwfsAlignment::attachOverlay( rtimvOverlayAccess &access, mx::app::appConfigurator &config )
+{
+    detachOverlay();
+    config.configUnused( m_deviceName, "pwfsAlignment", "name" );
 
     if( m_deviceName.empty() )
     {
-        pluginLogInfo( "not configured" );
         return 1;
     }
 
-    if( m_roa.m_dictionary != nullptr )
+    if( !access.m_graphicsView || !access.m_graphicsView->scene() || !access.m_dictionary )
     {
-        // The INDI dictionary derives property subscriptions from device.property.element keys.
-        auto &dictionary = *m_roa.m_dictionary;
-        dictionary.try_emplace( m_deviceName + ".numPupils.value" );
-        dictionary.try_emplace( m_deviceName + ".sm_frameSize.width" );
-        dictionary.try_emplace( m_deviceName + ".sm_frameSize.height" );
+        return -1;
+    }
 
-        for( int quadrant = 1; quadrant <= 4; ++quadrant )
+    m_scene      = access.m_graphicsView->scene();
+    m_dictionary = access.m_dictionary;
+    m_dictionary->try_emplace( m_deviceName + ".numPupils.value" );
+    m_dictionary->try_emplace( m_deviceName + ".sm_frameSize.width" );
+    m_dictionary->try_emplace( m_deviceName + ".sm_frameSize.height" );
+
+    for( int quadrant = 1; quadrant <= 4; ++quadrant )
+    {
+        const auto prefix = m_deviceName + ".quadrant" + std::to_string( quadrant ) + ".";
+
+        for( const char *element : { "x", "y", "D", "set-x", "set-y", "set-D" } )
         {
-            const auto prefix = m_deviceName + ".quadrant" + std::to_string( quadrant ) + ".";
-
-            for( const char *element : { "x", "y", "D", "set-x", "set-y", "set-D" } )
-            {
-                dictionary.try_emplace( prefix + element );
-            }
+            m_dictionary->try_emplace( prefix + element );
         }
     }
 
     pluginLogInfo( std::format( "configured for {}", m_deviceName ) );
-
-    disableOverlay();
-
     return 0;
+}
+
+bool pwfsAlignment::number( const std::string &key, double &value ) const
+{
+    const auto it = m_dictionary->find( key );
+    char       buffer[512];
+
+    if( it == m_dictionary->end() || it->second.getBlobStr( buffer, sizeof( buffer ) ) >= sizeof( buffer ) )
+    {
+        return false;
+    }
+
+    bool ok = false;
+    value   = QByteArray( buffer ).toDouble( &ok );
+    return ok && std::isfinite( value );
+}
+
+void pwfsAlignment::createDrawing( drawing &items, const QPen &stroke )
+{
+    for( size_t i = 0; i < items.m_circles.size(); ++i )
+    {
+        auto *edge = new QGraphicsLineItem( m_items );
+        edge->setPen( stroke );
+        edge->setAcceptedMouseButtons( Qt::NoButton );
+        items.m_edges[i] = edge;
+
+        auto *circle = new QGraphicsEllipseItem( m_items );
+        circle->setPen( stroke );
+        circle->setAcceptedMouseButtons( Qt::NoButton );
+        items.m_circles[i] = circle;
+    }
+}
+
+void pwfsAlignment::updateDrawing( drawing &items, const std::string &prefix, int count, double height )
+{
+    std::array<QPointF, 4> centers{};
+    std::array<bool, 4>    valid{};
+
+    for( int i = 0; i < 4; ++i )
+    {
+        const auto key = m_deviceName + ".quadrant" + std::to_string( i + 1 ) + "." + prefix;
+        double     x, y, diameter;
+        valid[i] = i < count && number( key + "x", x ) && number( key + "y", y ) && number( key + "D", diameter ) &&
+                   diameter > 0;
+        auto *circle = items.m_circles[i];
+        circle->setVisible( valid[i] );
+
+        if( valid[i] )
+        {
+            centers[i] = QPointF( x, height - 1 - y );
+            circle->setRect( x - diameter / 2, centers[i].y() - diameter / 2, diameter, diameter );
+        }
+    }
+
+    // Three pupils form a triangle. Four form a quadrilateral in fitter quadrant order.
+    const std::array<int, 4> from{ 0, 0, 2, 1 };
+    const std::array<int, 4> to{ 1, 2, count == 3 ? 1 : 3, 3 };
+
+    for( int i = 0; i < 4; ++i )
+    {
+        auto      *edge    = items.m_edges[i];
+        const bool visible = i < count && valid[from[i]] && valid[to[i]];
+        edge->setVisible( visible );
+
+        if( visible )
+        {
+            edge->setLine( QLineF( centers[from[i]], centers[to[i]] ) );
+        }
+    }
 }
 
 int pwfsAlignment::updateOverlay()
 {
-   if(!m_enabled) return 0;
+    if( !m_enabled || !m_scene )
+    {
+        return 0;
+    }
 
-   if(m_roa.m_graphicsView == nullptr) return 0;
+    double count, width, height;
 
-   static int initialized = false;
+    if( !number( m_deviceName + ".numPupils.value", count ) || ( count != 3 && count != 4 ) ||
+        !number( m_deviceName + ".sm_frameSize.width", width ) || width <= 0 ||
+        !number( m_deviceName + ".sm_frameSize.height", height ) || height <= 0 )
+    {
+        if( m_items )
+        {
+            m_items->hide();
+        }
 
-   if( m_roa.m_dictionary->count(m_deviceName + ".numPupils.value") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".numPupils.value"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_numPupils = atoi(m_blob);
-   }
+        return 0;
+    }
 
-   if( m_roa.m_dictionary->count(m_deviceName + ".sm_frameSize.width") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".sm_frameSize.width"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_width = atoi(m_blob);
-   }
+    if( !m_items )
+    {
+        m_items = new QGraphicsWidget;
+        m_items->setAcceptedMouseButtons( Qt::NoButton );
+        m_scene->addItem( m_items );
+        createDrawing( m_measured, QPen( Qt::red ) );
+        createDrawing( m_target, QPen( QColor( "lime" ), 0.1 ) );
+    }
 
-   if( m_roa.m_dictionary->count(m_deviceName + ".sm_frameSize.height") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".sm_frameSize.height"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_height = atoi(m_blob);
-   }
-
-   // These blobs are empty until the fitter publishes them and can be cleared on disconnect.
-   if( ( m_numPupils != 3 && m_numPupils != 4 ) || m_width <= 0 || m_height <= 0 )
-   {
-       return 0;
-   }
-
-   // Read the measured and target centers and diameters from the same quadrant properties.
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.x") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_1x = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.y") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_1y = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.D") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_1D = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.set-x") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set1x = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.set-y") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set1y = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant1.set-D") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant1.set-D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set1D = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.x") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_2x = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.y") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_2y = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.D") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_2D = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.set-x") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set2x = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.set-y") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set2y = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant2.set-D") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant2.set-D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set2D = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.x") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_3x = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.y") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_3y = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.D") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_3D = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.set-x") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set3x = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.set-y") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set3y = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant3.set-D") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant3.set-D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set3D = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.x") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_4x = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.y") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_4y = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.D") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_4D = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.set-x") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-x"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set4x = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.set-y") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-y"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set4y = strtod(m_blob,0);
-   }
-
-   if( m_roa.m_dictionary->count(m_deviceName + ".quadrant4.set-D") > 0)
-   {
-      if( ( (*m_roa.m_dictionary)[m_deviceName + ".quadrant4.set-D"].getBlobStr(m_blob, sizeof(m_blob))) == sizeof(m_blob) ) return -1; //Don't trust this as a string.
-      m_set4D = strtod(m_blob,0);
-   }
-
-   // The scene owns the graphics items. Create the geometry for the configured pupil layout once.
-   if(!initialized)
-   {
-      float dQw = 0.5*(0.5*m_width - 1.0);
-
-      float dQh = 0.5*(0.5*m_height - 1.0);
-
-      if(m_numPupils == 3)
-      {
-         m_1to2 = m_roa.m_graphicsView->scene()->addLine(QLineF(dQw,(m_height-1)-dQh, 0.5*m_width+dQw, (m_height-1)-dQh ), QColor("red"));
-         m_1to3 = m_roa.m_graphicsView->scene()->addLine(QLineF(dQw,(m_height-1)-dQh, 0.5*m_height, dQh ), QColor("red"));
-         m_3to4 = m_roa.m_graphicsView->scene()->addLine(QLineF(0.5*m_height, dQh, 0.5*m_width+dQw, (m_height-1)-dQh), QColor("red"));
-
-         m_1to2s = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-29.5, 89.5, 119-29.5 ), QPen(QBrush(QColor("lime")), 0.1));
-         m_1to3s = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-29.5, 29.5, 119-89.5 ), QPen(QBrush(QColor("lime")), 0.1));
-         m_3to4s = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-89.5, 89.5, 119-89.5 ), QPen(QBrush(QColor("lime")), 0.1));
-
-         m_c1 = m_roa.m_graphicsView->scene()->addEllipse(dQw-14,(m_height-1)-dQh-14, 28.0, 28.0, QColor("red"));
-         m_c2 = m_roa.m_graphicsView->scene()->addEllipse(0.5*m_width+dQw-14, (m_height-1)-dQh-14, 28.0, 28.0, QColor("red"));
-         m_c3 = m_roa.m_graphicsView->scene()->addEllipse(0.5*m_height-14, dQh-14, 28.0, 28.0, QColor("red"));
-
-         m_c1s = m_roa.m_graphicsView->scene()->addEllipse(29.5-28.0, 119-29.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
-         m_c2s = m_roa.m_graphicsView->scene()->addEllipse(89.5-28.0, 119-29.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
-         m_c3s = m_roa.m_graphicsView->scene()->addEllipse(29.5-28.0, 119-89.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
-      }
-      else
-      {
-         m_1to2 = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-29.5, 89.5, 119-29.5 ), QColor("red"));
-         m_1to3 = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-29.5, 29.5, 119-89.5 ), QColor("red"));
-         m_3to4 = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-89.5, 89.5, 119-89.5 ), QColor("red"));
-         m_2to4 = m_roa.m_graphicsView->scene()->addLine(QLineF(89.5,119-29.5, 89.5, 119-89.5 ), QColor("red"));
-
-         m_1to2s = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-29.5, 89.5, 119-29.5 ), QPen(QBrush(QColor("lime")), 0.1));
-         m_1to3s = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-29.5, 29.5, 119-89.5 ), QPen(QBrush(QColor("lime")), 0.1));
-         m_3to4s = m_roa.m_graphicsView->scene()->addLine(QLineF(29.5,119-89.5, 89.5, 119-89.5 ), QPen(QBrush(QColor("lime")), 0.1));
-         m_2to4s = m_roa.m_graphicsView->scene()->addLine(QLineF(89.5,119-29.5, 89.5, 119-89.5 ), QPen(QBrush(QColor("lime")), 0.1));
-
-         m_c1 = m_roa.m_graphicsView->scene()->addEllipse(29.5-28.0, 119-29.5-28.0, 56.0, 56.0, QColor("red"));
-         m_c2 = m_roa.m_graphicsView->scene()->addEllipse(89.5-28.0, 119-29.5-28.0, 56.0, 56.0, QColor("red"));
-         m_c3 = m_roa.m_graphicsView->scene()->addEllipse(29.5-28.0, 119-89.5-28.0, 56.0, 56.0, QColor("red"));
-         m_c4 = m_roa.m_graphicsView->scene()->addEllipse(89.5-28.0, 119-89.5-28.0, 56.0, 56.0, QColor("red"));
-
-         m_c1s = m_roa.m_graphicsView->scene()->addEllipse(29.5-28.0, 119-29.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
-         m_c2s = m_roa.m_graphicsView->scene()->addEllipse(89.5-28.0, 119-29.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
-         m_c3s = m_roa.m_graphicsView->scene()->addEllipse(29.5-28.0, 119-89.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
-         m_c4s = m_roa.m_graphicsView->scene()->addEllipse(89.5-28.0, 119-89.5-28.0, 56.0, 56.0, QPen(QBrush(QColor("lime")), 0.1));
-      }
-
-      initialized = true;
-   }
-
-   // Convert fitter coordinates to the scene's downward-increasing y axis.
-   if(m_numPupils == 3)
-   {
-      m_1to2->setLine(QLineF(m_1x,m_height-1-m_1y, m_2x, m_height-1-m_2y ));
-      m_1to3->setLine(QLineF(m_1x,m_height-1-m_1y, m_3x, m_height-1-m_3y ));
-      m_3to4->setLine(QLineF(m_3x,m_height-1-m_3y, m_2x, m_height-1-m_2y ));
-
-      m_1to2s->setLine(QLineF(m_set1x,m_height-1-m_set1y, m_set2x, m_height-1-m_set2y ));
-      m_1to3s->setLine(QLineF(m_set1x,m_height-1-m_set1y, m_set3x, m_height-1-m_set3y ));
-      m_3to4s->setLine(QLineF(m_set3x,m_height-1-m_set3y, m_set2x, m_height-1-m_set2y ));
-
-      m_c1->setRect(m_1x-0.5*m_1D, m_height-1-m_1y-0.5*m_1D, m_1D, m_1D);
-      m_c2->setRect(m_2x-0.5*m_2D, m_height-1-m_2y-0.5*m_2D, m_2D, m_2D);
-      m_c3->setRect(m_3x-0.5*m_3D, m_height-1-m_3y-0.5*m_3D, m_3D, m_3D);
-
-      m_c1s->setRect(m_set1x-0.5*m_set1D, m_height-1-m_set1y-0.5*m_set1D, m_set1D, m_set1D);
-      m_c2s->setRect(m_set2x-0.5*m_set2D, m_height-1-m_set2y-0.5*m_set2D, m_set2D, m_set2D);
-      m_c3s->setRect(m_set3x-0.5*m_set3D, m_height-1-m_set3y-0.5*m_set3D, m_set3D, m_set3D);
-   }
-   else
-   {
-      m_1to2->setLine(QLineF(m_1x,m_height-1-m_1y, m_2x, m_height-1-m_2y ));
-      m_1to3->setLine(QLineF(m_1x,m_height-1-m_1y, m_3x, m_height-1-m_3y ));
-      m_2to4->setLine(QLineF(m_2x,m_height-1-m_2y, m_4x, m_height-1-m_4y ));
-      m_3to4->setLine(QLineF(m_3x,m_height-1-m_3y, m_4x, m_height-1-m_4y ));
-
-      m_1to2s->setLine(QLineF(m_set1x,m_height-1-m_set1y, m_set2x, m_height-1-m_set2y ));
-      m_1to3s->setLine(QLineF(m_set1x,m_height-1-m_set1y, m_set3x, m_height-1-m_set3y ));
-      m_2to4s->setLine(QLineF(m_set2x,m_height-1-m_set2y, m_set4x, m_height-1-m_set4y ));
-      m_3to4s->setLine(QLineF(m_set3x,m_height-1-m_set3y, m_set4x, m_height-1-m_set4y ));
-
-      m_c1->setRect(m_1x-0.5*m_1D, m_height-1-m_1y-0.5*m_1D, m_1D, m_1D);
-      m_c2->setRect(m_2x-0.5*m_2D, m_height-1-m_2y-0.5*m_2D, m_2D, m_2D);
-      m_c3->setRect(m_3x-0.5*m_3D, m_height-1-m_3y-0.5*m_3D, m_3D, m_3D);
-      m_c4->setRect(m_4x-0.5*m_4D, m_height-1-m_4y-0.5*m_4D, m_4D, m_4D);
-
-      m_c1s->setRect(m_set1x-0.5*m_set1D, m_height-1-m_set1y-0.5*m_set1D, m_set1D, m_set1D);
-      m_c2s->setRect(m_set2x-0.5*m_set2D, m_height-1-m_set2y-0.5*m_set2D, m_set2D, m_set2D);
-      m_c3s->setRect(m_set3x-0.5*m_set3D, m_height-1-m_set3y-0.5*m_set3D, m_set3D, m_set3D);
-      m_c4s->setRect(m_set4x-0.5*m_set4D, m_height-1-m_set4y-0.5*m_set4D, m_set4D, m_set4D);
-   }
-
-   return 0;
+    updateDrawing( m_measured, "", static_cast<int>( count ), height );
+    updateDrawing( m_target, "set-", static_cast<int>( count ), height );
+    m_items->show();
+    return 0;
 }
 
-void pwfsAlignment::keyPressEvent( QKeyEvent * ke)
+void pwfsAlignment::keyPressEvent( QKeyEvent *event )
 {
-   char key = ke->text()[0].toLatin1();
-
-   if(key == 'P')
-   {
-      if(m_enabled) disableOverlay();
-      else enableOverlay();
-   }
+    if( event->text() == "P" )
+    {
+        if( m_enabled )
+        {
+            disableOverlay();
+        }
+        else
+        {
+            enableOverlay();
+        }
+    }
 }
 
 bool pwfsAlignment::overlayEnabled()
 {
-   return m_enabled;
+    return m_enabled;
 }
 
 void pwfsAlignment::enableOverlay()
 {
-   if(m_1to2) m_1to2->setVisible(true);
-   if(m_1to3) m_1to3->setVisible(true);
-   if(m_3to4) m_3to4->setVisible(true);
-   if(m_2to4) m_2to4->setVisible(true);
-
-   if(m_1to2s) m_1to2s->setVisible(true);
-   if(m_1to3s) m_1to3s->setVisible(true);
-   if(m_3to4s) m_3to4s->setVisible(true);
-   if(m_2to4s) m_2to4s->setVisible(true);
-
-   if(m_c1) m_c1->setVisible(true);
-   if(m_c2) m_c2->setVisible(true);
-   if(m_c3) m_c3->setVisible(true);
-   if(m_c4) m_c4->setVisible(true);
-
-   if(m_c1s) m_c1s->setVisible(true);
-   if(m_c2s) m_c2s->setVisible(true);
-   if(m_c3s) m_c3s->setVisible(true);
-   if(m_c4s) m_c4s->setVisible(true);
-
-   m_enabled = true;
+    m_enabled = true;
+    updateOverlay();
 }
 
 void pwfsAlignment::disableOverlay()
 {
-   if(m_1to2) m_1to2->setVisible(false);
-   if(m_1to3) m_1to3->setVisible(false);
-   if(m_3to4) m_3to4->setVisible(false);
-   if(m_2to4) m_2to4->setVisible(false);
+    m_enabled = false;
 
-   if(m_1to2s) m_1to2s->setVisible(false);
-   if(m_1to3s) m_1to3s->setVisible(false);
-   if(m_3to4s) m_3to4s->setVisible(false);
-   if(m_2to4s) m_2to4s->setVisible(false);
-
-   if(m_c1) m_c1->setVisible(false);
-   if(m_c2) m_c2->setVisible(false);
-   if(m_c3) m_c3->setVisible(false);
-   if(m_c4) m_c4->setVisible(false);
-
-   if(m_c1s) m_c1s->setVisible(false);
-   if(m_c2s) m_c2s->setVisible(false);
-   if(m_c3s) m_c3s->setVisible(false);
-   if(m_c4s) m_c4s->setVisible(false);
-
-   m_enabled = false;
+    if( m_items )
+    {
+        m_items->hide();
+    }
 }
 
 std::vector<std::string> pwfsAlignment::info()
 {
-    std::vector<std::string> vinfo;
-    vinfo.push_back("PWFS Alignment overlay");
-
-    return vinfo;
+    return { "PWFS Alignment overlay" };
 }

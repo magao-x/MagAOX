@@ -225,10 +225,13 @@ public:
    /// Handle a fresh settled loop state, including an external open.
    void observeLoopState( bool closed /**< [in] State read from CACAO. */ );
 
-   /// Send a switch command to the tweeter-to-woofer offloader.
+   /// Send a switch command to the tweeter-to-woofer offloader with the link marker on state commands.
    void sendOffloaderSwitch( const char                       *name /**< [in] Offloader property name. */,
                              const char                       *element /**< [in] Offloader switch element. */,
                              pcf::IndiElement::SwitchStateType requested /**< [in] Requested switch state. */ );
+
+   /// Set and publish the offload link switch under the INDI mutex.
+   void setOffloadLinked( bool linked /**< [in] Whether HO commands should control offloading. */ );
 
    /// @}
 
@@ -267,6 +270,7 @@ public:
    pcf::IndiProperty m_indiP_multCoeff;       ///< Current and requested loop multiplier.
    pcf::IndiProperty m_indiP_maxLim;          ///< Current and requested loop correction limit.
    pcf::IndiProperty m_indiP_offloadLink;     ///< HO-only switch selecting linked operation.
+   pcf::IndiProperty m_indiP_offloadOverride; ///< Notification that the offloader was operated separately.
 
    /// Handle a loop state command.
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopState);
@@ -276,6 +280,9 @@ public:
 
    /// Set whether offloading is linked to the HO loop.
    INDI_NEWCALLBACK_DECL( cacaoInterface, m_indiP_offloadLink );
+
+   /// Release the link after the offloader reports a separate state change.
+   INDI_NEWCALLBACK_DECL( cacaoInterface, m_indiP_offloadOverride );
 
    /// Handle a loop gain command.
    INDI_NEWCALLBACK_DECL(cacaoInterface, m_indiP_loopGain);
@@ -361,7 +368,11 @@ int cacaoInterface::appStartup()
    if( configName() == "holoop" )
    {
        createStandardIndiToggleSw( m_indiP_offloadLink, "offload_link", "Link Offload", "Loop Controls" );
-       if( registerIndiPropertyNew( m_indiP_offloadLink, INDI_NEWCALLBACK( m_indiP_offloadLink ) ) < 0 )
+       createStandardIndiRequestSw( m_indiP_offloadOverride, "offload_override" );
+       m_indiP_offloadOverride.setPerm( pcf::IndiProperty::WriteOnly );
+
+       if( registerIndiPropertyNew( m_indiP_offloadLink, INDI_NEWCALLBACK( m_indiP_offloadLink ) ) < 0 ||
+           registerIndiPropertyNew( m_indiP_offloadOverride, INDI_NEWCALLBACK( m_indiP_offloadOverride ) ) < 0 )
        {
            return -1;
        }
@@ -844,7 +855,23 @@ void cacaoInterface::sendOffloaderSwitch( const char                       *name
     command.setDevice( "t2wOffloader" );
     command.setName( name );
     command.add( pcf::IndiElement( element, requested ) );
+
+    if( command.getName() == "offload" )
+    {
+        command.add( pcf::IndiElement( "linked_request", pcf::IndiElement::On ) );
+    }
+
     sendNewProperty( command );
+}
+
+void cacaoInterface::setOffloadLinked( bool linked )
+{
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_offloadLinked = linked;
+    updateSwitchIfChanged( m_indiP_offloadLink,
+                           "toggle",
+                           linked ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           linked ? INDI_OK : INDI_IDLE );
 }
 
 void cacaoInterface::fmThreadStart( cacaoInterface * c )
@@ -1014,9 +1041,19 @@ INDI_NEWCALLBACK_DEFN( cacaoInterface, m_indiP_offloadLink )( const pcf::IndiPro
         return 0;
     }
 
-    std::lock_guard<std::mutex> lock( m_indiMutex );
-    m_offloadLinked = toggle == pcf::IndiElement::On;
-    updateSwitchIfChanged( m_indiP_offloadLink, "toggle", toggle, m_offloadLinked ? INDI_OK : INDI_IDLE );
+    setOffloadLinked( toggle == pcf::IndiElement::On );
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( cacaoInterface, m_indiP_offloadOverride )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadOverride, ipRecv );
+
+    if( ipRecv.find( "request" ) && ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+    {
+        setOffloadLinked( false );
+    }
+
     return 0;
 }
 

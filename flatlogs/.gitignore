@@ -1,1 +1,3 @@
 bin/*
+/src/flatlogcodes
+/src/logCodes.dat

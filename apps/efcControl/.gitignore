@@ -1,0 +1,2 @@
+# Python app: build outputs (build/, *.egg-info, __pycache__) are ignored by
+# generic patterns in the top-level .gitignore.

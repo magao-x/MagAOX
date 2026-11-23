@@ -259,6 +259,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup polarimetryGUI_unit_test Polarimetry GUI Unit Tests
+ * \brief Offline hwpSequencer subscription, control availability, status, and command tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup rtimvROI_unit_test rtimv ROI Plugin Unit Tests
  * \brief Offline INDI command lifecycle and ROI interaction tests.
  * \ingroup application_unit_test
