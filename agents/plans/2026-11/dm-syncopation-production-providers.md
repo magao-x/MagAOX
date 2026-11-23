@@ -939,3 +939,22 @@ release. It verified the timing capture and actual private buffer copies while
 checking that the numbered stream pixels, counters and timestamps did not
 change. The fixture produced only genuine-main combined publications and no
 live provider schedule or sidecar files. On-sky timing remains to be measured.
+
+## 2026-11-23 Woofer offload rate at synco enable
+
+The operator identified an offload-rate transition as a possible cause of the
+repeatable on-sky transient. The `ktwitchell/counter-offload` branch's rate
+manager updates the averager after receiving synco `timing.active` over INDI.
+That status is published on synco's ordinary app loop. It can therefore lag
+actual auxiliary triggers, with additional time for the INDI request to reach
+the averager. The averager ends its old generation when it accepts the new
+count. While the count is still four after a 1 to 8 kHz transition, a block
+average can arrive at 2 kHz instead of the requested 250 Hz. At 2 kHz main the
+old count is eight and the corresponding burst is 1 kHz. Actual throughput can
+be lower if average or offload processing drops frames. The woofer gain and
+leak apply per processed average. The `fps` readback is calculated from the
+last reported DM rate and count, and can miss the initial burst.
+
+The dry run uses the real main rate on the command streams. Report zero live
+steps through `timing.active`, preserving the virtual `plannedHz` and capture
+so the rate manager keeps the main-rate count during a dry-run comparison.

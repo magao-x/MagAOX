@@ -1106,6 +1106,9 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Return the selected automatic count or the configured fixed count.
     int scheduleSteps() const;
 
+    /// Report the active hardware subdivision count for INDI rate consumers.
+    int liveSteps() const;
+
     /// Attach production mappings and tagged command sidecars before arming.
     bool openProduction();
 
@@ -5203,13 +5206,13 @@ inline int dmSyncopation::appLogic()
                 "faultEntryToCounterUs",
 #endif
             };
-            const int                 activeSteps = m_primed ? scheduleSteps() : 0;
+            const int plannedSteps = m_requested != 0 ? m_requested : ( m_primed ? scheduleSteps() : 0 );
             const std::vector<double> values{
                 1e9 / m_period,
-                ( m_requested == 0 ? activeSteps : m_requested ) * 1e9 / m_period,
+                plannedSteps * 1e9 / m_period,
                 m_deliveredHz,
                 double( m_requested ),
-                double( activeSteps ),
+                double( liveSteps() ),
                 double( m_feasible ),
                 double( m_missed ),
                 double( m_faults ),

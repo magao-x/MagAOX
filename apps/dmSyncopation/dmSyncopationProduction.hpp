@@ -23,6 +23,11 @@ inline int dmSyncopation::scheduleSteps() const
     return m_productionEnabled && m_requested == 0 ? m_productionSteps : m_requested;
 }
 
+inline int dmSyncopation::liveSteps() const
+{
+    return m_primed && !m_productionDryRun ? scheduleSteps() : 0;
+}
+
 inline void dmSyncopation::closeProduction()
 {
     for( auto &mapping : m_mappings )

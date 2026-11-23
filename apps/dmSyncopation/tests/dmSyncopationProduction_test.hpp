@@ -40,6 +40,7 @@ class ProductionHarness : public Harness
     using dmSyncopation::configureDiagnostics;
     using dmSyncopation::detailedTimingEnabled;
     using dmSyncopation::inode;
+    using dmSyncopation::liveSteps;
     using dmSyncopation::logDryRunCapture;
     using dmSyncopation::m_dryCapture;
     using dmSyncopation::m_generation;
@@ -947,6 +948,7 @@ TEST_CASE( "production chooses the fastest rated cadence", "[dmSyncopation][prod
 
     REQUIRE( app.m_zeroStats.active );
     CHECK( app.m_record[synco::steps] == steps );
+    CHECK( app.liveSteps() == steps );
     CHECK( app.m_record[synco::period] == period );
     CHECK( app.m_zeroStats.auxiliaryOpportunities == uint64_t( steps - 1 ) );
     CHECK( app.m_zeroStats.acknowledged == uint64_t( steps - 1 ) );
@@ -1051,6 +1053,7 @@ TEST_CASE( "production dry run measures startup without touching live command st
     CHECK( app.m_dryCapture.firstEnabledNs < firstEnableMain + period );
     CHECK( app.m_dryCapture.after.front().primary > mainBefore );
     CHECK( app.m_record[synco::steps] == steps );
+    CHECK( app.liveSteps() == 0 );
     CHECK( app.m_delivered == 0 );
     CHECK( app.m_timing.md == nullptr );
     CHECK( app.inode( app.m_timingName ) == 0 );
