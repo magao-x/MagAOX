@@ -1,0 +1,32 @@
+#!/bin/bash
+
+#########################################################
+# switch HOWFS MFILT input
+#
+# usage: howfs_mfilt_switch shmimname
+#########################################################
+
+echo 'Switching mfiltINPUT to' $1
+
+#Stop relevant CACAO processes
+echo "runstop mvalC2dm-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+echo "confstop mvalC2dm-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+echo "runstop mfilt-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+echo "confstop mfilt-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+echo "runstop wfs2cmodeval-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+echo "confstop wfs2cmodeval-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+echo "runstop acquWFS-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+echo "confstop acquWFS-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+
+# Move symlinks
+cmd='ln -sf /milk/shm/'$1'.im.shm /milk/shm/aol1_mfiltINPUT.im.shm'
+$cmd
+
+#restart only acquWFS
+sleep 1
+echo "confstart acquWFS-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+sleep 1
+echo "runstart acquWFS-1" >> /milk/shm/tweeter-vispyr_fpsCTRL.fifo
+
+echo 'mfiltINPUT switched to' $1 '.  You probably want to run cacao-calib-apply next.'
+
