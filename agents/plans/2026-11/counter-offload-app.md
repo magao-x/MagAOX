@@ -1273,3 +1273,49 @@ Implemented as designed, in `counterOffload.hpp`, the unit tests and the example
 - **Config keys.** Removed `freqStream`, `halfWidthHz`, `nAverage` and the `[psds]` monitor section. Added `stepDevice`, `stepPeriodS`, `stepCount`, `onsetSigma`. `settleS` now defaults to 0.2 s.
 - **New INDI.** `calibStep` (`mode` 5, `amp` 0.7). No framework or other properties were removed.
 - **Unit tests.** The `bandPower` and PSD-collection tests are removed. New tests cover `findSteps` (onsets, offload placement, no response, too few pre-step frames), `stepOnlyResponse`, `stepFom` (zero error, the timing/gain split, skipped late offloads, noise bias, empty inputs), collection of frames and stamps, `calibStep` validation, and the new defaults and key count (14).
+
+### Bench: First Step-Driven Calibration Run `20261124T032114Z` (aborted: loop unstable)
+File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261124T032114Z.csv`. Mode 0004 (astig), amp 0.7, 20 modes, started from 0/330/0.5. 21 rows: step only, replicates, a full start sweep, then gains 0.3, 0.7, 0.5 before the abort.
+
+- **Repeatability is excellent.**
+  - Baselines: 8.22 ± 0.14%.
+  - Replicate ratios: 0.976, 0.977, 0.974 (SD 0.0013), against 0.05–0.07 with turbulence and PSDs.
+  - The step method removes the noise problem.
+- **But almost none of the figure of merit is the counter's to change.**
+  - All ratios are 0.973–0.996.
+  - The baseline (8.22) equals the step-only response energy (8.16).
+  - The offload spikes should be a small fraction of the step transient, so after the step-only subtraction the baseline should be much smaller than the step-only energy. It is not, so the subtraction is not cancelling the step transient.
+  - `fomTiming`/`fomGain` are fixed at about 1.93/6.1 whatever the parameters.
+- **Leading hypothesis: onset misalignment between the step-only series (offload off) and the points (offload on).**
+  - With offload off, the pre-step frames are quiet and the onset is detected at the first frame of the response.
+  - With offload on, the pre-step window holds the previous step's offload spikes (sparse and large), which raise the threshold or trigger it early. The onset then shifts by one or more frames.
+  - A shift of δ frames on a fast transient leaves S(j + δ) − S(j), whose energy is comparable to S itself.
+  - It is consistent with the residual being deterministic (small fomStd) and parameter-independent.
+- **Signal that is there.**
+  - Start: 125–150 µs is lowest (0.973), 100 µs highest (0.980), about 5σ of the replicate scatter.
+  - Gain: 0.3 → 0.981, 0.5 → 0.975, 0.7 → 0.996, with clipping 0.7% at 0.7.
+- **Decision rule.** `sigmaFloor` 0.02 is 15× the measured noise (0.0013), so the threshold (0.028) exceeded every difference and nothing could move.
+- **Instability.** The point after gain 0.5 in the gain order (0.3, 0.7, 0.5, 0.9, …) is 0.9, so the loop most likely went unstable at gain 0.9. The earlier bench runs also showed instability at high gain.
+- **Proposals (not implemented):**
+  - **P-1. Align each step on the step-only template.** Choose the shift δ ∈ [−4, 4] that minimizes ‖sign·r(onset + δ + j) − S̄(j)‖² over the first frames after the onset, before the first offload's effect. This replaces the threshold onset for the points. The threshold stays for the step-only series.
+  - **P-2. Diagnostics in the CSV.** Mean and SD of the onset delay (onset − command) and of the phase φ per measurement, so a misalignment is visible.
+  - **P-3. Lower `sigmaFloor`** to about 0.002 once the figure of merit is fixed.
+  - **P-4. Limit the gain grid** to 0.3–0.7 until the instability above 0.7 is understood.
+
+### Step Alignment and Diagnostics: Implementation of P-1 to P-4 (2026-11-23, not yet built)
+
+User: "implement the proposals".
+- **P-1, `alignSteps()`.** It runs on each point's steps after `findSteps()`, not on the step-only series.
+  - **Candidates.** Onsets from max(command, onset − 4) to onset + 4.
+  - **Score.** Each candidate is scored on one fixed window of frames: from the lowest candidate up to, but not including, the first offload at or after it. The window is at least 3 and at most 8 + 2·4 frames.
+  - **Error.** The squared difference between the sign-corrected residual (less the pre-step mean) and the step-only response placed at the candidate (0 before it).
+  - **Choice.** The best candidate becomes the onset; ties keep the detected one. The first offload is then taken at or after it, and `findSteps()` now lists offloads from the command, not the onset.
+  - **Deviation from the proposal.** The proposal matched the first 8 frames after each candidate onset. A simulation of the unit-test series showed that this window includes the counter-offload error and moves the onset to reduce it (minimum at 354 instead of 353). The alignment would then partly hide the error the figure of merit measures. Ending the window at the first offload recovers the true onset for onsets detected 2 frames late, exactly, or 2 frames early.
+- **P-2.** `stepFom()` returns the mean and SD of the onset delay (onset − command) and of the phase (first offload − onset) over the steps used. They are written as CSV columns `onsetDelay`, `onsetDelaySd`, `phase`, `phaseSd`, appended after `clipFrac` so earlier column positions do not change. The `step only` row and log line carry its onset delay (`onsetDelayStats()`).
+- **P-3.** `sigmaFloor` default 0.02 → 0.002.
+- **P-4.** `calibGainGrid` default 0.3–1.0 → 0.3–0.7 (5 points, so the quadratic fit is still used). A default run is now 52 measurements.
+- **Tests.**
+  - New: `alignSteps` (late and early onsets restored, so the error equals the exactly-aligned value; correct onsets not moved; never before the command) and `onsetDelayStats`.
+  - `stepFom` diagnostics.
+  - `findSteps` records the command.
+  - Defaults: gain grid, `sigmaFloor`, 52 points.

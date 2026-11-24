@@ -79,8 +79,8 @@ struct residualShmimT
  * cleared at the next slot.
  *
  * Calibrate mode drives repeatable offloads by stepping one woofer mode (wooferModes) and reads the per-frame modal
- * residual.  For each step it subtracts the response to the step alone (measured with the offloader paused), aligns on
- * the first offload after the step, and averages over the steps.  The figure of merit is the energy left, summed over
+ * residual.  For each step it matches the onset to the response to the step alone (measured with the offloader paused),
+ * subtracts that response, aligns on the first offload after the step, and averages over the steps.  The figure of merit is the energy left, summed over
  * the offloaded modes, as a ratio to a gain-0 baseline interpolated in time.  It estimates the noise from replicates,
  * sweeps rampStartUs, gain and rampDurationUs, then rampStartUs and gain again, choosing each from a quadratic fit and
  * moving only for an improvement beyond the noise, and applies the result if replicates confirm it.
@@ -285,6 +285,14 @@ class counterOffload : public MagAOXApp<true>,
 
         double fomGain{ 0 }; ///< Part of fom in the other frames.
 
+        double onsetDelay{ 0 }; ///< Mean step onset after its command, over the steps used, frames.
+
+        double onsetDelaySd{ 0 }; ///< Standard deviation of the onset delay, frames.
+
+        double phase{ 0 }; ///< Mean first offload after the onset, over the steps used, frames.
+
+        double phaseSd{ 0 }; ///< Standard deviation of the phase, frames.
+
         uint64_t clippedSlots{ 0 }; ///< Slots that clipped from the first step to the end of the measurement.
 
         uint64_t publishedSlots{ 0 }; ///< Slots published from the first step to the end of the measurement.
@@ -311,13 +319,15 @@ class counterOffload : public MagAOXApp<true>,
     {
         bool found{ false }; ///< Whether the onset was detected.
 
+        size_t cmd{ 0 }; ///< Frame index of the step command: frames collected when it was sent.
+
         size_t onset{ 0 }; ///< Frame index of the onset.
 
         size_t end{ 0 }; ///< One past the last frame before the next step command.
 
         long offload{ -1 }; ///< Frame index of the first offload at or after the onset; -1 if none.
 
-        std::vector<size_t> offloads; ///< Frame indices of the offloads from the onset to end.
+        std::vector<size_t> offloads; ///< Frame indices of the offloads from the command to end, ascending.
 
         std::vector<double> preMean; ///< Mean of each mode over the frames before the command.
 
@@ -336,6 +346,14 @@ class counterOffload : public MagAOXApp<true>,
         double fomGain{ 0 }; ///< Part of fom in the other frames.
 
         size_t used{ 0 }; ///< Steps used.
+
+        double onsetDelay{ 0 }; ///< Mean onset after the command, over the steps used, frames.
+
+        double onsetDelaySd{ 0 }; ///< Standard deviation of the onset delay, frames.
+
+        double phase{ 0 }; ///< Mean first offload after the onset, over the steps used, frames.
+
+        double phaseSd{ 0 }; ///< Standard deviation of the phase, frames.
     };
 
     static constexpr size_t m_preFrames{ 100 }; ///< Frames before a step command used for its mean and noise.
@@ -345,6 +363,12 @@ class counterOffload : public MagAOXApp<true>,
     static constexpr size_t m_guardFrames{ 8 }; ///< Frames before the next step left out of the step-only response.
 
     static constexpr size_t m_maxPhaseFrames{ 16 }; ///< Largest onset-to-first-offload offset allowed, frames.
+
+    static constexpr size_t m_matchFrames{ 8 }; ///< Most frames, beyond the shift range, matched by alignSteps().
+
+    static constexpr size_t m_minMatchFrames{ 3 }; ///< Fewest frames matched by alignSteps().
+
+    static constexpr size_t m_maxShiftFrames{ 4 }; ///< Largest onset change made by alignSteps(), frames.
 
     static constexpr double m_maxRunMin{ 20 }; ///< A run estimated to take longer than this logs a warning, min.
 
@@ -414,7 +438,7 @@ class counterOffload : public MagAOXApp<true>,
 
     std::vector<double> m_durationGridUs{ 200, 600, 100 }; ///< rampDurationUs scan: min, max, step, in us.
 
-    std::vector<double> m_gainGrid{ 0.3, 1.0, 0.1 }; ///< gain scan: min, max, step.
+    std::vector<double> m_gainGrid{ 0.3, 0.7, 0.1 }; ///< gain scan: min, max, step.  Above 0.7 the loop went unstable.
 
     int m_replicates{ 3 }; ///< Measurements of the starting parameters for the first noise estimate.
 
@@ -422,7 +446,7 @@ class counterOffload : public MagAOXApp<true>,
 
     double m_moveSigma{ 1.5 }; ///< A parameter moves only if the fit improves by this many standard errors.
 
-    double m_sigmaFloor{ 0.02 }; ///< Smallest noise estimate of the ratio used.
+    double m_sigmaFloor{ 0.002 }; ///< Smallest noise estimate of the ratio used.
 
     int m_rounds{ 2 }; ///< Rounds of sweeps; rounds after the first sweep only rampStartUs and gain.
 
@@ -720,6 +744,30 @@ class counterOffload : public MagAOXApp<true>,
     static size_t findSteps( const stepDataT    &d /**< [in] the collected series */,
                              double              onsetSigma /**< [in] onset threshold, standard deviations */,
                              std::vector<stepT> &steps /**< [out] one entry per step command */ );
+
+    /// Move each step's onset to where its response best matches the step-only response.
+    /** The steps of a point have the previous step's offload spikes in their pre-step frames, which can shift the
+     * threshold onset; the step-only response was measured with quiet pre-step frames.  For each step found, every
+     * candidate onset o from max(command, onset - maxShift) to onset + maxShift is scored over one fixed window of
+     * frames t: from the lowest candidate up to, but not including, the first offload at or after it, at least
+     * m_minMatchFrames and at most matchFrames + 2 maxShift frames.  The score is the squared difference between the
+     * step's sign-corrected residual, less its pre-step mean, and the step-only response at t - o (0 before the onset).
+     * Ending the window at the first offload keeps the counter-offload error, which the figure of merit measures, out
+     * of the alignment.  The best candidate becomes the onset (ties keep the detected one), and the first offload is
+     * taken at or after it.
+     *
+     * \returns the number of steps whose onset moved
+     */
+    static size_t alignSteps( const stepDataT           &d /**< [in] the collected series */,
+                              std::vector<stepT>        &steps /**< [in,out] the steps, from findSteps() */,
+                              const std::vector<double> &stepOnly /**< [in] the step-only response */,
+                              size_t                     matchFrames /**< [in] most frames matched, beyond the shift range */,
+                              size_t                     maxShift /**< [in] largest onset change, frames */ );
+
+    /// Mean and standard deviation of the onset delay (onset - command) of the steps found, in frames.
+    static void onsetDelayStats( const std::vector<stepT> &steps /**< [in] the steps */,
+                                 double                   &mean /**< [out] the mean; 0 if none found */,
+                                 double                   &sd /**< [out] the standard deviation; 0 if fewer than 2 */ );
 
     /// Average the onset-aligned, sign-corrected response over the steps found, for lags 0 to len - 1.
     /**
@@ -2088,6 +2136,7 @@ inline size_t counterOffload::findSteps( const stepDataT &d, double onsetSigma, 
         stepT &st = steps[k];
 
         const size_t cmd = std::min( d.cmdIndex[k], nFrames );
+        st.cmd           = cmd;
         st.end           = ( k + 1 < d.cmdIndex.size() ) ? std::min( d.cmdIndex[k + 1], nFrames ) : nFrames;
 
         const size_t pre0 = ( cmd > m_preFrames ) ? cmd - m_preFrames : 0;
@@ -2159,19 +2208,117 @@ inline size_t counterOffload::findSteps( const stepDataT &d, double onsetSigma, 
         {
             const size_t i = std::lower_bound( d.frameNs.begin(), d.frameNs.begin() + nFrames, t ) - d.frameNs.begin();
 
-            if( i >= st.onset && i < st.end )
+            if( i >= cmd && i < st.end )
             {
                 st.offloads.push_back( i );
             }
         }
 
-        if( !st.offloads.empty() )
-        {
-            st.offload = static_cast<long>( st.offloads.front() );
-        }
+        const auto first = std::lower_bound( st.offloads.begin(), st.offloads.end(), st.onset );
+
+        st.offload = ( first != st.offloads.end() ) ? static_cast<long>( *first ) : -1;
     }
 
     return found;
+}
+
+inline size_t counterOffload::alignSteps( const stepDataT           &d,
+                                          std::vector<stepT>        &steps,
+                                          const std::vector<double> &stepOnly,
+                                          size_t                     matchFrames,
+                                          size_t                     maxShift )
+{
+    const size_t M = d.nModes;
+
+    if( M == 0 || stepOnly.empty() )
+    {
+        return 0;
+    }
+
+    size_t moved = 0;
+
+    for( size_t k = 0; k < steps.size(); ++k )
+    {
+        stepT &st = steps[k];
+
+        if( !st.found )
+        {
+            continue;
+        }
+
+        const size_t len = stepOnly.size() / M;
+        const size_t lo  = std::max( st.cmd, ( st.onset > maxShift ) ? st.onset - maxShift : 0 );
+
+        const auto   next = std::lower_bound( st.offloads.begin(), st.offloads.end(), lo );
+        const size_t q    = ( next != st.offloads.end() ) ? *next : st.end;
+        const size_t hi   = std::min( { st.end, std::max( q, lo + m_minMatchFrames ), lo + matchFrames + 2 * maxShift } );
+
+        if( hi <= lo )
+        {
+            continue;
+        }
+
+        auto cost = [&]( size_t o )
+        {
+            double c = 0;
+            for( size_t t = lo; t < hi; ++t )
+            {
+                for( size_t m = 0; m < M; ++m )
+                {
+                    const double s = ( t >= o && t - o < len ) ? stepOnly[( t - o ) * M + m] : 0;
+                    const double e = d.signs[k] * ( d.frames[t * M + m] - st.preMean[m] ) - s;
+                    c += e * e;
+                }
+            }
+            return c;
+        };
+
+        size_t best     = st.onset;
+        double bestCost = cost( st.onset );
+
+        for( size_t o = lo; o <= st.onset + maxShift; ++o )
+        {
+            const double c = cost( o );
+
+            if( c < bestCost ) // ties keep the detected onset, or the earlier candidate
+            {
+                best     = o;
+                bestCost = c;
+            }
+        }
+
+        if( best != st.onset )
+        {
+            st.onset = best;
+            ++moved;
+
+            const auto first = std::lower_bound( st.offloads.begin(), st.offloads.end(), st.onset );
+
+            st.offload = ( first != st.offloads.end() ) ? static_cast<long>( *first ) : -1;
+        }
+    }
+
+    return moved;
+}
+
+inline void counterOffload::onsetDelayStats( const std::vector<stepT> &steps, double &mean, double &sd )
+{
+    double sum = 0, sum2 = 0;
+    size_t n   = 0;
+
+    for( const stepT &st : steps )
+    {
+        if( st.found )
+        {
+            const double v = double( st.onset ) - double( st.cmd );
+            sum += v;
+            sum2 += v * v;
+            ++n;
+        }
+    }
+
+    mean = ( n > 0 ) ? sum / n : 0;
+    sd   = ( n > 1 ) ? std::sqrt( std::max( 0.0, ( sum2 - sum * sum / n ) / ( n - 1 ) ) ) : 0;
 }
 
 inline size_t counterOffload::stepOnlyResponse( const stepDataT          &d,
@@ -2239,6 +2386,8 @@ inline counterOffload::stepFomT counterOffload::stepFom( const stepDataT        
     size_t nHalf[2] = { 0, 0 };
     double noise    = 0;
 
+    double delaySum = 0, delaySum2 = 0, phaseSum = 0, phaseSum2 = 0;
+
     for( size_t k = 0; k < steps.size(); ++k )
     {
         const stepT &st = steps[k];
@@ -2284,6 +2433,14 @@ inline counterOffload::stepFomT counterOffload::stepFom( const stepDataT        
         }
 
         noise += st.noiseVar;
+
+        const double delay = double( st.onset ) - double( st.cmd );
+
+        delaySum += delay;
+        delaySum2 += delay * delay;
+        phaseSum += phase;
+        phaseSum2 += double( phase ) * phase;
+
         ++nHalf[out.used % 2];
         ++out.used;
     }
@@ -2294,6 +2451,16 @@ inline counterOffload::stepFomT counterOffload::stepFom( const stepDataT        
     }
 
     noise /= out.used;
+
+    auto sdOf = [&]( double sum, double sum2 )
+    {
+        return ( out.used > 1 ) ? std::sqrt( std::max( 0.0, ( sum2 - sum * sum / out.used ) / ( out.used - 1 ) ) ) : 0.0;
+    };
+
+    out.onsetDelay   = delaySum / out.used;
+    out.onsetDelaySd = sdOf( delaySum, delaySum2 );
+    out.phase        = phaseSum / out.used;
+    out.phaseSd      = sdOf( phaseSum, phaseSum2 );
 
     // Energy of an average over n steps, less its noise bias, for each lag.
     auto energy = [&]( const std::vector<double> &acc, size_t n, size_t l )
@@ -2775,7 +2942,7 @@ inline std::vector<counterOffload::calibKeyT> counterOffload::calibKeys()
           0,
           10,
           "A parameter moves only if the fit improves by this many standard errors.  Default is 1.5." },
-        { "sigmaFloor", &m_sigmaFloor, nullptr, 0, 1, "Smallest noise estimate of the ratio used.  Default is 0.02." },
+        { "sigmaFloor", &m_sigmaFloor, nullptr, 0, 1, "Smallest noise estimate of the ratio used.  Default is 0.002." },
         { "rounds",
           nullptr,
           &m_rounds,
@@ -3155,7 +3322,8 @@ inline bool counterOffload::openCsv()
     }
 
     m_csv << "time,stage,rampStartUs,rampDurationUs,gain,stepMode,stepAmp,stepCount,numModes,fom,fomStd,fomOff,"
-             "ratio,ratioInterp,fomTiming,fomGain,fitCurrent,fitCandidate,threshold,moved,sigma,clippedSlots,clipFrac\n";
+             "ratio,ratioInterp,fomTiming,fomGain,fitCurrent,fitCandidate,threshold,moved,sigma,clippedSlots,clipFrac,"
+             "onsetDelay,onsetDelaySd,phase,phaseSd\n";
 
     log<text_log>( "calibration started, stepping " + m_stepDevice + " mode " + m_stepElement + " by +/- " +
                        std::to_string( m_stepAmp ) + " about " + std::to_string( m_stepBase ) + ", over " +
@@ -3409,8 +3577,12 @@ inline bool counterOffload::measureStepOnly( bool &offloadOff )
     m_stepOnlyCount = n;
     m_lagFrames     = len - m_maxPhaseFrames;
 
+    double delay, delaySd;
+    onsetDelayStats( steps, delay, delaySd );
+
     log<text_log>( "calibration: step-only response from " + std::to_string( n ) + " steps over " +
-                       std::to_string( len ) + " frames, energy " + std::to_string( energy ) + change,
+                       std::to_string( len ) + " frames, energy " + std::to_string( energy ) + ", onset delay " +
+                       std::to_string( delay ) + " +/- " + std::to_string( delaySd ) + " frames" + change,
                    logPrio::LOG_INFO );
 
     timespec wall;
@@ -3422,7 +3594,7 @@ inline bool counterOffload::measureStepOnly( bool &offloadOff )
         std::lock_guard<std::mutex> lock( m_calibMutex );
 
         writeCsvPrefix( wall, stageStepOnly, p );
-        m_csv << "," << energy << ",,,,,,,,,,,,,\n";
+        m_csv << "," << energy << ",,,,,,,,,,,,," << "," << delay << "," << delaySd << ",,\n";
         m_csv.flush();
     }
 
@@ -3442,6 +3614,8 @@ inline bool counterOffload::measure( const calibParamsT &p, stepFomT &f, uint64_
 
     std::vector<stepT> steps;
     const size_t       found = findSteps( d, m_onsetSigma, steps );
+
+    alignSteps( d, steps, m_stepOnly, m_matchFrames, m_maxShiftFrames );
 
     f = stepFom( d, steps, m_stepOnly, m_stepOnlyCount, m_lagFrames );
 
@@ -3702,6 +3876,11 @@ counterOffload::addRow( int stage, const calibParamsT &p, const stepFomT &f, uin
     row.fomTiming = f.fomTiming;
     row.fomGain   = f.fomGain;
 
+    row.onsetDelay   = f.onsetDelay;
+    row.onsetDelaySd = f.onsetDelaySd;
+    row.phase        = f.phase;
+    row.phaseSd      = f.phaseSd;
+
     row.clippedSlots   = clipped;
     row.publishedSlots = published;
 
@@ -3733,7 +3912,8 @@ inline void counterOffload::flushRows()
         m_csv << "," << row.fom << "," << row.fomStd << "," << row.fomOff << "," << row.fom / row.fomOff << ","
               << row.fom / interpBaseline( row.tNs, m_offTimes, m_offFoms ) << "," << row.fomTiming << ","
               << row.fomGain << ",,,,,," << row.clippedSlots << ","
-              << clipFraction( row.clippedSlots, row.publishedSlots ) << "\n";
+              << clipFraction( row.clippedSlots, row.publishedSlots ) << "," << row.onsetDelay << ","
+              << row.onsetDelaySd << "," << row.phase << "," << row.phaseSd << "\n";
     }
 
     m_rows.clear();
@@ -3763,7 +3943,7 @@ inline void counterOffload::writeFitRow( int stage, const calibParamsT &p, const
         m_csv << ch.rCurrent;
     }
 
-    m_csv << "," << ch.rCandidate << "," << ch.threshold << "," << int( ch.move ) << "," << sigma << ",,\n";
+    m_csv << "," << ch.rCandidate << "," << ch.threshold << "," << int( ch.move ) << "," << sigma << ",,,,,,\n";
     m_csv.flush();
 }
 

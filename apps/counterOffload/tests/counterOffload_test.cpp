@@ -559,7 +559,7 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
         REQUIRE( app.m_calibLeak > 0 );
         REQUIRE( app.m_startGridUs == std::vector<double>{ 0, 150, 25 } );
         REQUIRE( app.m_durationGridUs == std::vector<double>{ 200, 600, 100 } );
-        REQUIRE( app.m_gainGrid == std::vector<double>{ 0.3, 1.0, 0.1 } );
+        REQUIRE( app.m_gainGrid == std::vector<double>{ 0.3, 0.7, 0.1 } );
         REQUIRE( counterOffload::gridValid( app.m_startGridUs, 0, 1e6 ) );
         REQUIRE( counterOffload::gridValid( app.m_durationGridUs, 1, 1e6 ) );
         REQUIRE( counterOffload::gridValid( app.m_gainGrid, 0, 2 ) );
@@ -618,7 +618,8 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
         REQUIRE( s.find( "stepMode=5" ) != std::string::npos );
         REQUIRE( s.find( "stepAmp=0.7" ) != std::string::npos );
         REQUIRE( s.find( "leak=0.0025" ) != std::string::npos );
-        REQUIRE( s.find( "gainGrid=0.3,1,0.1" ) != std::string::npos );
+        REQUIRE( s.find( "gainGrid=0.3,0.7,0.1" ) != std::string::npos );
+        REQUIRE( s.find( "sigmaFloor=0.002" ) != std::string::npos );
     }
 
     SECTION( "the step mode must be an integer >= 0 and the amplitude finite and > 0" )
@@ -643,7 +644,7 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
     SECTION( "grids are checked before they are set" )
     {
         REQUIRE( app.applyCalibGrid( app.m_gainGrid, { 0.5, 2.5, 0.1 }, 0, 2 ) < 0 );
-        REQUIRE( app.m_gainGrid == std::vector<double>{ 0.3, 1.0, 0.1 } );
+        REQUIRE( app.m_gainGrid == std::vector<double>{ 0.3, 0.7, 0.1 } );
         REQUIRE( app.applyCalibGrid( app.m_gainGrid, { 0.4, 1.2, 0.2 }, 0, 2 ) == 0 );
         REQUIRE( app.m_gainGrid == std::vector<double>{ 0.4, 1.2, 0.2 } );
     }
@@ -872,7 +873,7 @@ TEST_CASE( "counterOffload noise estimate and run length", "[counterOffload]" )
     {
         counterOffload_test app;
 
-        REQUIRE( app.estimatePoints() == 58 );
+        REQUIRE( app.estimatePoints() == 52 );
         REQUIRE( app.estimatePoints() * ( app.m_settleS + app.m_stepCount * app.m_stepPeriodS ) / 60 < 20 );
     }
 
@@ -971,6 +972,7 @@ TEST_CASE( "counterOffload locates woofer steps in the residual", "[counterOfflo
         for( size_t k = 0; k < 3; ++k )
         {
             REQUIRE( steps[k].found );
+            REQUIRE( steps[k].cmd == 150 + 200 * k );
             REQUIRE( steps[k].onset == 150 + 200 * k + 3 );
             REQUIRE( steps[k].offload == long( steps[k].onset + 2 ) );
             REQUIRE( steps[k].offloads.size() > 1 );
@@ -1045,6 +1047,10 @@ TEST_CASE( "counterOffload computes the step figure of merit", "[counterOffload]
         REQUIRE( f.fomTiming == Approx( 2 * 0.04 ) ); // lags 0 and 1 after each offload
         REQUIRE( f.fomGain == Approx( 6 * 0.01 ) );
         REQUIRE( f.fomStd == Approx( 0 ).margin( 1e-9 ) ); // every step has the same error
+        REQUIRE( f.onsetDelay == Approx( 3 ) );
+        REQUIRE( f.onsetDelaySd == Approx( 0 ).margin( 1e-12 ) );
+        REQUIRE( f.phase == Approx( 2 ) );
+        REQUIRE( f.phaseSd == Approx( 0 ).margin( 1e-12 ) );
     }
 
     SECTION( "a step whose first offload is too long after its onset is not used" )
@@ -1078,6 +1084,83 @@ TEST_CASE( "counterOffload computes the step figure of merit", "[counterOffload]
     {
         REQUIRE( counterOffload::stepFom( only, steps, response, 0, 30 ).used == 0 );
         REQUIRE( counterOffload::stepFom( only, steps, response, 3, 0 ).used == 0 );
+    }
+}
+
+/// Verify that step onsets are moved to where each step best matches the step-only response.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload aligns step onsets on the step-only response", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::alignSteps({},{},{},0,0);
+    counterOffload::onsetDelayStats({},0,0);
+    #endif
+    // clang-format on
+
+    const counterOffload::stepDataT    only = stepSeries( false );
+    std::vector<counterOffload::stepT> steps;
+    counterOffload::findSteps( only, 5, steps );
+
+    std::vector<double> response;
+    counterOffload::stepOnlyResponse( only, steps, 60, response );
+
+    const counterOffload::stepDataT    d = stepSeries( true );
+    std::vector<counterOffload::stepT> ws;
+    counterOffload::findSteps( d, 5, ws );
+
+    const double exact = counterOffload::stepFom( d, ws, response, 3, 30 ).fom;
+
+    SECTION( "an onset detected 2 frames late is moved back, and the error is as if it were found exactly" )
+    {
+        ws[1].onset += 2; // the first offload at or after it is still frame 355
+        REQUIRE_FALSE( counterOffload::stepFom( d, ws, response, 3, 30 ).fom == Approx( exact ) );
+
+        REQUIRE( counterOffload::alignSteps( d, ws, response, 8, 4 ) == 1 );
+        REQUIRE( ws[1].onset == 353 );
+        REQUIRE( ws[1].offload == 355 );
+        REQUIRE( counterOffload::stepFom( d, ws, response, 3, 30 ).fom == Approx( exact ) );
+    }
+
+    SECTION( "an onset detected 2 frames early is moved forward" )
+    {
+        ws[1].onset -= 2;
+
+        REQUIRE( counterOffload::alignSteps( d, ws, response, 8, 4 ) == 1 );
+        REQUIRE( ws[1].onset == 353 );
+        REQUIRE( ws[1].offload == 355 );
+    }
+
+    SECTION( "correctly detected onsets are not moved" )
+    {
+        REQUIRE( counterOffload::alignSteps( d, ws, response, 8, 4 ) == 0 );
+        REQUIRE( ws[0].onset == 153 );
+    }
+
+    SECTION( "an onset is never moved before its command" )
+    {
+        ws[0].cmd = ws[0].onset; // as if the command came at the detected onset
+        ws[0].onset += 2;
+
+        counterOffload::alignSteps( d, ws, response, 8, 4 );
+        REQUIRE( ws[0].onset >= ws[0].cmd );
+    }
+
+    SECTION( "the onset delay statistics are over the steps found" )
+    {
+        double mean, sd;
+
+        ws[1].onset += 2;
+        counterOffload::onsetDelayStats( ws, mean, sd );
+        REQUIRE( mean == Approx( 3 + 2.0 / 3 ) );
+        REQUIRE( sd == Approx( std::sqrt( ( 2 * ( 2.0 / 3 ) * ( 2.0 / 3 ) + ( 4.0 / 3 ) * ( 4.0 / 3 ) ) / 2 ) ) );
+
+        ws[0].found = ws[1].found = ws[2].found = false;
+        counterOffload::onsetDelayStats( ws, mean, sd );
+        REQUIRE( mean == 0 );
+        REQUIRE( sd == 0 );
     }
 }
 
