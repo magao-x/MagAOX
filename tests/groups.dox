@@ -112,6 +112,11 @@ $ less tests/results/latest/run.log
  * \ingroup application_unit_test
  */
 
+/** \defgroup dmRecon_unit_test DM Reconstruction Unit Tests
+ * \brief Private reconstruction, publication ownership, validation and loop-trigger diagnostics.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup dmSyncopation_unit_test DM Syncopation Unit Tests
  * \brief Deterministic scheduling, control and local shared-memory publication tests.
  * \ingroup application_unit_test

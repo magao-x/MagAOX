@@ -65,12 +65,16 @@
 ../apps/dmMode/tests/dmMode_test
 ../apps/dmPokeCenter/tests/dmPokeCenter_test
 ../apps/dmPokeXCorr/tests/dmPokeXCorr_test
+../apps/dmRecon/tests/dmRecon_test
+../apps/dmRecon/tests/dmReconMath_test
+../apps/dmRecon/tests/dmReconTiming_test
 ../apps/dmSpeckle/tests/dmSpeckle_test
 ../apps/dmSyncopation/tests/dmSyncopation_test
 ../apps/dmSyncopation/tests/syncoSimulation_test
 ../apps/dmSyncopation/tests/syncoPipelineSimulation_test
 ../apps/dmSyncopation/tests/syncoZeroTiming_test
 ../apps/dmSyncopation/tests/syncoMainTiming_test
+../apps/dmTemporalResponse/tests/dmTemporalResponse_test
 ../apps/loopTimingMonitor/tests/loopTiming_test
 ../apps/loopTimingMonitor/tests/loopTimingGate_test
 ../apps/loopTimingMonitor/tests/loopTimingSynco_test
