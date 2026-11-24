@@ -42,22 +42,30 @@ The DDSPC cost penalizes future WFS frames, which integrate q slots, so command 
 
 ### Integrator
 
-The original loPredCtrl wrote its command into the main loop's modal input, so cacao `mfilt` integrated it: `DM[k] = mult·DM[k-1] − gain·delta[k]`. Its model was trained on those deltas, and the main loop kept integral action on tip/tilt, which tweeter-to-woofer offloading relies on. By default loPredCtrlAcc applies the same DDSPC calculation as an absolute position, with no integrator, and `parameters.gain·y` is proportional.
+The original loPredCtrl wrote its command into the main loop's modal input, so cacao `mfilt` integrated it: `DM[k] = mult·DM[k-1] − gain·delta[k]`, clipped to ±limit. Its model was trained on those deltas, and the main loop kept integral action on tip/tilt, which tweeter-to-woofer offloading relies on. By default loPredCtrlAcc applies the same DDSPC calculation as an absolute position, with no integrator, and `parameters.gain·y` is proportional.
 
-`[integrator] enabled=true` restores the mfilt law in both modes. The output still goes through syncopation to `dm.channelName`; only the value written changes. Each command `delta` (including `gain·y` and probes) updates `s = mult·s − gain·delta`, clipped to ±`limit` modal units, and synco writes `s`:
+`[integrator] enabled=true` restores the mfilt law in both modes, with the main loop's own parameters. The output still goes through syncopation to `dm.channelName`; only the value written changes. Each command `delta` (including `gain·y` and probes) updates `s = mult·s − gain·delta`, clipped to ±`limit`, and synco writes `s`:
 
 - **Standard:** one update per WFS frame, held on the frame's four slots, exactly as mfilt. A late WFS frame holds `s`.
-- **Assisted:** one update per DM slot on the DM worker, with `gain/dm_slots` and `mult^(1/dm_slots)`, so four slots of a constant delta equal one mfilt frame. A slot with no current frame holds `s`.
+- **Assisted:** one update per DM slot on the DM worker with `gain/dm_slots`; `mult` and `limit` are unchanged. A slot with no current frame holds `s`.
 
-Each fit is trained on the deltas recovered from the copied commands, `−(p − mult·p_previous)/gain` per frame (standard) or per slot (assisted), so missed slots and clipping are seen as applied. The assisted executed-slot prefix uses the same deltas, and `ripple` then penalizes delta variation within a frame. The state is zero whenever prediction is off, so prediction always starts from the confirmed zero; a fault zero still removes the whole state in one slot.
+For each DDSPC mode `i` (WFS index `modal_index0/1`), loPredCtrlAcc follows the main loop as it changes:
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `integrator.enabled` | `false` | Integrate both modes' commands and train on the deltas. |
-| `integrator.gain`, `integrator.mult` | `1`, `1` | mfilt-equivalent gain and multiplier per WFS frame; copy the deployed mfilt tip/tilt values. |
-| `integrator.limit` | required | Per-mode limit on `s` [modal units]. |
+| Parameter | Source |
+| --- | --- |
+| `gain` | `<loop.device>.loop_gain.current × aol<N>_mgainfact[i]` |
+| `mult` | `<loop.device>.loop_multcoeff.current × aol<N>_mmultfact[i]` |
+| `limit` | `<loop.device>.loop_max_limit.current × aol<N>_mlimitfact[i]` |
 
-It is a startup setting; the restart that changes it also discards the fits, which would not apply in the other form. The feedback sign matches mfilt only if `dm.modeCube` planes 0 and 1 use mfilt's DM mode sign. The design is in `agents/plans/2026-11/ddspc-standard-integrator.md`.
+`loop.device` defaults to `holoop` and `loop.number` (N) to `1`. The combined values are published as `loPredCtrlAcc.integrator.*` (`enabled`, `ready`, `gain0/1`, `mult0/1`, `limit0/1`). Prediction is refused, and `safety.output_state` reports `integrator_parameters`, until all six have been received with positive gain and limit for both modes. After that each keeps its last value until it is updated.
+
+Each fit is trained on the deltas recovered from the copied commands, `−(p − mult·p_previous)/gain` per frame (standard) or per slot with `gain/dm_slots` (assisted), so missed slots and clipping are seen as applied. The assisted executed-slot prefix uses the same deltas, and `ripple` then penalizes delta variation within a frame. The state is zero whenever prediction is off, so prediction always starts from the confirmed zero; a fault zero still removes the whole state in one slot. A change of the main loop's gain changes the plant a frozen fit was trained on; keep learning on, or retrain, after one.
+
+```bash
+getINDI 'loPredCtrlAcc.integrator.*' 'holoop.loop_gain.current' 'holoop.loop_multcoeff.current' 'holoop.loop_max_limit.current'
+```
+
+The feedback sign matches mfilt only if `dm.modeCube` planes 0 and 1 use mfilt's DM mode sign. It is a startup setting; the restart that changes it also discards the fits, which would not apply in the other form. The design is in `agents/plans/2026-11/ddspc-standard-integrator.md`.
 
 ## Before installation (operator, on the RTC)
 
