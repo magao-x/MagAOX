@@ -12,6 +12,7 @@ positive). Detailed stage timing is optional.
 ```ini
 [frameDelay]
 enabled=true
+warnings=true
 historySec=900
 thresholdFrames=1
 dumpDir=frame-delays
@@ -27,6 +28,9 @@ span of `round(FPS) + 0.5` periods.
 
 `frame_delay_enable` controls warning delivery for `atime`, `arrival`, `write`
 and their `_sum` versions. `frame_delay_warning` reports the stored latches.
+Set `warnings=false` to start with all six warning enables Off while retaining
+cadence telemetry and manual history dumps. The default is `true`. The INDI
+switches can still change individual enables during operation.
 The first enabled crossing logs a warning and records `telem_ocamdelay`.
 Acquisition restarting after a successful reconfiguration clears the latches.
 Disabling a check suppresses its labrules and rtimv warning immediately while
