@@ -69,7 +69,7 @@ The feedback sign matches mfilt only if `dm.modeCube` planes 0 and 1 use mfilt's
 
 ### Missed frames
 
-A single missed WFS frame or ACC frame does not stop prediction (`parameters.max_fill`, default 1, up to 2 consecutive frames):
+Missed WFS or ACC frames do not stop prediction, up to `parameters.max_fill` consecutive frames (default 5, i.e. 2.5 ms at 2 kHz; range 0–20). The copied-slot ring is sized to hold the commands of such a gap:
 
 - **Missed WFS frame:** the DM keeps its command (standard: the held or planned slot; assisted: the last slot). At the next frame both fits' histories are advanced over the gap with the previous measurement and the slots actually copied, so the fits stay ready and the output stays qualified.
 - **Missed ACC samples:** a missing sample inside the window holds the sample before it; a WFS frame with no new samples gets a window one frame after the previous one, holding the newest sample. `assisted_qualification.acc_window` reads `ok_filled`.
