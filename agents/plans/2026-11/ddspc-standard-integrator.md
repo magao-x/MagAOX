@@ -1,4 +1,4 @@
-# DDSPC standard-mode integrator (mfilt-equivalent output)
+# DDSPC integrator (mfilt-equivalent output, standard and assisted)
 
 2026-11-24. Branch `parkertjohnson1/accel_ddspc`. Workstation `ASTR-LT-428.local`; no instrument access.
 
@@ -29,9 +29,9 @@ Configuration `[integrator]`, default off so existing behaviour and the T1 stand
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `false` | Integrate standard-mode commands. |
-| `gain` | `1` | `g_m`; with 1, `parameters.gain` is the loop gain on `y`. |
-| `mult` | `1` | `mc`, in (0, 1]; below 1 the state leaks. |
+| `enabled` | `false` | Integrate both modes' commands; train both fits on the deltas. |
+| `gain` | `1` | `g_m` per WFS frame; with 1, `parameters.gain` is the loop gain on `y`. |
+| `mult` | `1` | `mc` per WFS frame, in (0, 1]; below 1 the state leaks. |
 | `limit` | none | Per-mode absolute limit on the integrator state, modal units; required (> 0) when enabled. |
 
 Standard mode, per WFS frame k (WFS thread, under `m_modelMutex`):
@@ -51,14 +51,22 @@ assisted is selected, use the same conversion.
 `gain·y` thus becomes integral feedback again, the model's plant includes the integrator as it did in the original,
 and the limit bounds the output.
 
-## Stages
+## Assisted mode (per-slot integrator)
 
-1. **Standard mode** (this change). Validate against the original loPredCtrl run under the same disturbance and offload
-   settings.
-2. **Assisted mode** (later). Integrating per slot changes the lifted slot structure, the executed-prefix re-solve and
-   the `ripple` penalty. Options: integrate the per-frame mean like standard and add the zero-mean within-frame part
-   without integration, or a per-slot integrator with a reformulated lift. Decide after stage 1. Until then assisted
-   output is unchanged; enabling the integrator only affects standard output and the standard fit's inputs.
+User direction (2026-11-24): output stays on syncopation, and both modes integrate.
+
+- The DM worker integrates every slot: `s = mult_q·s − gain_q·delta`, clipped, with `gain_q = gain/q` and
+  `mult_q = mult^(1/q)`. Four slots of a constant delta then equal one mfilt frame (exactly when `mult = 1`), so the
+  configured `gain` and `mult` are per WFS frame in both modes and copy the deployed mfilt values. The per-slot delta is
+  the current assisted command (`gain·y` + phase prediction + per-slot probe).
+- The assisted fit is trained on per-slot deltas: `slotInputs()` converts the copied slot positions of each interval,
+  `−(p_n − mult_q·p_(n−1))/gain_q`, using the newest slot of the previous interval. `step()` passes the deltas to
+  `stepAssisted()` in place of the positions, so the multirate learner, lift and gains are unchanged in form.
+- The executed-slot prefix the worker passes to `MultirateDDSPC::command` uses the same conversion on the copied ring.
+- A slot without a current frame holds `s`. The state is zero while prediction is off, on re-enable, and on a
+  non-finite command.
+- With delta inputs, `ripple` penalizes delta variation within a frame rather than position variation. Re-tune it if
+  needed.
 
 ## Open items (operator)
 
@@ -71,18 +79,21 @@ and the limit bounds the output.
 
 ## Execution notes
 
-- Implementation in `loPredCtrlAcc_operational.hpp`: `[integrator]` configuration, `standardInput()` (mean copied
-  position, or the recovered delta), and the state update in `step()`. `standardInput()` runs on every decision so the
-  previous position stays current across WFS gaps and while assisted is selected; `stepAssisted()` uses the same input
-  for the frozen standard fit.
+- `loPredCtrlAcc_operational.hpp`: `[integrator]` configuration; `standardInput()` (mean copied position, or the
+  recovered frame delta); `slotInputs()` and `slotIntegrator()` for assisted; state updates in `step()` (standard) and
+  `assistedCandidate()` (assisted). Both input helpers run on every decision, so the previous positions stay current
+  across WFS gaps and mode changes; `stepAssisted()` uses the frame input for the frozen standard fit.
 - Config in `loPredCtrlAcc.conf` (and its byte-identical `examples/operational/` copy): section present, `enabled=false`.
 - Tests (`tests/rtc_controller_test.cpp`, tag `[integrator]`):
-  - "Standard integrator follows the mfilt law": state update, hold on all four slots, clipping, zero while prediction
-    is off, restart from zero, and delta recovery (unknown without a previous position).
-  - "Standard integrator corrects and removes a static offset": covariance and QR RLS, plant with a constant offset;
-    residual ratio 0.0028, mean residual about 3e-5 after freezing.
-- Results on `ASTR-LT-428.local`: `check-rtc-controller` 25/25, `check-operational-controls` 16/16 plus the config
-  unit tests, `check-operational-output` 5/5, and T1 `standard_equivalence.py --base HEAD`: 192000 rendered values
+  - Standard law: state update, hold on all four slots, clipping, zero while prediction is off, restart from zero,
+    frame-delta recovery.
+  - Standard closed loop with a constant offset (covariance and QR RLS): residual ratio 0.0028, mean residual ~3e-5.
+  - Assisted law: per-slot update with `gain/4` and `mult^(1/4)`, clipping, four slots equal one frame at `mult = 1`,
+    per-slot delta recovery.
+  - Assisted closed loop (test plant, ACC, offset 0.5/−0.3): mean residual −0.0067/−0.0002, residual/open power
+    0.27/0.017 after freezing.
+- Results on `ASTR-LT-428.local`: `check-rtc-controller` 27/27, `check-operational-controls` 16/16 plus the config
+  unit tests, `check-operational-output` 5/5, and T1 `standard_equivalence.py --base HEAD`: rendered standard values
   bit-for-bit identical with the integrator off.
 - Formatting: the repository's clang-format (Apple 21, `InsertBraces`) would reformat hundreds of existing lines in
   both files; only the changed line ranges were formatted. Whole-file formatting is left for a separate commit.

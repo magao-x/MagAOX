@@ -110,6 +110,8 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::processImage;
     using loPredCtrlAcc_operational::resetModels;
     using loPredCtrlAcc_operational::sensorHistory;
+    using loPredCtrlAcc_operational::slotInputs;
+    using loPredCtrlAcc_operational::slotIntegrator;
     using loPredCtrlAcc_operational::standardInput;
     using loPredCtrlAcc_operational::step;
     using loPredCtrlAcc_operational::validateModalOutput;
@@ -1003,6 +1005,149 @@ TEST_CASE( "Assisted DDSPC recalculates every DM slot from the newest ACC sample
     app.slot( app.m_slot++ ); // Sample anchor+1 has not arrived.
     REQUIRE( app.m_fastStats.m_lagging == lagging + 1 );
     REQUIRE( last.allFinite() );
+}
+
+/// \cond RTC_TEST_SUPPORT
+namespace
+{
+/// Assisted controller with a short history, the test plant's ACC and upstream lock.
+void assisted( Controller &app /**< [in,out] Application under test. */,
+               Plant      &plant /**< [in] Source of the ACC samples. */ )
+{
+    app.m_settings.m_history       = 6;
+    app.m_settings.m_accelChannels = 16;
+    app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
+    app.resetModels();
+    app.m_syncLocked = true;
+    app.m_source     = [&]( std::uint64_t n )
+    {
+        return plant.acc( n );
+    };
+}
+} // namespace
+/// \endcond
+
+/** \brief The assisted integrator applies the mfilt law on every DM slot and trains on per-slot deltas. */
+TEST_CASE( "Assisted integrator follows the per-slot mfilt law", "[rtc-controller][integrator]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::assistedCandidate;
+    MagAOX::app::loPredCtrlAcc_operational::slotInputs;
+    MagAOX::app::loPredCtrlAcc_operational::slotIntegrator;
+#endif
+    // clang-format on
+    Controller app( true );
+    Plant      plant( .02 );
+    assisted( app, plant );
+    app.m_integrate  = true;
+    app.m_intGain    = .5f;
+    app.m_intMult    = .9f;
+    app.m_intLimit   = .3f;
+    app.m_gain       = .2f;
+    app.m_predicting = true; // Untrained: each slot's delta is gain*y alone.
+
+    DDSPC::Matrix y = DDSPC::Matrix::Zero( 2, 1 );
+    for( int i = 0; i < 20; ++i ) // Fill the history; a zero residual keeps the state at zero.
+    {
+        REQUIRE( app.advanceAssisted( y ).isZero() );
+    }
+
+    const double  gain = .5 / 4, mult = std::pow( .9, .25 );
+    DDSPC::Matrix expected = DDSPC::Matrix::Zero( 2, 1 );
+    for( int i = 0; i < 8; ++i )
+    {
+        y << .4f + .2f * i, -.6f;
+        const auto slots = app.advanceAssisted( y );
+        for( int p = 0; p < 4; ++p )
+        {
+            expected = ( mult * expected - gain * .2f * y ).cwiseMax( -.3f ).cwiseMin( .3f );
+            REQUIRE( slots.col( p ).isApprox( expected, 1e-5f ) );
+        }
+    }
+    REQUIRE( expected( 0 ) == Approx( -.3f ) ); // The limit was reached.
+
+    // Four slots of a constant delta equal one mfilt frame when mult is 1.
+    app.m_intMult                   = 1;
+    const auto [slotGain, slotMult] = app.slotIntegrator();
+    REQUIRE( 4 * slotGain == Approx( app.m_intGain ) );
+    REQUIRE( slotMult == 1 );
+
+    // Training inputs: the per-slot deltas that produced the copied positions.
+    app.m_intMult = .9f;
+    app.resetModels();
+    DDSPC::Matrix applied( 2, 4 );
+    applied << .1f, .2f, .2f, .15f, 0, -.1f, -.05f, -.05f;
+    REQUIRE( app.slotInputs( applied ).size() == 0 ); // No previous position yet.
+    const DDSPC::Matrix previous = applied.col( 3 );
+    applied << .3f, .1f, .1f, 0, .2f, .2f, .1f, 0;
+    const auto deltas = app.slotInputs( applied );
+    REQUIRE( deltas.cols() == 4 );
+    for( int j = 0; j < 4; ++j )
+    {
+        const DDSPC::Matrix before = j ? DDSPC::Matrix( applied.col( j - 1 ) ) : previous;
+        REQUIRE( deltas.col( j ).isApprox( -( applied.col( j ) - float( mult ) * before ) / float( gain ), 1e-5f ) );
+    }
+}
+
+/** \brief With the integrator, assisted DDSPC learns from per-slot deltas and removes a constant offset. */
+TEST_CASE( "Assisted integrator corrects and removes a static offset", "[rtc-controller][integrator]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::assistedCandidate;
+    MagAOX::app::loPredCtrlAcc_operational::stepAssisted;
+#endif
+    // clang-format on
+    Controller app( true );
+    Plant      plant( .02 );
+    assisted( app, plant );
+    app.m_integrate = true;
+    app.m_intLimit  = 10;
+    app.m_gain      = .2f;
+    app.train( "1500,0.1,0.1" );
+
+    const std::array<double, 2> offset{ .5, -.3 };
+    DDSPC::Matrix               command = DDSPC::Matrix::Zero( 2, 1 ), y = DDSPC::Matrix::Zero( 2, 1 );
+    std::uint64_t               n = 0;
+    std::array<double, 2>       mean{}, variance{}, open{};
+    for( int i = 0; i < 3000; ++i )
+    {
+        if( i == 2000 )
+        {
+            app.freeze();
+            app.m_exploration.clear();
+        }
+
+        const auto slots = app.advanceAssisted( y );
+        REQUIRE( slots.allFinite() );
+        y.setZero();
+        for( int p = 0; p < slots.cols(); ++p, ++n )
+        {
+            auto e = plant.residual( n, command );
+            for( int axis = 0; axis < 2; ++axis )
+            {
+                e[axis] += offset[axis];
+                y( axis ) += e[axis] / slots.cols();
+                if( i >= 2500 )
+                {
+                    const double vibration = plant.vibration( n )[axis] + offset[axis];
+                    mean[axis] += e[axis] / 2000;
+                    variance[axis] += e[axis] * e[axis] / 2000;
+                    open[axis] += vibration * vibration / 2000;
+                }
+            }
+            command = slots.col( p );
+        }
+    }
+    INFO( "mean residual " << mean[0] << ", " << mean[1] << "; residual/open power " << variance[0] / open[0] << ", "
+                           << variance[1] / open[1] );
+    REQUIRE( app.m_multirate->status().m_ready );
+    for( int axis = 0; axis < 2; ++axis )
+    {
+        REQUIRE( std::abs( mean[axis] ) < .05 * std::abs( offset[axis] ) );
+        REQUIRE( variance[axis] < .5 * open[axis] );
+    }
 }
 
 /** \brief assisted_qualification names every failing condition and the upstream values behind it. */
