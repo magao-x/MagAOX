@@ -237,7 +237,7 @@ class ocam2KCtrl : public MagAOXApp<>,
     double                m_frameDelayFraction{ 1 };     ///< Inclusive warning excess in units of a frame period.
     std::filesystem::path m_frameDelayDirectory;         ///< Final dump directory, resolved during startup.
     ocamFrameDelay        m_frameDelay;                  ///< Ordinary-thread cadence and rolling-history state.
-    std::atomic<unsigned> m_frameDelayEnable{ ocamFrameDelay::allChecks }; ///< Independently enabled checks.
+    std::atomic<unsigned> m_frameDelayEnable{ ocamFrameDelay::allChecks }; ///< Warning mask initialized from config.
     std::optional<ocamFrameDelay::Snapshot> m_frameDelayRequest; ///< Manual request and worker fence, under INDI mutex.
     bool              m_frameDelayFenced{ false };  ///< Pending manual request has an acquisition sequence cutoff.
     uint64_t          m_frameDelayRequestId{ 0 };   ///< Last accepted manual snapshot request, under INDI mutex.
@@ -813,6 +813,15 @@ inline void ocam2KCtrl::setupConfig()
                 false,
                 "bool",
                 "Capture OCAM cadence and retain a rolling manual-reconfigure history." );
+    config.add( "frameDelay.warnings",
+                "",
+                "frameDelay.warnings",
+                argType::Required,
+                "frameDelay",
+                "warnings",
+                false,
+                "bool",
+                "Start with all frame-delay warnings enabled (default true)." );
     config.add( "frameDelay.historySec",
                 "",
                 "frameDelay.historySec",
@@ -921,6 +930,10 @@ inline int ocam2KCtrl::loadConfigImpl()
 
     dev::frameGrabber<ocam2KCtrl>::loadConfig( config );
     config( m_frameDelayEnabled, "frameDelay.enabled" );
+    bool warnings = true;
+    config( warnings, "frameDelay.warnings" );
+    m_frameDelayEnable.store( warnings ? ocamFrameDelay::allChecks : 0, std::memory_order_relaxed );
+
     double historySec = m_frameDelayHistorySec;
     config( historySec, "frameDelay.historySec" );
 
@@ -1039,12 +1052,14 @@ inline int ocam2KCtrl::initFrameDelay()
     m_indiP_frameDelayWarning.setRule( pcf::IndiProperty::AnyOfMany );
     m_indiP_frameDelayWarning.setState( INDI_OK );
 
-    for( const auto *name : ocamFrameDelay::names )
+    const auto enabled = m_frameDelayEnable.load( std::memory_order_relaxed );
+
+    for( size_t check = 0; check < ocamFrameDelay::checks; ++check )
     {
-        m_indiP_frameDelayEnable.add( pcf::IndiElement( name ) );
-        m_indiP_frameDelayEnable[name].setSwitchState( pcf::IndiElement::On );
-        m_indiP_frameDelayWarning.add( pcf::IndiElement( name ) );
-        m_indiP_frameDelayWarning[name].setSwitchState( pcf::IndiElement::Off );
+        const auto *name  = ocamFrameDelay::names[check];
+        const auto  state = enabled & ( 1u << check ) ? pcf::IndiElement::On : pcf::IndiElement::Off;
+        m_indiP_frameDelayEnable.add( pcf::IndiElement( name, state ) );
+        m_indiP_frameDelayWarning.add( pcf::IndiElement( name, pcf::IndiElement::Off ) );
     }
 
     if( registerIndiPropertyNew( m_indiP_frameDelayEnable, INDI_NEWCALLBACK( m_indiP_frameDelayEnable ) ) < 0 ||

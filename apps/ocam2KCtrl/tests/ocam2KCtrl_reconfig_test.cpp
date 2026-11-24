@@ -246,41 +246,71 @@ TEST_CASE( "ocam2KCtrl serializes requested modes with reconfiguration", "[ocam2
     REQUIRE( app.m_nextMode.empty() );
 }
 
-/// Only the explicit operator request creates a dump, and the hardware retry consumes that request once.
+/// Manual reconfigure saves history with either warning default, and a hardware retry consumes the request once.
 /** \ingroup ocam2KCtrl_reconfig_unit_test */
 TEST_CASE( "ocam2KCtrl dumps only explicit reconfigure requests", "[ocam2KCtrl][reconfig][ocamFrameDelay]" )
 {
     // clang-format off
     #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
     MagAOX::app::dev::stdCamera<MagAOX::app::ocam2KCtrl>::newCallBack_reconfigure;
+    MagAOX::app::ocam2KCtrl::loadConfigImpl;
+    MagAOX::app::ocam2KCtrl::initFrameDelay;
     MagAOX::app::ocam2KCtrl::onManualCameraReconfigure;
     MagAOX::app::ocam2KCtrl::updateFrameDelay;
     #endif
     // clang-format on
+    const bool warnings = GENERATE( true, false );
+    CAPTURE( warnings );
     resetStubState();
     outletHarness::Controller<ocam2KCtrl_test> app;
+    app.configText( warnings ? "[frameDelay]\nenabled=true\n" : "[frameDelay]\nenabled=true\nwarnings=false\n" );
+    REQUIRE( app.loadConfigImpl() == 0 );
     app.driver();
     configureStartupMode( app );
     setPoweredOn( app );
-    app.m_frameDelayEnabled   = true;
     app.m_frameDelayDirectory = app.m_directory.m_path;
     REQUIRE( app.initFrameDelay() == 0 );
     app.m_fgTiming.configure( 2, 32 );
     REQUIRE( app.createStandardIndiRequestSw( app.m_indiP_reconfig, "reconfigure" ) == 0 );
 
+    for( const auto *name : ocamFrameDelay::names )
+    {
+        CHECK( app.m_indiP_frameDelayEnable[name].getSwitchState() ==
+               ( warnings ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+    }
+
     pcf::IndiProperty enable( pcf::IndiProperty::Switch, app.configName(), "frame_delay_enable" );
     enable.add( pcf::IndiElement( "arrival", pcf::IndiElement::Off ) );
+
+    if( !warnings )
+    {
+        enable["arrival"].setSwitchState( pcf::IndiElement::On );
+        REQUIRE( app.newCallBack_m_indiP_frameDelayEnable( enable ) == 0 );
+        CHECK( app.m_frameDelayEnable.load() == 2u );
+        enable["arrival"].setSwitchState( pcf::IndiElement::Off );
+    }
+
     REQUIRE( app.newCallBack_m_indiP_frameDelayEnable( enable ) == 0 );
-    CHECK( app.m_frameDelayEnable.load() == ( ocamFrameDelay::allChecks & ~2u ) );
+    CHECK( app.m_frameDelayEnable.load() == ( warnings ? ocamFrameDelay::allChecks & ~2u : 0u ) );
 
     REQUIRE( app.reconfig() == 0 );
     CHECK_FALSE( app.m_frameDelayRequest );
     CHECK_FALSE( app.m_frameDelayWriter.valid() );
     REQUIRE( app.startAcquisition() == 0 );
     CHECK( app.m_fgTiming.observedRestart() == 1 );
-    app.m_fgTiming.begin( 2000 );
-    app.m_fgTiming.mark( MagAOX::fgTiming::Marker::waitReturn );
-    app.m_fgTiming.finish( MagAOX::fgTiming::Outcome::rejected );
+
+    for( long frame = 1; frame <= 2; ++frame )
+    {
+        app.m_fgTiming.begin( 2000 );
+        app.m_fgTiming.mark( MagAOX::fgTiming::Marker::waitReturn );
+        app.m_fgTiming.frame( frame );
+        app.m_fgTiming.published( { 1, frame * 1500000 }, { 1, 10000000 + frame * 500000 }, frame, 42 );
+        app.m_fgTiming.finish();
+    }
+
+    app.m_fgTiming.update();
+    CHECK( app.m_frameDelay.reading().elapsed[0] == 1500000 );
+    CHECK( app.m_frameDelay.reading().latched == ( warnings ? 1u : 0u ) );
 
     pcf::IndiProperty request( pcf::IndiProperty::Switch, app.configName(), "reconfigure" );
     request.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
@@ -294,7 +324,7 @@ TEST_CASE( "ocam2KCtrl dumps only explicit reconfigure requests", "[ocam2KCtrl][
     g_edtStubState.readcfgReturn = -1;
     REQUIRE( app.reconfig() == -1 );
     REQUIRE( app.m_frameDelayFenced );
-    CHECK( app.m_frameDelayRequest->boundary == 1 );
+    CHECK( app.m_frameDelayRequest->boundary == 2 );
     CHECK( app.m_fgTiming.observedRestart() == 1 );
     app.m_fgTiming.update();
     app.updateFrameDelay();
@@ -317,7 +347,7 @@ TEST_CASE( "ocam2KCtrl dumps only explicit reconfigure requests", "[ocam2KCtrl][
     g_edtStubState.readcfgReturn = 0;
     REQUIRE( app.reconfig() == 0 );
     REQUIRE( app.startAcquisition() == 0 );
-    CHECK( app.m_fgTiming.observedRestart() == 2 );
+    CHECK( app.m_fgTiming.observedRestart() == 3 );
     app.updateFrameDelay();
     CHECK_FALSE( app.m_frameDelayWriter.valid() );
     CHECK( dumps() == 1 );

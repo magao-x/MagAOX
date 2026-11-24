@@ -127,6 +127,7 @@ ANSWER: yes.
 - Built `ocam2KCtrl` with the archived EDT SDK on `mx11`. Five offline suites passed, covering the cadence helper and logger, OCAM reconfiguration and controller paths, framegrabber timing, and framegrabber publication integration. Total coverage was 1,911 assertions across 74 test cases.
 - Loaded 142 rules using the production labrules parser, checked all six camwfs rules with synthetic INDI switch states, and confirmed the six warning keys in the rtimv configuration. The CSV exporter preserved clock and epoch data and rejected a truncated file.
 - A synthetic 900-second history at 5,962 FPS wrote all 5,365,800 rows in 257,558,536 bytes (246 MiB). The isolated test peaked at about 255 MiB of RSS. This measurement covers the history helper and writer on the workstation. Instrument A/B timing remains open.
+- Added `frameDelay.warnings=false` to start with all six warning enables Off while continuing cadence telemetry and manual dumps. The default keeps all six enabled at startup, and the existing INDI switches can still change individual enables during operation.
 
 ## Follow-up and Edge Cases
 
