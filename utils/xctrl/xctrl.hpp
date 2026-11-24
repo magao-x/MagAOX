@@ -106,62 +106,6 @@ typedef std::map<std::string, std::string> confMap;
 /// systemd directives and their values, keyed by directive name
 typedef std::map<std::string, std::string> directiveMap;
 
-/// Kinds of setting values, for validation
-enum class valueKind
-{
-    seconds, ///< a non-negative number of seconds, or infinity
-    count,   ///< a non-negative integer
-    restart, ///< a systemd Restart= policy
-    signal   ///< a signal name allowed for KillSignal=
-};
-
-/// One `[systemd]` configuration key and the systemd directive it sets
-/**
- * \ingroup xctrl
- */
-struct settingDef
-{
-    const char *key;         ///< key in the `[systemd]` section of an app or magaox.conf
-    const char *directive;   ///< the systemd directive it sets
-    bool        unitSection; ///< true if the directive belongs in [Unit], false for [Service]
-    valueKind   kind;        ///< how its value is validated
-};
-
-/// The `[systemd]` configuration keys whose values xctrl checks, in the order they are written to units
-/** Any other `[Unit]` or `[Service]` directive may be set too; see systemdSettings().
- *
- * \ingroup xctrl
- */
-inline const std::vector<settingDef> &settingDefs()
-{
-    static const std::vector<settingDef> defs = {
-        { "restart", "Restart", false, valueKind::restart },
-        { "restartSec", "RestartSec", false, valueKind::seconds },
-        { "startLimitBurst", "StartLimitBurst", true, valueKind::count },
-        { "startLimitIntervalSec", "StartLimitIntervalSec", true, valueKind::seconds },
-        { "watchdogSec", "WatchdogSec", false, valueKind::seconds },
-        { "timeoutStartSec", "TimeoutStartSec", false, valueKind::seconds },
-        { "timeoutStopSec", "TimeoutStopSec", false, valueKind::seconds },
-        { "killSignal", "KillSignal", false, valueKind::signal } };
-    return defs;
-}
-
-/// The template defaults, before magaox.conf `[systemd]` settings
-/**
- * \ingroup xctrl
- */
-inline directiveMap defaultDirectives()
-{
-    return { { "Restart", "always" },
-             { "RestartSec", "5" },
-             { "StartLimitBurst", "10" },
-             { "StartLimitIntervalSec", "600" },
-             { "WatchdogSec", "10" },
-             { "TimeoutStartSec", "120" },
-             { "TimeoutStopSec", "30" },
-             { "KillSignal", "SIGTERM" } };
-}
-
 /// The section of each systemd directive a service can set: true for [Unit], false for [Service]
 typedef std::map<std::string, bool> directiveSections;
 
@@ -194,10 +138,6 @@ std::string trim( const std::string &s /**< [in] the string */ );
 
 /// Whether s is a valid app or executable name: letters, digits, `_`, `.` and `-`, starting with a letter or digit
 bool validName( const std::string &s /**< [in] the name */ );
-
-/// Whether value is valid for a setting of the given kind
-bool validValue( valueKind          kind, /**< [in] the kind of setting */
-                 const std::string &value /**< [in] the value */ );
 
 /// Parse a proclist
 /** Each line `NAME EXECUTABLE` is a process started automatically.  A line starting with `#!`, with or without
@@ -252,17 +192,18 @@ double timespanSeconds( const std::string &span /**< [in] the time span */ );
 /// The systemd directives `[systemd]` sections may set, one name per line, `#` comments
 typedef std::set<std::string> allowList;
 
-/// Read a directive allow list, e.g. /etc/magaox/systemd-directives.txt
+/// Read a directive allow list, e.g. /etc/magaox/systemd-directives.local.txt
 /**
  * \returns the directive names; names that are not plain words are skipped
  */
 allowList parseAllowList( std::istream &in /**< [in] the list */ );
 
 /// Collect systemd directives from the `[systemd]` section of a configuration
-/** Each key is a systemd directive, its first letter in either case: `runtimeMaxSec = 20` sets `RuntimeMaxSec=20`.
+/** Each key is a systemd directive, in any case: `runtimeMaxSec = 20` and `cpuAffinity = 2` set `RuntimeMaxSec=20` and
+ * `CPUAffinity=2`, spelled as this systemd's list has them.
  * A key is used only if it is in the allow list, is a directive this systemd has in [Unit] or [Service], is not
- * denied (deniedDirective()), is not set twice, and its value is valid: settingDefs() keys are checked, others need
- * only be free of control characters.  Any other is reported in warnings and ignored.
+ * denied (deniedDirective()), is not set twice, and its value has no control characters.  Any other is reported in
+ * warnings and ignored.  Values are checked by systemd itself, in xCtrl::dropBadValues().
  */
 void systemdSettings( directiveMap             &dirs,     /**< [in.out] directives, updated with the settings found */
                       std::vector<std::string> &warnings, /**< [in.out] directives ignored, and why, appended to */
@@ -272,17 +213,24 @@ void systemdSettings( directiveMap             &dirs,     /**< [in.out] directiv
                       const directiveSections  &sections = systemdDirectives() /**< [in] [optional] the directives
                                                                                   systemd accepts, for tests */ );
 
-/// Collect the systemd directives of one app from the `[systemd]` section of its configuration
-/** Apps that do not notify get Type=simple and no watchdog.
+/// The systemd directives of one app: the role's, from magaox.conf, with the app's own .conf settings in their place
+/** All are written to the app's drop-in, none to the template, so each directive is set in one file only: an app's
+ * value replaces the role's, even for directives systemd merges across files, e.g. CPUAffinity.  Apps that do not
+ * notify (`-` prefix) get Type=simple and no watchdog, whatever is set.
  *
- * \returns the directives that differ from the template
+ * \returns the directives
  */
-directiveMap appDirectives( const appEntry           &app,      /**< [in] the app */
-                            const confMap            &conf,     /**< [in] the app's configuration */
-                            std::vector<std::string> &warnings, /**< [in.out] directives ignored, appended to */
-                            const allowList          &allow,    /**< [in] the directives that may be set */
-                            const directiveSections  &sections = systemdDirectives() /**< [in] [optional] the
-                                                                                    directives systemd accepts */ );
+directiveMap appDirectives( const appEntry     &app, /**< [in] the app */
+                            const directiveMap &own, /**< [in] the app's settings, from its .conf */
+                            const directiveMap &role /**< [in] the role's settings, from magaox.conf */ );
+
+/// The `systemd-analyze verify` messages about lines of a unit file, the lines systemd ignores
+/** systemd reports a value it can not use as `PATH:LINE: Failed to parse ..., ignoring: VALUE`.
+ *
+ * \returns line number: message, for each message about a line of path that says it is ignored
+ */
+std::map<int, std::string> parseVerify( const std::string &output, /**< [in] the output of systemd-analyze verify */
+                                        const std::string &path /**< [in] the unit file verified */ );
 
 /// Names of the units of a role
 /**
@@ -309,7 +257,7 @@ struct unitNames
     std::string appName( const std::string &unit /**< [in] a unit name */ ) const;
 };
 
-/// Append "Directive=value" lines to os for the directives of one section, Type first
+/// Append "Directive=value" lines to os for the directives of one section, Type first, then by name
 void appendDirectives( std::ostringstream      &os,          /**< [in.out] the unit being generated */
                        const directiveMap      &dirs,        /**< [in] the directives */
                        bool                     unitSection, /**< [in] true for [Unit], false for [Service] */
@@ -317,12 +265,13 @@ void appendDirectives( std::ostringstream      &os,          /**< [in.out] the u
                                                                                   sections, for tests */ );
 
 /// Generate the service template of a role
-/**
+/** It sets what xctrl needs, and no `[systemd]` settings: those are in each app's drop-in (appDirectives()), and
+ * where neither magaox.conf nor the app's .conf sets a directive, systemd's own default applies.
+ *
  * \returns the unit file contents
  */
-std::string templateUnit( const unitNames    &units, /**< [in] the role's unit names */
-                          const directiveMap &dirs,  /**< [in] the default directives, with magaox.conf settings */
-                          const std::string  &envFile /**< [in] optional environment file for all apps */ );
+std::string templateUnit( const unitNames   &units, /**< [in] the role's unit names */
+                          const std::string &envFile /**< [in] optional environment file for all apps */ );
 
 /// Generate the target of a role
 /**
@@ -457,12 +406,17 @@ class xCtrl
     bool      m_allowRead{ false };   ///< the directive allow list has been read
     bool      m_allowOk{ false };     ///< it was there, and safe to use
     allowList m_allow;                ///< the directive allow list
-    std::string              m_allowError;               ///< why it can not be used
-    bool                     m_proclistChecked{ false }; ///< warnIfProclistChanged() has run
-    bool                     m_rolesChecked{ false };    ///< warnOtherRoles() has run
-    std::string              m_cmdLine;                  ///< the command line, for the log
-    std::string              m_verb;                     ///< the command
-    std::vector<std::string> m_names;                    ///< the app names given
+    std::string m_allowError;         ///< why it can not be used
+
+    /// systemd's verdict on each `[systemd]` value checked: "Directive=value": "" if valid, else systemd's message
+    std::map<std::string, std::string> m_valueChecks;
+
+    bool        m_valuesUnchecked{ false }; ///< systemd-analyze is missing, so values go to systemd unchecked
+    bool        m_proclistChecked{ false }; ///< warnIfProclistChanged() has run
+    bool        m_rolesChecked{ false };    ///< warnOtherRoles() has run
+    std::string m_cmdLine;                  ///< the command line, for the log
+    std::string m_verb;                     ///< the command
+    std::vector<std::string> m_names;       ///< the app names given
 
     ///@}
 
@@ -602,17 +556,31 @@ class xCtrl
     int stopApps( const std::vector<std::string> &names /**< [in] the app names */ );
 
     /// The directive allow list, read once: it must exist, and, outside tests, be owned by root and writable by
-    /// root only, as must its directory
+    /// root only, as must its directory; and this systemd's list of directives must be known
     /**
      * \returns the list, or nullptr with the reason in m_allowError
      */
     const allowList *allowedDirectives();
 
-    /// The role-wide directives: the template defaults with magaox.conf `[systemd]` settings
+    /// Have systemd check the `[systemd]` values not checked yet, all at once, with `systemd-analyze verify` on a
+    /// scratch unit holding them, run as the caller
+    /** The results go to m_valueChecks.  Without systemd-analyze, m_valuesUnchecked is set and values pass.
+     */
+    void checkValues( const std::vector<directiveMap> &sets /**< [in] the settings to check */ );
+
+    /// Check the `[systemd]` values of magaox.conf and of these apps' .conf in one systemd-analyze run
+    void checkConfValues( const std::vector<std::string> &names /**< [in] the app names */ );
+
+    /// Remove the directives whose values systemd does not accept, with a warning for each
+    void dropBadValues( directiveMap             &dirs,   /**< [in.out] the settings */
+                        const std::string        &source, /**< [in] whose settings, for messages */
+                        std::vector<std::string> &warnings /**< [in.out] directives ignored, appended to */ );
+
+    /// The role-wide directives: the `[systemd]` settings of magaox.conf
     directiveMap roleDirectives( std::vector<std::string> &warnings, /**< [in.out] directives ignored, appended to */
                                  const allowList          &allow /**< [in] the directives that may be set */ );
 
-    /// Check that an app can be registered, and work out its systemd directives from its .conf
+    /// Check that an app can be registered, and work out its systemd directives from magaox.conf and its .conf
     /**
      * \returns true if it can, false with the reasons appended to errors
      */
@@ -621,6 +589,7 @@ class xCtrl
                      std::vector<std::string> &errors,   /**< [in.out] why it can not be registered, appended to */
                      std::vector<std::string> &warnings, /**< [in.out] directives ignored, appended to */
                      const allowList          &allow,    /**< [in] the directives that may be set */
+                     const directiveMap       &role,     /**< [in] the role's directives, roleDirectives() */
                      bool                     *hasConf = nullptr /**< [out] [optional] whether it has a .conf */ );
 
     /// Find the role's INDI server and ssh tunnels among apps, for the drop-ins' ordering
@@ -779,48 +748,6 @@ inline bool validName( const std::string &s )
         }
     }
     return true;
-}
-
-inline bool validValue( valueKind kind, const std::string &v )
-{
-    static const std::set<std::string> restarts = {
-        "no", "always", "on-success", "on-failure", "on-abnormal", "on-abort", "on-watchdog" };
-    static const std::set<std::string> signals = {
-        "SIGTERM", "SIGINT", "SIGQUIT", "SIGHUP", "SIGUSR1", "SIGUSR2", "SIGKILL" };
-
-    switch( kind )
-    {
-    case valueKind::seconds:
-    {
-        if( v == "infinity" )
-        {
-            return true;
-        }
-        // digits with at most one decimal point, not first or last: 5, 0.5, 120
-        bool dot = false;
-        for( size_t i = 0; i < v.size(); ++i )
-        {
-            if( v[i] == '.' && !dot && i > 0 && i + 1 < v.size() )
-            {
-                dot = true;
-            }
-            else if( !isdigit( static_cast<unsigned char>( v[i] ) ) )
-            {
-                return false;
-            }
-        }
-        return !v.empty();
-    }
-    case valueKind::count:
-        // digits only, fewer than 10 so the count fits an int
-        return !v.empty() && v.size() < 10 &&
-               std::all_of( v.begin(), v.end(), []( char c ) { return isdigit( static_cast<unsigned char>( c ) ); } );
-    case valueKind::restart:
-        return restarts.count( v ) > 0;
-    case valueKind::signal:
-        return signals.count( v ) > 0;
-    }
-    return false;
 }
 
 inline proclist parseProclist( std::istream &in )
@@ -1222,13 +1149,13 @@ inline void systemdSettings( directiveMap             &dirs,
         {
             continue;
         }
+        // the directive as systemd spells it, whatever the key's case: cpuAffinity is CPUAffinity; one systemd does
+        // not have keeps the key, with its first letter in upper case: fooSec is FooSec
         std::string key = kv.first.substr( 8 ), d = key;
-        d[0] = static_cast<char>( toupper( static_cast<unsigned char>( d[0] ) ) ); // watchdogSec: WatchdogSec
-
-        const settingDef *def = nullptr;
-        for( const auto &sd : settingDefs() )
+        d[0] = static_cast<char>( toupper( static_cast<unsigned char>( d[0] ) ) );
+        for( const auto &sd : sections )
         {
-            def = d == sd.directive ? &sd : def;
+            d = lower( sd.first ) == lower( key ) ? sd.first : d;
         }
 
         std::string why;
@@ -1243,16 +1170,15 @@ inline void systemdSettings( directiveMap             &dirs,
         }
         else if( !allow.count( d ) )
         {
-            why = " directive for " + source + " not in systemd-directives.txt allow list";
+            why = " directive for " + source + " not in systemd-directives.local.txt allow list";
         }
-        else if( !def && !sections.count( d ) )
+        else if( !sections.count( d ) )
         {
             why = " directive for " + source + " does not exist on this version of systemd";
         }
-        else if( def ? !validValue( def->kind, kv.second )
-                     : std::any_of( kv.second.begin(),
-                                    kv.second.end(),
-                                    []( char c ) { return iscntrl( static_cast<unsigned char>( c ) ); } ) )
+        else if( std::any_of( kv.second.begin(),
+                              kv.second.end(),
+                              []( char c ) { return iscntrl( static_cast<unsigned char>( c ) ); } ) )
         {
             // a control character, e.g. a newline, could start another directive in the unit file
             why = " = " + kv.second + " for " + source + " is an invalid value";
@@ -1270,14 +1196,13 @@ inline void systemdSettings( directiveMap             &dirs,
     }
 }
 
-inline directiveMap appDirectives( const appEntry           &app,
-                                   const confMap            &conf,
-                                   std::vector<std::string> &warnings,
-                                   const allowList          &allow,
-                                   const directiveSections  &sections )
+inline directiveMap appDirectives( const appEntry &app, const directiveMap &own, const directiveMap &role )
 {
-    directiveMap dirs;
-    systemdSettings( dirs, warnings, conf, app.name, allow, sections );
+    directiveMap dirs = role;
+    for( const auto &kv : own )
+    {
+        dirs[kv.first] = kv.second;
+    }
 
     if( !app.notifies() )
     {
@@ -1286,6 +1211,27 @@ inline directiveMap appDirectives( const appEntry           &app,
     }
 
     return dirs;
+}
+
+inline std::map<int, std::string> parseVerify( const std::string &output, const std::string &path )
+{
+    std::map<int, std::string> bad;
+    std::istringstream         in( output );
+    for( std::string l; std::getline( in, l ); )
+    {
+        // PATH:LINE: message
+        if( l.compare( 0, path.size() + 1, path + ":" ) != 0 )
+        {
+            continue;
+        }
+        size_t c = l.find( ':', path.size() + 1 );
+        int    n = atoi( l.c_str() + path.size() + 1 );
+        if( c != std::string::npos && n > 0 && l.find( "ignoring" ) != std::string::npos )
+        {
+            bad[n] = trim( l.substr( c + 1 ) );
+        }
+    }
+    return bad;
 }
 
 inline unitNames::unitNames( const std::string &r ) : role( r ), lrole( lower( r ) )
@@ -1329,40 +1275,28 @@ inline void appendDirectives( std::ostringstream      &os,
         os << "Type=" << dirs.at( "Type" ) << "\n";
     }
 
-    // the checked settings in their usual order, so units do not change as other directives come and go
-    std::set<std::string> done{ "Type" };
-    for( const auto &d : settingDefs() )
-    {
-        if( d.unitSection == unitSection && dirs.count( d.directive ) )
-        {
-            os << d.directive << "=" << dirs.at( d.directive ) << "\n";
-        }
-        done.insert( d.directive );
-    }
-
-    // then any other, in its section; [Service] if systemd's list is not known
+    // then the others, in their section; [Service] if systemd's list does not have it
     for( const auto &kv : dirs )
     {
         auto it = sections.find( kv.first );
-        if( !done.count( kv.first ) && ( it != sections.end() && it->second ) == unitSection )
+        if( kv.first != "Type" && ( it != sections.end() && it->second ) == unitSection )
         {
             os << kv.first << "=" << kv.second << "\n";
         }
     }
 }
 
-inline std::string templateUnit( const unitNames &units, const directiveMap &dirs, const std::string &envFile )
+inline std::string templateUnit( const unitNames &units, const std::string &envFile )
 {
     std::ostringstream os;
-    os << "# Generated by xctrl sync for MAGAOX_ROLE=" << units.role << ".  Do not edit: set [systemd] in\n"
-       << "# magaox.conf, or in an app's .conf for that app, then rerun xctrl sync.\n"
+    os << "# Generated by xctrl sync for MAGAOX_ROLE=" << units.role << ".  Do not edit.  The [systemd] settings of\n"
+       << "# magaox.conf, and of each app's .conf, are in the apps' drop-ins.\n"
        << "[Unit]\n"
        << "Description=MagAO-X app %i (role " << units.role << ")\n"
        << "PartOf=" << units.target() << "\n"
        << "Wants=network-online.target\n"
-       << "After=network-online.target\n";
-    appendDirectives( os, dirs, true );
-    os << "\n[Service]\n"
+       << "After=network-online.target\n"
+       << "\n[Service]\n"
        << "Type=notify\n"
        << "NotifyAccess=main\n"
        << "User=xsup\n"
@@ -1371,9 +1305,8 @@ inline std::string templateUnit( const unitNames &units, const directiveMap &dir
        << "Environment=PYTHONUNBUFFERED=1\n"
        << "EnvironmentFile=-" << envFile << "\n"
        << "# Each registered app's drop-in sets its ExecStart; an unregistered instance fails\n"
-       << "ExecStart=/bin/false\n";
-    appendDirectives( os, dirs, false );
-    os << "KillMode=control-group\n"
+       << "ExecStart=/bin/false\n"
+       << "KillMode=control-group\n"
        << "SyslogIdentifier=%i\n"
        << "\n[Install]\n"
        << "WantedBy=" << units.target() << "\n";
@@ -1400,7 +1333,7 @@ inline std::string dropIn( const unitNames                &units,
                            const std::vector<std::string> &tunnels )
 {
     std::ostringstream os;
-    os << "# Generated by xctrl sync from proclist_" << units.role << ".txt and " << app.name << ".conf.\n"
+    os << "# Generated by xctrl sync from proclist_" << units.role << ".txt, magaox.conf and " << app.name << ".conf.\n"
        << "# Do not edit: change those, then rerun xctrl sync.\n"
        << "[Unit]\n";
     if( app.isServer() )
@@ -1644,7 +1577,7 @@ inline std::string xCtrl::proclistPath() const
 
 inline std::string xCtrl::allowListPath() const
 {
-    return m_sysroot + "/etc/magaox/systemd-directives.txt";
+    return m_sysroot + "/etc/magaox/systemd-directives.local.txt";
 }
 
 inline void xCtrl::usage( std::ostream &os ) const
@@ -1673,7 +1606,7 @@ inline void xCtrl::usage( std::ostream &os ) const
           "                         new and changed apps, set autostart from #!, unregister apps no\n"
           "                         longer in the proclist unless they are running; starts and stops\n"
           "                         nothing.  [systemd] directives must be in the root-owned allow list\n"
-          "                         /etc/magaox/systemd-directives.txt\n"
+          "                         /etc/magaox/systemd-directives.local.txt\n"
           "  add NAME EXECUTABLE    add the app to the proclist disabled (#!), and register it; it needs\n"
           "                         NAME.conf; add -- -NAME EXECUTABLE for an app without a watchdog\n"
           "  enable NAME...|--all   autostart on: remove the app's #! in the proclist (adding it if\n"
@@ -2262,18 +2195,147 @@ inline const allowList *xCtrl::allowedDirectives()
         return nullptr;
     }
 
+    // which directives exist, and in which section, comes from systemd itself
+    if( systemdDirectives().empty() )
+    {
+        m_allowError = "cannot read the directives of this host's systemd (systemd --dump-configuration-items)";
+        return nullptr;
+    }
+
     std::ifstream f( path );
     m_allow   = parseAllowList( f );
     m_allowOk = true;
     return &m_allow;
 }
 
+inline void xCtrl::checkValues( const std::vector<directiveMap> &sets )
+{
+    static const char *analyze = []() -> const char *
+    {
+        for( const char *p : { "/usr/bin/systemd-analyze", "/bin/systemd-analyze" } )
+        {
+            if( access( p, X_OK ) == 0 )
+            {
+                return p;
+            }
+        }
+        return nullptr;
+    }();
+
+    // a scratch unit: each value not checked yet on a line of its own, in its section
+    const directiveSections &sections = systemdDirectives();
+    std::vector<std::string> unitLines{ "[Unit]" }, serviceLines{ "[Service]", "ExecStart=/bin/true" };
+    std::set<std::string>    added;
+    for( const auto &set : sets )
+    {
+        for( const auto &kv : set )
+        {
+            std::string line = kv.first + "=" + kv.second;
+            if( !m_valueChecks.count( line ) && added.insert( line ).second )
+            {
+                auto it = sections.find( kv.first );
+                ( it != sections.end() && it->second ? unitLines : serviceLines ).push_back( line );
+            }
+        }
+    }
+    if( added.empty() )
+    {
+        return;
+    }
+    for( const auto &l : added )
+    {
+        m_valueChecks[l] = "";
+    }
+    if( !analyze )
+    {
+        m_valuesUnchecked = true;
+        return;
+    }
+
+    // written and verified as the caller, in a directory of its own
+    char dir[] = "/tmp/xctrl.XXXXXX";
+    if( !mkdtemp( dir ) )
+    {
+        m_valuesUnchecked = true;
+        return;
+    }
+    std::string path = std::string( dir ) + "/xctrl-check.service", out;
+    {
+        std::ofstream f( path );
+        for( const auto *lines : { &unitLines, &serviceLines } )
+        {
+            for( const auto &l : *lines )
+            {
+                f << l << "\n";
+            }
+        }
+    }
+    runCommand( { analyze, "verify", path }, &out, true, true );
+    unlink( path.c_str() );
+    rmdir( dir );
+
+    // line n of the unit: the [Unit] lines, then the [Service] lines
+    for( const auto &kv : parseVerify( out, path ) )
+    {
+        size_t i = kv.first - 1;
+        if( i < unitLines.size() + serviceLines.size() )
+        {
+            const std::string &line = i < unitLines.size() ? unitLines[i] : serviceLines[i - unitLines.size()];
+            if( m_valueChecks.count( line ) )
+            {
+                m_valueChecks[line] = kv.second;
+            }
+        }
+    }
+}
+
+inline void xCtrl::checkConfValues( const std::vector<std::string> &names )
+{
+    const allowList *allow = allowedDirectives();
+    if( !allow )
+    {
+        return;
+    }
+    std::vector<std::string>  ignored; // reported where the settings are used
+    std::vector<directiveMap> sets( 1 );
+    std::string               cfgDir = m_top + "/" + MAGAOX_configRelPath;
+    confMap                   gconf;
+    readConf( gconf, cfgDir + "/" + MAGAOX_globalConfig );
+    systemdSettings( sets[0], ignored, gconf, MAGAOX_globalConfig, *allow );
+    for( const auto &n : names )
+    {
+        confMap c;
+        sets.emplace_back();
+        readConf( c, cfgDir + "/" + n + ".conf" );
+        systemdSettings( sets.back(), ignored, c, n, *allow );
+    }
+    checkValues( sets );
+}
+
+inline void xCtrl::dropBadValues( directiveMap &dirs, const std::string &source, std::vector<std::string> &warnings )
+{
+    checkValues( { dirs } );
+    for( auto it = dirs.begin(); it != dirs.end(); )
+    {
+        const std::string &why = m_valueChecks[it->first + "=" + it->second];
+        if( why.empty() )
+        {
+            ++it;
+            continue;
+        }
+        warnings.push_back( "[systemd] " + it->first + " = " + it->second + " for " + source +
+                            " is an invalid value (systemd: " + why + "); ignoring directive" );
+        it = dirs.erase( it );
+    }
+}
+
 inline directiveMap xCtrl::roleDirectives( std::vector<std::string> &warnings, const allowList &allow )
 {
-    directiveMap dirs = defaultDirectives();
+    directiveMap dirs;
     confMap      gconf;
     readConf( gconf, m_top + "/" + MAGAOX_configRelPath + "/" + MAGAOX_globalConfig );
     systemdSettings( dirs, warnings, gconf, MAGAOX_globalConfig, allow );
+    dropBadValues( dirs, MAGAOX_globalConfig, warnings );
     return dirs;
 }
 
@@ -2282,6 +2344,7 @@ inline bool xCtrl::prepareApp( const appEntry           &app,
                                std::vector<std::string> &errors,
                                std::vector<std::string> &warnings,
                                const allowList          &allow,
+                               const directiveMap       &role,
                                bool                     *hasConf )
 {
     std::string exe = m_top + "/bin/" + app.exec;
@@ -2298,7 +2361,10 @@ inline bool xCtrl::prepareApp( const appEntry           &app,
     {
         *hasConf = found;
     }
-    dirs = appDirectives( app, c, warnings, allow );
+    directiveMap own;
+    systemdSettings( own, warnings, c, app.name, allow );
+    dropBadValues( own, app.name, warnings );
+    dirs = appDirectives( app, own, role );
     return true;
 }
 
@@ -2576,7 +2642,8 @@ inline int xCtrl::registerApp( const appEntry &app )
         say( msgLevel::error ) << m_allowError << "; " << app.name << " not registered";
         return -1;
     }
-    bool ok = prepareApp( app, dirs, errors, warnings, *allow );
+    std::vector<std::string> ignored; // magaox.conf's, reported by sync
+    bool                     ok = prepareApp( app, dirs, errors, warnings, *allow, roleDirectives( ignored, *allow ) );
     for( const auto &w : warnings )
     {
         say( msgLevel::warning ) << w;
@@ -2674,7 +2741,7 @@ inline settingsState xCtrl::checkSettings( const appEntry                     &a
         st.errors.push_back( m_allowError );
         return st;
     }
-    if( !prepareApp( app, dirs, st.errors, ignored, *allow ) )
+    if( !prepareApp( app, dirs, st.errors, ignored, *allow, role ) )
     {
         return st;
     }
@@ -2685,7 +2752,7 @@ inline settingsState xCtrl::checkSettings( const appEntry                     &a
     st.fileStale = !sameContent( st.path, st.content );
     st.loadStale = p["NeedDaemonReload"] == "yes";
     st.running   = p["ActiveState"] == "active" || p["ActiveState"] == "activating" || p["ActiveState"] == "reloading";
-    st.wdWant    = timespanSeconds( dirs.count( "WatchdogSec" ) ? dirs["WatchdogSec"] : role.at( "WatchdogSec" ) );
+    st.wdWant    = dirs.count( "WatchdogSec" ) ? timespanSeconds( dirs["WatchdogSec"] ) : 0; // systemd's default
     if( !st.running )
     {
         return st;
@@ -2723,6 +2790,7 @@ inline void xCtrl::warnOutdatedRunning( const std::vector<std::string>          
     {
         return; // without it, what sync would register is not known
     }
+    checkConfValues( names );
     directiveMap role = roleDirectives( ignored, *allow );
     registeredOrdering( server, tunnels );
 
@@ -2776,12 +2844,13 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
     std::string              server;
     std::vector<std::string> tunnels, ignored, names;
     registeredOrdering( server, tunnels );
-    directiveMap role = roleDirectives( ignored, *allow );
     for( const auto &a : apps )
     {
         names.push_back( a.name );
     }
-    auto props = showProps( names );
+    checkConfValues( names );
+    directiveMap role  = roleDirectives( ignored, *allow );
+    auto         props = showProps( names );
 
     for( const auto &a : apps )
     {
@@ -2964,7 +3033,21 @@ inline int xCtrl::doSync( bool summary )
         }
     }
 
-    // role-wide defaults, from magaox.conf [systemd]
+    // systemd checks the values of magaox.conf and every app's .conf at once; then the role-wide settings
+    std::vector<std::string> listedNames;
+    for( const auto *list : { &pl.apps, &pl.disabled } )
+    {
+        for( const auto &a : *list )
+        {
+            listedNames.push_back( a.name );
+        }
+    }
+    checkConfValues( listedNames );
+    if( m_valuesUnchecked )
+    {
+        warnings.push_back( "systemd-analyze not found: [systemd] values are not checked, and systemd ignores any it "
+                            "can not use when it loads the units" );
+    }
     std::string  cfgDir = m_top + "/" + MAGAOX_configRelPath;
     directiveMap gdirs  = roleDirectives( warnings, *allow );
 
@@ -2998,7 +3081,7 @@ inline int xCtrl::doSync( bool summary )
         directiveMap d;
         bool         hasConf = false;
         size_t       n       = errors.size();
-        if( !prepareApp( app, d, errors, warnings, *allow, &hasConf ) )
+        if( !prepareApp( app, d, errors, warnings, *allow, gdirs, &hasConf ) )
         {
             errors.insert( errors.begin() + n,
                            "proclist line " + std::to_string( app.line ) + ": " + app.name + " not (re)registered:" );
@@ -3023,7 +3106,7 @@ inline int xCtrl::doSync( bool summary )
         }
         directiveMap d;
         size_t       n = errors.size();
-        if( !prepareApp( app, d, errors, warnings, *allow ) )
+        if( !prepareApp( app, d, errors, warnings, *allow, gdirs ) )
         {
             errors.insert( errors.begin() + n,
                            "proclist line " + std::to_string( app.line ) + ": " + app.name + " not (re)registered:" );
@@ -3087,8 +3170,8 @@ inline int xCtrl::doSync( bool summary )
     // write only what changed: the role's template and target, then each app's drop-in
     int  rc    = 0;
     bool wrote = false;
-    for( const auto &f : { std::make_pair( u.templ(), templateUnit( u, gdirs, envFile() ) ),
-                           std::make_pair( u.target(), targetUnit( u ) ) } )
+    for( const auto &f :
+         { std::make_pair( u.templ(), templateUnit( u, envFile() ) ), std::make_pair( u.target(), targetUnit( u ) ) } )
     {
         int w = writeFile( unitDir() + "/" + f.first, f.second, 0644 );
         rc |= w < 0;
@@ -3261,6 +3344,7 @@ inline bool xCtrl::syncNeeded()
     std::string              server;
     std::vector<std::string> tunnels, ignored;
     registeredOrdering( server, tunnels );
+    checkConfValues( registered() );
     directiveMap                       role = roleDirectives( ignored, *allow );
     std::map<std::string, std::string> none;
     for( const auto &n : registered() )
@@ -3502,7 +3586,7 @@ inline int xCtrl::cmdStatus()
     }
     if( names.empty() )
     {
-        say( msgLevel::info ) << "no apps registered for role " << m_role << "; run sudo xctrl register";
+        say( msgLevel::info ) << "no apps registered for role " << m_role << "; run " << m_prog << " sync";
         return 0;
     }
 
@@ -3527,6 +3611,28 @@ inline int xCtrl::cmdStatus()
         auto &p = props[n];
         return p.count( "MainPID" ) && p["MainPID"] != "0" ? p["MainPID"] : "";
     };
+    // no watchdog: for a running app, systemd's is 0 or infinity; else its drop-in, what it starts with, sets none,
+    // like systemd, whose default is none
+    unitNames u( m_role );
+    auto      noWatchdog = [&]( const std::string &n )
+    {
+        auto       &p  = props[n];
+        std::string wd = "0";
+        if( !pidOf( n ).empty() && p.count( "WatchdogUSec" ) )
+        {
+            wd = p["WatchdogUSec"];
+        }
+        else
+        {
+            std::ifstream f( unitDir() + "/" + u.instance( n ) + ".d/override.conf" );
+            for( std::string l; std::getline( f, l ); )
+            {
+                wd = l.compare( 0, 12, "WatchdogSec=" ) == 0 ? l.substr( 12 ) : wd;
+            }
+        }
+        double s = timespanSeconds( wd );
+        return s <= 0 || s >= 1e18;
+    };
 
     if( !m_verbose )
     {
@@ -3535,7 +3641,8 @@ inline int xCtrl::cmdStatus()
         {
             std::string pid = pidOf( r.name );
             std::cout << ( m_color ? r.st.color : "" ) << r.name << ": " << r.st.label
-                      << ( pid.empty() ? "" : " (pid: " + pid + ")" ) << reset << "\n";
+                      << ( pid.empty() ? "" : " (pid: " + pid + ")" )
+                      << ( regs.count( r.name ) && noWatchdog( r.name ) ? ", no watchdog" : "" ) << reset << "\n";
         }
         warnOutdatedRunning( names, props );
         return 0;
@@ -3665,7 +3772,11 @@ inline int xCtrl::cmdStatus()
         auto       &p   = props[r.name];
         std::string pid = pidOf( r.name );
         std::string wd = "-", up = "-", ping = "-", cpu = "-", mem = "-", gpu = "-";
-        if( p.count( "WatchdogUSec" ) && p["WatchdogUSec"] != "0" && p["WatchdogUSec"] != "infinity" )
+        if( regs.count( r.name ) && noWatchdog( r.name ) )
+        {
+            wd = "none";
+        }
+        else if( p.count( "WatchdogUSec" ) )
         {
             wd = p["WatchdogUSec"];
         }
@@ -3679,7 +3790,7 @@ inline int xCtrl::cmdStatus()
                 up = v;
             }
             double last = num( p, "WatchdogTimestampMonotonic" );
-            if( last > 0 && wd != "-" )
+            if( last > 0 && wd != "-" && wd != "none" )
             {
                 snprintf( v, sizeof( v ), "%.1f", ( now - last ) / 1e6 ); // seconds since the last WATCHDOG=1
                 ping = v;
@@ -3981,7 +4092,7 @@ inline int xCtrl::cmdAdd()
         say( msgLevel::error ) << m_allowError << "; " << app.name << " not added";
         return 1;
     }
-    if( !prepareApp( app, dirs, errors, ignored, *allow ) )
+    if( !prepareApp( app, dirs, errors, ignored, *allow, roleDirectives( ignored, *allow ) ) )
     {
         for( const auto &e : errors )
         {

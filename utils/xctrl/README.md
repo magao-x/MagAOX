@@ -25,11 +25,12 @@ For `MAGAOX_ROLE=ICC`, `xctrl sync` writes:
 
 ```
 /etc/systemd/system/
-    magaox-icc-app@.service               template shared by all apps of the role
+    magaox-icc-app@.service               template shared by all apps of the role, without settings
     magaox-icc.target                     wants the apps enabled for automatic startup
     magaox-icc.target.wants/              one link per enabled app (systemctl enable)
     magaox-icc-app@camsci1.service.d/
-        override.conf                     camsci1's command and settings
+        override.conf                     camsci1's command, and its settings: magaox.conf's
+                                          [systemd] with camsci1.conf's in their place
 /etc/magaox-icc/
     environment                           optional, not generated: extra environment for all apps
 ```
@@ -77,43 +78,72 @@ before it, and their last messages get through; it is ordered after the `sshDigg
 
 # Settings
 
-The template holds the default settings. `magaox.conf` changes them for every app of the role, and an app's `.conf`
-changes them for that app, both under `[systemd]`. A key is a systemd directive, its first letter in either case, so
-`runtimeMaxSec = 20` and `RuntimeMaxSec = 20` both set `RuntimeMaxSec=20`. The template sets these, and `xctrl` checks
-their values:
+xctrl sets no defaults of its own. `magaox.conf` sets them for every app of the role, and an app's `.conf` changes
+them for that app, both under `[systemd]`. Both go into the app's drop-in, the app's value in place of the role's,
+so each directive is set in one file only; that holds even for directives systemd would otherwise merge across
+files, e.g. `CPUAffinity`. A directive set in neither file has systemd's own default, which for most of these is not
+what MagAO-X wants: `Restart=no`, no watchdog, a 90 s start and stop timeout, 5 starts in 10 s. So `magaox.conf`
+should hold at least:
 
-| Key                     | systemd directive        | Default  | Meaning                                                  |
-|-------------------------|--------------------------|----------|----------------------------------------------------------|
-| `timeoutStartSec`       | `TimeoutStartSec=`       | 120      | time allowed from start to `READY=1`                     |
-| `watchdogSec`           | `WatchdogSec=`           | 10       | time allowed between `WATCHDOG=1`s, once ready; 0 disables the watchdog |
-| `restart`               | `Restart=`               | always   | when systemd restarts the app, e.g. `always`, `on-failure`, `no` |
-| `restartSec`            | `RestartSec=`            | 5        | wait before a restart                                    |
-| `startLimitBurst`       | `StartLimitBurst=`       | 10       | starts allowed within `startLimitIntervalSec`            |
-| `startLimitIntervalSec` | `StartLimitIntervalSec=` | 600      | time interval for limiting `startLimitIntervalSec`, 0 allows infinite restarts    |
-| `timeoutStopSec`        | `TimeoutStopSec=`        | 30       | time allowed to stop before SIGKILL                      |
-| `killSignal`            | `KillSignal=`            | SIGTERM  | signal that asks the app to stop                         |
+```
+[systemd]
+Restart = always
+RestartSec = 5
+StartLimitBurst = 10
+StartLimitIntervalSec = 600
+WatchdogSec = 10
+TimeoutStartSec = 120
+TimeoutStopSec = 30
+```
 
-Times are seconds, or `infinity`. Other directives may be set too, but only those in the allow list (below), e.g.
+| Directive               | Meaning                                                                                    |
+|-------------------------|--------------------------------------------------------------------------------------------|
+| `Restart`               | when systemd restarts the app, e.g. `always`, `on-failure`, `no` (systemd's default)       |
+| `RestartSec`            | wait before a restart                                                                      |
+| `StartLimitBurst`       | starts allowed within `StartLimitIntervalSec`; after that the app is left failed           |
+| `StartLimitIntervalSec` | the interval for `StartLimitBurst`; 0 allows unlimited restarts                            |
+| `WatchdogSec`           | time allowed between `WATCHDOG=1`s, once ready; 0, systemd's default, means no watchdog    |
+| `TimeoutStartSec`       | time allowed from start to `READY=1`                                                       |
+| `TimeoutStopSec`        | time allowed to stop after `KillSignal` (SIGTERM by default) before SIGKILL                |
+
+**`WatchdogSec` is needed for the watchdog.** An app that reports to systemd (`sd_notify`, no `-` prefix in the
+proclist) is watched only if `WatchdogSec` is set, in `magaox.conf` or its `.conf`, and above 0. An app that does not
+report to systemd must have the `-` prefix: it then gets no watchdog whatever is set. `xctrl status` shows
+`no watchdog` for an app without one, and `status -v` shows `none` in its WATCHDOG column:
+
+```
+maths_s: running (pid: 4242), no watchdog
+```
+
+A key is a systemd directive in any case: `runtimeMaxSec`, `RuntimeMaxSec` and `runtimemaxsec` all set
+`RuntimeMaxSec`, spelled as the host's systemd spells it. Any directive in the allow list (below) may be set, e.g.
 `runtimeMaxSec`, `nice`, `cpuAffinity`, `memoryMax`, `limitMEMLOCK` or `environment`; `xctrl` writes each in the
-right section and passes its value to systemd as it is (`man systemd.unit`, `systemd.service`, `systemd.exec`,
-`systemd.kill`, `systemd.resource-control`). `xctrl` learns which directives exist, and in which section, from the
-host's systemd itself (`systemd --dump-configuration-items`).
+right section (`man systemd.unit`, `systemd.service`, `systemd.exec`, `systemd.kill`, `systemd.resource-control`).
+`xctrl` learns which directives exist, and in which section, from the host's systemd itself
+(`systemd --dump-configuration-items`); without that list `sync` stops with an error. Values are written as given, in
+any form systemd accepts, e.g. `500ms`, `2min`, `infinity` or `SIGABRT`, after systemd itself has checked them
+(`systemd-analyze verify` on a scratch unit, run as the caller, once per run for all values).
 
 ## The allow list
 
 `sync` writes the units as root, for any user who can edit the proclist and the `.conf` files. Many directives are
 applied by systemd as root, e.g. `StandardOutput=file:PATH` or `BindPaths`, and would let such a user become root.
-So a `[systemd]` key is used only if its directive is in `/etc/magaox/systemd-directives.txt`, one directive per
-line, `#` starting a comment. The file must be owned by root and writable only by root, as must its directory; edit
-it with `sudo`.
+So a `[systemd]` key is used only if its directive is in `/etc/magaox/systemd-directives.local.txt`, one directive
+per line, `#` starting a comment. xctrl reads only that file. It must be owned by root and writable only by root, as
+must its directory; edit it with `sudo` to add or remove directives.
 
-`make install` (run as root, `sudo make install`) installs the default, `utils/xctrl/systemd-directives.txt`, as
-root:root 0644. It never overwrites an existing file, so site edits stay; it warns instead, and compare the two by
-hand after an update. Run without root, it warns that the list is not installed. Without the file, `sync`, and an
-editor's `start` or `startup`, stop with:
+`make install` in `utils/xctrl` installs two files, root:root 0644:
+
+| File                                        | `make install`                                                     |
+|---------------------------------------------|--------------------------------------------------------------------|
+| `/etc/magaox/systemd-directives.txt`        | the defaults, `utils/xctrl/systemd-directives.txt`, always overwritten; it warns if they differ from the file that was there. Do not edit it. |
+| `/etc/magaox/systemd-directives.local.txt`  | created from the defaults, with a header saying it is the file to edit, only if it does not exist; never changed afterwards |
+
+After an update, compare the two to pick up new defaults. Without the local file, `sync`, and an editor's `start` or
+`startup`, stop with:
 
 ```
-error: no directive allow list /etc/magaox/systemd-directives.txt: install it with sudo make install in utils/xctrl; nothing synced
+error: no directive allow list /etc/magaox/systemd-directives.local.txt: install it with sudo make install in utils/xctrl; nothing synced
 ```
 
 The default allows the watchdog, start and stop timing and restart directives (`WatchdogSec`, `TimeoutStartSec`,
@@ -130,17 +160,18 @@ privileges than `xsup` has (`SupplementaryGroups`, `AmbientCapabilities`, `Capab
 host, e.g. reboot it (`FailureAction`, `SuccessAction`, `StartLimitAction`, `JobTimeoutAction`).
 
 The apps ignore the `[systemd]` section; only `xctrl` reads it. A key that can not be used is a warning, and the app
-is registered without it:
+is registered without it, so with the role's value or systemd's default:
 
 ```
-warning: [systemd] runtimeMaxSec directive for maths_CO2 not in systemd-directives.txt allow list; ignoring directive
+warning: [systemd] runtimeMaxSec directive for maths_CO2 not in systemd-directives.local.txt allow list; ignoring directive
 warning: [systemd] fooSec directive for maths_CO2 does not exist on this version of systemd; ignoring directive
-warning: [systemd] watchdogSec = ten for maths_CO2 is an invalid value; ignoring directive
+warning: [systemd] WatchdogSec = ten for maths_CO2 is an invalid value (systemd: Failed to parse sec value, ignoring: ten); ignoring directive
 ```
 
-Likewise a directive that may not be set, or the same directive spelled twice. `sync` also warns once about entries
-of the allow list that this systemd does not have. systemd itself checks the values `xctrl` does not, and logs any it
-rejects when it loads the unit. Only a missing executable keeps an app from being registered.
+Likewise a directive that may not be set, the same directive spelled twice, or a value with a control character.
+`sync` also warns once about entries of the allow list that this systemd does not have. Without `systemd-analyze`,
+`sync` warns that values are not checked, and systemd ignores any it can not use when it loads the units. Only a
+missing executable keeps an app from being registered.
 
 Example, in `camsci1.conf`:
 
@@ -330,6 +361,6 @@ needs libMagAOX built first.
 # Testing without systemd
 
 `--dry-run` prints the files and `systemctl` commands instead, and logs nothing; with `--top DIR`, xctrl logs under `DIR/logs`, as the calling user. `--sysroot DIR --top DIR` writes the units under
-`DIR/etc` from a test MagAO-X tree, reads the allow list from `DIR/etc/magaox`, and runs only the `systemctl --root` commands that work offline (enable,
+`DIR/etc` from a test MagAO-X tree, reads the allow list from `DIR/etc/magaox/systemd-directives.local.txt`, and runs only the `systemctl --root` commands that work offline (enable,
 disable). Check the generated units with
 `SYSTEMD_UNIT_PATH=DIR/etc/systemd/system: systemd-analyze verify magaox-<role>-app@NAME.service`.

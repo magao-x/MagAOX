@@ -154,65 +154,52 @@ TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
     app.exec = "camCtrl";
     std::vector<std::string> warnings;
 
-    // an allow list as /etc/magaox/systemd-directives.txt has it: comments, and a name that is not one, skipped
-    std::istringstream al( "# the checked keys\nWatchdogSec\nTimeoutStartSec\nTimeoutStopSec\nRestartSec\nRestart\n"
-                           "StartLimitBurst\nKillSignal\n\nRuntimeMaxSec   # stop after\nOnFailure\nFooSec\n"
-                           "ExecStartPre\nUser\nbad-name\n" );
-    allowList          allow = parseAllowList( al );
-    REQUIRE( allow.size() == 12 );
+    // an allow list as /etc/magaox/systemd-directives.local.txt has it: comments, and a name that is not one, skipped
+    std::istringstream al(
+        "# timing\nWatchdogSec\nTimeoutStartSec\nRestart\nStartLimitBurst\nKillSignal\n\n"
+        "RuntimeMaxSec   # stop after\nOnFailure\nFooSec\nCPUAffinity\nExecStartPre\nUser\nbad-name\n" );
+    allowList allow = parseAllowList( al );
+    REQUIRE( allow.size() == 11 );
     REQUIRE( allow.count( "RuntimeMaxSec" ) );
     REQUIRE( !allow.count( "bad-name" ) );
 
-    SECTION( "[systemd] settings become directives" )
+    // a few lines of systemd --dump-configuration-items
+    directiveSections sections = parseDirectiveDump(
+        "[Unit]\nOnFailure=UNIT [...]\nStartLimitBurst=UNSIGNED\n"
+        "[Service]\nRuntimeMaxSec=SECONDS\nStartLimitBurst=UNSIGNED\nWatchdogSec=SECONDS\n"
+        "TimeoutStartSec=SECONDS\nRestart=RESTART\nKillSignal=SIGNAL\nCPUAffinity=CPUAFFINITY\n"
+        "ExecStartPre=PATH [ARGUMENT [...]]\nUser=STRING\nNice=NICE\n[Socket]\nListenStream=SOCKET\n" );
+    REQUIRE( sections.size() == 11 );
+    REQUIRE( sections["OnFailure"] );
+    REQUIRE( sections["StartLimitBurst"] ); // [Unit], listed first
+    REQUIRE( !sections["RuntimeMaxSec"] );
+    REQUIRE( !sections.count( "ListenStream" ) );
+
+    SECTION( "[systemd] settings become directives, their values as given, for systemd to check" )
     {
-        directiveMap d = appDirectives( app,
-                                        { { "systemd.watchdogSec", "20" },
-                                          { "systemd.timeoutStartSec", "90" },
-                                          { "systemd.timeoutStopSec", "15" },
-                                          { "systemd.restartSec", "2" },
-                                          { "systemd.restart", "on-failure" },
-                                          { "systemd.startLimitBurst", "3" } },
-                                        warnings,
-                                        allow );
+        directiveMap d;
+        systemdSettings( d,
+                         warnings,
+                         { { "systemd.watchdogSec", "500ms" },
+                           { "systemd.cpuaffinity", "6" },
+                           { "systemd.TimeoutStartSec", "2min" },
+                           { "systemd.restart", "on-failure" },
+                           { "systemd.killSignal", "SIGABRT" },
+                           { "systemd.startLimitBurst", "3" } },
+                         "cam",
+                         allow,
+                         sections );
         REQUIRE( warnings.empty() );
-        REQUIRE( d["WatchdogSec"] == "20" );
-        REQUIRE( d["TimeoutStartSec"] == "90" );
-        REQUIRE( d["TimeoutStopSec"] == "15" );
-        REQUIRE( d["RestartSec"] == "2" );
+        REQUIRE( d["WatchdogSec"] == "500ms" );
+        REQUIRE( d["TimeoutStartSec"] == "2min" );
         REQUIRE( d["Restart"] == "on-failure" );
+        REQUIRE( d["KillSignal"] == "SIGABRT" );
         REQUIRE( d["StartLimitBurst"] == "3" );
+        REQUIRE( d["CPUAffinity"] == "6" ); // any case, as systemd spells it
     }
 
-    SECTION( "bad values and keys not allowed are ignored, with warnings" )
+    SECTION( "keys not allowed, not in systemd, denied, repeated, or with control characters are ignored" )
     {
-        directiveMap d = appDirectives( app,
-                                        { { "systemd.restart", "sometimes" },
-                                          { "systemd.killSignal", "SIGSEGV" },
-                                          { "systemd.timeoutStopSec", "5\nExecStartPre=/bin/evil" },
-                                          { "systemd.nonsense", "1" } },
-                                        warnings,
-                                        allow );
-        REQUIRE( d.empty() );
-        REQUIRE( warnings.size() == 4 );
-        for( const auto &w : warnings )
-        {
-            REQUIRE( w.find( "; ignoring directive" ) != std::string::npos );
-        }
-    }
-
-    SECTION( "allowed directives systemd has, except denied ones" )
-    {
-        // a few lines of systemd --dump-configuration-items
-        directiveSections sections = parseDirectiveDump( "[Unit]\nOnFailure=UNIT [...]\nStartLimitBurst=UNSIGNED\n"
-                                                         "[Service]\nRuntimeMaxSec=SECONDS\nStartLimitBurst=UNSIGNED\n"
-                                                         "ExecStartPre=PATH [ARGUMENT [...]]\nUser=STRING\nNice=NICE\n"
-                                                         "[Socket]\nListenStream=SOCKET [...]\n" );
-        REQUIRE( sections.size() == 6 );
-        REQUIRE( sections["OnFailure"] );
-        REQUIRE( sections["StartLimitBurst"] ); // [Unit], listed first
-        REQUIRE( !sections["RuntimeMaxSec"] );
-        REQUIRE( !sections.count( "ListenStream" ) );
-
         directiveMap d;
         systemdSettings( d,
                          warnings,
@@ -224,6 +211,7 @@ TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
                            { "systemd.user", "root" },
                            { "systemd.fooSec", "5" },
                            { "systemd.nice", "5" },
+                           { "systemd.timeoutStartSec", "5\nExecStartPre=/bin/evil" },
                            { "systemd.watchdogSec", "x" } },
                          "cam",
                          allow,
@@ -233,55 +221,69 @@ TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
         REQUIRE( d["WatchdogSec"] == "30" );
         REQUIRE( d.size() == 3 );
 
-        // a typo and Nice not in the allow list, FooSec not in systemd, two denied, WatchdogSec spelled twice
-        REQUIRE( warnings.size() == 6 );
+        // a typo and Nice not in the allow list, FooSec not in systemd, two denied, a newline, WatchdogSec twice
+        REQUIRE( warnings.size() == 7 );
         auto has = [&]( const std::string &text )
         {
             return std::any_of( warnings.begin(),
                                 warnings.end(),
                                 [&]( const std::string &w ) { return w.find( text ) != std::string::npos; } );
         };
-        REQUIRE(
-            has( "[systemd] nice directive for cam not in systemd-directives.txt allow list; ignoring directive" ) );
+        REQUIRE( has(
+            "[systemd] nice directive for cam not in systemd-directives.local.txt allow list; ignoring directive" ) );
         REQUIRE(
             has( "[systemd] fooSec directive for cam does not exist on this version of systemd; ignoring directive" ) );
         REQUIRE( has( "[systemd] user directive for cam can not be set" ) );
+        REQUIRE( has( "for cam is an invalid value; ignoring directive" ) );
 
-        // written in their sections, after the checked settings
+        // written in their sections, Type first, then by name
         std::ostringstream unit, service;
         appendDirectives( unit, d, true, sections );
-        appendDirectives(
-            service, directiveMap{ { "WatchdogSec", "30" }, { "RuntimeMaxSec", "20" } }, false, sections );
+        appendDirectives( service,
+                          directiveMap{ { "WatchdogSec", "30" }, { "RuntimeMaxSec", "20" }, { "Type", "simple" } },
+                          false,
+                          sections );
         REQUIRE( unit.str() == "OnFailure=notify@%n.service\n" );
-        REQUIRE( service.str() == "WatchdogSec=30\nRuntimeMaxSec=20\n" );
+        REQUIRE( service.str() == "Type=simple\nRuntimeMaxSec=20\nWatchdogSec=30\n" );
+    }
+
+    SECTION( "an app's settings replace the role's, with nothing hard-coded" )
+    {
+        directiveMap role{ { "WatchdogSec", "10" }, { "Restart", "always" }, { "CPUAffinity", "0-3" } };
+        directiveMap d = appDirectives( app, { { "WatchdogSec", "20" }, { "CPUAffinity", "6" } }, role );
+        REQUIRE( d.size() == 3 );
+        REQUIRE( d["WatchdogSec"] == "20" );
+        REQUIRE( d["CPUAffinity"] == "6" );
+        REQUIRE( d["Restart"] == "always" );
+        REQUIRE( appDirectives( app, {}, {} ).empty() );
     }
 
     SECTION( "apps that do not notify are simple services without a watchdog" )
     {
         app.prefix     = "-";
-        directiveMap d = appDirectives( app, { { "systemd.watchdogSec", "20" } }, warnings, allow );
+        directiveMap d = appDirectives( app, { { "WatchdogSec", "20" } }, { { "WatchdogSec", "10" } } );
         REQUIRE( d["Type"] == "simple" );
         REQUIRE( d["WatchdogSec"] == "0" );
     }
 }
 
-/// Values are validated by kind.
+/// systemd's verdicts on values, from systemd-analyze verify, are matched to the lines of the unit checked.
 /**
  * \ingroup xctrl_unit_test
  */
-TEST_CASE( "xctrl validates setting values", "[xctrl]" )
+TEST_CASE( "xctrl reads systemd-analyze verify output", "[xctrl]" )
 {
-    REQUIRE( validValue( valueKind::seconds, "10" ) );
-    REQUIRE( validValue( valueKind::seconds, "2.5" ) );
-    REQUIRE( validValue( valueKind::seconds, "infinity" ) );
-    REQUIRE( !validValue( valueKind::seconds, "" ) );
-    REQUIRE( !validValue( valueKind::seconds, ".5" ) );
-    REQUIRE( !validValue( valueKind::seconds, "10s" ) );
-    REQUIRE( validValue( valueKind::count, "10" ) );
-    REQUIRE( !validValue( valueKind::count, "-1" ) );
-    REQUIRE( validValue( valueKind::restart, "on-watchdog" ) );
-    REQUIRE( validValue( valueKind::signal, "SIGINT" ) );
-    REQUIRE( !validValue( valueKind::signal, "SIGSEGV" ) );
+    std::string path = "/tmp/xctrl.AbC123/xctrl-check.service";
+    auto        bad  = parseVerify( path + ":2: Failed to parse unsigned value, ignoring: ten\n" + path +
+                                ":6: Failed to parse sec value, ignoring: ten\n"
+                                        "/other/x.service:3: Failed to parse sec value, ignoring: ten\n" +
+                                path +
+                                ":7: Some notice about the unit\n"
+                                        "Unit nosuch.service not found.\n",
+                            path );
+    REQUIRE( bad.size() == 2 );
+    REQUIRE( bad[2] == "Failed to parse unsigned value, ignoring: ten" );
+    REQUIRE( bad[6] == "Failed to parse sec value, ignoring: ten" );
 }
 
 /// Unit names use the role in lower case and map back to app names.
@@ -299,25 +301,23 @@ TEST_CASE( "xctrl names units by role", "[xctrl]" )
     REQUIRE( u.appName( "magaox-icc-app@.service" ) == "" );
 }
 
-/// Generated units carry the defaults, the app command and the INDI server ordering.
+/// Generated units carry what xctrl needs, the app command, its settings and the INDI server ordering.
 /**
  * \ingroup xctrl_unit_test
  */
 TEST_CASE( "xctrl generates the template and drop-ins", "[xctrl]" )
 {
-    unitNames    u( "ICC" );
-    directiveMap defs  = defaultDirectives();
-    defs["RestartSec"] = "3";
+    unitNames u( "ICC" );
 
-    std::string t = templateUnit( u, defs, "/etc/magaox-icc/environment" );
+    std::string t = templateUnit( u, "/etc/magaox-icc/environment" );
     REQUIRE( t.find( "Type=notify\n" ) != std::string::npos );
-    REQUIRE( t.find( "RestartSec=3\n" ) != std::string::npos );
+    // no settings: magaox.conf's go into each drop-in, and systemd's defaults apply to any not set
+    REQUIRE( t.find( "Restart" ) == std::string::npos );
+    REQUIRE( t.find( "WatchdogSec" ) == std::string::npos );
     REQUIRE( t.find( "User=xsup\n" ) != std::string::npos );
     REQUIRE( t.find( "WantedBy=magaox-icc.target\n" ) != std::string::npos );
     REQUIRE( t.find( "Environment=MAGAOX_ROLE=ICC\n" ) != std::string::npos );
     REQUIRE( t.find( "Environment=PYTHONUNBUFFERED=1\n" ) != std::string::npos );
-    // StartLimit* belong in [Unit]
-    REQUIRE( t.find( "StartLimitBurst" ) < t.find( "[Service]" ) );
 
     appEntry                 server{ "isICC", "xindiserver", "", 1 };
     appEntry                 tunnel{ "ICC_RTC", "sshDigger", "", 2 };

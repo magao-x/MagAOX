@@ -21,8 +21,11 @@ $(LOGGEN):
 # completed, for users whose ~/.bashrc enables bash-completion; the profile.d hook loads it for every other user
 COMPLETIONS_DIR ?= /usr/share/bash-completion/completions
 
-# the root-owned allow list of [systemd] directives: installed only when run as root, never overwritten
-ALLOW_LIST = /etc/magaox/systemd-directives.txt
+# the root-owned allow lists of [systemd] directives: the defaults, always overwritten, and the local copy xctrl
+# reads, created from the defaults, with its own header, only if it does not exist
+ALLOW_DIR     = /etc/magaox
+ALLOW_DEFAULT = $(ALLOW_DIR)/systemd-directives.txt
+ALLOW_LIST    = $(ALLOW_DIR)/systemd-directives.local.txt
 
 # setuid root so xsup and group magaox can start and stop apps, and proclist editors (magaox-dev) can sync; xctrl
 # drops to the caller at once and takes root back only to write its units and run systemctl
@@ -33,14 +36,18 @@ install: all
 	sudo install -d $(COMPLETIONS_DIR)
 	sudo install -m 0644 xctrl.bash-completion $(COMPLETIONS_DIR)/$(TARGET)
 	sudo install -m 0644 xctrl_completion.sh /etc/profile.d/xctrl_completion.sh
+	@if [ -e $(ALLOW_DEFAULT) ] && ! cmp -s systemd-directives.txt $(ALLOW_DEFAULT); then \
+	  echo "warning: the systemd-directives.txt installed differs from the $(ALLOW_DEFAULT) that was there;" \
+	       "any site edits belong in $(ALLOW_LIST)"; \
+	fi
+	sudo install -d -o root -g root -m 0755 $(ALLOW_DIR)
+	sudo install -o root -g root -m 0644 systemd-directives.txt $(ALLOW_DEFAULT)
 	@if [ -e $(ALLOW_LIST) ]; then \
-	  echo "warning: $(ALLOW_LIST) already exists, not overwritten; compare it with systemd-directives.txt"; \
-	elif [ "$$(id -u)" -ne 0 ]; then \
-	  echo "warning: $(ALLOW_LIST) not installed: it must be owned by root, run sudo make install"; \
+	  echo "$(ALLOW_LIST) exists, kept: xctrl reads it, so add or remove directives there"; \
 	else \
-	  install -d -o root -g root -m 0755 $(dir $(ALLOW_LIST)) && \
-	  install -o root -g root -m 0644 systemd-directives.txt $(ALLOW_LIST) && \
-	  echo "installed $(ALLOW_LIST)"; \
+	  { cat systemd-directives.local-header.txt; sed '1,/^$$/d' systemd-directives.txt; } | \
+	    sudo install -o root -g root -m 0644 /dev/stdin $(ALLOW_LIST) && \
+	  echo "installed $(ALLOW_LIST), from the defaults: xctrl reads it, so add or remove directives there"; \
 	fi
 
 .PHONY: clean
