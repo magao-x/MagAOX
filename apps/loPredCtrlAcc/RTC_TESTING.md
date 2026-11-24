@@ -2,7 +2,7 @@
 
 The normal build runs closed-loop DDSPC on the existing WFS monitor (`aol1_modevalWFS`, 2 kHz). It publishes a full calibrated surface through the syncopation producer to its own auxiliary channel, `dm.channelName`.
 
-- **Standard mode** follows loPredCtrl and is unchanged: one decision and RLS update per WFS frame on the WFS thread, held on that frame's four DM slots. It does not use the accelerometers and runs with `adc.enabled=false`.
+- **Standard mode** uses loPredCtrl's DDSPC calculation: one decision and RLS update per WFS frame on the WFS thread, held on that frame's four DM slots. It does not use the accelerometers and runs with `adc.enabled=false`. loPredCtrl's commands were integrated by the main loop's mfilt; here they are absolute positions unless the optional integrator is enabled (see "Standard integrator").
 - **Assisted mode** recalculates every 8 kHz DM slot on the DM worker from the newest upstream ACC sample, the newest WFS frame and the commands the scheduler actually copied. Learning is one shared QR-RLS update per genuine WFS frame (2 kHz) on the WFS thread; the four phase predictors and their slot gains reach the worker through a triple buffer, so the worker never waits for learning. The formulation and its validation are in `agents/plans/2026-11/ddspc-multirate-8khz-assisted.md`.
 
 Every WFS frame is also republished to the main AO loop. With prediction off it is unchanged; with prediction on, tip/tilt is set to zero, so DDSPC is the only tip/tilt controller (see "Main-loop modal output").
@@ -39,6 +39,20 @@ A slot with no current frame (a late WFS frame) holds the last command (`fast_ho
 ### Within-frame ripple
 
 The DDSPC cost penalizes future WFS frames, which integrate q slots, so command variation within a frame is unobserved. In simulation the unmodified cost (`ripple=0`) added within-frame ripple that made assisted control worse than standard when the ACC carried no information. `ripple` penalizes each future frame's variation about its mean command, scaled like `regularization`; with `ripple=10` and no ACC information assisted stayed within 5–10% of standard, and with informative ACC it reduced the 8 kHz residual variance by 60–80%. Re-solving with fixed executed slots remains exact for this cost (test T5). Measure the WFS residual and, if available, an independent fast sensor when tuning it.
+
+### Standard integrator
+
+The original loPredCtrl wrote its command into the main loop's modal input, so cacao `mfilt` integrated it: `DM[k] = mult·DM[k-1] − gain·delta[k]`. Its model was trained on those deltas, and the main loop kept integral action on tip/tilt, which tweeter-to-woofer offloading relies on. By default loPredCtrlAcc applies the same DDSPC calculation as an absolute position, with no integrator, and `parameters.gain·y` is proportional.
+
+`[integrator] enabled=true` restores the mfilt law in standard mode: each frame's command `delta` (including `gain·y` and probes) updates `s = mult·s − gain·delta`, clipped to ±`limit` modal units, and `s` is held on the frame's four slots. The standard fit is trained on the delta recovered from the copied commands, `−(p_k − mult·p_(k−1))/gain`, so missed slots and clipping are seen as applied. A late WFS frame holds `s`. The state is zero whenever prediction is off, so prediction always starts from the confirmed zero, and a fault zero still removes the whole state in one slot.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `integrator.enabled` | `false` | Integrate standard commands and train on the deltas. |
+| `integrator.gain`, `integrator.mult` | `1`, `1` | mfilt-equivalent gain and multiplier; copy the deployed mfilt tip/tilt values. |
+| `integrator.limit` | required | Per-mode limit on `s` [modal units]. |
+
+It is a startup setting; the restart that changes it also discards the fit, which would not apply in the other form. The feedback sign matches mfilt only if `dm.modeCube` planes 0 and 1 use mfilt's DM mode sign. Assisted mode is not integrated yet. The design and remaining stages are in `agents/plans/2026-11/ddspc-standard-integrator.md`.
 
 ## Before installation (operator, on the RTC)
 
