@@ -100,6 +100,17 @@ class GeneratorTests(unittest.TestCase):
         self.assertEqual(fields["ok"]["testVal"], "{1, 0, 1}")
         self.assertEqual(fields["checkTime"]["schemaName"], "check_time")
 
+    def test_raid_numeric_entries_use_production_decoder(self):
+        """Compact RAID fixtures preserve typed health flags, counts, and check time."""
+        info = generator.makeTestInfoDict(str(pathlib.Path(__file__).parent / "../types/telem_raid.hpp"), {})
+        self.assertEqual(len(info["messageTypes"]), 1)
+        fields = {field["name"]: field for field in info["messageTypes"][0]}
+        self.assertEqual(list(fields), ["status", "arrays", "checkTime"])
+        self.assertEqual(fields["arrays"]["type"], "std::vector<MagAOX::logger::telem_raid::arrayT>")
+        self.assertEqual(fields["arrays"]["decoder"], "arrays")
+        self.assertEqual(fields["arrays"]["testVal"], "{{0, 35, 2, 2}, {7, 37, 3, 2}}")
+        self.assertEqual(fields["checkTime"]["schemaName"], "check_time")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,1295 @@
+/** \file po4ao_impl.hpp
+ * \brief Header-only implementation of the PO4AO real-time application.
+ *
+ * This file is included by po4ao.hpp inside MagAOX::app.
+ * \ingroup po4ao_files
+ */
+
+#ifndef po4ao_impl_hpp
+#define po4ao_impl_hpp
+
+#include "po4ao_control.hpp"
+
+inline po4ao::po4ao() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
+{
+}
+
+inline po4ao::~po4ao() noexcept
+{
+}
+
+inline void po4ao::setupConfig()
+{
+    SHMIMMONITOR_SETUP_CONFIG( config );
+    TELEMETER_SETUP_CONFIG( config );
+
+    config.add( "parameters.dataDirs",
+                "",
+                "parameters.dataDirs",
+                argType::Required,
+                "parameters",
+                "dataDirs",
+                false,
+                "string",
+                "Directory containing PO4AO training artifacts." );
+    config.add( "parameters.engineDirs",
+                "",
+                "parameters.engineDirs",
+                argType::Required,
+                "parameters",
+                "engineDirs",
+                false,
+                "string",
+                "Directory containing the TensorRT engine." );
+    config.add( "parameters.engineName",
+                "",
+                "parameters.engineName",
+                argType::Required,
+                "parameters",
+                "engineName",
+                false,
+                "string",
+                "TensorRT engine filename." );
+    config.add( "parameters.linear_inference_backend",
+                "",
+                "parameters.linear_inference_backend",
+                argType::Required,
+                "parameters",
+                "linear_inference_backend",
+                false,
+                "string",
+                "Legacy option. Both auto and tensorrt use TensorRT." );
+    config.add( "parameters.channel",
+                "",
+                "parameters.channel",
+                argType::Required,
+                "parameters",
+                "channel",
+                false,
+                "string",
+                "Differential modal command stream consumed by mfilt." );
+    config.add( "parameters.buffer_channel",
+                "",
+                "parameters.buffer_channel",
+                argType::Required,
+                "parameters",
+                "buffer_channel",
+                false,
+                "string",
+                "Rolling replay-buffer stream." );
+    config.add( "parameters.buffer_metadata_channel",
+                "",
+                "parameters.buffer_metadata_channel",
+                argType::Required,
+                "parameters",
+                "buffer_metadata_channel",
+                false,
+                "string",
+                "Rolling replay publication metadata stream." );
+    config.add( "parameters.warmup_buffer_channel",
+                "",
+                "parameters.warmup_buffer_channel",
+                argType::Required,
+                "parameters",
+                "warmup_buffer_channel",
+                false,
+                "string",
+                "Frozen warm-up replay-buffer stream." );
+    config.add( "parameters.warmup_metadata_channel",
+                "",
+                "parameters.warmup_metadata_channel",
+                argType::Required,
+                "parameters",
+                "warmup_metadata_channel",
+                false,
+                "string",
+                "Frozen warm-up publication metadata stream." );
+    config.add( "parameters.iterations_per_ep",
+                "",
+                "parameters.iterations_per_ep",
+                argType::Required,
+                "parameters",
+                "iterations_per_ep",
+                false,
+                "int",
+                "Frames in one training episode." );
+    config.add( "parameters.warmup_episodes",
+                "",
+                "parameters.warmup_episodes",
+                argType::Required,
+                "parameters",
+                "warmup_episodes",
+                false,
+                "int",
+                "Exploratory warm-up episode count." );
+    config.add( "parameters.replay_buffer_size",
+                "",
+                "parameters.replay_buffer_size",
+                argType::Required,
+                "parameters",
+                "replay_buffer_size",
+                false,
+                "int",
+                "Samples retained in the rolling replay buffer." );
+    config.add( "parameters.integrator_gain",
+                "",
+                "parameters.integrator_gain",
+                argType::Required,
+                "parameters",
+                "integrator_gain",
+                false,
+                "float",
+                "Proportional fallback command gain." );
+    config.add( "parameters.policy_blend",
+                "",
+                "parameters.policy_blend",
+                argType::Required,
+                "parameters",
+                "policy_blend",
+                false,
+                "float",
+                "Learned-policy fraction; zero is fallback control and one is the full policy." );
+    config.add( "parameters.exploration_sigma_start",
+                "",
+                "parameters.exploration_sigma_start",
+                argType::Required,
+                "parameters",
+                "exploration_sigma_start",
+                false,
+                "float",
+                "Exploration-noise scale at the first warm-up frame." );
+    config.add( "parameters.exploration_sigma_end",
+                "",
+                "parameters.exploration_sigma_end",
+                argType::Required,
+                "parameters",
+                "exploration_sigma_end",
+                false,
+                "float",
+                "Exploration-noise scale at the final warm-up frame." );
+    config.add( "parameters.Nmodes",
+                "",
+                "parameters.Nmodes",
+                argType::Required,
+                "parameters",
+                "Nmodes",
+                false,
+                "int",
+                "Number of modes in the input, output, and replay streams." );
+    config.add( "parameters.Nmodes_controlled",
+                "",
+                "parameters.Nmodes_controlled",
+                argType::Required,
+                "parameters",
+                "Nmodes_controlled",
+                false,
+                "int",
+                "Leading modal count actively controlled by PO4AO." );
+    config.add( "parameters.max_Nhist",
+                "",
+                "parameters.max_Nhist",
+                argType::Required,
+                "parameters",
+                "max_Nhist",
+                false,
+                "int",
+                "Maximum retained history; loaded policies may use any shorter history." );
+    config.add( "parameters.exploreNoiseFile",
+                "",
+                "parameters.exploreNoiseFile",
+                argType::Required,
+                "parameters",
+                "exploreNoiseFile",
+                false,
+                "string",
+                "Exploration-noise CSV pathname." );
+    config.add( "parameters.config_version",
+                "",
+                "parameters.config_version",
+                argType::Required,
+                "parameters",
+                "config_version",
+                false,
+                "int",
+                "Runtime-configuration schema version." );
+    config.add( "parameters.control_enabled",
+                "",
+                "parameters.control_enabled",
+                argType::Required,
+                "parameters",
+                "control_enabled",
+                false,
+                "bool",
+                "Legacy option, ignored: predictive control always starts Off; use control_enable to enable it." );
+    config.add( "parameters.max_command_abs",
+                "",
+                "parameters.max_command_abs",
+                argType::Required,
+                "parameters",
+                "max_command_abs",
+                false,
+                "float",
+                "Maximum absolute value of one modal command." );
+    config.add( "parameters.cuda_device",
+                "",
+                "parameters.cuda_device",
+                argType::Required,
+                "parameters",
+                "cuda_device",
+                false,
+                "int",
+                "CUDA device index." );
+    config.add( "parameters.latency_deadline_us",
+                "",
+                "parameters.latency_deadline_us",
+                argType::Required,
+                "parameters",
+                "latency_deadline_us",
+                false,
+                "int",
+                "Callback duration counted as a deadline miss." );
+    config.add( "parameters.stats_period_seconds",
+                "",
+                "parameters.stats_period_seconds",
+                argType::Required,
+                "parameters",
+                "stats_period_seconds",
+                false,
+                "float",
+                "Runtime-statistics publication period." );
+}
+
+inline int po4ao::loadConfigImpl( mx::app::appConfigurator &_config )
+{
+    SHMIMMONITOR_LOAD_CONFIG( _config );
+    TELEMETER_LOAD_CONFIG( _config );
+    _config( m_dataDirs, "parameters.dataDirs" );
+    _config( m_engineDirs, "parameters.engineDirs" );
+    _config( m_engineName, "parameters.engineName" );
+    std::string legacyBackend = "auto";
+    _config( legacyBackend, "parameters.linear_inference_backend" );
+    if( legacyBackend != "auto" && legacyBackend != "tensorrt" )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "PO4AO supports only TensorRT policy inference" } );
+    }
+
+    _config( m_outputChannel, "parameters.channel" );
+    _config( m_bufferChannel, "parameters.buffer_channel" );
+    _config( m_bufferMetadataChannel, "parameters.buffer_metadata_channel" );
+    _config( m_warmupBufferChannel, "parameters.warmup_buffer_channel" );
+    _config( m_warmupMetadataChannel, "parameters.warmup_metadata_channel" );
+    _config( m_iterationsPerEpisode, "parameters.iterations_per_ep" );
+    _config( m_warmupEpisodes, "parameters.warmup_episodes" );
+    _config( m_replayBufferSize, "parameters.replay_buffer_size" );
+    _config( m_integratorGain, "parameters.integrator_gain" );
+    _config( m_policyBlend, "parameters.policy_blend" );
+    _config( m_explorationSigmaStart, "parameters.exploration_sigma_start" );
+    _config( m_explorationSigmaEnd, "parameters.exploration_sigma_end" );
+    _config( m_nModes, "parameters.Nmodes" );
+    _config( m_nModesControlled, "parameters.Nmodes_controlled" );
+    _config( m_historyCapacity, "parameters.max_Nhist" );
+    _config( m_exploreNoiseFile, "parameters.exploreNoiseFile" );
+    _config( m_configVersion, "parameters.config_version" );
+    _config( m_controlEnabledConfig, "parameters.control_enabled" );
+    _config( m_maxCommandAbs, "parameters.max_command_abs" );
+    _config( m_cudaDevice, "parameters.cuda_device" );
+    _config( m_latencyDeadlineUs, "parameters.latency_deadline_us" );
+    _config( m_statsPeriodSeconds, "parameters.stats_period_seconds" );
+    return 0;
+}
+
+inline void po4ao::loadConfig()
+{
+    if( loadConfigImpl( config ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "PO4AO configuration load failed" } );
+        m_shutdown = true;
+    }
+}
+
+inline std::unique_ptr<EngineBundle> po4ao::createEngineBundle( const std::string &filename, std::string &error )
+{
+    std::ifstream file( filename, std::ios::binary );
+    if( !file )
+    {
+        error = "could not open " + filename;
+        return nullptr;
+    }
+    file.seekg( 0, std::ios::end );
+    const std::streamoff fileSize = file.tellg();
+    if( fileSize <= 0 )
+    {
+        error = "engine file is empty";
+        return nullptr;
+    }
+    std::vector<char> bytes( static_cast<size_t>( fileSize ) );
+    file.seekg( 0, std::ios::beg );
+    file.read( bytes.data(), fileSize );
+    if( !file )
+    {
+        error = "engine file read failed";
+        return nullptr;
+    }
+
+    auto     bundle = std::make_unique<EngineBundle>();
+    uint64_t hash   = 14695981039346656037ULL;
+    for( unsigned char byte : bytes )
+    {
+        hash ^= byte;
+        hash *= 1099511628211ULL;
+    }
+    bundle->modelId = hash;
+
+    if( cudaSetDevice( m_cudaDevice ) != cudaSuccess )
+    {
+        error = "CUDA inference-device selection failed";
+        return nullptr;
+    }
+    bundle->runtime = nvinfer1::createInferRuntime( m_logger );
+    if( bundle->runtime == nullptr )
+    {
+        error = "TensorRT runtime creation failed";
+        return nullptr;
+    }
+    bundle->engine = bundle->runtime->deserializeCudaEngine( bytes.data(), bytes.size() );
+    if( bundle->engine == nullptr )
+    {
+        error = "TensorRT engine deserialization failed";
+        return nullptr;
+    }
+    if( bundle->engine->getNbIOTensors() != 2 )
+    {
+        error = "engine must contain exactly one input and one output";
+        return nullptr;
+    }
+
+    for( int index = 0; index < bundle->engine->getNbIOTensors(); ++index )
+    {
+        const char *name = bundle->engine->getIOTensorName( index );
+        if( bundle->engine->getTensorDataType( name ) != nvinfer1::DataType::kFLOAT )
+        {
+            error = "engine tensors must use float32";
+            return nullptr;
+        }
+        if( bundle->engine->getTensorIOMode( name ) == nvinfer1::TensorIOMode::kINPUT )
+        {
+            bundle->inputName = name;
+        }
+        else
+        {
+            bundle->outputName = name;
+        }
+    }
+    if( bundle->inputName.empty() || bundle->outputName.empty() )
+    {
+        error = "engine input/output tensor discovery failed";
+        return nullptr;
+    }
+
+    const nvinfer1::Dims inputDims  = bundle->engine->getTensorShape( bundle->inputName.c_str() );
+    const nvinfer1::Dims outputDims = bundle->engine->getTensorShape( bundle->outputName.c_str() );
+    if( inputDims.nbDims != 4 || inputDims.d[0] != 1 || outputDims.nbDims < 2 || outputDims.d[0] != 1 )
+    {
+        error = "engine must have fixed batch-one NCHW input and batch-one output";
+        return nullptr;
+    }
+    bundle->inputChannels = inputDims.d[1];
+    bundle->inputHeight   = inputDims.d[2];
+    bundle->inputWidth    = inputDims.d[3];
+    bundle->inputSize     = 1;
+    for( int dimension = 1; dimension < inputDims.nbDims; ++dimension )
+    {
+        if( inputDims.d[dimension] <= 0 )
+        {
+            error = "dynamic or invalid input dimensions are unsupported";
+            return nullptr;
+        }
+        bundle->inputSize *= inputDims.d[dimension];
+    }
+    bundle->outputSize = 1;
+    for( int dimension = 1; dimension < outputDims.nbDims; ++dimension )
+    {
+        if( outputDims.d[dimension] <= 0 )
+        {
+            error = "dynamic or invalid output dimensions are unsupported";
+            return nullptr;
+        }
+        bundle->outputSize *= outputDims.d[dimension];
+    }
+    bundle->trainedModes  = bundle->inputHeight * bundle->inputWidth;
+    bundle->historyLength = ( bundle->inputChannels + 1 ) / 2;
+    if( bundle->inputChannels != 2 * bundle->historyLength - 1 || bundle->outputSize != bundle->trainedModes ||
+        bundle->trainedModes < m_nModesControlled || bundle->trainedModes > m_nModes ||
+        bundle->historyLength > m_historyCapacity )
+    {
+        error = "engine tensor contract does not cover Nmodes_controlled, exceeds Nmodes, or exceeds max_Nhist";
+        return nullptr;
+    }
+    bundle->context = bundle->engine->createExecutionContext();
+    if( bundle->context == nullptr )
+    {
+        error = "TensorRT execution-context creation failed";
+        return nullptr;
+    }
+    return bundle;
+}
+
+inline int po4ao::prepareEngineMemory()
+{
+    if( m_cudaStream != nullptr )
+    {
+        return 0;
+    }
+    const size_t inputCapacity = ( 2 * static_cast<size_t>( m_historyCapacity ) - 1 ) * static_cast<size_t>( m_nModes );
+    int          lowPriority   = 0;
+    if( cudaSetDevice( m_cudaDevice ) != cudaSuccess ||
+        cudaDeviceGetStreamPriorityRange( &lowPriority, nullptr ) != cudaSuccess ||
+        cudaStreamCreateWithFlags( &m_cudaStream, cudaStreamNonBlocking ) != cudaSuccess ||
+        cudaStreamCreateWithPriority( &m_engineWarmupStream, cudaStreamNonBlocking, lowPriority ) != cudaSuccess ||
+        cudaMalloc( reinterpret_cast<void **>( &m_deviceInput ), inputCapacity * sizeof( float ) ) != cudaSuccess ||
+        cudaMalloc( reinterpret_cast<void **>( &m_deviceOutput ), static_cast<size_t>( m_nModes ) * sizeof( float ) ) !=
+            cudaSuccess ||
+        cudaMalloc( reinterpret_cast<void **>( &m_deviceWarmupInput ), inputCapacity * sizeof( float ) ) !=
+            cudaSuccess ||
+        cudaMalloc( reinterpret_cast<void **>( &m_deviceWarmupOutput ),
+                    static_cast<size_t>( m_nModes ) * sizeof( float ) ) != cudaSuccess )
+    {
+        cleanupEngineMemory();
+        return -1;
+    }
+    return 0;
+}
+
+inline void po4ao::cleanupEngineMemory()
+{
+    if( m_deviceInput != nullptr )
+    {
+        cudaFree( m_deviceInput );
+    }
+    if( m_deviceOutput != nullptr )
+    {
+        cudaFree( m_deviceOutput );
+    }
+    if( m_deviceWarmupInput != nullptr )
+    {
+        cudaFree( m_deviceWarmupInput );
+    }
+    if( m_deviceWarmupOutput != nullptr )
+    {
+        cudaFree( m_deviceWarmupOutput );
+    }
+    if( m_cudaStream != nullptr )
+    {
+        cudaStreamDestroy( m_cudaStream );
+    }
+    if( m_engineWarmupStream != nullptr )
+    {
+        cudaStreamDestroy( m_engineWarmupStream );
+    }
+    m_deviceInput        = nullptr;
+    m_deviceOutput       = nullptr;
+    m_deviceWarmupInput  = nullptr;
+    m_deviceWarmupOutput = nullptr;
+    m_cudaStream         = nullptr;
+    m_engineWarmupStream = nullptr;
+}
+
+inline bool po4ao::warmEngineBundle(
+    EngineBundle &bundle, cudaStream_t stream, float *deviceInput, float *deviceOutput, std::string &error )
+{
+    if( stream == nullptr || deviceInput == nullptr || deviceOutput == nullptr )
+    {
+        error = "engine warm-up resources are unavailable";
+        return false;
+    }
+
+    const size_t inputBytes = static_cast<size_t>( bundle.inputSize ) * sizeof( float );
+    if( cudaMemsetAsync( deviceInput, 0, inputBytes, stream ) != cudaSuccess )
+    {
+        error = "engine warm-up input initialization failed";
+        return false;
+    }
+    if( !bundle.context->setTensorAddress( bundle.inputName.c_str(), deviceInput ) ||
+        !bundle.context->setTensorAddress( bundle.outputName.c_str(), deviceOutput ) ||
+        !bundle.context->enqueueV3( stream ) )
+    {
+        error = "engine warm-up enqueue failed";
+        return false;
+    }
+    if( cudaStreamSynchronize( stream ) != cudaSuccess )
+    {
+        error = "engine warm-up synchronization failed";
+        return false;
+    }
+    if( !bundle.context->setTensorAddress( bundle.inputName.c_str(), m_deviceInput ) ||
+        !bundle.context->setTensorAddress( bundle.outputName.c_str(), m_deviceOutput ) )
+    {
+        error = "candidate-engine inference-address binding failed";
+        return false;
+    }
+    return true;
+}
+
+inline bool po4ao::captureEngineGraph( EngineBundle &bundle, std::string &error )
+{
+    if( m_engineWarmupStream == nullptr || !m_inputState || !m_output )
+    {
+        error = "inference-graph resources are unavailable";
+        return false;
+    }
+
+    cudaGraph_t graph = nullptr;
+    if( cudaStreamBeginCapture( m_engineWarmupStream, cudaStreamCaptureModeThreadLocal ) != cudaSuccess )
+    {
+        error = "inference-graph capture start failed";
+        return false;
+    }
+
+    const size_t inputBytes  = static_cast<size_t>( bundle.inputSize ) * sizeof( float );
+    const size_t outputBytes = static_cast<size_t>( bundle.outputSize ) * sizeof( float );
+    const bool   captured =
+        cudaMemcpyAsync(
+            m_deviceInput, m_inputState.get(), inputBytes, cudaMemcpyHostToDevice, m_engineWarmupStream ) ==
+            cudaSuccess &&
+        bundle.context->enqueueV3( m_engineWarmupStream ) &&
+        cudaMemcpyAsync( m_output.get(), m_deviceOutput, outputBytes, cudaMemcpyDeviceToHost, m_engineWarmupStream ) ==
+            cudaSuccess;
+    const cudaError_t captureStatus = cudaStreamEndCapture( m_engineWarmupStream, &graph );
+    if( !captured || captureStatus != cudaSuccess || graph == nullptr )
+    {
+        if( graph != nullptr )
+        {
+            cudaGraphDestroy( graph );
+        }
+        error = "inference-graph capture failed";
+        return false;
+    }
+
+    cudaGraphExec_t graphExec = nullptr;
+    if( cudaGraphInstantiate( &graphExec, graph, 0 ) != cudaSuccess )
+    {
+        cudaGraphDestroy( graph );
+        error = "inference-graph instantiation failed";
+        return false;
+    }
+    cudaGraphDestroy( graph );
+    if( cudaGraphUpload( graphExec, m_engineWarmupStream ) != cudaSuccess ||
+        cudaStreamSynchronize( m_engineWarmupStream ) != cudaSuccess )
+    {
+        cudaGraphExecDestroy( graphExec );
+        error = "inference-graph upload failed";
+        return false;
+    }
+
+    bundle.graphExec = graphExec;
+    return true;
+}
+
+inline bool po4ao::loadExplorationNoise()
+{
+    std::ifstream file( m_exploreNoiseFile );
+    if( !file )
+    {
+        return false;
+    }
+
+    m_explorationNoise.clear();
+    m_explorationNoiseRows = 0;
+    m_explorationNoiseCols = 0;
+    std::string line;
+    while( std::getline( file, line ) )
+    {
+        if( line.empty() )
+        {
+            continue;
+        }
+        std::stringstream  rowStream( line );
+        std::string        token;
+        std::vector<float> row;
+        while( std::getline( rowStream, token, ',' ) )
+        {
+            try
+            {
+                row.push_back( std::stof( token ) );
+            }
+            catch( const std::exception & )
+            {
+                return false;
+            }
+        }
+        if( row.empty() )
+        {
+            continue;
+        }
+        if( m_explorationNoiseRows == 0 )
+        {
+            m_explorationNoiseCols = row.size();
+        }
+        else if( row.size() != m_explorationNoiseCols )
+        {
+            return false;
+        }
+        m_explorationNoise.insert( m_explorationNoise.end(), row.begin(), row.end() );
+        ++m_explorationNoiseRows;
+    }
+    return m_explorationNoiseRows > 0 && m_explorationNoiseCols >= static_cast<size_t>( m_nModesControlled );
+}
+
+inline void po4ao::modelLoaderLoop()
+{
+    while( !m_loaderShutdown.load( std::memory_order_acquire ) )
+    {
+        { //mutex scope
+            std::unique_lock<std::mutex> lock( m_loaderMutex );
+            m_loaderCondition.wait( lock,
+                                    [this]()
+                                    {
+                                        return m_loaderShutdown.load( std::memory_order_acquire ) ||
+                                               m_reloadRequested.load( std::memory_order_acquire ) ||
+                                               m_retiredEngine.load( std::memory_order_acquire ) != nullptr;
+                                    } );
+        }
+        delete m_retiredEngine.exchange( nullptr, std::memory_order_acq_rel );
+        if( m_loaderShutdown.load( std::memory_order_acquire ) )
+        {
+            break;
+        }
+        if( !m_reloadRequested.exchange( false, std::memory_order_acq_rel ) )
+        {
+            continue;
+        }
+
+        const uint64_t requestGeneration = m_reloadGeneration.load( std::memory_order_acquire );
+        std::string    error;
+        auto           candidate = createEngineBundle( m_engineDirs + "/" + m_engineName, error );
+        if( candidate != nullptr && m_cudaStream == nullptr && prepareEngineMemory() < 0 )
+        {
+            error = "CUDA inference-buffer allocation failed";
+            candidate.reset();
+        }
+        if( candidate != nullptr &&
+            !warmEngineBundle( *candidate, m_engineWarmupStream, m_deviceWarmupInput, m_deviceWarmupOutput, error ) )
+        {
+            candidate.reset();
+        }
+        if( candidate != nullptr && !captureEngineGraph( *candidate, error ) )
+        {
+            candidate.reset();
+        }
+        if( candidate == nullptr )
+        {
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( m_reloadErrorMutex );
+                m_reloadError = error;
+            }
+            log<text_log>( "PO4AO model reload failed: " + m_reloadError, logPrio::LOG_ERROR );
+            m_reloadStatus.store( 3, std::memory_order_release );
+            continue;
+        }
+        if( requestGeneration != m_modelGeneration.load( std::memory_order_acquire ) )
+        {
+            m_reloadStatus.store( 0, std::memory_order_release );
+            continue;
+        }
+        candidate->generation = requestGeneration;
+        if( m_pendingEngine.load( std::memory_order_acquire ) != nullptr )
+        {
+            std::lock_guard<std::mutex> lock( m_reloadErrorMutex );
+            m_reloadError = "a validated model is already awaiting activation";
+            log<text_log>( "PO4AO model reload failed: " + m_reloadError, logPrio::LOG_ERROR );
+            m_reloadStatus.store( 3, std::memory_order_release );
+            continue;
+        }
+        // Publish ready before the pointer so activation cannot be followed by a stale ready status.
+        m_reloadStatus.store( 2, std::memory_order_release );
+        m_pendingEngine.store( candidate.release(), std::memory_order_release );
+    }
+    delete m_retiredEngine.exchange( nullptr, std::memory_order_acq_rel );
+}
+
+inline void po4ao::activatePendingEngine()
+{
+    if( m_pendingEngine.load( std::memory_order_acquire ) == nullptr )
+    {
+        return;
+    }
+    EngineBundle *candidate = takePendingModel(
+        m_pendingEngine, m_retiredEngine, m_reloadStatus, m_modelGeneration.load( std::memory_order_acquire ) );
+    if( candidate == nullptr )
+    {
+        if( m_retiredEngine.load( std::memory_order_acquire ) != nullptr )
+        {
+            m_loaderCondition.notify_one();
+        }
+        return;
+    }
+
+    EngineBundle *old = m_activeEngine;
+    m_activeEngine    = candidate;
+    m_activeModelId.store( candidate->modelId, std::memory_order_release );
+    m_useNeuralNetwork.store( true, std::memory_order_release );
+    m_reloadStatus.store( 0, std::memory_order_release );
+    m_retiredEngine.store( old, std::memory_order_release );
+    m_loaderCondition.notify_one();
+}
+
+inline void po4ao::resetActiveModel( uint64_t generation )
+{
+    if( m_observationHistory )
+    {
+        m_observationHistory->reset();
+    }
+    if( m_commandHistory )
+    {
+        m_commandHistory->reset();
+    }
+    m_episodeBuffers[static_cast<size_t>( m_activeEpisodeSlot )].reset();
+
+    if( m_activeEngine != nullptr && m_activeEngine->generation >= generation )
+    {
+        return;
+    }
+
+    m_activeModelId.store( 0, std::memory_order_release );
+    m_useNeuralNetwork.store( false, std::memory_order_release );
+}
+
+inline bool po4ao::runInference( const float *observation )
+{
+    if( m_activeEngine == nullptr || m_activeEngine->graphExec == nullptr ||
+        !assemblePolicyInput( m_inputState.get(),
+                              static_cast<size_t>( m_activeEngine->trainedModes ),
+                              static_cast<size_t>( m_activeEngine->historyLength ),
+                              *m_observationHistory,
+                              *m_commandHistory ) )
+    {
+        return false;
+    }
+
+    if( cudaGraphLaunch( m_activeEngine->graphExec, m_cudaStream ) != cudaSuccess ||
+        cudaStreamSynchronize( m_cudaStream ) != cudaSuccess )
+    {
+        return false;
+    }
+    if( !blendPolicyCommand(
+            m_output.get(), observation, static_cast<size_t>( m_nModesControlled ), m_integratorGain, m_policyBlend ) )
+    {
+        return false;
+    }
+    // Exploration and limits are applied once, after either base controller has run.
+    for( int mode = 0; mode < m_nModesControlled; ++mode )
+    {
+        if( !finiteFloat( m_output[mode] ) )
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline int po4ao::openOutputStreams()
+{
+    closeOutputStreams();
+
+    auto openOrCreate = [this]( IMAGE                         &stream,
+                                const std::string             &name,
+                                uint8_t                        dimensions,
+                                const std::array<uint32_t, 3> &sizes,
+                                uint8_t                        dataType,
+                                bool                           recreateIfMismatched )
+    {
+        auto create = [&stream, &name, dimensions, &sizes, dataType]()
+        {
+            uint32_t imageSize[3] = { sizes[0], sizes[1], sizes[2] };
+            if( ImageStreamIO_createIm_gpu( &stream,
+                                            name.c_str(),
+                                            dimensions,
+                                            imageSize,
+                                            dataType,
+                                            -1,
+                                            1,
+                                            IMAGE_NB_SEMAPHORE,
+                                            0,
+                                            MATH_DATA,
+                                            0 ) != IMAGESTREAMIO_SUCCESS )
+            {
+                return false;
+            }
+            return true;
+        };
+
+        auto matches = [&stream, dimensions, &sizes, dataType]()
+        {
+            bool valid = stream.md != nullptr && stream.array.raw != nullptr && stream.md[0].naxis == dimensions &&
+                         stream.md[0].sem > 0 && stream.md[0].datatype == dataType;
+            for( uint8_t axis = 0; valid && axis < dimensions; ++axis )
+            {
+                valid = stream.md[0].size[axis] == sizes[axis];
+            }
+            return valid;
+        };
+
+        bool created   = false;
+        bool recreated = false;
+        if( ImageStreamIO_openIm( &stream, name.c_str() ) != IMAGESTREAMIO_SUCCESS )
+        {
+            if( !create() )
+            {
+                return false;
+            }
+            created = true;
+        }
+        else if( !matches() )
+        {
+            if( !recreateIfMismatched )
+            {
+                ImageStreamIO_closeIm( &stream );
+                return false;
+            }
+            if( ImageStreamIO_destroyIm( &stream ) != IMAGESTREAMIO_SUCCESS )
+            {
+                ImageStreamIO_closeIm( &stream );
+                return false;
+            }
+            if( !create() )
+            {
+                return false;
+            }
+            created   = true;
+            recreated = true;
+        }
+
+        if( !matches() )
+        {
+            ImageStreamIO_closeIm( &stream );
+            return false;
+        }
+        if( created )
+        {
+            memset( stream.array.raw, 0, stream.md[0].nelement * ImageStreamIO_typesize( dataType ) );
+            log<text_log>(
+                ( recreated ? "recreated stale PO4AO shared-memory stream " : "created PO4AO shared-memory stream " ) +
+                    name,
+                logPrio::LOG_INFO );
+        }
+        return true;
+    };
+
+    const std::array<uint32_t, 3> outputSize = { static_cast<uint32_t>( m_nModes ), 1, 1 };
+    const std::array<uint32_t, 3> replaySize = {
+        static_cast<uint32_t>( m_nModes ), static_cast<uint32_t>( m_replayBufferSize ), 2 };
+    const std::array<uint32_t, 3> metadataSize = { 4, 1, 1 };
+
+    m_outputOpened = openOrCreate( m_outputStream, m_outputChannel, 2, outputSize, _DATATYPE_FLOAT, false );
+    m_replayOpened = openOrCreate( m_replayStream, m_bufferChannel, 3, replaySize, _DATATYPE_FLOAT, true );
+    m_replayMetadataOpened =
+        openOrCreate( m_replayMetadataStream, m_bufferMetadataChannel, 2, metadataSize, _DATATYPE_UINT32, true );
+    m_warmupOpened = openOrCreate( m_warmupStream, m_warmupBufferChannel, 3, replaySize, _DATATYPE_FLOAT, true );
+    m_warmupMetadataOpened =
+        openOrCreate( m_warmupMetadataStream, m_warmupMetadataChannel, 2, metadataSize, _DATATYPE_UINT32, true );
+    if( !m_outputOpened || !m_replayOpened || !m_replayMetadataOpened || !m_warmupOpened || !m_warmupMetadataOpened )
+    {
+        closeOutputStreams();
+        return log<software_error, -1>( { __FILE__,
+                                          __LINE__,
+                                          "could not open or create correctly sized "
+                                          "PO4AO shared-memory streams" } );
+    }
+
+    memset( m_output.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );
+    sendOutput();
+
+    invalidateReplay( m_replayStream, m_replayOpened, m_replayMetadataStream, m_replayMetadataOpened );
+    invalidateReplay( m_warmupStream, m_warmupOpened, m_warmupMetadataStream, m_warmupMetadataOpened );
+    return 0;
+}
+
+inline void po4ao::closeOutputStreams()
+{
+    m_replayRmsNm.store( -1.0, std::memory_order_relaxed );
+
+    if( m_outputOpened )
+    {
+        ImageStreamIO_closeIm( &m_outputStream );
+    }
+    if( m_replayOpened )
+    {
+        ImageStreamIO_closeIm( &m_replayStream );
+    }
+    if( m_replayMetadataOpened )
+    {
+        ImageStreamIO_closeIm( &m_replayMetadataStream );
+    }
+    if( m_warmupOpened )
+    {
+        ImageStreamIO_closeIm( &m_warmupStream );
+    }
+    if( m_warmupMetadataOpened )
+    {
+        ImageStreamIO_closeIm( &m_warmupMetadataStream );
+    }
+    m_outputOpened         = false;
+    m_replayOpened         = false;
+    m_replayMetadataOpened = false;
+    m_warmupOpened         = false;
+    m_warmupMetadataOpened = false;
+}
+
+inline int po4ao::sendOutput()
+{
+    if( !m_outputOpened )
+    {
+        return -1;
+    }
+    m_outputStream.md[0].write = 1;
+    memcpy( m_outputStream.array.raw, m_output.get(), static_cast<size_t>( m_nModes ) * sizeof( float ) );
+    ++m_outputStream.md[0].cnt0;
+    m_outputStream.md[0].write = 0;
+    if( ImageStreamIO_sempost( &m_outputStream, -1 ) != 0 )
+    {
+        return -1;
+    }
+    return 0;
+}
+
+inline int po4ao::appStartup()
+{
+    m_runtimeInstance = std::to_string( getpid() ) + "-" +
+                        std::to_string( std::chrono::system_clock::now().time_since_epoch().count() );
+    if( m_configVersion != 2 || m_nModes <= 0 || m_nModesControlled <= 0 || m_nModesControlled > m_nModes ||
+        m_historyCapacity <= 0 || m_iterationsPerEpisode == 0 || m_replayBufferSize <= 0 || m_warmupEpisodes == 0 ||
+        static_cast<uint64_t>( m_warmupEpisodes ) * m_iterationsPerEpisode >
+            static_cast<uint64_t>( m_replayBufferSize ) ||
+        m_explorationSigmaEnd < 0.F || m_explorationSigmaStart < m_explorationSigmaEnd ||
+        !finiteFloat( m_policyBlend ) || m_policyBlend < 0.F || m_policyBlend > 1.F || m_maxCommandAbs <= 0.F ||
+        m_latencyDeadlineUs == 0 || m_statsPeriodSeconds <= 0.0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "invalid PO4AO configuration" } );
+    }
+    if( !CircularBuffer::selfTest() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "CircularBuffer self-test failed" } );
+    }
+    if( !loadExplorationNoise() )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "exploration-noise load failed" } );
+    }
+
+    m_activeModelId.store( 0, std::memory_order_release );
+    m_useNeuralNetwork.store( false, std::memory_order_release );
+    log<text_log>( "PO4AO starting in fallback mode; waiting for an explicit model reload", logPrio::LOG_INFO );
+
+    for( auto &state : m_episodeStates )
+    {
+        state.store( 0, std::memory_order_relaxed );
+    }
+    // A retained configuration must never select prediction before an explicit operator request.
+    m_controlRequest.store( 2, std::memory_order_release );
+    if( m_controlEnabledConfig )
+    {
+        log<text_log>( "Ignoring parameters.control_enabled: use control_enable to enable predictive control",
+                       logPrio::LOG_WARNING );
+    }
+    m_lastStatsUpdate = std::chrono::steady_clock::now();
+
+    createStandardIndiToggleSw( m_indiP_reloadToggle, "reload_engine" );
+    registerIndiPropertyNew( m_indiP_reloadToggle, INDI_NEWCALLBACK( m_indiP_reloadToggle ) );
+    createStandardIndiToggleSw( m_indiP_resetModel, "reset_model" );
+    registerIndiPropertyNew( m_indiP_resetModel, INDI_NEWCALLBACK( m_indiP_resetModel ) );
+    createStandardIndiToggleSw( m_indiP_controlToggle, "control_enable" );
+    registerIndiPropertyNew( m_indiP_controlToggle, INDI_NEWCALLBACK( m_indiP_controlToggle ) );
+    createStandardIndiToggleSw( m_indiP_recollectWarmup, "recollect_warmup" );
+    registerIndiPropertyNew( m_indiP_recollectWarmup, INDI_NEWCALLBACK( m_indiP_recollectWarmup ) );
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_runtimeStats, "runtime_stats", pcf::IndiProperty::Number );
+    for( const char *element : { "p50_us", "max_us", "missed_frames", "replay_drops" } )
+    {
+        m_indiP_runtimeStats.add( pcf::IndiElement( element ) );
+    }
+    REG_INDI_NEWPROP_NOCB( m_indiP_modelStatus, "model_status", pcf::IndiProperty::Text );
+    m_indiP_modelStatus.add( pcf::IndiElement( "active_id" ) );
+    m_indiP_modelStatus.add( pcf::IndiElement( "active_backend" ) );
+    for( const char *element : { "reload",
+                                 "reload_error",
+                                 "effective_controller",
+                                 "effective_id",
+                                 "control_request",
+                                 "control_target",
+                                 "instance",
+                                 "sequence",
+                                 "control_applied",
+                                 "reset_request",
+                                 "reset_applied" } )
+    {
+        m_indiP_modelStatus.add( pcf::IndiElement( element ) );
+    }
+    REG_INDI_NEWPROP_NOCB( m_indiP_collectionStatus, "collection_status", pcf::IndiProperty::Text );
+    for( const char *element :
+         { "state", "requested_generation", "generation", "frames", "target_frames", "residual_rms_nm" } )
+    {
+        m_indiP_collectionStatus.add( pcf::IndiElement( element ) );
+    }
+
+    TELEMETER_APP_STARTUP;
+    m_loaderThread = std::thread(
+        [this]()
+        {
+            modelLoaderLoop();
+        } );
+    m_replayThread = std::thread(
+        [this]()
+        {
+            replayPublisherLoop();
+        } );
+    // The standard early-return macro would skip rollback of the two worker threads.
+    if( shmimMonitorT::appStartup() < 0 )
+    {
+        m_loaderShutdown.store( true, std::memory_order_release );
+        m_replayShutdown.store( true, std::memory_order_release );
+        m_loaderCondition.notify_all();
+        m_replayCondition.notify_all();
+        m_loaderThread.join();
+        m_replayThread.join();
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+    state( stateCodes::OPERATING );
+    return 0;
+}
+
+inline void po4ao::checkInputNotifications( uint64_t sequence )
+{
+    if( sequence != m_checkedSequence )
+    {
+        m_checkedSequence    = sequence;
+        m_checkedInode       = 0;
+        m_inputStallReported = false;
+        return;
+    }
+
+    // The monitor owns its mapping and may unmap it concurrently. Inspect the named
+    // stream without claiming a reader semaphore or touching the real-time callback.
+    char        filename[1024];
+    struct stat info;
+    IMAGE       probe{};
+    if( ImageStreamIO_filename( filename, sizeof( filename ), shmimMonitorT::m_shmimName.c_str() ) !=
+            IMAGESTREAMIO_SUCCESS ||
+        stat( filename, &info ) != 0 ||
+        ImageStreamIO_openIm( &probe, shmimMonitorT::m_shmimName.c_str() ) != IMAGESTREAMIO_SUCCESS )
+    {
+        m_checkedInode       = 0;
+        m_inputStallReported = false;
+        return;
+    }
+
+    const auto inode   = static_cast<uint64_t>( probe.md->inode );
+    const auto counter = __atomic_load_n( &probe.md->cnt0, __ATOMIC_ACQUIRE );
+    if( inode != m_checkedInode || inode != static_cast<uint64_t>( info.st_ino ) )
+    {
+        m_inputStallReported = false;
+    }
+    else if( counter != m_checkedCounter && !m_inputStallReported )
+    {
+        int slot = -1;
+        for( int index = 0; probe.semReadPID && index < probe.md->sem; ++index )
+        {
+            if( probe.semReadPID[index] == getpid() )
+            {
+                slot = index;
+                break;
+            }
+        }
+        // An interrupted semaphore wait follows the monitor's normal detach/reattach path.
+        // Leave a busy callback and a slot claimed by another process alone.
+        std::unique_lock<std::mutex> idle( m_callbackMutex, std::try_to_lock );
+        if( !idle || m_runtimeSamples.sequence() != sequence )
+        {
+            ImageStreamIO_closeIm( &probe );
+            return;
+        }
+        const bool requested = slot >= 0 && shmimMonitorT::m_smThread.joinable() &&
+                               pthread_kill( shmimMonitorT::m_smThread.native_handle(), SIGUSR1 ) == 0;
+        log<text_log>( shmimMonitorT::m_shmimName + " is advancing without completed PO4AO callbacks; reader slot " +
+                           std::to_string( slot ) +
+                           ( requested ? ", requested reattachment" : ", no reattachment requested" ),
+                       logPrio::LOG_WARNING );
+        m_inputStallReported = true;
+    }
+    m_checkedCounter = counter;
+    m_checkedInode   = inode;
+    ImageStreamIO_closeIm( &probe );
+}
+
+inline void po4ao::updateRuntimeStatistics()
+{
+    const auto now = std::chrono::steady_clock::now();
+    if( std::chrono::duration<double>( now - m_lastStatsUpdate ).count() < m_statsPeriodSeconds )
+    {
+        return;
+    }
+    m_lastStatsUpdate = now;
+
+    const auto   statistics = m_runtimeSamples.snapshot( m_lastTelemSequence );
+    checkInputNotifications( statistics.sequence );
+    updateIfChanged( m_indiP_runtimeStats, "p50_us", statistics.p50 );
+    updateIfChanged( m_indiP_runtimeStats, "max_us", statistics.maximum );
+    updateIfChanged( m_indiP_runtimeStats,
+                     "missed_frames",
+                     static_cast<double>( m_missedFrames.load( std::memory_order_relaxed ) ) );
+    updateIfChanged(
+        m_indiP_runtimeStats, "replay_drops", static_cast<double>( m_replayDrops.load( std::memory_order_relaxed ) ) );
+
+    recordTelem( static_cast<const telem_po4ao *>( nullptr ) );
+}
+
+inline int po4ao::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_po4ao() );
+}
+
+inline int po4ao::recordTelem( const telem_po4ao * )
+{
+    const auto s      = m_runtimeSamples.snapshot( m_lastTelemSequence );
+    const int  result = telemeterT::template telem<telem_po4ao>( { s.p50,
+                                                                   s.p95,
+                                                                   s.p99,
+                                                                   s.maximum,
+                                                                   s.count,
+                                                                   s.sequence,
+                                                                   s.lastTimeNs,
+                                                                   s.fresh,
+                                                                   s.mixed,
+                                                                   m_missedFrames.load(),
+                                                                   m_deadlineMisses.load(),
+                                                                   m_inferenceFailures.load(),
+                                                                   m_replayDrops.load(),
+                                                                   m_latencyDeadlineUs,
+                                                                   s.model,
+                                                                   s.backend } );
+    if( result >= 0 )
+    {
+        m_lastTelemSequence = s.sequence;
+    }
+    return result;
+}
+
+inline int po4ao::appShutdown()
+{
+    // Always release worker/model resources, even when the monitor reports a shutdown error.
+    const int monitorStatus = shmimMonitorT::appShutdown();
+    m_controlRequest.fetch_and( ~uint64_t{ 1 }, std::memory_order_acq_rel );
+    if( m_outputOpened && m_output )
+    {
+        memset( m_output.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );
+        sendOutput();
+    }
+
+    m_loaderShutdown.store( true, std::memory_order_release );
+    m_replayShutdown.store( true, std::memory_order_release );
+    m_loaderCondition.notify_all();
+    m_replayCondition.notify_all();
+    if( m_loaderThread.joinable() )
+    {
+        m_loaderThread.join();
+    }
+    if( m_replayThread.joinable() )
+    {
+        m_replayThread.join();
+    }
+    closeOutputStreams();
+
+    delete m_pendingEngine.exchange( nullptr, std::memory_order_acq_rel );
+    delete m_retiredEngine.exchange( nullptr, std::memory_order_acq_rel );
+    delete m_activeEngine;
+    m_activeEngine = nullptr;
+    cleanupEngineMemory();
+    TELEMETER_APP_SHUTDOWN;
+    if( monitorStatus < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "Error from shmimMonitorT::appShutdown" } );
+    }
+    return 0;
+}
+
+inline int po4ao::allocate( const dev::shmimT &dummy )
+{
+    std::lock_guard<std::mutex> callbackLock( m_callbackMutex );
+    static_cast<void>( dummy );
+    if( shmimMonitorT::m_dataType != _DATATYPE_FLOAT ||
+        static_cast<uint64_t>( shmimMonitorT::m_width ) * shmimMonitorT::m_height != static_cast<uint64_t>( m_nModes ) )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "input stream must be Nmodes float32 values" } );
+    }
+
+    std::lock_guard<std::mutex> publicationLock( m_publicationMutex );
+    m_readyRead.store( m_readyWrite.load( std::memory_order_acquire ), std::memory_order_release );
+    const size_t inputCapacity = ( 2 * static_cast<size_t>( m_historyCapacity ) - 1 ) * static_cast<size_t>( m_nModes );
+    if( !m_inputState || !m_output )
+    {
+        if( cudaSetDevice( m_cudaDevice ) != cudaSuccess )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "CUDA inference-device selection failed" } );
+        }
+        float *inputState = nullptr;
+        float *output     = nullptr;
+        if( cudaHostAlloc( reinterpret_cast<void **>( &inputState ),
+                           inputCapacity * sizeof( float ),
+                           cudaHostAllocDefault ) != cudaSuccess )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "pinned policy-input allocation failed" } );
+        }
+        std::unique_ptr<float[], HostBufferDeleter> pinnedInput( inputState );
+        if( cudaHostAlloc( reinterpret_cast<void **>( &output ),
+                           static_cast<size_t>( m_nModes ) * sizeof( float ),
+                           cudaHostAllocDefault ) != cudaSuccess )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "pinned policy-output allocation failed" } );
+        }
+        m_inputState = std::move( pinnedInput );
+        m_output.reset( output );
+    }
+    memset( m_inputState.get(), 0, inputCapacity * sizeof( float ) );
+    memset( m_output.get(), 0, static_cast<size_t>( m_nModes ) * sizeof( float ) );
+    m_observationHistory  = std::make_unique<CircularBuffer>( m_nModes, m_historyCapacity );
+    m_commandHistory      = std::make_unique<CircularBuffer>( m_nModes, m_historyCapacity - 1 );
+    m_publishObservations = std::make_unique<CircularBuffer>( m_nModes, m_replayBufferSize );
+    m_publishCommands     = std::make_unique<CircularBuffer>( m_nModes, m_replayBufferSize );
+
+    for( size_t slot = 0; slot < c_episodeSlots; ++slot )
+    {
+        m_episodeBuffers[slot].configure( m_iterationsPerEpisode, m_nModes );
+        m_episodeStates[slot].store( 0, std::memory_order_relaxed );
+    }
+    m_activeEpisodeSlot = 0;
+    m_episodeStates[0].store( 1, std::memory_order_release );
+    m_readyRead.store( 0, std::memory_order_relaxed );
+    m_readyWrite.store( 0, std::memory_order_relaxed );
+    // Reallocation invalidates snapshots, but must not lose a pre-attachment recollection request.
+    const bool recollectPending = m_warmupRecollectRequest.load( std::memory_order_acquire ) >
+                                  WarmupCollection::generation( m_collection.token() );
+    m_activeCollectionGeneration = m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
+    m_publicationGeneration      = 0;
+    m_initialWarmupPending       = WarmupCollection::phase( m_collection.token() ) == CollectionPhase::idle;
+    if( !m_initialWarmupPending )
+    {
+        m_collection.begin( m_activeCollectionGeneration, 0, 0, 0, 0 );
+    }
+    if( recollectPending )
+    {
+        m_warmupRecollectRequest.store( m_collectionGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1,
+                                        std::memory_order_release );
+    }
+    m_episodeCounter.store( 0, std::memory_order_relaxed );
+    m_lastInputCounter = 0;
+    m_haveInputCounter = false;
+    m_retryConsecutive.reset();
+    m_effectiveController.store( 0, std::memory_order_release );
+    m_effectiveModelId.store( 0, std::memory_order_release );
+    m_appliedControl.store( 0, std::memory_order_release );
+    if( openOutputStreams() < 0 )
+    {
+        m_retryOutputsAt = std::chrono::steady_clock::now() + std::chrono::seconds( 1 );
+    }
+    return 0;
+}
+
+#endif // po4ao_impl_hpp

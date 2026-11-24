@@ -102,6 +102,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup raidTelemetry_unit_test RAID Telemetry Unit Tests
+ * \brief Compact MD array health, counts, and metadata tests.
+ * \ingroup unit_test
+ */
+
 /** \defgroup logdump_unit_test Logdump Unit Tests
  * \brief Complete-record decoding, live partial appends, filtering, and log rotation tests.
  * \ingroup application_unit_test
@@ -114,6 +119,11 @@ $ less tests/results/latest/run.log
 
 /** \defgroup dmSyncopation_unit_test DM Syncopation Unit Tests
  * \brief Deterministic scheduling, control and local shared-memory publication tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup qwpTracker_unit_test qwpTracker Unit Tests
+ * \brief Angle mapping, tracking law, tracking/manual modes, stage gating and FSM tests.
  * \ingroup application_unit_test
  */
 
@@ -189,6 +199,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup hwpSequencer_unit_test hwpSequencer Unit Tests
+ * \brief Offline tests of the HWP sequencer callbacks, configuration, bounded waits, and sequence logic.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup filterWheelCtrl_unit_test Filter Wheel Controller Unit Tests
  * \brief Offline communication recovery, homing, and power-transition tests.
  * \ingroup application_unit_test
@@ -244,8 +259,23 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup timingGUI_unit_test Timing GUI Unit Tests
+ * \brief Offline timing conversions, INDI availability, and command routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup polarimetryGUI_unit_test Polarimetry GUI Unit Tests
+ * \brief Offline hwpSequencer subscription, control availability, status, and command tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup rtimvROI_unit_test rtimv ROI Plugin Unit Tests
  * \brief Offline INDI command lifecycle and ROI interaction tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup valueDisplay_unit_test rtimv Value Display Plugin Unit Tests
+ * \brief Offline numeric display, INDI availability, and overlay placement tests.
  * \ingroup application_unit_test
  */
 
@@ -324,6 +354,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup ocam2KCtrl_descramble_unit_test OCAM Descramble Unit Tests
+ * \brief Real-SDK pixel equivalence and offline frame-boundary implementation selection.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup cameraSim_emgain_unit_test Camera Simulator EM Gain Unit Tests
  * \brief Offline simulated EM-gain disable behavior and generic shared interface compatibility.
  * \ingroup application_unit_test
@@ -332,4 +367,29 @@ report from their counters and then returns nonzero. An HTML report therefore do
 /** \defgroup dmSyncopationProducer_unit_test DM Syncopation Producer Unit Tests
  * \brief Same-host tagged request, source ownership and private-snapshot acknowledgement tests.
  * \ingroup app_dev_unit_tests
+ */
+
+/** \defgroup dlDataCollection_unit_test dlDataCollection Unit Tests
+ * \brief Tests of command-bank validation, synchronized capture and checked file output.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup nnReconstructor_unit_test nnReconstructor Unit Tests
+ * \brief Reconstruction, native handover and FPS/FIFO transport tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup po4aoTrainer_unit_test PO4AO Trainer Unit Tests
+ * \brief Offline configuration, worker lifecycle and PO4AO publication tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup po4ao_unit_test PO4AO Unit Tests
+ * \brief Model handoff, modal history, and command-safety tests for PO4AO.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup po4aoGUI_unit_test PO4AO GUI Unit Tests
+ * \brief Offline state, request, reconnect and layout tests for the shared NN/PO4AO panel.
+ * \ingroup application_unit_test
  */

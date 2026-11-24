@@ -1,5 +1,5 @@
 /** \file dmSpeckle.hpp
- * \brief The MagAO-X DM speckle maker header file
+ * \brief Generate DM speckles and tip/tilt waveforms, or play arbitrary FITS cubes.
  *
  * \ingroup dmSpeckle_files
  */
@@ -7,8 +7,11 @@
 #ifndef dmSpeckle_hpp
 #define dmSpeckle_hpp
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <limits>
+#include <mutex>
 
 #include <mx/math/floatUtils.hpp>
 #include <mx/improc/eigenCube.hpp>
@@ -25,8 +28,8 @@
 /** \defgroup dmSpeckle
  * \brief The DM speckle maker app
  *
- * Creates a set of fourier modes to generate speckles, then applies them to a DM channel
- * at a specified rate.
+ * Applies generated Fourier modes, a loaded FITS cube, or a tip/tilt waveform to a DM channel.
+ * Triggered or loop-locked sparkle follows the AO loop cadence.
  *
  *
  * <a href="../handbook/operating/software/apps/dmSpeckle.html">Application Documentation</a>
@@ -86,23 +89,32 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
 
     realT m_angleOffset{ 28.0 }; ///< The calibration offset of angle so that up on camsci1/2 is 0
 
-    realT m_amp{ 0.01 }; ///< The speckle amplitude on the DM
+    realT m_amp{ 0.01 }; ///< Speckle or tip/tilt amplitude, or a gain applied to arbitrary cube pixels.
 
     bool m_cross{ true }; ///< If true, also apply the cross speckles rotated by 90 degrees
 
-    realT m_frequency{ 2000 }; ///< Legacy frame rate, or physical tip/tilt vibration frequency in Hz.
+    realT m_frequency{ 2000 }; ///< Timed plane rate, or physical tip/tilt frequency, in Hz.
 
-    unsigned m_dwell{ 1 }; ///< The dwell time for each speckle, or for how many frames it is held.
+    unsigned m_dwell{ 1 }; ///< Frame hold count for legacy operation and timed cube playback.
 
     int m_single{ -1 }; ///< if >= 0 a single frame is non-zero.
 
-    int m_opMode{ SPARKLE }; ///< Generated sparkle, file cube, or time-based tip/tilt waveform.
+    std::atomic<int> m_opMode{ SPARKLE }; ///< INDI-selected waveform, sampled by the producer before polling.
 
-    std::string m_fileName; ///< Input cube for arbitrary-cube modulation.
+    std::atomic<bool> m_loopLock{ true }; ///< Restrict managed sparkle to the main AO slot.
+
+    std::string m_fileName; ///< Full filesystem path to the arbcube FITS file, settable at runtime via INDI.
 
     ///@}
 
-    mx::improc::eigenCube<realT> m_shapes; ///< Prepared legacy shapes or arbitrary provider cube.
+    mx::improc::eigenCube<realT> m_shapes; ///< Generated speckle patterns owned by the modulation worker.
+
+    mx::improc::eigenCube<realT> m_arbcube; ///< Unscaled FITS frames owned by the modulation worker.
+
+    std::string m_loadedArbcubeFile; ///< Path that supplied the cached arbitrary cube.
+
+    std::atomic<bool> m_reloadFile{
+        false }; ///< Set by the load_file.request callback; consumed by the modulator thread.
 
     IMAGE    m_imageStream{}; ///< The only writable channel; an auxiliary source in managed mode.
     uint32_t m_width{ 0 };    ///< The width of the image
@@ -127,10 +139,10 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
         false }; ///< Queue an explicit tagged zero without mutating owned pixels.
 
   public:
-    /// Default c'tor.
+    /// Construct the application.
     dmSpeckle();
 
-    /// D'tor, declared and defined for noexcept.
+    /// Destroy the application.
     ~dmSpeckle() noexcept;
 
     /// Register legacy modulation and optional provider configuration.
@@ -145,10 +157,7 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
     /// Load configuration and request shutdown for invalid provider settings.
     virtual void loadConfig();
 
-    /// Startup function
-    /**
-     *
-     */
+    /// Register INDI controls and start the modulation worker and telemeter.
     virtual int appStartup();
 
     /// Implementation of the FSM for dmSpeckle.
@@ -158,15 +167,35 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Join the worker and release streams and telemetry resources.
     virtual int appShutdown();
 
   protected:
-    /// Prepare shape storage for the configured legacy or managed modulation.
-    int generateSpeckles();
+    /// Read and validate an unscaled FITS cube against the attached DM channel.
+    /**
+     *  \returns 0 on success
+     *  \returns -1 on error
+     */
+    int loadArbcubeFile( mx::improc::eigenCube<realT> &cube, /**< [out] Destination for FITS data. */
+                         const std::string            &fileName /**< [in] Snapshot of the configured FITS path. */ );
+
+    /// Check that the worker has loaded the configured FITS path. Caller holds m_indiMutex.
+    bool arbcubeReady() const;
+
+    /// Publish the state of the FITS load. Caller holds m_indiMutex.
+    void setFileState( pcf::IndiProperty::PropertyStateType fileState /**< [in] Load status to publish. */ );
+
+    /// Load a requested or missing cube on the worker, releasing m_indiMutex during FITS I/O.
+    void handleFileReload();
+
+    /// Stop modulation and publish a failed start or restart. Caller holds m_indiMutex.
+    void modulationFailed();
+
+    /// Name of an operating mode as used in configuration and the mode INDI property.
+    static std::string opModeName( int opMode /**< [in] SPARKLE, ARBCUBE, or TIPTILT. */ );
+
+    /// Prepare generated speckles when selected and publish the active settings. Caller holds m_indiMutex.
+    void generateSpeckles();
 
     /// Validate the optional provider mode without changing legacy channel semantics.
     int validateSyncopationConfig();
@@ -179,10 +208,13 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
                              realT    frequency, /**< [in] Actual vibration frequency in Hz. */
                              int64_t  targetNs /**< [in] CLOCK_MONOTONIC command target time. */ );
 
-    /// Generate a full provider payload for its advertised target or an explicit zero request.
+    /// Return whether the managed producer should submit only for the main AO slot.
+    bool syncopationMainOnly() const;
+
+    /// Build a sparkle plane from the main cycle, a timed waveform sample, or an explicit zero.
     int prepareSyncopationCommand(
         mx::improc::eigenImage<realT> &command /**< [out] Preallocated full source command. */,
-        int64_t                        targetNs /**< [in] Same-host monotonic target of the selected slot. */,
+        const synco::Request          &slot /**< [in] Advertised main cycle and monotonic target. */,
         bool zero /**< [in] Build an explicitly requested zero rather than a modulation sample. */ );
 
     /// Follow scheduler cutoffs without independently triggering a main DM channel.
@@ -199,7 +231,7 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
 
     std::thread m_modThread; ///< A separate thread for the modulation
 
-    bool m_modThreadInit{ true }; ///< Synchronizer to ensure f.g. thread initializes before doing dangerous things.
+    bool m_modThreadInit{ true }; ///< Holds the worker until the thread starter completes initialization.
 
     pid_t m_modThreadID{ 0 }; ///< Modulate thread PID.
 
@@ -208,8 +240,11 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
     /// Thread starter, called by modThreadStart on thread construction.  Calls modThreadExec.
     static void modThreadStart( dmSpeckle *d /**< [in] a pointer to a dmSpeckle instance (normally this) */ );
 
-    /// Execute the frame grabber main loop.
+    /// Run the legacy modulation loop or dispatch to the managed provider.
     void modThreadExec();
+
+    /// Finish a legacy run and clear its DM contribution.
+    void finishLegacyModulation( bool trigger /**< [in] Whether the finished run used a legacy trigger. */ );
 
     ///@}
 
@@ -219,6 +254,8 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
     pcf::IndiProperty m_indiP_dm; ///< INDI dm control/status.
 
     pcf::IndiProperty m_indiP_trigger; ///< INDI trigger control/status.
+
+    pcf::IndiProperty m_indiP_loopLock; ///< INDI cadence selection for managed sparkle.
 
     pcf::IndiProperty m_indiP_delay; ///< INDI delay control/status.
 
@@ -240,9 +277,20 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
 
     pcf::IndiProperty m_indiP_zero; ///< INDI zero control/status.
 
+    pcf::IndiProperty m_indiP_mode; ///< Selection switch for SPARKLE / ARBCUBE, plus TIPTILT when syncopated.
+
+    pcf::IndiProperty m_indiP_file; ///< Configured FITS path and load status.
+
+    pcf::IndiProperty m_indiP_loadFile; ///< Request switch that triggers an arbcube reload.
+
+    pcf::IndiProperty m_indiP_nFrames; ///< Read-only count of available playback frames.
+
   public:
     /// Handle changes to the trigger property.
     INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_trigger );
+
+    /// Change managed sparkle between loop-locked and frequency-driven playback.
+    INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_loopLock );
 
     /// Handle changes to the delay property.
     INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_delay );
@@ -273,6 +321,15 @@ class dmSpeckle : public MagAOXApp<true>, public dev::telemeter<dmSpeckle>, publ
 
     /// Handle changes to the zero property.
     INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_zero );
+
+    /// Select a modulation mode.
+    INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_mode );
+
+    /// Stage a FITS path for the next load.
+    INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_file );
+
+    /// Queue a FITS load on the modulation worker.
+    INDI_NEWCALLBACK_DECL( dmSpeckle, m_indiP_loadFile );
 
     /** \name Telemeter Interface
      *
@@ -401,7 +458,7 @@ void dmSpeckle::setupConfig()
                 "frequency",
                 false,
                 "float",
-                "The frequency to modulate at if not triggering (default 2000 Hz)." );
+                "Timed playback rate or managed tiptilt frequency in Hz (default 2000)." );
 
     config.add( "dm.dwell",
                 "",
@@ -412,6 +469,16 @@ void dmSpeckle::setupConfig()
                 false,
                 "int",
                 "The dwell time for each speckle, or for how many frames it is held. Default=1." );
+
+    config.add( "syncopation.loopLock",
+                "",
+                "syncopation.loopLock",
+                argType::Required,
+                "syncopation",
+                "loopLock",
+                false,
+                "bool",
+                "Lock managed sparkle to the main AO slot (default true)." );
 
     config.add( "modulator.threadPrio",
                 "",
@@ -449,13 +516,18 @@ void dmSpeckle::setupConfig()
                 "fileName",
                 false,
                 "string",
-                "File name containing the FITS cube to modulate the DM with.  Only valid if opMode==arbcube." );
+                "Full filesystem path to the FITS cube to modulate the DM with.  "
+                "Only used if opMode==arbcube; can be changed at runtime via the file INDI property." );
 }
 
 int dmSpeckle::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     _config( m_dmChannelName, "dm.channelName" );
     DMSYNCOPATIONPRODUCER_LOAD_CONFIG( _config );
+
+    bool loopLock = true;
+    _config( loopLock, "syncopation.loopLock" );
+    m_loopLock = loopLock;
 
     m_dmName = m_dmChannelName;
     _config( m_dmName, "dm.name" );
@@ -552,7 +624,14 @@ void dmSpeckle::fillTipTilt(
     }
 }
 
-int dmSpeckle::prepareSyncopationCommand( mx::improc::eigenImage<realT> &command, int64_t targetNs, bool zero )
+bool dmSpeckle::syncopationMainOnly() const
+{
+    return m_opMode.load( std::memory_order_relaxed ) == SPARKLE && m_loopLock.load( std::memory_order_relaxed );
+}
+
+int dmSpeckle::prepareSyncopationCommand( mx::improc::eigenImage<realT> &command,
+                                          const synco::Request          &slot,
+                                          bool                           zero )
 {
     if( zero )
     {
@@ -560,31 +639,61 @@ int dmSpeckle::prepareSyncopationCommand( mx::improc::eigenImage<realT> &command
         return 0;
     }
 
-    if( m_opMode == TIPTILT )
+    const int mode = m_opMode;
+
+    if( mode == TIPTILT )
     {
-        fillTipTilt( command.data(), m_width, m_height, m_amp, m_frequency, targetNs );
+        if( m_restartSp )
+        {
+            m_restartSp = false;
+        }
+
+        fillTipTilt( command.data(), m_width, m_height, m_amp, m_frequency, slot.targetNs );
         return 0;
     }
 
-    if( m_shapes.planes() == 0 || m_restartSp )
-    {
-        m_restartSp = false;
+    const bool mainOnly = syncopationMainOnly();
 
-        if( generateSpeckles() < 0 )
-        {
-            return -1;
-        }
-    }
-
-    if( m_shapes.planes() == 0 )
+    if( mainOnly && ( slot.step != 0 || slot.cycle < 0 ) )
     {
         return -1;
     }
 
-    long double index =
-        std::floor( static_cast<long double>( targetNs ) * m_frequency / ( 1e9L * std::max( 1U, m_dwell ) ) );
-    int plane = static_cast<int>( std::fmod( index, m_shapes.planes() ) );
-    command   = m_shapes.image( plane );
+    const auto &shapes = mode == ARBCUBE ? m_arbcube : m_shapes;
+
+    if( m_restartSp || ( mode == SPARKLE && shapes.planes() == 0 ) )
+    {
+        m_restartSp = false;
+        generateSpeckles();
+    }
+
+    if( shapes.planes() == 0 )
+    {
+        return -1;
+    }
+
+    int plane;
+
+    if( mainOnly )
+    {
+        plane = static_cast<int>( slot.cycle % shapes.planes() );
+    }
+    else
+    {
+        const long double index =
+            std::floor( static_cast<long double>( slot.targetNs ) * m_frequency / ( 1e9L * std::max( 1U, m_dwell ) ) );
+        plane = static_cast<int>( std::fmod( index, shapes.planes() ) );
+    }
+
+    if( mode == ARBCUBE )
+    {
+        command = shapes.image( plane ) * m_amp;
+    }
+    else
+    {
+        command = shapes.image( plane );
+    }
+
     return 0;
 }
 
@@ -594,14 +703,21 @@ void dmSpeckle::syncopationThreadExec()
 
     while( !m_shutdown )
     {
+        // Finish any FITS I/O before selecting a deadline.
+        if( m_reloadFile || ( m_modulating && m_restartSp ) )
+        {
+            handleFileReload();
+        }
+
         if( !m_modulating && !m_syncopationZeroRequested )
         {
             mx::sys::milliSleep( 1 );
             continue;
         }
 
+        const bool     mainOnly = syncopationMainOnly();
         synco::Request request{};
-        const int      pollResult = dmSyncopationProducerT::syncopationPoll( request, m_imageStream );
+        const int      pollResult = dmSyncopationProducerT::syncopationPoll( request, m_imageStream, mainOnly );
 
         if( pollResult < 0 )
         {
@@ -618,16 +734,21 @@ void dmSpeckle::syncopationThreadExec()
         { //mutex scope
             std::lock_guard<std::mutex> lock( m_indiMutex );
 
-            if( m_shutdown || ( !m_modulating && !m_syncopationZeroRequested ) )
+            if( m_shutdown || ( !m_modulating && !m_syncopationZeroRequested ) || mainOnly != syncopationMainOnly() )
             {
                 continue;
             }
 
             const bool zero = !m_modulating && m_syncopationZeroRequested;
 
-            if( prepareSyncopationCommand( command, request.targetNs, zero ) < 0 )
+            if( !zero && ( m_reloadFile || ( m_opMode == ARBCUBE && m_restartSp && !arbcubeReady() ) ) )
             {
-                m_modulating = false;
+                continue;
+            }
+
+            if( prepareSyncopationCommand( command, request, zero ) < 0 )
+            {
+                modulationFailed();
                 continue;
             }
 
@@ -661,40 +782,39 @@ int dmSpeckle::appStartup()
     m_indiP_delay["target"]  = m_triggerDelay;
     registerIndiPropertyNew( m_indiP_delay, INDI_NEWCALLBACK( m_indiP_delay ) );
 
-    if( m_opMode == SPARKLE )
+    // The sparkle-specific properties are always registered so users can set them while in
+    // arbcube mode; they take effect when mode switches back to sparkle.
+    createStandardIndiNumber<float>( m_indiP_separation, "separation", 0, 0, 100, "%f" );
+    m_indiP_separation["current"] = m_separation;
+    m_indiP_separation["target"]  = m_separation;
+    registerIndiPropertyNew( m_indiP_separation, INDI_NEWCALLBACK( m_indiP_separation ) );
+
+    createStandardIndiNumber<float>( m_indiP_angle, "angle", 0, 0, 100, "%f" );
+    m_indiP_angle["current"] = m_angle;
+    m_indiP_angle["target"]  = m_angle;
+    registerIndiPropertyNew( m_indiP_angle, INDI_NEWCALLBACK( m_indiP_angle ) );
+
+    createStandardIndiToggleSw( m_indiP_cross, "cross" );
+    if( registerIndiPropertyNew( m_indiP_cross, INDI_NEWCALLBACK( m_indiP_cross ) ) < 0 )
     {
-        createStandardIndiNumber<float>( m_indiP_separation, "separation", 0, 0, 100, "%f" );
-        m_indiP_separation["current"] = m_separation;
-        m_indiP_separation["target"]  = m_separation;
-        registerIndiPropertyNew( m_indiP_separation, INDI_NEWCALLBACK( m_indiP_separation ) );
-
-        createStandardIndiNumber<float>( m_indiP_angle, "angle", 0, 0, 100, "%f" );
-        m_indiP_angle["current"] = m_angle;
-        m_indiP_angle["target"]  = m_angle;
-        registerIndiPropertyNew( m_indiP_angle, INDI_NEWCALLBACK( m_indiP_angle ) );
-
-        createStandardIndiToggleSw( m_indiP_cross, "cross" );
-        if( registerIndiPropertyNew( m_indiP_cross, INDI_NEWCALLBACK( m_indiP_cross ) ) < 0 )
-        {
-            log<software_error>( { __FILE__, __LINE__ } );
-            return -1;
-        }
-        if( m_cross )
-        {
-            m_indiP_cross["toggle"] = pcf::IndiElement::On;
-        }
-        else
-        {
-            m_indiP_cross["toggle"] = pcf::IndiElement::Off;
-        }
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+    if( m_cross )
+    {
+        m_indiP_cross["toggle"] = pcf::IndiElement::On;
+    }
+    else
+    {
+        m_indiP_cross["toggle"] = pcf::IndiElement::Off;
     }
 
-    createStandardIndiNumber<float>( m_indiP_amp, "amp", -1, 0, 1, "%f" );
+    createStandardIndiNumber<float>( m_indiP_amp, "amp", -1, 1, 0, "%f" );
     m_indiP_amp["current"] = m_amp;
     m_indiP_amp["target"]  = m_amp;
     registerIndiPropertyNew( m_indiP_amp, INDI_NEWCALLBACK( m_indiP_amp ) );
 
-    createStandardIndiNumber<float>( m_indiP_frequency, "frequency", 0, 0, 10000, "%f" );
+    createStandardIndiNumber<float>( m_indiP_frequency, "frequency", 0, 10000, 0, "%f" );
     m_indiP_frequency["current"] = m_frequency;
     m_indiP_frequency["target"]  = m_frequency;
     registerIndiPropertyNew( m_indiP_frequency, INDI_NEWCALLBACK( m_indiP_frequency ) );
@@ -712,6 +832,12 @@ int dmSpeckle::appStartup()
     else
     {
         m_indiP_trigger["toggle"] = pcf::IndiElement::Off;
+    }
+
+    if( !m_syncopationTiming.empty() )
+    {
+        CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_loopLock, "loop_lock" );
+        m_indiP_loopLock["toggle"] = m_loopLock ? pcf::IndiElement::On : pcf::IndiElement::Off;
     }
 
     createStandardIndiNumber<int>( m_indiP_dwell, "dwell", 1, 100, 1, "%d" );
@@ -737,6 +863,51 @@ int dmSpeckle::appStartup()
         log<software_error>( { __FILE__, __LINE__ } );
         return -1;
     }
+
+    // tiptilt is only valid with a syncopation timing source, see validateSyncopationConfig().
+    std::vector<std::string> modeNames = { opModeName( SPARKLE ), opModeName( ARBCUBE ) };
+    if( !m_syncopationTiming.empty() )
+    {
+        modeNames.push_back( opModeName( TIPTILT ) );
+    }
+    if( createStandardIndiSelectionSw( m_indiP_mode, "mode", modeNames ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+    for( const auto &modeName : modeNames )
+    {
+        m_indiP_mode[modeName] = ( modeName == opModeName( m_opMode ) ) ? pcf::IndiElement::On : pcf::IndiElement::Off;
+    }
+    if( registerIndiPropertyNew( m_indiP_mode, INDI_NEWCALLBACK( m_indiP_mode ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    if( createStandardIndiText( m_indiP_file, "file" ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+    m_indiP_file["current"] = m_fileName;
+    m_indiP_file["target"]  = m_fileName;
+    if( registerIndiPropertyNew( m_indiP_file, INDI_NEWCALLBACK( m_indiP_file ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    createStandardIndiRequestSw( m_indiP_loadFile, "load_file" );
+    if( registerIndiPropertyNew( m_indiP_loadFile, INDI_NEWCALLBACK( m_indiP_loadFile ) ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    REG_INDI_NEWPROP_NOCB( m_indiP_nFrames, "n_frames", pcf::IndiProperty::Number );
+    m_indiP_nFrames.add( pcf::IndiElement( "current" ) );
+    m_indiP_nFrames["current"] = 0;
 
     if( threadStart( m_modThread,
                      m_modThreadInit,
@@ -861,32 +1032,126 @@ int dmSpeckle::appShutdown()
     return 0;
 }
 
-int dmSpeckle::generateSpeckles()
+int dmSpeckle::loadArbcubeFile( mx::improc::eigenCube<realT> &cube, const std::string &fileName )
 {
-    if( m_opMode == TIPTILT )
+    if( fileName.empty() )
     {
-        m_shapes.resize( m_width, m_height, 1 );
+        return log<software_error, -1>( { __FILE__, __LINE__, "arbcube file name is empty; nothing to load" } );
     }
-    else if( m_opMode == ARBCUBE )
+
+    mx::fits::fitsFile<realT> ff;
+    mx::error_t               errc = ff.read( cube, fileName );
+
+    if( errc != mx::error_t::noerror )
     {
-        mx::fits::fitsFile<float> ff;
-        mx::error_t               errc = ff.read( m_shapes, m_fileName );
-        if( errc != mx::error_t::noerror )
+        return log<software_error, -1>( { __FILE__, __LINE__, "could not read arbcube FITS file: " + fileName } );
+    }
+
+    if( cube.rows() != m_width || cube.cols() != m_height || cube.planes() == 0 )
+    {
+        return log<software_error, -1>(
+            { __FILE__,
+              __LINE__,
+              "arbcube must contain nonempty DM frames: expected " + std::to_string( m_width ) + "x" +
+                  std::to_string( m_height ) + ", loaded " + std::to_string( cube.rows() ) + "x" +
+                  std::to_string( cube.cols() ) + "x" + std::to_string( cube.planes() ) + " from " + fileName } );
+    }
+
+    return 0;
+}
+
+inline bool dmSpeckle::arbcubeReady() const
+{
+    return m_arbcube.planes() > 0 && m_loadedArbcubeFile == m_fileName;
+}
+
+inline void dmSpeckle::setFileState( pcf::IndiProperty::PropertyStateType fileState )
+{
+    if( m_indiP_file.getState() == fileState )
+    {
+        return;
+    }
+
+    m_indiP_file.setState( fileState );
+    m_indiP_file.setTimeStamp( pcf::TimeStamp() );
+    if( m_indiDriver )
+    {
+        m_indiDriver->sendSetProperty( m_indiP_file );
+    }
+}
+
+void dmSpeckle::handleFileReload()
+{
+    std::string fileName;
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_indiMutex );
+
+        if( !m_reloadFile.exchange( false ) && ( !m_modulating || m_opMode != ARBCUBE || arbcubeReady() ) )
         {
-            return log<software_critical, -1>( { __FILE__, __LINE__, "no file with that name" } );
+            return;
         }
 
-        if( m_shapes.rows() != m_width || m_shapes.cols() != m_height )
-        {
-            return log<software_critical, -1>( { __FILE__, __LINE__, "shape cube is not the right size" } );
-        }
+        fileName = m_fileName;
+        setFileState( INDI_BUSY );
+    }
 
-        for( int p = 0; p < m_shapes.planes(); ++p )
+    mx::improc::eigenCube<realT> cube;
+    const int                    rv = loadArbcubeFile( cube, fileName );
+
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+
+    if( m_fileName != fileName || m_reloadFile )
+    {
+        return;
+    }
+
+    if( rv < 0 )
+    {
+        m_arbcube.clear();
+        m_loadedArbcubeFile.clear();
+        setFileState( INDI_ALERT );
+
+        if( m_modulating && m_opMode == ARBCUBE )
         {
-            m_shapes.image( p ) *= (float)m_amp;
+            modulationFailed();
         }
     }
     else
+    {
+        m_arbcube           = std::move( cube );
+        m_loadedArbcubeFile = fileName;
+        log<text_log>( "loaded arbcube FITS file: " + fileName + " (" + std::to_string( m_arbcube.planes() ) +
+                           " planes)",
+                       logPrio::LOG_NOTICE );
+        setFileState( INDI_OK );
+    }
+
+    updateIfChanged( m_indiP_nFrames, "current", static_cast<int>( m_arbcube.planes() ) );
+}
+
+inline void dmSpeckle::modulationFailed()
+{
+    m_modulating = false;
+    updateSwitchIfChanged( m_indiP_modulating, "toggle", pcf::IndiElement::Off, INDI_ALERT );
+}
+
+std::string dmSpeckle::opModeName( int opMode )
+{
+    if( opMode == ARBCUBE )
+    {
+        return "arbcube";
+    }
+    if( opMode == TIPTILT )
+    {
+        return "tiptilt";
+    }
+    return "sparkle";
+}
+
+void dmSpeckle::generateSpeckles()
+{
+    if( m_opMode == SPARKLE )
     {
         mx::improc::eigenImage<realT> onesp, onespC;
         onesp.resize( m_width, m_height );
@@ -937,13 +1202,12 @@ int dmSpeckle::generateSpeckles()
         updateIfChanged( m_indiP_separation, "current", m_separation );
         updateIfChanged( m_indiP_angle, "current", m_angle );
     }
+
+    const int nFrames = m_opMode == ARBCUBE ? m_arbcube.planes() : m_shapes.planes();
+    updateIfChanged( m_indiP_nFrames, "current", nFrames );
     updateIfChanged( m_indiP_delay, "current", m_triggerDelay );
-    updateIfChanged( m_indiP_amp, "current", m_amp );
-    updateIfChanged( m_indiP_frequency, "current", m_frequency );
     updateIfChanged( m_indiP_dwell, "current", m_dwell );
     updateIfChanged( m_indiP_single, "current", m_single );
-
-    return 0;
 }
 
 inline void dmSpeckle::modThreadStart( dmSpeckle *d )
@@ -955,7 +1219,7 @@ inline void dmSpeckle::modThreadExec()
 {
     m_modThreadID = syscall( SYS_gettid );
 
-    // Wait fpr the thread starter to finish initializing this thread.
+    // Wait for the thread starter and the DM channel.
     while( ( m_modThreadInit == true || state() != stateCodes::READY ) && m_shutdown == 0 )
     {
         sleep( 1 );
@@ -967,74 +1231,109 @@ inline void dmSpeckle::modThreadExec()
         return;
     }
 
-    while( m_shutdown == 0 )
+    mx::improc::eigenImage<realT> stagedFrame( m_width, m_height );
+    bool                          legacyActive = false;
+    bool                          runTriggered = false;
+
+    while( !m_shutdown )
     {
-        if( !m_modulating && !m_shutdown ) // If we aren't modulating we sleep for 1/2 a second
+        handleFileReload();
+
+        if( !m_modulating )
         {
+            if( legacyActive )
+            {
+                finishLegacyModulation( runTriggered );
+                legacyActive = false;
+            }
+
             mx::sys::milliSleep( 500 );
+            continue;
         }
 
         if( m_modulating && !m_shutdown )
         {
-            m_restartSp = false;
-            if( generateSpeckles() < 0 )
-            {
-                m_modulating = false;
-                continue;
+            bool     arbcube;
+            bool     trigger;
+            realT    amp;
+            double   triggerDelay;
+            unsigned dwell;
+            int64_t  freqNsec;
+
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( m_indiMutex );
+
+                arbcube = m_opMode == ARBCUBE;
+
+                if( !m_modulating || m_reloadFile || ( arbcube && !arbcubeReady() ) )
+                {
+                    continue;
+                }
+
+                if( m_dmTriggerChannel.empty() )
+                {
+                    m_trigger = false;
+                    updateSwitchIfChanged( m_indiP_trigger, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+                }
+
+                trigger             = m_trigger;
+                amp                 = m_amp;
+                triggerDelay        = m_triggerDelay / 1e6;
+                dwell               = std::max( 1U, m_dwell );
+                const double period = trigger || m_frequency <= 0 ? 0 : 1e9 / m_frequency;
+
+                if( !trigger && ( !mx::math::isFinite( period ) || period < 1 ||
+                                  period >= static_cast<double>( std::numeric_limits<int64_t>::max() ) ) )
+                {
+                    log<software_error>( { __FILE__, __LINE__, "Invalid frequency for untriggered modulation" } );
+                    modulationFailed();
+                    continue;
+                }
+
+                freqNsec    = static_cast<int64_t>( period );
+                m_restartSp = false;
+                generateSpeckles();
+
+                log<text_log>( "started modulating", logPrio::LOG_NOTICE );
+                log<telem_dmspeck>( { m_modulating,
+                                      m_trigger,
+                                      m_frequency,
+                                      std::vector<float>( { m_separation } ),
+                                      std::vector<float>( { m_angle } ),
+                                      std::vector<float>( { m_amp } ),
+                                      std::vector<bool>( { m_cross } ) },
+                                    logPrio::LOG_INFO );
+                recordDmSpeck( true );
             }
 
-            int64_t freqNsec = ( 1.0 / m_frequency ) * 1e9;
-            int64_t dnsec;
+            legacyActive = true;
+            runTriggered = trigger;
 
-            int idx = 0;
+            const auto &shapes = arbcube ? m_arbcube : m_shapes;
+            int64_t     dnsec  = 0;
+            int         idx    = 0;
 
             timespec modstart;
             timespec currtime;
 
             bool   triggered = false;
             sem_t *sem       = nullptr;
-            if( m_dmTriggerChannel == "" )
-            {
-                m_trigger = false;
-                indi::updateSwitchIfChanged(
-                    m_indiP_trigger, "toggle", pcf::IndiElement::Off, m_indiDriver, INDI_IDLE );
-            }
-            else if( m_trigger == true )
+
+            if( trigger )
             {
                 ImageStreamIO_semflush( &m_triggerStream, m_triggerSemaphore );
 
                 sem = m_triggerStream.semptr[m_triggerSemaphore]; ///< The semaphore to monitor for new image data
             }
 
-            log<text_log>( "started modulating", logPrio::LOG_NOTICE );
-            // To send a message
-            log<telem_dmspeck>( { m_modulating,
-                                  m_trigger,
-                                  m_frequency,
-                                  std::vector<float>( { m_separation } ),
-                                  std::vector<float>( { m_angle } ),
-                                  std::vector<float>( { m_amp } ),
-                                  std::vector<bool>( { m_cross } ) },
-                                logPrio::LOG_INFO );
-            // The official record:
-            recordDmSpeck( true );
-
-            dnsec = 0;
             clock_gettime( CLOCK_REALTIME, &modstart );
 
             unsigned dwelled = 0;
-            if( m_dwell == 0 )
-            {
-                m_dwell = 1;
-            }
-
-            float triggerDelay = m_triggerDelay / 1e6;
-
-            double t0, t1;
+            double   t0, t1;
 
             while( m_modulating && !m_restartSp && !m_shutdown )
             {
-                if( m_trigger )
+                if( trigger )
                 {
                     timespec ts;
 
@@ -1064,6 +1363,7 @@ inline void dmSpeckle::modThreadExec()
                         }
 
                         triggered = true;
+                        clock_gettime( CLOCK_REALTIME, &currtime );
                     }
                     else
                     {
@@ -1087,7 +1387,7 @@ inline void dmSpeckle::modThreadExec()
                 }
                 else
                 {
-                    mx::sys::nanoSleep( 0.5 * dnsec );
+                    mx::sys::nanoSleep( std::clamp<int64_t>( dnsec / 2, 0, 100000000 ) );
                     clock_gettime( CLOCK_REALTIME, &currtime );
 
                     dnsec =
@@ -1095,23 +1395,34 @@ inline void dmSpeckle::modThreadExec()
                     triggered = false;
                 }
 
-                if( dwelled < m_dwell - 1 )
+                if( !m_modulating || m_restartSp || m_shutdown )
+                {
+                    break;
+                }
+
+                if( dwelled < dwell - 1 )
                 {
                     ++dwelled;
                 }
-                else if( dnsec >= freqNsec || triggered )
+                else if( trigger ? triggered : dnsec >= freqNsec )
                 {
-                    // Do the write
-                    dwelled = 0;
-
+                    dwelled                 = 0;
                     m_imageStream.md->write = 1;
 
-                    memcpy( m_imageStream.array.raw, m_shapes.image( idx ).data(), m_width * m_height * m_typeSize );
+                    auto         frame  = shapes.image( idx );
+                    const realT *pixels = frame.data();
+                    if( arbcube )
+                    {
+                        stagedFrame = frame * amp;
+                        pixels      = stagedFrame.data();
+                    }
+
+                    memcpy( m_imageStream.array.raw, pixels, m_width * m_height * m_typeSize );
 
                     m_imageStream.md->atime     = currtime;
                     m_imageStream.md->writetime = currtime;
 
-                    if( !m_trigger || triggerDelay > 0 )
+                    if( !trigger || triggerDelay > 0 )
                     {
                         m_imageStream.md->cnt0++;
                     }
@@ -1120,14 +1431,15 @@ inline void dmSpeckle::modThreadExec()
                     ImageStreamIO_sempost( &m_imageStream, -1 );
 
                     ++idx;
-                    if( idx >= m_shapes.planes() )
+                    if( idx >= shapes.planes() )
                     {
                         idx = 0;
                     }
 
-                    if( !m_trigger )
+                    if( !trigger )
                     {
-                        modstart.tv_nsec += freqNsec;
+                        modstart.tv_sec += freqNsec / 1000000000;
+                        modstart.tv_nsec += freqNsec % 1000000000;
                         if( modstart.tv_nsec >= 1000000000 )
                         {
                             modstart.tv_nsec -= 1000000000;
@@ -1137,32 +1449,43 @@ inline void dmSpeckle::modThreadExec()
                     }
                 }
             }
-            if( m_restartSp )
+            if( m_restartSp && m_modulating )
             {
                 continue;
             }
 
-            recordDmSpeck( true );
-            log<text_log>( "stopped modulating", logPrio::LOG_NOTICE );
-            // Always zero when done
-            clock_gettime( CLOCK_REALTIME, &currtime );
-            m_imageStream.md->write = 1;
-
-            memset( m_imageStream.array.raw, 0.0, m_width * m_height * m_typeSize );
-
-            m_imageStream.md->atime     = currtime;
-            m_imageStream.md->writetime = currtime;
-
-            if( !m_trigger )
-            {
-                m_imageStream.md->cnt0++;
-            }
-
-            m_imageStream.md->write = 0;
-            ImageStreamIO_sempost( &m_imageStream, -1 );
-            log<text_log>( "zeroed" );
+            finishLegacyModulation( runTriggered );
+            legacyActive = false;
         }
     }
+
+    if( legacyActive )
+    {
+        finishLegacyModulation( runTriggered );
+    }
+}
+
+inline void dmSpeckle::finishLegacyModulation( bool trigger )
+{
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    recordDmSpeck( true );
+    log<text_log>( "stopped modulating", logPrio::LOG_NOTICE );
+
+    timespec currtime;
+    clock_gettime( CLOCK_REALTIME, &currtime );
+    m_imageStream.md->write = 1;
+    memset( m_imageStream.array.raw, 0, m_width * m_height * m_typeSize );
+    m_imageStream.md->atime     = currtime;
+    m_imageStream.md->writetime = currtime;
+
+    if( !trigger )
+    {
+        m_imageStream.md->cnt0++;
+    }
+
+    m_imageStream.md->write = 0;
+    ImageStreamIO_sempost( &m_imageStream, -1 );
+    log<text_log>( "zeroed" );
 }
 
 INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_trigger )
@@ -1199,6 +1522,29 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_trigger )
     }
 
     m_restartSp = true;
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_loopLock )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loopLock, ipRecv );
+
+    if( m_syncopationTiming.empty() || !ipRecv.find( "toggle" ) )
+    {
+        return -1;
+    }
+
+    const auto setting = ipRecv["toggle"].getSwitchState();
+
+    if( setting != pcf::IndiElement::On && setting != pcf::IndiElement::Off )
+    {
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    m_loopLock = setting == pcf::IndiElement::On;
+    indi::updateSwitchIfChanged( m_indiP_loopLock, "toggle", setting, m_indiDriver, INDI_OK );
 
     return 0;
 }
@@ -1336,7 +1682,7 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_amp )
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
     m_amp = amp;
-    updateIfChanged( m_indiP_amp, "target", m_amp );
+    updatesIfChanged<float>( m_indiP_amp, { "target", "current" }, { amp, amp } );
 
     m_restartSp = true;
     return 0;
@@ -1404,7 +1750,7 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_frequency )
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
     m_frequency = freq;
-    updateIfChanged( m_indiP_frequency, "target", m_frequency );
+    updatesIfChanged<float>( m_indiP_frequency, { "target", "current" }, { freq, freq } );
 
     m_restartSp = true;
 
@@ -1500,6 +1846,11 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_modulating )
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
     {
+        if( !m_modulating )
+        {
+            m_restartSp = true;
+        }
+
         m_syncopationZeroRequested = false;
         m_modulating               = true;
         indi::updateSwitchIfChanged( m_indiP_modulating, "toggle", pcf::IndiElement::On, m_indiDriver, INDI_OK );
@@ -1557,6 +1908,104 @@ INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_zero )
     return 0;
 }
 
+INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_mode )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_mode, ipRecv );
+
+    // Iterate received elements to find the one newly switched On.
+    // We skip elements already On in the device property because the pcf library merges
+    // current device state into ipRecv when the client sends only the changed element,
+    // which would otherwise cause the already-selected element to fire first.
+    int newMode = -1;
+    for( auto elit = ipRecv.getElements().begin(); elit != ipRecv.getElements().end(); ++elit )
+    {
+        if( elit->second.getSwitchState() != pcf::IndiElement::On )
+        {
+            continue;
+        }
+        if( m_indiP_mode.find( elit->first ) && m_indiP_mode[elit->first].getSwitchState() == pcf::IndiElement::On )
+        {
+            continue;
+        }
+        if( elit->first == opModeName( SPARKLE ) )
+        {
+            newMode = SPARKLE;
+        }
+        else if( elit->first == opModeName( ARBCUBE ) )
+        {
+            newMode = ARBCUBE;
+        }
+        else if( elit->first == opModeName( TIPTILT ) && !m_syncopationTiming.empty() )
+        {
+            newMode = TIPTILT;
+        }
+    }
+    if( newMode == -1 )
+    {
+        return 0;
+    }
+
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    if( newMode != m_opMode )
+    {
+        m_opMode = newMode;
+        log<text_log>( "mode set to " + opModeName( newMode ), logPrio::LOG_NOTICE );
+        m_restartSp = true;
+    }
+
+    indi::updateSelectionSwitchIfChanged( m_indiP_mode, opModeName( newMode ), m_indiDriver, pcf::IndiProperty::Ok );
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_file )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_file, ipRecv );
+
+    if( !ipRecv.find( "target" ) )
+    {
+        return 0;
+    }
+
+    std::string target = ipRecv["target"].get<std::string>();
+
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    if( m_fileName != target )
+    {
+        m_fileName = target;
+        updatesIfChanged<std::string>( m_indiP_file, { "target", "current" }, { target, target }, INDI_IDLE );
+    }
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( dmSpeckle, m_indiP_loadFile )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loadFile, ipRecv );
+
+    if( !ipRecv.find( "request" ) )
+    {
+        return 0;
+    }
+
+    if( ipRecv["request"].getSwitchState() != pcf::IndiElement::On )
+    {
+        return 0;
+    }
+
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+
+    m_reloadFile = true;
+    m_restartSp  = true;
+    setFileState( INDI_BUSY );
+    return 0;
+}
+
 inline int dmSpeckle::checkRecordTimes()
 {
     return telemeter<dmSpeckle>::checkRecordTimes( telem_dmspeck() );
@@ -1565,6 +2014,7 @@ inline int dmSpeckle::checkRecordTimes()
 inline int dmSpeckle::recordTelem( const telem_dmspeck *unused )
 {
     static_cast<void>( unused );
+    std::lock_guard<std::mutex> lock( m_indiMutex );
     return recordDmSpeck( true );
 }
 

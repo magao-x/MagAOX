@@ -2003,8 +2003,30 @@ inline void dmSyncopation::updateZeroTest( bool record )
     }
 
     m_zeroStatus.consume( m_zeroSnapshot );
+    if( !m_zeroSnapshot.sequence )
+    {
+        return;
+    }
+
+    const auto &snapshot = m_zeroSnapshot;
+    if( m_indiP_settings.find( "durationSec" ) )
+    {
+        updateIfChanged( m_indiP_settings, "durationSec", snapshot.durationSec );
+    }
+
+    const bool enabled = m_enabled.load( std::memory_order_acquire );
+    updateSwitchIfChanged( m_indiP_enable,
+                           "toggle",
+                           enabled ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           enabled ? INDI_BUSY : INDI_IDLE );
+
+    const bool publish = m_indiP_zeroTest.find( "enabled" );
+    if( !record && !publish )
+    {
+        return;
+    }
+
     now                    = m_now();
-    const auto   &snapshot = m_zeroSnapshot;
     const auto   &stats    = snapshot.stats;
     const auto   &timing   = snapshot.timing;
     const auto    trial    = snapshot.trial;
@@ -2016,11 +2038,10 @@ inline void dmSyncopation::updateZeroTest( bool record )
         stats.startedNs
             ? std::max<int64_t>( 0, ( stats.stoppedNs ? stats.stoppedNs : snapshot.capturedNs ) - stats.startedNs )
             : 0;
-    const bool copied                 = snapshot.sequence != 0;
     const auto mainCycles             = stats.mainObserved + stats.clockExcludedCycles;
     const auto auxiliaryOpportunities = stats.auxiliaryOpportunities;
 
-    if( copied )
+    if( publish )
     {
         const std::vector<std::string> names{ "enabled",
                                               "labelVersion",
@@ -2163,129 +2184,124 @@ inline void dmSyncopation::updateZeroTest( bool record )
                                           double( timing.sdkGaps ),
                                           double( timing.failed ) };
         updateIfChanged( m_indiP_zeroTest, names, values, stats.active ? INDI_BUSY : INDI_IDLE );
-        if( m_indiP_settings.find( "durationSec" ) )
-        {
-            updateIfChanged( m_indiP_settings, "durationSec", snapshot.durationSec );
-        }
-        updateSwitchIfChanged( m_indiP_enable,
-                               "toggle",
-                               m_enabled ? pcf::IndiElement::On : pcf::IndiElement::Off,
-                               m_enabled ? INDI_BUSY : INDI_IDLE );
-        if( record )
+    }
+
+    if( record )
+    {
+        std::ostringstream output;
+        output << "[zero_test] kind=summary labelVersion=9 targetEndpoint=1 idealPublisher=1 trial=" << trial
+               << " diagnosticsEnabled=" << detailedTimingEnabled() << " requested=" << snapshot.requested
+               << " snapshotSequence=" << snapshot.sequence << " snapshotTimeNs=" << snapshot.capturedNs
+               << " snapshotAgeSec=" << age << " snapshotValid=" << valid << " eventsQueued=" << snapshot.eventsQueued
+               << " eventStride=" << snapshot.eventStride << " eventsSampledOut=" << stats.eventsSampledOut
+               << " active=" << stats.active << " warming=" << stats.warming << " finished=" << stats.finished
+               << " steps=" << steps << " targetHz=" << targetHz << " elapsedSec=" << elapsed * 1e-9
+               << " durationSec=" << snapshot.durationSec << " durationLimitSec=" << snapshot.durationLimitSec
+               << " publicationAdvanceUs=" << snapshot.publicationAdvanceUs << " lateUs=" << snapshot.lateUs
+               << " commitLeadUs=" << snapshot.commitLeadUs << " clockRejected=" << stats.clockRejected
+               << " clockExcludedCycles=" << stats.clockExcludedCycles
+               << " clockExcludedSlots=" << stats.clockExcludedSlots << " wakeAheadUs=" << snapshot.wakeAheadUs
+               << " posted=" << stats.posted << " staged=" << stats.staged << " acknowledged=" << stats.acknowledged
+               << " unacknowledged=" << stats.unacknowledged << " skipped=" << stats.skipped << " late=" << stats.late
+               << " validationLate=" << stats.validationLate << " preparationLate=" << stats.preparationLate
+               << " readerMissing=" << stats.readerMissing << " primaryChanged=" << stats.primaryChanged
+               << " primaryWriting=" << stats.primaryWriting << " resourceUnavailable=" << stats.resourceUnavailable
+               << " waitError=" << stats.waitError << " durationExpired=" << stats.durationExpired
+               << " invalidTarget=" << stats.invalidTarget << " cancelled=" << stats.cancelled
+               << " combinedUnclassified=" << stats.combinedUnclassified << " resourceFaults=" << stats.resourceFaults
+               << " readerInvalid=" << stats.readerInvalid << " readerDrops=" << stats.readerDrops
+               << " eventsDropped=" << snapshot.eventsDropped << " mainObserved=" << stats.mainObserved
+               << " mainCycles=" << mainCycles << " auxiliaryOpportunities=" << auxiliaryOpportunities
+               << " mainMatched=" << stats.mainMatched << " mainUnmatched=" << stats.mainUnmatched
+               << " mainRebaselined=" << stats.mainRebaselined
+               << " mainImpactUnclassified=" << stats.mainImpactUnclassified << " mainSdkMatched=" << timing.matched
+               << " mainSdkUnmatched=" << timing.classified - std::min( timing.classified, timing.matched )
+               << " mainReaderMatched=" << timing.readerMatched << " mainTimingInvalid=" << timing.invalid
+               << " mainTimingEvicted=" << timing.evicted << " mainTimingSourceResets=" << timing.sourceResets
+               << " primaryToSdkMeanUs=" << timing.primaryToSdk.meanNs * 1e-3
+               << " primaryToSdkMaxUs=" << ( timing.primaryToSdk.count ? timing.primaryToSdk.maxNs * 1e-3 : -1 )
+               << " controllerToSdkMeanUs=" << timing.controllerToSdk.meanNs * 1e-3 << " controllerToSdkMaxUs="
+               << ( timing.controllerToSdk.count ? timing.controllerToSdk.maxNs * 1e-3 : -1 )
+               << " mainSdkServiceMeanUs=" << timing.sdkService.meanNs * 1e-3
+               << " mainSdkServiceMaxUs=" << ( timing.sdkService.count ? timing.sdkService.maxNs * 1e-3 : -1 )
+               << " sdkGaps=" << timing.sdkGaps << " sdkFailed=" << timing.failed;
+        telemeterT::telem<syncoZeroLog>( { output.str() } );
+    }
+
+    if( detailedTimingEnabled() )
+    {
+        const auto              &phase = snapshot.phase;
+        std::vector<std::string> phaseNames{ "observed",
+                                             "paired",
+                                             "phaseMatched",
+                                             "invalid",
+                                             "duplicates",
+                                             "counterGaps",
+                                             "labelGaps",
+                                             "phaseExcluded",
+                                             "transportExcluded" };
+        std::vector<double>      phaseValues{ double( phase.observed ),
+                                         double( phase.paired ),
+                                         double( phase.phaseMatched ),
+                                         double( phase.invalid ),
+                                         double( phase.duplicates ),
+                                         double( phase.counterGaps ),
+                                         double( phase.labelGaps ),
+                                         double( phase.phaseExcluded ),
+                                         double( phase.transportExcluded ) };
+
+        for( unsigned step = 0; step < phase.interval.size(); ++step )
         {
             std::ostringstream output;
-            output << "[zero_test] kind=summary labelVersion=9 targetEndpoint=1 idealPublisher=1 trial=" << trial
-                   << " diagnosticsEnabled=" << detailedTimingEnabled() << " requested=" << snapshot.requested
-                   << " snapshotSequence=" << snapshot.sequence << " snapshotTimeNs=" << snapshot.capturedNs
-                   << " snapshotAgeSec=" << age << " snapshotValid=" << valid
-                   << " eventsQueued=" << snapshot.eventsQueued << " eventStride=" << snapshot.eventStride
-                   << " eventsSampledOut=" << stats.eventsSampledOut << " active=" << stats.active
-                   << " warming=" << stats.warming << " finished=" << stats.finished << " steps=" << steps
-                   << " targetHz=" << targetHz << " elapsedSec=" << elapsed * 1e-9
-                   << " durationSec=" << snapshot.durationSec << " durationLimitSec=" << snapshot.durationLimitSec
-                   << " publicationAdvanceUs=" << snapshot.publicationAdvanceUs << " lateUs=" << snapshot.lateUs
-                   << " commitLeadUs=" << snapshot.commitLeadUs << " clockRejected=" << stats.clockRejected
-                   << " clockExcludedCycles=" << stats.clockExcludedCycles
-                   << " clockExcludedSlots=" << stats.clockExcludedSlots << " wakeAheadUs=" << snapshot.wakeAheadUs
-                   << " posted=" << stats.posted << " staged=" << stats.staged << " acknowledged=" << stats.acknowledged
-                   << " unacknowledged=" << stats.unacknowledged << " skipped=" << stats.skipped
-                   << " late=" << stats.late << " validationLate=" << stats.validationLate
-                   << " preparationLate=" << stats.preparationLate << " readerMissing=" << stats.readerMissing
-                   << " primaryChanged=" << stats.primaryChanged << " primaryWriting=" << stats.primaryWriting
-                   << " resourceUnavailable=" << stats.resourceUnavailable << " waitError=" << stats.waitError
-                   << " durationExpired=" << stats.durationExpired << " invalidTarget=" << stats.invalidTarget
-                   << " cancelled=" << stats.cancelled << " combinedUnclassified=" << stats.combinedUnclassified
-                   << " resourceFaults=" << stats.resourceFaults << " readerInvalid=" << stats.readerInvalid
-                   << " readerDrops=" << stats.readerDrops << " eventsDropped=" << snapshot.eventsDropped
-                   << " mainObserved=" << stats.mainObserved << " mainCycles=" << mainCycles
-                   << " auxiliaryOpportunities=" << auxiliaryOpportunities << " mainMatched=" << stats.mainMatched
-                   << " mainUnmatched=" << stats.mainUnmatched << " mainRebaselined=" << stats.mainRebaselined
-                   << " mainImpactUnclassified=" << stats.mainImpactUnclassified << " mainSdkMatched=" << timing.matched
-                   << " mainSdkUnmatched=" << timing.classified - std::min( timing.classified, timing.matched )
-                   << " mainReaderMatched=" << timing.readerMatched << " mainTimingInvalid=" << timing.invalid
-                   << " mainTimingEvicted=" << timing.evicted << " mainTimingSourceResets=" << timing.sourceResets
-                   << " primaryToSdkMeanUs=" << timing.primaryToSdk.meanNs * 1e-3
-                   << " primaryToSdkMaxUs=" << ( timing.primaryToSdk.count ? timing.primaryToSdk.maxNs * 1e-3 : -1 )
-                   << " controllerToSdkMeanUs=" << timing.controllerToSdk.meanNs * 1e-3 << " controllerToSdkMaxUs="
-                   << ( timing.controllerToSdk.count ? timing.controllerToSdk.maxNs * 1e-3 : -1 )
-                   << " mainSdkServiceMeanUs=" << timing.sdkService.meanNs * 1e-3
-                   << " mainSdkServiceMaxUs=" << ( timing.sdkService.count ? timing.sdkService.maxNs * 1e-3 : -1 )
-                   << " sdkGaps=" << timing.sdkGaps << " sdkFailed=" << timing.failed;
-            telemeterT::telem<syncoZeroLog>( { output.str() } );
-        }
+            output << "[zero_test] kind=phase labelVersion=9 trial=" << trial << " toStep=" << step
+                   << " endpoint=combined_publication observed=" << phase.observed << " paired=" << phase.paired
+                   << " phaseMatched=" << phase.phaseMatched << " invalid=" << phase.invalid
+                   << " duplicates=" << phase.duplicates << " counterGaps=" << phase.counterGaps
+                   << " labelGaps=" << phase.labelGaps << " phaseExcluded=" << phase.phaseExcluded
+                   << " transportExcluded=" << phase.transportExcluded;
+            const std::array<std::pair<const char *, const synco::ZeroTiming::Stats *>, 4> populations{
+                { { "interval", &phase.interval[step] },
+                  { "intervalError", &phase.intervalError[step] },
+                  { "phaseError", &phase.phaseError[step] },
+                  { "transport", &phase.transport[step] } } };
 
-        if( detailedTimingEnabled() )
-        {
-            const auto              &phase = snapshot.phase;
-            std::vector<std::string> phaseNames{ "observed",
-                                                 "paired",
-                                                 "phaseMatched",
-                                                 "invalid",
-                                                 "duplicates",
-                                                 "counterGaps",
-                                                 "labelGaps",
-                                                 "phaseExcluded",
-                                                 "transportExcluded" };
-            std::vector<double>      phaseValues{ double( phase.observed ),
-                                             double( phase.paired ),
-                                             double( phase.phaseMatched ),
-                                             double( phase.invalid ),
-                                             double( phase.duplicates ),
-                                             double( phase.counterGaps ),
-                                             double( phase.labelGaps ),
-                                             double( phase.phaseExcluded ),
-                                             double( phase.transportExcluded ) };
-
-            for( unsigned step = 0; step < phase.interval.size(); ++step )
+            for( const auto &population : populations )
             {
-                std::ostringstream output;
-                output << "[zero_test] kind=phase labelVersion=9 trial=" << trial << " toStep=" << step
-                       << " endpoint=combined_publication observed=" << phase.observed << " paired=" << phase.paired
-                       << " phaseMatched=" << phase.phaseMatched << " invalid=" << phase.invalid
-                       << " duplicates=" << phase.duplicates << " counterGaps=" << phase.counterGaps
-                       << " labelGaps=" << phase.labelGaps << " phaseExcluded=" << phase.phaseExcluded
-                       << " transportExcluded=" << phase.transportExcluded;
-                const std::array<std::pair<const char *, const synco::ZeroTiming::Stats *>, 4> populations{
-                    { { "interval", &phase.interval[step] },
-                      { "intervalError", &phase.intervalError[step] },
-                      { "phaseError", &phase.phaseError[step] },
-                      { "transport", &phase.transport[step] } } };
+                const auto       &value = *population.second;
+                const auto        rms = value.count ? std::sqrt( std::max( 0.0, value.m2 / value.count ) ) * 1e-3 : -1;
+                const std::string prefix = std::string( population.first ) + std::to_string( step );
+                phaseNames.insert(
+                    phaseNames.end(),
+                    { prefix + "Count", prefix + "MeanUs", prefix + "RmsUs", prefix + "MinUs", prefix + "MaxUs" } );
+                phaseValues.insert( phaseValues.end(),
+                                    { double( value.count ),
+                                      value.meanNs * 1e-3,
+                                      rms,
+                                      value.count ? value.minNs * 1e-3 : -1,
+                                      value.count ? value.maxNs * 1e-3 : -1 } );
+                output << ' ' << population.first << "Count=" << value.count << ' ' << population.first
+                       << "MeanUs=" << value.meanNs * 1e-3 << ' ' << population.first << "RmsUs=" << rms << ' '
+                       << population.first << "MinUs=" << ( value.count ? value.minNs * 1e-3 : -1 ) << ' '
+                       << population.first << "MaxUs=" << ( value.count ? value.maxNs * 1e-3 : -1 );
+            }
 
-                for( const auto &population : populations )
+            if( record && step < unsigned( steps ) )
+            {
+                if( telemeterT::telem<syncoZeroLog>( { output.str() } ) < 0 )
                 {
-                    const auto &value = *population.second;
-                    const auto  rms   = value.count ? std::sqrt( std::max( 0.0, value.m2 / value.count ) ) * 1e-3 : -1;
-                    const std::string prefix = std::string( population.first ) + std::to_string( step );
-                    phaseNames.insert(
-                        phaseNames.end(),
-                        { prefix + "Count", prefix + "MeanUs", prefix + "RmsUs", prefix + "MinUs", prefix + "MaxUs" } );
-                    phaseValues.insert( phaseValues.end(),
-                                        { double( value.count ),
-                                          value.meanNs * 1e-3,
-                                          rms,
-                                          value.count ? value.minNs * 1e-3 : -1,
-                                          value.count ? value.maxNs * 1e-3 : -1 } );
-                    output << ' ' << population.first << "Count=" << value.count << ' ' << population.first
-                           << "MeanUs=" << value.meanNs * 1e-3 << ' ' << population.first << "RmsUs=" << rms << ' '
-                           << population.first << "MinUs=" << ( value.count ? value.minNs * 1e-3 : -1 ) << ' '
-                           << population.first << "MaxUs=" << ( value.count ? value.maxNs * 1e-3 : -1 );
-                }
-
-                if( record && step < unsigned( steps ) )
-                {
-                    if( telemeterT::telem<syncoZeroLog>( { output.str() } ) < 0 )
-                    {
-                        ++m_logicTiming.logFailed;
-                    }
+                    ++m_logicTiming.logFailed;
                 }
             }
+        }
+        if( publish )
+        {
             updateIfChanged( m_indiP_zeroPhase, phaseNames, phaseValues, stats.active ? INDI_BUSY : INDI_IDLE );
         }
-        updateZeroPublication( snapshot, record );
     }
+    updateZeroPublication( snapshot, record, publish );
 }
 
-inline void dmSyncopation::updateZeroPublication( const ZeroSnapshot &snapshot, bool record )
+inline void dmSyncopation::updateZeroPublication( const ZeroSnapshot &snapshot, bool record, bool publish )
 {
     const auto &c     = snapshot.clock;
     const auto  state = snapshot.stats.active ? INDI_BUSY : INDI_IDLE;
@@ -2358,52 +2374,58 @@ inline void dmSyncopation::updateZeroPublication( const ZeroSnapshot &snapshot, 
                 ++m_logicTiming.logFailed;
             }
         }
-        updateIfChanged( m_indiP_zeroPublication, names, values, state );
+        if( publish )
+        {
+            updateIfChanged( m_indiP_zeroPublication, names, values, state );
+        }
     }
 
-    const std::vector<std::string> clockNames{ "clockId",
-                                               "valid",
-                                               "epoch",
-                                               "attempted",
-                                               "qualified",
-                                               "invalid",
-                                               "wideBracket",
-                                               "discontinuity",
-                                               "mapped",
-                                               "mapInvalid",
-                                               "unavailable",
-                                               "futurePublication",
-                                               "stalePublication",
-                                               "projected",
-                                               "projectionInvalid",
-                                               "projectionUnavailable",
-                                               "projectionOutside",
-                                               "bracketUs",
-                                               "offsetNs",
-                                               "offsetLowerNs",
-                                               "offsetUpperNs" };
-    const std::vector<double>      clockValues{ double( CLOCK_ISIO ),
-                                           c.valid ? 1.0 : 0.0,
-                                           double( c.epoch ),
-                                           double( c.attempted ),
-                                           double( c.qualified ),
-                                           double( c.invalid ),
-                                           double( c.wideBracket ),
-                                           double( c.discontinuity ),
-                                           double( c.mapped ),
-                                           double( c.mapInvalid ),
-                                           double( c.unavailable ),
-                                           double( c.futurePublication ),
-                                           double( c.stalePublication ),
-                                           double( c.projected ),
-                                           double( c.projectionInvalid ),
-                                           double( c.projectionUnavailable ),
-                                           double( c.projectionOutside ),
-                                           c.bracketNs * 1e-3,
-                                           double( c.offsetNs ),
-                                           double( c.offsetLowerNs ),
-                                           double( c.offsetUpperNs ) };
-    updateIfChanged( m_indiP_zeroClock, clockNames, clockValues, state );
+    if( publish )
+    {
+        const std::vector<std::string> clockNames{ "clockId",
+                                                   "valid",
+                                                   "epoch",
+                                                   "attempted",
+                                                   "qualified",
+                                                   "invalid",
+                                                   "wideBracket",
+                                                   "discontinuity",
+                                                   "mapped",
+                                                   "mapInvalid",
+                                                   "unavailable",
+                                                   "futurePublication",
+                                                   "stalePublication",
+                                                   "projected",
+                                                   "projectionInvalid",
+                                                   "projectionUnavailable",
+                                                   "projectionOutside",
+                                                   "bracketUs",
+                                                   "offsetNs",
+                                                   "offsetLowerNs",
+                                                   "offsetUpperNs" };
+        const std::vector<double>      clockValues{ double( CLOCK_ISIO ),
+                                               c.valid ? 1.0 : 0.0,
+                                               double( c.epoch ),
+                                               double( c.attempted ),
+                                               double( c.qualified ),
+                                               double( c.invalid ),
+                                               double( c.wideBracket ),
+                                               double( c.discontinuity ),
+                                               double( c.mapped ),
+                                               double( c.mapInvalid ),
+                                               double( c.unavailable ),
+                                               double( c.futurePublication ),
+                                               double( c.stalePublication ),
+                                               double( c.projected ),
+                                               double( c.projectionInvalid ),
+                                               double( c.projectionUnavailable ),
+                                               double( c.projectionOutside ),
+                                               c.bracketNs * 1e-3,
+                                               double( c.offsetNs ),
+                                               double( c.offsetLowerNs ),
+                                               double( c.offsetUpperNs ) };
+        updateIfChanged( m_indiP_zeroClock, clockNames, clockValues, state );
+    }
 
     if( record )
     {
@@ -2583,7 +2605,11 @@ inline void dmSyncopation::updateLogicTimingINDI()
                << "MaxUs=" << m_logicTiming.maxNs[index] * 1e-3;
     }
 
-    updateIfChanged( m_indiP_logicTiming, names, values );
+    if( m_indiP_logicTiming.find( "enabled" ) )
+    {
+        updateIfChanged( m_indiP_logicTiming, names, values );
+    }
+
     telemeterT::telem<syncoZeroLog>( { output.str() } );
     m_logicTiming.reportNs    = std::max<int64_t>( 0, m_now() - began );
     m_logicTiming.maxReportNs = std::max( m_logicTiming.maxReportNs, m_logicTiming.reportNs );

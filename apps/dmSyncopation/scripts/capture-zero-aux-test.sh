@@ -16,6 +16,7 @@ WAKE_AHEAD_US is the expected startup validation lead, default 0, from 0 through
 COMMIT_LEAD_US is the expected startup guard-to-counter lead, default 0, from 0 through 10 us.
 LATE_US optionally verifies the startup late-publication allowance, from 0 through 50 us.
 Omitting LATE_US accepts and records any valid configured allowance.
+Use the diagnostic INDI build (-DDMSYNCOPATION_DIAGNOSTIC_INDI=1).
 The app must report schema 9 or newer, targetEndpoint=1 (cnt0), and matching startup leads.
 The app must already be running with zeroTest.enabled=true and enable=Off.
 The script sets steps and the app-enforced duration while disabled, then starts the trial.

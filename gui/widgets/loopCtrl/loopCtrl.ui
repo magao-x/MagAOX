@@ -51,7 +51,7 @@
      <item>
       <layout class="QHBoxLayout" name="horizontalLayout_2" stretch="5,1,0,1,0,0,0,0">
        <item>
-        <layout class="QVBoxLayout" name="vl_loopStatus" stretch="2,0,3,1,1,2,0">
+        <layout class="QVBoxLayout" name="vl_loopStatus" stretch="2,0,3,1,1,0,2,0">
          <item>
           <widget class="QLabel" name="label_loop">
            <property name="font">
@@ -138,6 +138,16 @@
             </spacer>
            </item>
           </layout>
+         </item>
+         <item alignment="Qt::AlignHCenter">
+          <widget class="QCheckBox" name="checkBox_offload">
+           <property name="text">
+            <string>Offload</string>
+           </property>
+           <property name="toolTip">
+            <string>Coordinate tweeter-to-woofer offloading with the high-order loop controls.</string>
+           </property>
+          </widget>
          </item>
          <item>
           <spacer name="verticalSpacer_2">
@@ -368,6 +378,51 @@
             </size>
            </property>
           </spacer>
+         </item>
+         <item>
+          <widget class="QPushButton" name="button_saveVector">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="toolTip">
+            <string>Save the current gain vector, replacing the previous save.</string>
+           </property>
+           <property name="text">
+            <string>Save Vector</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="button_loadSaved">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="toolTip">
+            <string>Apply the most recently saved gain vector.</string>
+           </property>
+           <property name="text">
+            <string>Load Saved</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="button_flatVector">
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+           <property name="focusPolicy">
+            <enum>Qt::NoFocus</enum>
+           </property>
+           <property name="text">
+            <string>Flat Vector</string>
+           </property>
+          </widget>
          </item>
          <item>
           <widget class="QPushButton" name="button_zeroall">

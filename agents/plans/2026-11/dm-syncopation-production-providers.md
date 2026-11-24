@@ -1081,3 +1081,44 @@ bound; simply reducing the bound would discard an observed safety cost.
 Only this engineering record was appended. No runtime code, configuration,
 timing margin or instrument state was changed, and no new tests were needed
 for this readback/source analysis.
+
+## 2026-11-20 Open-loop channel clearing
+
+The operator requested a way to clear the synco contribution with the loop open
+and explicitly required that the clear trigger a dmcomb write. The `zero`
+request uses the AO loop's startup INDI subscription, requires synco Off, and
+preflights the configured destination batch against the combined stream. It
+stages all zero payloads before publishing the first destination once. It then
+checks for one new combined frame, with a 100 ms timeout. The clear uses no
+primary callback, and reopening production mappings reloads the cleared
+destination values. Producers retain ownership of `_aux` payloads and sidecars.
+The operator procedure calls for quiescent channel writers and a running
+combiner and controller. [Operator procedure](../../../apps/dmSyncopation/doc/dmSyncopation.md#controller-clearing-and-maintenance)
+
+The workstation suite passed 163 cases. A local simulated combiner woke on the
+single trigger, observed both destinations cleared, and republished the sum
+with an unchanged primary contribution. Rejected requests left pixels and
+counters intact, and a missing combined publication returned Alert.
+
+## Loop-synchronous sparkle
+
+With loop lock on, managed `dmSpeckle` polls only for passive step 0 in sparkle
+mode and picks the plane from the upcoming main frame counter modulo the plane
+count. The ensuing main DM update applies the plane and the auxiliary steps
+reuse it. Changes in loop period or subdivision count require no waveform
+settings change. This uses the existing tagged source, passive copy and deadline
+checks. An unavailable slot retains the last copied plane.
+
+The offline producer tests cover both a multi-step schedule and passive-only
+operation, along with expired or absent step 0 and transport acknowledgement.
+The dmSpeckle test varies loop timing and skips a main frame to verify that
+the plane stays tied to the frame counter.
+
+Managed sparkle defaults to loop lock on. The live `loop_lock` INDI toggle
+restores timed playback across all usable slots when Off.
+`syncopation.loopLock` sets the startup state. The workstation's configuration
+checkout sets it to `true` for `tweeterSpeck` and `false` for `tweeterMod`.
+The callback changes the cadence under the existing producer mutex. An
+outstanding tagged payload still follows the protocol's acknowledgement and
+ownership rules. Offline tests exercise switching in both directions with
+modulation active and three auxiliary slots receiving distinct planes at 8 kHz.

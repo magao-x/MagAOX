@@ -51,7 +51,7 @@ QWidget
 {
     color: #eff0f1;
     background-color: #23262a;
-    selection-background-color:#3DA5FF;
+    selection-background-color: #3DA5FF;
     selection-color: #eff0f1;
     background-clip: border;
     border-image: none;
@@ -674,6 +674,25 @@ QPushButton[isScaleButton="true"]
    font-size: 15px;
 }
 
+QPushButton[isHighlightButton="true"]:checked
+{
+    background-color: #3DA5FF;
+    padding-top: -1.5ex;
+    padding-bottom: -1.7ex;
+}
+
+QPushButton[isAbortButton="true"]
+{
+    background-color: #a32a2a;
+    border-color: #d04040;
+}
+
+QPushButton[isAbortButton="true"]:disabled
+{
+    background-color: #23262a;
+    border-color: #454545;
+}
+
 QComboBox
 {
     selection-background-color: #3DA5FF;
@@ -840,6 +859,11 @@ QLabel[isStatus="true"]
 QLabel:disabled[isStatus="true"]
 {
    color: #007ae6;
+}
+
+QLabel[isWarning="true"]
+{
+   color: #f0c419;
 }
 
 QLabel[isStatusChanged="true"]
