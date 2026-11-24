@@ -282,6 +282,9 @@ inline const Detector *detectorAt( double emg /**< [in] Actual camera EM setting
     return nullptr;
 }
 
+/// Paths to the matched WFS mask, reference, mode cube, and selfRM cube, in that order.
+using CalibrationFiles = std::array<std::filesystem::path, 4>;
+
 /// Matched reconstructor rows, diagonal noise contractions and static selfRM responses.
 class Calibration
 {
@@ -293,11 +296,10 @@ class Calibration
     size_t modes() const;
 
     /// Validate and load the active WFS mode cube, mask, reference and plane-5 selfRM.
-    bool load( const std::filesystem::path &directory /**< [in] Active calibration directory. */,
-               const std::string           &selfRm /**< [in] Matched selfRM FITS filename or absolute path. */,
-               double                       floorPerPixel /**< [in] Runtime WFS floor in ADU per full-frame pixel. */,
-               double responseBeta /**< [in] Flux normalization fraction at selfRM acquisition. */,
-               bool   modeNorm /**< [in] Runtime MODENORM setting. */ );
+    bool load( const CalibrationFiles &files /**< [in] Matched FITS paths, resolved in the active archive. */,
+               double                  floorPerPixel /**< [in] Runtime WFS floor in ADU per full-frame pixel. */,
+               double                  responseBeta /**< [in] Flux normalization fraction at selfRM acquisition. */,
+               bool                    modeNorm /**< [in] Runtime MODENORM setting. */ );
 
     /// Compute masked calibration contractions from already normalized reconstructor rows.
     bool set( const Rows           &rows /**< [in] Runtime reconstructor weights. */,
@@ -395,22 +397,17 @@ inline bool Calibration::set( const Rows           &rows,
     return true;
 }
 
-inline bool Calibration::load( const std::filesystem::path &directory,
-                               const std::string           &selfRm,
-                               double                       floorPerPixel,
-                               double                       responseBeta,
-                               bool                         modeNorm )
+inline bool Calibration::load( const CalibrationFiles &files, double floorPerPixel, double responseBeta, bool modeNorm )
 {
     using File = mx::fits::fitsFile<float>;
     File maskFile;
     File refFile;
     File modesFile;
     File rmFile;
+    const auto &[maskPath, referencePath, modesPath, selfRm] = files;
 
-    if( !!maskFile.open( ( directory / "wfsmask.fits" ).string() ) ||
-        !!refFile.open( ( directory / "wfsref.fits" ).string() ) ||
-        !!modesFile.open( ( directory / "CMmodesWFS.fits" ).string() ) ||
-        !!rmFile.open( ( directory / selfRm ).string() ) )
+    if( !!maskFile.open( maskPath.string() ) || !!refFile.open( referencePath.string() ) ||
+        !!modesFile.open( modesPath.string() ) || !!rmFile.open( selfRm.string() ) )
     {
         return false;
     }

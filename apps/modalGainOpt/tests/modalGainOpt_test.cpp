@@ -267,6 +267,15 @@ class modalGainOptHarness : public modalGainOpt
         m_gainLeak = gainLeak;
     }
 
+    /// Advance the synthetic PSD interval and provide a flux sample inside it.
+    void setNoiseWindowForTest( time_t start /**< [in] PSD interval start, in Unix seconds. */,
+                                time_t end /**< [in] PSD interval end, in Unix seconds. */ )
+    {
+        m_psdWindowStart = start;
+        m_psdWindowEnd   = { end, 0 };
+        m_fluxHistory    = { { 0.5 * ( start + end ), 25000 } };
+    }
+
     using modalGainOpt::selectNoisePrediction;
 
     /// Provide a matched timestamped flux and camera state for offline source selection.
@@ -2217,6 +2226,29 @@ TEST_CASE( "modalGainOpt bounds predictor regularization and cached coefficient 
     REQUIRE( gain <= std::min( 0.20F, stability * controller.m_minFindMaxFact ) );
 }
 
+/// \cond
+/// Write matched synthetic FITS inputs in either standalone or CACAO layout.
+static void writeNoiseArchive( const std::filesystem::path &directory /**< [in] Archive to populate. */,
+                               const std::array<float, 8>  &modes /**< [in] Two 2x2 WFS mode images. */,
+                               bool cacaoLayout /**< [in] Use the applied CACAO archive layout. */ )
+{
+    std::filesystem::create_directories( cacaoLayout ? directory / "CMmodesWFS" : directory );
+    const std::array<float, 4> mask{ 1, 1, 1, 0 };
+    const std::array<float, 4> reference{ 4, 3, 2, 0 };
+    std::array<float, 24>      response{};
+    response[20] = 0.8F;
+    response[23] = 0.9F;
+
+    auto modePath = cacaoLayout ? directory / "CMmodesWFS" / "CMmodesWFS.fits" : directory / "CMmodesWFS.fits";
+    mx::fits::fitsFile<float> file;
+    REQUIRE( !file.write( ( directory / "wfsmask.fits" ).string(), mask.data(), 2, 2, 1 ) );
+    REQUIRE( !file.write( ( directory / "wfsref.fits" ).string(), reference.data(), 2, 2, 1 ) );
+    REQUIRE( !file.write( modePath.string(), modes.data(), 2, 2, 2 ) );
+    REQUIRE( !file.write( ( directory / "response.fits" ).string(), response.data(), 2, 2, 6 ) );
+    std::filesystem::create_symlink( "response.fits", directory / "selfRM_cal.fits" );
+}
+/// \endcond
+
 /// Use the requested source, fall back on missing inputs, and reject mixed camera settings.
 TEST_CASE( "modalGainOpt selects a matched noise source for the current PSD window", "[modalGainOpt]" )
 {
@@ -2228,19 +2260,8 @@ TEST_CASE( "modalGainOpt selects a matched noise source for the current PSD wind
                                                                std::filesystem::remove_all( name, error );
                                                            } );
     REQUIRE( directory );
-    const std::string          base = std::string( directory.get() ) + "/";
-    const std::array<float, 4> mask{ 1, 1, 1, 0 };
-    const std::array<float, 4> reference{ 4, 3, 2, 0 };
-    const std::array<float, 8> modes{ 1, 2, 3, 1, -1, 0, 2, 4 };
-    std::array<float, 24>      response{};
-    response[20] = 0.8F;
-    response[23] = 0.9F;
-
-    mx::fits::fitsFile<float> file;
-    REQUIRE( !file.write( base + "wfsmask.fits", mask.data(), 2, 2, 1 ) );
-    REQUIRE( !file.write( base + "wfsref.fits", reference.data(), 2, 2, 1 ) );
-    REQUIRE( !file.write( base + "CMmodesWFS.fits", modes.data(), 2, 2, 2 ) );
-    REQUIRE( !file.write( base + "selfRM.fits", response.data(), 2, 2, 6 ) );
+    const std::string base = std::string( directory.get() ) + "/";
+    writeNoiseArchive( base, { 1, 2, 3, 1, -1, 0, 2, 4 }, false );
 
     modalGainOptHarness app;
     app.configureNoiseForTest( base );
@@ -2273,6 +2294,86 @@ TEST_CASE( "modalGainOpt selects a matched noise source for the current PSD wind
     app.setNoiseEmForTest( 200, 80 );
     REQUIRE( app.selectNoisePrediction( fps, flux ).empty() );
     REQUIRE( app.activeNoiseForTest() == modalNoise::Source::empirical );
+}
+
+/// Follow CACAO's applied archive and invalidate PSDs that span a calibration change.
+TEST_CASE( "modalGainOpt follows the active CACAO archive and selfRM link", "[modalGainOpt]" )
+{
+    namespace fs                                       = std::filesystem;
+    char                                        path[] = "/tmp/modalGainOpt_cacao_XXXXXX";
+    std::unique_ptr<char, void ( * )( char * )> directory( mkdtemp( path ),
+                                                           []( char *name )
+                                                           {
+                                                               std::error_code error;
+                                                               fs::remove_all( name, error );
+                                                           } );
+    REQUIRE( directory );
+    const fs::path shmDir         = directory.get();
+    const auto     restoreMilkDir = [previous = mx::sys::getEnv( "MILK_SHM_DIR" )]( const char *name )
+    {
+        if( previous.empty() )
+        {
+            unsetenv( name );
+        }
+        else
+        {
+            setenv( name, previous.c_str(), 1 );
+        }
+    };
+    const std::unique_ptr<const char, decltype( restoreMilkDir )> environment( "MILK_SHM_DIR", restoreMilkDir );
+    REQUIRE( setenv( environment.get(), directory.get(), 1 ) == 0 );
+
+    const auto first  = shmDir / "first archive";
+    const auto second = shmDir / "second archive";
+    writeNoiseArchive( first, { 1, 2, 3, 1, -1, 0, 2, 4 }, true );
+    writeNoiseArchive( second, { 3, 2, 1, 3, 1, 0, -2, 4 }, true );
+    const auto alias = shmDir / "active archive";
+    fs::create_directory_symlink( first, alias );
+    const auto source = shmDir / "aol1_calib_source.txt";
+    const auto loaded = shmDir / "aol1_calib_loaded.txt";
+    const auto time   = fs::file_time_type::clock::now();
+    std::ofstream( source ) << alias.string() << '\n';
+    std::ofstream( loaded ) << "2026-11-22T09:09:28+00:00\n";
+    fs::last_write_time( source, time - std::chrono::seconds( 3 ) );
+    fs::last_write_time( loaded, time - std::chrono::seconds( 2 ) );
+
+    modalGainOptHarness app;
+    app.configureNoiseForTest( "" );
+    app.requestNoiseForTest( "detector" );
+    float  fps  = 0;
+    double flux = 0;
+
+    // clang-format off
+    #ifdef MODALGAINOPT_TEST_DOXYGEN_REF
+    modalGainOpt::refreshNoiseCalibration();
+    modalGainOpt::selectNoisePrediction( fps, flux );
+    #endif
+    // clang-format on
+
+    const auto original = app.selectNoisePrediction( fps, flux );
+    REQUIRE( original.size() == 2 );
+
+    fs::remove( alias );
+    fs::create_directory_symlink( second, alias );
+    REQUIRE( app.selectNoisePrediction( fps, flux ) == original );
+    std::ofstream( source ) << alias.string() << '\n';
+    fs::last_write_time( source, time - std::chrono::seconds( 1 ) );
+    REQUIRE( app.selectNoisePrediction( fps, flux ).empty() );
+    REQUIRE( app.activeNoiseForTest() == modalNoise::Source::empirical );
+
+    std::ofstream( loaded ) << "2026-11-22T09:09:29+00:00\n";
+    fs::last_write_time( loaded, time );
+    REQUIRE( app.selectNoisePrediction( fps, flux ).empty() );
+    app.setNoiseWindowForTest( 101, 111 );
+    const auto changed = app.selectNoisePrediction( fps, flux );
+    REQUIRE( changed.size() == 2 );
+    REQUIRE( changed != original );
+
+    std::ofstream( loaded ) << "2026-11-22T09:09:30+00:00\n";
+    fs::last_write_time( loaded, time + std::chrono::seconds( 1 ) );
+    REQUIRE( app.selectNoisePrediction( fps, flux ).empty() );
+    app.setNoiseWindowForTest( 112, 122 );
+    REQUIRE( app.selectNoisePrediction( fps, flux ) == changed );
 }
 
 } // namespace modalGainOptTest

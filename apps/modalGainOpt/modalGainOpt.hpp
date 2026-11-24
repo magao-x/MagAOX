@@ -13,10 +13,12 @@
 #include <cmath>
 #include <cstring>
 #include <deque>
+#include <fstream>
 
 #include <mx/ao/analysis/clAOLinearPredictor.hpp>
 #include <mx/ao/analysis/clGainOpt.hpp>
 #include <mx/mxException.hpp>
+#include <mx/sys/environment.hpp>
 
 #include "modalNoiseModel.hpp"
 #include "modalPsdProcessor.hpp"
@@ -1032,9 +1034,9 @@ class modalGainOpt : public MagAOXApp<true>,
     bool               m_calibratedNoise{ false }; ///< Enable independent WFS noise estimation.
     modalNoise::Source m_requestedNoise{ modalNoise::Source::camera }; ///< Operator-selected source.
     modalNoise::Source m_activeNoise{
-        modalNoise::Source::empirical }; ///< Source used for the last published optimization.
-    std::string m_noiseCalDir;           ///< Directory containing the active WFS reconstruction FITS calibration.
-    std::string m_noiseSelfRm{ "selfRM.fits" };              ///< Matched plane-5 self response FITS cube.
+        modalNoise::Source::empirical };            ///< Source used for the last published optimization.
+    std::string m_noiseCalDir;                      ///< Optional calibration directory override for offline use.
+    std::string m_noiseSelfRm{ "selfRM_cal.fits" }; ///< Matched plane-5 self response FITS cube.
     std::string m_cameraNoiseBuffer{ "camwfs_noise_cbuff" }; ///< Buffered raw camera input for pixel periodograms.
     double      m_noiseFloorPerPixel{ 1 };  ///< Active WFS normalization floor in ADU per full-frame pixel.
     double      m_noiseResponseBeta{ 0 };   ///< Flux normalization fraction at the self-response calibration.
@@ -1043,11 +1045,13 @@ class modalGainOpt : public MagAOXApp<true>,
     modalNoise::Calibration m_noiseCalibration; ///< Cached matched reconstructor and noise contractions.
     modalNoise::CameraNoise m_cameraNoise;      ///< Periodogram work area owned by the optimizer thread.
     std::vector<std::pair<std::filesystem::path, std::filesystem::file_time_type>>
-           m_noiseFiles;                                ///< Cached calibration file identities.
-    double m_noiseCalChanged{ 0 };                      ///< Time when a changed calibration invalidated prior samples.
-    double m_cameraSettingsSince{ 0 };                  ///< Time the current FPS and EM gain last changed.
-    bool   m_haveEmGain{ false };                       ///< Whether the camera has provided its actual EM setting.
-    double m_cameraFps{ 0 };                            ///< Reported actual camera FPS.
+                          m_noiseFiles;      ///< FITS file identities and CACAO records for the cached calibration.
+    std::filesystem::path m_noiseArchiveDir; ///< Resolved CACAO archive pinned to the cached apply records.
+    std::string           m_noiseCalIssue;   ///< Latest calibration error, retained to avoid repeated logging.
+    double                m_noiseCalChanged{ 0 };       ///< Time when a changed calibration invalidated prior samples.
+    double                m_cameraSettingsSince{ 0 };   ///< Time the current FPS and EM gain last changed.
+    bool                  m_haveEmGain{ false };        ///< Whether the camera has provided its actual EM setting.
+    double                m_cameraFps{ 0 };             ///< Reported actual camera FPS.
     std::deque<std::pair<double, float>> m_fluxHistory; ///< Timestamped masked dark-subtracted flux samples.
     double m_psdWindowStart{ 0 };        ///< Acquisition time of the oldest sample averaged into the PSD, if supplied.
     eigenImage<float> m_psdStaging;      ///< Private copy used to validate a PSD and its timestamps together.
@@ -2139,7 +2143,7 @@ void modalGainOpt::setupConfig()
                 "calibrationDir",
                 false,
                 "string",
-                "Path to the active reconstruction calibration directory." );
+                "Override the active CACAO archive path. Defaults to the applied calibration for this loop." );
     config.add( "noise.selfRM",
                 "",
                 "noise.selfRM",
@@ -2148,7 +2152,8 @@ void modalGainOpt::setupConfig()
                 "selfRM",
                 false,
                 "string",
-                "Matched selfRM FITS filename within calibrationDir, or an absolute path." );
+                "Matched selfRM path relative to the selected calibration archive, or an absolute path. Defaults to "
+                "selfRM_cal.fits." );
     config.add( "noise.selfRMBeta",
                 "",
                 "noise.selfRMBeta",
@@ -5181,41 +5186,114 @@ int modalGainOpt::checkSizes()
 
 void modalGainOpt::refreshNoiseCalibration()
 {
-    if( m_noiseCalDir.empty() )
+    namespace fs           = std::filesystem;
+    const auto unavailable = [this]( const std::string &reason )
     {
-        return;
+        m_noiseCalChanged  = modalNoise::seconds( m_psdWindowEnd );
+        m_noiseCalibration = {};
+        m_noiseFiles.clear();
+
+        if( reason != m_noiseCalIssue )
+        {
+            m_noiseCalIssue = reason;
+            log<text_log>( reason, logPrio::LOG_WARNING );
+        }
+    };
+
+    fs::path                 directory( m_noiseCalDir );
+    const bool               useCacaoArchive = directory.empty();
+    decltype( m_noiseFiles ) files;
+    std::error_code          error;
+
+    if( useCacaoArchive )
+    {
+        const auto     milkDir = mx::sys::getEnv( "MILK_SHM_DIR" );
+        const fs::path shmDir  = milkDir.empty() ? "/milk/shm" : milkDir;
+        const auto     prefix  = "aol" + std::to_string( m_loopNum ) + "_calib_";
+        const auto     source  = shmDir / ( prefix + "source.txt" );
+        const auto     loaded  = shmDir / ( prefix + "loaded.txt" );
+
+        if( !fs::is_regular_file( source, error ) || !fs::is_regular_file( loaded, error ) )
+        {
+            unavailable( "Missing active CACAO calibration records in " + shmDir.string() );
+            return;
+        }
+
+        const auto sourceTime = fs::last_write_time( source, error );
+
+        if( error )
+        {
+            unavailable( "Cannot read CACAO calibration record " + source.string() );
+            return;
+        }
+
+        const auto    loadedTime = fs::last_write_time( loaded, error );
+        std::string   archive, loadedAt;
+        std::ifstream sourceFile( source ), loadedFile( loaded );
+
+        if( error || loadedTime < sourceTime || !std::getline( sourceFile, archive ) || !( loadedFile >> loadedAt ) )
+        {
+            unavailable( "Waiting for a complete CACAO calibration record for loop " + std::to_string( m_loopNum ) );
+            return;
+        }
+
+        directory = archive;
+
+        if( !directory.is_absolute() )
+        {
+            unavailable( "CACAO calibration record needs an absolute archive path in " + source.string() );
+            return;
+        }
+
+        files.emplace_back( source, sourceTime );
+        files.emplace_back( loaded, loadedTime );
+
+        if( m_noiseFiles.size() >= files.size() && std::equal( files.begin(), files.end(), m_noiseFiles.begin() ) )
+        {
+            directory = m_noiseArchiveDir;
+        }
+        else
+        {
+            directory = fs::canonical( directory, error );
+
+            if( error )
+            {
+                unavailable( "Cannot resolve CACAO calibration archive " + archive );
+                return;
+            }
+        }
     }
 
-    const std::filesystem::path directory( m_noiseCalDir );
-    decltype( m_noiseFiles )    files;
+    auto modes = directory / "CMmodesWFS" / "CMmodesWFS.fits";
 
-    for( const auto &name : { std::string( "wfsmask.fits" ),
-                              std::string( "wfsref.fits" ),
-                              std::string( "CMmodesWFS.fits" ),
-                              m_noiseSelfRm } )
+    if( !useCacaoArchive && !fs::is_regular_file( modes, error ) )
     {
-        std::error_code error;
-        auto            path = std::filesystem::canonical( directory / name, error );
+        modes = directory / "CMmodesWFS.fits";
+    }
+
+    modalNoise::CalibrationFiles inputs{
+        directory / "wfsmask.fits", directory / "wfsref.fits", modes, directory / m_noiseSelfRm };
+
+    for( auto &path : inputs )
+    {
+        const auto resolved = fs::canonical( path, error );
 
         if( error )
         {
-            m_noiseCalChanged  = modalNoise::seconds( m_psdWindowEnd );
-            m_noiseCalibration = {};
-            m_noiseFiles.clear();
+            unavailable( "Missing WFS noise calibration input " + path.string() );
             return;
         }
 
-        const auto modified = std::filesystem::last_write_time( path, error );
+        const auto modified = fs::last_write_time( resolved, error );
 
         if( error )
         {
-            m_noiseCalChanged  = modalNoise::seconds( m_psdWindowEnd );
-            m_noiseCalibration = {};
-            m_noiseFiles.clear();
+            unavailable( "Cannot read WFS noise calibration metadata for " + resolved.string() );
             return;
         }
 
-        files.emplace_back( std::move( path ), modified );
+        files.emplace_back( resolved, modified );
+        path = resolved;
     }
 
     if( files == m_noiseFiles )
@@ -5228,23 +5306,35 @@ void modalGainOpt::refreshNoiseCalibration()
         m_noiseCalChanged = modalNoise::seconds( m_psdWindowEnd );
     }
 
+    m_noiseArchiveDir  = useCacaoArchive ? directory : fs::path{};
     m_noiseFiles       = std::move( files );
     m_noiseCalibration = {};
+    m_noiseCalIssue.clear();
 
     try
     {
-        if( m_noiseCalibration.load(
-                directory, m_noiseSelfRm, m_noiseFloorPerPixel, m_noiseResponseBeta, m_noiseModeNorm ) )
+        if( m_noiseCalibration.load( inputs, m_noiseFloorPerPixel, m_noiseResponseBeta, m_noiseModeNorm ) )
         {
+            for( const auto &[path, modified] : m_noiseFiles )
+            {
+                if( fs::last_write_time( path, error ) != modified || error )
+                {
+                    unavailable( "WFS noise calibration changed while loading " + path.string() );
+                    return;
+                }
+            }
+
             return;
         }
     }
-    catch( const std::exception &error )
+    catch( const std::exception &err )
     {
-        log<text_log>( std::string( "WFS noise calibration: " ) + error.what(), logPrio::LOG_WARNING );
+        log<text_log>( std::string( "WFS noise calibration: " ) + err.what(), logPrio::LOG_WARNING );
     }
 
-    log<text_log>( "WFS noise calibration unavailable or invalid in " + m_noiseCalDir, logPrio::LOG_WARNING );
+    m_noiseCalIssue =
+        "Invalid WFS noise calibration in " + directory.string() + ". Check the matched selfRM and noise.selfRMBeta.";
+    log<text_log>( m_noiseCalIssue, logPrio::LOG_WARNING );
 }
 
 bool modalGainOpt::cameraRateMatchesPsd() const
