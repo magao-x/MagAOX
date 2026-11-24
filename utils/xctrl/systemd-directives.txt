@@ -1,19 +1,20 @@
 # The default systemd directives that the [systemd] section of magaox.conf or an app's .conf may set.
 #
 # make install in utils/xctrl installs this file as /etc/magaox/systemd-directives.txt, always overwriting it, and
-# copies it to /etc/magaox/systemd-directives.local.txt if that does not exist.  xctrl reads the .local copy, or
-# this one if there is none: add or remove directives in systemd-directives.local.txt, with sudo.
+# copies it to /etc/magaox/systemd-directives.local.txt if it does not exist.  xctrl reads the .local copy, or
+# falls back to standard systemd-directives.txt. 
 #
-# xctrl sync writes these into the apps' systemd units, as root, for any user who can edit the proclist, so the
-# list is what keeps that from granting more than the app's own resources and timing.  Both files are owned by root
-# and writable only by root.  One directive per line, as systemd spells it; # starts a comment.  A [systemd] key
-# may start with a lower-case letter: watchdogSec sets WatchdogSec.
+# xctrl sync registers apps with systemd and includes any of the overrides in this allowlist if they are present 
+# in the <appname>.conf or magaox.conf files. The allowlist should only ever be root:root permissions so that 
+# a malicious systemd directive cannot be included in an app setting. 
+# 
+# A [systemd] key may start with a lower-case letter: watchdogSec is treated like WatchdogSec.
 #
-# Never add directives that name files or paths systemd opens or mounts as root (StandardOutput=file:...,
-# StandardInput, StandardError, TTYPath, RootDirectory, RootImage, BindPaths, ReadWritePaths, LoadCredential,
-# StateDirectory, LogsDirectory, PIDFile), that run commands (Exec...), or that change who the app runs as or what
-# it may do (User, Group, capabilities): any of those would let a proclist editor become root.  xctrl refuses the
-# worst of them (Exec..., User, Group, capabilities, host actions such as a reboot) even if they are listed here.
+# Dangerous or powerful directives should not be included, for example those that name files or paths systemd opens
+# or mounts as root (StandardOutput=file:..., StandardInput, StandardError, TTYPath, RootDirectory, RootImage, 
+# BindPaths, ReadWritePaths, LoadCredential, StateDirectory, LogsDirectory, PIDFile), that run commands (Exec...),
+# or that change who the app runs as or what it may do (User, Group, capabilities): any of those could allow an 
+# app to become root and do something malicious. let a proclist editor become root. 
 
 # The watchdog, start and stop timing, and restarts
 WatchdogSec
