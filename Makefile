@@ -333,6 +333,7 @@ ifeq ($(MAGAOX_ROLE),AOC)
   scripts_to_install += xlabmode
   scripts_to_install += xskymode
   scripts_to_install += xhomezabers
+  scripts_to_install += xtransportmode
 else ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup
   scripts_to_install += cacao/RTC/cacao-shutdown
