@@ -62,7 +62,59 @@ It also combines all delays on the time-since-command axis into a super-sampled 
   (not normalized, so `amp = 1` applies the file as stored).  The file is re-read at each run start, and a copy is
   saved with the results.
 
-In both modes the largest absolute command must not exceed `poke.maxCommand` (default 1).
+- `t2wMode`: plane `t2w.mode` (default 4, astig00) of t2wOffloader's woofer mode cube `t2w.wooferModesFile`
+  (`wModes.fits`); the command is `+/- amp * plane`.  This is the woofer side of a single-mode offload.  The file is
+  re-read at each run start and its SHA-256 recorded.
+
+In every mode the largest absolute command must not exceed `poke.maxCommand` (default 1).
+
+## Counter-offload cases
+
+`counter.case` (or INDI `offload_case`) selects what each measurement trial does.  The app then stands in for
+t2wOffloader so that counterOffload makes its real counter ramp, and the WFS response is measured with the loop open.
+
+| Case | Trial |
+|---|---|
+| `woofer` (default) | the woofer poke only, as above |
+| `counter` | no woofer poke; `counter.postDelayUs` after the time it would have been written, post `+/- amp * Δ` to `counter.stream` |
+| `both` | the woofer poke, then `counter.postDelayUs` later post `+/- amp * Δ` |
+
+- **Δ** is plane `t2w.mode` of t2wOffloader's tweeter mode cube `t2w.tweeterModesFile` (`tModesOrtho.fits`).
+  t2wOffloader offloads Σ δₚ `wModes[p]` to the woofer and posts Σ δₚ `tModesOrtho[p]` as its tweeter offload, so a
+  woofer poke of `amp * wModes[k]` and a Δ of `amp * tModesOrtho[k]` are exactly one single-mode offload.  Both cubes
+  are written by t2wOffloader at startup in `/tmp`; copy them to a permanent place.
+- **The post.**
+  - Δ is written to `counter.stream` (default `aol0_tweeterOffload`, the stream counterOffload watches) with
+    `ImageStreamIO_UpdateIm_atime`.
+  - Its `atime` is the `CLOCK_ISIO` time of the woofer write, as t2wOffloader stamps it.
+  - counterOffload places its ramp from when it receives Δ, so the delay between the woofer write and the post shifts
+    the counter directly.
+  - `counter.postDelayUs` < 0 (the default) measures t2wOffloader's own gap at run start, as `writetime − atime` of
+    its last post still in the stream.
+  - The value used is recorded as `POSTDLY`, and the achieved delay per cube as `POSTMEAN`/`POSTSTD`.
+- **Zeroing.** After each trial that posted Δ the app requests `counterOffload.zero`, which clears counterOffload
+  exactly whatever its leak or clipping.  `poke.settle` must cover the INDI round trip; 0.05 s is ample.
+- **Reference.** The reference pass always pokes the woofer, so every case is projected onto the woofer's pattern `P`
+  and is in units of a full woofer step:
+  - the woofer settles at 1;
+  - the counter at −gain × (counter/woofer scale at the WFS);
+  - `both` at the residual, 1 minus that.
+- **Time origin.** All curves are timed from the woofer write (in `counter`, when it would have been), so the
+  counter's curve includes its whole latency: the post delay, counterOffload's handoff and slot wait, the synco lead,
+  dmcomb, the driver, and the tweeter mechanics.
+- **Metrics.** In `counter` the timing metrics (`t50`, `rise`, `jitter`) are taken on each curve normalized by its own
+  settled value.  In `both` they are usually unavailable, and the residual is described by `settled`, `peakAbs` and
+  `residRms`.
+- **Start checks.** For `counter` and `both` a run refuses to start, and logs why, unless:
+  - the poke mode is `t2wMode`;
+  - t2wOffloader's `offload` is reported off, since the app writes the stream t2wOffloader posts to;
+  - counterOffload's `enable` is reported on;
+  - holoop's `loop_state` is reported off;
+  - `counter.stream` is a 2-D float image the size of the tweeter plane;
+  - the post delay is known.
+
+  counterOffload's `rampStartUs`, `rampDurationUs`, `gain` and `leak` are recorded in the headers. If any changes
+  during the run, `COCHG = 1` is recorded.
 
 ## Timing notes
 
@@ -114,6 +166,14 @@ In both modes the largest absolute command must not exceed `poke.maxCommand` (de
 | `analysis.bestMetric` | string | `jitter` | `jitter`, `rise`, or `t50` |
 | `analysis.maxLateFrac` | float | 0.1 | late-poke warning threshold |
 | `analysis.minRefSNR` | float | 8 | minimum reference peak SNR, max\|P\| / sigmaP; pure noise gives ~4.4 for 120x120 |
+| `t2w.mode` | int | 4 | mode index k in t2wOffloader's cubes (`t2wMode`) |
+| `t2w.wooferModesFile` | string | | t2wOffloader's woofer mode cube (`wModes.fits`) |
+| `t2w.tweeterModesFile` | string | | t2wOffloader's tweeter mode cube (`tModesOrtho.fits`) |
+| `counter.case` | string | `woofer` | `woofer`, `counter`, or `both` |
+| `counter.stream` | string | `aol0_tweeterOffload` | stream written with Δ |
+| `counter.postDelayUs` | float | -1 | woofer write to Δ post [us]; < 0 measures t2wOffloader's gap |
+| `counter.device` | string | `counterOffload` | counterOffload INDI device |
+| `counter.offloadDevice` | string | `t2wOffloader` | t2wOffloader INDI device |
 | `output.baseDir` | string | `/home/xsup/dm_response` | root of the output tree |
 
 Example `dmTemporalResponse.conf`:
@@ -140,8 +200,11 @@ nTrials=20
 # INDI
 
 Tunable properties (`current`/`target`), all rejected while a run is in progress:
-`dm_index`, `dm_channel`, `poke_mode` (selection: `actuator`/`pattern`), `poke_x`, `poke_y`, `pattern_file`,
-`poke_amp`, `nDelays`, `delaySpan`, `nFrames`, `nTrials`, `settle`, `nSettle`, `maskThresh`, `bestMetric`.
+`dm_index`, `dm_channel`, `poke_mode` (selection: `actuator`/`pattern`/`t2wMode`), `poke_x`, `poke_y`, `pattern_file`,
+`poke_amp`, `nDelays`, `delaySpan`, `nFrames`, `nTrials`, `settle`, `nSettle`, `maskThresh`, `bestMetric`,
+`offload_case` (selection: `woofer`/`counter`/`both`), `t2w_mode`.  The two mode cube paths are config only.
+
+Subscribed: t2wOffloader `offload`; counterOffload `enable`, `rampStartUs`, `rampDurationUs`, `gain`, `leak`.
 
 Controls: `start.request`, `stop.request`.
 
@@ -167,9 +230,11 @@ Each run writes to `<output.baseDir>/<YYYY-MM-DDTHHMMSS>/` (UTC):
 | `dmresp_delay_<DDDDD>us.fits` | one per delay: `[nx, ny, N]` averaged +/- half-difference cube |
 | `reference.fits` | `[nx, ny, 2]`: plane 0 `P`, plane 1 the mask; header `REFSNR`, `REFSIGMA`, `MINRSNR` |
 | `summary_curves.fits` | `[N+1, K, 3]`: mean response, trial std, and mean time from the command [us]; row 0 is the pre-poke baseline (r = 0) |
-| `summary_metrics.fits` | `[K, 9]`: delay, t50, rise, overshoot, settleErr, jitter, delayErrMean, delayErrStd, lateFrac (columns named by `MCOLn`) |
+| `summary_metrics.fits` | `[K, 12]`: delay, t50, rise, overshoot, settleErr, jitter, delayErrMean, delayErrStd, lateFrac, settled, peakAbs, residRms (columns named by `MCOLn`) |
 | `summary_superres.fits` | `[nBins, 2]`: bin time [us] and binned response |
 | `pattern.fits` | pattern mode only: copy of the applied pattern |
+| `woofer_poke.fits` | `t2wMode` only: the positive woofer command |
+| `counter_delta.fits` | `counter` and `both` only: the positive Δ posted |
 
 Every file carries the run header: `DATE-OBS`, `DMSTREAM`, `WFSSHMIM`, `WFSFPS`, `POKEMODE`, `POKEX`/`POKEY` or
 `PATFILE`/`PATSHA`, `POKEAMP`, `NDELAYS`, `DLYSPAN`, `NFRAMES`, `NTRIALS`, `NREF`, and the provenance cards:
@@ -182,8 +247,17 @@ Every file carries the run header: `DATE-OBS`, `DMSTREAM`, `WFSSHMIM`, `WFSFPS`,
 | `GITSHA1` | git SHA-1 of the MagAOX build |
 | `GITMOD` | 1 if the build tree had uncommitted changes |
 
-The cubes also have `DELAYUS`,
-`DLYIDX`, `DLYMEAN`, `DLYSTD`, `DLYMIN`, `DLYMAX`, `NINVALID`, `LATEFRAC`, `LATEFLAG`, `T50`, `RISE`, and `JITTER`.
+In `t2wMode` the header has `T2WMODE`, `WMFILE` and `WMSHA` instead of `POKEX`/`POKEY` or `PATFILE`/`PATSHA`.  Every file
+has `OFFCASE`.  In `counter` and `both` it also has:
+- `TMFILE`, `TMSHA`: the tweeter mode cube;
+- `CNTSTRM`: the stream written;
+- `POSTDLY`: the post delay;
+- `CORAMP0`, `CORAMPD`, `COGAIN`, `COLEAK`: counterOffload's settings at the start (`-999` if unknown);
+- `COCHG`: 1 if any of those settings changed during the run.
+
+The cubes also have `DELAYUS`, `DLYIDX`, `DLYMEAN`, `DLYSTD`, `DLYMIN`, `DLYMAX`, `NINVALID`, `LATEFRAC`, `LATEFLAG`,
+`T50`, `RISE`, `JITTER`, `SETTLED`, `PEAKABS`, and `RESIDRMS`. In `counter` and `both` they also have `POSTMEAN` and
+`POSTSTD`.
 A header value that can not be computed (e.g. no 10%/90% crossing) is written as `-999`.
 
 Live shared memory, updated during a run: `<name>_ref` (P), `<name>_resp` (mean response curves, (N+1) x K), and
@@ -194,3 +268,8 @@ Live shared memory, updated during a run: `<name>_ref` (P), `<name>_resp` (mean 
 - Use a DM channel that no other process writes (default `dm00disp07`), with the AO loop open.
 - Start with a small `poke_amp`.  `poke.maxCommand` limits the command in both modes.
 - The DM channel is zeroed after every trial and whenever the run ends, including on stop, error, and shutdown.
+- In `counter` and `both` the app writes `aol0_tweeterOffload`, which belongs to t2wOffloader. It does so only while
+  t2wOffloader reports `offload` off, and it requests counterOffload's zero after every trial that posted Δ and at
+  the end of the run.
+- When t2wOffloader resumes offloading, its next post overwrites the app's last frame.
+- The app never writes the tweeter or a synco channel; the counter's tweeter command comes from counterOffload.
