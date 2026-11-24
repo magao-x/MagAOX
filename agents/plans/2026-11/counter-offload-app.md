@@ -1358,3 +1358,45 @@ User: "implement".
   - New: step-only noise, the windowed sum with the full profile, removal of independent noise (−0.03 for v = 0.3, −0.3, 0), removal of the step-only noise, and fewer than 2 steps.
   - The existing figure-of-merit and alignment tests use the new signatures.
   - There are now 15 config keys.
+
+### Bench: Run `20261124T040415Z` with Window and Noise Removal (aborted halfway; first lag profiles)
+Files: `counterOffload_calib_20261124T040415Z.csv` and `_lags.csv`. Started from 120/330/0.4. Rows: step only (20 steps), 4 baselines, 3 replicates; the lag file also has 3 start points.
+
+- **The measurement now sees the offload error.**
+  - The baseline is 2.02–2.08, against 8.14 for the step-only energy (before: about equal).
+  - Replicate ratios at gain 0.4: 0.917, 0.899, 0.887 (SD 0.015).
+- **The lag profile (baselines, energy per lag summed over modes) shows the mechanism.**
+  - Lags 0–17 are nearly 0 (0.001–0.003). The step-only subtraction and the alignment work.
+  - From lag 18, the energy jumps every 8 lags, at lags 18, 26, 34, … (2 mod 8). That is 2 frames (1 ms) after each offload frame, consistent with the woofer rise. Each jump decays over the next 8 frames.
+  - The jumps grow to a peak at lags 40–60 (20–30 ms), then decay. The first offloads are small because their Δ comes from the 8-frame average.
+  - The energy is within about 100 lags (50 ms), so `fomWindowMs` = 50 fits.
+- **Floor.**
+  - Every stage, including the step-only response, has a constant 0.0068 per lag from about lag 100 to 400.
+  - In the step-only response it is a persistent sign-dependent offset of the residual after a step with offload off. A tweeter-loop leak (`aol1_mmultfact` < 1) holding a steady-state error while the tweeter holds the step would do this.
+  - With offload on, the woofer takes the step and the offset goes away. The early lags show the points share the offset until the offloads move the step.
+  - The floor is the same in every measurement, so it only rescales the ratios (with the noise scaled equally); it does not change decisions. With it removed, gain 0.4 gives 0.855 instead of 0.903 over lags 0–100.
+- **Counter effect.** At gain 0.4 the offload error is reduced by about 15%. Perfect timing at gain 0.4 would give (1 − 0.4)² = 0.36 of the error, so there is room for the start, duration and gain to improve it.
+- **`fomTiming` is misplaced.** It counts the offload frame and the next, but the error lands 2 frames after the offload frame. Proposal P-9 (not implemented): place the timing lags at the measured woofer latency, the lag offset in each 8-lag cycle where the baseline's per-lag energy jumps, or a fixed 2 frames.
+
+### Bench: Run `20261124T040415Z`, Completed
+Started from 120/330/0.4. Nothing moved, and the confirmation (0.893, 0.902, 0.897) kept 120/330/0.4. Baselines 2.01–2.09 (SD 1.1%).
+
+- **Gain is the clear signal.** Mean ratios over 2 sweeps: 0.3 → 0.914, 0.4 → 0.899, **0.5 → 0.864**, 0.6 → 0.872, 0.7 → 0.910.
+  - All four 0.5 points (0.872, 0.856) are below all four 0.4 points (0.912, 0.886): a difference of 0.035, about 3σ (σ about 0.011).
+  - The quadratic fit over 0.3–0.7 flattens the sharp minimum and predicted only 0.014–0.015 improvement, under the 0.018–0.020 threshold, so the gain did not move.
+  - Clipping is 0.27% at 0.5, 0.57% at 0.6 and 0.69% at 0.7.
+- **Start:** 0 → 0.905, 25 → 0.888, 50 → 0.898, 75 → 0.882, 100 → 0.893, 125 → 0.886, 150 → 0.888. Start 0 is the worst, by about 0.02 (about 2σ); 25–150 are equal within the noise.
+- **Duration:** 0.897–0.907, flat (400 lowest).
+- **The counter removes only about 14% of the offload error at its best gain.** A perfectly matched counter at gain 0.5 would remove 75%.
+  - Folding the lag profiles over the 8-lag offload cycle (lags 16–80), the error at gain 0.5 is reduced almost uniformly over the cycle: ratio 0.80–0.85.
+  - It is reduced least at phase 2, the frame where each woofer jump appears: 0.89 at gain 0.5, and 0.96–1.15 for start 0 and 150, gain 0.3 and duration 600.
+  - So the counter mostly scales down the tail of each jump and does not cancel the jump itself. Its waveform correlates weakly with the woofer error at the WFS (for a pure mismatch, ratio = 1 − ρ² gives ρ about 0.37).
+  - Possible causes:
+    - a timing mismatch of order a WFS frame, which the 0–150 µs start grid cannot reach;
+    - a shape or scale mismatch between the woofer motion and the back-projected Δ;
+    - error in these lags that the counter cannot address (for example the leak-offset change as each offload moves the held step).
+- **Next steps (suggested, not implemented):**
+  - Set gain 0.5 by hand (start 75–120, duration 330 or 400).
+  - Narrow the gain grid to 0.4–0.6 by 0.05, so the quadratic fits the minimum.
+  - P-9 (timing lags at the woofer latency).
+  - Measure the woofer and counter timing at the WFS directly (dmTemporalResponse-style: woofer poke versus a counter-channel poke, same frame reference) before tuning further.
