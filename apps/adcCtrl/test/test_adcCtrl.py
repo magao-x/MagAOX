@@ -37,6 +37,7 @@ from xapp.adcCtrl.app import (
     expected_axes,
     inlier_mask,
     ke_blocked_spots,
+    ke_combine,
     ke_orient_frame,
     ke_orient_point,
     ke_orient_spots,
@@ -173,19 +174,24 @@ def make_ke_frame(separation=15.0, angle=17.0, center=(2.0, -3.0), edge=1.1, gli
 
     With the top mask, everything below a horizontal edge `edge` lambda/D
     above the star is blocked; the bottom mask is the mirror image, blocking
-    everything above an edge `edge` below the star. Optional: a smooth halo,
-    a glint line along the edge (fading over ~5 lambda/D to the sides of the
-    star), and noise over the whole frame.
+    everything above an edge `edge` below the star. The right and left masks
+    are the same turned by 90 degrees: a vertical edge `edge` to the right
+    (left) of the star, transmitting the right (left) side. Optional: a
+    smooth halo, a glint line along the edge (fading over ~5 lambda/D to the
+    sides of the star), and noise over the whole frame.
     """
     frame = make_frame(separation=separation, angle=angle, center=center, **kwargs)
     xx, yy = frame_coords(frame)
     if halo_amp:
         frame += halo_amp * np.exp(-np.hypot(xx - center[0], yy - center[1]) / 8.0)
-    up = 1.0 if mask == "top" else -1.0
-    edge_y = center[1] + up * edge
-    frame *= up * (yy - edge_y) > 0
+    up = 1.0 if mask in ("top", "right") else -1.0
+    # across: coordinate across the edge, along: coordinate along it
+    across, along, c_across, c_along = (yy, xx, center[1], center[0]) if mask in ("top", "bottom") else \
+        (xx, yy, center[0], center[1])
+    edge_at = c_across + up * edge
+    frame *= up * (across - edge_at) > 0
     if glint_amp:
-        frame += glint_amp * np.exp(-((yy - edge_y) ** 2) / (2 * 0.3**2) - (xx - center[0]) ** 2 / (2 * 5.0**2))
+        frame += glint_amp * np.exp(-((across - edge_at) ** 2) / (2 * 0.3**2) - (along - c_along) ** 2 / (2 * 5.0**2))
     if noise > 0:
         frame += np.random.default_rng(seed).normal(0, noise, frame.shape)
     return frame
@@ -587,13 +593,62 @@ def test_ke_bottom_mask_turned_frame():
         frame = make_ke_frame(dispersion=dispersion, mask="bottom")
         bottom = measure_knife_edge(ke_orient_frame(frame, "bottom"), ke_geometry(), (0, 3), PIXEL_SCALE)
         ms[dispersion] = (top.m, bottom.m)
-        star = ke_orient_point(bottom.location.star, frame.shape, "bottom")
+        star = ke_orient_point(bottom.location.star, frame.shape, "bottom", inverse=True)
         assert np.hypot(*(np.array(star) - to_pixels(frame, center))) * PIXEL_SCALE < 0.5, star
     top0, bottom0 = ms[(0.0, 0.0)]
     for dispersion in [(0.0, 0.1), (0.1, -0.1)]:
         top_change, bottom_change = ms[dispersion][0] - top0, ms[dispersion][1] - bottom0
         assert abs(top_change) > 1.0, top_change
         assert abs(bottom_change + top_change) < 0.1 * abs(top_change), (dispersion, top_change, bottom_change)
+
+
+def test_ke_left_right_masks_turned_frame():
+    """Left and right frames, turned by 90 deg, respond to dispersion like the top mask with the summed m.
+
+    The right mask sees physical spots 1 and 0 and the left mask 3 and 2,
+    which are spots 0 and 3 of the turned frame. These are mirror images
+    across the horizontal, so their difference would cancel the dispersion;
+    the sum (negated for the left mask) changes by the same amount as the
+    top mask's m. The star maps back to its frame position.
+    """
+    assert ke_orient_spots(ke_spot_order([0, 1]), "right") == (0, 3)
+    assert ke_orient_spots(ke_spot_order([2, 3]), "left") == (0, 3)
+    assert ke_orient_spots((0, 3), "right", inverse=True) == (1, 0)
+    assert ke_orient_spots((0, 3), "left", inverse=True) == (3, 2)
+    for mask in ["top", "bottom", "left", "right"]:
+        assert abs(ke_sensitivity((0, 3), 17.0, mask) - ke_sensitivity((0, 3), 17.0)) < 1e-12, mask
+    assert abs(ke_sensitivity((0, 3), 45.0, "right")) > 1.0
+    assert abs(ke_combine([1.0, np.nan, np.nan, 2.0], (0, 3), "left") + 3.0) < 1e-12
+
+    # points and frames: the transmitted half ends up on top, and points map back
+    frame = np.zeros((40, 60))
+    for mask in ["bottom", "left", "right"]:
+        point = (7.0, 31.0)
+        turned = ke_orient_point(point, frame.shape, mask)
+        assert ke_orient_point(turned, frame.shape, mask, inverse=True) == point
+    marked = frame.copy()
+    marked[5, 50] = 1.0  # x = 50, right side
+    turned = ke_orient_frame(marked, "right")
+    y, x = np.unravel_index(np.argmax(turned), turned.shape)
+    assert (x, y) == ke_orient_point((50, 5), marked.shape, "right") and y > turned.shape[0] / 2
+
+    center = (2.0, -3.0)
+    ms = {}
+    for dispersion in [(0.0, 0.0), (0.0, 0.1), (0.1, -0.1)]:
+        ms[dispersion] = {"top": measure_knife_edge(make_ke_frame(dispersion=dispersion), ke_geometry(), (0, 3),
+                                                    PIXEL_SCALE).m}
+        for mask in ["left", "right"]:
+            frame = make_ke_frame(dispersion=dispersion, mask=mask)
+            meas = measure_knife_edge(ke_orient_frame(frame, mask), ke_geometry(), (0, 3), PIXEL_SCALE, mask=mask)
+            ms[dispersion][mask] = meas.m
+            star = ke_orient_point(meas.location.star, frame.shape, mask, inverse=True)
+            assert np.hypot(*(np.array(star) - to_pixels(frame, center))) * PIXEL_SCALE < 0.5, (mask, star)
+    for dispersion in [(0.0, 0.1), (0.1, -0.1)]:
+        top_change = ms[dispersion]["top"] - ms[(0.0, 0.0)]["top"]
+        assert abs(top_change) > 1.0, top_change
+        for mask in ["left", "right"]:
+            change = ms[dispersion][mask] - ms[(0.0, 0.0)][mask]
+            assert abs(change - top_change) < 0.2 * abs(top_change), (dispersion, mask, top_change, change)
 
 
 def test_ke_margin_guard_keeps_clear_of_spot():
@@ -829,11 +884,11 @@ def test_default_gain():
 
 
 def test_default_ctrl_mtx_and_loop_sign():
-    """Defaults match the on-instrument DM-spot calibration: this matrix with negative feedback."""
+    """Defaults match the on-instrument sparkle calibration (15 l/D, 45 deg, z): this matrix with negative feedback."""
     dev = make_device()
-    np.testing.assert_allclose(dev._control_mtx, [-0.4156, -0.24515])
-    assert dev.properties["ctrl_mtx"]["m00"] == -0.4156
-    assert dev.properties["ctrl_mtx"]["m01"] == -0.24515
+    np.testing.assert_allclose(dev._control_mtx, [-0.1238, -0.1344])
+    assert dev.properties["ctrl_mtx"]["m00"] == -0.1238
+    assert dev.properties["ctrl_mtx"]["m01"] == -0.1344
     assert dev._loop_sign == -1.0
     assert dev.properties["loop_sign"]["negative"] == ON
     assert dev.properties["loop_sign"]["positive"] == OFF
@@ -1060,14 +1115,14 @@ def test_coronagraph_switch_only_when_idle_and_keeps_delta1():
 def test_ke_mask_switch_mirrors_spots_and_swaps_setpoints():
     """Changing knife-edge mask mirrors the physical spot selection and swaps in that mask's set point."""
     dev = make_device(client=ke_client())
-    assert dev._ke_setpoint == -1.2 and dev.properties["ke_setpoint"]["current"] == -1.2
+    assert dev._ke_setpoint == -6.835 and dev.properties["ke_setpoint"]["current"] == -6.835
     send(dev, "coronagraph", knife_edge_bottom=ON)
     assert dev._knife_edge and dev._ke_mask == "bottom"
     assert dev.properties["coronagraph"]["knife_edge_bottom"] == ON
     assert dev.properties["coronagraph"]["knife_edge_top"] == OFF
     assert dev._ke_order == (0, 3) and dev.ke_spots() == (2, 1)
     assert [dev.properties["ke_spots"][f"spot{n}"] for n in range(4)] == [OFF, ON, ON, OFF]
-    assert dev._ke_setpoint == 2.35 and dev.properties["ke_setpoint"]["current"] == 2.35
+    assert dev._ke_setpoint == 170.4 and dev.properties["ke_setpoint"]["current"] == 170.4
 
     send(dev, "ke_setpoint", target=0.7)
     send(dev, "ke_spots", spot1=OFF)  # physical spot 2 alone
@@ -1075,11 +1130,21 @@ def test_ke_mask_switch_mirrors_spots_and_swaps_setpoints():
     send(dev, "coronagraph", standard=ON)
     assert dev._ke_setpoint == 0.7  # standard mode keeps the last mask
     send(dev, "coronagraph", knife_edge_top=ON)
-    assert dev._ke_setpoint == -1.2 and dev._ke_setpoint_time is None
+    assert dev._ke_setpoint == -6.835 and dev._ke_setpoint_time is None
     assert [dev.properties["ke_spots"][f"spot{n}"] for n in range(4)] == [ON, OFF, OFF, OFF]
     send(dev, "coronagraph", knife_edge_bottom=ON)
     assert dev._ke_setpoint == 0.7 and dev._ke_setpoint_time is not None
     assert dev.properties["ke_setpoint"]["current"] == 0.7
+
+    # left and right: the selection turns with the transmitted half
+    send(dev, "ke_spots", spot1=ON)  # physical spots 2 and 1 again
+    send(dev, "coronagraph", knife_edge_left=ON)
+    assert dev._ke_mask == "left" and dev.ke_spots() == (3, 2) and dev._ke_setpoint == 0.0
+    assert dev.properties["coronagraph"]["knife_edge_left"] == ON
+    assert [dev.properties["ke_spots"][f"spot{n}"] for n in range(4)] == [OFF, OFF, ON, ON]
+    send(dev, "coronagraph", knife_edge_right=ON)
+    assert dev._ke_mask == "right" and dev.ke_spots() == (1, 0) and dev._ke_setpoint == 0.0
+    assert dev.coronagraph_name() == "knife_edge_right"
 
 
 def test_ke_spots_refuses_invalid_selections():
@@ -1129,10 +1194,10 @@ def test_entering_knife_edge_reports_selection():
 
 
 def test_ke_gain_default_and_handler():
-    """ke_gain defaults to the provisional -0.62 and can be changed through INDI."""
+    """ke_gain defaults to -0.258, derived from the pair slopes, and can be changed through INDI."""
     dev = make_device()
-    assert dev._ke_gain == -0.62
-    assert dev.properties["ke_gain"]["current"] == -0.62
+    assert dev._ke_gain == -0.258
+    assert dev.properties["ke_gain"]["current"] == -0.258
     send(dev, "ke_gain", target=-1.5)
     assert dev._ke_gain == -1.5
     assert dev.properties["ke_gain"]["current"] == -1.5
@@ -1262,7 +1327,7 @@ def test_ke_loop_converges_to_setpoint_not_zero():
 
 
 def test_same_loop_sign_converges_in_both_modes():
-    """With ctrl_mtx = 1/pair slopes and ke_gain = 2/m slope, negative loop_sign converges in standard mode and with both masks."""
+    """With ctrl_mtx = 1/pair slopes and ke_gain = 2/m slope, negative loop_sign converges in standard mode and with all four masks."""
     geometry = ke_geometry()
     std_geometry = SpotGeometry(15.0, 17.0, 20, 10.0, 5.0)
     deltas = np.array([-0.2, 0.3, 0.8])
@@ -1282,11 +1347,13 @@ def test_same_loop_sign_converges_in_both_modes():
         "standard": lambda dispersion: make_frame(angle=17.0, dispersion=dispersion),
         "knife_edge_top": make_ke_frame,
         "knife_edge_bottom": lambda dispersion: make_ke_frame(dispersion=dispersion, mask="bottom"),
+        "knife_edge_left": lambda dispersion: make_ke_frame(dispersion=dispersion, mask="left"),
+        "knife_edge_right": lambda dispersion: make_ke_frame(dispersion=dispersion, mask="right"),
     }
     for mode, make in makes.items():
         dev = make_device(client=ke_client(), gain=0.3, ctrl_mtx=[1.0 / slopes[0], 1.0 / slopes[1]],
-                          ke_gain=2.0 / ke_slope, ke_setpoint_top=0.0,
-                          ke_setpoint_bottom=0.0)
+                          ke_gain=2.0 / ke_slope, ke_setpoint_top=0.0, ke_setpoint_bottom=0.0,
+                          ke_setpoint_left=0.0, ke_setpoint_right=0.0)
         assert dev._loop_sign == -1.0
         dev.camera = DispersionCamera(dev, make)
         send(dev, "coronagraph", **{mode: ON})
@@ -1296,9 +1363,10 @@ def test_same_loop_sign_converges_in_both_modes():
             dev.loop()
         assert abs(dev.delta_1 - 0.3) < 0.05, (mode, dev.delta_1)
 
-    # the bottom mask publishes physical spots and the star in frame pixels
-    cycle = dev.telem_records[-1][1]
-    assert cycle["mode"] == "knife_edge_bottom" and cycle["ke_spots"] == [2, 1]
-    assert cycle["angles"][0] is None and cycle["angles"][2] is not None
-    frame = make_ke_frame(mask="bottom")
+        # turned masks publish physical spots and the star in frame pixels
+        cycle = dev.telem_records[-1][1]
+        assert cycle["mode"] == mode
+    assert cycle["ke_spots"] == [1, 0]
+    assert cycle["angles"][2] is None and cycle["angles"][1] is not None
+    frame = make_ke_frame(mask="right")
     assert np.hypot(*(np.array(cycle["star"]) - to_pixels(frame, (2.0, -3.0)))) * PIXEL_SCALE < 0.5

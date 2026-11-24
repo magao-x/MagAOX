@@ -1158,6 +1158,74 @@ The stages are Newport SMC100 controllers (`apps/smc100ccCtrl`). Error "U" means
 - **One entry per cycle** (`log_cycle`, from `run_cycle`): state and coronagraph mode, gain, `n_avg`, `no_measurements`, `ctrl_mtx`, the four averaged spot angles and deviations (NaN for unmeasured knife-edge spots), the error and the step. In knife-edge mode it also has `ke_gain`, `m` and the set point.
 - **Test.** `test_debug_logs_state_settings_and_cycle`. All 57 tests pass locally (the stand-in packages and runner had to be recreated in the scratchpad).
 
+### Left/Right Knife-Edge Masks and Sparkle Calibration (2026-11-24)
+
+**Request (user).** A new knife-edge mask, rotated by 90°, splits the plane left/right. Add `knife_edge_left` (transmits the left side, smaller x) and `knife_edge_right` (transmits the right side) with the existing naming.
+
+**Calibration (user, lab, z band, all four sparkles).** ADC offset sweeps, −4° to +4°:
+
+| Sparkles | Slope 0&2 | Slope 1&3 | Pairs zero at |
+|---|---|---|---|
+| 15 λ/D, 15° | −4.065 | −9.528 | ≈ −0.4° |
+| 15 λ/D, 45° | −8.075 | −7.442 | ≈ −0.85° |
+| 20 λ/D, 45° | −6.092 | −5.771 | ≈ −0.35° |
+
+- The slopes scale as 1/separation (20 vs 15 λ/D: 0.76 measured, 0.75 expected). So `ctrl_mtx` and `ke_gain` must be rescaled when the sparkle separation changes. The app does not do this.
+- At 45° the two pairs respond almost equally, as the cos model predicts. At 15° the ratio (2.3) is below the model's (3.7).
+- Both pairs cross zero at the same offset in each sweep, so the crossing is residual dispersion, not a measurement bias. The 15 λ/D, 45° sweep's −0.85° is the outlier, possibly from a different starting `deltaADC`, missed stage moves or drift. Not resolved.
+- Set points measured at 15 λ/D, 45°, z: top −6.835, bottom 170.4.
+- A bottom value near 180 means both deviations are near ±90°, which is suspicious (mislabelled spots, or noise). The residual is compared modulo 180, so control is not affected unless m flips between ≈170 and ≈−10 within a batch. The user deferred checking this (no instrument access).
+
+**New defaults (15 λ/D, 45°, z).**
+
+| Setting | Default |
+|---|---|
+| `ctrl_mtx` | [−0.1238, −0.1344] |
+| `ke_gain` | −0.258 = 4/(S02 + S13), assuming opposite spots respond equally and oppositely |
+| `ke_setpoint_top` | −6.835 |
+| `ke_setpoint_bottom` | 170.4 |
+| `ke_setpoint_left` | 0 (placeholder) |
+| `ke_setpoint_right` | 0 (placeholder) |
+
+The INDI `ke_setpoint` range widens to ±180, since m (a difference or sum of two ±90° deviations) can exceed ±90.
+
+**Design.**
+- **Turned frames.** The bottom mask's 180° turn is generalized. `KE_MASKS` maps each mask to its counter-clockwise quarter turns (top 0, right 1, bottom 2, left 3), the sign of `d_b` in m, and the sign of m.
+  - `ke_orient_frame` uses `np.rot90(frame, -turns)`, so the transmitted half is up.
+  - `ke_orient_point(point, shape, mask, inverse=False)` maps frame pixels to the turned frame, or back with `inverse`.
+  - `ke_orient_spots(spots, mask, inverse=False)` maps physical spots to turned labels (`n → n − turns`), or back.
+  - The 90° maps are not their own inverse, so call sites now give the direction.
+- **Downstream unchanged.** The star estimate, mask line, row medians (the edge runs along rows again), tracking and the blocked-half check all run in the turned frame. Spots and their radial axes turn together, so deviations are unchanged.
+- **Sum, not difference, for left/right.** A spot's tilt responds to the vertical counter-rotation dispersion as cos of its position angle. In the left or right half, two adjacent spots are mirror images across the horizontal, so they tilt in the same sense and `d_a − d_b` cancels the signal (exactly at 45°).
+  - `ke_combine` forms m: `d_a − d_b` (top), `d_b − d_a` (bottom), `d_a + d_b` (right), `−(d_a + d_b)` (left). One spot gives `±d_a`.
+  - With these signs, m responds as `sin(angle) + cos(angle)` for every mask, so one `ke_gain` and `loop_sign` work for all four.
+  - `ke_combine` replaces the batch's bottom-mask negation; `measure_knife_edge` takes `mask`.
+  - `ke_sensitivity` takes `mask` and applies `ke_combine` to the physical spots' cosines.
+- **Spots.** `[0, 3]` from the config maps to `[2, 1]` bottom, `[3, 2]` left and `[1, 0]` right.
+- **Risk.** The sum doubles a common rotation of the spot pattern, which the difference cancels. A fixed one goes into the set point; drift would read as dispersion. The pattern angle measured from the spots could be used instead if this shows up.
+
+**Tests.**
+- `make_ke_frame` gains `mask="left"/"right"`, with a vertical edge.
+- New `test_ke_left_right_masks_turned_frame`:
+  - spot maps both ways,
+  - equal sensitivity for all masks,
+  - the frame and point maps agree and invert,
+  - left/right m changes with dispersion by the same amount as top m (within 20%),
+  - the star maps back.
+- The convergence test covers all four masks with negative `loop_sign`.
+- The mask-switch test covers left/right spots and set points.
+- The default tests take the new values.
+- All 58 tests pass locally (stand-in packages recreated again).
+- Mutation checks:
+  - Using the difference for left/right fails the new test.
+  - Using the wrong left sign also fails it, and the left-mask loop diverges (δ1 → 2.41 instead of 0.3).
+  - At the tests' 17° pattern the difference would still converge, at about half the sensitivity; at 45° it would see nothing.
+
+**On-instrument follow-up.**
+- With the left and right masks: measure-only (star estimate, `ke_sep` ≈ 15 at 15 λ/D), capture set points (they then go in `ke_setpoint_left/right`), and check that the same `ke_gain` and `loop_sign` converge.
+- Check that "left" on camsci1 is smaller x in the raw frame.
+- The bottom-mask set point check above.
+
 ### References
 - MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
 - Satellite-spot dispersion method: arXiv:2608.10307

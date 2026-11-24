@@ -43,15 +43,15 @@ before the move and kept adding steps, then overshot.
 Knife-edge mode
 ---------------
 With the knife-edge coronagraph the star and half of the image are blocked,
-so no opposite pair survives. There is one mask of each parity:
-``knife_edge_top`` transmits the upper half and ``knife_edge_bottom`` the
-lower half. Frames from the bottom mask are turned by 180 degrees first, so
-both masks use the same measurement. Turning the frame also reverses the
-dispersion, so the bottom mask's ``m`` is negated (``d_b - d_a``); both masks
-then use the same ``ke_gain``, ``loop_sign`` and calibration procedure. In
-knife-edge mode the app measures one spot, or normally two adjacent spots
-(``ke_spots``, default 0 and 3 with the top mask and the opposite spots, 2
-and 1, with the bottom mask), and for each frame:
+so no opposite pair survives. There are four masks: ``knife_edge_top``
+transmits the upper half (+y), ``knife_edge_bottom`` the lower half,
+``knife_edge_left`` the left half (smaller x) and ``knife_edge_right`` the
+right half. Frames are first turned so the transmitted half is up (by 180
+degrees for the bottom mask and 90 degrees for left and right), so all
+masks use the same measurement. In knife-edge mode the app measures one
+spot, or normally two adjacent spots (``ke_spots``, default 0 and 3 with the
+top mask; the turn maps these to 2 and 1 with the bottom mask, 3 and 2 with
+the left mask and 1 and 0 with the right mask), and for each frame:
 
 1. estimates the star from the spots: for two spots, the right-angle corner
    of the isosceles right triangle they form, so neither the star nor the
@@ -62,8 +62,21 @@ and 1, with the bottom mask), and for each frame:
    lowered if needed to stay ``ke_spot_clearance`` below the selected spots,
 3. subtracts a half-plane radial profile and the row medians (the edge glint
    runs along rows),
-4. measures the selected spots with ``moment_angle`` and forms
-   ``m = d_a - d_b`` (b the counter-clockwise neighbour of a) or ``m = d_a``.
+4. measures the selected spots with ``moment_angle`` and forms ``m`` from
+   their deviations (b the counter-clockwise neighbour of a in the turned
+   frame): ``d_a - d_b`` (top), ``d_b - d_a`` (bottom), ``d_a + d_b``
+   (right) or ``-(d_a + d_b)`` (left); with one spot, ``+-d_a`` with the
+   same sign.
+
+A spot's tilt responds to the (vertical) counter-rotation dispersion as the
+cosine of its position angle. Two adjacent spots in the top or bottom half
+lie on either side of the vertical, so they tilt in opposite senses and
+their difference is used. In the left or right half they are mirror images
+across the horizontal and tilt in the same sense, so their sum is used (the
+difference would cancel). The signs make ``m`` respond to dispersion as the
+top mask's does, so all masks use the same ``ke_gain``, ``loop_sign`` and
+calibration procedure. The sum also adds a common rotation of the spot
+pattern, which the difference cancels; a fixed one goes into the set point.
 
 ``m`` is not zero at zero dispersion, so the loop drives it to a set point:
 ``error = ke_gain * wrap90(m - ke_setpoint)``, followed by the same step,
@@ -89,10 +102,11 @@ gain             number    loop gain
 offset           number    common offset added to both ADCs [deg]
 ctrl_mtx         number    m00, m01: pair offsets -> dispersion error
 loop_sign        switch    positive / negative feedback polarity (platform dependent)
-coronagraph      switch    standard / knife_edge_top / knife_edge_bottom; idle only
-ke_spots         switch    knife-edge spots: one, or two adjacent (any of spot0-spot3); mirrored
-                           when the mask changes
-ke_gain          number    knife-edge m residual -> dispersion error (both masks)
+coronagraph      switch    standard / knife_edge_top / knife_edge_bottom / knife_edge_left /
+                           knife_edge_right; idle only
+ke_spots         switch    knife-edge spots: one, or two adjacent (any of spot0-spot3); turned
+                           with the transmitted half when the mask changes
+ke_gain          number    knife-edge m residual -> dispersion error (all masks)
 ke_setpoint      number    current mask's knife-edge set point for m [deg]; settable by hand
 ke_capture_setpoint switch request: set ke_setpoint to one batch's mean m (idle or measure-only)
 satellite_spots  switch    sparkles / dm_spots
@@ -116,8 +130,8 @@ Operator procedure
 Knife-edge procedure:
 
 1. In standard mode, close the loop until it converges.
-2. Go idle, insert the knife edge and set coronagraph to knife_edge_top or
-   knife_edge_bottom to match the mask (delta_1 is kept). Check the INFO log
+2. Go idle, insert the knife edge and set coronagraph to the matching
+   knife_edge_* mask (delta_1 is kept). Check the INFO log
    for spot-selection and set-point messages.
 3. Run measure-only and check the star position and ke_sep.
 4. Press ke_capture_setpoint, or enter a recent ke_setpoint by hand.
@@ -503,14 +517,13 @@ def measure_spot_angles(frame, geometry, pixel_scale, pad=50, mask_factor=0.7, r
 # --------------------------------------------------------------------------
 # Knife-edge coronagraph mode
 #
-# The knife edge blocks the star and half of the science camera image. There
-# is one mask of each parity: "top" transmits the upper (+y, increasing row)
-# half, "bottom" the lower half. Frames from the bottom mask are turned by 180
-# degrees first (ke_orient_frame), so the functions below always see the
-# transmitted half on top. The star position is estimated from the visible
-# spots each frame, and the loop controls on one spot's deviation, or the
-# difference of two adjacent spots' deviations, relative to a captured set
-# point.
+# The knife edge blocks the star and half of the science camera image. The
+# masks transmit the "top" (+y, increasing row), "bottom", "left" (smaller x,
+# column) or "right" half. Frames are turned first (ke_orient_frame), so the
+# functions below always see the transmitted half on top. The star position
+# is estimated from the visible spots each frame, and the loop controls on
+# one spot's deviation, or the difference or sum of two adjacent spots'
+# deviations (ke_combine), relative to a captured set point.
 # --------------------------------------------------------------------------
 
 class KnifeEdgeParams(NamedTuple):
@@ -538,7 +551,7 @@ class KnifeEdgeMeasurement(NamedTuple):
     """Result of measure_knife_edge for one frame."""
     raw: np.ndarray  # moment_angle results [deg], NaN for unselected spots
     dev: np.ndarray  # deviations from the nominal radial axes [deg], NaN for unselected spots
-    m: float  # measured quantity: d_a - d_b for two spots, d_a for one [deg]
+    m: float  # measured quantity, from the deviations by ke_combine [deg]
     location: KnifeEdgeLocation  # where the spots and star were found
     separation: float  # spot distance from the star [reference lambda/D]
     margin: float  # half-plane mask line actually used, above the star [reference lambda/D]
@@ -554,8 +567,8 @@ def ke_spot_order(spots):
     """Validate a knife-edge spot selection and return it in measurement order.
 
     A selection is one spot, or two adjacent spots. For two spots the result
-    is `(a, b)` with b the counter-clockwise neighbour of a, so that
-    `m = d_a - d_b`; for spots 0 and 3 this is `(0, 3)`. Raises ValueError for
+    is `(a, b)` with b the counter-clockwise neighbour of a (see ke_combine);
+    for spots 0 and 3 this is `(0, 3)`. Raises ValueError for
     any other selection.
     """
     spots = sorted(set(int(s) for s in spots))
@@ -573,41 +586,80 @@ def ke_spot_order(spots):
     raise ValueError(f"select one spot or two adjacent spots, got {spots}")
 
 
-def ke_sensitivity(order, angle):
+# Knife-edge mask (transmitted half) -> (counter-clockwise quarter turns that bring the
+# transmitted half up, sign of d_b in m, sign of m); see ke_orient_frame and ke_combine
+KE_MASKS = {
+    "top": (0, -1.0, 1.0),
+    "bottom": (2, -1.0, -1.0),
+    "right": (1, 1.0, 1.0),
+    "left": (3, 1.0, -1.0),
+}
+
+
+def ke_combine(dev, order, mask):
+    """Knife-edge quantity m [deg] from the turned-frame deviations `dev` of the spots in `order`.
+
+    `d_a - d_b` for the top mask, `d_b - d_a` for the bottom mask,
+    `d_a + d_b` for the right mask and `-(d_a + d_b)` for the left mask; one
+    spot gives `d_a` with the same overall sign. These make m respond to
+    dispersion the same way for every mask (see ke_sensitivity).
+    """
+    _, b_sign, sign = KE_MASKS[mask]
+    m = dev[order[0]] + b_sign * dev[order[1]] if len(order) == 2 else dev[order[0]]
+    return float(sign * m)
+
+
+def ke_sensitivity(order, angle, mask="top"):
     """Relative response of `m` to vertical (counter-rotation) dispersion.
 
-    A spot's tilt responds as cos of its position angle, so this is
-    `cos(phi_a) - cos(phi_b)` for two spots and `cos(phi_a)` for one. The
-    standard-mode pair13 is `2 cos(angle)` on the same scale.
+    A physical spot's tilt responds as cos of its position angle, and the
+    turn of ke_orient_frame leaves deviations unchanged, so this is
+    ke_combine applied to those cosines for the physical spots of `order`
+    (turned-frame indices). For the top mask it is `cos(phi_a) - cos(phi_b)`,
+    and it is the same for every mask. The standard-mode pair13 is
+    `2 cos(angle)` on the same scale.
     """
-    cosines = [np.cos(np.radians(spot_position_angle(n, angle))) for n in order]
-    return float(cosines[0] - cosines[1]) if len(order) == 2 else float(cosines[0])
+    cosines = {n: np.cos(np.radians(spot_position_angle(p, angle)))
+               for n, p in zip(order, ke_orient_spots(order, mask, inverse=True))}
+    return ke_combine(cosines, order, mask)
 
 
 def ke_blocked_spots(order, angle):
-    """Spots of `order` that fall in the blocked (lower) half for pattern angle `angle`."""
+    """Spots of `order` (turned frame) that fall in the blocked (lower) half for pattern angle `angle`."""
     return [n for n in order if np.sin(np.radians(spot_position_angle(n, angle))) <= 0]
 
 
 def ke_orient_frame(frame, mask):
-    """`frame` turned so the transmitted half is up: rotated by 180 degrees for the bottom mask.
+    """`frame` turned so the transmitted half is up (+y, increasing row).
 
-    A spot's elongation axis does not change under a 180 degree rotation, so
-    deviations measured in the turned frame are the physical spots' deviations.
+    Turned counter-clockwise by 90 degrees per quarter turn of KE_MASKS: 180
+    degrees for the bottom mask, 90 for the right mask and 270 for the left
+    mask. The spots and their elongation axes turn together, so deviations
+    measured in the turned frame are the physical spots' deviations.
     """
-    return np.asarray(frame)[::-1, ::-1] if mask == "bottom" else frame
+    turns = KE_MASKS[mask][0]
+    return np.rot90(frame, -turns) if turns else frame
 
 
-def ke_orient_point(point, shape, mask):
-    """Map a point (x, y) between frame pixels and the turned frame of ke_orient_frame (either way)."""
-    if mask != "bottom":
-        return point
-    return (shape[1] - 1 - point[0], shape[0] - 1 - point[1])
+def ke_orient_point(point, shape, mask, inverse=False):
+    """Map a point (x, y) from frame pixels to the turned frame of ke_orient_frame, or back with `inverse`.
+
+    `shape` is the original frame's shape either way.
+    """
+    turns = KE_MASKS[mask][0]
+    if inverse:
+        shape = shape if turns % 2 == 0 else shape[::-1]
+        turns = -turns % 4
+    x, y = point
+    for _ in range(turns):
+        x, y, shape = shape[0] - 1 - y, x, shape[::-1]
+    return (x, y)
 
 
-def ke_orient_spots(spots, mask):
-    """Map spot indices between physical spots and the turned frame (either way): n -> n + 2 for the bottom mask."""
-    return tuple((n + 2) % 4 if mask == "bottom" else n for n in spots)
+def ke_orient_spots(spots, mask, inverse=False):
+    """Map physical spot indices to the turned frame of ke_orient_frame (n -> n - turns), or back with `inverse`."""
+    turns = KE_MASKS[mask][0]
+    return tuple((n + turns if inverse else n - turns) % 4 for n in spots)
 
 
 def ke_star_from_pair(p_a, p_b):
@@ -828,15 +880,17 @@ def subtract_row_medians(image, keep):
 
 
 def measure_knife_edge(frame, geometry, order, pixel_scale, params=KnifeEdgeParams(), prev=None,
-                       star_hint=None, pad=50, radial_bin=5 * 6.0 / 21.0):
+                       star_hint=None, pad=50, radial_bin=5 * 6.0 / 21.0, mask="top"):
     """Measure the selected spots' elongation axes in one knife-edge frame.
 
     Paralleling measure_spot_angles: the frame is median subtracted, the star
     is estimated from the spots (locate_knife_edge_spots), everything below
     the half-plane mask line is zeroed, a half-plane radial profile and the
     row medians are subtracted, and the selected spots are cut out and measured with
-    moment_angle. `order` comes from ke_spot_order. Deviations use the
-    configured pattern angle `geometry.angle`, as in the standard mode.
+    moment_angle. `frame` is already turned by ke_orient_frame for `mask`,
+    which only selects how m is formed (ke_combine). `order` comes from
+    ke_spot_order, in the turned frame. Deviations use the configured
+    pattern angle `geometry.angle`, as in the standard mode.
     """
     frame = np.asarray(frame, dtype=float)
     if frame.ndim != 2:
@@ -878,7 +932,7 @@ def measure_knife_edge(frame, geometry, order, pixel_scale, params=KnifeEdgePara
         raw[n] = moment_angle(cutout)
 
     dev = wrap90(raw - expected_axes(geometry.angle))
-    m = float(dev[order[0]] - dev[order[1]]) if len(order) == 2 else float(dev[order[0]])
+    m = ke_combine(dev, order, mask)
     return KnifeEdgeMeasurement(raw, dev, m, location, separation, margin, margin < params.edge_margin)
 
 
@@ -963,7 +1017,7 @@ class AdcCtrlConfig(BaseConfig):
     pad : int = xconf.field(default=50, help="Zero padding added around each frame [pixels]")
     radial_bin : float = xconf.field(default=5 * 6.0 / 21.0, help="Radial profile bin size [lambda/D]")
     gain : float = xconf.field(default=0.1, help="Initial loop gain")
-    ctrl_mtx : list[float] = xconf.field(default_factory=lambda: [-0.4156, -0.24515], help="Initial control matrix [m00, m01]; default calibrated on the instrument with DM spots (2026-10-25)")
+    ctrl_mtx : list[float] = xconf.field(default_factory=lambda: [-0.1238, -0.1344], help="Initial control matrix [m00, m01]; default calibrated on the instrument with sparkles at 15 l/D and 45 deg in z (2026-11-24); scales with the inverse of the sparkle separation")
     loop_sign : str = xconf.field(default="negative", help="Initial feedback polarity, 'positive' or 'negative'; negative converges with the default ctrl_mtx")
     step_limit_deg : float = xconf.field(default=1.0, help="Steps with |step| at or above this [deg] are rejected")
     send_timeout_sec : float = xconf.field(default=30.0, help="Time to wait for adctrack to accept a commanded offset")
@@ -977,10 +1031,12 @@ class AdcCtrlConfig(BaseConfig):
     min_valid_fraction : float = xconf.field(default=0.5, help="Minimum fraction of valid measurements needed to act on a batch")
     camera_retry_sec : float = xconf.field(default=10.0, help="Interval between attempts to open the camera")
     startup_grace_sec : float = xconf.field(default=60.0, help="After startup, missing INDI devices and camera are logged at DEBUG only, while the INDI server comes up")
-    ke_spots : list[int] = xconf.field(default_factory=lambda: [0, 3], help="Knife-edge mode: spots measured at startup with the top mask, one spot or two adjacent spots (0-3); the bottom mask uses the spots opposite these")
-    ke_gain : float = xconf.field(default=-0.62, help="Knife-edge mode: initial scalar from m residual to dispersion error; provisional, derived from the 2026-10-25 DM-spot calibration for spots 0 and 3, scaled so the same loop_sign works in both modes")
-    ke_setpoint_top : float = xconf.field(default=-1.2, help="Knife-edge mode: set point for m at startup with the top mask [deg]; measured on the instrument 2026-11-05")
-    ke_setpoint_bottom : float = xconf.field(default=2.35, help="Knife-edge mode: set point for m at startup with the bottom mask [deg]; measured on the instrument 2026-11-05")
+    ke_spots : list[int] = xconf.field(default_factory=lambda: [0, 3], help="Knife-edge mode: spots measured at startup with the top mask, one spot or two adjacent spots (0-3); other masks use these turned with the transmitted half (see KE_MASKS)")
+    ke_gain : float = xconf.field(default=-0.258, help="Knife-edge mode: initial scalar from m residual to dispersion error (all masks); derived from the 2026-11-24 pair slopes (sparkles at 15 l/D and 45 deg in z) as 4 / (S02 + S13), so the same loop_sign works in all modes")
+    ke_setpoint_top : float = xconf.field(default=-6.835, help="Knife-edge mode: set point for m at startup with the top mask [deg]; measured on the instrument with sparkles at 15 l/D and 45 deg in z (2026-11-24)")
+    ke_setpoint_bottom : float = xconf.field(default=170.4, help="Knife-edge mode: set point for m at startup with the bottom mask [deg]; measured on the instrument with sparkles at 15 l/D and 45 deg in z (2026-11-24); equivalent to -9.6 (m is compared modulo 180)")
+    ke_setpoint_left : float = xconf.field(default=0.0, help="Knife-edge mode: set point for m at startup with the left mask [deg]; placeholder, not yet measured")
+    ke_setpoint_right : float = xconf.field(default=0.0, help="Knife-edge mode: set point for m at startup with the right mask [deg]; placeholder, not yet measured")
     ke_setpoint_max_age_hr : float = xconf.field(default=24.0, help="Knife-edge mode: a set point older than this is reported on entering the mode [hours]")
     ke_edge_margin : float = xconf.field(default=1.5, help="Knife-edge mode: half-plane mask line above the estimated star [lambda/D]")
     ke_spot_clearance : float = xconf.field(default=1.5, help="Knife-edge mode: the mask line is kept at least this far below each selected spot [lambda/D]")
@@ -1013,7 +1069,7 @@ STATE_ELEMENTS = {
 LOOP_SIGNS = {"positive": 1.0, "negative": -1.0}
 
 # INDI `coronagraph` switch element name -> knife-edge mask (transmitted half), None for standard mode
-CORONAGRAPHS = {"standard": None, "knife_edge_top": "top", "knife_edge_bottom": "bottom"}
+CORONAGRAPHS = {"standard": None, **{f"knife_edge_{mask}": mask for mask in KE_MASKS}}
 
 # INDI `ke_spots` switch element names, by spot index
 KE_SPOT_ELEMENTS = [f"spot{n}" for n in range(4)]
@@ -1121,7 +1177,7 @@ class adcCtrl(XDevice):
         self._filter_name = None
         # True in knife-edge mode, changed through the `coronagraph` switch (idle only)
         self._knife_edge = False
-        # Last selected knife-edge mask, "top" or "bottom"; its spots and set point stay current in standard mode
+        # Last selected knife-edge mask (a key of KE_MASKS); its spots and set point stay current in standard mode
         self._ke_mask = "top"
         # Knife-edge spot selection in measurement order (see ke_spot_order), as spot
         # indices in the turned frame (ke_orient_frame), i.e. the top mask's physical spots
@@ -1137,10 +1193,9 @@ class adcCtrl(XDevice):
         # was captured or entered (None while it is still the config default; it is never saved)
         self._ke_setpoint = float(self.config.ke_setpoint_top)
         self._ke_setpoint_time = None
-        # (set point, time) kept for each mask while the other mask is selected
+        # (set point, time) kept for each mask while another mask is selected
         self._ke_saved_setpoints = {
-            "top": (self._ke_setpoint, None),
-            "bottom": (float(self.config.ke_setpoint_bottom), None),
+            mask: (float(getattr(self.config, f"ke_setpoint_{mask}")), None) for mask in KE_MASKS
         }
         # Set point capture requested by `ke_capture_setpoint`, performed by loop()
         self._pending_capture = False
@@ -1266,11 +1321,11 @@ class adcCtrl(XDevice):
         nv = properties.NumberVector(name="ke_setpoint")
         nv.add_element(DefNumber(
             name="current", label="Knife-edge set point [deg]", format="%.4f",
-            min=-90.0, max=90.0, step=0.0001, _value=self._ke_setpoint
+            min=-180.0, max=180.0, step=0.0001, _value=self._ke_setpoint
         ))
         nv.add_element(DefNumber(
             name="target", label="Knife-edge set point [deg]", format="%.4f",
-            min=-90.0, max=90.0, step=0.0001, _value=self._ke_setpoint
+            min=-180.0, max=180.0, step=0.0001, _value=self._ke_setpoint
         ))
         self.add_property(nv, callback=self.handle_ke_setpoint)
 
@@ -1491,12 +1546,12 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def coronagraph_name(self):
-        """Current `coronagraph` switch element: standard, knife_edge_top or knife_edge_bottom."""
+        """Current `coronagraph` switch element: standard or knife_edge_<mask>."""
         return f"knife_edge_{self._ke_mask}" if self._knife_edge else "standard"
 
     def ke_spots(self):
         """Selected knife-edge spots as physical spot indices, in measurement order."""
-        return ke_orient_spots(self._ke_order, self._ke_mask)
+        return ke_orient_spots(self._ke_order, self._ke_mask, inverse=True)
 
     def handle_coronagraph(self, existing_property, new_message):
         """INDI callback for `coronagraph`: standard mode or a knife-edge mask; idle only.
@@ -1504,7 +1559,8 @@ class adcCtrl(XDevice):
         Changing mode leaves `delta_1` alone, so a set point can be captured
         right after converging in standard mode. Changing mask keeps the
         measured spots' positions relative to the transmitted half, so the
-        physical selection is mirrored (`[0, 3]` <-> `[2, 1]`), and swaps in
+        physical selection turns with it (`[0, 3]` top, `[2, 1]` bottom,
+        `[3, 2]` left, `[1, 0]` right), and swaps in
         the new mask's set point.
         """
         target = requested_switch(new_message, CORONAGRAPHS)
@@ -1631,10 +1687,10 @@ class adcCtrl(XDevice):
         blocked = ke_blocked_spots(self._ke_order, angle)
         if blocked:
             self.log.info(
-                f"knife-edge spots {list(ke_orient_spots(blocked, self._ke_mask))} are in the blocked half of the "
+                f"knife-edge spots {list(ke_orient_spots(blocked, self._ke_mask, inverse=True))} are in the blocked half of the "
                 f"{self._ke_mask} mask for a pattern angle of {angle:.1f} deg"
             )
-        sensitivity = ke_sensitivity(self._ke_order, angle)
+        sensitivity = ke_sensitivity(self._ke_order, angle, self._ke_mask)
         if abs(sensitivity) < self.config.ke_min_sensitivity:
             self.log.info(
                 f"knife-edge spots {list(self.ke_spots())} have a low sensitivity ({sensitivity:.2f}, "
@@ -1944,8 +2000,8 @@ class adcCtrl(XDevice):
         aborted or had too few valid measurements. Outliers are rejected on m.
         Frames are measured turned (ke_orient_frame), and the spot lock is kept
         in the turned frame; the published angles, deviations and star are
-        mapped back to physical spots and frame pixels. For the bottom mask m
-        is negated (see below).
+        mapped back to physical spots and frame pixels. m is formed for the
+        mask by ke_combine.
         """
         start_state = self._state
         geometry = self.spot_geometry()
@@ -1970,7 +2026,7 @@ class adcCtrl(XDevice):
                 meas = measure_knife_edge(
                     ke_orient_frame(frame, mask), geometry, order, self.config.pixel_scale_lod, params,
                     prev=self._ke_lock, star_hint=hint and ke_orient_point(hint, frame.shape, mask),
-                    pad=self.config.pad, radial_bin=self.config.radial_bin,
+                    pad=self.config.pad, radial_bin=self.config.radial_bin, mask=mask,
                 )
                 if not np.isfinite(meas.m):
                     raise ValueError("non-finite knife-edge measurement")
@@ -1989,12 +2045,9 @@ class adcCtrl(XDevice):
             self.ke_update_lock(meas.location)
             self.log.debug(f"knife-edge angles: {meas.raw}, deviations: {meas.dev}, m: {meas.m}, star: {meas.location.star}")
             measurements.append(meas)
-            stars.append(ke_orient_point(meas.location.star, frame.shape, mask))
+            stars.append(ke_orient_point(meas.location.star, frame.shape, mask, inverse=True))
 
-        # Turning the frame also reverses the dispersion, so the bottom mask's m is
-        # negated (d_b - d_a) to keep one ke_gain, loop_sign and calibration procedure
-        sign = -1.0 if mask == "bottom" else 1.0
-        ms = sign * np.array([meas.m for meas in measurements])
+        ms = np.array([meas.m for meas in measurements])
         inliers = inlier_mask(ms, self.config.outlier_k) if len(ms) else np.zeros(0, dtype=bool)
         n_valid = int(np.sum(inliers))
         if n_total == 0 or n_valid / n_total < self.config.min_valid_fraction:
@@ -2004,7 +2057,7 @@ class adcCtrl(XDevice):
         kept = [meas for meas, ok in zip(measurements, inliers) if ok]
         m = float(np.mean(ms[inliers]))
         residual, error = ke_error(m, self._ke_setpoint, self._ke_gain)
-        # Physical spot n is spot (n + 2) % 4 of the turned frame for the bottom mask
+        # Physical spot n is spot (n - turns) % 4 of the turned frame
         physical = list(ke_orient_spots(range(4), mask))
         result = {
             "raw": np.mean([meas.raw for meas in kept], axis=0)[physical],
