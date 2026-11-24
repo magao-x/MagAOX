@@ -31,6 +31,11 @@ namespace dev
  */
 class frameGrabberTiming
 {
+  public:
+    /// Ordinary-thread receiver of raw timing events before summary filtering.
+    using Observer = void ( * )( void *, const fgTiming::Event & );
+
+  private:
     MagAOX::spscQueue<fgTiming::Event>        m_queue;         ///< Fixed acquisition handoff.
     MagAOX::spscQueue<fgTiming::ControlEvent> m_controls;      ///< Independent serialized-control handoff.
     std::atomic<uint64_t>                     m_session{ 1 };  ///< Acquisition epoch, visible even without a new frame.
@@ -66,6 +71,16 @@ class frameGrabberTiming
     std::vector<int64_t>                     m_traceSorted;    ///< Reserved sorted median workspace, consumer only.
     size_t                                   m_traceIntervalHead{ 0 };  ///< Oldest valid ring position.
     size_t                                   m_traceIntervalCount{ 0 }; ///< Number of preceding retained intervals.
+
+    Observer m_observer{ nullptr }; ///< Optional ordinary-thread event receiver, set before startup.
+
+    void *m_observerContext{ nullptr }; ///< Object supplied to the optional event receiver.
+
+    std::atomic<uint64_t> m_finished{ 0 }; ///< Last completed producer attempt, including drops.
+
+    std::atomic<uint64_t> m_restart{ 0 }; ///< First attempt sequence after the latest successful restart.
+
+    uint64_t m_drained{ 0 }; ///< Last completed attempt covered by the ordinary consumer.
 
     /// Convert a normalized nonnegative external timestamp to integer nanoseconds.
     static int64_t timestamp( const timespec &stamp /**< [in] External timestamp. */ );
@@ -110,6 +125,28 @@ class frameGrabberTiming
     void tracePopInterval();
 
   public:
+    /// Install a raw observer while the producer and consumer are stopped.
+    void observe( Observer observer /**< [in] Raw event receiver. */,
+                  void    *context /**< [in,out] Receiver-owned object. */ );
+
+    /// Preserve the SDK timestamp for the observer even when the frame is subsequently rejected.
+    void acquired( const timespec &atime /**< [in] EDT SDK timestamp. */ );
+
+    /// Tag resumed acquisition after a successful reconfiguration, from the producer only.
+    void observeRestart();
+
+    /// Return the latest successful restart's first attempt sequence, or zero.
+    uint64_t observedRestart() const;
+
+    /// Return the last completed attempt covered by the consumer's drain, including losses.
+    uint64_t drainedSequence() const;
+
+    /// Return the latest finished producer attempt, including attempts lost to queue saturation.
+    uint64_t finishedSequence() const;
+
+    /// Return the cumulative number of timing events dropped at the handoff.
+    uint64_t droppedEvents() const;
+
     /// Read CLOCK_MONOTONIC without changing errno; return -1 on failure.
     static int64_t monotonicNowNs();
 
@@ -140,7 +177,7 @@ class frameGrabberTiming
                   uint32_t binY /**< [in] Digital Y factor, zero when unknown. */ );
 
     /// Begin an attempt, reading the local wait-enter clock only when stages are enabled.
-    void begin();
+    void begin( double fps = 0 /**< [in] Effective rate for this attempt, if known. */ );
 
     /// Begin an attempt with a caller-supplied deterministic local timestamp.
     void beginAt( int64_t waitEnterNs /**< [in] Local wait entry, ns; ignored when stages are disabled. */ );
@@ -236,6 +273,9 @@ inline void frameGrabberTiming::configure(
     m_controlWindow.clear();
     m_session.store( 1, std::memory_order_relaxed );
     m_sequence = 0;
+    m_finished.store( 0, std::memory_order_relaxed );
+    m_restart.store( 0, std::memory_order_relaxed );
+    m_drained  = 0;
     m_event    = {};
     m_active   = false;
     m_mode = m_binX = m_binY = 0;
@@ -290,11 +330,56 @@ inline void frameGrabberTiming::context( uint32_t mode, uint32_t binX, uint32_t 
     m_binY = binY;
 }
 
-inline void frameGrabberTiming::begin()
+inline void frameGrabberTiming::observe( Observer observer, void *context )
+{
+    m_observer        = observer;
+    m_observerContext = context;
+}
+
+inline void frameGrabberTiming::acquired( const timespec &atime )
+{
+    if( m_observer && m_active )
+    {
+        m_event.atime = atime;
+    }
+}
+
+inline void frameGrabberTiming::observeRestart()
+{
+    m_restart.store( m_sequence + 1, std::memory_order_release );
+}
+
+inline uint64_t frameGrabberTiming::observedRestart() const
+{
+    return m_restart.load( std::memory_order_acquire );
+}
+
+inline uint64_t frameGrabberTiming::drainedSequence() const
+{
+    return m_drained;
+}
+
+inline uint64_t frameGrabberTiming::finishedSequence() const
+{
+    return m_finished.load( std::memory_order_acquire );
+}
+
+inline uint64_t frameGrabberTiming::droppedEvents() const
+{
+    return m_queue.dropped();
+}
+
+inline void frameGrabberTiming::begin( double fps )
 {
     if( m_enabled )
     {
         beginAt( m_stages ? monotonicNowNs() : -1 );
+
+        if( m_observer )
+        {
+            m_event.fps     = fps;
+            m_event.restart = m_restart.load( std::memory_order_relaxed );
+        }
     }
 }
 
@@ -327,6 +412,10 @@ inline void frameGrabberTiming::mark( fgTiming::Marker marker )
     if( m_stages && m_active )
     {
         markAt( marker, monotonicNowNs() );
+    }
+    else if( m_observer && m_active && marker == fgTiming::Marker::waitReturn )
+    {
+        m_event.arrivalNs = monotonicNowNs();
     }
 }
 
@@ -395,6 +484,11 @@ inline void frameGrabberTiming::finish( fgTiming::Outcome outcome )
         m_event.outcome = outcome;
         m_active        = false;
         m_queue.push( m_event );
+
+        if( m_observer )
+        {
+            m_finished.store( m_event.sequence, std::memory_order_release );
+        }
     }
 }
 
@@ -789,6 +883,8 @@ inline void frameGrabberTiming::update( int64_t nowMono, int64_t nowReal )
         m_everEvent       = false;
     }
 
+    // Reading the producer fence before the queue size includes every available event through that fence.
+    const uint64_t finished = m_observer ? m_finished.load( std::memory_order_acquire ) : 0;
     const size_t frames = m_queue.queued();
 
     for( size_t index = 0; index < frames; ++index )
@@ -798,6 +894,17 @@ inline void frameGrabberTiming::update( int64_t nowMono, int64_t nowReal )
         if( !m_queue.pop( event ) )
         {
             break;
+        }
+
+        if( m_observer )
+        {
+            m_observer( m_observerContext, event );
+            m_drained = event.sequence;
+
+            if( !event.outputValid )
+            {
+                event.atime = {};
+            }
         }
 
         count( event );
@@ -859,6 +966,7 @@ inline void frameGrabberTiming::update( int64_t nowMono, int64_t nowReal )
         m_everEvent = true;
     }
 
+    m_drained = std::max( m_drained, finished );
     session = m_session.load( std::memory_order_acquire );
 
     if( session > m_summary.session )

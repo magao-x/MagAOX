@@ -200,6 +200,7 @@ logger/logMap.o: logger/logMap.hpp logger/logMap.cpp
 logger/logMeta.o logger/logMap.o: logger/types/telem_dmsynco.hpp common/dmReaderTiming.hpp
 logger/logMeta.o logger/logMap.o: logger/types/telem_dmtimings.hpp common/dmTiming.hpp
 logger/logMeta.o: logger/types/telem_gpu.hpp logger/types/telem_irq.hpp logger/types/telem_raid.hpp
+logger/logMeta.o logger/logMap.o logger/types/telem.o: logger/types/telem_ocamdelay.hpp
 logger/logBinarySchemata.o: logger/generated/logTypes.hpp logger/generated/binarySchemata.inc
 
 clean:

@@ -234,6 +234,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup ocamFrameDelay_unit_test OCAM Frame Delay Unit Tests
+ * \brief Offline cadence, history, and manual reconfiguration capture tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup stdCamera_unit_test stdCamera Unit Tests
  * \brief Shared camera temperature, ROI geometry, configuration, and callback tests.
  * \ingroup app_unit_test

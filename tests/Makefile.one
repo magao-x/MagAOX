@@ -92,6 +92,9 @@ else ifneq ($(filter pvcam%_test,$(notdir $(TESTNAME))),)
 else ifeq ($(notdir $(TESTNAME)),picamCtrl_test)
 	# PICam SDK stubs; the tests define the library functions.
 	CPPFLAGS += -I$(TESTS_DIR)/picam
+else ifeq ($(notdir $(TESTNAME)),ocamFrameDelay_test)
+    LDLIBS += -lflatbuffers
+    $(OBJNAME): $(PATHNAME)../ocamFrameDelay.hpp $(PATHNAME)../../../libMagAOX/app/dev/frameGrabberTiming.hpp $(PATHNAME)../../../libMagAOX/logger/types/telem_ocamdelay.hpp
 else ifeq ($(notdir $(TESTNAME)),ocamDescrambler_test)
     # Pixel equivalence needs the real SDK, isolated from app-test function stubs.
     OCAM_DESCRAMBLE_SDK = $(PATHNAME)ocamDescrambler_sdk.o

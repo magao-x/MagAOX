@@ -260,6 +260,9 @@ bool verifyLogEntry( flatlogs::eventCodeT ev, char *log )
     case eventCodes::TELEM_FGTRACE:
         verified = telem_fgtrace::verify( logBuff, len );
         break;
+    case eventCodes::TELEM_OCAMDELAY:
+        verified = telem_ocamdelay::verify( logBuff, len );
+        break;
     case eventCodes::TELEM_DMMODES:
         verified = telem_dmmodes::verify( logBuff, len );
         break;

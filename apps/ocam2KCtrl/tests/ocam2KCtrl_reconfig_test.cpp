@@ -246,5 +246,82 @@ TEST_CASE( "ocam2KCtrl serializes requested modes with reconfiguration", "[ocam2
     REQUIRE( app.m_nextMode.empty() );
 }
 
+/// Only the explicit operator request creates a dump, and the hardware retry consumes that request once.
+/** \ingroup ocam2KCtrl_reconfig_unit_test */
+TEST_CASE( "ocam2KCtrl dumps only explicit reconfigure requests", "[ocam2KCtrl][reconfig][ocamFrameDelay]" )
+{
+    // clang-format off
+    #ifdef OCAM2KCTRL_TEST_DOXYGEN_REF
+    MagAOX::app::dev::stdCamera<MagAOX::app::ocam2KCtrl>::newCallBack_reconfigure;
+    MagAOX::app::ocam2KCtrl::onManualCameraReconfigure;
+    MagAOX::app::ocam2KCtrl::updateFrameDelay;
+    #endif
+    // clang-format on
+    resetStubState();
+    outletHarness::Controller<ocam2KCtrl_test> app;
+    app.driver();
+    configureStartupMode( app );
+    setPoweredOn( app );
+    app.m_frameDelayEnabled   = true;
+    app.m_frameDelayDirectory = app.m_directory.m_path;
+    REQUIRE( app.initFrameDelay() == 0 );
+    app.m_fgTiming.configure( 2, 32 );
+    REQUIRE( app.createStandardIndiRequestSw( app.m_indiP_reconfig, "reconfigure" ) == 0 );
+
+    pcf::IndiProperty enable( pcf::IndiProperty::Switch, app.configName(), "frame_delay_enable" );
+    enable.add( pcf::IndiElement( "arrival", pcf::IndiElement::Off ) );
+    REQUIRE( app.newCallBack_m_indiP_frameDelayEnable( enable ) == 0 );
+    CHECK( app.m_frameDelayEnable.load() == ( ocamFrameDelay::allChecks & ~2u ) );
+
+    REQUIRE( app.reconfig() == 0 );
+    CHECK_FALSE( app.m_frameDelayRequest );
+    CHECK_FALSE( app.m_frameDelayWriter.valid() );
+    REQUIRE( app.startAcquisition() == 0 );
+    CHECK( app.m_fgTiming.observedRestart() == 1 );
+    app.m_fgTiming.begin( 2000 );
+    app.m_fgTiming.mark( MagAOX::fgTiming::Marker::waitReturn );
+    app.m_fgTiming.finish( MagAOX::fgTiming::Outcome::rejected );
+
+    pcf::IndiProperty request( pcf::IndiProperty::Switch, app.configName(), "reconfigure" );
+    request.add( pcf::IndiElement( "request", pcf::IndiElement::On ) );
+    REQUIRE( app.newCallBack_reconfigure( request ) == 0 );
+    REQUIRE( app.m_frameDelayRequest );
+    CHECK( app.m_frameDelayRequest->id == 1 );
+    CHECK_FALSE( app.m_frameDelayFenced );
+    REQUIRE( app.newCallBack_reconfigure( request ) == 0 );
+    CHECK( app.m_frameDelayRequest->id == 1 );
+
+    g_edtStubState.readcfgReturn = -1;
+    REQUIRE( app.reconfig() == -1 );
+    REQUIRE( app.m_frameDelayFenced );
+    CHECK( app.m_frameDelayRequest->boundary == 1 );
+    CHECK( app.m_fgTiming.observedRestart() == 1 );
+    app.m_fgTiming.update();
+    app.updateFrameDelay();
+    REQUIRE( app.m_frameDelayWriter.valid() );
+    app.finishFrameDelayWrite();
+    CHECK_FALSE( app.m_frameDelayRequest );
+    const auto dumps = [&app]()
+    {
+        size_t count = 0;
+
+        for( const auto &item : std::filesystem::directory_iterator( app.m_frameDelayDirectory ) )
+        {
+            count += item.path().extension() == ".bin";
+        }
+
+        return count;
+    };
+    CHECK( dumps() == 1 );
+
+    g_edtStubState.readcfgReturn = 0;
+    REQUIRE( app.reconfig() == 0 );
+    REQUIRE( app.startAcquisition() == 0 );
+    CHECK( app.m_fgTiming.observedRestart() == 2 );
+    app.updateFrameDelay();
+    CHECK_FALSE( app.m_frameDelayWriter.valid() );
+    CHECK( dumps() == 1 );
+}
+
 } // namespace ocam2KCtrlTest
 } // namespace libXWCTest
