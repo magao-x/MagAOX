@@ -110,7 +110,7 @@ t2wOffloader so that counterOffload makes its real counter ramp, and the WFS res
   - t2wOffloader's `offload` is reported off, since the app writes the stream t2wOffloader posts to;
   - counterOffload's `enable` is reported on;
   - holoop's `loop_state` is reported off;
-  - `counter.stream` is a 2-D float image the size of the tweeter plane;
+  - `counter.stream` is a float image with one plane (2-D, or 3-D with one slice as t2wOffloader creates it) the size of the tweeter plane;
   - the post delay is known.
 
   counterOffload's `rampStartUs`, `rampDurationUs`, `gain` and `leak` are recorded in the headers. If any changes
