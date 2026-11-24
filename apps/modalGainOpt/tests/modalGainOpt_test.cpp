@@ -2275,7 +2275,7 @@ static void writeNoiseArchive( const std::filesystem::path &directory /**< [in] 
 }
 /// \endcond
 
-/// Repair isolated acquisition gaps and preserve estimates for blocks outside a gap.
+/// Repair isolated gaps using frame counters and tolerate jitter within the PSD window.
 TEST_CASE( "modalGainOpt camera noise repairs isolated missing frames", "[modalGainOpt]" )
 {
     char                                        path[] = "/tmp/modalGainOpt_camera_XXXXXX";
@@ -2302,8 +2302,9 @@ TEST_CASE( "modalGainOpt camera noise repairs isolated missing frames", "[modalG
 
     const auto estimate = [&]( const std::vector<size_t> &omitted,
                                const std::vector<size_t> &zeroFrames,
-                               bool                       renumber     = false,
-                               bool                       oneZeroPixel = false )
+                               bool                       renumber         = false,
+                               bool                       oneZeroPixel     = false,
+                               bool                       jitterTimestamps = false )
     {
         std::vector<uint16_t>              frames( 4 * depth );
         std::vector<timespec>              times( depth );
@@ -2329,6 +2330,12 @@ TEST_CASE( "modalGainOpt camera noise repairs isolated missing frames", "[modalG
             slot           = ( slot + 1 ) % depth;
             times[slot]    = { 100 + static_cast<time_t>( n / 1000 ), static_cast<long>( n % 1000 ) * 1000000 };
             counters[slot] = n + 1 - ( renumber ? skipped : 0 );
+
+            if( jitterTimestamps && n >= 492 && n <= 508 )
+            {
+                // Shift the timestamps by up to 3.2 nominal frame periods while preserving their order.
+                times[slot].tv_nsec += 400000 * std::min( n - 492, 508 - n );
+            }
 
             if( std::find( zeroFrames.begin(), zeroFrames.end(), n ) != zeroFrames.end() )
             {
@@ -2368,19 +2375,21 @@ TEST_CASE( "modalGainOpt camera noise repairs isolated missing frames", "[modalG
     const auto complete = estimate( {}, {} );
     REQUIRE( complete.size() == 3 );
     REQUIRE( ( complete > 0 ).all() );
+    REQUIRE( estimate( {}, {}, false, false, true ).isApprox( complete, 1e-6 ) );
 
     const auto dropped = estimate( { 500, 1500 }, {} );
     const auto blank   = estimate( {}, { 500, 1500 } );
     REQUIRE( dropped.size() == complete.size() );
     REQUIRE( blank.isApprox( dropped, 1e-6 ) );
     REQUIRE( dropped.isApprox( complete, 0.08 ) );
+    REQUIRE( estimate( { 500, 1500 }, {}, false, false, true ).isApprox( dropped, 1e-6 ) );
     const auto droppedEdges = estimate( { 436, 563 }, {} );
     REQUIRE( droppedEdges.size() == complete.size() );
     REQUIRE( droppedEdges.isApprox( estimate( {}, { 436, 563 } ), 1e-6 ) );
     REQUIRE( estimate( { 1000 }, {} ).isApprox( complete, 1e-6 ) );
     REQUIRE( estimate( { 500, 501 }, {} ).size() == 0 );
     REQUIRE( estimate( {}, { 500, 501 } ).size() == 0 );
-    REQUIRE( estimate( { 500 }, {}, true ).size() == 0 );
+    REQUIRE( estimate( { 500 }, {}, true ).size() == complete.size() );
 
     const auto oneZeroPixel = estimate( {}, {}, false, true );
     REQUIRE( oneZeroPixel.size() == complete.size() );

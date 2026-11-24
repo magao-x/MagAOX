@@ -620,7 +620,7 @@ class CameraNoise
     /// Per-row flags distinguishing camera samples from interpolated data.
     using FramePresence = std::array<bool, c_blockFrames + 2>;
 
-    /// Find a block by acquisition time, copy its pixels and interpolate isolated missing frames.
+    /// Locate a block by acquisition time and use frame counters to detect gaps in the copied samples.
     static bool readBlock( FrameBlock                &frames /**< [out] Private time-series data for the block. */,
                            FramePresence             &present /**< [out] Rows backed by actual frames. */,
                            const IMAGE               &image /**< [in] Timestamped raw camera history. */,
@@ -791,7 +791,6 @@ inline bool CameraNoise::readBlock( FrameBlock                &frames,
         return false;
     }
 
-    double   previousTime  = 0;
     uint64_t previousCount = 0;
     uint64_t oldestCount   = 0;
     size_t   frame         = 0;
@@ -810,7 +809,7 @@ inline bool CameraNoise::readBlock( FrameBlock                &frames,
         {
             const auto step = count - previousCount;
 
-            if( count <= previousCount || step > 2 || std::abs( ( time - previousTime ) * fps - step ) > 0.25 )
+            if( count <= previousCount || step > 2 )
             {
                 return false;
             }
@@ -823,7 +822,7 @@ inline bool CameraNoise::readBlock( FrameBlock                &frames,
             break;
         }
 
-        if( count == 0 || time < start || time > end || std::abs( ( time - expectedFirst ) * fps - frame ) > 2.5 )
+        if( count == 0 || time < start || time > end )
         {
             return false;
         }
@@ -857,7 +856,6 @@ inline bool CameraNoise::readBlock( FrameBlock                &frames,
         }
 
         previousCount = count;
-        previousTime  = time;
     }
 
     // The writer may start reusing a slot one publication before advancing the counter.
