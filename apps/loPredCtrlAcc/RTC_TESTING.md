@@ -80,7 +80,7 @@ getINDI 'loPredCtrlAcc.safety.*' 'loPredCtrlAcc.ddspc_control.*' 'loPredCtrlAcc.
 getINDI 'acc000.timingDiag.mode_code' 'acc000.timingDiag.delay_lock'   # both 1 for assisted mode
 ```
 
-Wait for `safety.zero_confirmed=true`, the consumer's receipt for the initial own-channel zero. If it stays false, check the scheduler, the channel and `safety.output_state`. If a readiness flag stays false, `ddspc_control.standard_state` and `assisted_state` give the reason. Possible reasons are an absent WFS, the upstream lock, sensor history, insufficient training or excitation, and numerical faults.
+Wait for `safety.zero_confirmed=true`, the consumer's receipt for the initial own-channel zero. If it stays false, check the scheduler, the channel and `safety.output_state`. If a readiness flag stays false, `ddspc_control.standard_state` and `assisted_state` give the reason. Possible reasons are an absent WFS, the upstream lock, sensor history, insufficient training or excitation, and numerical faults. A refused `predict` or `learn_std` request is answered at once with its unchanged state and Alert; `predict` stays Alert until a request is accepted, which `loPredCtrlAccGUI` shows as a warning.
 
 Start the disturbance and record a 60 s baseline with prediction off:
 
@@ -121,7 +121,7 @@ setINDI -s 'loPredCtrlAcc.predict.toggle=On'
 getINDI 'loPredCtrlAcc.ddspc_control.*' 'loPredCtrlAcc.ddspc_performance.*' 'loPredCtrlAcc.safety.*'
 ```
 
-The triples are loPredCtrl's original sequence: WFS frames, Gaussian standard deviation in modal command units, and regularization. Use the middle value that matches the deployed modal scale. `setINDI -s 'loPredCtrlAcc.learn_std.toggle=On'` installs the same triples and enables learning and prediction together. During the 3,000-frame sequence (1.5 s), `prediction=warming` shows probe or feedback commands. When `standard_ready=true`, freeze the fit and measure:
+The triples are loPredCtrl's original sequence: WFS frames, Gaussian standard deviation in modal command units, and regularization. Use the middle value that matches the deployed modal scale. `setINDI -s 'loPredCtrlAcc.learn_std.toggle=On'` installs `1000,0.05,100,1000,0.05,3,1000,0.05,0.1` and enables learning and prediction together. During the 3,000-frame sequence (1.5 s), `prediction=warming` shows probe or feedback commands. Learning continues after the sequence ends, and the final stage's regularization (0.1) stays in use until `reset_model`. When `standard_ready=true`, freeze the fit and measure:
 
 ```bash
 setINDI -s 'loPredCtrlAcc.learn.toggle=Off'
@@ -179,7 +179,7 @@ loPredCtrlAcc always republishes every new `aol1_modevalWFS` frame to the main A
 | Prediction on (`predict` or `learn_std` accepted) | zero | unchanged | `zeroed` |
 | Prediction turned off or faulted, own-channel zero not yet confirmed | zero | unchanged | `zeroed` |
 
-With prediction off the main loop sees exactly the WFS frame, as if loPredCtrlAcc were not there. From the moment a prediction request is accepted, tip/tilt is zero on the next WFS frame and DDSPC, through its 8 kHz auxiliary channel, is the only tip/tilt controller. After prediction stops, tip/tilt stays zero until `safety.zero_confirmed=true`, so the main loop and DDSPC never both correct tip/tilt. If that zero is never confirmed (for example, the scheduler stopped), tip/tilt stays zero until it is, or until loPredCtrlAcc restarts. The startup zero of the auxiliary channel does not withhold tip/tilt. Every other mode is always copied bit-for-bit. Nothing else changes:
+With prediction off the main loop sees exactly the WFS frame, as if loPredCtrlAcc were not there. From the moment a prediction request is accepted, tip/tilt is zero on the next WFS frame and DDSPC, through its 8 kHz auxiliary channel, is the only tip/tilt controller. After prediction stops, tip/tilt stays zero until `safety.zero_confirmed=true`, so the main loop and DDSPC never both correct tip/tilt. If that zero is never confirmed (for example, the scheduler stopped), tip/tilt stays zero until it is, until the operator sends `release_tt`, or until loPredCtrlAcc restarts. The startup zero of the auxiliary channel does not withhold tip/tilt. Every other mode is always copied bit-for-bit. Nothing else changes:
 - DDSPC still learns, predicts and applies feedback from the unmodified `aol1_modevalWFS` tip/tilt.
 - The input stream is never written.
 - Learning, predictive gains, ACC handling, scheduler timing and the auxiliary channel are unchanged.
@@ -221,6 +221,20 @@ getINDI 'loPredCtrlAcc.safety.*'   # zero_confirmed=true
 setINDI -s 'acc000.dm_enable.toggle=Off'
 xctrl stop loPredCtrlAcc
 ```
+
+Two operator requests recover from a correction left on the DM:
+
+| Request | Effect |
+| --- | --- |
+| `zero_dm.request` | Turns prediction off and writes a fresh zero to `dm.channelName`, even if the last removal was already confirmed. Main-loop tip/tilt follows the usual rule: zeroed until that zero is confirmed if DDSPC was engaged, otherwise unchanged. |
+| `release_tt.request` | Turns prediction off and passes main-loop tip/tilt through from the next WFS frame, without waiting for `zero_confirmed`. The zero is still retried. Use it when the zero cannot be confirmed and the main loop must take tip/tilt back. |
+
+```bash
+setINDI -s 'loPredCtrlAcc.zero_dm.request=On'
+setINDI -s 'loPredCtrlAcc.release_tt.request=On'
+```
+
+Neither touches the main loop's own integrator. A tip/tilt command the main loop held while DDSPC owned tip/tilt stays on its channel until the main loop corrects it, or until the main loop is opened.
 
 Prediction turns off and own-channel zero is requested when any of these occur:
 
