@@ -37,6 +37,54 @@
 
 namespace MagAOX::app
 {
+/// shmimMonitor tag for the main loop's per-mode gain factors, aolN_mgainfact.
+struct ddspcGainFactShmimT
+{
+    /// Configuration section of this monitor.
+    static std::string configSection()
+    {
+        return "gainFactShmim";
+    }
+
+    /// INDI property prefix of this monitor.
+    static std::string indiPrefix()
+    {
+        return "gainFact";
+    }
+};
+
+/// shmimMonitor tag for the main loop's per-mode multiplier factors, aolN_mmultfact.
+struct ddspcMultFactShmimT
+{
+    /// Configuration section of this monitor.
+    static std::string configSection()
+    {
+        return "multFactShmim";
+    }
+
+    /// INDI property prefix of this monitor.
+    static std::string indiPrefix()
+    {
+        return "multFact";
+    }
+};
+
+/// shmimMonitor tag for the main loop's per-mode limit factors, aolN_mlimitfact.
+struct ddspcLimitFactShmimT
+{
+    /// Configuration section of this monitor.
+    static std::string configSection()
+    {
+        return "limitFactShmim";
+    }
+
+    /// INDI property prefix of this monitor.
+    static std::string indiPrefix()
+    {
+        return "limitFact";
+    }
+};
+
 /// Operational loPredCtrl workflow; upstream owns ACC/WFS synchronization and the DM owns its scheduler.
 /** Standard mode is unchanged loPredCtrl DDSPC: one decision per WFS frame on the WFS monitor thread, held on the q DM
  * slots of the frame, trained only while standard is selected. The original's commands were increments integrated by
@@ -64,12 +112,21 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
                                   public dev::shmimMonitor<loPredCtrlAcc_operational>,
                                   public dev::frameGrabber<loPredCtrlAcc_operational>,
                                   public dev::telemeter<loPredCtrlAcc_operational>,
-                                  protected dev::dmSyncopationProducer<loPredCtrlAcc_operational>
+                                  protected dev::dmSyncopationProducer<loPredCtrlAcc_operational>,
+                                  public dev::shmimMonitor<loPredCtrlAcc_operational, ddspcGainFactShmimT>,
+                                  public dev::shmimMonitor<loPredCtrlAcc_operational, ddspcMultFactShmimT>,
+                                  public dev::shmimMonitor<loPredCtrlAcc_operational, ddspcLimitFactShmimT>
 {
     friend class dev::shmimMonitor<loPredCtrlAcc_operational>;
     friend class dev::frameGrabber<loPredCtrlAcc_operational>;
     friend class dev::telemeter<loPredCtrlAcc_operational>;
     friend class dev::dmSyncopationProducer<loPredCtrlAcc_operational>;
+    friend class dev::shmimMonitor<loPredCtrlAcc_operational, ddspcGainFactShmimT>;
+    friend class dev::shmimMonitor<loPredCtrlAcc_operational, ddspcMultFactShmimT>;
+    friend class dev::shmimMonitor<loPredCtrlAcc_operational, ddspcLimitFactShmimT>;
+    using gainFactShmimMonitorT  = dev::shmimMonitor<loPredCtrlAcc_operational, ddspcGainFactShmimT>;
+    using multFactShmimMonitorT  = dev::shmimMonitor<loPredCtrlAcc_operational, ddspcMultFactShmimT>;
+    using limitFactShmimMonitorT = dev::shmimMonitor<loPredCtrlAcc_operational, ddspcLimitFactShmimT>;
     using shmimMonitorT          = dev::shmimMonitor<loPredCtrlAcc_operational>;
     using frameGrabberT          = dev::frameGrabber<loPredCtrlAcc_operational>;
     using telemeterT             = dev::telemeter<loPredCtrlAcc_operational>;
@@ -294,15 +351,41 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     DDSPC::realT                   m_gain{ .3f };
 
     /** \name Integrator - Data
-     * Optional mfilt-equivalent output: s = mult*s - gain*delta, where delta is the DDSPC command, as the original
-     * loPredCtrl's commands were integrated by the main loop. Standard mode integrates once per WFS frame; assisted
-     * mode integrates every DM slot with gain/q and mult^(1/q). Each fit is trained on its deltas. See
+     * Optional mfilt-equivalent output: s = mult*s - gain*delta, clipped to +/-limit, where delta is the DDSPC command,
+     * as the original loPredCtrl's commands were integrated by the main loop. gain, mult and limit are always the main
+     * loop's: the cacaoInterface loop_gain, loop_multcoeff and loop_max_limit, times each DDSPC mode's entry in
+     * aolN_mgainfact, aolN_mmultfact and aolN_mlimitfact. Standard mode integrates once per WFS frame; assisted mode
+     * integrates every DM slot with gain/q. Each fit is trained on its deltas. See
      * agents/plans/2026-11/ddspc-standard-integrator.md.
      * @{ */
-    bool          m_integrate{ false };         ///< Integrate DDSPC commands in both modes; fits learn the deltas.
-    DDSPC::realT  m_intGain{ 1 };               ///< mfilt-equivalent gain applied to each WFS-frame delta.
-    DDSPC::realT  m_intMult{ 1 };               ///< mfilt-equivalent multiplier per WFS frame; below 1 leaks.
-    DDSPC::realT  m_intLimit{ 0 };              ///< Per-mode absolute limit on the state [modal units].
+    bool m_integrate{ false }; ///< Integrate DDSPC commands in both modes; fits learn the deltas.
+
+    std::string m_loopDevice{ "holoop" }; ///< Main loop's cacaoInterface INDI device.
+    int         m_loopNumber{ 1 };        ///< cacao loop number N of the aolN_m*fact streams.
+
+    /// Main-loop filter parameters of the DDSPC modes, combined from the six sources.
+    struct Integrator
+    {
+        std::array<double, 2> m_gain{}, m_mult{}, m_limit{}; ///< Per DDSPC mode.
+        bool                  m_ready{ false }; ///< All six sources received, finite, and gain and limit positive.
+    };
+
+    std::mutex m_loopMutex; ///< Serializes the six main-loop sources and their combination.
+
+    /// Latest loop_gain, loop_multcoeff and loop_max_limit; NaN until received. Under m_loopMutex.
+    std::array<double, 3> m_loopScalars{ std::nan( "" ), std::nan( "" ), std::nan( "" ) };
+
+    /// Latest aolN_mgainfact, aolN_mmultfact and aolN_mlimitfact, by WFS mode index. Under m_loopMutex.
+    std::array<std::vector<float>, 3> m_loopFactors;
+
+    Integrator        m_integrator;               ///< Combined parameters; under m_commandMutex.
+    std::atomic<bool> m_integratorReady{ false }; ///< m_integrator.m_ready, for qualification and INDI.
+
+    /// Subscriptions to the main loop's cacaoInterface scalars.
+    pcf::IndiProperty m_indiP_loopGain, m_indiP_loopMult, m_indiP_loopLimit;
+
+    pcf::IndiProperty m_indiP_integrator; ///< Published integrator state and combined parameters.
+
     DDSPC::Matrix m_intState;                   ///< Standard integrator state, the held position; WFS thread.
     DDSPC::Matrix m_intPrevious;                ///< Mean copied position of the previous decision interval.
     bool          m_intPreviousKnown{ false };  ///< m_intPrevious is valid, so the next frame delta can be recovered.
@@ -394,13 +477,46 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
                         DDSPC::Matrix       &input /**< [out] Mean position or integrator delta, when known. */ );
 
     /// Return the assisted fit's slot inputs for the interval just closed: the copied positions, or their deltas.
-    /** With the integrator each slot's delta is -(p_n - mult_q*p_(n-1))/gain_q (see slotIntegrator()); the result is
-     * empty when the previous slot position is unknown. Call once per decision so that position stays current.
+    /** With the integrator each slot's delta is -(p_n - mult*p_(n-1))/(gain/q); the result is empty when the previous
+     * slot position or the main-loop parameters are unknown. Call once per decision so that position stays current.
      */
     DDSPC::Matrix slotInputs( const DDSPC::Matrix &applied /**< [in] Slot commands copied since the last decision. */ );
 
-    /// Per-slot integrator gain and multiplier, gain/q and mult^(1/q): q slots of a constant delta match one frame.
-    std::pair<double, double> slotIntegrator() const;
+    /// Return a copy of the combined main-loop integrator parameters.
+    Integrator integrator();
+
+    /// Store a main-loop cacaoInterface scalar (loop_gain, loop_multcoeff or loop_max_limit) and recombine.
+    void loopParameter( const pcf::IndiProperty &ipRecv /**< [in] Received property with a "current" element. */,
+                        std::size_t              which /**< [in] 0 gain, 1 multiplier, 2 limit. */ );
+
+    /// Store a main-loop per-mode factor stream (aolN_mgainfact, mmultfact or mlimitfact) and recombine.
+    void loopFactors( const void *source /**< [in] FLOAT factors by WFS mode index. */,
+                      std::size_t count /**< [in] Number of factors. */,
+                      std::size_t which /**< [in] 0 gain, 1 multiplier, 2 limit. */ );
+
+    /// Combine the six main-loop sources for the DDSPC modes; caller holds m_loopMutex.
+    void combineIntegrator();
+
+    /// Accept a FLOAT aolN_mgainfact stream.
+    int allocate( const ddspcGainFactShmimT &tag /**< [in] Gain-factor monitor tag. */ );
+
+    /// Store new main-loop gain factors.
+    int processImage( void                      *source /**< [in] Current factors. */,
+                      const ddspcGainFactShmimT &tag /**< [in] Gain-factor monitor tag. */ );
+
+    /// Accept a FLOAT aolN_mmultfact stream.
+    int allocate( const ddspcMultFactShmimT &tag /**< [in] Multiplier-factor monitor tag. */ );
+
+    /// Store new main-loop multiplier factors.
+    int processImage( void                      *source /**< [in] Current factors. */,
+                      const ddspcMultFactShmimT &tag /**< [in] Multiplier-factor monitor tag. */ );
+
+    /// Accept a FLOAT aolN_mlimitfact stream.
+    int allocate( const ddspcLimitFactShmimT &tag /**< [in] Limit-factor monitor tag. */ );
+
+    /// Store new main-loop limit factors.
+    int processImage( void                       *source /**< [in] Current factors. */,
+                      const ddspcLimitFactShmimT &tag /**< [in] Limit-factor monitor tag. */ );
 
     /// Process one WFS decision, closing the preceding interval with the commands copied during it.
     int step( const DDSPC::Matrix &measurement /**< [in] Current calibrated WFS modes. */,
@@ -576,6 +692,15 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
     /// Receive the existing upstream synchronization state; it never gates standard DDSPC.
     INDI_SETCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_sync );
+
+    /// Receive the main loop's scalar gain from its cacaoInterface.
+    INDI_SETCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_loopGain );
+
+    /// Receive the main loop's scalar multiplier coefficient from its cacaoInterface.
+    INDI_SETCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_loopMult );
+
+    /// Receive the main loop's scalar limit from its cacaoInterface.
+    INDI_SETCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_loopLimit );
 };
 
 inline loPredCtrlAcc_operational::loPredCtrlAcc_operational() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -588,6 +713,11 @@ inline loPredCtrlAcc_operational::loPredCtrlAcc_operational() : MagAOXApp( MAGAO
     m_settings.m_scaledPenalty = m_settings.m_externalOrigins = m_settings.m_freezeQualification = true;
     m_settings.m_requireFullRank                                                                 = false;
     m_calibration.m_indices                                                                      = { 0, 1 };
+
+    // The factor streams change rarely: read their current contents on connection, as modalFilter does.
+    gainFactShmimMonitorT::m_getExistingFirst  = true;
+    multFactShmimMonitorT::m_getExistingFirst  = true;
+    limitFactShmimMonitorT::m_getExistingFirst = true;
 }
 
 inline loPredCtrlAcc_operational::~loPredCtrlAcc_operational() noexcept
@@ -620,6 +750,9 @@ inline void loPredCtrlAcc_operational::outputThreadStart( loPredCtrlAcc_operatio
 inline void loPredCtrlAcc_operational::setupConfig()
 {
     SHMIMMONITOR_SETUP_CONFIG( config );
+    SHMIMMONITORT_SETUP_CONFIG( gainFactShmimMonitorT, config );
+    SHMIMMONITORT_SETUP_CONFIG( multFactShmimMonitorT, config );
+    SHMIMMONITORT_SETUP_CONFIG( limitFactShmimMonitorT, config );
     DMSYNCOPATIONPRODUCER_SETUP_CONFIG( config );
     FRAMEGRABBER_SETUP_CONFIG( config );
     TELEMETER_SETUP_CONFIG( config );
@@ -644,11 +777,10 @@ inline void loPredCtrlAcc_operational::setupConfig()
     add( "integrator",
          "enabled",
          "bool",
-         "Integrate DDSPC commands as mfilt does, s = mult*s - gain*delta: standard per WFS frame, assisted per DM "
-         "slot with gain/q and mult^(1/q); both fits train on the deltas (default false)." );
-    add( "integrator", "gain", "float", "mfilt-equivalent gain per WFS frame, in (0,10] (default 1)." );
-    add( "integrator", "mult", "float", "mfilt-equivalent multiplier per WFS frame, in (0,1] (default 1)." );
-    add( "integrator", "limit", "float", "Per-mode absolute state limit [modal units]; required when enabled." );
+         "Integrate DDSPC commands with the main loop's mfilt law and parameters, s = mult*s - gain*delta: standard "
+         "per WFS frame, assisted per DM slot with gain/q; both fits train on the deltas (default false)." );
+    add( "loop", "device", "string", "Main loop's cacaoInterface INDI device, for gain, mc and limit (holoop)." );
+    add( "loop", "number", "int", "cacao loop number N of the aolN_mgainfact/mmultfact/mlimitfact streams (1)." );
     add( "parameters",
          "own_shmim",
          "bool",
@@ -686,6 +818,19 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
     try
     {
         SHMIMMONITOR_LOAD_CONFIG( config );
+
+        config( m_integrate, "integrator.enabled" );
+        config( m_loopDevice, "loop.device" );
+        config( m_loopNumber, "loop.number" );
+
+        const std::string loop              = "aol" + std::to_string( m_loopNumber ) + "_";
+        gainFactShmimMonitorT::m_shmimName  = loop + "mgainfact";
+        multFactShmimMonitorT::m_shmimName  = loop + "mmultfact";
+        limitFactShmimMonitorT::m_shmimName = loop + "mlimitfact";
+        SHMIMMONITORT_LOAD_CONFIG( gainFactShmimMonitorT, config );
+        SHMIMMONITORT_LOAD_CONFIG( multFactShmimMonitorT, config );
+        SHMIMMONITORT_LOAD_CONFIG( limitFactShmimMonitorT, config );
+
         DMSYNCOPATIONPRODUCER_LOAD_CONFIG( config );
         config( m_modalOwnShmim, "parameters.own_shmim" );
         frameGrabberT::m_ownShmim = m_modalOwnShmim;
@@ -724,22 +869,10 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
             m_ripple < 0 )
             throw std::invalid_argument( "Invalid operational WFS, producer, gain or model configuration" );
 
-        config( m_integrate, "integrator.enabled" );
-        config( m_intGain, "integrator.gain" );
-        config( m_intMult, "integrator.mult" );
-        config( m_intLimit, "integrator.limit" );
-
-        if( m_integrate &&
-            ( !std::isfinite( m_intGain ) || m_intGain <= 0 || m_intGain > 10 || !std::isfinite( m_intMult ) ||
-              m_intMult <= 0 || m_intMult > 1 || !std::isfinite( m_intLimit ) || m_intLimit <= 0 ) )
-        {
-            throw std::invalid_argument( "Invalid integrator gain, mult or limit" );
-        }
-
         if( m_integrate )
         {
-            log<text_log>( "Integrator enabled: gain=" + std::to_string( m_intGain ) +
-                               " mult=" + std::to_string( m_intMult ) + " limit=" + std::to_string( m_intLimit ),
+            log<text_log>( "Integrator enabled with the main loop's parameters from " + m_loopDevice + " and " + loop +
+                               "m*fact",
                            logPrio::LOG_NOTICE );
         }
 
@@ -1035,10 +1168,16 @@ inline bool loPredCtrlAcc_operational::standardInput( const DDSPC::Matrix &appli
         return true;
     }
 
-    const bool known = m_intPreviousKnown;
+    const auto law   = integrator();
+    const bool known = m_intPreviousKnown && law.m_ready;
     if( known )
     {
-        input = -( position - m_intMult * m_intPrevious ) / m_intGain;
+        input.resize( position.rows(), 1 );
+        for( int mode = 0; mode < position.rows(); ++mode )
+        {
+            input( mode ) =
+                DDSPC::realT( -( position( mode ) - law.m_mult[mode] * m_intPrevious( mode ) ) / law.m_gain[mode] );
+        }
     }
 
     m_intPrevious      = position;
@@ -1059,16 +1198,19 @@ inline DDSPC::Matrix loPredCtrlAcc_operational::slotInputs( const DDSPC::Matrix 
         return applied;
     }
 
-    const auto [gain, mult] = slotIntegrator();
+    const auto    law = integrator();
     DDSPC::Matrix deltas;
-    if( m_slotPreviousKnown )
+    if( m_slotPreviousKnown && law.m_ready )
     {
         deltas.resize( applied.rows(), applied.cols() );
         for( int j = 0; j < m_slots; ++j )
         {
-            deltas.col( j ) =
-                -( applied.col( j ) - DDSPC::realT( mult ) * ( j ? applied.col( j - 1 ) : m_slotPrevious ) ) /
-                DDSPC::realT( gain );
+            for( int mode = 0; mode < applied.rows(); ++mode )
+            {
+                const double before = j ? applied( mode, j - 1 ) : m_slotPrevious( mode );
+                deltas( mode, j )   = DDSPC::realT( -( applied( mode, j ) - law.m_mult[mode] * before ) /
+                                                  ( law.m_gain[mode] / m_slots ) );
+            }
         }
     }
 
@@ -1077,9 +1219,127 @@ inline DDSPC::Matrix loPredCtrlAcc_operational::slotInputs( const DDSPC::Matrix 
     return deltas;
 }
 
-inline std::pair<double, double> loPredCtrlAcc_operational::slotIntegrator() const
+inline loPredCtrlAcc_operational::Integrator loPredCtrlAcc_operational::integrator()
 {
-    return { double( m_intGain ) / m_slots, std::pow( double( m_intMult ), 1. / m_slots ) };
+    std::lock_guard<std::mutex> lock( m_commandMutex );
+    return m_integrator;
+}
+
+inline void loPredCtrlAcc_operational::loopParameter( const pcf::IndiProperty &ipRecv, std::size_t which )
+{
+    double value = std::nan( "" );
+    try
+    {
+        if( ipRecv.find( "current" ) )
+        {
+            value = number( ipRecv["current"] );
+        }
+    }
+    catch( const std::exception & )
+    {
+    }
+
+    if( !std::isfinite( value ) ) // Retain the last value until a valid update.
+    {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock( m_loopMutex );
+    m_loopScalars[which] = value;
+    combineIntegrator();
+}
+
+inline void loPredCtrlAcc_operational::loopFactors( const void *source, std::size_t count, std::size_t which )
+{
+    const auto *factors = static_cast<const float *>( source );
+
+    std::lock_guard<std::mutex> lock( m_loopMutex );
+    m_loopFactors[which].assign( factors, factors + count );
+    combineIntegrator();
+}
+
+inline void loPredCtrlAcc_operational::combineIntegrator()
+{
+    // As mfilt: each mode's gain, multiplier and limit are the loop scalars times that mode's factors.
+    Integrator combined;
+    combined.m_ready = true;
+    for( int mode = 0; mode < m_settings.m_modes && combined.m_ready; ++mode )
+    {
+        const std::size_t index = m_calibration.m_indices[mode];
+        for( const auto &factors : m_loopFactors )
+        {
+            combined.m_ready = combined.m_ready && index < factors.size();
+        }
+
+        if( !combined.m_ready )
+        {
+            break;
+        }
+
+        combined.m_gain[mode]  = m_loopScalars[0] * m_loopFactors[0][index];
+        combined.m_mult[mode]  = m_loopScalars[1] * m_loopFactors[1][index];
+        combined.m_limit[mode] = m_loopScalars[2] * m_loopFactors[2][index];
+
+        // The delta is recovered by dividing by the gain, and the limit bounds the output: both must be positive.
+        combined.m_ready = std::isfinite( combined.m_gain[mode] ) && std::isfinite( combined.m_mult[mode] ) &&
+                           std::isfinite( combined.m_limit[mode] ) && combined.m_gain[mode] > 0 &&
+                           combined.m_limit[mode] > 0;
+    }
+
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_commandMutex );
+        m_integrator = combined;
+    }
+
+    m_integratorReady.store( combined.m_ready );
+}
+
+inline int loPredCtrlAcc_operational::allocate( const ddspcGainFactShmimT & )
+{
+    if( gainFactShmimMonitorT::m_dataType != _DATATYPE_FLOAT )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "main-loop gain factors are not FLOAT" } );
+    }
+
+    return 0;
+}
+
+inline int loPredCtrlAcc_operational::processImage( void *source, const ddspcGainFactShmimT & )
+{
+    loopFactors( source, std::size_t( gainFactShmimMonitorT::m_width ) * gainFactShmimMonitorT::m_height, 0 );
+    return 0;
+}
+
+inline int loPredCtrlAcc_operational::allocate( const ddspcMultFactShmimT & )
+{
+    if( multFactShmimMonitorT::m_dataType != _DATATYPE_FLOAT )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "main-loop multiplier factors are not FLOAT" } );
+    }
+
+    return 0;
+}
+
+inline int loPredCtrlAcc_operational::processImage( void *source, const ddspcMultFactShmimT & )
+{
+    loopFactors( source, std::size_t( multFactShmimMonitorT::m_width ) * multFactShmimMonitorT::m_height, 1 );
+    return 0;
+}
+
+inline int loPredCtrlAcc_operational::allocate( const ddspcLimitFactShmimT & )
+{
+    if( limitFactShmimMonitorT::m_dataType != _DATATYPE_FLOAT )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "main-loop limit factors are not FLOAT" } );
+    }
+
+    return 0;
+}
+
+inline int loPredCtrlAcc_operational::processImage( void *source, const ddspcLimitFactShmimT & )
+{
+    loopFactors( source, std::size_t( limitFactShmimMonitorT::m_width ) * limitFactShmimMonitorT::m_height, 2 );
+    return 0;
 }
 
 inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
@@ -1183,9 +1443,16 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
     }
     else if( m_integrate && plan.allFinite() )
     {
-        // mfilt: the first column is this frame's delta; the state is held on every slot until the next decision.
-        m_intState =
-            ( m_intMult * m_intState - m_intGain * plan.col( 0 ) ).cwiseMax( -m_intLimit ).cwiseMin( m_intLimit );
+        // mfilt with the main loop's parameters: the first column is this frame's delta, and the state is held on
+        // every slot until the next decision. Without the parameters the output is inhibited (outputValid).
+        const auto law = integrator();
+        for( int mode = 0; mode < modes; ++mode )
+        {
+            const double state = law.m_mult[mode] * m_intState( mode ) - law.m_gain[mode] * plan( mode, 0 );
+            m_intState( mode ) =
+                law.m_ready ? DDSPC::realT( std::clamp( state, -law.m_limit[mode], law.m_limit[mode] ) ) : 0;
+        }
+
         plan = m_intState.replicate( 1, plan.cols() );
     }
 
@@ -1311,6 +1578,7 @@ inline bool loPredCtrlAcc_operational::outputValid() const
     const bool assisted = m_mode != DDSPC::ShadowMode::Standard;
 
     const char *reason = !m_inputValid.load()                                          ? "wfs_invalid"
+                         : m_integrate && !m_integratorReady.load()                    ? "integrator_parameters"
                          : !m_candidateValid.load()                                    ? "command_invalid"
                          : last < 0 || now < last || now - last > m_inputTimeout * 1e9 ? "wfs_stale"
                          : assisted && !m_assistedValid.load()                         ? "acc_window"
@@ -1411,9 +1679,11 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
     const int  modes = m_settings.m_modes;
     int        prefix;
     bool       mismatch;
+    Integrator law; // The main loop's parameters, copied with the frame so the slot uses one consistent set.
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_commandMutex );
         m_steps = schedule[synco::steps];
+        law     = m_integrator;
         if( m_gainFresh )
         {
             std::swap( m_gainFront, m_gainMiddle );
@@ -1451,7 +1721,6 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
             return m_appliedOrdinal < 0 ? m_copiedCommand( mode ) : m_appliedSlots( mode, slot % m_ring );
         };
 
-        const auto [gain, mult] = slotIntegrator();
         for( int j = 0; j < prefix && prefix < m_slots; ++j )
         {
             const auto slot = std::min( m_fastFrame.m_base + 1 + j, m_appliedOrdinal );
@@ -1461,7 +1730,9 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
                 const double before  = position( std::max<std::int64_t>( slot - 1, 0 ), mode );
 
                 m_fastPrefix[( prefix - 1 - j ) * modes + mode] =
-                    m_integrate ? -( current - mult * before ) / gain : current;
+                    m_integrate && law.m_ready
+                        ? -( current - law.m_mult[mode] * before ) / ( law.m_gain[mode] / m_slots )
+                        : current;
             }
         }
     }
@@ -1528,10 +1799,15 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
 
         if( m_integrate && m_fastCommand.allFinite() )
         {
-            // mfilt per slot: the slot's command is the delta, and the rendered position is the clipped state.
-            const auto [gain, mult] = slotIntegrator();
-            const double limit      = m_intLimit;
-            m_fastState   = ( mult * m_fastState - gain * m_fastCommand ).cwiseMax( -limit ).cwiseMin( limit );
+            // mfilt per slot with the main loop's parameters and gain/q: the slot's command is the delta, and the
+            // rendered position is the clipped state. Without the parameters the output is inhibited (outputValid).
+            for( int mode = 0; mode < modes; ++mode )
+            {
+                const double state =
+                    law.m_mult[mode] * m_fastState( mode ) - law.m_gain[mode] / m_slots * m_fastCommand( mode );
+                m_fastState( mode ) = law.m_ready ? std::clamp( state, -law.m_limit[mode], law.m_limit[mode] ) : 0;
+            }
+
             m_fastCommand = m_fastState;
         }
     }
@@ -1955,6 +2231,37 @@ inline int loPredCtrlAcc_operational::setupINDI()
         m_indiP_adc.add( pcf::IndiElement( key, 0.0 ) );
     if( registerIndiPropertyReadOnly( m_indiP_adc ) < 0 )
         return -1;
+
+    // The integrator's parameters are the main loop's; their combination per DDSPC mode is published here.
+    createROIndiNumber( m_indiP_integrator, "integrator" );
+    for( const auto &key : { "enabled", "ready", "gain0", "gain1", "mult0", "mult1", "limit0", "limit1" } )
+    {
+        m_indiP_integrator.add( pcf::IndiElement( key, 0.0 ) );
+    }
+
+    if( registerIndiPropertyReadOnly( m_indiP_integrator ) < 0 )
+    {
+        return -1;
+    }
+
+    if( registerIndiPropertySet( m_indiP_loopGain, m_loopDevice, "loop_gain", INDI_SETCALLBACK( m_indiP_loopGain ) ) <
+        0 )
+    {
+        return -1;
+    }
+
+    if( registerIndiPropertySet(
+            m_indiP_loopMult, m_loopDevice, "loop_multcoeff", INDI_SETCALLBACK( m_indiP_loopMult ) ) < 0 )
+    {
+        return -1;
+    }
+
+    if( registerIndiPropertySet(
+            m_indiP_loopLimit, m_loopDevice, "loop_max_limit", INDI_SETCALLBACK( m_indiP_loopLimit ) ) < 0 )
+    {
+        return -1;
+    }
+
     return 0;
 }
 
@@ -2014,6 +2321,9 @@ inline int loPredCtrlAcc_operational::appStartup()
         FRAMEGRABBER_APP_STARTUP;
         TELEMETER_APP_STARTUP;
         SHMIMMONITOR_APP_STARTUP;
+        SHMIMMONITORT_APP_STARTUP( gainFactShmimMonitorT );
+        SHMIMMONITORT_APP_STARTUP( multFactShmimMonitorT );
+        SHMIMMONITORT_APP_STARTUP( limitFactShmimMonitorT );
     }
     catch( const std::exception &error )
     {
@@ -2026,10 +2336,30 @@ inline int loPredCtrlAcc_operational::appStartup()
 inline int loPredCtrlAcc_operational::appLogic()
 {
     SHMIMMONITOR_APP_LOGIC;
+    SHMIMMONITORT_APP_LOGIC( gainFactShmimMonitorT );
+    SHMIMMONITORT_APP_LOGIC( multFactShmimMonitorT );
+    SHMIMMONITORT_APP_LOGIC( limitFactShmimMonitorT );
     FRAMEGRABBER_APP_LOGIC;
     TELEMETER_APP_LOGIC;
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     SHMIMMONITOR_UPDATE_INDI;
+    SHMIMMONITORT_UPDATE_INDI( gainFactShmimMonitorT );
+    SHMIMMONITORT_UPDATE_INDI( multFactShmimMonitorT );
+    SHMIMMONITORT_UPDATE_INDI( limitFactShmimMonitorT );
+
+    const auto law = integrator();
+    updatesIfChanged<double>( m_indiP_integrator,
+                              { "enabled", "ready", "gain0", "gain1", "mult0", "mult1", "limit0", "limit1" },
+                              { double( m_integrate ),
+                                double( law.m_ready ),
+                                law.m_gain[0],
+                                law.m_gain[1],
+                                law.m_mult[0],
+                                law.m_mult[1],
+                                law.m_limit[0],
+                                law.m_limit[1] },
+                              !m_integrate || law.m_ready ? INDI_OK : INDI_BUSY );
+
     FRAMEGRABBER_UPDATE_INDI;
     const auto             output = m_output.status();
     DDSPC::ShadowStatus    standard;
@@ -2292,6 +2622,9 @@ inline int loPredCtrlAcc_operational::appShutdown()
         m_modalLock = -1;
     }
     SHMIMMONITOR_APP_SHUTDOWN;
+    SHMIMMONITORT_APP_SHUTDOWN( gainFactShmimMonitorT );
+    SHMIMMONITORT_APP_SHUTDOWN( multFactShmimMonitorT );
+    SHMIMMONITORT_APP_SHUTDOWN( limitFactShmimMonitorT );
     m_adc.reset();
     if( !removed )
         log<software_error>(
@@ -2337,10 +2670,13 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
         m_slotPlan.setZero();
         m_fastClear = true;
     }
-    // Refused if learned without upstream lock (reset the models first), or with nothing to apply yet.
+    // Refused if learned without upstream lock (reset the models first), with nothing to apply yet, or while
+    // integrating without the main loop's parameters.
     const bool unlocked = m_mode.load() == DDSPC::ShadowMode::AccelAssisted && m_unlockedTraining.load();
+    const bool integrating = !m_integrate || m_integratorReady.load(); // The main loop's parameters are known.
     const bool allowed =
-        !enabled || ( !unlocked && ( selectedReady() || ( m_learning && ( m_gain != 0 || !m_exploration.empty() ) ) ) );
+        !enabled || ( !unlocked && integrating &&
+                      ( selectedReady() || ( m_learning && ( m_gain != 0 || !m_exploration.empty() ) ) ) );
     const bool accepted = allowed && m_output.request( enabled );
     m_predictRejected   = !accepted;
 
@@ -2379,7 +2715,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
         m_slotPlan.setZero();
         m_fastClear = true;
     }
-    if( enabled && !m_output.request( true ) )
+    if( enabled && ( ( m_integrate && !m_integratorReady.load() ) || !m_output.request( true ) ) )
     {
         m_predictRejected = true;
         updateSwitchIfChanged( m_indiP_learnStd, "toggle", m_indiP_learnStd["toggle"].getSwitchState(), INDI_ALERT );
@@ -2573,6 +2909,27 @@ inline INDI_SETCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_sync )( const p
     m_syncLocked.store( valid );
     if( !valid )
         m_assistedValid.store( false );
+    return 0;
+}
+
+inline INDI_SETCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_loopGain )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loopGain, ipRecv );
+    loopParameter( ipRecv, 0 );
+    return 0;
+}
+
+inline INDI_SETCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_loopMult )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loopMult, ipRecv );
+    loopParameter( ipRecv, 1 );
+    return 0;
+}
+
+inline INDI_SETCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_loopLimit )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loopLimit, ipRecv );
+    loopParameter( ipRecv, 2 );
     return 0;
 }
 

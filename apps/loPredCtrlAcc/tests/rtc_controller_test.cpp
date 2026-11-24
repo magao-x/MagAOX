@@ -37,6 +37,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::configureAcquisition;
     using loPredCtrlAcc_operational::copied;
     using loPredCtrlAcc_operational::fastSample;
+    using loPredCtrlAcc_operational::integrator;
     using loPredCtrlAcc_operational::loadCalibration;
     using loPredCtrlAcc_operational::loadImageIntoStream;
     using loPredCtrlAcc_operational::m_accelEnabled;
@@ -59,8 +60,10 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_indiP_control;
     using loPredCtrlAcc_operational::m_indiP_exploration;
     using loPredCtrlAcc_operational::m_indiP_gain;
+    using loPredCtrlAcc_operational::m_indiP_integrator;
     using loPredCtrlAcc_operational::m_indiP_learning;
     using loPredCtrlAcc_operational::m_indiP_learnStd;
+    using loPredCtrlAcc_operational::m_indiP_loopGain;
     using loPredCtrlAcc_operational::m_indiP_mode;
     using loPredCtrlAcc_operational::m_indiP_predicting;
     using loPredCtrlAcc_operational::m_indiP_qualification;
@@ -70,9 +73,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_indiP_zeroDm;
     using loPredCtrlAcc_operational::m_inputValid;
     using loPredCtrlAcc_operational::m_integrate;
-    using loPredCtrlAcc_operational::m_intGain;
-    using loPredCtrlAcc_operational::m_intLimit;
-    using loPredCtrlAcc_operational::m_intMult;
+    using loPredCtrlAcc_operational::m_integratorReady;
     using loPredCtrlAcc_operational::m_intState;
     using loPredCtrlAcc_operational::m_invalidReason;
     using loPredCtrlAcc_operational::m_invalidWindow;
@@ -100,6 +101,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_syncLocked;
     using loPredCtrlAcc_operational::m_syncopationTiming;
     using loPredCtrlAcc_operational::m_unlockedTraining;
+    using loPredCtrlAcc_operational::m_wasValid;
     using loPredCtrlAcc_operational::m_wfsCounter;
     using loPredCtrlAcc_operational::m_wfsReceipt;
     using loPredCtrlAcc_operational::m_windowReason;
@@ -111,7 +113,6 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::resetModels;
     using loPredCtrlAcc_operational::sensorHistory;
     using loPredCtrlAcc_operational::slotInputs;
-    using loPredCtrlAcc_operational::slotIntegrator;
     using loPredCtrlAcc_operational::standardInput;
     using loPredCtrlAcc_operational::step;
     using loPredCtrlAcc_operational::validateModalOutput;
@@ -165,6 +166,15 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
 
     /// Qualify the own-channel output without a DM worker, so prediction requests are accepted.
     void qualifyOutput();
+
+    /// Enable the integrator and deliver the main loop's parameters through the real cacaoInterface subscriptions and
+    /// factor-stream monitors.
+    void mainLoop( double                    gain /**< [in] holoop loop_gain. */,
+                   double                    mult /**< [in] holoop loop_multcoeff. */,
+                   double                    limit /**< [in] holoop loop_max_limit. */,
+                   const std::vector<float> &gainFact  = { 1, 1, 1 } /**< [in] aol1_mgainfact by WFS mode. */,
+                   const std::vector<float> &multFact  = { 1, 1, 1 } /**< [in] aol1_mmultfact by WFS mode. */,
+                   const std::vector<float> &limitFact = { 1, 1, 1 } /**< [in] aol1_mlimitfact by WFS mode. */ );
 };
 
 Controller::Controller( bool qr )
@@ -206,6 +216,42 @@ void Controller::qualifyOutput()
         {},
         {},
         false );
+}
+
+void Controller::mainLoop( double                    gain,
+                           double                    mult,
+                           double                    limit,
+                           const std::vector<float> &gainFact,
+                           const std::vector<float> &multFact,
+                           const std::vector<float> &limitFact )
+{
+    namespace app = MagAOX::app;
+    m_integrate   = true;
+
+    auto scalar = []( pcf::IndiProperty property, double value )
+    {
+        property.add( pcf::IndiElement( "current", value ) );
+        return property;
+    };
+
+    REQUIRE( setCallBack_m_indiP_loopGain( scalar( m_indiP_loopGain, gain ) ) == 0 );
+    REQUIRE( setCallBack_m_indiP_loopMult( scalar( m_indiP_loopMult, mult ) ) == 0 );
+    REQUIRE( setCallBack_m_indiP_loopLimit( scalar( m_indiP_loopLimit, limit ) ) == 0 );
+
+    using gainMonitor  = app::dev::shmimMonitor<app::loPredCtrlAcc_operational, app::ddspcGainFactShmimT>;
+    using multMonitor  = app::dev::shmimMonitor<app::loPredCtrlAcc_operational, app::ddspcMultFactShmimT>;
+    using limitMonitor = app::dev::shmimMonitor<app::loPredCtrlAcc_operational, app::ddspcLimitFactShmimT>;
+
+    auto gains = gainFact, mults = multFact, limits = limitFact;
+    gainMonitor::m_width   = gains.size();
+    gainMonitor::m_height  = 1;
+    multMonitor::m_width   = mults.size();
+    multMonitor::m_height  = 1;
+    limitMonitor::m_width  = limits.size();
+    limitMonitor::m_height = 1;
+    REQUIRE( processImage( gains.data(), app::ddspcGainFactShmimT{} ) == 0 );
+    REQUIRE( processImage( mults.data(), app::ddspcMultFactShmimT{} ) == 0 );
+    REQUIRE( processImage( limits.data(), app::ddspcLimitFactShmimT{} ) == 0 );
 }
 
 void Controller::deliver( std::uint64_t last )
@@ -339,7 +385,7 @@ TEST_CASE( "Standard WFS monitor trains from copied modal commands", "[rtc-contr
     md.size[2]                = 2;
     app.m_width               = 2;
     app.m_height              = 1;
-    REQUIRE( app.allocate( {} ) == 0 );
+    REQUIRE( app.allocate( MagAOX::app::dev::shmimT{} ) == 0 );
     app.m_gain = .2f;
     app.train();
     app.m_exploration.clear();
@@ -351,9 +397,9 @@ TEST_CASE( "Standard WFS monitor trains from copied modal commands", "[rtc-contr
         auto *frame = wfs.data() + 2 * md.cnt1;
         frame[0]    = std::sin( n * .13f );
         frame[1]    = std::cos( n * .07f );
-        REQUIRE( app.processImage( wfs.data() + 2 * ( 1 - md.cnt1 ), {} ) == 0 );
+        REQUIRE( app.processImage( wfs.data() + 2 * ( 1 - md.cnt1 ), MagAOX::app::dev::shmimT{} ) == 0 );
         REQUIRE( app.m_wfsCounter == n - 1 );
-        REQUIRE( app.processImage( frame, {} ) == 0 );
+        REQUIRE( app.processImage( frame, MagAOX::app::dev::shmimT{} ) == 0 );
         REQUIRE( app.m_wfsCounter == n );
         if( n < 30 )
         {
@@ -566,42 +612,77 @@ TEST_CASE( "Operational standard DDSPC corrects without accelerometers", "[rtc-c
     REQUIRE( residual < .25 * uncontrolled );
 }
 
-/** \brief The standard integrator applies the mfilt law, holds and clips its state, and restarts from zero. */
-TEST_CASE( "Standard integrator follows the mfilt law", "[rtc-controller][integrator]" )
+/** \brief The standard integrator applies the main loop's mfilt law, holds and clips its state, and restarts from zero.
+ */
+TEST_CASE( "Standard integrator follows the main loop's mfilt law", "[rtc-controller][integrator]" )
 {
     // clang-format off
 #ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
     MagAOX::app::loPredCtrlAcc_operational::step;
     MagAOX::app::loPredCtrlAcc_operational::standardInput;
+    MagAOX::app::loPredCtrlAcc_operational::combineIntegrator;
+    MagAOX::app::loPredCtrlAcc_operational::setCallBack_m_indiP_loopGain;
+    MagAOX::app::loPredCtrlAcc_operational::outputValid;
 #endif
     // clang-format on
     Controller app( true );
-    app.m_integrate  = true;
-    app.m_intGain    = .5f;
-    app.m_intMult    = .9f;
-    app.m_intLimit   = .3f;
     app.m_gain       = .2f;
+    app.m_integrate  = true;
     app.m_predicting = true; // Untrained: each delta is gain*y alone.
 
-    DDSPC::Matrix y( 2, 1 ), empty, expected = DDSPC::Matrix::Zero( 2, 1 );
+    // Without the main loop's parameters the integrator has nothing to apply: output is not qualified.
+    REQUIRE_FALSE( app.m_integratorReady.load() );
+    DDSPC::Matrix y( 2, 1 ), empty;
+    y << .4f, -.6f;
+    REQUIRE( app.advance( y, empty, false ).isZero() );
+    app.m_wasValid = true; // Record the first failing condition.
+    REQUIRE_FALSE( app.outputValid() );
+    REQUIRE( std::string( app.m_invalidReason.load() ) == "integrator_parameters" );
+
+    // holoop gain .25, mc .9, limit .3; mode 0 gain factor 2, mode 1 limit factor 2; mode 2 is not a DDSPC mode.
+    app.mainLoop( .25, .9, .3, { 2, 1, 7 }, { 1, 1, 7 }, { 1, 2, 7 } );
+    REQUIRE( app.m_integratorReady.load() );
+    const auto law = app.integrator();
+    REQUIRE( law.m_gain[0] == Approx( .5 ) );
+    REQUIRE( law.m_gain[1] == Approx( .25 ) );
+    REQUIRE( law.m_mult[0] == Approx( .9 ) );
+    REQUIRE( law.m_limit[0] == Approx( .3 ) );
+    REQUIRE( law.m_limit[1] == Approx( .6 ) );
+
+    const std::array<double, 2> gain{ .5, .25 }, limit{ .3, .6 };
+    std::array<double, 2>       expected{};
     for( int n = 0; n < 12; ++n )
     {
         y << .4f + .1f * n, -.6f;
-        expected         = ( .9f * expected - .5f * .2f * y ).cwiseMax( -.3f ).cwiseMin( .3f );
         const auto slots = app.advance( y, empty, false );
-        for( int j = 0; j < 4; ++j )
+        for( int mode = 0; mode < 2; ++mode )
         {
-            REQUIRE( slots.col( j ).isApprox( expected, 1e-6f ) );
+            expected[mode] = std::clamp( .9 * expected[mode] - gain[mode] * .2 * y( mode ), -limit[mode], limit[mode] );
+            for( int j = 0; j < 4; ++j )
+            {
+                REQUIRE( slots( mode, j ) == Approx( expected[mode] ).margin( 1e-6 ) );
+            }
         }
     }
-    REQUIRE( expected( 0 ) == Approx( -.3f ) ); // The limit was reached.
+    REQUIRE( expected[0] == Approx( -.3 ) ); // The limit was reached.
+
+    // An invalid update keeps the last value; a new factor takes effect at once.
+    auto invalid = app.m_indiP_loopGain;
+    invalid.add( pcf::IndiElement( "current", "nan" ) );
+    REQUIRE( app.setCallBack_m_indiP_loopGain( invalid ) == 0 );
+    REQUIRE( app.integrator().m_gain[0] == Approx( .5 ) );
+    std::vector<float> factors{ 4, 1, 7 };
+    REQUIRE( app.processImage( factors.data(), MagAOX::app::ddspcGainFactShmimT{} ) == 0 );
+    REQUIRE( app.integrator().m_gain[0] == Approx( 1 ) );
 
     app.m_predicting = false;
     REQUIRE( app.advance( y, empty, false ).isZero() );
     REQUIRE( app.m_intState.isZero() );
 
     app.m_predicting = true;
-    REQUIRE( app.advance( y, empty, false ).col( 0 ).isApprox( -.5f * .2f * y, 1e-6f ) );
+    const auto restart = app.advance( y, empty, false );
+    REQUIRE( restart( 0, 0 ) == Approx( -1 * .2 * y( 0 ) ) );
+    REQUIRE( restart( 1, 0 ) == Approx( -.25 * .2 * y( 1 ) ) );
 
     // Training input: the delta that produced each copied position, unknown without a previous position.
     app.resetModels();
@@ -612,8 +693,8 @@ TEST_CASE( "Standard integrator follows the mfilt law", "[rtc-controller][integr
     applied.row( 0 ).setConstant( .1f );
     applied.row( 1 ).setConstant( .05f );
     REQUIRE( app.standardInput( applied, input ) );
-    REQUIRE( input( 0 ) == Approx( -( .1f - .9f * .2f ) / .5f ) );
-    REQUIRE( input( 1 ) == Approx( -( .05f + .9f * .1f ) / .5f ) );
+    REQUIRE( input( 0 ) == Approx( -( .1 - .9 * .2 ) / 1 ) );
+    REQUIRE( input( 1 ) == Approx( -( .05 + .9 * .1 ) / .25 ) );
 
     app.m_integrate = false;
     REQUIRE( app.standardInput( applied, input ) );
@@ -630,9 +711,8 @@ TEST_CASE( "Standard integrator corrects and removes a static offset", "[rtc-con
     // clang-format on
     const bool qr = GENERATE( false, true );
     Controller app( qr );
-    app.m_integrate = true;
-    app.m_intLimit  = 10;
-    app.m_gain      = .2f;
+    app.mainLoop( 1, 1, 10 );
+    app.m_gain = .2f;
     app.train();
 
     DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), empty, mean = DDSPC::Matrix::Zero( 2, 1 );
@@ -1027,23 +1107,19 @@ void assisted( Controller &app /**< [in,out] Application under test. */,
 } // namespace
 /// \endcond
 
-/** \brief The assisted integrator applies the mfilt law on every DM slot and trains on per-slot deltas. */
+/** \brief The assisted integrator applies the main loop's law on every DM slot, with gain/q, and trains on deltas. */
 TEST_CASE( "Assisted integrator follows the per-slot mfilt law", "[rtc-controller][integrator]" )
 {
     // clang-format off
 #ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
     MagAOX::app::loPredCtrlAcc_operational::assistedCandidate;
     MagAOX::app::loPredCtrlAcc_operational::slotInputs;
-    MagAOX::app::loPredCtrlAcc_operational::slotIntegrator;
 #endif
     // clang-format on
     Controller app( true );
     Plant      plant( .02 );
     assisted( app, plant );
-    app.m_integrate  = true;
-    app.m_intGain    = .5f;
-    app.m_intMult    = .9f;
-    app.m_intLimit   = .3f;
+    app.mainLoop( .5, .9, .3 );
     app.m_gain       = .2f;
     app.m_predicting = true; // Untrained: each slot's delta is gain*y alone.
 
@@ -1053,7 +1129,8 @@ TEST_CASE( "Assisted integrator follows the per-slot mfilt law", "[rtc-controlle
         REQUIRE( app.advanceAssisted( y ).isZero() );
     }
 
-    const double  gain = .5 / 4, mult = std::pow( .9, .25 );
+    // gain/q per slot; the multiplier and limit are the main loop's, unchanged.
+    const double  gain = .5 / 4, mult = .9;
     DDSPC::Matrix expected = DDSPC::Matrix::Zero( 2, 1 );
     for( int i = 0; i < 8; ++i )
     {
@@ -1067,14 +1144,7 @@ TEST_CASE( "Assisted integrator follows the per-slot mfilt law", "[rtc-controlle
     }
     REQUIRE( expected( 0 ) == Approx( -.3f ) ); // The limit was reached.
 
-    // Four slots of a constant delta equal one mfilt frame when mult is 1.
-    app.m_intMult                   = 1;
-    const auto [slotGain, slotMult] = app.slotIntegrator();
-    REQUIRE( 4 * slotGain == Approx( app.m_intGain ) );
-    REQUIRE( slotMult == 1 );
-
     // Training inputs: the per-slot deltas that produced the copied positions.
-    app.m_intMult = .9f;
     app.resetModels();
     DDSPC::Matrix applied( 2, 4 );
     applied << .1f, .2f, .2f, .15f, 0, -.1f, -.05f, -.05f;
@@ -1102,9 +1172,8 @@ TEST_CASE( "Assisted integrator corrects and removes a static offset", "[rtc-con
     Controller app( true );
     Plant      plant( .02 );
     assisted( app, plant );
-    app.m_integrate = true;
-    app.m_intLimit  = 10;
-    app.m_gain      = .2f;
+    app.mainLoop( 1, 1, 10 );
+    app.m_gain = .2f;
     app.train( "1500,0.1,0.1" );
 
     const std::array<double, 2> offset{ .5, -.3 };
@@ -1568,7 +1637,7 @@ ModalRun runModal( bool monitor /**< [in] Use the WFS monitor callback. */ )
     md.size[2]                = 2;
     app.m_width               = modes;
     app.m_height              = 1;
-    REQUIRE( app.allocate( {} ) == 0 );
+    REQUIRE( app.allocate( MagAOX::app::dev::shmimT{} ) == 0 );
     // Size the output as the frameGrabber thread does; the fixture stream is absent, so it would be created.
     char path[4096];
     REQUIRE( ImageStreamIO_filename( path, sizeof( path ), "ddspc_modal_run_test" ) == 0 );
@@ -1592,13 +1661,14 @@ ModalRun runModal( bool monitor /**< [in] Use the WFS monitor callback. */ )
         const auto input = wfs;
         if( monitor )
         {
-            REQUIRE( app.processImage( frame, {} ) == 0 );
+            REQUIRE( app.processImage( frame, MagAOX::app::dev::shmimT{} ) == 0 );
             REQUIRE( wfs == input ); // The WFS input stream is never written.
             std::vector<float> out( modes, -1 );
             REQUIRE( app.m_modalFresh );
             REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
             REQUIRE( app.m_currImageTimestamp.tv_sec == time_t( n ) ); // The WFS frame's acquisition time.
-            REQUIRE( app.processImage( frame, {} ) == 0 );             // A repeated counter publishes nothing.
+            // A repeated counter publishes nothing.
+            REQUIRE( app.processImage( frame, MagAOX::app::dev::shmimT{} ) == 0 );
             REQUIRE_FALSE( app.m_modalFresh );
             run.m_published.push_back( out );
         }
@@ -1633,7 +1703,7 @@ void prepareModal( Controller        &app /**< [in,out] Application under test. 
     app.m_width                                    = 6;
     app.m_height                                   = 1;
     static_cast<ModalGrabber &>( app ).m_shmimName = name;
-    REQUIRE( app.allocate( {} ) == 0 );
+    REQUIRE( app.allocate( MagAOX::app::dev::shmimT{} ) == 0 );
 }
 } // namespace
 /// \endcond
@@ -1895,7 +1965,7 @@ TEST_CASE( "Modal output zeroes tip/tilt only while DDSPC owns it", "[rtc-contro
     const auto    publish = [&]()
     {
         md.cnt0 = ++counter;
-        REQUIRE( app.processImage( wfs.data(), {} ) == 0 );
+        REQUIRE( app.processImage( wfs.data(), MagAOX::app::dev::shmimT{} ) == 0 );
         std::vector<float> out( wfs.size(), -1 );
         REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
         return out;
@@ -1957,7 +2027,7 @@ TEST_CASE( "Operator zero and tip/tilt release controls", "[rtc-controller][moda
     const auto    publish = [&]()
     {
         md.cnt0 = ++counter;
-        REQUIRE( app.processImage( wfs.data(), {} ) == 0 );
+        REQUIRE( app.processImage( wfs.data(), MagAOX::app::dev::shmimT{} ) == 0 );
         std::vector<float> out( wfs.size(), -1 );
         REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
         return out;
@@ -2034,6 +2104,44 @@ TEST_CASE( "Refused prediction requests are answered with an alert", "[rtc-contr
     CHECK( app.m_indiP_predicting.getState() == pcf::IndiProperty::Ok );
     REQUIRE( app.appLogic() == 0 );
     CHECK( app.m_indiP_predicting.getState() == pcf::IndiProperty::Ok );
+}
+
+/** \brief While integrating, prediction is refused until the main loop's parameters are known, then accepted. */
+TEST_CASE( "Integrator prediction waits for the main loop's parameters", "[rtc-controller][integrator]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_predicting;
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_learnStd;
+    MagAOX::app::loPredCtrlAcc_operational::appLogic;
+#endif
+    // clang-format on
+    Controller app( true );
+    app.qualifyOutput();
+    app.train();
+    app.m_predicting = false;
+    app.m_integrate  = true;
+
+    auto predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+    auto learnStd = app.m_indiP_learnStd;
+    learnStd["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) < 0 );
+    REQUIRE( app.newCallBack_m_indiP_learnStd( learnStd ) < 0 );
+    CHECK_FALSE( app.m_predicting );
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_integrator["ready"].get<double>() == 0 );
+    CHECK( app.m_indiP_integrator.getState() == pcf::IndiProperty::Busy );
+
+    app.mainLoop( .5, .99, .2, { 1, 2, 1 } );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+    CHECK( app.m_predicting );
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_integrator["ready"].get<double>() == 1 );
+    CHECK( app.m_indiP_integrator["gain1"].get<double>() == Approx( 1 ) );
+    CHECK( app.m_indiP_integrator["mult0"].get<double>() == Approx( .99 ) );
+    CHECK( app.m_indiP_integrator["limit0"].get<double>() == Approx( .2 ) );
+    CHECK( app.m_indiP_integrator.getState() == pcf::IndiProperty::Ok );
 }
 
 /** \brief The modal frameGrabber and its telemeter always start and stop with the application, as in loPredCtrl.
