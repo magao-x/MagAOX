@@ -1319,3 +1319,42 @@ User: "implement the proposals".
   - `stepFom` diagnostics.
   - `findSteps` records the command.
   - Defaults: gain grid, `sigmaFloor`, 52 points.
+
+### Bench: Step-Driven Run `20261124T034134Z` (with alignment; completed)
+File: `~/Documents/MagAO-X/Data/counterOffload/counterOffload_calib_20261124T034134Z.csv`. Mode 0004, amp 0.7, 20 modes, gain grid 0.3–0.7, `sigmaFloor` 0.002. The run completed; nothing moved, and the confirmation (0.979, 0.972, 0.973) kept 0/330/0.5.
+
+- **Alignment was not the cause.**
+  - Onset delays are 2.7 ± 0.5 and 3.8 ± 0.6 frames in the step-only rows, and 3.5 ± 0.5 in the points, so detection is consistent.
+  - The baseline (7.84–8.05) still equals the step-only energy (7.79, 7.94).
+  - Ratios are 0.97–0.99 again.
+- **New diagnosis: the figure of merit is a noise floor.**
+  - `fomTiming` / `fomGain` = 0.306. The timing lags are 2 of every 8, so the per-lag energy is nearly the same at every lag across the whole window, about 980 lags (0.5 s).
+  - A transient error would be concentrated in the first tens of ms after the step. A uniform per-lag energy is what residual noise looks like.
+  - Summed over about 980 lags × 20 modes, that noise is very stable (relative SD about 1%), which matches the tiny `fomStd` and replicate scatter.
+  - The noise-bias correction, from the per-frame variance of the 100 pre-step frames (50 ms), evidently removes little of it. It misses residual power slower than 50 ms, which still varies from step to step 0.5 s apart.
+  - The step-only energy is the same kind of floor: the response averaged over only 10 steps keeps noise of variance v/10 at every lag.
+  - So the real counter-offload signal is only the few percent that moves: gain 0.3 → 0.986, 0.4 → 0.977, 0.5 → 0.976, 0.6 → 0.978, 0.7 → 0.994 (best about 0.5, with a clear rise at both ends). Start and duration are flat within ±0.002 (replicate SD 0.001).
+- **Proposals (not implemented):**
+  - **P-5. Window.** Sum the figure of merit only over the first `calibrate.fomWindowMs` after the first offload, where the offload train is, instead of to the next step. Proposed default 50 ms (100 frames), to be set from the profile in P-7.
+  - **P-6. Unbiased energy.** At each lag, replace |mean|² − bias with the pairwise estimator (|Σₖ eₖ|² − Σₖ |eₖ|²) / (n(n − 1)). It removes each step's independent noise exactly, without a noise model. Do the same for the step-only response: subtract its own per-lag noise variance (Σₖ |sₖ − S̄|² / (n(n − 1))) from the baseline-relative energies.
+  - **P-7. Lag profile.** Write a second CSV per run, `<instance>_calib_<time>_lags.csv`, with one row per measurement (time, stage, parameters) and the per-lag energy of the averaged error summed over the modes, for the first 400 lags (200 ms). This shows where the signal is, so the window can be chosen from data.
+  - **P-8. More steps for the step-only response.** Use 2 × `stepCount` steps, so it adds half the noise.
+
+### Window, Unbiased Energy, Lag Profile: Implementation of P-5 to P-8 (2026-11-23, not yet built)
+
+User: "implement".
+- **P-5.** New `[calibrate]` key `fomWindowMs`, default 50, range 0.1–10⁴.
+  - `measure()` converts it to frames with the mean frame interval of the series, capped by the lags the steps allow (`m_lagFrames`).
+  - `stepFom()` sums only those lags (`lags`). It computes the per-lag energy over `totalLags` = min(`m_lagFrames`, max(window, 400)) for the profile.
+- **P-6.** `stepFom()` estimates the energy of the mean error at each lag as (|Σₖ eₖ|² − Σₖ|eₖ|²) / (n(n − 1)), summed over the modes, less the step-only noise.
+  - The step-only noise is sum over phases p of (nₚ / n)² · noise[p + l]. It is exact for the S̄ noise shared by steps with the same phase.
+  - `stepOnlyResponse()` now also returns noise[j] = Σₖ|sₖ − S̄|² / (n(n − 1)), summed over the modes.
+  - The pre-step `noiseVar` is no longer used by the figure of merit; it is kept for the onset threshold.
+  - A measurement now needs at least 2 usable steps. `fomStd` needs at least 2 steps in each half, otherwise it is 0.
+  - The `step only` energy is the energy less its noise.
+- **P-7.** `<instance>_calib_<time>_lags.csv`, opened with the main CSV: `time,stage,rampStartUs,rampDurationUs,gain,nLags,e0…e399`. One row per measurement (written in `addRow`) and per step-only response, with up to 400 lags.
+- **P-8.** The step-only response uses 2 × `stepCount` steps (`collectSteps()` now takes the count). The main CSV's `stepCount` column still shows `stepCount`.
+- **Tests.**
+  - New: step-only noise, the windowed sum with the full profile, removal of independent noise (−0.03 for v = 0.3, −0.3, 0), removal of the step-only noise, and fewer than 2 steps.
+  - The existing figure-of-merit and alignment tests use the new signatures.
+  - There are now 15 config keys.

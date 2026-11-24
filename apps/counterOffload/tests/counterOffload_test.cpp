@@ -37,6 +37,7 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_enabled;
     using counterOffload::m_events;
     using counterOffload::m_finalZero;
+    using counterOffload::m_fomWindowMs;
     using counterOffload::m_gain;
     using counterOffload::m_gainGrid;
     using counterOffload::m_latency;
@@ -553,6 +554,7 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
         REQUIRE( app.m_stepPeriodS == 0.5 );
         REQUIRE( app.m_stepCount == 10 );
         REQUIRE( app.m_onsetSigma == 5 );
+        REQUIRE( app.m_fomWindowMs == 50 );
         REQUIRE( app.m_stepMode == 5 );
         REQUIRE( app.m_stepAmp == 0.7 );
         REQUIRE( app.m_timeoutS == 5 );
@@ -588,10 +590,10 @@ TEST_CASE( "counterOffload calibration settings", "[counterOffload]" )
         REQUIRE( app.m_calibLeak == 0.005 );
     }
 
-    SECTION( "the config keys cover the 14 numeric settings, and every default is accepted" )
+    SECTION( "the config keys cover the 15 numeric settings, and every default is accepted" )
     {
         const auto keys = app.calibKeys();
-        REQUIRE( keys.size() == 14 );
+        REQUIRE( keys.size() == 15 );
 
         std::set<std::string> names;
         for( const auto &k : keys )
@@ -1009,8 +1011,8 @@ TEST_CASE( "counterOffload computes the step figure of merit", "[counterOffload]
 {
     // clang-format off
     #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
-    counterOffload::stepOnlyResponse({},{},0,{});
-    counterOffload::stepFom({},{},{},0,0);
+    counterOffload::stepOnlyResponse({},{},0,{},{});
+    counterOffload::stepFom({},{},{},{},0,0);
     #endif
     // clang-format on
 
@@ -1018,17 +1020,39 @@ TEST_CASE( "counterOffload computes the step figure of merit", "[counterOffload]
     std::vector<counterOffload::stepT> steps;
     counterOffload::findSteps( only, 5, steps );
 
-    std::vector<double> response;
-    REQUIRE( counterOffload::stepOnlyResponse( only, steps, 60, response ) == 3 );
+    std::vector<double> response, noise;
+    REQUIRE( counterOffload::stepOnlyResponse( only, steps, 60, response, noise ) == 3 );
     REQUIRE( response.size() == 60 * 2 );
+    REQUIRE( noise.size() == 60 );
     REQUIRE( response[0] == Approx( 1 ) );
     REQUIRE( response[1] == Approx( 0.5 ) );
     REQUIRE( response[5 * 2] == Approx( std::exp( -1.0 ) ) );
     REQUIRE( response[50 * 2] == Approx( 0 ).margin( 1e-12 ) );
+    REQUIRE( noise[0] == Approx( 0 ).margin( 1e-12 ) ); // identical steps
+
+    const counterOffload::stepDataT    d = stepSeries( true );
+    std::vector<counterOffload::stepT> ws;
+    counterOffload::findSteps( d, 5, ws );
+
+    SECTION( "the step-only noise is the scatter of the steps about their mean, over n (n - 1)" )
+    {
+        counterOffload::stepDataT n3 = stepSeries( false );
+        n3.frames[( 153 + 10 ) * 2] += 0.3f; // step 0, lag 10, mode 0
+
+        std::vector<counterOffload::stepT> s3;
+        counterOffload::findSteps( n3, 5, s3 );
+
+        std::vector<double> r3, v3;
+        counterOffload::stepOnlyResponse( n3, s3, 60, r3, v3 );
+
+        REQUIRE( r3[10 * 2] == Approx( std::exp( -2.0 ) + 0.1 ) );
+        REQUIRE( v3[10] == Approx( ( 0.2 * 0.2 + 0.1 * 0.1 + 0.1 * 0.1 ) / 6 ) );
+        REQUIRE( v3[11] == Approx( 0 ).margin( 1e-12 ) );
+    }
 
     SECTION( "a step whose response is the step alone has no error" )
     {
-        const counterOffload::stepFomT f = counterOffload::stepFom( only, steps, response, 3, 30 );
+        const counterOffload::stepFomT f = counterOffload::stepFom( only, steps, response, noise, 30, 30 );
 
         REQUIRE( f.used == 3 );
         REQUIRE( f.fom == Approx( 0 ).margin( 1e-12 ) );
@@ -1036,54 +1060,79 @@ TEST_CASE( "counterOffload computes the step figure of merit", "[counterOffload]
 
     SECTION( "the error after the first offload is split into timing and gain lags" )
     {
-        const counterOffload::stepDataT    d = stepSeries( true );
-        std::vector<counterOffload::stepT> ws;
-        counterOffload::findSteps( d, 5, ws );
-
-        const counterOffload::stepFomT f = counterOffload::stepFom( d, ws, response, 3, 30 );
+        const counterOffload::stepFomT f = counterOffload::stepFom( d, ws, response, noise, 30, 30 );
 
         REQUIRE( f.used == 3 );
+        REQUIRE( f.lags == 30 );
         REQUIRE( f.fom == Approx( 2 * 0.04 + 6 * 0.01 ) );
         REQUIRE( f.fomTiming == Approx( 2 * 0.04 ) ); // lags 0 and 1 after each offload
         REQUIRE( f.fomGain == Approx( 6 * 0.01 ) );
-        REQUIRE( f.fomStd == Approx( 0 ).margin( 1e-9 ) ); // every step has the same error
+        REQUIRE( f.fomStd == 0 ); // the second half has only 1 step
         REQUIRE( f.onsetDelay == Approx( 3 ) );
         REQUIRE( f.onsetDelaySd == Approx( 0 ).margin( 1e-12 ) );
         REQUIRE( f.phase == Approx( 2 ) );
         REQUIRE( f.phaseSd == Approx( 0 ).margin( 1e-12 ) );
     }
 
-    SECTION( "a step whose first offload is too long after its onset is not used" )
+    SECTION( "only the window is summed, and the profile covers all lags" )
     {
-        counterOffload::stepDataT d = stepSeries( true );
-        d.offloadNs.erase( std::remove_if( d.offloadNs.begin(),
-                                           d.offloadNs.end(),
-                                           [&d]( int64_t t ) { return t > d.frameNs[353] && t < d.frameNs[375]; } ),
-                           d.offloadNs.end() );
+        const counterOffload::stepFomT f = counterOffload::stepFom( d, ws, response, noise, 1, 30 );
 
-        std::vector<counterOffload::stepT> ws;
-        counterOffload::findSteps( d, 5, ws );
-
-        REQUIRE( ws[1].offload - long( ws[1].onset ) > long( counterOffload::m_maxPhaseFrames ) );
-        REQUIRE( counterOffload::stepFom( d, ws, response, 3, 30 ).used == 2 );
+        REQUIRE( f.lags == 1 );
+        REQUIRE( f.fom == Approx( 0.04 ) );
+        REQUIRE( f.fomTiming == Approx( 0.04 ) );
+        REQUIRE( f.lagEnergy.size() == 30 );
+        REQUIRE( f.lagEnergy[2] == Approx( 0.01 ) );
+        REQUIRE( f.lagEnergy[9] == Approx( 0 ).margin( 1e-12 ) );
     }
 
-    SECTION( "the noise bias is removed" )
+    SECTION( "noise independent between steps is removed" )
     {
-        std::vector<counterOffload::stepT> noisy = steps;
-        for( auto &st : noisy )
+        counterOffload::stepDataT dn  = stepSeries( true );
+        const float               v[] = { 0.3f, -0.3f, 0 };
+
+        for( size_t k = 0; k < 3; ++k ) // lag 5 after the first offload, mode 1, sign-corrected v
         {
-            st.noiseVar = 0.01;
+            dn.frames[( 150 + 200 * k + 3 + 2 + 5 ) * 2 + 1] += dn.signs[k] * v[k];
         }
 
-        // 30 lags of 0.01 * (1/3 + 1/3)
-        REQUIRE( counterOffload::stepFom( only, noisy, response, 3, 30 ).fom == Approx( -30 * 0.01 * 2.0 / 3 ) );
+        std::vector<counterOffload::stepT> sn;
+        counterOffload::findSteps( dn, 5, sn );
+
+        // The mean of v is 0, and (|sum v|^2 - sum v^2) / (n (n - 1)) = -0.18 / 6 is its unbiased contribution.
+        REQUIRE( counterOffload::stepFom( dn, sn, response, noise, 30, 30 ).fom == Approx( 0.14 - 0.03 ) );
     }
 
-    SECTION( "nothing can be used without a step-only response or lags" )
+    SECTION( "the step-only response's noise is removed at the lags used" )
     {
-        REQUIRE( counterOffload::stepFom( only, steps, response, 0, 30 ).used == 0 );
-        REQUIRE( counterOffload::stepFom( only, steps, response, 3, 0 ).used == 0 );
+        const std::vector<double> flat( 60, 0.01 );
+
+        REQUIRE( counterOffload::stepFom( d, ws, response, flat, 30, 30 ).fom == Approx( 0.14 - 30 * 0.01 ) );
+    }
+
+    SECTION( "a step whose first offload is too long after its onset is not used" )
+    {
+        counterOffload::stepDataT dl = stepSeries( true );
+        dl.offloadNs.erase( std::remove_if( dl.offloadNs.begin(),
+                                            dl.offloadNs.end(),
+                                            [&dl]( int64_t t ) { return t > dl.frameNs[353] && t < dl.frameNs[375]; } ),
+                            dl.offloadNs.end() );
+
+        std::vector<counterOffload::stepT> sl;
+        counterOffload::findSteps( dl, 5, sl );
+
+        REQUIRE( sl[1].offload - long( sl[1].onset ) > long( counterOffload::m_maxPhaseFrames ) );
+        REQUIRE( counterOffload::stepFom( dl, sl, response, noise, 30, 30 ).used == 2 );
+    }
+
+    SECTION( "nothing is computed with fewer than 2 steps, no lags, or a short noise vector" )
+    {
+        std::vector<counterOffload::stepT> one = ws;
+        one[1].found = one[2].found = false;
+
+        REQUIRE( counterOffload::stepFom( d, one, response, noise, 30, 30 ).used == 0 );
+        REQUIRE( counterOffload::stepFom( d, ws, response, noise, 0, 30 ).used == 0 );
+        REQUIRE( counterOffload::stepFom( d, ws, response, {}, 30, 30 ).used == 0 );
     }
 }
 
@@ -1104,24 +1153,24 @@ TEST_CASE( "counterOffload aligns step onsets on the step-only response", "[coun
     std::vector<counterOffload::stepT> steps;
     counterOffload::findSteps( only, 5, steps );
 
-    std::vector<double> response;
-    counterOffload::stepOnlyResponse( only, steps, 60, response );
+    std::vector<double> response, noise;
+    counterOffload::stepOnlyResponse( only, steps, 60, response, noise );
 
     const counterOffload::stepDataT    d = stepSeries( true );
     std::vector<counterOffload::stepT> ws;
     counterOffload::findSteps( d, 5, ws );
 
-    const double exact = counterOffload::stepFom( d, ws, response, 3, 30 ).fom;
+    const double exact = counterOffload::stepFom( d, ws, response, noise, 30, 30 ).fom;
 
     SECTION( "an onset detected 2 frames late is moved back, and the error is as if it were found exactly" )
     {
         ws[1].onset += 2; // the first offload at or after it is still frame 355
-        REQUIRE_FALSE( counterOffload::stepFom( d, ws, response, 3, 30 ).fom == Approx( exact ) );
+        REQUIRE_FALSE( counterOffload::stepFom( d, ws, response, noise, 30, 30 ).fom == Approx( exact ) );
 
         REQUIRE( counterOffload::alignSteps( d, ws, response, 8, 4 ) == 1 );
         REQUIRE( ws[1].onset == 353 );
         REQUIRE( ws[1].offload == 355 );
-        REQUIRE( counterOffload::stepFom( d, ws, response, 3, 30 ).fom == Approx( exact ) );
+        REQUIRE( counterOffload::stepFom( d, ws, response, noise, 30, 30 ).fom == Approx( exact ) );
     }
 
     SECTION( "an onset detected 2 frames early is moved forward" )

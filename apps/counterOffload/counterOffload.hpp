@@ -331,13 +331,13 @@ class counterOffload : public MagAOXApp<true>,
 
         std::vector<double> preMean; ///< Mean of each mode over the frames before the command.
 
-        double noiseVar{ 0 }; ///< Per-frame variance summed over the modes, from the frames before the command.
+        double noiseVar{ 0 }; ///< Mean squared deviation from preMean, summed over the modes, before the command.
     };
 
     /// The step figure of merit of one measurement.
     struct stepFomT
     {
-        double fom{ 0 }; ///< Energy of the averaged error, summed over lags and modes, less the noise bias.
+        double fom{ 0 }; ///< Energy of the mean error, summed over the lags in the window and the modes, noise removed.
 
         double fomStd{ 0 }; ///< Half the difference of the figures of merit of the two halves of the steps.
 
@@ -347,6 +347,8 @@ class counterOffload : public MagAOXApp<true>,
 
         size_t used{ 0 }; ///< Steps used.
 
+        size_t lags{ 0 }; ///< Lags summed into fom.
+
         double onsetDelay{ 0 }; ///< Mean onset after the command, over the steps used, frames.
 
         double onsetDelaySd{ 0 }; ///< Standard deviation of the onset delay, frames.
@@ -354,6 +356,8 @@ class counterOffload : public MagAOXApp<true>,
         double phase{ 0 }; ///< Mean first offload after the onset, over the steps used, frames.
 
         double phaseSd{ 0 }; ///< Standard deviation of the phase, frames.
+
+        std::vector<double> lagEnergy; ///< Energy of the mean error at each lag, summed over the modes.
     };
 
     static constexpr size_t m_preFrames{ 100 }; ///< Frames before a step command used for its mean and noise.
@@ -367,6 +371,8 @@ class counterOffload : public MagAOXApp<true>,
     static constexpr size_t m_matchFrames{ 8 }; ///< Most frames, beyond the shift range, matched by alignSteps().
 
     static constexpr size_t m_minMatchFrames{ 3 }; ///< Fewest frames matched by alignSteps().
+
+    static constexpr size_t m_profileLags{ 400 }; ///< Lags written to the lag-profile CSV, when the steps allow.
 
     static constexpr size_t m_maxShiftFrames{ 4 }; ///< Largest onset change made by alignSteps(), frames.
 
@@ -425,6 +431,8 @@ class counterOffload : public MagAOXApp<true>,
     int m_stepCount{ 10 }; ///< Woofer steps per measurement, alternating in sign.
 
     double m_onsetSigma{ 5 }; ///< Onset threshold, in standard deviations of the pre-step residual energy.
+
+    double m_fomWindowMs{ 50 }; ///< Time after the first offload summed into the figure of merit, ms.
 
     int m_stepMode{ 5 }; ///< Index of the stepDevice mode stepped (0005, astig00).  INDI only.
 
@@ -556,9 +564,11 @@ class counterOffload : public MagAOXApp<true>,
 
     std::vector<double> m_stepOnly; ///< Step-only response by lag from the onset, nModes per lag.  Calibration thread.
 
+    std::vector<double> m_stepOnlyNoise; ///< Noise variance of m_stepOnly at each lag.  Calibration thread only.
+
     size_t m_stepOnlyCount{ 0 }; ///< Steps averaged into m_stepOnly.  Calibration thread only.
 
-    size_t m_lagFrames{ 0 }; ///< Lags from the first offload in the figure of merit.  Calibration thread only.
+    size_t m_lagFrames{ 0 }; ///< Most lags from the first offload the steps allow.  Calibration thread only.
 
     double m_fomOff{ 0 }; ///< Latest gain-0 baseline figure of merit.
 
@@ -575,6 +585,8 @@ class counterOffload : public MagAOXApp<true>,
     double m_confirmRatio{ 0 }; ///< Mean confirmed ratio of the chosen parameters.
 
     std::ofstream m_csv; ///< The current run's CSV file.  Calibration thread only.
+
+    std::ofstream m_lagCsv; ///< The current run's lag-profile CSV file.  Calibration thread only.
 
     std::vector<int64_t> m_offTimes; ///< CLOCK_MONOTONIC times of the run's baselines, ns.  Calibration thread only.
 
@@ -770,28 +782,35 @@ class counterOffload : public MagAOXApp<true>,
                                  double                   &sd /**< [out] the standard deviation; 0 if fewer than 2 */ );
 
     /// Average the onset-aligned, sign-corrected response over the steps found, for lags 0 to len - 1.
-    /**
+    /** Also returns the noise variance of the average at each lag, summed over the modes: the scatter of the steps
+     * about the average, sum_k |s_k - S|^2 / (n (n - 1)); 0 with fewer than 2 steps.
+     *
      * \returns the number of steps averaged; 0 if no step has len frames after its onset
      */
     static size_t stepOnlyResponse( const stepDataT          &d /**< [in] the collected series */,
                                     const std::vector<stepT> &steps /**< [in] the steps, from findSteps() */,
                                     size_t                    len /**< [in] lags from the onset */,
-                                    std::vector<double>      &response /**< [out] len x nModes, mode fastest */ );
+                                    std::vector<double>      &response /**< [out] len x nModes, mode fastest */,
+                                    std::vector<double>      &noise /**< [out] len noise variances of response */ );
 
     /// The step figure of merit of a series.
-    /** For each step with an offload at most m_maxPhaseFrames after its onset, the error at lag l from that offload is
-     * its sign times the residual less the pre-step mean, less the step-only response at the same lag from the onset.
-     * The errors are averaged over the steps.  The figure of merit is the sum over lags and modes of the squared
-     * average, less the noise bias (pre-step noise times 1/used + 1/stepOnlyCount per lag).  A lag is a timing lag if
-     * an offload of more than half the steps falls on it or on the lag before.
+    /** For each step with an offload at most m_maxPhaseFrames after its onset, the error e_k at lag l from that
+     * offload is its sign times the residual less the pre-step mean, less the step-only response at the same lag from
+     * the onset.  The energy of the mean error at each lag, summed over the modes, is estimated without the steps'
+     * independent noise as (|sum_k e_k|^2 - sum_k |e_k|^2) / (n (n - 1)), less the step-only response's noise at the
+     * lags used, sum over phases p of (n_p / n)^2 noise[p + l].  The figure of merit is the sum of these energies over
+     * the first lags lags; lagEnergy holds them for all totalLags lags.  A lag is a timing lag if an offload of more
+     * than half the steps falls on it or on the lag before.  The halves of the steps give fomStd when each has at
+     * least 2 steps.
      *
-     * \returns the figure of merit; used is 0 if no step could be used
+     * \returns the figure of merit; used is 0 if fewer than 2 steps could be used
      */
     static stepFomT stepFom( const stepDataT           &d /**< [in] the collected series */,
                              const std::vector<stepT>  &steps /**< [in] the steps, from findSteps() */,
                              const std::vector<double> &stepOnly /**< [in] the step-only response, see stepOnlyResponse() */,
-                             size_t                     stepOnlyCount /**< [in] steps averaged into stepOnly */,
-                             size_t                     lags /**< [in] lags from the first offload */ );
+                             const std::vector<double> &stepOnlyNoise /**< [in] its noise variance at each lag */,
+                             size_t                     lags /**< [in] lags summed into the figure of merit */,
+                             size_t                     totalLags /**< [in] lags in lagEnergy, at least lags */ );
 
     /// Baseline at a time, linearly interpolated between baselines and constant beyond the first and last.
     /**
@@ -1004,20 +1023,22 @@ class counterOffload : public MagAOXApp<true>,
      */
     bool setOffloading( bool on /**< [in] the new state */ );
 
-    /// Wait m_settleS, then make m_stepCount woofer steps m_stepPeriodS apart, collecting the residual and offloads.
+    /// Wait m_settleS, then make count woofer steps m_stepPeriodS apart, collecting the residual and offloads.
     /** Clipping is counted from the first step to the end, after the previous point's held contribution leaked away.
      *
      * \returns true on success
      * \returns false on abort, disable, residual timeout, a change of numModes, or (if needOffload) offload turned off
      */
     bool collectSteps( stepDataT &d /**< [out] the collected series */,
+                       int        count /**< [in] number of steps */,
                        bool       needOffload /**< [in] whether the offload toggle must stay on */,
                        uint64_t  &clipped /**< [out] slots that clipped from the first step */,
                        uint64_t  &published /**< [out] slots published from the first step */ );
 
     /// Measure the response to the woofer step alone, with the offloader's offload toggle off, and restore it.
-    /** Sets m_stepOnly, m_stepOnlyCount and m_lagFrames, logs the change from the previous measurement, and writes a
-     * CSV row whose fom is the response energy.
+    /** Uses 2 m_stepCount steps.  Sets m_stepOnly, m_stepOnlyNoise, m_stepOnlyCount and m_lagFrames, logs the change
+     * from the previous measurement, and writes a CSV row whose fom is the response energy (noise removed) and a
+     * lag-profile row.
      *
      * \returns true on success
      */
@@ -1086,6 +1107,12 @@ class counterOffload : public MagAOXApp<true>,
     void writeCsvPrefix( const timespec     &wall /**< [in] CLOCK_REALTIME of the row */,
                          int                 stage /**< [in] stage index */,
                          const calibParamsT &p /**< [in] parameters */ );
+
+    /// Write a lag-profile row: time, stage, parameters, the number of lags, then the energy at each lag.
+    void writeLagRow( const timespec            &wall /**< [in] CLOCK_REALTIME of the row */,
+                      int                        stage /**< [in] stage index */,
+                      const calibParamsT        &p /**< [in] parameters */,
+                      const std::vector<double> &lagEnergy /**< [in] energy at each lag, up to m_profileLags used */ );
 
     /// Write a decision row.
     void writeFitRow( int                 stage /**< [in] stage index, one of the fit stages */,
@@ -2324,11 +2351,15 @@ inline void counterOffload::onsetDelayStats( const std::vector<stepT> &steps, do
 inline size_t counterOffload::stepOnlyResponse( const stepDataT          &d,
                                                 const std::vector<stepT> &steps,
                                                 size_t                    len,
-                                                std::vector<double>      &response )
+                                                std::vector<double>      &response,
+                                                std::vector<double>      &noise )
 {
     const size_t M = d.nModes;
 
     response.assign( len * M, 0 );
+    noise.assign( len, 0 );
+
+    std::vector<double> sumSq( len, 0 ); // sum over steps of |s_k|^2 at each lag
 
     size_t n = 0;
 
@@ -2345,19 +2376,34 @@ inline size_t counterOffload::stepOnlyResponse( const stepDataT          &d,
         {
             for( size_t m = 0; m < M; ++m )
             {
-                response[j * M + m] += d.signs[k] * ( d.frames[( st.onset + j ) * M + m] - st.preMean[m] );
+                const double v = d.signs[k] * ( d.frames[( st.onset + j ) * M + m] - st.preMean[m] );
+
+                response[j * M + m] += v;
+                sumSq[j] += v * v;
             }
         }
 
         ++n;
     }
 
-    if( n > 0 )
+    if( n == 0 )
     {
-        for( double &v : response )
+        return 0;
+    }
+
+    for( size_t j = 0; j < len; ++j )
+    {
+        double mean2 = 0;
+
+        for( size_t m = 0; m < M; ++m )
         {
-            v /= n;
+            double &r = response[j * M + m];
+            r /= n;
+            mean2 += r * r;
         }
+
+        // sum_k |s_k - S|^2 = sum_k |s_k|^2 - n |S|^2, and the variance of the mean is that over n (n - 1)
+        noise[j] = ( n > 1 ) ? std::max( 0.0, sumSq[j] - n * mean2 ) / ( double( n ) * ( n - 1 ) ) : 0;
     }
 
     return n;
@@ -2366,25 +2412,40 @@ inline size_t counterOffload::stepOnlyResponse( const stepDataT          &d,
 inline counterOffload::stepFomT counterOffload::stepFom( const stepDataT           &d,
                                                          const std::vector<stepT>  &steps,
                                                          const std::vector<double> &stepOnly,
-                                                         size_t                     stepOnlyCount,
-                                                         size_t                     lags )
+                                                         const std::vector<double> &stepOnlyNoise,
+                                                         size_t                     lags,
+                                                         size_t                     totalLags )
 {
     stepFomT out;
 
     const size_t M   = d.nModes;
     const size_t len = ( M > 0 ) ? stepOnly.size() / M : 0;
 
-    if( M == 0 || lags == 0 || stepOnlyCount == 0 )
+    totalLags = std::max( totalLags, lags );
+
+    if( M == 0 || lags == 0 || stepOnlyNoise.size() < len )
     {
         return out;
     }
 
-    std::vector<double> sum( lags * M, 0 );
-    std::vector<double> half[2] = { std::vector<double>( lags * M, 0 ), std::vector<double>( lags * M, 0 ) };
-    std::vector<size_t> onLag( lags, 0 );
+    // Sums of e_k and of |e_k|^2 at each lag, over all steps and over each half.
+    std::vector<double> sum[3], sumSq[3];
 
-    size_t nHalf[2] = { 0, 0 };
-    double noise    = 0;
+    for( int h = 0; h < 3; ++h )
+    {
+        sum[h].assign( totalLags * M, 0 );
+        sumSq[h].assign( totalLags, 0 );
+    }
+
+    std::vector<size_t> onLag( totalLags, 0 );
+    std::vector<size_t> phaseCount[3];
+
+    for( int h = 0; h < 3; ++h )
+    {
+        phaseCount[h].assign( m_maxPhaseFrames + 1, 0 );
+    }
+
+    size_t nSteps[3] = { 0, 0, 0 }; // all, first half, second half
 
     double delaySum = 0, delaySum2 = 0, phaseSum = 0, phaseSum2 = 0;
 
@@ -2400,39 +2461,40 @@ inline counterOffload::stepFomT counterOffload::stepFom( const stepDataT        
         const size_t off   = static_cast<size_t>( st.offload );
         const size_t phase = off - st.onset;
 
-        if( phase > m_maxPhaseFrames || phase + lags > len || off + lags > st.end )
+        if( phase > m_maxPhaseFrames || phase + totalLags > len || off + totalLags > st.end )
         {
             continue;
         }
 
-        std::vector<double> &h = half[out.used % 2];
+        const int half = 1 + static_cast<int>( nSteps[0] % 2 );
 
-        for( size_t l = 0; l < lags; ++l )
+        for( size_t l = 0; l < totalLags; ++l )
         {
             for( size_t m = 0; m < M; ++m )
             {
                 const double e = d.signs[k] * ( d.frames[( off + l ) * M + m] - st.preMean[m] ) -
                                  stepOnly[( phase + l ) * M + m];
 
-                sum[l * M + m] += e;
-                h[l * M + m] += e;
+                for( int h : { 0, half } )
+                {
+                    sum[h][l * M + m] += e;
+                    sumSq[h][l] += e * e;
+                }
             }
         }
 
         for( size_t q : st.offloads )
         {
-            if( q >= off && q < off + lags )
+            if( q >= off && q < off + totalLags )
             {
                 ++onLag[q - off];
 
-                if( q - off + 1 < lags )
+                if( q - off + 1 < totalLags )
                 {
                     ++onLag[q - off + 1];
                 }
             }
         }
-
-        noise += st.noiseVar;
 
         const double delay = double( st.onset ) - double( st.cmd );
 
@@ -2441,63 +2503,82 @@ inline counterOffload::stepFomT counterOffload::stepFom( const stepDataT        
         phaseSum += phase;
         phaseSum2 += double( phase ) * phase;
 
-        ++nHalf[out.used % 2];
-        ++out.used;
+        for( int h : { 0, half } )
+        {
+            ++phaseCount[h][phase];
+            ++nSteps[h];
+        }
     }
 
-    if( out.used == 0 )
+    if( nSteps[0] < 2 )
     {
         return out;
     }
 
-    noise /= out.used;
+    out.used = nSteps[0];
+    out.lags = lags;
 
-    auto sdOf = [&]( double sum, double sum2 )
+    // Energy of the mean error at a lag, without the steps' own noise or the step-only response's noise.
+    auto energy = [&]( int h, size_t l )
     {
-        return ( out.used > 1 ) ? std::sqrt( std::max( 0.0, ( sum2 - sum * sum / out.used ) / ( out.used - 1 ) ) ) : 0.0;
-    };
+        const double n = nSteps[h];
 
-    out.onsetDelay   = delaySum / out.used;
-    out.onsetDelaySd = sdOf( delaySum, delaySum2 );
-    out.phase        = phaseSum / out.used;
-    out.phaseSd      = sdOf( phaseSum, phaseSum2 );
-
-    // Energy of an average over n steps, less its noise bias, for each lag.
-    auto energy = [&]( const std::vector<double> &acc, size_t n, size_t l )
-    {
-        double e = 0;
+        double s2 = 0;
         for( size_t m = 0; m < M; ++m )
         {
-            const double v = acc[l * M + m] / n;
-            e += v * v;
+            s2 += sum[h][l * M + m] * sum[h][l * M + m];
         }
-        return e - noise * ( 1.0 / n + 1.0 / stepOnlyCount );
+
+        double bias = 0;
+        for( size_t p = 0; p <= m_maxPhaseFrames; ++p )
+        {
+            if( phaseCount[h][p] > 0 )
+            {
+                bias += ( phaseCount[h][p] / n ) * ( phaseCount[h][p] / n ) * stepOnlyNoise[p + l];
+            }
+        }
+
+        return ( s2 - sumSq[h][l] ) / ( n * ( n - 1 ) ) - bias;
     };
+
+    out.lagEnergy.resize( totalLags );
 
     double halfFom[2] = { 0, 0 };
 
-    for( size_t l = 0; l < lags; ++l )
+    for( size_t l = 0; l < totalLags; ++l )
     {
-        const double e = energy( sum, out.used, l );
+        out.lagEnergy[l] = energy( 0, l );
 
-        out.fom += e;
+        if( l >= lags )
+        {
+            continue;
+        }
+
+        out.fom += out.lagEnergy[l];
 
         if( 2 * onLag[l] > out.used )
         {
-            out.fomTiming += e;
+            out.fomTiming += out.lagEnergy[l];
         }
 
-        for( int h = 0; h < 2; ++h )
+        for( int h = 1; h <= 2; ++h )
         {
-            if( nHalf[h] > 0 )
+            if( nSteps[h] > 1 )
             {
-                halfFom[h] += energy( half[h], nHalf[h], l );
+                halfFom[h - 1] += energy( h, l );
             }
         }
     }
 
     out.fomGain = out.fom - out.fomTiming;
-    out.fomStd  = ( nHalf[1] > 0 ) ? std::fabs( halfFom[0] - halfFom[1] ) / 2 : 0;
+    out.fomStd  = ( nSteps[1] > 1 && nSteps[2] > 1 ) ? std::fabs( halfFom[0] - halfFom[1] ) / 2 : 0;
+
+    const double n = out.used;
+
+    out.onsetDelay   = delaySum / n;
+    out.onsetDelaySd = std::sqrt( std::max( 0.0, ( delaySum2 - delaySum * delaySum / n ) / ( n - 1 ) ) );
+    out.phase        = phaseSum / n;
+    out.phaseSd      = std::sqrt( std::max( 0.0, ( phaseSum2 - phaseSum * phaseSum / n ) / ( n - 1 ) ) );
 
     return out;
 }
@@ -2966,7 +3047,13 @@ inline std::vector<counterOffload::calibKeyT> counterOffload::calibKeys()
           nullptr,
           0,
           1e3,
-          "Step onset threshold, in standard deviations of the pre-step residual energy.  Default is 5." } };
+          "Step onset threshold, in standard deviations of the pre-step residual energy.  Default is 5." },
+        { "fomWindowMs",
+          &m_fomWindowMs,
+          nullptr,
+          0.1,
+          1e4,
+          "Time after the first offload summed into the figure of merit, ms.  Default is 50." } };
 }
 
 inline int counterOffload::applyCalibStep( double mode, double amp )
@@ -3098,12 +3185,13 @@ inline void counterOffload::runCalibration()
     m_clippedRows  = 0;
 
     m_stepOnly.clear();
+    m_stepOnlyNoise.clear();
     m_stepOnlyCount = 0;
     m_lagFrames     = 0;
 
     const double perPoint = m_settleS + m_stepCount * m_stepPeriodS;
     const int    points   = estimatePoints();
-    const double minutes  = ( points * perPoint + 2 * ( perPoint + 3 * m_stepPeriodS ) ) / 60;
+    const double minutes  = ( points * perPoint + 2 * ( perPoint + ( m_stepCount + 3 ) * m_stepPeriodS ) ) / 60;
 
     log<text_log>( "calibration: about " + std::to_string( points ) + " measurements, " +
                        std::to_string( minutes ) + " min",
@@ -3239,6 +3327,11 @@ inline void counterOffload::runCalibration()
         m_csv.close();
     }
 
+    if( m_lagCsv.is_open() )
+    {
+        m_lagCsv.close();
+    }
+
     m_calibRunning = false;
 }
 
@@ -3320,6 +3413,25 @@ inline bool counterOffload::openCsv()
         log<text_log>( "calibration could not open " + path, logPrio::LOG_ERROR );
         return false;
     }
+
+    const std::string lagPath = m_csvDir + "/" + m_configName + "_calib_" + ts + "_lags.csv";
+
+    m_lagCsv.open( lagPath );
+
+    if( !m_lagCsv )
+    {
+        log<text_log>( "calibration could not open " + lagPath, logPrio::LOG_ERROR );
+        return false;
+    }
+
+    m_lagCsv << "time,stage,rampStartUs,rampDurationUs,gain,nLags";
+
+    for( size_t l = 0; l < m_profileLags; ++l )
+    {
+        m_lagCsv << ",e" << l;
+    }
+
+    m_lagCsv << "\n";
 
     m_csv << "time,stage,rampStartUs,rampDurationUs,gain,stepMode,stepAmp,stepCount,numModes,fom,fomStd,fomOff,"
              "ratio,ratioInterp,fomTiming,fomGain,fitCurrent,fitCandidate,threshold,moved,sigma,clippedSlots,clipFrac,"
@@ -3425,9 +3537,10 @@ inline bool counterOffload::setOffloading( bool on )
     return true;
 }
 
-inline bool counterOffload::collectSteps( stepDataT &d, bool needOffload, uint64_t &clipped, uint64_t &published )
+inline bool
+counterOffload::collectSteps( stepDataT &d, int count, bool needOffload, uint64_t &clipped, uint64_t &published )
 {
-    const double seriesS = m_settleS + m_stepCount * m_stepPeriodS;
+    const double seriesS = m_settleS + count * m_stepPeriodS;
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
@@ -3455,7 +3568,7 @@ inline bool counterOffload::collectSteps( stepDataT &d, bool needOffload, uint64
     const uint64_t clipStart      = m_clipped;
     const uint64_t publishedStart = m_published;
 
-    for( int k = 0; ok && k < m_stepCount; ++k )
+    for( int k = 0; ok && k < count; ++k )
     {
         m_stepPos = -m_stepPos;
 
@@ -3507,7 +3620,8 @@ inline bool counterOffload::measureStepOnly( bool &offloadOff )
     stepDataT d;
     uint64_t  clipped, published;
 
-    const bool collected = collectSteps( d, false, clipped, published );
+    const int  count     = 2 * m_stepCount; // the response is subtracted from every step, so give it half the noise
+    const bool collected = collectSteps( d, count, false, clipped, published );
 
     if( setOffloading( true ) ) // whatever happened
     {
@@ -3521,7 +3635,7 @@ inline bool counterOffload::measureStepOnly( bool &offloadOff )
 
     std::vector<stepT> steps;
     const size_t       found = findSteps( d, m_onsetSigma, steps );
-    const size_t       need  = std::max<size_t>( 2, m_stepCount / 2 );
+    const size_t       need  = std::max<size_t>( 2, count / 2 );
 
     size_t span = std::numeric_limits<size_t>::max();
 
@@ -3543,14 +3657,23 @@ inline bool counterOffload::measureStepOnly( bool &offloadOff )
     }
 
     const size_t        len = span - m_guardFrames;
-    std::vector<double> response;
-    const size_t        n = stepOnlyResponse( d, steps, len, response );
+    std::vector<double> response, noise;
+    const size_t        n = stepOnlyResponse( d, steps, len, response, noise );
 
-    double energy = 0;
+    // Energy at each lag, summed over the modes, less the noise of the average.
+    const size_t        M = d.nModes;
+    std::vector<double> lagEnergy( len, 0 );
+    double              energy = 0;
 
-    for( double v : response )
+    for( size_t j = 0; j < len; ++j )
     {
-        energy += v * v;
+        for( size_t m = 0; m < M; ++m )
+        {
+            lagEnergy[j] += response[j * M + m] * response[j * M + m];
+        }
+
+        lagEnergy[j] -= noise[j];
+        energy += lagEnergy[j];
     }
 
     // RMS change from the previous measurement over the lags both have, relative to the previous response.
@@ -3574,6 +3697,7 @@ inline bool counterOffload::measureStepOnly( bool &offloadOff )
     }
 
     m_stepOnly      = std::move( response );
+    m_stepOnlyNoise = std::move( noise );
     m_stepOnlyCount = n;
     m_lagFrames     = len - m_maxPhaseFrames;
 
@@ -3598,6 +3722,8 @@ inline bool counterOffload::measureStepOnly( bool &offloadOff )
         m_csv.flush();
     }
 
+    writeLagRow( wall, stageStepOnly, p, lagEnergy );
+
     return calibWait( 2 * m_stepPeriodS, true ); // the offload train started by turning offload back on settles
 }
 
@@ -3607,7 +3733,7 @@ inline bool counterOffload::measure( const calibParamsT &p, stepFomT &f, uint64_
 
     stepDataT d;
 
-    if( !collectSteps( d, true, clipped, published ) )
+    if( !collectSteps( d, m_stepCount, true, clipped, published ) )
     {
         return false;
     }
@@ -3617,7 +3743,15 @@ inline bool counterOffload::measure( const calibParamsT &p, stepFomT &f, uint64_
 
     alignSteps( d, steps, m_stepOnly, m_matchFrames, m_maxShiftFrames );
 
-    f = stepFom( d, steps, m_stepOnly, m_stepOnlyCount, m_lagFrames );
+    // The window in frames, from the mean frame interval.
+    const size_t nFrames = d.frameNs.size();
+    const double frameNs =
+        ( nFrames > 1 ) ? double( d.frameNs.back() - d.frameNs.front() ) / ( nFrames - 1 ) : 0;
+    const size_t window =
+        ( frameNs > 0 ) ? static_cast<size_t>( std::lround( m_fomWindowMs * 1e6 / frameNs ) ) : m_lagFrames;
+    const size_t lags = std::min( m_lagFrames, std::max<size_t>( 1, window ) );
+
+    f = stepFom( d, steps, m_stepOnly, m_stepOnlyNoise, lags, std::min( m_lagFrames, std::max( lags, m_profileLags ) ) );
 
     const size_t need = std::max<size_t>( 2, m_stepCount / 2 );
 
@@ -3881,6 +4015,8 @@ counterOffload::addRow( int stage, const calibParamsT &p, const stepFomT &f, uin
     row.phase        = f.phase;
     row.phaseSd      = f.phaseSd;
 
+    writeLagRow( row.wall, stage, p, f.lagEnergy );
+
     row.clippedSlots   = clipped;
     row.publishedSlots = published;
 
@@ -3925,6 +4061,26 @@ inline void counterOffload::writeCsvPrefix( const timespec &wall, int stage, con
     m_csv << std::fixed << wall.tv_sec << "." << std::setw( 9 ) << std::setfill( '0' ) << wall.tv_nsec
           << std::setfill( ' ' ) << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << "," << p[1]
           << "," << p[2] << "," << m_stepElement << "," << m_stepAmp << "," << m_stepCount << "," << m_stepModes;
+}
+
+inline void counterOffload::writeLagRow( const timespec            &wall,
+                                        int                        stage,
+                                        const calibParamsT        &p,
+                                        const std::vector<double> &lagEnergy )
+{
+    const size_t n = std::min( lagEnergy.size(), m_profileLags );
+
+    m_lagCsv << std::fixed << wall.tv_sec << "." << std::setw( 9 ) << std::setfill( '0' ) << wall.tv_nsec
+             << std::setfill( ' ' ) << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << ","
+             << p[1] << "," << p[2] << "," << n;
+
+    for( size_t l = 0; l < n; ++l )
+    {
+        m_lagCsv << "," << lagEnergy[l];
+    }
+
+    m_lagCsv << "\n";
+    m_lagCsv.flush();
 }
 
 inline void counterOffload::writeFitRow( int stage, const calibParamsT &p, const choiceT &ch, double sigma )
