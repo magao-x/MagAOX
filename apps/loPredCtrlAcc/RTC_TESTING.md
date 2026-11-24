@@ -13,7 +13,7 @@ Each model trains only while its mode is selected, so the standard and assisted 
 
 | Setting | Value | Reason |
 | --- | --- | --- |
-| `dm.channelName` | `dm01disp09_aux` | One producer per scheduler destination. The `<aux>.producer` lock is exclusive, and synco copies the whole image. `acc000` owns `dm01disp10_aux`, so the disturbance and the correction must use different destinations; dmcomb sums them. The code accepts any `*_aux` name. |
+| `dm.channelName` | `dm01disp05_aux` | The tweeter channel DDSPC writes. One producer per scheduler destination. The `<aux>.producer` lock is exclusive, and synco copies the whole image. `acc000` owns `dm01disp10_aux`, so the disturbance and the correction must use different destinations; dmcomb sums them. The code accepts any `*_aux` name. |
 | `dm.threadPrio` | `20` | Dedicated producer worker started by `MagAOXApp::threadStart`, as in accelSim and dmSpeckle. It runs below the scheduler's priority 30. |
 | `dm.cpuset` | `spare29` | Dedicated development core (CPU 29). acc000 uses `spare30` and `spare31`. |
 | `shmimMonitor.cpuset` | `spare28` | Runs the WFS decisions and all learning. Assisted learning takes about 160 µs per 500 µs frame on a development Mac (one 212-column QR update, four phase solutions, 16 slot gains). |
@@ -71,13 +71,13 @@ The feedback sign matches mfilt only if `dm.modeCube` planes 0 and 1 use mfilt's
 
 ```bash
 hostname   # the RTC
-grep -n destinations /opt/MagAOX/config/dmtweeter-synco.conf   # must list dm01disp09
-ls -l /milk/shm/dm01disp09_aux.im.shm                          # must exist with the tweeter geometry
-lslocks | grep -E 'dm01disp09_aux' || echo 'no producer owns dm01disp09_aux'
+grep -n destinations /opt/MagAOX/config/dmtweeter-synco.conf   # must list dm01disp05
+ls -l /milk/shm/dm01disp05_aux.im.shm                          # must exist with the tweeter geometry
+lslocks | grep -E 'dm01disp05_aux' || echo 'no producer owns dm01disp05_aux'
 cat "$CGROUPS1_CPUSET_MOUNTPOINT/spare28/tasks" "$CGROUPS1_CPUSET_MOUNTPOINT/spare29/tasks"   # both empty
 ```
 
-If `dm01disp09` is not a scheduler destination or is in use, choose another unused destination and set `dm.channelName` to it. Changing the scheduler configuration is a separate decision.
+If `dm01disp05` is not a scheduler destination, synco never copies `dm01disp05_aux` and nothing reaches the DM: add it to the scheduler's `[streams] destinations` (a separate scheduler configuration change) before starting loPredCtrlAcc.
 
 ## Build and install
 
@@ -184,7 +184,7 @@ Take `getINDI 'loPredCtrlAcc.ddspc_performance.*'` and `getINDI 'dmtweeter-synco
 - In assisted mode: `predict_rate_hz` near 8000 (a calculation for every slot, not a replayed plan); while learning, `update_rate_hz` and `refresh_rate_hz` near 2000 (one QR-RLS update per WFS frame); `fast_holds`, `acc_lagging`, `acc_anomalies`, `step_mismatch` and `learn_overruns` near zero; `acc_phase0..3` equal; `margin_us_min` positive; `learn_us_p99` well below 500.
 - `acc_age_calc_us_*` and `acc_age_apply_us_*` give the age of the newest ACC sample at each calculation and at the slot's DM target time. Lower `dm.renderLeadUs` while `margin_us_min` stays positive with headroom; raise it if `transport_skipped` rises.
 - `safety.output_state` to report `transport_acknowledged_not_physical_application`.
-- The scheduler's accepted count for the `dm01disp09` index (the third destination, `accepted2`) to rise by about 480,000, with `missing2` and `rejected2` near zero.
+- The scheduler's accepted count for the `dm01disp05` index (`accepted<k>`, where k is its position in `[streams] destinations`, counting from 0) to rise by about 480,000, with `missing<k>` and `rejected<k>` near zero.
 
 ## Benchmark on the RTC (optional, operator decision)
 
