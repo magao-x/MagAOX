@@ -19,7 +19,10 @@ Before this change:
 
 ## Design
 
-`parameters.max_fill` (default 1, range 0–2) consecutive missed frames are filled; 0 restores the old behaviour.
+`parameters.max_fill` (default 5, range 0–20; user direction: at least 5) consecutive missed frames are filled; 0
+restores the old behaviour. The copied-slot ring holds `(max(max_fill, 2) + 2)·q` slots (`ringSize()`, set in
+`loadConfig()`; previously a fixed 4 frames), so every slot of a filled gap and the current interval is retained. A gap
+the ring cannot hold falls back to the newest copy. 20 frames (10 ms) is the WFS `input_timeout`.
 
 - **WFS:** in `step()`, a gap of 1..`max_fill` frames calls `fillFrame()` for each missed counter before the current
   frame. It holds the previous measurement and takes the missed frame's interval from the copied-slot ring (the q slots
@@ -62,6 +65,8 @@ output; a predicted fill can replace it later if hold proves worse.
 - T1 (`standard_equivalence.py`): its "edges" scenario injects a WFS gap, which is now filled. The trace turns filling off
   (like the integrator) through a `requires` check, so T1 still verifies that nothing else changed: 192000 values
   bit-for-bit identical to HEAD and to `1ff631bb`.
+- Default raised from 1 to 5: the ACC test fills five consecutive empty frames and refuses the sixth; the WFS tests use
+  gaps of 1–5 frames (standard residual ratio 0.092).
 - Results on `ASTR-LT-428.local`: `check-rtc-controller` 30/30, `check-operational-controls` 16/16 plus the config unit
   tests, `check-operational-output` 5/5.
 - Formatting: changed line ranges only; the two hand-aligned `ddspc_performance` name tables were left in their layout.

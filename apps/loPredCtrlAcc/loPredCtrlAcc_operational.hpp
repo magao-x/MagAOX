@@ -218,7 +218,8 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Assisted weight on command variation within each future frame, relative to max(C^T C) like the command penalty.
     double m_ripple{ 10 };
 
-    /// Size of the copied-slot ring: four frames of slots.
+    /// Size of the copied-slot ring, set by loadConfig() from ringSize(); a gap it cannot hold falls back to the newest
+    /// copy.
     int m_ring{ 16 };
 
     /// Brief plan/copied-command exchange with the producer worker, kept separate from all RLS and QR work.
@@ -391,7 +392,7 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
      * the missed WFS measurement holds the previous one, a missed ACC sample holds the one before it, and the DM keeps
      * its command. Prediction continues; learning pauses until no example contains a filled value.
      * @{ */
-    int m_maxFill{ 1 }; ///< Consecutive missed WFS frames (and WFS frames of ACC samples) filled; 0 disables filling.
+    int m_maxFill{ 5 }; ///< Consecutive missed WFS frames (and WFS frames of ACC samples) filled; 0 disables filling.
 
     DDSPC::Matrix m_lastMeasurement; ///< Previous WFS measurement, held for a missed frame; WFS thread.
 
@@ -504,6 +505,9 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
     /// Return a copy of the combined main-loop integrator parameters.
     Integrator integrator();
+
+    /// Copied-slot ring size: the slots of max(max_fill, 2) + 2 WFS frames, so a filled gap's slots are all retained.
+    int ringSize() const;
 
     /// Advance both fits' histories over a missed WFS frame without changing the DM command; caller holds m_modelMutex.
     /** The missed measurement holds the previous one; its interval's commands are the q slots copied after the previous
@@ -803,8 +807,8 @@ inline void loPredCtrlAcc_operational::setupConfig()
     add( "parameters",
          "max_fill",
          "int",
-         "Consecutive missed WFS frames, and WFS frames of missed ACC samples, filled instead of stopping (0-2, "
-         "default 1)." );
+         "Consecutive missed WFS frames, and WFS frames of missed ACC samples, filled instead of stopping (0-20, "
+         "default 5)." );
     add( "parameters", "qrd", "bool", "Use QR-RLS for both independent models." );
     add( "integrator",
          "enabled",
@@ -899,7 +903,7 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
             m_inputTimeout <= 0 || m_inputTimeout > 1 || m_settings.m_modes < 1 || m_settings.m_modes > 2 ||
             m_accelHistory < 1 || m_accelHistory > 16 || m_slots < 1 || m_slots > 16 || m_ratio < 1 || m_ratio > 16 ||
             !std::isfinite( renderLeadUs ) || renderLeadUs < 0 || renderLeadUs > 1000 || !std::isfinite( m_ripple ) ||
-            m_ripple < 0 || m_maxFill < 0 || m_maxFill > 2 )
+            m_ripple < 0 || m_maxFill < 0 || m_maxFill > 20 )
         {
             throw std::invalid_argument( "Invalid operational WFS, producer, gain or model configuration" );
         }
@@ -912,7 +916,7 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         }
 
         m_renderLeadNs             = std::llround( renderLeadUs * 1000 );
-        m_ring                     = 4 * m_slots;
+        m_ring                     = ringSize();
         m_settings.m_accelChannels = 2 * m_ratio * m_accelHistory;
         loadCalibration();
         validateModalOutput(); // After the calibration, which can replace the modal indices.
@@ -1320,6 +1324,11 @@ inline loPredCtrlAcc_operational::Integrator loPredCtrlAcc_operational::integrat
 {
     std::lock_guard<std::mutex> lock( m_commandMutex );
     return m_integrator;
+}
+
+inline int loPredCtrlAcc_operational::ringSize() const
+{
+    return ( std::max( m_maxFill, 2 ) + 2 ) * m_slots;
 }
 
 inline void loPredCtrlAcc_operational::fillFrame( std::uint64_t counter, std::uint64_t current )

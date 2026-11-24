@@ -203,6 +203,7 @@ Controller::Controller( bool qr )
     m_calibration.m_shapes.topRows( 2 ).setIdentity();
     m_calibration.m_projection = m_calibration.m_shapes.transpose();
     m_copiedCommand            = DDSPC::Matrix::Zero( 2, 1 );
+    m_ring                     = ringSize(); // As loadConfig(), so the default max_fill gap is retained.
     m_appliedSlots             = DDSPC::Matrix::Zero( 2, m_ring );
     m_commandKnown             = true;
     resetModels();
@@ -559,14 +560,19 @@ TEST_CASE( "Operational WFS decision consumes individual upstream sensor samples
         REQUIRE( features( 2 * i ) == 3 - i );
         REQUIRE( features( 2 * i + 1 ) == -double( 3 - i ) );
     }
-    // A missed ACC frame is filled one frame on, holding the newest sample; a second consecutive one is not.
+    // Up to max_fill (5) consecutive missed ACC frames are filled, one frame on each, holding the newest sample; the
+    // next one is not.
+    REQUIRE( app.m_maxFill == 5 );
     batch.m_count = 0;
-    REQUIRE( app.sensorHistory( batch, rows, features, 1500000 ) );
-    REQUIRE( app.m_adcAnchor == 17 );
-    REQUIRE( app.m_accFilled );
-    for( unsigned i = 0; i < 4; ++i )
+    for( unsigned k = 1; k <= 5; ++k )
     {
-        REQUIRE( features( 2 * i ) == 3 );
+        REQUIRE( app.sensorHistory( batch, rows, features, 1500000 ) );
+        REQUIRE( app.m_adcAnchor == 13 + 4 * k );
+        REQUIRE( app.m_accFilled );
+        for( unsigned i = 0; i < 4; ++i )
+        {
+            REQUIRE( features( 2 * i ) == 3 );
+        }
     }
     REQUIRE_FALSE( app.sensorHistory( batch, rows, features, 1500000 ) );
     REQUIRE( std::string( app.m_windowReason.load() ) == "no_new_sample" );
@@ -1347,12 +1353,13 @@ TEST_CASE( "Standard prediction continues through a missed WFS frame", "[rtc-con
         frame( n, 0 );
     }
 
-    // Frozen: each missed frame keeps the fit ready and the output qualified, with no slot shift.
+    // Frozen: gaps of up to max_fill frames keep the fit ready and the output qualified, with no slot shift.
     app.freeze();
     const auto shifts = app.m_slotShifts;
     for( ; n < 4500; ++n )
     {
-        frame( n, n % 97 == 0 ? 1 : 0 );
+        // Gaps of 1 to 5 frames.
+        frame( n, n % 97 == 0 ? 1 + ( n / 97 ) % 5 : 0 );
         REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready );
         REQUIRE( app.m_candidateValid.load() );
     }
@@ -1419,7 +1426,8 @@ TEST_CASE( "Assisted prediction continues through a missed WFS frame", "[rtc-con
     for( int i = 0; i < 200; ++i )
     {
         const auto predictions = app.m_fastStats.m_predictions;
-        frame( i % 23 == 0 ? 1 : 0 );
+        // Gaps of 1 to 5 frames.
+        frame( i % 23 == 0 ? 1 + ( i / 23 ) % 5 : 0 );
         REQUIRE( app.m_fastStats.m_predictions - predictions == 4 ); // The frame after a gap is predicted too.
         REQUIRE( app.m_candidateValid.load() );
     }
