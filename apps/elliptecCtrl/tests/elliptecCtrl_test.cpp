@@ -182,8 +182,8 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
         return m_lastCommand.getDevice();
     }
 
-    /// Set `stage.homePreset` (0-based).
-    void homePreset( int n /**< [in] 0-based preset index, negative to disable */ )
+    /// Set `stage.homePreset`.
+    void homePreset( int n /**< [in] preset number (1 is the first preset), 0 or negative to disable */ )
     {
         m_homePreset = n;
     }
@@ -204,6 +204,12 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     float preset() const
     {
         return m_preset;
+    }
+
+    /// Target preset (1-based, 0 for none).
+    float presetTarget() const
+    {
+        return m_preset_target;
     }
 
     /// Read a configuration file and load it.
@@ -229,6 +235,24 @@ class elliptecCtrl_test : public MagAOX::app::elliptecCtrl
     int homePresetIndex() const
     {
         return m_homePreset;
+    }
+
+    /// Preset names published in the `presetName` switch vector.
+    const std::vector<std::string> &presetNames() const
+    {
+        return m_presetNames;
+    }
+
+    /// Whether the `presetName` switch vector has an element.
+    bool hasPresetNameElement( const std::string &name /**< [in] element name */ ) const
+    {
+        return m_indiP_presetName.find( name );
+    }
+
+    /// Preset name that `stdMotionStage` would switch on for the current position.
+    std::string activeName()
+    {
+        return activePresetName( static_cast<int>( presetNumber() ) );
     }
 };
 
@@ -323,6 +347,7 @@ TEST_CASE( "elliptecCtrl sends absolute targets to the low level", "[elliptecCtr
     REQUIRE( app.lastCommandValue() == Approx( 115.0 ) );
     REQUIRE( app.lastCommandName() == "tgt_pos" );
     REQUIRE( app.state() == MagAOX::app::stateCodes::OPERATING );
+    REQUIRE( app.presetTarget() == Approx( 1.0F ) );
 
     app.llPos( 115.2 );
     app.llState( "READY" );
@@ -331,6 +356,7 @@ TEST_CASE( "elliptecCtrl sends absolute targets to the low level", "[elliptecCtr
     REQUIRE( app.requestPresetName( "sky" ) == 0 );
     REQUIRE( app.lastCommandValue() == Approx( 300.0 ) );
     REQUIRE( app.lastCommandName() == "tgt_pos" );
+    REQUIRE( app.presetTarget() == Approx( 2.0F ) );
 
     // Position targets outside [0, 360) wrap.
     REQUIRE( app.position( 400.0 ) == 0 );
@@ -347,6 +373,43 @@ TEST_CASE( "elliptecCtrl sends absolute targets to the low level", "[elliptecCtr
     REQUIRE( app.preset() == Approx( 2.0F ) );
     app.llPos( 301.0 );
     REQUIRE( app.preset() == Approx( 0.0F ) );
+}
+
+/// A `none` preset is published, reported away from every preset, and does not move the stage.
+/** \ingroup elliptecCtrl_unit_test
+ */
+TEST_CASE( "elliptecCtrl publishes a none preset", "[elliptecCtrl]" )
+{
+#ifdef ELLIPTECCTRL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecCtrl::appStartup();
+    MagAOX::app::elliptecCtrl::presetNumber();
+    MagAOX::app::elliptecCtrl::presetIndexForPosition_( 0 );
+    // clang-format on
+#endif
+
+    elliptecCtrl_test app( "ellctrl-none" );
+    readyAt( app, 10.0 );
+
+    REQUIRE( app.presetNames() == std::vector<std::string>{ "none", "lab", "sky" } );
+    REQUIRE( app.hasPresetNameElement( "none" ) );
+
+    // Away from every preset, including 359 degrees (the "none" placeholder position is -1).
+    REQUIRE( app.preset() == Approx( 0.0F ) );
+    REQUIRE( app.activeName() == "none" );
+    app.llPos( 359.0 );
+    REQUIRE( app.activeName() == "none" );
+
+    app.llPos( 115.0 );
+    REQUIRE( app.preset() == Approx( 1.0F ) );
+    REQUIRE( app.activeName() == "lab" );
+
+    // Selecting "none", by name or as preset 0, does not move the stage.
+    REQUIRE( app.requestPresetName( "none" ) == 0 );
+    REQUIRE( app.lastCommandName().empty() );
+    REQUIRE( app.requestPreset( 0 ) == 0 );
+    REQUIRE( app.lastCommandName().empty() );
+    REQUIRE( app.activeName() == "lab" );
 }
 
 /// Motion is refused unless the stage is connected and not homing.
@@ -415,7 +478,7 @@ TEST_CASE( "elliptecCtrl home sequence and stop", "[elliptecCtrl]" )
     SECTION( "with a home preset the home is followed by a preset move" )
     {
         elliptecCtrl_test app( "ellctrl-home-preset" );
-        app.homePreset( 1 );
+        app.homePreset( 2 );
         REQUIRE( app.startup() == 0 );
         app.llState( "NOTHOMED" );
 
@@ -434,6 +497,22 @@ TEST_CASE( "elliptecCtrl home sequence and stop", "[elliptecCtrl]" )
         app.llState( "READY" );
         REQUIRE( app.state() == stateCodes::READY );
         REQUIRE( app.preset() == Approx( 2.0F ) );
+        REQUIRE( app.lastCommandName().empty() );
+    }
+
+    SECTION( "a home preset of 0 (none) does not move after the home" )
+    {
+        elliptecCtrl_test app( "ellctrl-home-none" );
+        app.homePreset( 0 );
+        REQUIRE( app.startup() == 0 );
+        app.llState( "NOTHOMED" );
+
+        REQUIRE( app.pressHome() == 0 );
+        app.lastCommandName();
+        app.llState( "HOMING" );
+        app.llPos( 0.0 );
+        app.llState( "READY" );
+        REQUIRE( app.state() == stateCodes::READY );
         REQUIRE( app.lastCommandName().empty() );
     }
 
@@ -540,8 +619,27 @@ TEST_CASE( "elliptecCtrl configuration", "[elliptecCtrl]" )
         mx::app::writeConfigFile( "/tmp/elliptecCtrl_test_homepreset.conf",
                                   { "stage", "presets", "presets" },
                                   { "homePreset", "names", "positions" },
-                                  { "2", "lab, sky", "115, 300" } );
+                                  { "3", "lab, sky", "115, 300" } );
         REQUIRE( app.loadConfigFile( "/tmp/elliptecCtrl_test_homepreset.conf" ) == -1 );
+    }
+    {
+        elliptecCtrl_test app( "ellctrl-config-homepreset-last" );
+        app.setupConfig();
+        mx::app::writeConfigFile( "/tmp/elliptecCtrl_test_homepreset_last.conf",
+                                  { "stage", "presets", "presets" },
+                                  { "homePreset", "names", "positions" },
+                                  { "2", "lab, sky", "115, 300" } );
+        REQUIRE( app.loadConfigFile( "/tmp/elliptecCtrl_test_homepreset_last.conf" ) == 0 );
+        REQUIRE( app.homePresetIndex() == 2 );
+    }
+    {
+        elliptecCtrl_test app( "ellctrl-config-mismatch" );
+        app.setupConfig();
+        mx::app::writeConfigFile( "/tmp/elliptecCtrl_test_mismatch.conf",
+                                  { "presets", "presets" },
+                                  { "names", "positions" },
+                                  { "lab, sky", "115" } );
+        REQUIRE( app.loadConfigFile( "/tmp/elliptecCtrl_test_mismatch.conf" ) == -1 );
     }
     {
         elliptecCtrl_test app( "ellctrl-config-close" );
