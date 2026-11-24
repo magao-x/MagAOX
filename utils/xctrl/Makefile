@@ -22,7 +22,7 @@ $(LOGGEN):
 COMPLETIONS_DIR ?= /usr/share/bash-completion/completions
 
 # the root-owned allow lists of [systemd] directives: the defaults, always overwritten, and the local copy xctrl
-# reads, created from the defaults, with its own header, only if it does not exist
+# reads first, a copy of the defaults made only if it does not exist
 ALLOW_DIR     = /etc/magaox
 ALLOW_DEFAULT = $(ALLOW_DIR)/systemd-directives.txt
 ALLOW_LIST    = $(ALLOW_DIR)/systemd-directives.local.txt
@@ -45,9 +45,8 @@ install: all
 	@if [ -e $(ALLOW_LIST) ]; then \
 	  echo "$(ALLOW_LIST) exists, kept: xctrl reads it, so add or remove directives there"; \
 	else \
-	  { cat systemd-directives.local-header.txt; sed '1,/^$$/d' systemd-directives.txt; } | \
-	    sudo install -o root -g root -m 0644 /dev/stdin $(ALLOW_LIST) && \
-	  echo "installed $(ALLOW_LIST), from the defaults: xctrl reads it, so add or remove directives there"; \
+	  sudo install -o root -g root -m 0644 systemd-directives.txt $(ALLOW_LIST) && \
+	  echo "installed $(ALLOW_LIST), a copy of the defaults: xctrl reads it, so add or remove directives there"; \
 	fi
 
 .PHONY: clean

@@ -433,7 +433,8 @@ class xCtrl
     /// The proclist of the role
     std::string proclistPath() const;
 
-    /// The root-owned allow list of the systemd directives `[systemd]` sections may set
+    /// The root-owned allow list of the systemd directives `[systemd]` sections may set: the local copy,
+    /// systemd-directives.local.txt, if it exists, else the installed defaults, systemd-directives.txt
     std::string allowListPath() const;
 
     ///@}
@@ -1170,7 +1171,7 @@ inline void systemdSettings( directiveMap             &dirs,
         }
         else if( !allow.count( d ) )
         {
-            why = " directive for " + source + " not in systemd-directives.local.txt allow list";
+            why = " directive for " + source + " not in systemd-directives allow list";
         }
         else if( !sections.count( d ) )
         {
@@ -1577,7 +1578,9 @@ inline std::string xCtrl::proclistPath() const
 
 inline std::string xCtrl::allowListPath() const
 {
-    return m_sysroot + "/etc/magaox/systemd-directives.local.txt";
+    std::string dir = m_sysroot + "/etc/magaox/", local = dir + "systemd-directives.local.txt";
+    struct stat st;
+    return lstat( local.c_str(), &st ) == 0 ? local : dir + "systemd-directives.txt";
 }
 
 inline void xCtrl::usage( std::ostream &os ) const
@@ -1606,7 +1609,7 @@ inline void xCtrl::usage( std::ostream &os ) const
           "                         new and changed apps, set autostart from #!, unregister apps no\n"
           "                         longer in the proclist unless they are running; starts and stops\n"
           "                         nothing.  [systemd] directives must be in the root-owned allow list\n"
-          "                         /etc/magaox/systemd-directives.local.txt\n"
+          "                         /etc/magaox/systemd-directives.local.txt, else systemd-directives.txt\n"
           "  add NAME EXECUTABLE    add the app to the proclist disabled (#!), and register it; it needs\n"
           "                         NAME.conf; add -- -NAME EXECUTABLE for an app without a watchdog\n"
           "  enable NAME...|--all   autostart on: remove the app's #! in the proclist (adding it if\n"
@@ -2182,7 +2185,9 @@ inline const allowList *xCtrl::allowedDirectives()
     struct stat fs, ds;
     if( lstat( path.c_str(), &fs ) < 0 || !S_ISREG( fs.st_mode ) )
     {
-        m_allowError = "no directive allow list " + path + ": install it with sudo make install in utils/xctrl";
+        m_allowError = "no directive allow list " + path.substr( 0, path.rfind( '/' ) + 1 ) +
+                       "systemd-directives.local.txt or systemd-directives.txt: install it with sudo make install in "
+                       "utils/xctrl";
         return nullptr;
     }
 

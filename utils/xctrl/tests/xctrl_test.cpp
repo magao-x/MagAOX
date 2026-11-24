@@ -229,8 +229,7 @@ TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
                                 warnings.end(),
                                 [&]( const std::string &w ) { return w.find( text ) != std::string::npos; } );
         };
-        REQUIRE( has(
-            "[systemd] nice directive for cam not in systemd-directives.local.txt allow list; ignoring directive" ) );
+        REQUIRE( has( "[systemd] nice directive for cam not in systemd-directives allow list; ignoring directive" ) );
         REQUIRE(
             has( "[systemd] fooSec directive for cam does not exist on this version of systemd; ignoring directive" ) );
         REQUIRE( has( "[systemd] user directive for cam can not be set" ) );

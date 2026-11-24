@@ -128,22 +128,23 @@ any form systemd accepts, e.g. `500ms`, `2min`, `infinity` or `SIGABRT`, after s
 
 `sync` writes the units as root, for any user who can edit the proclist and the `.conf` files. Many directives are
 applied by systemd as root, e.g. `StandardOutput=file:PATH` or `BindPaths`, and would let such a user become root.
-So a `[systemd]` key is used only if its directive is in `/etc/magaox/systemd-directives.local.txt`, one directive
-per line, `#` starting a comment. xctrl reads only that file. It must be owned by root and writable only by root, as
-must its directory; edit it with `sudo` to add or remove directives.
+So a `[systemd]` key is used only if its directive is in the allow list, one directive per line, `#` starting a
+comment. xctrl reads `/etc/magaox/systemd-directives.local.txt`, or, if it does not exist,
+`/etc/magaox/systemd-directives.txt`. The file must be owned by root and writable only by root, as must its directory;
+edit the `.local` copy with `sudo` to add or remove directives.
 
 `make install` in `utils/xctrl` installs two files, root:root 0644:
 
 | File                                        | `make install`                                                     |
 |---------------------------------------------|--------------------------------------------------------------------|
 | `/etc/magaox/systemd-directives.txt`        | the defaults, `utils/xctrl/systemd-directives.txt`, always overwritten; it warns if they differ from the file that was there. Do not edit it. |
-| `/etc/magaox/systemd-directives.local.txt`  | created from the defaults, with a header saying it is the file to edit, only if it does not exist; never changed afterwards |
+| `/etc/magaox/systemd-directives.local.txt`  | a copy of the defaults, made only if it does not exist; never changed afterwards. This is the file to edit, and the one xctrl reads. |
 
-After an update, compare the two to pick up new defaults. Without the local file, `sync`, and an editor's `start` or
+After an update, compare the two to pick up new defaults. With neither file, `sync`, and an editor's `start` or
 `startup`, stop with:
 
 ```
-error: no directive allow list /etc/magaox/systemd-directives.local.txt: install it with sudo make install in utils/xctrl; nothing synced
+error: no directive allow list /etc/magaox/systemd-directives.local.txt or systemd-directives.txt: install it with sudo make install in utils/xctrl; nothing synced
 ```
 
 The default allows the watchdog, start and stop timing and restart directives (`WatchdogSec`, `TimeoutStartSec`,
@@ -163,7 +164,7 @@ The apps ignore the `[systemd]` section; only `xctrl` reads it. A key that can n
 is registered without it, so with the role's value or systemd's default:
 
 ```
-warning: [systemd] runtimeMaxSec directive for maths_CO2 not in systemd-directives.local.txt allow list; ignoring directive
+warning: [systemd] runtimeMaxSec directive for maths_CO2 not in systemd-directives allow list; ignoring directive
 warning: [systemd] fooSec directive for maths_CO2 does not exist on this version of systemd; ignoring directive
 warning: [systemd] WatchdogSec = ten for maths_CO2 is an invalid value (systemd: Failed to parse sec value, ignoring: ten); ignoring directive
 ```
@@ -361,6 +362,6 @@ needs libMagAOX built first.
 # Testing without systemd
 
 `--dry-run` prints the files and `systemctl` commands instead, and logs nothing; with `--top DIR`, xctrl logs under `DIR/logs`, as the calling user. `--sysroot DIR --top DIR` writes the units under
-`DIR/etc` from a test MagAO-X tree, reads the allow list from `DIR/etc/magaox/systemd-directives.local.txt`, and runs only the `systemctl --root` commands that work offline (enable,
+`DIR/etc` from a test MagAO-X tree, reads the allow list from `DIR/etc/magaox`, and runs only the `systemctl --root` commands that work offline (enable,
 disable). Check the generated units with
 `SYSTEMD_UNIT_PATH=DIR/etc/systemd/system: systemd-analyze verify magaox-<role>-app@NAME.service`.

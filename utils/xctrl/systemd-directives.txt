@@ -1,9 +1,8 @@
 # The default systemd directives that the [systemd] section of magaox.conf or an app's .conf may set.
 #
-# make install in utils/xctrl installs this file as /etc/magaox/systemd-directives.txt, and ALWAYS OVERWRITES it
-# there, so do not edit that copy.  xctrl never reads it: it reads /etc/magaox/systemd-directives.local.txt, which
-# make install creates from this file the first time and never changes afterwards.  To add or remove directives,
-# edit systemd-directives.local.txt, with sudo; compare it with this file after an update for new defaults.
+# make install in utils/xctrl installs this file as /etc/magaox/systemd-directives.txt, always overwriting it, and
+# copies it to /etc/magaox/systemd-directives.local.txt if that does not exist.  xctrl reads the .local copy, or
+# this one if there is none: add or remove directives in systemd-directives.local.txt, with sudo.
 #
 # xctrl sync writes these into the apps' systemd units, as root, for any user who can edit the proclist, so the
 # list is what keeps that from granting more than the app's own resources and timing.  Both files are owned by root
