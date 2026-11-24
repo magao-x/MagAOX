@@ -67,6 +67,16 @@ getINDI 'loPredCtrlAcc.integrator.*' 'holoop.loop_gain.current' 'holoop.loop_mul
 
 The feedback sign matches mfilt only if `dm.modeCube` planes 0 and 1 use mfilt's DM mode sign. It is a startup setting; the restart that changes it also discards the fits, which would not apply in the other form. The design is in `agents/plans/2026-11/ddspc-standard-integrator.md`.
 
+### Missed frames
+
+A single missed WFS frame or ACC frame does not stop prediction (`parameters.max_fill`, default 1, up to 2 consecutive frames):
+
+- **Missed WFS frame:** the DM keeps its command (standard: the held or planned slot; assisted: the last slot). At the next frame both fits' histories are advanced over the gap with the previous measurement and the slots actually copied, so the fits stay ready and the output stays qualified.
+- **Missed ACC samples:** a missing sample inside the window holds the sample before it; a WFS frame with no new samples gets a window one frame after the previous one, holding the newest sample. `assisted_qualification.acc_window` reads `ok_filled`.
+- **Learning** pauses for `max(history, accel_history) + future + 1` frames after a fill, so no fit ever learns from a filled value. Prediction continues.
+
+`ddspc_performance.wfs_filled` and `acc_filled` count filled WFS frames and ACC samples. Longer gaps still break the histories (standard then stops qualifying until the history refills; assisted holds), and `max_fill=0` restores stopping on any gap.
+
 ## Before installation (operator, on the RTC)
 
 ```bash
@@ -266,7 +276,7 @@ Neither touches the main loop's own integrator. A tip/tilt command the main loop
 Prediction turns off and own-channel zero is requested when any of these occur:
 
 - a discarded receipt;
-- a stale WFS stream or a WFS counter gap, which breaks the model history;
+- a stale WFS stream (no frame within `input_timeout`), or a WFS gap longer than `parameters.max_fill` frames, which breaks the model history;
 - invalid selected sensor data;
 - a numerical fault.
 
