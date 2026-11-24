@@ -1400,3 +1400,50 @@ Started from 120/330/0.4. Nothing moved, and the confirmation (0.893, 0.902, 0.8
   - Narrow the gain grid to 0.4–0.6 by 0.05, so the quadratic fits the minimum.
   - P-9 (timing lags at the woofer latency).
   - Measure the woofer and counter timing at the WFS directly (dmTemporalResponse-style: woofer poke versus a counter-channel poke, same frame reference) before tuning further.
+
+### dmTemporalResponse Counter-Offload Mode (proposal, 2026-11-23; not implemented)
+
+**Goal.** Measure, at sub-frame resolution and with the loop open, how the deployed counter-offload lines up with the woofer at the WFS. The closed-loop calibration shows the counter removes only about 14% of the offload error, with weak waveform correlation (ρ about 0.4). That points to a timing error of about a frame or more, or a Δ shape mismatch. The closed loop cannot separate the two.
+
+**Proposal.** dmTemporalResponse acts as a stand-in t2wOffloader. In each trial, at delay d after a camWFS frame:
+1. write the woofer poke, as now;
+2. wait the real t2wOffloader gap between its woofer write and its post (read from `aol0_tweeterOffload` as `writetime − atime`), then post the matching tweeter Δ to the stream counterOffload watches, with `atime` set to the woofer write time;
+3. counterOffload (enabled, synco running) produces its real ramp through the real path;
+4. at the end of the trial, zero the woofer and post −Δ so the counter ramps back to zero.
+
+Each run is one of three cases:
+- `woofer`: woofer poke only (as now);
+- `counter`: Δ posted with no woofer poke, giving the deployed counter's response;
+- `both`: both, giving the residual the WFS sees.
+
+All responses are timed from the woofer write. The counter's response therefore includes every latency: the handoff, the slot wait, the 100 µs lead, dmcomb, the driver and the tweeter mechanics.
+
+**Results it gives.**
+- The woofer and counter t50 on one time axis, so the true timing error in µs.
+- The counter latency as a function of the woofer write's phase in the frame. Synco slots are fixed to the camWFS frames, so the latency depends on that phase; the phase t2wOffloader actually uses is reported separately.
+- The shape and size of the `both` residual, which separates a timing error from a shape or scale mismatch.
+- Optionally, open-loop tuning of `rampStartUs`, `rampDurationUs` and `gain`, with no closed loop, no step-only subtraction and no leak floor.
+
+**Limitation.** This measures the matching of the two DMs and the timing pipeline, not the closed loop's interaction with the counter.
+
+**Questions.**
+- **DT-Q1. Branch.** Answered (2026-11-23): `dev` was merged into `ktwitchell/dm-response`, which was merged into `ktwitchell/counter-offload`; the work goes on `ktwitchell/counter-offload`.
+- **DT-Q2. Δ pattern.** What does the counter get for a given woofer poke?
+  - (a) a pattern pair the user supplies: a woofer pattern and the tweeter Δ, for example captured from a real offload (`aol0_tweeterOffload` and the woofer channel). Recommended; simplest.
+  - (b) the app computes Δ from t2wOffloader's woofer-to-tweeter matrices; more code.
+  - (c) the same mode on each DM's mode cube; does not reproduce the real back-projection.
+  - **Answered (2026-11-23): (a), built into the app.**
+    - **The pair.** t2wOffloader offloads Σ δₚ · `wModes[p]` to the woofer and posts Σ δₚ · `tModesOrtho[p]` as Δ, with the same δₚ for both. So a single-mode offload of amplitude a in mode k is exactly woofer a · `wModes[k]` and tweeter Δ a · `tModesOrtho[k]`, independent of the offload gain.
+    - **The cubes.** t2wOffloader's `prepareModes()` writes `/tmp/tModesOrtho.fits` (50×50×N) and `/tmp/wModes.fits` (11×11×N) at every start; `wModes` is also published live as `aol0_CMmodesDM`. The user copies them to a permanent location.
+    - **App inputs.** The two cube paths, a mode index k (default 4, astig) and the amplitude (`amp`). The app reads plane k of each at run start and records each file's path, size and SHA-256 in the headers, as pattern mode does. It checks that each plane matches its DM channel's size, and that the woofer plane's command stays within `poke.maxCommand`.
+    - **Not modelled.** t2wOffloader's woofer actuator clipping (`actLim` = 7) is not applied; it does not matter at test amplitudes.
+    - **Fallback** (not chosen): a script that writes the two planes as pattern files.
+    - **Cubes copied (2026-11-24)** to `~/Documents/MagAO-X/Data/counterOffload/modeCubes/`, with `SHA256SUMS` alongside:
+      - `tModesOrtho.fits`: 50×50×80, SHA-256 `69073c7f…dd6cd`. Each plane is unit-normalized (Σ v² = 1, 1959 pixels); mode 4 has max |v| 0.046.
+      - `wModes.fits`: 11×11×80, SHA-256 `2d215175…6ed336`, 97 actuators. Mode 4 has max |v| 0.138, RMS 0.042, Σ v² 0.174.
+      - With `poke.maxCommand` 1, the mode-4 woofer pattern allows amp ≤ 7.2. These copies need to go to the RTC for the app.
+- **DT-Q3. Stream.** Should the app write `aol0_tweeterOffload` itself, refusing to start unless `t2wOffloader.offload` is off and the loop is open (recommended)? Or should it write a separate stream, with counterOffload restarted and its `shmimMonitor.shmimName` pointed at it?
+- **DT-Q4. Parameter scan.** Should the user change counterOffload's start, duration and gain by hand between runs (recommended at first), or should the app step them over INDI?
+  - **Answered (2026-11-24): by hand, between runs.**
+- **DT-Q3 answered (2026-11-24):** the app writes `aol0_tweeterOffload`, and refuses to start unless `t2wOffloader.offload` is off.
+- **Implementation plan:** `agents/plans/2026-11/dmTemporalResponse-counter-mode.md`.

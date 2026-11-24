@@ -1,8 +1,6 @@
 /** \file dmTemporalResponse_test.cpp
  * \brief Catch2 tests for the dmTemporalResponse app.
  *
- * \author Katie Twitchell (twitchell@arizona.edu)
- *
  * \ingroup dmTemporalResponse_files
  */
 
@@ -179,6 +177,14 @@ class dmTemporalResponse_test : public dmTemporalResponse
     float  m_gain{ 10 };    ///< Camera gain per DM unit.
     float  m_noise{ 0 };   ///< Per-pixel Gaussian camera noise sigma (0 = noise-free).
 
+    // Fake counterOffload model: a posted Δ produces -m_coModelGain * Δ, rising like the DM after m_latency.
+    std::vector<dmWrite>         m_posts;        ///< Counter posts, and zero requests as all-zero entries.
+    std::vector<timespec>        m_postStamps;   ///< The atime stamp of each post.
+    std::atomic<int>             m_zeroRequests{ 0 }; ///< counterOffload zero requests.
+    std::atomic<int>             m_failPosts{ 0 };    ///< If > 0, postCounter fails.
+    double                       m_coModelGain{ 1 };  ///< Model counter gain.
+    mx::improc::milkImage<float> m_counterTest;       ///< The test counter stream.
+
     /// Set up the harness with an nx x ny camera and DM.
     dmTemporalResponse_test( uint32_t nx = 8, /**< [in] camera and DM width */
                              uint32_t ny = 8  /**< [in] camera and DM height */
@@ -232,11 +238,122 @@ class dmTemporalResponse_test : public dmTemporalResponse
         stopCamera();
         std::error_code ec;
         std::filesystem::remove_all( m_baseTmp, ec );
-        for( const std::string &n :
-             { m_dmStreamOverride, m_configName + "_ref", m_configName + "_resp", m_configName + "_respavg" } )
+        closeCounter();
+        for( const std::string &n : { m_dmStreamOverride,
+                                      m_configName + "_ref",
+                                      m_configName + "_resp",
+                                      m_configName + "_respavg",
+                                      m_counterStreamName } )
         {
             std::filesystem::remove( m_shmDir + "/" + n + ".im.shm", ec );
         }
+    }
+
+    /// Record a counter post, then write the test counter stream if it is open.
+    int postCounter( const mx::improc::eigenImage<float> &delta, /**< [in] the Δ */
+                     const timespec                      &stamp  /**< [in] the atime stamp */
+                     ) override
+    {
+        if( m_failPosts > 0 )
+        {
+            return -1;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock( m_writeMutex );
+            m_posts.push_back( { s_fakeNs.load(), delta } );
+            m_postStamps.push_back( stamp );
+        }
+
+        return dmTemporalResponse::postCounter( delta, stamp );
+    }
+
+    /// Record a counterOffload zero request, which snaps the counter model to zero.
+    int requestCounterZero() override
+    {
+        std::unique_lock<std::mutex> flock( m_frameMutex, std::defer_lock );
+        if( std::this_thread::get_id() != m_camId )
+        {
+            flock.lock();
+        }
+
+        std::lock_guard<std::mutex> lock( m_writeMutex );
+
+        ++m_zeroRequests;
+
+        mx::improc::eigenImage<float> z( m_nx, m_ny );
+        z.setZero();
+        m_posts.push_back( { s_fakeNs.load(), z } );
+
+        return 0;
+    }
+
+    /// Simulated counter contribution at fake time tns: -m_coModelGain times the latest post, rising like the DM.
+    mx::improc::eigenImage<float> counterState( int64_t tns /**< [in] fake time [ns] */ )
+    {
+        std::lock_guard<std::mutex> lock( m_writeMutex );
+
+        mx::improc::eigenImage<float> st( m_nx, m_ny );
+        st.setZero();
+
+        if( m_posts.size() == 0 || m_posts.back().m_cmd.abs().maxCoeff() == 0 )
+        {
+            return st;
+        }
+
+        const dmWrite &p = m_posts.back();
+
+        double dt = ( tns - p.m_ns ) * 1e-3 - m_latency;
+        if( dt <= 0 )
+        {
+            return st;
+        }
+
+        return p.m_cmd * static_cast<float>( -m_coModelGain * ( 1.0 - exp( -dt / m_tau ) ) );
+    }
+
+    /// Set up poke mode t2wMode with mode 4 cubes, a test counter stream, and the counter start conditions.
+    /** Plane 4 of both cubes is 1 at (1,1) and -0.5 at (6,2); the other planes are zero.  The post delay is 30 us.
+     */
+    void setupCounter( const std::string &oc /**< [in] the offload case */ )
+    {
+        std::filesystem::create_directories( m_baseTmp );
+
+        mx::improc::eigenCube<float> cube( m_nx, m_ny, 6 );
+        cube.setZero();
+        cube.image( 4 )( 1, 1 ) = 1.0;
+        cube.image( 4 )( 6, 2 ) = -0.5;
+
+        mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
+        m_wooferModesFile  = m_baseTmp + "/wModes.fits";
+        m_tweeterModesFile = m_baseTmp + "/tModesOrtho.fits";
+        ff.write( m_wooferModesFile, cube );
+        ff.write( m_tweeterModesFile, cube );
+
+        m_pokeModeName    = "t2wMode";
+        m_t2wMode         = 4;
+        m_offloadCaseName = oc;
+
+        m_counterStreamName = uniqueName( "co" );
+        m_counterTest.create( m_counterStreamName, m_nx, m_ny );
+
+        m_postDelayUs   = 30;
+        m_t2wOffloading = 0;
+        m_coEnabled     = 1;
+        m_loopState     = 0;
+    }
+
+    /// The number of DM writes that were not all zero.
+    int nonzeroWrites()
+    {
+        std::lock_guard<std::mutex> lock( m_writeMutex );
+
+        int n = 0;
+        for( const dmWrite &w : m_writes )
+        {
+            n += ( w.m_cmd.abs().maxCoeff() > 0 );
+        }
+        return n;
     }
 
     /// Record DM writes, then write the test stream.
@@ -343,7 +460,7 @@ class dmTemporalResponse_test : public dmTemporalResponse
 
                         fakeClockAtLeast( atimeNs + static_cast<int64_t>( m_wake * 1e3 ) );
 
-                        im = m_bias + m_gain * dmState( atimeNs );
+                        im = m_bias + m_gain * ( dmState( atimeNs ) + counterState( atimeNs ) );
 
 
                         if( m_noise > 0 )
@@ -1260,6 +1377,12 @@ TEST_CASE( "dmTemporalResponse configuration defaults", "[dmTemporalResponse][co
     REQUIRE( app.maxLateFrac() == Approx( 0.1 ) );
     REQUIRE( app.minRefSNR() == Approx( 8 ) );
     REQUIRE( app.baseDir() == "/home/xsup/dm_response" );
+    REQUIRE( app.m_offloadCaseName == "woofer" );
+    REQUIRE( app.m_t2wMode == 4 );
+    REQUIRE( app.m_counterStreamName == "aol0_tweeterOffload" );
+    REQUIRE( app.m_postDelayUs == -1 );
+    REQUIRE( app.m_counterDevName == "counterOffload" );
+    REQUIRE( app.m_offloaderDevName == "t2wOffloader" );
 
     std::string sname;
     dmStreamName( sname, app.dmIndex(), app.dmChannel() );
@@ -2436,6 +2559,348 @@ TEST_CASE( "dmTemporalResponse measurement thread", "[dmTemporalResponse][run]" 
     REQUIRE( startRv == 0 );
     REQUIRE( status == "done" );
     REQUIRE( running == false );
+}
+
+/// Verify the t2wMode and offload-case helpers: names, cube planes, the stamped post gap, and the curve summary.
+/**
+ * \ingroup dmTemporalResponse_unit_test
+ */
+TEST_CASE( "dmTemporalResponse counter-offload helpers", "[dmTemporalResponse][helpers]" )
+{
+    // clang-format off
+    #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
+    dmTemporalResponseMath::pokeModeName( pokeMode() );
+    dmTemporalResponseMath::parseOffloadCase( offloadCase(), "" );
+    dmTemporalResponseMath::offloadCaseName( offloadCase() );
+    dmTemporalResponseMath::loadCubePlane( mx::improc::eigenImage<float>(), "", 0, 0, 0 );
+    dmTemporalResponseMath::stampedGapUs( timespec(), timespec() );
+    dmTemporalResponseMath::curveSummary( 0, 0, 0, {}, 0 );
+    #endif
+    // clang-format on
+
+    SECTION( "poke mode and offload case names" )
+    {
+        pokeMode mode;
+        REQUIRE( parsePokeMode( mode, "t2wMode" ) == 0 );
+        REQUIRE( mode == pokeMode::t2wMode );
+        REQUIRE( pokeModeName( pokeMode::t2wMode ) == "t2wMode" );
+        REQUIRE( pokeModeName( pokeMode::pattern ) == "pattern" );
+        REQUIRE( pokeModeName( pokeMode::actuator ) == "actuator" );
+
+        offloadCase oc;
+        for( const std::string &name : { "woofer", "counter", "both" } )
+        {
+            REQUIRE( parseOffloadCase( oc, name ) == 0 );
+            REQUIRE( offloadCaseName( oc ) == name );
+        }
+        REQUIRE( parseOffloadCase( oc, "tweeter" ) == -1 );
+    }
+
+    SECTION( "a t2wMode poke is amp times the plane" )
+    {
+        mx::improc::eigenImage<float> pat( 4, 3 ), cmd( 4, 3 );
+        pat.setConstant( 0.5 );
+        REQUIRE( buildPokeCommand( cmd, pokeMode::t2wMode, 0, 0, pat, -1, 2.0 ) == 0 );
+        REQUIRE( cmd( 3, 2 ) == Approx( -1.0 ) );
+    }
+
+    SECTION( "cube planes are checked for index and size" )
+    {
+        const std::string dir = "/tmp/" + uniqueName( "cube" );
+        std::filesystem::create_directories( dir );
+
+        mx::improc::eigenCube<float> cube( 5, 4, 3 );
+        cube.setZero();
+        cube.image( 2 )( 1, 3 ) = 7;
+
+        mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
+        ff.write( dir + "/c.fits", cube );
+
+        mx::improc::eigenImage<float> plane;
+        REQUIRE( loadCubePlane( plane, dir + "/c.fits", 2, 5, 4 ) == 0 );
+        REQUIRE( plane( 1, 3 ) == 7 );
+        REQUIRE( loadCubePlane( plane, dir + "/c.fits", 3, 5, 4 ) == -1 );  // no plane 3
+        REQUIRE( loadCubePlane( plane, dir + "/c.fits", -1, 5, 4 ) == -1 );
+        REQUIRE( loadCubePlane( plane, dir + "/c.fits", 2, 4, 5 ) == -1 );  // wrong size
+        REQUIRE( loadCubePlane( plane, dir + "/none.fits", 0, 5, 4 ) == -1 );
+
+        std::error_code ec;
+        std::filesystem::remove_all( dir, ec );
+    }
+
+    SECTION( "the stamped gap is writetime - atime, and -1 without a stamp or out of range" )
+    {
+        timespec w{ 100, 50000 };
+        REQUIRE( stampedGapUs( timespec{ 100, 30000 }, w ) == Approx( 20 ) );
+        REQUIRE( stampedGapUs( w, w ) == -1 );                      // no stamp
+        REQUIRE( stampedGapUs( timespec{ 100, 60000 }, w ) == -1 ); // negative
+        REQUIRE( stampedGapUs( timespec{ 99, 0 }, w ) == -1 );      // over 1000 us
+    }
+
+    SECTION( "the curve summary excludes the baseline point" )
+    {
+        double settled, peakAbs, rms;
+        REQUIRE( curveSummary( settled, peakAbs, rms, { 0, -2, 1, 1 }, 2 ) == 0 );
+        REQUIRE( settled == Approx( 1 ) );
+        REQUIRE( peakAbs == Approx( 2 ) );
+        REQUIRE( rms == Approx( sqrt( 6.0 / 3 ) ) );
+        REQUIRE( curveSummary( settled, peakAbs, rms, { 0 }, 2 ) == -1 );
+    }
+}
+
+/// Verify the offload_case and t2w_mode tunables and the t2wOffloader and counterOffload set properties.
+/**
+ * \ingroup dmTemporalResponse_unit_test
+ */
+TEST_CASE( "dmTemporalResponse counter-offload INDI", "[dmTemporalResponse][indi]" )
+{
+    // clang-format off
+    #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
+    dmTemporalResponse::newCallBack_m_indiP_offloadCase( pcf::IndiProperty() );
+    dmTemporalResponse::newCallBack_m_indiP_t2wMode( pcf::IndiProperty() );
+    dmTemporalResponse::setCallBack_m_indiP_t2wOffload( pcf::IndiProperty() );
+    dmTemporalResponse::setCallBack_m_indiP_coEnable( pcf::IndiProperty() );
+    dmTemporalResponse::setCallBack_m_indiP_coGain( pcf::IndiProperty() );
+    dmTemporalResponse::counterSetting( m_coGain, 0, pcf::IndiProperty() );
+    #endif
+    // clang-format on
+
+    dmTemporalResponse_test app;
+    REQUIRE( app.createIndiProperties() == 0 );
+
+    const std::string dev = app.m_configName;
+
+    SECTION( "offload_case and t2w_mode are set, and rejected during a run" )
+    {
+        REQUIRE( app.newCallBack_m_indiP_offloadCase( switchProp( dev, "offload_case", "both" ) ) == 0 );
+        REQUIRE( app.m_offloadCaseName == "both" );
+
+        REQUIRE( app.newCallBack_m_indiP_t2wMode( targetProp( dev, "t2w_mode", 7 ) ) == 0 );
+        REQUIRE( app.m_t2wMode == 7 );
+
+        app.m_running = true;
+        REQUIRE( app.newCallBack_m_indiP_offloadCase( switchProp( dev, "offload_case", "counter" ) ) == -1 );
+        REQUIRE( app.m_offloadCaseName == "both" );
+        app.m_running = false;
+    }
+
+    SECTION( "the toggles of t2wOffloader and counterOffload are tracked" )
+    {
+        REQUIRE( app.m_t2wOffloading == -1 );
+        REQUIRE( app.setCallBack_m_indiP_t2wOffload( switchProp( app.m_offloaderDevName, "offload", "toggle" ) ) == 0 );
+        REQUIRE( app.m_t2wOffloading == 1 );
+
+        pcf::IndiProperty off = switchProp( app.m_offloaderDevName, "offload", "toggle" );
+        off["toggle"].setSwitchState( pcf::IndiElement::Off );
+        REQUIRE( app.setCallBack_m_indiP_t2wOffload( off ) == 0 );
+        REQUIRE( app.m_t2wOffloading == 0 );
+
+        REQUIRE( app.setCallBack_m_indiP_coEnable( switchProp( app.m_counterDevName, "enable", "toggle" ) ) == 0 );
+        REQUIRE( app.m_coEnabled == 1 );
+    }
+
+    SECTION( "counterOffload settings are recorded, and a change during a run is flagged" )
+    {
+        pcf::IndiProperty gain( pcf::IndiProperty::Number );
+        gain.setDevice( app.m_counterDevName );
+        gain.setName( "gain" );
+        gain.add( pcf::IndiElement( "current" ) );
+        gain["current"] = 0.5;
+
+        REQUIRE( app.setCallBack_m_indiP_coGain( gain ) == 0 );
+        REQUIRE( app.m_coGain == Approx( 0.5 ) );
+        REQUIRE_FALSE( app.m_coChanged );
+
+        app.m_running       = true;
+        app.m_run.m_coGain  = 0.5;
+        gain["current"]     = 0.6;
+        REQUIRE( app.setCallBack_m_indiP_coGain( gain ) == 0 );
+        REQUIRE( app.m_coGain == Approx( 0.6 ) );
+        REQUIRE( app.m_coChanged );
+        app.m_running = false;
+    }
+}
+
+/// Verify the start checks and setup of the counter and both cases.
+/**
+ * \ingroup dmTemporalResponse_unit_test
+ */
+TEST_CASE( "dmTemporalResponse counter-offload start validation", "[dmTemporalResponse][run]" )
+{
+    // clang-format off
+    #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
+    dmTemporalResponse::prepareCounter();
+    dmTemporalResponse::closeCounter();
+    #endif
+    // clang-format on
+
+    dmTemporalResponse_test app;
+    app.setupCounter( "both" );
+    app.m_lastATimeNs = s_fakeNs.load();
+
+    timespec now = realtimeNow();
+
+    SECTION( "a valid setup opens the stream and builds the Δ" )
+    {
+        REQUIRE( app.prepareRun( now ) == 0 );
+        REQUIRE( app.m_counterOpened );
+        REQUIRE( app.m_postDelayUsed == Approx( 30 ) );
+        REQUIRE( app.m_deltaPos( 1, 1 ) == Approx( app.m_pokeAmp ) );
+        REQUIRE( app.m_deltaNeg( 6, 2 ) == Approx( 0.5 * app.m_pokeAmp ) );
+        REQUIRE( app.m_cmdPos( 6, 2 ) == Approx( -0.5 * app.m_pokeAmp ) );
+        REQUIRE( std::filesystem::exists( app.m_runDir + "/woofer_poke.fits" ) );
+        REQUIRE( std::filesystem::exists( app.m_runDir + "/counter_delta.fits" ) );
+    }
+
+    SECTION( "counter and both need poke mode t2wMode" )
+    {
+        app.m_pokeModeName = "actuator";
+        REQUIRE( app.prepareRun( now ) == -1 );
+    }
+
+    SECTION( "t2wOffloader must be reported not offloading" )
+    {
+        app.m_t2wOffloading = 1;
+        REQUIRE( app.prepareRun( now ) == -1 );
+        app.m_t2wOffloading = -1;
+        REQUIRE( app.prepareRun( now ) == -1 );
+    }
+
+    SECTION( "counterOffload must be reported enabled" )
+    {
+        app.m_coEnabled = 0;
+        REQUIRE( app.prepareRun( now ) == -1 );
+    }
+
+    SECTION( "the loop must be reported open" )
+    {
+        app.m_loopState = 1;
+        REQUIRE( app.prepareRun( now ) == -1 );
+    }
+
+    SECTION( "the counter stream must exist and match the tweeter mode plane" )
+    {
+        app.m_counterStreamName = uniqueName( "missing" );
+        REQUIRE( app.prepareRun( now ) == -1 );
+    }
+
+    SECTION( "the post delay is measured from t2wOffloader's stamp, and refused without one" )
+    {
+        app.m_postDelayUs = -1;
+        REQUIRE( app.prepareRun( now ) == -1 ); // a new stream has no stamp
+        REQUIRE_FALSE( app.m_counterOpened );
+
+        IMAGE im{};
+        REQUIRE( ImageStreamIO_openIm( &im, app.m_counterStreamName.c_str() ) == IMAGESTREAMIO_SUCCESS );
+        im.md->writetime = timespec{ 100, 50000 };
+        im.md->atime     = timespec{ 100, 25000 };
+        ImageStreamIO_closeIm( &im );
+
+        REQUIRE( app.prepareRun( now ) == 0 );
+        REQUIRE( app.m_postDelayUsed == Approx( 25 ) );
+    }
+
+    SECTION( "the woofer case does not open the stream" )
+    {
+        app.m_offloadCaseName = "woofer";
+        REQUIRE( app.prepareRun( now ) == 0 );
+        REQUIRE_FALSE( app.m_counterOpened );
+        REQUIRE( app.m_postDelayUsed == -1 );
+    }
+}
+
+/// Verify a counter-case run: only the reference pokes the woofer, every trial posts ±Δ and is zeroed, and the counter
+/// response is timed from the woofer write.
+/**
+ * \ingroup dmTemporalResponse_unit_test
+ */
+TEST_CASE( "dmTemporalResponse counter-case run", "[dmTemporalResponse][run]" )
+{
+    // clang-format off
+    #ifdef DMTEMPORALRESPONSE_TEST_DOXYGEN_REF
+    dmTemporalResponse::postCounter( mx::improc::eigenImage<float>(), timespec() );
+    dmTemporalResponse::requestCounterZero();
+    #endif
+    // clang-format on
+
+    dmTemporalResponse_test app;
+    app.setupCounter( "counter" );
+    app.m_nDelays = 2;
+
+    app.startCamera();
+    REQUIRE( app.runMeasurement() == 0 );
+    app.stopCamera();
+
+    REQUIRE( app.status() == "done" );
+
+    // Only the reference pass pokes the woofer; every measurement trial posts a Δ and requests a zero.
+    REQUIRE( app.nonzeroWrites() == 2 * app.m_nRef );
+
+    int nPosts = 0;
+    for( const auto &p : app.m_posts )
+    {
+        nPosts += ( p.m_cmd.abs().maxCoeff() > 0 );
+    }
+    REQUIRE( nPosts == app.m_nDelays * app.m_nTrials );
+    REQUIRE( app.m_zeroRequests >= nPosts );
+
+    // The stream carries the last post with the woofer-write stamp as atime.
+    REQUIRE( app.m_counterImage.md->atime.tv_sec == app.m_postStamps.back().tv_sec );
+    REQUIRE( app.m_counterImage.md->atime.tv_nsec == app.m_postStamps.back().tv_nsec );
+
+    // In woofer units the counter settles at -gain, and its t50 includes the post delay.
+    for( const responseMetrics &m : app.m_metrics )
+    {
+        REQUIRE( m.m_settled == Approx( -app.m_coModelGain ).margin( 0.02 ) );
+        REQUIRE( m.m_t50 == Approx( 30 + app.m_latency + app.m_tau * log( 2 ) ).epsilon( 0.05 ) );
+    }
+
+    mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
+    mx::improc::eigenCube<float>                     cube;
+    mx::fits::fitsHeader<XWC_DEFAULT_VERBOSITY>      fh;
+    ff.read( cube, fh, app.m_runDir + "/" + cubeFileName( app.m_delays[0] ) );
+
+    REQUIRE( fitsStr( fh["OFFCASE"].value<std::string>() ) == "counter" );
+    REQUIRE( fitsStr( fh["POKEMODE"].value<std::string>() ) == "t2wMode" );
+    REQUIRE( fh["T2WMODE"].value<int>() == 4 );
+    REQUIRE( fh["POSTDLY"].value<double>() == Approx( 30 ) );
+    REQUIRE( fh["POSTMEAN"].value<double>() == Approx( 30 ).margin( 3 ) );
+    REQUIRE( fh["COCHG"].value<int>() == 0 );
+}
+
+/// Verify a both-case run: the counter cancels the woofer, leaving only the post-delay residual.
+/**
+ * \ingroup dmTemporalResponse_unit_test
+ */
+TEST_CASE( "dmTemporalResponse both-case run", "[dmTemporalResponse][run]" )
+{
+    dmTemporalResponse_test app;
+    app.setupCounter( "both" );
+    app.m_nDelays = 2;
+
+    app.startCamera();
+    REQUIRE( app.runMeasurement() == 0 );
+    app.stopCamera();
+
+    REQUIRE( app.status() == "done" );
+    REQUIRE( app.nonzeroWrites() == 2 * app.m_nRef + app.m_nDelays * app.m_nTrials );
+
+    // The residual of a counter 30 us after the woofer is below 1 - exp(-30/tau) ~ 1%.
+    for( const responseMetrics &m : app.m_metrics )
+    {
+        REQUIRE( std::fabs( m.m_settled ) < 0.01 );
+        REQUIRE( m.m_peakAbs < 0.02 );
+        REQUIRE( m.m_residRms < 0.02 );
+    }
+
+    // The DM and the counter end at zero.
+    REQUIRE( app.lastWrite().m_cmd.abs().maxCoeff() == 0 );
+    REQUIRE( app.m_posts.back().m_cmd.abs().maxCoeff() == 0 );
+
+    mx::improc::eigenImage<float> metrics;
+    mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
+    ff.read( metrics, app.m_runDir + "/summary_metrics.fits" );
+    REQUIRE( metrics.cols() == 12 );
 }
 
 } // namespace dmTemporalResponseTest

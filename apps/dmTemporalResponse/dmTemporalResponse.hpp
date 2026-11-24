@@ -1,8 +1,6 @@
 /** \file dmTemporalResponse.hpp
  * \brief The MagAO-X DM temporal response measurement application header.
  *
- * \author Katie Twitchell (twitchell@arizona.edu)
- *
  * \ingroup dmTemporalResponse_files
  */
 
@@ -60,11 +58,20 @@ namespace app
 namespace dmTemporalResponseMath
 {
 
-/// The two poke modes supported by the app.
+/// The poke modes supported by the app.
 enum class pokeMode
 {
     actuator, ///< Poke a single actuator at (x, y).
-    pattern   ///< Apply a 2-D DM pattern loaded from a FITS file.
+    pattern,  ///< Apply a 2-D DM pattern loaded from a FITS file.
+    t2wMode   ///< Apply one plane of t2wOffloader's woofer mode cube, with the matching tweeter plane as the counter Δ.
+};
+
+/// What a measurement trial does, see dmTemporalResponse::m_offloadCaseName.  The reference pass always pokes the woofer.
+enum class offloadCase
+{
+    woofer,  ///< Poke the woofer only.
+    counter, ///< Post the tweeter Δ for counterOffload only, as t2wOffloader would after a woofer write.
+    both     ///< Poke the woofer and post the tweeter Δ.
 };
 
 /// Per-delay response metrics.
@@ -83,6 +90,12 @@ struct responseMetrics
     double m_delayErrMean{ std::numeric_limits<double>::quiet_NaN() }; ///< Mean of achieved - requested delay [us].
 
     double m_delayErrStd{ std::numeric_limits<double>::quiet_NaN() }; ///< Std of achieved - requested delay [us].
+
+    double m_settled{ std::numeric_limits<double>::quiet_NaN() }; ///< Mean response over the trailing frames.
+
+    double m_peakAbs{ std::numeric_limits<double>::quiet_NaN() }; ///< Largest |response| after the command.
+
+    double m_residRms{ std::numeric_limits<double>::quiet_NaN() }; ///< RMS of the response after the command.
 
     double m_lateFrac{
         std::numeric_limits<double>::quiet_NaN() }; ///< Fraction of trials whose poke deadline had passed.
@@ -209,10 +222,10 @@ inline int dmStreamName( std::string &name, /**< [out] the stream name, e.g. dm0
 /// Parse the poke mode from its string name.
 /**
  * \returns 0 on success
- * \returns -1 if \p str is not "actuator" or "pattern"
+ * \returns -1 if \p str is not "actuator", "pattern", or "t2wMode"
  */
 inline int parsePokeMode( pokeMode          &mode, /**< [out] the parsed mode */
-                          const std::string &str   /**< [in] "actuator" or "pattern" */
+                          const std::string &str   /**< [in] "actuator", "pattern", or "t2wMode" */
 )
 {
     if( str == "actuator" )
@@ -227,7 +240,81 @@ inline int parsePokeMode( pokeMode          &mode, /**< [out] the parsed mode */
         return 0;
     }
 
+    if( str == "t2wMode" )
+    {
+        mode = pokeMode::t2wMode;
+        return 0;
+    }
+
     return -1;
+}
+
+/// The name of a poke mode, as parsePokeMode() accepts it.
+/**
+ * \returns "actuator", "pattern", or "t2wMode"
+ */
+inline std::string pokeModeName( pokeMode mode /**< [in] the poke mode */ )
+{
+    if( mode == pokeMode::pattern )
+    {
+        return "pattern";
+    }
+
+    if( mode == pokeMode::t2wMode )
+    {
+        return "t2wMode";
+    }
+
+    return "actuator";
+}
+
+/// Parse the offload case from its string name.
+/**
+ * \returns 0 on success
+ * \returns -1 if \p str is not "woofer", "counter", or "both"
+ */
+inline int parseOffloadCase( offloadCase       &oc, /**< [out] the parsed case */
+                             const std::string &str /**< [in] "woofer", "counter", or "both" */
+)
+{
+    if( str == "woofer" )
+    {
+        oc = offloadCase::woofer;
+        return 0;
+    }
+
+    if( str == "counter" )
+    {
+        oc = offloadCase::counter;
+        return 0;
+    }
+
+    if( str == "both" )
+    {
+        oc = offloadCase::both;
+        return 0;
+    }
+
+    return -1;
+}
+
+/// The name of an offload case, as parseOffloadCase() accepts it.
+/**
+ * \returns "woofer", "counter", or "both"
+ */
+inline std::string offloadCaseName( offloadCase oc /**< [in] the offload case */ )
+{
+    if( oc == offloadCase::counter )
+    {
+        return "counter";
+    }
+
+    if( oc == offloadCase::both )
+    {
+        return "both";
+    }
+
+    return "woofer";
 }
 
 /// Validate a single-actuator poke specification.
@@ -360,9 +447,9 @@ inline int loadPattern( mx::improc::eigenImage<float> &pattern, /**< [out] the l
     return 0;
 }
 
-/// Build a poke command for either mode.
+/// Build a poke command for any mode.
 /** In actuator mode the command is sign*amp at (x, y) and zero elsewhere.
- * In pattern mode the command is sign*amp*pattern (the pattern is not normalized).
+ * In pattern and t2wMode modes the command is sign*amp*pattern (the pattern is not normalized).
  *
  * \returns 0 on success
  * \returns -1 if the inputs are inconsistent
@@ -376,7 +463,7 @@ inline int buildPokeCommand( mx::improc::eigenImage<float>       &cmd,     /**< 
                              float                                amp      /**< [in] the poke amplitude */
 )
 {
-    if( mode == pokeMode::pattern )
+    if( mode != pokeMode::actuator )
     {
         if( pattern.rows() != cmd.rows() || pattern.cols() != cmd.cols() )
         {
@@ -395,6 +482,113 @@ inline int buildPokeCommand( mx::improc::eigenImage<float>       &cmd,     /**< 
 
     cmd.setZero();
     cmd( x, y ) = sign * amp;
+
+    return 0;
+}
+
+/// Load one plane of a FITS cube and check its dimensions.
+/** Used for t2wOffloader's woofer and tweeter mode cubes (`wModes.fits`, `tModesOrtho.fits`), whose plane k is mode k.
+ *
+ * \returns 0 on success
+ * \returns -1 if the file can not be read, k is not a plane of it, or the plane has the wrong dimensions
+ */
+inline int loadCubePlane( mx::improc::eigenImage<float> &plane, /**< [out] the plane */
+                          const std::string             &path,  /**< [in] path to the FITS cube */
+                          int                            k,     /**< [in] the plane index */
+                          uint32_t                       rows,  /**< [in] required rows */
+                          uint32_t                       cols   /**< [in] required cols */
+)
+{
+    if( path == "" || !std::filesystem::exists( path ) || k < 0 )
+    {
+        return -1;
+    }
+
+    mx::improc::eigenCube<float>                     cube;
+    mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
+
+    try
+    {
+        if( ff.read( cube, path ) != mx::error_t::noerror )
+        {
+            return -1;
+        }
+    }
+    catch( ... )
+    {
+        return -1;
+    }
+
+    if( k >= cube.planes() || static_cast<uint32_t>( cube.rows() ) != rows ||
+        static_cast<uint32_t>( cube.cols() ) != cols )
+    {
+        return -1;
+    }
+
+    plane = cube.image( k );
+
+    return 0;
+}
+
+/// The woofer-write-to-post gap t2wOffloader stamps on its tweeter offload frame.
+/** t2wOffloader posts the frame with its woofer write time as atime, so writetime - atime is the gap.  A frame posted
+ * without a stamp has atime == writetime.
+ *
+ * \returns the gap [us]
+ * \returns -1 if the frame has no stamp, or the gap is negative or over 1000 us
+ */
+inline double stampedGapUs( const timespec &atime,    /**< [in] the frame's atime */
+                            const timespec &writetime /**< [in] the frame's writetime */
+)
+{
+    if( atime.tv_sec == writetime.tv_sec && atime.tv_nsec == writetime.tv_nsec )
+    {
+        return -1;
+    }
+
+    double gap = tsDiffUs( writetime, atime );
+
+    return ( gap >= 0 && gap <= 1000 ) ? gap : -1;
+}
+
+/// Summarize a mean response curve: the settled value, the peak |r| and the RMS of r after the command.
+/** Point 0 of the curve is the pre-poke baseline and is excluded from the peak and the RMS.
+ *
+ * \returns 0 on success
+ * \returns -1 if the curve has fewer than 2 points
+ */
+inline int curveSummary( double                    &settled, /**< [out] the mean of the last nSettle points */
+                         double                    &peakAbs, /**< [out] the largest |r| after the baseline */
+                         double                    &rms,     /**< [out] the RMS of r after the baseline */
+                         const std::vector<double> &rmean,   /**< [in] the mean response curve */
+                         int                        nSettle  /**< [in] trailing points for the settled value */
+)
+{
+    if( rmean.size() < 2 )
+    {
+        return -1;
+    }
+
+    int    ns  = std::max( 1, std::min( nSettle, static_cast<int>( rmean.size() ) - 1 ) );
+    double sum = 0;
+
+    for( size_t i = rmean.size() - ns; i < rmean.size(); ++i )
+    {
+        sum += rmean[i];
+    }
+
+    settled = sum / ns;
+    peakAbs = 0;
+
+    double sum2 = 0;
+
+    for( size_t i = 1; i < rmean.size(); ++i )
+    {
+        peakAbs = std::max( peakAbs, std::fabs( rmean[i] ) );
+        sum2 += rmean[i] * rmean[i];
+    }
+
+    rms = sqrt( sum2 / ( rmean.size() - 1 ) );
 
     return 0;
 }
@@ -1098,9 +1292,15 @@ struct dmTemporalResponseWfsShmimT
 };
 
 /// The MagAO-X DM temporal response measurement application.
-/** Triggers a DM poke (single actuator or FITS pattern) off the camWFS frame semaphore after a delay referenced to
- * the frame acquisition time, captures N frames per trial, and runs M/2 positive then M/2 negative trials per delay
- * on an evenly spaced delay grid.  Outputs averaged difference cubes and scalar response metrics.
+/** Triggers a DM poke (single actuator, FITS pattern, or a t2wOffloader woofer mode) off the camWFS frame semaphore
+ * after a delay referenced to the frame acquisition time, captures N frames per trial, and runs M/2 positive then M/2
+ * negative trials per delay on an evenly spaced delay grid.  Outputs averaged difference cubes and scalar response
+ * metrics.
+ *
+ * In the counter and both cases the app stands in for t2wOffloader: after the (actual or, for counter, notional)
+ * woofer write it waits t2wOffloader's post delay and posts the matching tweeter Δ to the stream counterOffload watches,
+ * with the woofer-write time as atime, so counterOffload makes its real counter ramp.  Every curve is timed from the
+ * woofer write and projected onto the woofer's reference pattern.
  *
  * \ingroup dmTemporalResponse
  */
@@ -1188,6 +1388,30 @@ class dmTemporalResponse : public MagAOXApp<true>,
         double m_emGain{ std::numeric_limits<double>::quiet_NaN() }; ///< camWFS EM gain at run start, NaN if unknown.
 
         int m_loopState{ -1 }; ///< holoop loop_state at run start: 1 on, 0 off, -1 unknown.
+
+        dmTemporalResponseMath::offloadCase m_offloadCase{ dmTemporalResponseMath::offloadCase::woofer }; ///< The case.
+
+        int m_t2wMode{ 4 }; ///< Mode index k in the t2wOffloader cubes (t2wMode).
+
+        std::string m_wooferModesFile; ///< t2wOffloader woofer mode cube (t2wMode).
+
+        std::string m_tweeterModesFile; ///< t2wOffloader tweeter mode cube (t2wMode, counter and both).
+
+        std::string m_counterStream; ///< The stream counterOffload watches, written with the tweeter Δ.
+
+        double m_postDelayUs{ -1 }; ///< Configured woofer-write-to-post delay [us]; < 0 measures it from the stream.
+
+        int m_t2wOffloading{ -1 }; ///< t2wOffloader offload toggle at run start: 1 on, 0 off, -1 unknown.
+
+        int m_coEnabled{ -1 }; ///< counterOffload enable toggle at run start: 1 on, 0 off, -1 unknown.
+
+        double m_coRampStartUs{ std::numeric_limits<double>::quiet_NaN() }; ///< counterOffload rampStartUs at start.
+
+        double m_coRampDurationUs{ std::numeric_limits<double>::quiet_NaN() }; ///< counterOffload rampDurationUs.
+
+        double m_coGain{ std::numeric_limits<double>::quiet_NaN() }; ///< counterOffload gain at run start.
+
+        double m_coLeak{ std::numeric_limits<double>::quiet_NaN() }; ///< counterOffload leak at run start.
     };
 
   protected:
@@ -1273,6 +1497,30 @@ class dmTemporalResponse : public MagAOXApp<true>,
     /// Root of the output tree.  Each run creates a UTC-stamped sub-directory.
     std::string m_baseDir{ "/home/xsup/dm_response" };
 
+    /// What each measurement trial does: woofer, counter, or both.  counter and both require poke mode t2wMode.
+    std::string m_offloadCaseName{ "woofer" };
+
+    /// Mode index k in t2wOffloader's mode cubes, used in poke mode t2wMode.  4 is astig00.
+    int m_t2wMode{ 4 };
+
+    /// Path to t2wOffloader's woofer mode cube (wModes.fits); plane k is the woofer poke shape in t2wMode.
+    std::string m_wooferModesFile;
+
+    /// Path to t2wOffloader's tweeter mode cube (tModesOrtho.fits); plane k is the counter Δ shape.
+    std::string m_tweeterModesFile;
+
+    /// The stream counterOffload watches, written with the tweeter Δ in the counter and both cases.
+    std::string m_counterStreamName{ "aol0_tweeterOffload" };
+
+    /// Delay from the woofer write to posting Δ [us].  < 0 measures t2wOffloader's gap from the stream at run start.
+    double m_postDelayUs{ -1 };
+
+    /// INDI device name of counterOffload, whose settings are recorded and whose zero is requested after each trial.
+    std::string m_counterDevName{ "counterOffload" };
+
+    /// INDI device name of t2wOffloader, whose offload toggle must be off in the counter and both cases.
+    std::string m_offloaderDevName{ "t2wOffloader" };
+
     ///@}
 
     /** \name Camera State - Data
@@ -1339,6 +1587,58 @@ class dmTemporalResponse : public MagAOXApp<true>,
     /// SHA-256 of the pattern file for the current run.
     std::string m_patternSha;
 
+    /// SHA-256 of the woofer mode cube for the current run (t2wMode).
+    std::string m_wooferModesSha;
+
+    /// SHA-256 of the tweeter mode cube for the current run (counter and both).
+    std::string m_tweeterModesSha;
+
+    ///@}
+
+    /** \name Counter-Offload State - Data
+     * The stand-in for t2wOffloader's tweeter offload post, used in the counter and both cases.
+     * @{
+     */
+
+    /// The counter stream (normally aol0_tweeterOffload, created by t2wOffloader), opened for the current run.
+    IMAGE m_counterImage{};
+
+    /// Whether m_counterImage is open.
+    bool m_counterOpened{ false };
+
+    /// The pre-built positive counter Δ, amp times the tweeter mode plane.
+    mx::improc::eigenImage<float> m_deltaPos;
+
+    /// The pre-built negative counter Δ.
+    mx::improc::eigenImage<float> m_deltaNeg;
+
+    /// The woofer-write-to-post delay used for the current run [us], -1 if no Δ is posted.
+    double m_postDelayUsed{ -1 };
+
+    /// Achieved woofer-write-to-post delays of the valid trials of the current trial set [us].
+    std::vector<double> m_postDelays;
+
+    /// t2wOffloader's offload toggle from INDI: 1 on, 0 off, -1 unknown.
+    std::atomic<int> m_t2wOffloading{ -1 };
+
+    /// counterOffload's enable toggle from INDI: 1 on, 0 off, -1 unknown.
+    std::atomic<int> m_coEnabled{ -1 };
+
+    /// counterOffload's rampStartUs from INDI, NaN if unknown.
+    std::atomic<double> m_coRampStartUs{ std::numeric_limits<double>::quiet_NaN() };
+
+    /// counterOffload's rampDurationUs from INDI, NaN if unknown.
+    std::atomic<double> m_coRampDurationUs{ std::numeric_limits<double>::quiet_NaN() };
+
+    /// counterOffload's gain from INDI, NaN if unknown.
+    std::atomic<double> m_coGain{ std::numeric_limits<double>::quiet_NaN() };
+
+    /// counterOffload's leak from INDI, NaN if unknown.
+    std::atomic<double> m_coLeak{ std::numeric_limits<double>::quiet_NaN() };
+
+    /// Set if a counterOffload setting changes during a run.  Recorded as COCHG; does not abort the run.
+    std::atomic<bool> m_coChanged{ false };
+
     ///@}
 
     /** \name Trial State - Data
@@ -1370,8 +1670,23 @@ class dmTemporalResponse : public MagAOXApp<true>,
     /// The poke deadline, trigger atime + delay.
     timespec m_tPoke{ 0, 0 };
 
-    /// The time the poke command was written.
+    /// The time the poke command was written (or, in the counter case, would have been).  The origin of every curve.
     timespec m_tCmd{ 0, 0 };
+
+    /// The time the counter Δ was posted.
+    timespec m_tPosted{ 0, 0 };
+
+    /// Whether the current trial set is the reference pass, which pokes the woofer only.
+    bool m_trialReference{ false };
+
+    /// Whether the current trial writes the woofer poke.
+    bool m_trialWriteWoofer{ true };
+
+    /// Whether the current trial posts the counter Δ.
+    bool m_trialPostCounter{ false };
+
+    /// Whether the current trial posted a counter Δ that must be zeroed.
+    bool m_counterPosted{ false };
 
     /// Whether the current trial is still valid (no frame gap).
     bool m_trialValid{ true };
@@ -1745,6 +2060,34 @@ class dmTemporalResponse : public MagAOXApp<true>,
     /// Zero the DM channel, if it is open.
     void zeroDM();
 
+    /// Post a counter Δ to the counter stream with the given atime, as t2wOffloader posts its tweeter offload.
+    /** Virtual so the test harness can observe posts.
+     *
+     * \returns 0 on success
+     * \returns -1 if the stream is not open, or ImageStreamIO_UpdateIm_atime fails
+     */
+    virtual int postCounter( const mx::improc::eigenImage<float> &delta, /**< [in] the Δ to post */
+                             const timespec                      &stamp  /**< [in] the woofer-write time, as atime */
+    );
+
+    /// Request counterOffload's zero, clearing its held contribution whatever its leak and clipping.
+    /** Virtual so the test harness can observe requests.
+     *
+     * \returns 0 on success
+     * \returns -1 if the request could not be sent
+     */
+    virtual int requestCounterZero();
+
+    /// Close the counter stream, if it is open.
+    void closeCounter();
+
+    /// Check the counter and both cases can run, open the counter stream, and build the Δ and the post delay.
+    /**
+     * \returns 0 on success
+     * \returns -1 on a check or setup failure, which is logged
+     */
+    int prepareCounter();
+
     /// Snapshot the parameters for a run from the configurable members.
     void snapshotParams( runParams &params /**< [out] the snapshot */ ) const;
 
@@ -1888,7 +2231,7 @@ class dmTemporalResponse : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_dmChannel; ///< DM channel MM.
     INDI_NEWCALLBACK_DECL( dmTemporalResponse, m_indiP_dmChannel );
 
-    pcf::IndiProperty m_indiP_pokeMode; ///< Poke mode selection: actuator or pattern.
+    pcf::IndiProperty m_indiP_pokeMode; ///< Poke mode selection: actuator, pattern, or t2wMode.
     INDI_NEWCALLBACK_DECL( dmTemporalResponse, m_indiP_pokeMode );
 
     pcf::IndiProperty m_indiP_pokeX; ///< Actuator x.
@@ -1927,6 +2270,12 @@ class dmTemporalResponse : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_bestMetric; ///< Best-delay criterion.
     INDI_NEWCALLBACK_DECL( dmTemporalResponse, m_indiP_bestMetric );
 
+    pcf::IndiProperty m_indiP_offloadCase; ///< Offload case selection: woofer, counter, or both.
+    INDI_NEWCALLBACK_DECL( dmTemporalResponse, m_indiP_offloadCase );
+
+    pcf::IndiProperty m_indiP_t2wMode; ///< Mode index k in t2wOffloader's mode cubes.
+    INDI_NEWCALLBACK_DECL( dmTemporalResponse, m_indiP_t2wMode );
+
     pcf::IndiProperty m_indiP_start; ///< Request switch to start a run.
     INDI_NEWCALLBACK_DECL( dmTemporalResponse, m_indiP_start );
 
@@ -1941,6 +2290,33 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_loopState; ///< The high-order loop state, a set property.
     INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_loopState );
+
+    pcf::IndiProperty m_indiP_t2wOffload; ///< t2wOffloader's offload toggle, a set property.
+    INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_t2wOffload );
+
+    pcf::IndiProperty m_indiP_coEnable; ///< counterOffload's enable toggle, a set property.
+    INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_coEnable );
+
+    pcf::IndiProperty m_indiP_coRampStart; ///< counterOffload's rampStartUs, a set property.
+    INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_coRampStart );
+
+    pcf::IndiProperty m_indiP_coRampDuration; ///< counterOffload's rampDurationUs, a set property.
+    INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_coRampDuration );
+
+    pcf::IndiProperty m_indiP_coGain; ///< counterOffload's gain, a set property.
+    INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_coGain );
+
+    pcf::IndiProperty m_indiP_coLeak; ///< counterOffload's leak, a set property.
+    INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_coLeak );
+
+    /// Record a counterOffload setting from a set property, flagging a change during a run.
+    /**
+     * \returns 0 always
+     */
+    int counterSetting( std::atomic<double>     &value, /**< [out] the stored setting */
+                        double                   run,   /**< [in] the value at run start, NaN if unknown */
+                        const pcf::IndiProperty &ipRecv /**< [in] the received property */
+    );
 
     pcf::IndiProperty m_indiP_dmStream; ///< RO: the resolved DM stream name.
 
@@ -2225,6 +2601,88 @@ inline void dmTemporalResponse::setupConfig()
                 "float",
                 "Minimum reference-pattern peak SNR; below this the run fails with no WFS response.  Default 8." );
 
+    config.add( "counter.case",
+                "",
+                "counter.case",
+                argType::Required,
+                "counter",
+                "case",
+                false,
+                "string",
+                "What each measurement trial does: woofer, counter (post the tweeter delta only), or both.  counter and both "
+                "require poke.mode t2wMode.  Default woofer." );
+
+    config.add( "counter.stream",
+                "",
+                "counter.stream",
+                argType::Required,
+                "counter",
+                "stream",
+                false,
+                "string",
+                "The stream counterOffload watches, written with the tweeter delta.  Default aol0_tweeterOffload." );
+
+    config.add( "counter.postDelayUs",
+                "",
+                "counter.postDelayUs",
+                argType::Required,
+                "counter",
+                "postDelayUs",
+                false,
+                "float",
+                "Delay from the woofer write to posting delta [us].  < 0 measures t2wOffloader's gap from the stream at run "
+                "start.  Default -1." );
+
+    config.add( "counter.device",
+                "",
+                "counter.device",
+                argType::Required,
+                "counter",
+                "device",
+                false,
+                "string",
+                "INDI device name of counterOffload.  Default counterOffload." );
+
+    config.add( "counter.offloadDevice",
+                "",
+                "counter.offloadDevice",
+                argType::Required,
+                "counter",
+                "offloadDevice",
+                false,
+                "string",
+                "INDI device name of t2wOffloader, whose offload must be off for counter and both.  Default t2wOffloader." );
+
+    config.add( "t2w.mode",
+                "",
+                "t2w.mode",
+                argType::Required,
+                "t2w",
+                "mode",
+                false,
+                "int",
+                "Mode index k in t2wOffloader's mode cubes, used in poke mode t2wMode.  Default 4 (astig00)." );
+
+    config.add( "t2w.wooferModesFile",
+                "",
+                "t2w.wooferModesFile",
+                argType::Required,
+                "t2w",
+                "wooferModesFile",
+                false,
+                "string",
+                "Path to t2wOffloader's woofer mode cube (wModes.fits).  Plane k is the woofer poke in t2wMode." );
+
+    config.add( "t2w.tweeterModesFile",
+                "",
+                "t2w.tweeterModesFile",
+                argType::Required,
+                "t2w",
+                "tweeterModesFile",
+                false,
+                "string",
+                "Path to t2wOffloader's tweeter mode cube (tModesOrtho.fits).  Plane k is the counter delta." );
+
     config.add( "output.baseDir",
                 "",
                 "output.baseDir",
@@ -2267,12 +2725,26 @@ inline int dmTemporalResponse::loadConfigImpl( mx::app::appConfigurator &_config
     _config( m_maxLateFrac, "analysis.maxLateFrac" );
     _config( m_minRefSNR, "analysis.minRefSNR" );
     _config( m_baseDir, "output.baseDir" );
+    _config( m_offloadCaseName, "counter.case" );
+    _config( m_counterStreamName, "counter.stream" );
+    _config( m_postDelayUs, "counter.postDelayUs" );
+    _config( m_counterDevName, "counter.device" );
+    _config( m_offloaderDevName, "counter.offloadDevice" );
+    _config( m_t2wMode, "t2w.mode" );
+    _config( m_wooferModesFile, "t2w.wooferModesFile" );
+    _config( m_tweeterModesFile, "t2w.tweeterModesFile" );
 
     // Parameters are validated at run start so that INDI changes are validated the same way.
     dmTemporalResponseMath::pokeMode mode;
     if( dmTemporalResponseMath::parsePokeMode( mode, m_pokeModeName ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid poke.mode: " + m_pokeModeName } );
+    }
+
+    dmTemporalResponseMath::offloadCase oc;
+    if( dmTemporalResponseMath::parseOffloadCase( oc, m_offloadCaseName ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "invalid counter.case: " + m_offloadCaseName } );
     }
 
     return 0;
@@ -2296,8 +2768,8 @@ inline int dmTemporalResponse::createIndiProperties()
     m_indiP_dmChannel["current"] = m_dmChannel;
     m_indiP_dmChannel["target"]  = m_dmChannel;
 
-    if( createStandardIndiSelectionSw( m_indiP_pokeMode, "poke_mode", { "actuator", "pattern" }, "Poke Mode", "Poke" ) <
-        0 )
+    if( createStandardIndiSelectionSw(
+            m_indiP_pokeMode, "poke_mode", { "actuator", "pattern", "t2wMode" }, "Poke Mode", "Poke" ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
     }
@@ -2355,6 +2827,21 @@ inline int dmTemporalResponse::createIndiProperties()
     m_indiP_bestMetric["current"] = m_bestMetric;
     m_indiP_bestMetric["target"]  = m_bestMetric;
 
+    if( createStandardIndiSelectionSw(
+            m_indiP_offloadCase, "offload_case", { "woofer", "counter", "both" }, "Offload Case", "Counter" ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "error from createStandardIndiSelectionSw" } );
+    }
+    m_indiP_offloadCase[m_offloadCaseName].setSwitchState( pcf::IndiElement::On );
+    if( registerIndiPropertyNew( m_indiP_offloadCase, INDI_NEWCALLBACK( m_indiP_offloadCase ) ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "error from registerIndiPropertyNew" } );
+    }
+
+    CREATE_REG_INDI_NEW_NUMBERI( m_indiP_t2wMode, "t2w_mode", 0, 9999, 1, "%d", "t2wOffloader Mode Index", "Counter" );
+    m_indiP_t2wMode["current"] = m_t2wMode;
+    m_indiP_t2wMode["target"]  = m_t2wMode;
+
     CREATE_REG_INDI_NEW_REQUESTSWITCH( m_indiP_start, "start" );
 
     CREATE_REG_INDI_NEW_REQUESTSWITCH( m_indiP_stop, "stop" );
@@ -2364,6 +2851,18 @@ inline int dmTemporalResponse::createIndiProperties()
     REG_INDI_SETPROP( m_indiP_wfsEMGain, m_wfsCamDevName, std::string( "emgain" ) );
 
     REG_INDI_SETPROP( m_indiP_loopState, m_loopDevName, std::string( "loop_state" ) );
+
+    REG_INDI_SETPROP( m_indiP_t2wOffload, m_offloaderDevName, std::string( "offload" ) );
+
+    REG_INDI_SETPROP( m_indiP_coEnable, m_counterDevName, std::string( "enable" ) );
+
+    REG_INDI_SETPROP( m_indiP_coRampStart, m_counterDevName, std::string( "rampStartUs" ) );
+
+    REG_INDI_SETPROP( m_indiP_coRampDuration, m_counterDevName, std::string( "rampDurationUs" ) );
+
+    REG_INDI_SETPROP( m_indiP_coGain, m_counterDevName, std::string( "gain" ) );
+
+    REG_INDI_SETPROP( m_indiP_coLeak, m_counterDevName, std::string( "leak" ) );
 
     createROIndiText( m_indiP_dmStream, "dm_stream", "name", "DM Stream", "DM" );
     std::string sname;
@@ -2467,10 +2966,12 @@ inline int dmTemporalResponse::appLogic()
     // Snapshot the tunables under the lock held by the INDI callbacks
     runParams   cur;
     std::string pokeModeName;
+    std::string offloadCaseName;
     { // mutex scope
         std::lock_guard<std::mutex> plock( m_paramMutex );
         snapshotParams( cur );
-        pokeModeName = m_pokeModeName;
+        pokeModeName    = m_pokeModeName;
+        offloadCaseName = m_offloadCaseName;
     }
 
     updateIfChanged( m_indiP_dmIndex, "current", cur.m_dmIndex );
@@ -2488,6 +2989,8 @@ inline int dmTemporalResponse::appLogic()
     updateIfChanged( m_indiP_maskThresh, "current", cur.m_maskThresh );
     updateIfChanged( m_indiP_bestMetric, "current", cur.m_bestMetric );
     indi::updateSelectionSwitchIfChanged( m_indiP_pokeMode, pokeModeName, m_indiDriver, INDI_OK );
+    indi::updateSelectionSwitchIfChanged( m_indiP_offloadCase, offloadCaseName, m_indiDriver, INDI_OK );
+    updateIfChanged( m_indiP_t2wMode, "current", cur.m_t2wMode );
 
     std::string sname;
     dmTemporalResponseMath::dmStreamName( sname, cur.m_dmIndex, cur.m_dmChannel );
@@ -2556,6 +3059,12 @@ inline int dmTemporalResponse::appShutdown()
     }
 
     zeroDM();
+
+    if( m_counterOpened )
+    {
+        requestCounterZero();
+        closeCounter();
+    }
 
     SHMIMMONITORT_APP_SHUTDOWN( shmimMonitorT );
 
@@ -2781,7 +3290,7 @@ inline int dmTemporalResponse::processFrame( void *src, const timespec &atime, u
             now = m_clock();
         }
 
-        if( writeDM( ( m_curSign > 0 ) ? m_cmdPos : m_cmdNeg ) < 0 )
+        if( m_trialWriteWoofer && writeDM( ( m_curSign > 0 ) ? m_cmdPos : m_cmdNeg ) < 0 )
         {
             m_trialValid = false;
             m_trialState = trialState::idle;
@@ -2790,6 +3299,42 @@ inline int dmTemporalResponse::processFrame( void *src, const timespec &atime, u
         }
 
         m_tCmd = m_clock();
+
+        if( m_trialPostCounter )
+        {
+            // The woofer-write time, which t2wOffloader stamps as the tweeter offload's atime.  In the counter case
+            // the woofer is not written, and this is when it would have been.
+            timespec stamp;
+            clock_gettime( CLOCK_ISIO, &stamp );
+
+            const timespec tPost = dmTemporalResponseMath::tsAddUs( m_tCmd, m_postDelayUsed );
+
+            now = m_clock();
+
+            while( dmTemporalResponseMath::tsDiffUs( now, tPost ) < 0 )
+            {
+                if( m_stopRequested || m_shutdown )
+                {
+                    m_trialValid = false;
+                    m_trialState = trialState::idle;
+                    sem_post( &m_trialSem );
+                    return 0;
+                }
+
+                now = m_clock();
+            }
+
+            if( postCounter( ( m_curSign > 0 ) ? m_deltaPos : m_deltaNeg, stamp ) < 0 )
+            {
+                m_trialValid = false;
+                m_trialState = trialState::idle;
+                sem_post( &m_trialSem );
+                return log<software_error, -1>( { __FILE__, __LINE__, "error posting the counter delta" } );
+            }
+
+            m_tPosted       = m_clock();
+            m_counterPosted = true;
+        }
 
         // The baseline copy is done after the poke to keep it off the timing-critical path.  The frame's slot in the
         // circular buffer remains valid until the camera wraps around.
@@ -2864,6 +3409,153 @@ inline void dmTemporalResponse::zeroDM()
     writeDM( m_cmdZero );
 }
 
+inline int dmTemporalResponse::postCounter( const mx::improc::eigenImage<float> &delta, const timespec &stamp )
+{
+    if( !m_counterOpened || m_counterImage.md == nullptr ||
+        static_cast<uint64_t>( delta.size() ) != m_counterImage.md->nelement )
+    {
+        return -1;
+    }
+
+    m_counterImage.md->write = 1;
+
+    memcpy( m_counterImage.array.F, delta.data(), delta.size() * sizeof( float ) );
+
+    timespec atime = stamp; // ImageStreamIO_UpdateIm_atime takes a non-const pointer
+
+    if( ImageStreamIO_UpdateIm_atime( &m_counterImage, &atime ) != IMAGESTREAMIO_SUCCESS )
+    {
+        m_counterImage.md->write = 0;
+        return -1;
+    }
+
+    return 0;
+}
+
+inline int dmTemporalResponse::requestCounterZero()
+{
+    pcf::IndiProperty ip( pcf::IndiProperty::Switch );
+
+    ip.setDevice( m_counterDevName );
+    ip.setName( "zero" );
+    ip.add( pcf::IndiElement( "request" ) );
+    ip["request"].setSwitchState( pcf::IndiElement::On );
+
+    if( sendNewProperty( ip ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "could not request " + m_counterDevName + " zero" } );
+    }
+
+    return 0;
+}
+
+inline void dmTemporalResponse::closeCounter()
+{
+    if( m_counterOpened )
+    {
+        ImageStreamIO_closeIm( &m_counterImage );
+        m_counterOpened = false;
+    }
+}
+
+inline int dmTemporalResponse::prepareCounter()
+{
+    using namespace dmTemporalResponseMath;
+
+    closeCounter();
+    m_postDelayUsed = -1;
+
+    if( m_run.m_pokeMode != pokeMode::t2wMode )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "counter.case counter and both require poke mode t2wMode" } );
+    }
+
+    // This app writes the stream t2wOffloader posts to, so t2wOffloader must not be offloading.
+    if( m_run.m_t2wOffloading != 0 )
+    {
+        return log<software_error, -1>(
+            { __FILE__,
+              __LINE__,
+              m_offloaderDevName + " offload is not reported off: refusing to write " + m_run.m_counterStream } );
+    }
+
+    if( m_run.m_coEnabled != 1 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, m_counterDevName + " is not reported enabled" } );
+    }
+
+    if( m_run.m_loopState != 0 )
+    {
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, m_loopDevName + " loop_state is not reported off: the loop must be open" } );
+    }
+
+    if( ImageStreamIO_openIm( &m_counterImage, m_run.m_counterStream.c_str() ) != IMAGESTREAMIO_SUCCESS )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "could not open " + m_run.m_counterStream } );
+    }
+
+    m_counterOpened = true;
+
+    if( m_counterImage.md->datatype != _DATATYPE_FLOAT || m_counterImage.md->naxis != 2 )
+    {
+        closeCounter();
+        return log<software_error, -1>( { __FILE__, __LINE__, m_run.m_counterStream + " must be a 2-D float image" } );
+    }
+
+    const uint32_t rows = m_counterImage.md->size[0];
+    const uint32_t cols = m_counterImage.md->size[1];
+
+    mx::improc::eigenImage<float> plane;
+
+    if( loadCubePlane( plane, m_run.m_tweeterModesFile, m_run.m_t2wMode, rows, cols ) < 0 ||
+        validatePattern( plane, m_run.m_pokeAmp, m_run.m_maxCommand ) < 0 )
+    {
+        closeCounter();
+        return log<software_error, -1>( { __FILE__,
+                                          __LINE__,
+                                          "could not load a valid plane " + std::to_string( m_run.m_t2wMode ) + " (" +
+                                              std::to_string( rows ) + "x" + std::to_string( cols ) + ") of " +
+                                              m_run.m_tweeterModesFile } );
+    }
+
+    if( sha256File( m_tweeterModesSha, m_run.m_tweeterModesFile ) < 0 )
+    {
+        closeCounter();
+        return log<software_error, -1>( { __FILE__, __LINE__, "could not hash tweeter mode cube" } );
+    }
+
+    m_deltaPos = plane * m_run.m_pokeAmp;
+    m_deltaNeg = plane * -m_run.m_pokeAmp;
+
+    if( m_run.m_postDelayUs >= 0 )
+    {
+        m_postDelayUsed = m_run.m_postDelayUs;
+    }
+    else
+    {
+        // t2wOffloader's last post is still in the stream: its writetime - atime is t2wOffloader's gap.
+        m_postDelayUsed = stampedGapUs( m_counterImage.md->atime, m_counterImage.md->writetime );
+
+        if( m_postDelayUsed < 0 )
+        {
+            closeCounter();
+            return log<software_error, -1>( { __FILE__,
+                                              __LINE__,
+                                              m_run.m_counterStream +
+                                                  " has no t2wOffloader woofer stamp to measure the post delay from: "
+                                                  "offload once with t2wOffloader, or set counter.postDelayUs" } );
+        }
+    }
+
+    log<text_log>( "counter case " + offloadCaseName( m_run.m_offloadCase ) + ": posting mode " +
+                       std::to_string( m_run.m_t2wMode ) + " to " + m_run.m_counterStream + " " +
+                       std::to_string( m_postDelayUsed ) + " us after the woofer write",
+                   logPrio::LOG_NOTICE );
+
+    return 0;
+}
+
 inline void dmTemporalResponse::snapshotParams( runParams &params ) const
 {
     params.m_dmIndex   = m_dmIndex;
@@ -2892,6 +3584,18 @@ inline void dmTemporalResponse::snapshotParams( runParams &params ) const
     params.m_fps            = m_wfsFps;
     params.m_emGain         = m_wfsEMGain;
     params.m_loopState      = m_loopState;
+    dmTemporalResponseMath::parseOffloadCase( params.m_offloadCase, m_offloadCaseName );
+    params.m_t2wMode          = m_t2wMode;
+    params.m_wooferModesFile  = m_wooferModesFile;
+    params.m_tweeterModesFile = m_tweeterModesFile;
+    params.m_counterStream    = m_counterStreamName;
+    params.m_postDelayUs      = m_postDelayUs;
+    params.m_t2wOffloading    = m_t2wOffloading;
+    params.m_coEnabled        = m_coEnabled;
+    params.m_coRampStartUs    = m_coRampStartUs;
+    params.m_coRampDurationUs = m_coRampDurationUs;
+    params.m_coGain           = m_coGain;
+    params.m_coLeak           = m_coLeak;
 }
 
 inline int dmTemporalResponse::prepareRun( const timespec &runStart )
@@ -2998,6 +3702,33 @@ inline int dmTemporalResponse::prepareRun( const timespec &runStart )
         y = m_run.m_pokeY[0];
         m_patternSha.clear();
     }
+    else if( m_run.m_pokeMode == pokeMode::t2wMode )
+    {
+        // The woofer mode plane is re-read at every run start
+        if( loadCubePlane( m_pattern, m_run.m_wooferModesFile, m_run.m_t2wMode, dmRows, dmCols ) < 0 )
+        {
+            std::string info = "error: could not load plane " + std::to_string( m_run.m_t2wMode ) + " (" +
+                               std::to_string( dmRows ) + "x" + std::to_string( dmCols ) + ") of " +
+                               m_run.m_wooferModesFile;
+            setPatternInfo( info );
+            return log<software_error, -1>( { __FILE__, __LINE__, info } );
+        }
+
+        if( validatePattern( m_pattern, m_run.m_pokeAmp, m_run.m_maxCommand ) < 0 )
+        {
+            std::string info = "error: woofer mode is non-finite, all zero, or amp*mode exceeds maxCommand";
+            setPatternInfo( info );
+            return log<software_error, -1>( { __FILE__, __LINE__, info } );
+        }
+
+        if( sha256File( m_wooferModesSha, m_run.m_wooferModesFile ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "could not hash woofer mode cube" } );
+        }
+
+        setPatternInfo( m_run.m_wooferModesFile + " mode " + std::to_string( m_run.m_t2wMode ) +
+                        " sha256=" + m_wooferModesSha );
+    }
     else
     {
         // The pattern is re-read at every run start
@@ -3031,6 +3762,16 @@ inline int dmTemporalResponse::prepareRun( const timespec &runStart )
         return log<software_error, -1>( { __FILE__, __LINE__, "error building poke commands" } );
     }
 
+    if( m_run.m_offloadCase == offloadCase::woofer )
+    {
+        closeCounter();
+        m_postDelayUsed = -1;
+    }
+    else if( prepareCounter() < 0 )
+    {
+        return -1;
+    }
+
     // Create the output directory
     std::string runDir = m_run.m_baseDir + "/" + runDirName( runStart );
     try
@@ -3059,6 +3800,24 @@ inline int dmTemporalResponse::prepareRun( const timespec &runStart )
         {
             return log<software_error, -1>(
                 { __FILE__, __LINE__, std::string( "could not copy pattern to output: " ) + e.what() } );
+        }
+    }
+
+    if( m_run.m_pokeMode == pokeMode::t2wMode )
+    {
+        // The positive commands actually applied: the woofer poke and, for counter and both, the posted Δ.
+        mx::fits::fitsFile<float, XWC_DEFAULT_VERBOSITY> ff;
+
+        bool ok = writeOk( ff.write( runDir + "/woofer_poke.fits", m_cmdPos ) );
+
+        if( ok && m_run.m_offloadCase != offloadCase::woofer )
+        {
+            ok = writeOk( ff.write( runDir + "/counter_delta.fits", m_deltaPos ) );
+        }
+
+        if( !ok )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "could not write the t2wMode commands to output" } );
         }
     }
 
@@ -3128,7 +3887,13 @@ inline int dmTemporalResponse::runTrial( double delay, int sign )
         m_trialValid  = true;
         m_trialLate   = false;
         m_nCaptured   = 0;
-        m_trialState  = trialState::armed;
+
+        // The reference pass always pokes the woofer, so every case shares the woofer's reference pattern.
+        m_trialWriteWoofer = m_trialReference || m_run.m_offloadCase != dmTemporalResponseMath::offloadCase::counter;
+        m_trialPostCounter = !m_trialReference && m_run.m_offloadCase != dmTemporalResponseMath::offloadCase::woofer;
+        m_counterPosted    = false;
+
+        m_trialState = trialState::armed;
     }
 
     timespec start = dmTemporalResponseMath::realtimeNow();
@@ -3176,6 +3941,16 @@ inline int dmTemporalResponse::runTrial( double delay, int sign )
 
     zeroDM();
 
+    if( m_counterPosted )
+    {
+        m_counterPosted = false;
+
+        if( requestCounterZero() < 0 )
+        {
+            rv = resultStopped;
+        }
+    }
+
     return rv;
 }
 
@@ -3200,8 +3975,10 @@ inline int dmTemporalResponse::runTrialSet( double                            de
     curves.clear();
     times.clear();
     delayErrs.clear();
-    nLate         = 0;
-    m_progInvalid = 0;
+    nLate            = 0;
+    m_progInvalid    = 0;
+    m_trialReference = !project;
+    m_postDelays.clear();
 
     for( int sign : { +1, -1 } )
     {
@@ -3250,6 +4027,11 @@ inline int dmTemporalResponse::runTrialSet( double                            de
             }
 
             delayErrs.push_back( dmTemporalResponseMath::achievedDelay( m_trigATime, m_tCmd ) - delay );
+
+            if( m_trialPostCounter )
+            {
+                m_postDelays.push_back( dmTemporalResponseMath::tsDiffUs( m_tPosted, m_tCmd ) );
+            }
 
             if( m_trialLate )
             {
@@ -3366,6 +4148,7 @@ inline int dmTemporalResponse::runMeasurement()
     m_fpsChanged    = false;
     m_loopChanged   = false;
     m_camChanged    = false;
+    m_coChanged     = false;
     m_haveBest      = false;
     m_metrics.clear();
     m_respMean.clear();
@@ -3381,18 +4164,24 @@ inline int dmTemporalResponse::runMeasurement()
         return -1;
     }
 
-    log<text_log>( "starting DM temporal response run on " + m_dmStreamName + " into " + m_runDir,
+    log<text_log>( "starting DM temporal response run (" + offloadCaseName( m_run.m_offloadCase ) + ") on " +
+                       m_dmStreamName + " into " + m_runDir,
                    logPrio::LOG_NOTICE );
 
-    // Always leave the DM channel at zero, however we exit
+    // Always leave the DM channel and counterOffload at zero, however we exit
     struct zeroGuard
     {
-        dmTemporalResponse *m_app; ///< The app whose DM is zeroed.
+        dmTemporalResponse *m_app; ///< The app whose DM and counter are zeroed.
 
-        /// Zero the DM on scope exit.
+        /// Zero the DM, and counterOffload if the counter stream is open, on scope exit.
         ~zeroGuard()
         {
             m_app->zeroDM();
+
+            if( m_app->m_counterOpened )
+            {
+                m_app->requestCounterZero();
+            }
         }
     } guard{ this };
 
@@ -3457,13 +4246,34 @@ inline int dmTemporalResponse::runMeasurement()
             rstd[i] = sqrt( rstd[i] / curves.size() );
         }
 
+        // In woofer units: woofer -> 1, counter -> -gain*scale, both -> the residual.  The counter's timing metrics are
+        // taken on its curve normalized by its own settled value; the residual of both has no rise to time.
+        double settled = 0, peakAbs = 0, residRms = 0;
+        curveSummary( settled, peakAbs, residRms, rmean, m_run.m_nSettle );
+
+        std::vector<double> rnorm = rmean, snorm = rstd;
+
+        if( m_run.m_offloadCase == offloadCase::counter && std::fabs( settled ) > 0 )
+        {
+            for( int i = 0; i < L; ++i )
+            {
+                rnorm[i] /= settled;
+                snorm[i] /= std::fabs( settled );
+            }
+        }
+
         responseMetrics met;
-        if( computeMetrics( met, tmean, rmean, rstd, m_run.m_nSettle, delayErrs, nLate ) < 0 )
+        if( computeMetrics( met, tmean, rnorm, snorm, m_run.m_nSettle, delayErrs, nLate ) < 0 &&
+            m_run.m_offloadCase != offloadCase::both )
         {
             log<text_log>( "delay " + std::to_string( m_delays[k] ) +
                                " us: response did not cross 10/50/90%; t50/rise/jitter unavailable",
                            logPrio::LOG_WARNING );
         }
+
+        met.m_settled  = settled;
+        met.m_peakAbs  = peakAbs;
+        met.m_residRms = residRms;
 
         m_progLateFrac = met.m_lateFrac;
 
@@ -3489,7 +4299,8 @@ inline int dmTemporalResponse::runMeasurement()
         log<text_log>( "delay " + std::to_string( m_delays[k] ) + " us: t50=" + std::to_string( met.m_t50 ) +
                        " rise=" + std::to_string( met.m_rise ) + " jitter=" + std::to_string( met.m_jitter ) +
                        " delayErr=" + std::to_string( met.m_delayErrMean ) + "+/-" +
-                       std::to_string( met.m_delayErrStd ) );
+                       std::to_string( met.m_delayErrStd ) + " settled=" + std::to_string( met.m_settled ) +
+                       " residRms=" + std::to_string( met.m_residRms ) );
 
         // Live response curves, (N+1) x K (completed delays so far)
         try
@@ -3652,19 +4463,39 @@ inline void dmTemporalResponse::appendRunHeader( mx::fits::fitsHeader<XWC_DEFAUL
     fh.append( "LOOPCHG", static_cast<int>( m_loopChanged.load() ), "1 if loop_state changed during the run" );
     fh.append( "GITSHA1", std::string( MAGAOX_CURRENT_SHA1 ), "MagAOX git SHA-1 of this build" );
     fh.append( "GITMOD", static_cast<int>( MAGAOX_REPO_MODIFIED ), "1 if the build tree had uncommitted changes" );
-    fh.append( "POKEMODE",
-               std::string( m_run.m_pokeMode == dmTemporalResponseMath::pokeMode::actuator ? "actuator" : "pattern" ),
-               "poke mode" );
+    fh.append( "POKEMODE", dmTemporalResponseMath::pokeModeName( m_run.m_pokeMode ), "poke mode" );
 
     if( m_run.m_pokeMode == dmTemporalResponseMath::pokeMode::actuator )
     {
         fh.append( "POKEX", m_run.m_pokeX[0], "actuator x" );
         fh.append( "POKEY", m_run.m_pokeY[0], "actuator y" );
     }
-    else
+    else if( m_run.m_pokeMode == dmTemporalResponseMath::pokeMode::pattern )
     {
         fh.append( "PATFILE", m_run.m_patternFile, "DM pattern file" );
         fh.append( "PATSHA", m_patternSha, "SHA-256 of pattern file" );
+    }
+    else
+    {
+        fh.append( "T2WMODE", m_run.m_t2wMode, "mode index in the t2wOffloader cubes" );
+        fh.append( "WMFILE", m_run.m_wooferModesFile, "t2wOffloader woofer mode cube" );
+        fh.append( "WMSHA", m_wooferModesSha, "SHA-256 of the woofer mode cube" );
+    }
+
+    fh.append( "OFFCASE", dmTemporalResponseMath::offloadCaseName( m_run.m_offloadCase ), "woofer, counter, or both" );
+
+    if( m_run.m_offloadCase != dmTemporalResponseMath::offloadCase::woofer )
+    {
+        fh.append( "TMFILE", m_run.m_tweeterModesFile, "t2wOffloader tweeter mode cube" );
+        fh.append( "TMSHA", m_tweeterModesSha, "SHA-256 of the tweeter mode cube" );
+        fh.append( "CNTSTRM", m_run.m_counterStream, "stream written with the counter delta" );
+        fh.append( "POSTDLY", m_postDelayUsed, "woofer write to delta post [us]" );
+        fh.append( "CORAMP0", dmTemporalResponseMath::headerValue( m_run.m_coRampStartUs ), "counterOffload rampStartUs" );
+        fh.append(
+            "CORAMPD", dmTemporalResponseMath::headerValue( m_run.m_coRampDurationUs ), "counterOffload rampDurationUs" );
+        fh.append( "COGAIN", dmTemporalResponseMath::headerValue( m_run.m_coGain ), "counterOffload gain" );
+        fh.append( "COLEAK", dmTemporalResponseMath::headerValue( m_run.m_coLeak ), "counterOffload leak" );
+        fh.append( "COCHG", static_cast<int>( m_coChanged.load() ), "1 if a counterOffload setting changed in the run" );
     }
 
     fh.append( "POKEAMP", m_run.m_pokeAmp, "poke amplitude [DM units]" );
@@ -3707,6 +4538,26 @@ inline int dmTemporalResponse::writeCube( size_t                              id
     fh.append( "T50", dmTemporalResponseMath::headerValue( met.m_t50 ), "t50 [us] from command, -999 if NA" );
     fh.append( "RISE", dmTemporalResponseMath::headerValue( met.m_rise ), "10-90% rise [us], -999 if NA" );
     fh.append( "JITTER", dmTemporalResponseMath::headerValue( met.m_jitter ), "std of r at t50 frame, -999 if NA" );
+    fh.append( "SETTLED", dmTemporalResponseMath::headerValue( met.m_settled ), "mean r over the trailing frames" );
+    fh.append( "PEAKABS", dmTemporalResponseMath::headerValue( met.m_peakAbs ), "largest |r| after the command" );
+    fh.append( "RESIDRMS", dmTemporalResponseMath::headerValue( met.m_residRms ), "RMS of r after the command" );
+
+    if( m_postDelays.size() > 0 )
+    {
+        double sum = 0, sum2 = 0;
+        for( double v : m_postDelays )
+        {
+            sum += v;
+            sum2 += v * v;
+        }
+
+        const double mean = sum / m_postDelays.size();
+
+        fh.append( "POSTMEAN", mean, "mean achieved woofer write to delta post [us]" );
+        fh.append( "POSTSTD",
+                   sqrt( std::max( 0.0, sum2 / m_postDelays.size() - mean * mean ) ),
+                   "std of the achieved post delay [us]" );
+    }
 
     std::string fname = m_runDir + "/" + dmTemporalResponseMath::cubeFileName( m_delays[idx] );
 
@@ -3780,9 +4631,10 @@ inline int dmTemporalResponse::writeSummary( const std::vector<double> &grid, co
         }
     }
 
-    // Metrics: [K, 9]
-    static const std::vector<std::string> cols = {
-        "delay", "t50", "rise", "overshoot", "settleErr", "jitter", "delayErrMean", "delayErrStd", "lateFrac" };
+    // Metrics: [K, 12]
+    static const std::vector<std::string> cols = { "delay",        "t50",         "rise",     "overshoot",
+                                                   "settleErr",    "jitter",      "delayErrMean", "delayErrStd",
+                                                   "lateFrac",     "settled",     "peakAbs",  "residRms" };
 
     mx::improc::eigenImage<float> metrics( K, cols.size() );
     for( size_t k = 0; k < K; ++k )
@@ -3797,6 +4649,9 @@ inline int dmTemporalResponse::writeSummary( const std::vector<double> &grid, co
         metrics( k, 6 )                                  = m.m_delayErrMean;
         metrics( k, 7 )                                  = m.m_delayErrStd;
         metrics( k, 8 )                                  = m.m_lateFrac;
+        metrics( k, 9 )                                  = m.m_settled;
+        metrics( k, 10 )                                 = m.m_peakAbs;
+        metrics( k, 11 )                                 = m.m_residRms;
     }
 
     // Super-sampled response: [nGrid, 2] columns are time [us] and response
@@ -3936,7 +4791,7 @@ INDI_NEWCALLBACK_DEFN( dmTemporalResponse, m_indiP_pokeMode )( const pcf::IndiPr
         return log<text_log, -1>( "change to poke_mode rejected while a run is in progress", logPrio::LOG_WARNING );
     }
 
-    for( const std::string &mode : { std::string( "actuator" ), std::string( "pattern" ) } )
+    for( const std::string &mode : { std::string( "actuator" ), std::string( "pattern" ), std::string( "t2wMode" ) } )
     {
         if( ipRecv.find( mode ) && ipRecv[mode].getSwitchState() == pcf::IndiElement::On )
         {
@@ -4049,6 +4904,37 @@ INDI_NEWCALLBACK_DEFN( dmTemporalResponse, m_indiP_bestMetric )( const pcf::Indi
     return tunableCallback( m_indiP_bestMetric, m_bestMetric, ipRecv );
 }
 
+INDI_NEWCALLBACK_DEFN( dmTemporalResponse, m_indiP_offloadCase )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadCase, ipRecv );
+
+    std::lock_guard<std::mutex> lock( m_paramMutex );
+
+    if( m_running )
+    {
+        return log<text_log, -1>( "change to offload_case rejected while a run is in progress", logPrio::LOG_WARNING );
+    }
+
+    for( const std::string &oc : { std::string( "woofer" ), std::string( "counter" ), std::string( "both" ) } )
+    {
+        if( ipRecv.find( oc ) && ipRecv[oc].getSwitchState() == pcf::IndiElement::On )
+        {
+            // appLogic() publishes the new selection, so the local property is not changed here.
+            m_offloadCaseName = oc;
+            return 0;
+        }
+    }
+
+    return log<text_log, -1>( "offload_case: no element switched on", logPrio::LOG_WARNING );
+}
+
+INDI_NEWCALLBACK_DEFN( dmTemporalResponse, m_indiP_t2wMode )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_t2wMode, ipRecv );
+
+    return tunableCallback( m_indiP_t2wMode, m_t2wMode, ipRecv );
+}
+
 INDI_NEWCALLBACK_DEFN( dmTemporalResponse, m_indiP_start )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_start, ipRecv );
@@ -4153,6 +5039,79 @@ INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_loopState )( const pcf::IndiP
     m_loopState = state;
 
     return 0;
+}
+
+INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_t2wOffload )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_t2wOffload, ipRecv );
+
+    if( ipRecv.find( "toggle" ) )
+    {
+        m_t2wOffloading = ( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On ) ? 1 : 0;
+    }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_coEnable )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_coEnable, ipRecv );
+
+    if( ipRecv.find( "toggle" ) )
+    {
+        m_coEnabled = ( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On ) ? 1 : 0;
+    }
+
+    return 0;
+}
+
+inline int dmTemporalResponse::counterSetting( std::atomic<double> &value, double run, const pcf::IndiProperty &ipRecv )
+{
+    if( !ipRecv.find( "current" ) )
+    {
+        return 0;
+    }
+
+    double v = ipRecv["current"].get<double>();
+
+    // Recorded as COCHG; the run continues.  The first value received is not a change.
+    if( m_running && dmTemporalResponseMath::isFinite( run ) && v != run && !m_coChanged )
+    {
+        m_coChanged = true;
+        log<text_log>( m_counterDevName + "." + ipRecv.getName() + " changed during run", logPrio::LOG_WARNING );
+    }
+
+    value = v;
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_coRampStart )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_coRampStart, ipRecv );
+
+    return counterSetting( m_coRampStartUs, m_run.m_coRampStartUs, ipRecv );
+}
+
+INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_coRampDuration )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_coRampDuration, ipRecv );
+
+    return counterSetting( m_coRampDurationUs, m_run.m_coRampDurationUs, ipRecv );
+}
+
+INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_coGain )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_coGain, ipRecv );
+
+    return counterSetting( m_coGain, m_run.m_coGain, ipRecv );
+}
+
+INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_coLeak )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_coLeak, ipRecv );
+
+    return counterSetting( m_coLeak, m_run.m_coLeak, ipRecv );
 }
 
 } // namespace app
