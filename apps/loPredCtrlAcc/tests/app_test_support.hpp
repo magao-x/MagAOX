@@ -9,7 +9,10 @@
 #include <map>
 #include <sstream>
 #include <mutex>
+#include <string>
 #include <thread>
+#include <type_traits>
+#include <utility>
 #include <vector>
 #include <semaphore.h>
 #include <ImageStreamIO/ImageStreamIO.h>
@@ -90,14 +93,24 @@ enum
 } // namespace logPrio
 struct TestLog
 {
-    /// Accept existing logger payload syntax without I/O.
+    std::string m_text; ///< Text of a single-text entry, as text_log; empty for other payloads.
+
+    /// Accept existing logger payload syntax without I/O, keeping the text of a single-text entry.
     template <typename... T>
-    TestLog( T... /**< [in] Ignored payload. */ );
+    TestLog( T... payload /**< [in] Logger payload. */ );
 };
 
 template <typename... T>
-inline TestLog::TestLog( T... /**< [in] Ignored payload. */ )
+inline TestLog::TestLog( T... payload )
 {
+    if constexpr( sizeof...( T ) == 1 && ( std::is_convertible_v<T, std::string> && ... ) )
+    {
+        m_text = ( std::string( payload ), ... );
+    }
+    else
+    {
+        ( static_cast<void>( payload ), ... );
+    }
 }
 struct TestDriver
 {
@@ -138,9 +151,12 @@ class MagAOXApp
     /// Construct without system initialization.
     MagAOXApp( const char * /**< [in] Version. */, int /**< [in] Modified flag. */ );
 
-    /// Ignore logging, preserving error returns.
+    /// Text log entries and their priorities, in order; nothing is written.
+    std::vector<std::pair<std::string, int>> m_textLogs;
+
+    /// Record text entries, preserving error returns.
     template <typename T, int result = 0>
-    int log( TestLog /**< [in] Payload. */, int = 0 /**< [in] Ignored priority. */ );
+    int log( TestLog payload /**< [in] Payload. */, int priority = 0 /**< [in] Priority. */ );
 
     /// Ignore application state publication.
     void state( int /**< [in] State. */ );
@@ -271,8 +287,13 @@ inline MagAOXApp<useIndi>::MagAOXApp( const char * /**< [in] Version. */, int /*
 
 template <bool useIndi>
 template <typename T, int result>
-inline int MagAOXApp<useIndi>::log( TestLog /**< [in] Payload. */, int /**< [in] Ignored priority. */ )
+inline int MagAOXApp<useIndi>::log( TestLog payload, int priority )
 {
+    if( !payload.m_text.empty() )
+    {
+        m_textLogs.emplace_back( payload.m_text, priority );
+    }
+
     return result;
 }
 

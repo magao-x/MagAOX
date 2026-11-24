@@ -607,7 +607,8 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     bool removed() const;
 
     /// Turn prediction off, which schedules removal of the own-channel contribution; called under both INDI locks.
-    void stopPrediction();
+    /** Logs a note with the reason when prediction was on. */
+    void stopPrediction( const std::string &reason /**< [in] Why prediction stops, for the log. */ );
 
     /// Register operator controls without opening inputs or the auxiliary transport.
     int setupINDI();
@@ -2307,8 +2308,13 @@ inline bool loPredCtrlAcc_operational::removed() const
     return !output.m_requested && output.m_zeroConfirmed;
 }
 
-inline void loPredCtrlAcc_operational::stopPrediction()
+inline void loPredCtrlAcc_operational::stopPrediction( const std::string &reason )
 {
+    if( m_predicting )
+    {
+        log<text_log>( "DDSPC prediction stopped: " + reason, logPrio::LOG_NOTICE );
+    }
+
     m_output.request( false ); // Off is always accepted and schedules removal of the DDSPC contribution.
     m_predicting      = false;
     m_predictRejected = false;
@@ -2874,15 +2880,37 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
         m_slotPlan.setZero();
         m_fastClear = true;
     }
-    // Refused if learned without upstream lock (reset the models first), with nothing to apply yet, or while
-    // integrating without the main loop's parameters.
-    const bool unlocked = m_mode.load() == DDSPC::ShadowMode::AccelAssisted && m_unlockedTraining.load();
-    const bool integrating = !m_integrate || m_integratorReady.load(); // The main loop's parameters are known.
-    const bool allowed =
-        !enabled || ( !unlocked && integrating &&
-                      ( selectedReady() || ( m_learning && ( m_gain != 0 || !m_exploration.empty() ) ) ) );
-    const bool accepted = allowed && m_output.request( enabled );
+    // Refused if learned without upstream lock (reset the models first), while integrating without the main loop's
+    // parameters, with nothing to apply yet, or without the own-channel output. Off is always accepted.
+    std::string refused;
+    if( enabled && m_mode.load() == DDSPC::ShadowMode::AccelAssisted && m_unlockedTraining.load() )
+    {
+        refused = "the assisted fit learned without upstream lock; reset the models";
+    }
+    else if( enabled && m_integrate && !m_integratorReady.load() )
+    {
+        refused = "the main loop's integrator parameters have not been received";
+    }
+    else if( enabled && !selectedReady() && !( m_learning && ( m_gain != 0 || !m_exploration.empty() ) ) )
+    {
+        refused = "the selected model is not ready, and learning is off or has neither gain nor exploration";
+    }
+    else if( !m_output.request( enabled ) )
+    {
+        refused = std::string( "the DDSPC output is not available (" ) + m_output.status().m_reason + ")";
+    }
+
+    const bool accepted = refused.empty();
     m_predictRejected   = !accepted;
+
+    if( !accepted )
+    {
+        log<text_log>( "DDSPC prediction request refused: " + refused, logPrio::LOG_NOTICE );
+    }
+    else if( !enabled && m_predicting )
+    {
+        log<text_log>( "DDSPC prediction stopped: turned off by request", logPrio::LOG_NOTICE );
+    }
 
     if( accepted )
     {
@@ -2919,8 +2947,19 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
         m_slotPlan.setZero();
         m_fastClear = true;
     }
-    if( enabled && ( ( m_integrate && !m_integratorReady.load() ) || !m_output.request( true ) ) )
+    std::string refused;
+    if( enabled && m_integrate && !m_integratorReady.load() )
     {
+        refused = "the main loop's integrator parameters have not been received";
+    }
+    else if( enabled && !m_output.request( true ) )
+    {
+        refused = std::string( "the DDSPC output is not available (" ) + m_output.status().m_reason + ")";
+    }
+
+    if( !refused.empty() )
+    {
+        log<text_log>( "DDSPC standard learning sequence refused: " + refused, logPrio::LOG_NOTICE );
         m_predictRejected = true;
         updateSwitchIfChanged( m_indiP_learnStd, "toggle", m_indiP_learnStd["toggle"].getSwitchState(), INDI_ALERT );
         return -1;
@@ -2972,7 +3011,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_zeroDm )( const
 
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     std::lock_guard<std::mutex> modelLock( m_modelMutex );
-    stopPrediction();
+    stopPrediction( "Zero DDSPC DM requested" );
 
     // A confirmed removal is written again, as at startup; this never withholds main-loop tip/tilt by itself.
     if( !m_output.initialize() )
@@ -2995,7 +3034,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_releaseTT )( co
 
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     std::lock_guard<std::mutex> modelLock( m_modelMutex );
-    stopPrediction();
+    stopPrediction( "tip/tilt returned to the main loop" );
 
     // Operator override: the zero is still retried, but the main loop takes tip/tilt back on the next WFS frame.
     m_modalEngaged.store( false );

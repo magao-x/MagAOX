@@ -5,6 +5,7 @@
 #include "../../../tests/testXWC.hpp"
 #include "app_test_support.hpp"
 #include "../loPredCtrlAcc_operational.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <numeric>
@@ -2321,6 +2322,61 @@ TEST_CASE( "Refused prediction requests are answered with an alert", "[rtc-contr
     CHECK( app.m_indiP_predicting.getState() == pcf::IndiProperty::Ok );
     REQUIRE( app.appLogic() == 0 );
     CHECK( app.m_indiP_predicting.getState() == pcf::IndiProperty::Ok );
+}
+
+/** \brief Every prediction stop and every refused request is logged as a note with its reason. */
+TEST_CASE( "Prediction stops and refusals are logged with their reason", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::stopPrediction;
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_predicting;
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_learnStd;
+#endif
+    // clang-format on
+    Controller app( true );
+    auto       request = [&]( pcf::IndiProperty property, const char *element, bool on )
+    {
+        property[element].setSwitchState( on ? pcf::IndiElement::On : pcf::IndiElement::Off );
+        return property;
+    };
+    auto last = [&]()
+    {
+        REQUIRE_FALSE( app.m_textLogs.empty() );
+        CHECK( app.m_textLogs.back().second == MagAOX::app::logPrio::LOG_NOTICE );
+        return app.m_textLogs.back().first;
+    };
+
+    // Refusals, with the condition that refused them.
+    REQUIRE( app.newCallBack_m_indiP_learnStd( request( app.m_indiP_learnStd, "toggle", true ) ) < 0 );
+    CHECK( last().find( "DDSPC standard learning sequence refused: the DDSPC output is not available" ) == 0 );
+    app.qualifyOutput();
+    REQUIRE( app.newCallBack_m_indiP_predicting( request( app.m_indiP_predicting, "toggle", true ) ) < 0 );
+    CHECK( last() == "DDSPC prediction request refused: the selected model is not ready, and learning is off or has "
+                     "neither gain nor exploration" );
+    app.m_integrate = true;
+    REQUIRE( app.newCallBack_m_indiP_predicting( request( app.m_indiP_predicting, "toggle", true ) ) < 0 );
+    CHECK( last() == "DDSPC prediction request refused: the main loop's integrator parameters have not been received" );
+    app.m_integrate = false;
+
+    // Stops by request, with which request; turning off when already off logs nothing.
+    app.train();
+    app.m_predicting = false;
+    REQUIRE( app.newCallBack_m_indiP_predicting( request( app.m_indiP_predicting, "toggle", true ) ) == 0 );
+    const auto count = app.m_textLogs.size();
+    REQUIRE( app.newCallBack_m_indiP_predicting( request( app.m_indiP_predicting, "toggle", false ) ) == 0 );
+    CHECK( last() == "DDSPC prediction stopped: turned off by request" );
+    REQUIRE( app.newCallBack_m_indiP_predicting( request( app.m_indiP_predicting, "toggle", false ) ) == 0 );
+    CHECK( app.m_textLogs.size() == count + 1 );
+
+    REQUIRE( app.newCallBack_m_indiP_predicting( request( app.m_indiP_predicting, "toggle", true ) ) == 0 );
+    app.newCallBack_m_indiP_releaseTT( request( app.m_indiP_releaseTT, "request", true ) );
+    CHECK( std::any_of( app.m_textLogs.begin() + count,
+                        app.m_textLogs.end(),
+                        []( const auto &entry )
+                        {
+                            return entry.first == "DDSPC prediction stopped: tip/tilt returned to the main loop";
+                        } ) );
 }
 
 /** \brief While integrating, prediction is refused until the main loop's parameters are known, then accepted. */
