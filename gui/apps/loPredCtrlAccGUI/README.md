@@ -24,21 +24,39 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 | Reset models | `reset_model.request` |
 | Prediction | `predict.toggle` |
 | Gain | `gain.current`/`target` |
-| Zero DDSPC DM | `zero_dm.request`. Turns prediction off and writes a fresh zero to the DDSPC auxiliary channel (`dm01disp09_aux`), even if the last zero was already confirmed. |
+| Zero DDSPC DM | `zero_dm.request`. Turns prediction off and writes a fresh zero to the DDSPC auxiliary channel (`dm.channelName`), even if the last zero was already confirmed. |
 | Return tip/tilt to main loop | `release_tt.request`. Turns prediction off and passes main-loop tip/tilt through from the next WFS frame without waiting for `safety.zero_confirmed`; the zero is still retried. |
 
 ## Status
 
 | Display | INDI source |
 | --- | --- |
-| Prediction banner | `ddspc_control.prediction`, `main_loop_tt` |
+| Prediction banner | `ddspc_control.prediction`, `main_loop_tt`; after a fault, `PREDICTION STOPPED:` and its reason |
 | Controller | `fsm.state` |
 | Standard / ACC-assisted model | `ddspc_control.standard_ready`/`standard_state`, `assisted_ready`/`assisted_state` |
 | ACC rate, ACC sync | `adc_values.rate_hz`/`valid`, `ddspc_control.accel_sync` |
 | Aux DM output | `safety.output_state` |
+| Last stop | Why prediction last stopped: the decoded fault from `safety.output_state`, a stop by request, or `running` |
 | Main-loop tip/tilt | `ddspc_control.main_loop_tt`: `zeroed` (DDSPC only) or `passthrough` (main loop) |
 | Learning overruns | `ddspc_performance.learn_overruns` (assisted-mode WFS-thread work that delays the next main-loop frame) |
-| Warnings | A controller that is not `OPERATING`, and an alert state on `safety` or `predict` |
+| Warnings | A controller that is not `OPERATING`; an output fault with its reason; a refused prediction request with the condition that refused it (`integrator.ready`, then the selected model's `ddspc_control.*_ready`/`*_state` with learning off, then `safety.output_state`) |
+
+## Why prediction stopped
+
+`loPredCtrlAcc` reports each fault in `safety.output_state` as the fault code, or `fault_zero_acknowledged` once its zero is copied, followed by `(<fault>: <condition> [<ACC window reason>])`. The panel turns that into a sentence and keeps the raw code in brackets, which matches the controller's `DDSPC output fault, prediction stopped` log entry:
+
+| Code | Shown as |
+| --- | --- |
+| `input_or_model_qualification_lost: wfs_invalid` | the WFS measurement was invalid (non-finite) |
+| `…: integrator_parameters` | the main loop's integrator parameters were unavailable |
+| `…: command_invalid` | the selected model stopped qualifying (a WFS gap longer than `max_fill`, or a numerical fault) |
+| `…: wfs_stale` | no WFS frame arrived within `input_timeout` |
+| `…: acc_window <reason>` | the ACC window was unusable, with the reason (for example `stale_sample`, `counter_gap`, `no_new_sample`) |
+| `…: upstream_unlocked` | the ACC upstream timing lock was lost |
+| `command_discarded_zero_pending`, `scheduler_reset_zero_pending`, `ack_timeout_zero_unconfirmed` | the DM scheduler discarded a command, restarted, or did not acknowledge in time |
+| `nonfinite_or_command_limit` | a DDSPC command was non-finite or beyond its limit |
+
+The reason stays shown until prediction is requested again.
 
 ## Tests
 
