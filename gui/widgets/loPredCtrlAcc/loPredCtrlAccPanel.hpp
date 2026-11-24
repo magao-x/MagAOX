@@ -114,6 +114,15 @@ class loPredCtrlAccPanel : public xWidget
     /// Return why mode changes and resets are refused, or an empty string when the controller would accept them.
     QString interlock() const;
 
+    /// Return why prediction last stopped, decoded from safety.output_state, or an empty string without a fault.
+    QString faultReason() const;
+
+    /// Return the Last stop row: the decoded fault, an operator stop, running, or "---" when unavailable.
+    QString stopReason() const;
+
+    /// Return why a prediction request was refused, from the conditions the controller publishes.
+    QString refusalReason() const;
+
     /// Add a status row computed by text.
     void addRow( QGridLayout             *grid,  /**< [in,out] Grid receiving the row. */
                  const char              *key,   /**< [in] Object name suffix. */

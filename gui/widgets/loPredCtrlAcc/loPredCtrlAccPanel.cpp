@@ -35,6 +35,99 @@ bool finiteNumber( const std::string &text, double &number )
     number  = QString::fromStdString( text ).trimmed().toDouble( &ok );
     return ok && std::isfinite( number );
 }
+
+/// Explain a loPredCtrlAcc output fault, or return an empty string when the output state is not a fault.
+/** safety.output_state is the fault code, or fault_zero_acknowledged once its zero is copied, followed by
+ * "(<fault>: <condition> [<ACC window reason>])" when loPredCtrlAcc knows the condition behind it. The raw code is kept
+ * in brackets so the explanation can be matched to the "DDSPC output fault" log entry.
+ */
+QString describeFault( const std::string &outputState /**< [in] safety.output_state. */ );
+
+QString describeFault( const std::string &outputState )
+{
+    static const std::map<std::string, const char *> faults{
+        { "input_or_model_qualification_lost", "the inputs or the model stopped qualifying" },
+        { "command_discarded_zero_pending", "the DM scheduler discarded a DDSPC command" },
+        { "scheduler_reset_zero_pending", "the DM scheduler (dmtweeter-synco) restarted" },
+        { "ack_timeout_zero_unconfirmed", "the DM scheduler did not acknowledge a command in time" },
+        { "nonfinite_or_command_limit", "a DDSPC command was non-finite or beyond its limit" },
+        { "candidate_exception_zero_pending", "an internal error occurred while preparing a DM command" },
+        { "copy_callback_exception_zero_pending", "an internal error occurred while recording a DM command" },
+        { "auxiliary_unavailable", "the DDSPC DM channel was unavailable" },
+        { "auxiliary_geometry", "the DDSPC DM channel has the wrong geometry" },
+        { "syncopation_transport_unavailable", "the DM scheduler transport was unavailable" } };
+    static const std::map<std::string, const char *> conditions{
+        { "wfs_invalid", "the WFS measurement was invalid (non-finite)" },
+        { "integrator_parameters",
+          "the main loop's integrator parameters (holoop gain, mc, limit, aol1_m*fact) were "
+          "unavailable" },
+        { "command_invalid",
+          "the selected model stopped qualifying (a WFS gap longer than max_fill broke its "
+          "history, or a numerical fault)" },
+        { "wfs_stale", "no WFS frame arrived within input_timeout" },
+        { "acc_window", "the ACC window was unusable" },
+        { "upstream_unlocked", "the ACC upstream timing lock was lost" } };
+    static const std::map<std::string, const char *> windows{
+        { "adc_stream_invalid", "ACC stream invalid" },
+        { "awaiting_upstream_lock", "waiting for the upstream lock" },
+        { "reader_backlog", "ACC reader fell behind" },
+        { "history_filling", "ACC history still filling" },
+        { "stale_sample", "newest ACC sample too old" },
+        { "no_new_sample", "no new ACC samples for more than max_fill frames" },
+        { "counter_gap", "more ACC samples missing than max_fill allows" },
+        { "nonfinite_sample", "non-finite ACC sample" },
+        { "adc_disabled", "ACC disabled" } };
+
+    // "<head> (<detail>)", or the bare fault code.
+    std::string head = outputState, detail;
+    const auto  open = outputState.find( " (" );
+
+    if( open != std::string::npos && outputState.back() == ')' )
+    {
+        head   = outputState.substr( 0, open );
+        detail = outputState.substr( open + 2, outputState.size() - open - 3 );
+    }
+
+    if( head != "fault_zero_acknowledged" && !faults.count( head ) )
+    {
+        return {};
+    }
+
+    if( head == "fault_zero_acknowledged" && detail.empty() )
+    {
+        return QStringLiteral( "a fault (this controller version does not report its reason) [%1]" )
+            .arg( QString::fromStdString( head ) );
+    }
+
+    const std::string code      = detail.empty() ? head : detail;
+    const auto        colon     = code.find( ": " );
+    const std::string fault     = code.substr( 0, colon );
+    std::string       condition = colon == std::string::npos ? std::string() : code.substr( colon + 2 ), window;
+    const auto        space     = condition.find( ' ' );
+
+    if( space != std::string::npos )
+    {
+        window    = condition.substr( space + 1 );
+        condition = condition.substr( 0, space );
+    }
+
+    const auto found = faults.find( fault );
+    QString    text  = found == faults.end() ? QString::fromStdString( fault ) : QString::fromLatin1( found->second );
+
+    if( const auto reason = conditions.find( condition ); reason != conditions.end() )
+    {
+        text = QString::fromLatin1( reason->second );
+    }
+
+    if( !window.empty() )
+    {
+        const auto reason = windows.find( window );
+        text += QStringLiteral( ": " ) +
+                ( reason == windows.end() ? QString::fromStdString( window ) : QString::fromLatin1( reason->second ) );
+    }
+
+    return text + QStringLiteral( " [" ) + QString::fromStdString( code ) + QLatin1Char( ']' );
+}
 } // namespace
 
 loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *parent )
@@ -210,6 +303,13 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
     addElementRow( statusGrid, "ACC sync", "ddspc_control", "accel_sync" );
     addElementRow( statusGrid, "Aux DM output", "safety", "output_state" );
     addRow( statusGrid,
+            "stopReason",
+            "Last stop",
+            [this]()
+            {
+                return stopReason();
+            } );
+    addRow( statusGrid,
             "mainLoopTT",
             "Main-loop tip/tilt",
             [this]()
@@ -314,7 +414,8 @@ void loPredCtrlAccPanel::subscribe()
                                   "ddspc_control",
                                   "ddspc_performance",
                                   "safety",
-                                  "adc_values" } )
+                                  "adc_values",
+                                  "integrator" } )
     {
         m_parent->addSubscriberProperty( this, m_device, property );
     }
@@ -476,6 +577,61 @@ QString loPredCtrlAccPanel::interlock() const
     return {};
 }
 
+QString loPredCtrlAccPanel::faultReason() const
+{
+    return describeFault( value( "safety", "output_state" ) );
+}
+
+QString loPredCtrlAccPanel::stopReason() const
+{
+    const auto state = value( "safety", "output_state" );
+
+    if( state.empty() )
+    {
+        return c_missing;
+    }
+
+    if( const QString fault = faultReason(); !fault.isEmpty() )
+    {
+        return fault;
+    }
+
+    if( switchState( "predict", "toggle" ) == pcf::IndiElement::On )
+    {
+        return QStringLiteral( "running" );
+    }
+
+    return state == "disabled" ? QStringLiteral( "not started since the controller started" )
+                               : QStringLiteral( "turned off by request (prediction off, Zero DDSPC DM, Return "
+                                                 "tip/tilt, or a mode change)" );
+}
+
+QString loPredCtrlAccPanel::refusalReason() const
+{
+    // The controller's own conditions for accepting a request, in the order it checks them.
+    double enabled, ready;
+
+    if( finiteNumber( value( "integrator", "enabled" ), enabled ) && enabled == 1 &&
+        finiteNumber( value( "integrator", "ready" ), ready ) && ready == 0 )
+    {
+        return QStringLiteral( "the main loop's integrator parameters have not been received" );
+    }
+
+    const bool        standard = switchState( "ddspc_mode", "standard" ) == pcf::IndiElement::On;
+    const std::string mode     = standard ? "standard" : "assisted";
+
+    if( value( "ddspc_control", mode + "_ready" ) != "true" &&
+        switchState( "learn", "toggle" ) != pcf::IndiElement::On )
+    {
+        return QStringLiteral( "the %1 model is not ready (%2) and learning is off" )
+            .arg( standard ? QStringLiteral( "standard" ) : QStringLiteral( "ACC-assisted" ),
+                  QString::fromStdString( value( "ddspc_control", mode + "_state" ) ) );
+    }
+
+    return QStringLiteral( "the DDSPC output was not available (%1)" )
+        .arg( QString::fromStdString( value( "safety", "output_state" ) ) );
+}
+
 void loPredCtrlAccPanel::merge( Readback &readback, const pcf::IndiProperty &property )
 {
     readback.m_type  = property.getType();
@@ -577,6 +733,12 @@ void loPredCtrlAccPanel::refresh()
                                              : QStringLiteral( "PREDICTION ON: awaiting first DM copy" );
             style  = QStringLiteral( "background: #8a6d1a; color: white;" );
         }
+        else if( const QString fault = faultReason(); !fault.isEmpty() && prediction == "off" )
+        {
+            // Stopped by a fault: say why, whoever now corrects tip/tilt.
+            banner = QStringLiteral( "PREDICTION STOPPED: %1" ).arg( fault );
+            style  = QStringLiteral( "background: #9b2c2c; color: white;" );
+        }
         else if( prediction == "inhibited" )
         {
             banner = QStringLiteral( "PREDICTION INHIBITED: inputs not valid, tip/tilt uncorrected" );
@@ -620,15 +782,19 @@ void loPredCtrlAccPanel::refresh()
 
     if( safety != m_readbacks.end() && safety->second.m_state == pcf::IndiProperty::Alert )
     {
-        warnings
-            << QStringLiteral( "Output fault: %1" ).arg( QString::fromStdString( value( "safety", "output_state" ) ) );
+        const QString fault = faultReason();
+        warnings << QStringLiteral( "Output fault: %1" )
+                        .arg( fault.isEmpty() ? QString::fromStdString( value( "safety", "output_state" ) ) : fault );
     }
 
     const auto predict = m_readbacks.find( "predict" );
 
     if( predict != m_readbacks.end() && predict->second.m_state == pcf::IndiProperty::Alert )
     {
-        warnings << QStringLiteral( "Prediction request rejected or faulted" );
+        // A fault is explained above; otherwise the request itself was refused.
+        warnings << ( faultReason().isEmpty()
+                          ? QStringLiteral( "Prediction request refused: %1" ).arg( refusalReason() )
+                          : QStringLiteral( "Prediction stopped by the output fault" ) );
     }
 
     m_warnings->setText( warnings.join( QLatin1Char( '\n' ) ) );

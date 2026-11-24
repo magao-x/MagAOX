@@ -384,6 +384,83 @@ TEST_CASE( "loPredCtrlAccGUI disables everything when the controller disappears"
         CHECK( fixture.m_panel.windowTitle().contains( wholeDevice ? "not running" : "disconnected" ) );
     }
 }
+/** \brief The banner, Last stop row and warnings say why prediction stopped or why a request was refused. */
+TEST_CASE( "loPredCtrlAccGUI explains why prediction stopped", "[loPredCtrlAccGUI]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACCGUI_TEST_DOXYGEN_REF
+    xqt::loPredCtrlAccPanel::stopReason;
+    xqt::loPredCtrlAccPanel::refusalReason;
+#endif
+    // clang-format on
+    Fixture fixture;
+    fixture.defineAll();
+    auto banner = [&]()
+    {
+        return fixture.widget<QLabel>( "prediction.banner" )->text().toStdString();
+    };
+    auto warnings = [&]()
+    {
+        return fixture.widget<QLabel>( "warnings" )->text();
+    };
+    auto safety = [&]( const char *outputState, pcf::IndiProperty::PropertyStateType state )
+    {
+        pcf::IndiProperty update( pcf::IndiProperty::Text, "loPredCtrlAcc", "safety" );
+        update.add( pcf::IndiElement( "output_state", outputState ) );
+        update.setState( state );
+        fixture.publish( update );
+    };
+    CHECK( fixture.status( "stopReason" ) == "not started since the controller started" );
+
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::On );
+    fixture.publishText( "ddspc_control", "prediction", "active" );
+    safety( "transport_acknowledged_not_physical_application", pcf::IndiProperty::Ok );
+    CHECK( fixture.status( "stopReason" ) == "running" );
+
+    // A fault before its zero is copied: the fault code with the condition behind it.
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Alert );
+    fixture.publishText( "ddspc_control", "prediction", "off" );
+    fixture.publishText( "ddspc_control", "main_loop_tt", "zeroed" );
+    safety( "input_or_model_qualification_lost (input_or_model_qualification_lost: acc_window stale_sample)",
+            pcf::IndiProperty::Alert );
+    const std::string acc = "the ACC window was unusable: newest ACC sample too old "
+                            "[input_or_model_qualification_lost: acc_window stale_sample]";
+    CHECK( banner() == "PREDICTION STOPPED: " + acc );
+    CHECK( fixture.status( "stopReason" ) == acc );
+    CHECK( warnings().contains( QString::fromStdString( "Output fault: " + acc ) ) );
+    CHECK( warnings().contains( "Prediction stopped by the output fault" ) );
+
+    // After the zero is copied, and once tip/tilt is back with the main loop, the reason stays.
+    fixture.publishText( "ddspc_control", "main_loop_tt", "passthrough" );
+    safety( "fault_zero_acknowledged (input_or_model_qualification_lost: wfs_stale)", pcf::IndiProperty::Alert );
+    CHECK( banner() ==
+           "PREDICTION STOPPED: no WFS frame arrived within input_timeout [input_or_model_qualification_lost: "
+           "wfs_stale]" );
+    safety( "fault_zero_acknowledged (scheduler_reset_zero_pending)", pcf::IndiProperty::Alert );
+    CHECK( fixture.status( "stopReason" ) ==
+           "the DM scheduler (dmtweeter-synco) restarted [scheduler_reset_zero_pending]" );
+    safety( "fault_zero_acknowledged", pcf::IndiProperty::Alert );
+    CHECK( fixture.status( "stopReason" ).find( "does not report its reason" ) != std::string::npos );
+
+    // An operator stop is not a fault.
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::Off );
+    safety( "disabled_zero_acknowledged", pcf::IndiProperty::Ok );
+    CHECK( fixture.status( "stopReason" ).find( "turned off by request" ) == 0 );
+    CHECK( banner() == "PREDICTION OFF: main loop is correcting tip/tilt" );
+    CHECK( warnings().isEmpty() );
+
+    // A refused request: the condition the controller reports.
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Alert );
+    CHECK( warnings().contains(
+        "Prediction request refused: the standard model is not ready (awaiting_wfs) and learning is off" ) );
+    pcf::IndiProperty integrator( pcf::IndiProperty::Number, "loPredCtrlAcc", "integrator" );
+    integrator.add( pcf::IndiElement( "enabled", 1.0 ) );
+    integrator.add( pcf::IndiElement( "ready", 0.0 ) );
+    fixture.publish( integrator, true );
+    CHECK( warnings().contains(
+        "Prediction request refused: the main loop's integrator parameters have not been received" ) );
+}
+
 } // namespace loPredCtrlAccGUITest
 } // namespace libXWCTest
 
