@@ -689,3 +689,7 @@ roughly 1 ms lock per frame. Options to evaluate on hardware:
 
 Each must be verified by **image content changing every frame**, not by `cnt0` rate. Example: the frame
 sum, or the framestamp in the image's metadata.
+
+**Verified on hardware (2026-11-23):** the user rebuilt and installed orcaCtrl with the lock-per-frame
+fix. Rerunning the same diagnostic on `camscc` (512×512, 12.5 Hz), the image sum now changes on every
+frame.
