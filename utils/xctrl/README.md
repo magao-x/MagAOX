@@ -255,8 +255,8 @@ with `boot on` starts it again, and does the same for a running app newly disabl
 
 ```
 warning: maths_q removed from proclist but still running, so still registered; stop it first (xctrl stop maths_q), then xctrl sync unregisters it
-maths_q: autostart turned off, as it is removed from the proclist; neither startup nor a reboot starts it; still running, not stopped
-maths_r: autostart turned off, as it is disabled (#!) in the proclist; neither startup nor a reboot starts it; still running, not stopped
+maths_q: autostart turned off (now removed from proclist); however the app is still running.
+maths_r: autostart turned off (now #! disabled in proclist); however the app is still running.
 ```
 
 The role comes from `-r ROLE`, `MAGAOX_ROLE`, or `/etc/profile.d/magaox_role.sh`, since `sudo` can drop the

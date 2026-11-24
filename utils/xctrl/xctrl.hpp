@@ -3197,7 +3197,7 @@ inline int xCtrl::doSync( bool summary )
             ( v.autostart ? toEnable : toDisable ).push_back( u.instance( v.app.name ) );
             if( !v.autostart )
             {
-                turnedOff.push_back( { v.app.name, "disabled (#!) in the proclist" } );
+                turnedOff.push_back( { v.app.name, "now #! disabled in proclist" } );
             }
         }
     }
@@ -3206,7 +3206,7 @@ inline int xCtrl::doSync( bool summary )
         if( enabled( n ) )
         {
             toDisable.push_back( u.instance( n ) );
-            turnedOff.push_back( { n, "disabled (#!) in the proclist" } );
+            turnedOff.push_back( { n, "now #! disabled in proclist" } );
         }
     }
     for( const auto &n : keptRunning )
@@ -3214,7 +3214,7 @@ inline int xCtrl::doSync( bool summary )
         if( enabled( n ) )
         {
             toDisable.push_back( u.instance( n ) );
-            turnedOff.push_back( { n, "removed from the proclist" } );
+            turnedOff.push_back( { n, "now removed from proclist" } );
         }
     }
     for( const auto &n : removed )
@@ -3288,9 +3288,8 @@ inline int xCtrl::doSync( bool summary )
     }
     for( const auto &off : turnedOff )
     {
-        say( msgLevel::info ) << off.first << ": autostart turned off, as it is " << off.second
-                              << "; neither startup nor a reboot starts it"
-                              << ( isRunning.count( off.first ) ? "; still running, not stopped" : "" );
+        say( msgLevel::info ) << off.first << ": autostart turned off (" << off.second << ")"
+                              << ( isRunning.count( off.first ) ? "; however the app is still running." : "" );
     }
     for( const auto &w : warnings )
     {
