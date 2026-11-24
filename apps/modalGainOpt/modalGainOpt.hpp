@@ -5486,7 +5486,6 @@ void modalGainOpt::goptThreadExec()
                 continue;
             }
 
-            const auto         previousSource      = m_activeNoise;
             float              noiseFps            = 0;
             double             noiseFlux           = 0;
             const auto         predictedNoise      = selectNoisePrediction( noiseFps, noiseFlux );
@@ -5494,11 +5493,6 @@ void modalGainOpt::goptThreadExec()
             const float        unavailable         = std::numeric_limits<float>::quiet_NaN();
             std::vector<float> noiseComparison( m_noiseComparisonStream ? 2 * m_nModes : 0, unavailable );
             std::vector<float> gainLimits( 4 * m_nModes, unavailable );
-
-            if( previousSource != m_activeNoise )
-            {
-                std::fill( m_regScale.begin(), m_regScale.end(), -999 );
-            }
 
             if( m_siGainStateNeedsSync )
             {
@@ -6074,9 +6068,9 @@ void modalGainOpt::goptThreadExec()
                             m_goptLP[n].a( m_linPred[n].m_lp.m_c );
                             m_goptLP[n].b( m_linPred[n].m_lp.m_c );
 
-                            const bool limited = mx::math::isFinite( ceiling );
-
-                            if( limited && !!m_goptLP[n].maxStableGain( m_gmaxLP[n] ) )
+                            // The coefficients can change while the regularization scale is cached.
+                            if( ( m_calibratedNoise || mx::math::isFinite( ceiling ) ) &&
+                                !!m_goptLP[n].maxStableGain( m_gmaxLP[n] ) )
                             {
                                 m_gmaxLP[n] = 0;
                             }

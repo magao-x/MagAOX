@@ -166,3 +166,9 @@ Acquisition time places the blocks within the modal PSD interval. Frame counters
 In the offline November camera replay, all five archived camera intervals yielded estimates with their original frame sequences and after deliberately removing one frame from each of the four sampled blocks. The complete-frame run reproduced the original camera estimates to the output's displayed precision. The repaired-to-complete modal PSD ratio had a median of 1.00043 and 5th–95th percentiles of 0.99935–1.00144 across 1,563 modes. The synthetic test also covers zero-filled frames, gaps at block edges, and timestamp jitter with both consecutive and skipped counters.
 
 The frame-counter regression passed all 22 assertions. The full optimizer suite passed 49 of 51 tests, with the same crossover-boundary and initial predictor mode-count failures recorded above.
+
+## Gain continuity through noise fallback
+
+Noise-source transitions use the next PSD and selected noise prediction as inputs to the existing gain update. The SI integrator continues from its previous recommendation. The predictor keeps its regularization scale and per-mode schedule during fallback and recovery. With calibrated noise enabled, the predictor checks the stability bound for the current coefficients even when it reuses the regularization scale. The raw SI output shows the result from each PSD before integration.
+
+The focused source selection, SI integration, and predictor bounds tests passed. The full suite passed 49 of 51 tests with the same two baseline failures.
