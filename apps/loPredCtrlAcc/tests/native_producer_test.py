@@ -42,7 +42,7 @@ class NativeProducerTests(unittest.TestCase):
         config.read_string("[application]\n" + (APP / "loPredCtrlAcc.conf").read_text())
         self.assertNotIn("learn", config["parameters"])
         self.assertNotIn("predict", config["parameters"])
-        self.assertEqual(config["dm"]["channelName"], "dm01disp09_aux")
+        self.assertEqual(config["dm"]["channelName"], "dm01disp05_aux")
         self.assertNotIn("native_inputs", config)
 
 

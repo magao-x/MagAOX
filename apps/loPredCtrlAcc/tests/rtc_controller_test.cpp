@@ -1818,7 +1818,7 @@ TEST_CASE( "Modal output configuration rejects feedback and other modes", "[rtc-
     app.m_syncopationTiming = "dmtweeter_synco_timing";
     grabber.m_shmimName     = "loPredCtrlAcc"; // The frameGrabber default: the application's name.
     REQUIRE_NOTHROW( app.validateModalOutput() );
-    for( const auto *name : { "", "aol1_modevalWFS", "dm01disp09_aux", "dmtweeter_synco_timing" } )
+    for( const auto *name : { "", "aol1_modevalWFS", "dm01disp05_aux", "dmtweeter_synco_timing" } )
     {
         grabber.m_shmimName = name;
         REQUIRE_THROWS( app.validateModalOutput() );

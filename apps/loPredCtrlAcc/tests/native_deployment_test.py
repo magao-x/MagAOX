@@ -39,7 +39,7 @@ class NativeDeploymentTest(unittest.TestCase):
             self.assertEqual(config["adc"][key], original["adc"][key])
         self.assertTrue(config.getboolean("adc", "enabled"))
         self.assertEqual(config["shmimMonitor"]["shmimName"], "aol1_modevalWFS")
-        self.assertEqual(config["dm"]["channelName"], "dm01disp09_aux")
+        self.assertEqual(config["dm"]["channelName"], "dm01disp05_aux")
         self.assertNotIn("predict", config["parameters"])
         # The always-on main-loop modal output (as loPredCtrl's frameGrabber) never republishes into the WFS input.
         self.assertNotEqual(config["framegrabber"].get("shmimName"), config["shmimMonitor"]["shmimName"])
