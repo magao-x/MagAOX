@@ -43,7 +43,9 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_adcAnchor;
     using loPredCtrlAcc_operational::m_adcSegment;
     using loPredCtrlAcc_operational::m_assistedDiagnostic;
+    using loPredCtrlAcc_operational::m_assistedValid;
     using loPredCtrlAcc_operational::m_calibration;
+    using loPredCtrlAcc_operational::m_candidateValid;
     using loPredCtrlAcc_operational::m_commandKnown;
     using loPredCtrlAcc_operational::m_commandMutex;
     using loPredCtrlAcc_operational::m_decisionOrdinal;
@@ -66,6 +68,9 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_indiP_reset;
     using loPredCtrlAcc_operational::m_indiP_sync;
     using loPredCtrlAcc_operational::m_indiP_zeroDm;
+    using loPredCtrlAcc_operational::m_inputValid;
+    using loPredCtrlAcc_operational::m_invalidReason;
+    using loPredCtrlAcc_operational::m_invalidWindow;
     using loPredCtrlAcc_operational::m_learning;
     using loPredCtrlAcc_operational::m_learnUs;
     using loPredCtrlAcc_operational::m_modalEngaged;
@@ -91,6 +96,8 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_syncopationTiming;
     using loPredCtrlAcc_operational::m_unlockedTraining;
     using loPredCtrlAcc_operational::m_wfsCounter;
+    using loPredCtrlAcc_operational::m_wfsReceipt;
+    using loPredCtrlAcc_operational::m_windowReason;
     using loPredCtrlAcc_operational::modalZeroed;
     using loPredCtrlAcc_operational::outputCandidate;
     using loPredCtrlAcc_operational::outputValid;
@@ -1412,6 +1419,58 @@ TEST_CASE( "Modal output zeroes tip/tilt only and leaves DDSPC unchanged", "[rtc
     REQUIRE( monitor.m_standard.m_ready ); // Trained and predicting, so the comparison covers DDSPC predictions.
     REQUIRE( monitor.m_standard.m_updates == direct.m_standard.m_updates );
     REQUIRE( monitor.m_standard.m_originRmse == direct.m_standard.m_originRmse );
+}
+
+/** \brief A latched output fault keeps its reason after the zero is acknowledged, and outputValid() records the
+ * condition that first ended a qualified period, so a qualification fault can be explained afterwards.
+ */
+TEST_CASE( "Output faults keep the condition that caused them", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::SyncoOutputState::fault;
+    MagAOX::app::loPredCtrlAcc_operational::outputValid;
+#endif
+    // clang-format on
+    MagAOX::app::SyncoOutputConfig config;
+    config.m_authorized = config.m_routingVerified = config.m_producerDefaults = true;
+    MagAOX::app::SyncoOutputState output( config, 2, true );
+    const std::vector<float>      zero( 2, 0 );
+    REQUIRE( output.request( true, true ) );
+    output.fault( "input_or_model_qualification_lost" );
+    output.submitted( zero, true, 0 );
+    output.acknowledge( true );
+    CHECK( std::string( output.status().m_reason ) == "fault_zero_acknowledged" );
+    CHECK( std::string( output.status().m_faultReason ) == "input_or_model_qualification_lost" );
+    CHECK( output.status().m_faults == 1 );
+
+    Controller app( true );
+    app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
+    app.m_inputValid.store( true );
+    app.m_candidateValid.store( true );
+    app.m_assistedValid.store( true );
+    app.m_syncLocked.store( true );
+    app.m_wfsReceipt.store( MagAOX::app::synco::monotonicNs() );
+    REQUIRE( app.outputValid() );
+
+    // One frame without a complete ACC window ends qualification; the later loss of lock is a consequence.
+    app.m_windowReason.store( "stale_sample" );
+    app.m_assistedValid.store( false );
+    CHECK_FALSE( app.outputValid() );
+    app.m_windowReason.store( "ok" );
+    app.m_assistedValid.store( true );
+    app.m_syncLocked.store( false );
+    CHECK_FALSE( app.outputValid() );
+    CHECK( std::string( app.m_invalidReason.load() ) == "acc_window" );
+    CHECK( std::string( app.m_invalidWindow.load() ) == "stale_sample" );
+
+    // After qualifying again, a new failure is recorded.
+    app.m_syncLocked.store( true );
+    app.m_wfsReceipt.store( MagAOX::app::synco::monotonicNs() );
+    REQUIRE( app.outputValid() );
+    app.m_wfsReceipt.store( MagAOX::app::synco::monotonicNs() - std::int64_t( 1e9 ) );
+    CHECK_FALSE( app.outputValid() );
+    CHECK( std::string( app.m_invalidReason.load() ) == "wfs_stale" );
 }
 
 /** \brief The modal output requires DDSPC to control exactly modes 0 and 1 and a stream distinct from the WFS input and

@@ -123,6 +123,16 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Why the latest WFS-thread ACC window is not usable ("ok" when it is).
     std::atomic<const char *> m_windowReason{ "no_samples" };
 
+    /// First failed outputValid() condition after the output was last qualified, and the ACC window reason then.
+    /** Written by the output-thread qualification check; read by appLogic to explain a qualification fault. */
+    mutable std::atomic<const char *> m_invalidReason{ "" }, m_invalidWindow{ "" };
+
+    /// outputValid() last passed, so the next failure is recorded as the first one.
+    mutable std::atomic<bool> m_wasValid{ false };
+
+    std::uint64_t m_faultsLogged{ 0 }; ///< Output faults already logged; appLogic only.
+    std::string   m_faultDetail;       ///< Latest fault's reason and condition, shown in safety; appLogic only.
+
     /// Shared WFS freshness policy, independent of ACC synchronization and the model's excitation rank.
     double                    m_inputTimeout{ .01 };
     std::atomic<std::int64_t> m_wfsReceipt{ -1 };
@@ -1147,9 +1157,29 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
 inline bool loPredCtrlAcc_operational::outputValid() const
 {
     const auto now = synco::monotonicNs(), last = m_wfsReceipt.load();
-    return m_inputValid.load() && m_candidateValid.load() && last >= 0 && now >= last &&
-           now - last <= m_inputTimeout * 1e9 &&
-           ( ( m_assistedValid.load() && m_syncLocked.load() ) || m_mode == DDSPC::ShadowMode::Standard );
+    const bool assisted = m_mode != DDSPC::ShadowMode::Standard;
+
+    const char *reason = !m_inputValid.load()                                          ? "wfs_invalid"
+                         : !m_candidateValid.load()                                    ? "command_invalid"
+                         : last < 0 || now < last || now - last > m_inputTimeout * 1e9 ? "wfs_stale"
+                         : assisted && !m_assistedValid.load()                         ? "acc_window"
+                         : assisted && !m_syncLocked.load()                            ? "upstream_unlocked"
+                                                                                       : nullptr;
+
+    if( !reason )
+    {
+        m_wasValid.store( true );
+        return true;
+    }
+
+    // Keep the condition that ended a qualified period, not the consequences that follow it.
+    if( m_wasValid.exchange( false ) )
+    {
+        m_invalidWindow.store( m_windowReason.load() );
+        m_invalidReason.store( reason );
+    }
+
+    return false;
 }
 
 inline bool loPredCtrlAcc_operational::outputCandidate( const synco::Request &request,
@@ -2040,9 +2070,31 @@ inline int loPredCtrlAcc_operational::appLogic()
         values.push_back( k < int( fast.m_phase.size() ) ? double( fast.m_phase[k] ) : 0 );
     }
     updatesIfChanged<double>( m_indiP_performance, names, values, INDI_OK );
+    if( output.m_faults != m_faultsLogged )
+    {
+        m_faultsLogged = output.m_faults;
+        m_faultDetail  = output.m_faultReason;
+
+        // A lost qualification names the outputValid() condition, and for the ACC window its reason.
+        if( std::string( output.m_faultReason ) == "input_or_model_qualification_lost" )
+        {
+            const std::string condition = m_invalidReason.load();
+            m_faultDetail += ": " + condition;
+
+            if( condition == "acc_window" )
+            {
+                m_faultDetail += std::string( " " ) + m_invalidWindow.load();
+            }
+        }
+
+        log<text_log>( "DDSPC output fault, prediction stopped: " + m_faultDetail, logPrio::LOG_WARNING );
+    }
+
     updatesIfChanged<std::string>( m_indiP_safety,
                                    { "output_state", "dm_write_enabled", "zero_confirmed" },
-                                   { output.m_reason,
+                                   { output.m_fault && m_faultDetail != output.m_reason
+                                         ? std::string( output.m_reason ) + " (" + m_faultDetail + ")"
+                                         : std::string( output.m_reason ),
                                      output.m_requested && !output.m_fault ? "true" : "false",
                                      output.m_zeroConfirmed ? "true" : "false" },
                                    output.m_fault ? INDI_ALERT : INDI_OK );

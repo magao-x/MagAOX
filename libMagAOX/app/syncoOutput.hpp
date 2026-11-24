@@ -39,6 +39,8 @@ struct SyncoOutputStatus
         m_rejected{ 0 };          ///< Committed payloads, exact receipts and failed bounds.
     std::uint64_t m_skipped{ 0 }; ///< Observed slots not committed by their cutoff; synco retains the last copy.
     const char   *m_reason{ "disabled" }; ///< Stable diagnostic text, without acquisition-thread string allocation.
+    const char   *m_faultReason{ "" };    ///< Why the latest fault latched; kept after its zero is acknowledged.
+    std::uint64_t m_faults{ 0 };          ///< Faults latched since startup, so a reader can detect each new one.
 };
 
 /// Small deterministic output interlock reused by the two native providers and mock consumers.
@@ -122,6 +124,8 @@ inline void SyncoOutputState::fault( const char *reason )
     m_status.m_requested     = false;
     m_status.m_zeroConfirmed = false;
     m_status.m_reason        = reason;
+    m_status.m_faultReason   = reason;
+    ++m_status.m_faults;
 }
 inline bool SyncoOutputState::initialize()
 {
