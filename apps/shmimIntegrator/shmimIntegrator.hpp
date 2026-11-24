@@ -7,6 +7,7 @@
 #ifndef shmimIntegrator_hpp
 #define shmimIntegrator_hpp
 
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <limits>
@@ -56,8 +57,44 @@ struct dark2ShmimT
     };
 };
 
+/// Configuration and INDI tag for the third optional dark monitor.
+struct dark3ShmimT
+{
+    /// Return the configuration section for this monitor.
+    static std::string configSection()
+    {
+        return "dark3Shmim";
+    }
+
+    /// Return the prefix for this monitor's INDI properties.
+    static std::string indiPrefix()
+    {
+        return "dark3";
+    }
+};
+
+/// Configuration and INDI tag for the fourth optional dark monitor.
+struct dark4ShmimT
+{
+    /// Return the configuration section for this monitor.
+    static std::string configSection()
+    {
+        return "dark4Shmim";
+    }
+
+    /// Return the prefix for this monitor's INDI properties.
+    static std::string indiPrefix()
+    {
+        return "dark4";
+    }
+};
+
 /** \defgroup shmimIntegrator ImageStreamIO Stream Integrator
  * \brief Integrates (i.e. averages) an ImageStreamIO image stream.
+ * Block averages subtract each enabled, size-matched dark. Moving averages use only `darkShmim`.
+ * Set `shmimName` in `dark2Shmim`, `dark3Shmim`, or `dark4Shmim` to select a stream. Set `enabled` in any
+ * of those sections to choose whether subtraction starts on (the default) or off. The INDI `dark2_enable`,
+ * `dark3_enable`, and `dark4_enable` switches change subtraction at runtime while the monitors receive frames.
  *
  * <a href="../handbook/operating/software/apps/shmimIntegrator.html">Application Documentation</a>
  *
@@ -80,6 +117,8 @@ class shmimIntegrator : public MagAOXApp<true>,
                         public dev::shmimMonitor<shmimIntegrator>,
                         public dev::shmimMonitor<shmimIntegrator, darkShmimT>,
                         public dev::shmimMonitor<shmimIntegrator, dark2ShmimT>,
+                        public dev::shmimMonitor<shmimIntegrator, dark3ShmimT>,
+                        public dev::shmimMonitor<shmimIntegrator, dark4ShmimT>,
                         public dev::frameGrabber<shmimIntegrator>,
                         public dev::telemeter<shmimIntegrator>
 {
@@ -91,6 +130,10 @@ class shmimIntegrator : public MagAOXApp<true>,
 
     friend class dev::shmimMonitor<shmimIntegrator, dark2ShmimT>;
 
+    friend class dev::shmimMonitor<shmimIntegrator, dark3ShmimT>;
+
+    friend class dev::shmimMonitor<shmimIntegrator, dark4ShmimT>;
+
     friend class dev::frameGrabber<shmimIntegrator>;
 
     friend class dev::telemeter<shmimIntegrator>;
@@ -100,6 +143,10 @@ class shmimIntegrator : public MagAOXApp<true>,
     typedef dev::shmimMonitor<shmimIntegrator, darkShmimT> darkMonitorT;
 
     typedef dev::shmimMonitor<shmimIntegrator, dark2ShmimT> dark2MonitorT;
+
+    typedef dev::shmimMonitor<shmimIntegrator, dark3ShmimT> dark3MonitorT;
+
+    typedef dev::shmimMonitor<shmimIntegrator, dark4ShmimT> dark4MonitorT;
 
     typedef dev::frameGrabber<shmimIntegrator> frameGrabberT;
 
@@ -168,7 +215,12 @@ class shmimIntegrator : public MagAOXApp<true>,
 
         bool m_set{ false }; ///< A complete frame has been installed since allocation.
 
-        bool m_failed{ false }; ///< A failed allocation gates output until a successful allocation of this dark.
+        bool m_failed{ false }; ///< An enabled dark's failed allocation gates output until a successful allocation.
+
+        bool m_enabled{ true }; ///< Apply this correction when a compatible frame is available.
+
+        /// Check whether a complete dark matches both source dimensions.
+        bool matches( const imageInfo &source /**< [in] source descriptor */ ) const;
     };
 
     /// Protects all app image, configuration, readiness, and state-string data below.
@@ -190,6 +242,10 @@ class shmimIntegrator : public MagAOXApp<true>,
     darkFrame m_dark; ///< First optional correction image.
 
     darkFrame m_dark2; ///< Second optional correction image.
+
+    darkFrame m_dark3; ///< Third optional correction image.
+
+    darkFrame m_dark4; ///< Fourth optional correction image.
 
     mx::improc::eigenCube<realT> m_accumImages; ///< Moving-average history for the prepared generation.
 
@@ -284,6 +340,9 @@ class shmimIntegrator : public MagAOXApp<true>,
     /// Invalidate unclaimed work and advance the request generation; caller holds m_imageMutex.
     void requestReconfigure();
 
+    /// Check for a failed source or dark allocation while holding m_imageMutex.
+    bool inputFailed() const;
+
     /// Import a source descriptor and request a coordinated configuration transition.
     int allocate( const dev::shmimT &tag /**< [in] source monitor tag */ );
 
@@ -305,6 +364,20 @@ class shmimIntegrator : public MagAOXApp<true>,
     int processImage( void              *source /**< [in] current dark frame */,
                       const dark2ShmimT &tag /**< [in] second-dark monitor tag */ );
 
+    /// Allocate the third dark and reset its readiness.
+    int allocate( const dark3ShmimT &tag /**< [in] third-dark monitor tag */ );
+
+    /// Install a complete third dark atomically with respect to subtraction.
+    int processImage( void              *source /**< [in] current dark frame */,
+                      const dark3ShmimT &tag /**< [in] third-dark monitor tag */ );
+
+    /// Allocate the fourth dark and reset its readiness.
+    int allocate( const dark4ShmimT &tag /**< [in] fourth-dark monitor tag */ );
+
+    /// Install a complete fourth dark atomically with respect to subtraction.
+    int processImage( void              *source /**< [in] current dark frame */,
+                      const dark4ShmimT &tag /**< [in] fourth-dark monitor tag */ );
+
     /// Common optional-dark allocation and transition.
     int allocateDark( darkFrame &dark /**< [in/out] dark storage */,
                       uint32_t   width /**< [in] monitor width */,
@@ -313,6 +386,17 @@ class shmimIntegrator : public MagAOXApp<true>,
 
     /// Copy an entire dark under the image-state lock.
     int processDark( darkFrame &dark /**< [in/out] dark storage */, void *source /**< [in] current frame */ );
+
+    /// Register a subtraction toggle for each configured numbered dark stream.
+    int registerDarkSwitches();
+
+    /// Apply a dark switch request and discard unclaimed work from the previous setting.
+    int setDarkEnabled( darkFrame               &dark /**< [in/out] correction to switch */,
+                        pcf::IndiProperty       &property /**< [in/out] registered switch */,
+                        const pcf::IndiProperty &request /**< [in] received switch command */ );
+
+    /// Identify the dark switch settings in a saved filename while holding m_imageMutex.
+    std::string savedDarkSuffix() const;
 
     /// Read the newest matching saved image without holding either app mutex.
     int findMatchingDark();
@@ -324,7 +408,8 @@ class shmimIntegrator : public MagAOXApp<true>,
 
     /// Save an independently owned completed average outside the image-state lock.
     int saveImage( const imageT      &image /**< [in] completed average */,
-                   const std::string &stateString /**< [in] state at completion */ );
+                   const std::string &stateString /**< [in] state at completion */,
+                   const std::string &darkSuffix /**< [in] enabled dark corrections at completion */ );
 
     /** \name dev::frameGrabber interface
      * @{ */
@@ -355,6 +440,12 @@ class shmimIntegrator : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_startAveraging; ///< Start/stop switch.
 
+    pcf::IndiProperty m_indiP_dark2Enable; ///< Toggle subtraction of the second correction.
+
+    pcf::IndiProperty m_indiP_dark3Enable; ///< Toggle subtraction of the third correction.
+
+    pcf::IndiProperty m_indiP_dark4Enable; ///< Toggle subtraction of the fourth correction.
+
     /// Request a frame-count change.
     INDI_NEWCALLBACK_DECL( shmimIntegrator, m_indiP_nAverage );
 
@@ -366,6 +457,15 @@ class shmimIntegrator : public MagAOXApp<true>,
 
     /// Start or stop averaging and invalidate stale disk lookups.
     INDI_NEWCALLBACK_DECL( shmimIntegrator, m_indiP_startAveraging );
+
+    /// Enable or bypass the second correction.
+    INDI_NEWCALLBACK_DECL( shmimIntegrator, m_indiP_dark2Enable );
+
+    /// Enable or bypass the third correction.
+    INDI_NEWCALLBACK_DECL( shmimIntegrator, m_indiP_dark3Enable );
+
+    /// Enable or bypass the fourth correction.
+    INDI_NEWCALLBACK_DECL( shmimIntegrator, m_indiP_dark4Enable );
 
     pcf::IndiProperty m_indiP_fpsSource; ///< Subscription to the source FPS.
 
@@ -402,8 +502,29 @@ inline void shmimIntegrator::setupConfig()
     SHMIMMONITORT_SETUP_CONFIG( shmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( darkMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( dark2MonitorT, config );
+    SHMIMMONITORT_SETUP_CONFIG( dark3MonitorT, config );
+    SHMIMMONITORT_SETUP_CONFIG( dark4MonitorT, config );
+
+    // The third and fourth dark streams require explicit names instead of the base's app-name default.
+    dark3MonitorT::m_shmimName.clear();
+    dark4MonitorT::m_shmimName.clear();
+
     FRAMEGRABBER_SETUP_CONFIG( config );
     TELEMETER_SETUP_CONFIG( config );
+
+    for( const auto &section :
+         { dark2ShmimT::configSection(), dark3ShmimT::configSection(), dark4ShmimT::configSection() } )
+    {
+        config.add( section + ".enabled",
+                    "",
+                    section + ".enabled",
+                    argType::Required,
+                    section,
+                    "enabled",
+                    false,
+                    "bool",
+                    "Subtract this configured dark at startup. Default true. Can be changed via INDI." );
+    }
 
     config.add( "integrator.nAverage",
                 "",
@@ -493,8 +614,14 @@ inline int shmimIntegrator::loadConfigImpl( mx::app::appConfigurator &_config )
     SHMIMMONITORT_LOAD_CONFIG( shmimMonitorT, _config );
     SHMIMMONITORT_LOAD_CONFIG( darkMonitorT, _config );
     SHMIMMONITORT_LOAD_CONFIG( dark2MonitorT, _config );
+    SHMIMMONITORT_LOAD_CONFIG( dark3MonitorT, _config );
+    SHMIMMONITORT_LOAD_CONFIG( dark4MonitorT, _config );
     FRAMEGRABBER_LOAD_CONFIG( _config );
     TELEMETER_LOAD_CONFIG( _config );
+
+    _config( m_dark2.m_enabled, "dark2Shmim.enabled" );
+    _config( m_dark3.m_enabled, "dark3Shmim.enabled" );
+    _config( m_dark4.m_enabled, "dark4Shmim.enabled" );
 
     _config( m_nAverageDefault, "integrator.nAverage" );
     m_nAverage = m_nAverageDefault;
@@ -612,9 +739,25 @@ inline int shmimIntegrator::appStartup()
         }
     }
 
+    if( registerDarkSwitches() < 0 )
+    {
+        return -1;
+    }
+
     SHMIMMONITORT_APP_STARTUP( shmimMonitorT );
     SHMIMMONITORT_APP_STARTUP( darkMonitorT );
     SHMIMMONITORT_APP_STARTUP( dark2MonitorT );
+
+    if( !dark3MonitorT::shmimName().empty() )
+    {
+        SHMIMMONITORT_APP_STARTUP( dark3MonitorT );
+    }
+
+    if( !dark4MonitorT::shmimName().empty() )
+    {
+        SHMIMMONITORT_APP_STARTUP( dark4MonitorT );
+    }
+
     FRAMEGRABBER_APP_STARTUP;
     TELEMETER_APP_STARTUP;
 
@@ -628,6 +771,17 @@ inline int shmimIntegrator::appLogic()
     SHMIMMONITORT_APP_LOGIC( shmimMonitorT );
     SHMIMMONITORT_APP_LOGIC( darkMonitorT );
     SHMIMMONITORT_APP_LOGIC( dark2MonitorT );
+
+    if( !dark3MonitorT::shmimName().empty() )
+    {
+        SHMIMMONITORT_APP_LOGIC( dark3MonitorT );
+    }
+
+    if( !dark4MonitorT::shmimName().empty() )
+    {
+        SHMIMMONITORT_APP_LOGIC( dark4MonitorT );
+    }
+
     FRAMEGRABBER_APP_LOGIC;
     TELEMETER_APP_LOGIC;
 
@@ -640,6 +794,17 @@ inline int shmimIntegrator::appLogic()
     SHMIMMONITORT_UPDATE_INDI( shmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( darkMonitorT );
     SHMIMMONITORT_UPDATE_INDI( dark2MonitorT );
+
+    if( !dark3MonitorT::shmimName().empty() )
+    {
+        SHMIMMONITORT_UPDATE_INDI( dark3MonitorT );
+    }
+
+    if( !dark4MonitorT::shmimName().empty() )
+    {
+        SHMIMMONITORT_UPDATE_INDI( dark4MonitorT );
+    }
+
     FRAMEGRABBER_UPDATE_INDI;
     updateIntegratorINDI();
     return 0;
@@ -688,6 +853,8 @@ inline int shmimIntegrator::appShutdown()
     SHMIMMONITORT_APP_SHUTDOWN( shmimMonitorT );
     SHMIMMONITORT_APP_SHUTDOWN( darkMonitorT );
     SHMIMMONITORT_APP_SHUTDOWN( dark2MonitorT );
+    SHMIMMONITORT_APP_SHUTDOWN( dark3MonitorT );
+    SHMIMMONITORT_APP_SHUTDOWN( dark4MonitorT );
     FRAMEGRABBER_APP_SHUTDOWN;
     TELEMETER_APP_SHUTDOWN;
     return 0;
@@ -727,6 +894,17 @@ inline void shmimIntegrator::requestReconfigure()
     m_imageCondition.notify_all();
 }
 
+inline bool shmimIntegrator::inputFailed() const
+{
+    return m_sourceFailed || m_dark.m_failed || ( m_dark2.m_enabled && m_dark2.m_failed ) ||
+           ( m_dark3.m_enabled && m_dark3.m_failed ) || ( m_dark4.m_enabled && m_dark4.m_failed );
+}
+
+inline bool shmimIntegrator::darkFrame::matches( const imageInfo &source ) const
+{
+    return m_set && m_info.m_width == source.m_width && m_info.m_height == source.m_height;
+}
+
 inline int shmimIntegrator::allocate( const dev::shmimT &tag )
 {
     static_cast<void>( tag );
@@ -747,8 +925,6 @@ inline int shmimIntegrator::allocate( const dev::shmimT &tag )
 inline int shmimIntegrator::processImage( void *source, const dev::shmimT &tag )
 {
     static_cast<void>( tag );
-    imageT                       saved;
-    std::string                  savedState;
     std::unique_lock<std::mutex> lock( m_imageMutex );
     if( m_stopping || !m_running || !m_prepared || m_activeGeneration != m_generation || !m_source.m_pixels )
     {
@@ -812,11 +988,9 @@ inline int shmimIntegrator::processImage( void *source, const dev::shmimT &tag )
     }
 
     m_avgImage /= m_activeAverage;
-    bool firstDark =
-        m_dark.m_set && m_dark.m_info.m_width == m_source.m_width && m_dark.m_info.m_height == m_source.m_height;
-    // Preserve the existing first-dark-only policy for moving averages.
-    bool secondDark = m_activeUpdate == 0 && m_dark2.m_set && m_dark2.m_info.m_width == m_source.m_width &&
-                      m_dark2.m_info.m_height == m_source.m_height;
+    bool firstDark  = m_dark.matches( m_source );
+    bool secondDark = m_activeUpdate == 0 && m_dark2.m_enabled && m_dark2.matches( m_source );
+
     if( firstDark && secondDark )
     {
         m_avgImage -= m_dark.m_image + m_dark2.m_image;
@@ -830,6 +1004,17 @@ inline int shmimIntegrator::processImage( void *source, const dev::shmimT &tag )
         m_avgImage -= m_dark2.m_image;
     }
 
+    if( m_activeUpdate == 0 )
+    {
+        for( const auto *dark : { &m_dark3, &m_dark4 } )
+        {
+            if( dark->m_enabled && dark->matches( m_source ) )
+            {
+                m_avgImage -= dark->m_image;
+            }
+        }
+    }
+
     m_updated     = true;
     m_sinceUpdate = 0;
     m_imageCondition.notify_one();
@@ -841,30 +1026,36 @@ inline int shmimIntegrator::processImage( void *source, const dev::shmimT &tag )
             m_imageValid = !m_stateStringChanged && m_stateStringValid && m_stateStringValidOnStart;
             if( m_imageValid )
             {
-                saved      = m_avgImage;
-                savedState = m_stateString;
+                imageT      saved      = m_avgImage;
+                std::string savedState = m_stateString;
+                std::string darkSuffix = savedDarkSuffix();
+
+                lock.unlock();
+                return saveImage( saved, savedState, darkSuffix );
             }
         }
     }
-    lock.unlock();
-    if( saved.size() )
-    {
-        return saveImage( saved, savedState );
-    }
+
     return 0;
 }
 
 inline int shmimIntegrator::allocateDark( darkFrame &dark, uint32_t width, uint32_t height, uint8_t type )
 {
     std::lock_guard<std::mutex> lock( m_imageMutex );
-    requestReconfigure();
+
+    if( dark.m_enabled )
+    {
+        requestReconfigure();
+    }
+
     dark.m_failed  = true;
     dark.m_set     = false;
     dark.m_info    = {};
     imageInfo info = describeImage( width, height, type );
     if( !info.m_pixels )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "invalid dark geometry or datatype" } );
+        log<software_error>( { __FILE__, __LINE__, "invalid dark geometry or datatype" } );
+        return dark.m_enabled ? -1 : 0;
     }
     try
     {
@@ -876,7 +1067,8 @@ inline int shmimIntegrator::allocateDark( darkFrame &dark, uint32_t width, uint3
     }
     catch( const std::exception &error )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, error.what() } );
+        log<software_error>( { __FILE__, __LINE__, error.what() } );
+        return dark.m_enabled ? -1 : 0;
     }
     return 0;
 }
@@ -890,7 +1082,7 @@ inline int shmimIntegrator::processDark( darkFrame &dark, void *source )
     }
     if( !source || !dark.m_info.m_pixels )
     {
-        return -1;
+        return dark.m_enabled ? -1 : 0;
     }
     dark.m_info.m_setFrame( dark.m_image.data(), source, dark.m_info.m_pixels );
     dark.m_set = true;
@@ -921,9 +1113,87 @@ inline int shmimIntegrator::processImage( void *source, const dark2ShmimT &tag )
     return processDark( m_dark2, source );
 }
 
+inline int shmimIntegrator::allocate( const dark3ShmimT &tag )
+{
+    static_cast<void>( tag );
+    return allocateDark( m_dark3, dark3MonitorT::m_width, dark3MonitorT::m_height, dark3MonitorT::m_dataType );
+}
+
+inline int shmimIntegrator::processImage( void *source, const dark3ShmimT &tag )
+{
+    static_cast<void>( tag );
+    return processDark( m_dark3, source );
+}
+
+inline int shmimIntegrator::allocate( const dark4ShmimT &tag )
+{
+    static_cast<void>( tag );
+    return allocateDark( m_dark4, dark4MonitorT::m_width, dark4MonitorT::m_height, dark4MonitorT::m_dataType );
+}
+
+inline int shmimIntegrator::processImage( void *source, const dark4ShmimT &tag )
+{
+    static_cast<void>( tag );
+    return processDark( m_dark4, source );
+}
+
+inline int shmimIntegrator::registerDarkSwitches()
+{
+    auto registerSwitch = [this]( const std::string                 &stream,
+                                  unsigned                           darkNumber,
+                                  pcf::IndiProperty                 &property,
+                                  bool                               enabled,
+                                  decltype( indiCallBack::callBack ) callback )
+    {
+        if( stream.empty() )
+        {
+            return 0;
+        }
+
+        std::string number = std::to_string( darkNumber );
+        createStandardIndiToggleSw( property, "dark" + number + "_enable", "Subtract Dark " + number );
+        property["toggle"].setSwitchState( enabled ? pcf::IndiElement::On : pcf::IndiElement::Off );
+        property.setState( enabled ? INDI_OK : INDI_IDLE );
+        return registerIndiPropertyNew( property, callback );
+    };
+
+    if( registerSwitch( dark2MonitorT::shmimName(),
+                        2,
+                        m_indiP_dark2Enable,
+                        m_dark2.m_enabled,
+                        INDI_NEWCALLBACK( m_indiP_dark2Enable ) ) < 0 ||
+        registerSwitch( dark3MonitorT::shmimName(),
+                        3,
+                        m_indiP_dark3Enable,
+                        m_dark3.m_enabled,
+                        INDI_NEWCALLBACK( m_indiP_dark3Enable ) ) < 0 ||
+        registerSwitch( dark4MonitorT::shmimName(),
+                        4,
+                        m_indiP_dark4Enable,
+                        m_dark4.m_enabled,
+                        INDI_NEWCALLBACK( m_indiP_dark4Enable ) ) < 0 )
+    {
+        return -1;
+    }
+
+    return 0;
+}
+
+inline std::string shmimIntegrator::savedDarkSuffix() const
+{
+    // Keep existing filenames for settings that leave dark2 enabled.
+    if( m_dark2.m_enabled && m_dark3.m_enabled && m_dark4.m_enabled )
+    {
+        return {};
+    }
+
+    return std::format( "__D{}{:d}{:d}", m_dark2.m_enabled ? "" : "0", m_dark3.m_enabled, m_dark4.m_enabled );
+}
+
 inline int shmimIntegrator::findMatchingDark()
 {
     std::string stateString;
+    std::string darkSuffix;
     uint64_t    generation, revision;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
@@ -938,6 +1208,7 @@ inline int shmimIntegrator::findMatchingDark()
             return 0;
         }
         stateString = m_stateString;
+        darkSuffix  = savedDarkSuffix();
         generation  = m_generation;
         revision    = m_stateRevision;
     }
@@ -960,6 +1231,13 @@ inline int shmimIntegrator::findMatchingDark()
         {
             continue;
         }
+
+        size_t suffix = stem.find( "__D", end + 3 );
+        if( stem.substr( std::min( suffix, stem.size() ) ) != darkSuffix )
+        {
+            continue;
+        }
+
         imageT                    image;
         mx::fits::fitsFile<realT> file;
         if( file.read( image, *name ) != mx::error_t::noerror )
@@ -981,8 +1259,8 @@ inline int shmimIntegrator::findMatchingDark()
 inline int shmimIntegrator::installSavedImage( imageT &image, uint64_t generation, uint64_t revision )
 {
     std::lock_guard<std::mutex> lock( m_imageMutex );
-    if( m_stopping || m_running || m_sourceFailed || m_dark.m_failed || m_dark2.m_failed ||
-        generation != m_generation || revision != m_stateRevision || !m_stateStringValid )
+    if( m_stopping || m_running || inputFailed() || generation != m_generation || revision != m_stateRevision ||
+        !m_stateStringValid )
     {
         return 0;
     }
@@ -1005,7 +1283,8 @@ inline int shmimIntegrator::installSavedImage( imageT &image, uint64_t generatio
     return 0;
 }
 
-inline int shmimIntegrator::saveImage( const imageT &image, const std::string &stateString )
+inline int
+shmimIntegrator::saveImage( const imageT &image, const std::string &stateString, const std::string &darkSuffix )
 {
     timespec timestamp;
     if( clock_gettime( CLOCK_REALTIME, &timestamp ) < 0 )
@@ -1023,7 +1302,7 @@ inline int shmimIntegrator::saveImage( const imageT &image, const std::string &s
         return -1;
     }
     std::string name = m_fileSaveDir + "/" + m_configName + "_" + stateString + "__T" + timeString +
-                       std::format( "{:09d}", timestamp.tv_nsec ) + ".fits";
+                       std::format( "{:09d}", timestamp.tv_nsec ) + darkSuffix + ".fits";
     mx::fits::fitsFile<realT> file;
     if( file.write( name, image ) != mx::error_t::noerror )
     {
@@ -1036,8 +1315,7 @@ inline int shmimIntegrator::saveImage( const imageT &image, const std::string &s
 inline int shmimIntegrator::configureAcquisition()
 {
     std::lock_guard<std::mutex> lock( m_imageMutex );
-    if( m_stopping || m_claimed || m_sourceFailed || m_dark.m_failed || m_dark2.m_failed ||
-        ( !m_source.m_pixels && !m_savedImage ) )
+    if( m_stopping || m_claimed || inputFailed() || ( !m_source.m_pixels && !m_savedImage ) )
     {
         return -1;
     }
@@ -1307,6 +1585,53 @@ INDI_NEWCALLBACK_DEFN( shmimIntegrator, m_indiP_startAveraging )( const pcf::Ind
     }
     updateIntegratorINDI();
     return 0;
+}
+
+inline int
+shmimIntegrator::setDarkEnabled( darkFrame &dark, pcf::IndiProperty &property, const pcf::IndiProperty &request )
+{
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
+    INDI_VALIDATE_CALLBACK_PROPS( property, request );
+    if( request.getType() != pcf::IndiProperty::Switch || !request.find( "toggle" ) )
+    {
+        return -1;
+    }
+
+    auto value = request["toggle"].getSwitchState();
+    if( value != pcf::IndiElement::On && value != pcf::IndiElement::Off )
+    {
+        return -1;
+    }
+
+    bool enabled = value == pcf::IndiElement::On;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_imageMutex );
+        if( m_stopping || dark.m_enabled == enabled )
+        {
+            return 0;
+        }
+
+        dark.m_enabled = enabled;
+        requestReconfigure();
+    }
+
+    updateSwitchIfChanged( property, "toggle", value, enabled ? INDI_OK : INDI_IDLE );
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( shmimIntegrator, m_indiP_dark2Enable )( const pcf::IndiProperty &ipRecv )
+{
+    return setDarkEnabled( m_dark2, m_indiP_dark2Enable, ipRecv );
+}
+
+INDI_NEWCALLBACK_DEFN( shmimIntegrator, m_indiP_dark3Enable )( const pcf::IndiProperty &ipRecv )
+{
+    return setDarkEnabled( m_dark3, m_indiP_dark3Enable, ipRecv );
+}
+
+INDI_NEWCALLBACK_DEFN( shmimIntegrator, m_indiP_dark4Enable )( const pcf::IndiProperty &ipRecv )
+{
+    return setDarkEnabled( m_dark4, m_indiP_dark4Enable, ipRecv );
 }
 
 INDI_SETCALLBACK_DEFN( shmimIntegrator, m_indiP_fpsSource )( const pcf::IndiProperty &ipRecv )

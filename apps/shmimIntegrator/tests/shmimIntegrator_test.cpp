@@ -44,6 +44,7 @@ void integratorTestCube<T>::resize( int rows, int columns, int planes )
 #undef eigenCube
 
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <atomic>
 
@@ -58,7 +59,15 @@ class shmimIntegrator_test : public shmimIntegrator
   public:
     using shmimIntegrator::acquireAndCheckValid;
 
+    using shmimIntegrator::config;
+
     using shmimIntegrator::configureAcquisition;
+
+    using shmimIntegrator::dark2MonitorT;
+
+    using shmimIntegrator::dark3MonitorT;
+
+    using shmimIntegrator::dark4MonitorT;
 
     using shmimIntegrator::findMatchingDark;
 
@@ -100,6 +109,12 @@ class shmimIntegrator_test : public shmimIntegrator
 
     using shmimIntegrator::m_imageValid;
 
+    using shmimIntegrator::m_indiP_dark2Enable;
+
+    using shmimIntegrator::m_indiP_dark3Enable;
+
+    using shmimIntegrator::m_indiP_dark4Enable;
+
     using shmimIntegrator::m_inFlight;
 
     using shmimIntegrator::m_nAverage;
@@ -121,6 +136,8 @@ class shmimIntegrator_test : public shmimIntegrator
     using shmimIntegrator::m_stateStringValidOnStart;
 
     using shmimIntegrator::m_updated;
+
+    using shmimIntegrator::registerDarkSwitches;
 
     using shmimIntegrator::startAcquisition;
 
@@ -157,6 +174,13 @@ class shmimIntegrator_test : public shmimIntegrator
                       uint32_t height /**< [in] height */,
                       uint8_t  type /**< [in] datatype */ = _DATATYPE_FLOAT );
 
+    /// Allocate a tagged dark without installing any pixels.
+    template <typename tagT>
+    int darkAllocate( tagT     tag /**< [in] dark monitor tag */,
+                      uint32_t width /**< [in] width */,
+                      uint32_t height /**< [in] height */,
+                      uint8_t  type /**< [in] datatype */ );
+
     /// Copy a raw source frame through the real callback.
     int sourcePixels( void *data /**< [in] source pixels */ );
 
@@ -168,6 +192,13 @@ class shmimIntegrator_test : public shmimIntegrator
 
     /// Invoke the start/stop callback.
     int run( bool running /**< [in] start or stop */ );
+
+    /// Register the numbered dark switches with dummy stream names and no workers.
+    int registerTestDarkSwitches();
+
+    /// Dispatch a local switch request using the callback registered at startup.
+    int darkEnable( const std::string &name /**< [in] switch property name */,
+                    bool               enabled /**< [in] requested switch state */ );
 
     /// Invoke the state-source callback, optionally with validity only.
     int stateUpdate( const std::string &value /**< [in] state string */,
@@ -197,6 +228,13 @@ class shmimIntegrator_test : public shmimIntegrator
 
     /// Allocate and install one complete dark frame.
     int dark( bool     second /**< [in] select the second dark */,
+              uint32_t width /**< [in] dark width */,
+              uint32_t height /**< [in] dark height */,
+              float    value /**< [in] constant pixels */ );
+
+    /// Allocate and install one complete dark through its tagged monitor callbacks.
+    template <typename tagT>
+    int dark( tagT     tag /**< [in] dark monitor tag */,
               uint32_t width /**< [in] dark width */,
               uint32_t height /**< [in] dark height */,
               float    value /**< [in] constant pixels */ );
@@ -267,24 +305,31 @@ int shmimIntegrator_test::source( uint32_t width, uint32_t height, uint8_t type 
 
 int shmimIntegrator_test::dark( bool second, uint32_t width, uint32_t height, float value )
 {
+    return second ? dark( dark2ShmimT{}, width, height, value ) : dark( darkShmimT{}, width, height, value );
+}
+
+template <typename tagT>
+int shmimIntegrator_test::dark( tagT tag, uint32_t width, uint32_t height, float value )
+{
     std::vector<float> data( size_t( width ) * height, value );
-    int                rv = darkAllocate( second, width, height );
-    return rv < 0 ? rv : darkPixels( second, data.data() );
+    int                rv = darkAllocate( tag, width, height, _DATATYPE_FLOAT );
+    return rv < 0 ? rv : processImage( data.data(), tag );
 }
 
 int shmimIntegrator_test::darkAllocate( bool second, uint32_t width, uint32_t height, uint8_t type )
 {
-    if( second )
-    {
-        dark2MonitorT::m_width    = width;
-        dark2MonitorT::m_height   = height;
-        dark2MonitorT::m_dataType = type;
-        return allocate( dark2ShmimT() );
-    }
-    darkMonitorT::m_width    = width;
-    darkMonitorT::m_height   = height;
-    darkMonitorT::m_dataType = type;
-    return allocate( darkShmimT() );
+    return second ? darkAllocate( dark2ShmimT{}, width, height, type )
+                  : darkAllocate( darkShmimT{}, width, height, type );
+}
+
+template <typename tagT>
+int shmimIntegrator_test::darkAllocate( tagT tag, uint32_t width, uint32_t height, uint8_t type )
+{
+    using monitorT       = dev::shmimMonitor<shmimIntegrator, tagT>;
+    monitorT::m_width    = width;
+    monitorT::m_height   = height;
+    monitorT::m_dataType = type;
+    return allocate( tag );
 }
 
 int shmimIntegrator_test::sourcePixels( void *data )
@@ -318,6 +363,27 @@ int shmimIntegrator_test::run( bool running )
     auto property = m_indiP_startAveraging;
     property["toggle"].setSwitchState( running ? pcf::IndiElement::On : pcf::IndiElement::Off );
     return newCallBack_m_indiP_startAveraging( property );
+}
+
+int shmimIntegrator_test::registerTestDarkSwitches()
+{
+    dark2MonitorT::m_shmimName = "test_dark2";
+    dark3MonitorT::m_shmimName = "test_dark3";
+    dark4MonitorT::m_shmimName = "test_dark4";
+    return registerDarkSwitches();
+}
+
+int shmimIntegrator_test::darkEnable( const std::string &name, bool enabled )
+{
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.setDevice( configName() );
+    request.setName( name );
+    request.add( pcf::IndiElement( "toggle", enabled ? pcf::IndiElement::On : pcf::IndiElement::Off ) );
+
+    auto entry = m_indiNewCallBacks.find( request.createUniqueKey() );
+    REQUIRE( entry != m_indiNewCallBacks.end() );
+    REQUIRE( entry->second.callBack != nullptr );
+    return entry->second.callBack( this, request );
 }
 
 int shmimIntegrator_test::stateUpdate( const std::string &value, bool valid, bool validityOnly )
@@ -568,11 +634,14 @@ namespace libXWCTest
 /** \ingroup shmimIntegrator_unit_test */
 namespace shmimIntegratorTest
 {
+using MagAOX::app::dark2ShmimT;
+using MagAOX::app::dark3ShmimT;
+using MagAOX::app::dark4ShmimT;
 using MagAOX::app::shmimIntegrator_test;
 
-/// Verify block averages subtract both complete dark images.
+/// Verify block averages subtract each complete, size-matched dark independently.
 /** \ingroup shmimIntegrator_unit_test */
-TEST_CASE( "shmimIntegrator block average and two darks", "[shmimIntegrator]" )
+TEST_CASE( "shmimIntegrator block average with up to four darks", "[shmimIntegrator]" )
 {
     // clang-format off
     #ifdef SHMIMINTEGRATOR_TEST_DOXYGEN_REF
@@ -585,11 +654,143 @@ TEST_CASE( "shmimIntegrator block average and two darks", "[shmimIntegrator]" )
     REQUIRE( app.source( 3, 2 ) == 0 );
     REQUIRE( app.dark( false, 3, 2, 1 ) == 0 );
     REQUIRE( app.dark( true, 3, 2, 2 ) == 0 );
+
+    unsigned dark3Width  = GENERATE( 0u, 3u, 4u );
+    unsigned dark4Height = GENERATE( 0u, 2u, 3u );
+
+    if( dark3Width )
+    {
+        REQUIRE( app.dark( dark3ShmimT{}, dark3Width, 2, 3 ) == 0 );
+    }
+
+    if( dark4Height )
+    {
+        REQUIRE( app.dark( dark4ShmimT{}, 3, dark4Height, 5 ) == 0 );
+    }
+
     REQUIRE( app.start() == 0 );
     REQUIRE( app.feed( 5 ) == 0 );
     REQUIRE_FALSE( app.m_updated );
     REQUIRE( app.feed( 9 ) == 0 );
-    REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 6, 4 ) ) );
+    float expected = 4 - ( dark3Width == 3 ? 3 : 0 ) - ( dark4Height == 2 ? 5 : 0 );
+    REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 6, expected ) ) );
+}
+
+/// Verify independent stream configuration and startup switch defaults.
+/** \ingroup shmimIntegrator_unit_test */
+TEST_CASE( "shmimIntegrator extra dark monitor configuration", "[shmimIntegrator]" )
+{
+    // clang-format off
+    #ifdef SHMIMINTEGRATOR_TEST_DOXYGEN_REF
+    MagAOX::app::shmimIntegrator::setupConfig;
+    MagAOX::app::shmimIntegrator::loadConfigImpl;
+    MagAOX::app::shmimIntegrator::registerDarkSwitches;
+    #endif
+    // clang-format on
+    shmimIntegrator_test app;
+    app.setupConfig();
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.dark2MonitorT::shmimName() == app.configName() );
+    REQUIRE( app.dark3MonitorT::shmimName().empty() );
+    REQUIRE( app.dark4MonitorT::shmimName().empty() );
+
+    unsigned    selected = GENERATE( 2u, 3u, 4u );
+    bool        bypassed = GENERATE( true, false );
+    std::string path     = app.m_directory + "/integrator.conf";
+    std::ofstream( path ) << "[dark" << selected << "Shmim]\nshmimName=configured_dark\n"
+                          << ( bypassed ? "enabled=false\n" : "" );
+    REQUIRE( app.config.readConfig( path ) == 0 );
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.registerDarkSwitches() == 0 );
+
+    const std::string *streams[] = {
+        &app.dark2MonitorT::shmimName(), &app.dark3MonitorT::shmimName(), &app.dark4MonitorT::shmimName() };
+    const pcf::IndiProperty *switches[] = {
+        &app.m_indiP_dark2Enable, &app.m_indiP_dark3Enable, &app.m_indiP_dark4Enable };
+    for( unsigned number : { 2u, 3u, 4u } )
+    {
+        const auto &control = *switches[number - 2];
+        const auto &stream  = *streams[number - 2];
+
+        if( number == selected )
+        {
+            REQUIRE( stream == "configured_dark" );
+            REQUIRE( control.getName() == "dark" + std::to_string( number ) + "_enable" );
+            REQUIRE( control["toggle"].getSwitchState() ==
+                     ( bypassed ? pcf::IndiElement::Off : pcf::IndiElement::On ) );
+        }
+        else if( number == 2 )
+        {
+            REQUIRE( stream == app.configName() );
+            REQUIRE( control.getName() == "dark2_enable" );
+            REQUIRE( control["toggle"].getSwitchState() == pcf::IndiElement::On );
+        }
+        else
+        {
+            REQUIRE( stream.empty() );
+            REQUIRE_FALSE( control.hasValidName() );
+        }
+    }
+}
+
+/// A live change discards prior work while a bypassed input can receive a replacement dark.
+/** \ingroup shmimIntegrator_unit_test */
+TEST_CASE( "shmimIntegrator switches extra dark subtraction at runtime", "[shmimIntegrator]" )
+{
+    // clang-format off
+    #ifdef SHMIMINTEGRATOR_TEST_DOXYGEN_REF
+    MagAOX::app::shmimIntegrator::newCallBack_m_indiP_dark2Enable;
+    MagAOX::app::shmimIntegrator::newCallBack_m_indiP_dark3Enable;
+    MagAOX::app::shmimIntegrator::newCallBack_m_indiP_dark4Enable;
+    MagAOX::app::shmimIntegrator::processImage;
+    #endif
+    // clang-format on
+    shmimIntegrator_test app;
+    REQUIRE( app.registerTestDarkSwitches() == 0 );
+    REQUIRE( app.source( 3, 2 ) == 0 );
+    REQUIRE( app.dark( false, 3, 2, 1 ) == 0 );
+    REQUIRE( app.dark( dark2ShmimT{}, 3, 2, 2 ) == 0 );
+    REQUIRE( app.dark( dark3ShmimT{}, 3, 2, 3 ) == 0 );
+    REQUIRE( app.dark( dark4ShmimT{}, 3, 2, 4 ) == 0 );
+    REQUIRE( app.start() == 0 );
+    REQUIRE( app.feed( 100 ) == 0 );
+    REQUIRE( app.darkEnable( "dark3_enable", false ) == 0 );
+    REQUIRE( app.start() == 0 );
+    REQUIRE( app.feed( 20 ) == 0 );
+    REQUIRE_FALSE( app.m_updated );
+
+    auto generation = app.generation();
+    REQUIRE( app.darkEnable( "dark3_enable", false ) == 0 );
+    REQUIRE( app.darkAllocate( dark3ShmimT{}, 3, 2, 0 ) == 0 );
+    REQUIRE( app.dark( dark3ShmimT{}, 3, 2, 7 ) == 0 );
+    REQUIRE( app.generation() == generation );
+    REQUIRE( app.feed( 20 ) == 0 );
+    REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 6, 13 ) ) );
+
+    REQUIRE( app.feed( 100 ) == 0 );
+    REQUIRE( app.feed( 100 ) == 0 );
+    REQUIRE( app.m_updated );
+    REQUIRE( app.darkEnable( "dark4_enable", false ) == 0 );
+    REQUIRE_FALSE( app.m_updated );
+    REQUIRE( app.darkEnable( "dark3_enable", true ) == 0 );
+    REQUIRE( app.start() == 0 );
+    REQUIRE( app.feed( 20 ) == 0 );
+    REQUIRE( app.feed( 20 ) == 0 );
+    REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 6, 10 ) ) );
+
+    REQUIRE( app.darkEnable( "dark2_enable", false ) == 0 );
+    REQUIRE( app.darkAllocate( dark2ShmimT{}, 3, 2, 0 ) == 0 );
+    REQUIRE( app.start() == 0 );
+    REQUIRE( app.feed( 20 ) == 0 );
+    REQUIRE( app.dark( dark2ShmimT{}, 3, 2, 5 ) == 0 );
+    REQUIRE( app.feed( 20 ) == 0 );
+    REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 6, 12 ) ) );
+
+    REQUIRE( app.darkEnable( "dark2_enable", true ) == 0 );
+    REQUIRE( app.start() == 0 );
+    REQUIRE( app.feed( 20 ) == 0 );
+    REQUIRE( app.feed( 20 ) == 0 );
+    REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 6, 7 ) ) );
 }
 
 /// Preserve moving-average burn-in, cadence, and first-dark-only subtraction.
@@ -605,6 +806,8 @@ TEST_CASE( "shmimIntegrator moving average cadence", "[shmimIntegrator]" )
     REQUIRE( app.source( 2, 2 ) == 0 );
     REQUIRE( app.dark( false, 2, 2, 1 ) == 0 );
     REQUIRE( app.dark( true, 2, 2, 100 ) == 0 );
+    REQUIRE( app.dark( dark3ShmimT{}, 2, 2, 200 ) == 0 );
+    REQUIRE( app.dark( dark4ShmimT{}, 2, 2, 300 ) == 0 );
     REQUIRE( app.start() == 0 );
     for( float value : { 1, 2, 3 } )
         REQUIRE( app.feed( value ) == 0 );
@@ -925,13 +1128,22 @@ TEST_CASE( "shmimIntegrator loads saved output before the source connects", "[sh
     app.m_fileSaver = true;
     REQUIRE( app.run( false ) == 0 );
     REQUIRE( app.stateUpdate( "stateA", true ) == 0 );
+
+    std::string suffix;
+    if( GENERATE( false, true ) )
+    {
+        REQUIRE( app.registerTestDarkSwitches() == 0 );
+        REQUIRE( app.darkEnable( "dark3_enable", false ) == 0 );
+        suffix = "__D01";
+    }
+
     shmimIntegrator_test::imageT old( 3, 2 ), image( 3, 2 );
     old.setConstant( 1 );
     image.setConstant( 8 );
     mx::fits::fitsFile<float> file;
-    REQUIRE( file.write( app.m_directory + "/integrator_test_stateA__T20260101000000.fits", old ) ==
+    REQUIRE( file.write( app.m_directory + "/integrator_test_stateA__T20260101000000" + suffix + ".fits", old ) ==
              mx::error_t::noerror );
-    REQUIRE( file.write( app.m_directory + "/integrator_test_stateA__T20260102000000.fits", image ) ==
+    REQUIRE( file.write( app.m_directory + "/integrator_test_stateA__T20260102000000" + suffix + ".fits", image ) ==
              mx::error_t::noerror );
     REQUIRE( app.findMatchingDark() == 0 );
     REQUIRE( app.m_source.m_pixels == 0 );
@@ -944,6 +1156,50 @@ TEST_CASE( "shmimIntegrator loads saved output before the source connects", "[sh
     REQUIRE( app.feed( 2 ) == 0 );
     REQUIRE( app.feed( 4 ) == 0 );
     REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 4, 3 ) ) );
+}
+
+/// Saved output is selected using the dark switch settings as well as the external state string.
+/** \ingroup shmimIntegrator_unit_test */
+TEST_CASE( "shmimIntegrator reloads saved averages with matching dark switches", "[shmimIntegrator][fits]" )
+{
+    // clang-format off
+    #ifdef SHMIMINTEGRATOR_TEST_DOXYGEN_REF
+    MagAOX::app::shmimIntegrator::findMatchingDark;
+    MagAOX::app::shmimIntegrator::saveImage;
+    #endif
+    // clang-format on
+    shmimIntegrator_test app( 1 );
+    unsigned             number  = GENERATE( 2u, 3u );
+    std::string          control = "dark" + std::to_string( number ) + "_enable";
+    app.m_fileSaver              = true;
+    app.m_continuous             = false;
+    REQUIRE( app.registerTestDarkSwitches() == 0 );
+    REQUIRE( app.source( 3, 2 ) == 0 );
+    REQUIRE( app.dark( dark2ShmimT{}, 3, 2, 2 ) == 0 );
+    REQUIRE( app.dark( dark3ShmimT{}, 3, 2, 3 ) == 0 );
+    REQUIRE( app.stateUpdate( "stateA", true ) == 0 );
+    REQUIRE( app.run( true ) == 0 );
+    REQUIRE( app.start() == 0 );
+    REQUIRE( app.feed( 20 ) == 0 );
+    REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 6, 15 ) ) );
+
+    REQUIRE( app.darkEnable( control, false ) == 0 );
+    REQUIRE( app.findMatchingDark() == 0 );
+    REQUIRE_FALSE( app.m_imageValid );
+    REQUIRE( app.run( true ) == 0 );
+    REQUIRE( app.start() == 0 );
+    REQUIRE( app.feed( 20 ) == 0 );
+    REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 6, 15 + number ) ) );
+
+    REQUIRE( app.darkEnable( control, true ) == 0 );
+    REQUIRE( app.findMatchingDark() == 0 );
+    REQUIRE( app.start() == 0 );
+    REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 6, 15 ) ) );
+
+    REQUIRE( app.darkEnable( control, false ) == 0 );
+    REQUIRE( app.findMatchingDark() == 0 );
+    REQUIRE( app.start() == 0 );
+    REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 6, 15 + number ) ) );
 }
 
 /// Reject a disk candidate if shape, state revision, configuration, or run state has changed.
