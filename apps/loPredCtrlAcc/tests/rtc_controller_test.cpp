@@ -83,6 +83,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_ratio;
     using loPredCtrlAcc_operational::m_renderLeadNs;
     using loPredCtrlAcc_operational::m_ripple;
+    using loPredCtrlAcc_operational::m_sequenceRunning;
     using loPredCtrlAcc_operational::m_settings;
     using loPredCtrlAcc_operational::m_slotPlan;
     using loPredCtrlAcc_operational::m_slots;
@@ -355,6 +356,98 @@ TEST_CASE( "Standard WFS monitor trains from copied modal commands", "[rtc-contr
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates > 100 );
     REQUIRE( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_updates == 0 );
+}
+
+/** \brief learn_std stops learning, not prediction, once its sequence has ended and the model is ready; a sequence
+ * that ends first keeps learning until the model is ready, and turning learning off cancels the stop.
+ */
+TEST_CASE( "Standard learning sequence stops learning when done", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_learnStd;
+    MagAOX::app::loPredCtrlAcc_operational::finishSequence;
+    MagAOX::app::loPredCtrlAcc_operational::appLogic;
+#endif
+    // clang-format on
+    Controller           app( true );
+    IMAGE_METADATA       md{};
+    std::array<float, 4> wfs{};
+    app.m_imageStream.md      = &md;
+    app.m_imageStream.array.F = wfs.data();
+    md.naxis                  = 3;
+    md.size[0]                = 2;
+    md.size[1]                = 1;
+    md.size[2]                = 2;
+    app.m_width               = 2;
+    app.m_height              = 1;
+    REQUIRE( app.allocate( {} ) == 0 );
+    app.qualifyOutput();
+    app.m_commandKnown = false;
+    app.m_gain         = .2f; // Feedback keeps exciting the plant after the probes end.
+
+    unsigned   n     = 0;
+    const auto frame = [&]()
+    {
+        ++n;
+        md.cnt0     = n;
+        md.cnt1     = n % 2;
+        auto *image = wfs.data() + 2 * md.cnt1;
+        image[0]    = std::sin( n * .13f );
+        image[1]    = std::cos( n * .07f );
+        REQUIRE( app.processImage( image, {} ) == 0 );
+
+        for( int j = 0; j < 4; ++j )
+        {
+            app.slot( app.m_slot++ );
+        }
+    };
+    const auto ready = [&]()
+    {
+        return app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready;
+    };
+
+    auto learnStd = app.m_indiP_learnStd;
+    learnStd["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_learnStd( learnStd ) == 0 );
+    REQUIRE( app.m_sequenceRunning );
+    REQUIRE( app.m_exploration.size() == 3 );
+
+    // A sequence shorter than the model's history ends before it is ready: learning continues.
+    app.m_exploration = app.parseExploration( "1,0.05,100" );
+    frame();
+    frame();
+    REQUIRE( app.m_exploration.empty() );
+    REQUIRE_FALSE( ready() );
+    CHECK( app.m_learning );
+    CHECK( app.m_sequenceRunning );
+
+    while( !ready() && n < 200 )
+    {
+        frame();
+    }
+    REQUIRE( ready() );
+    CHECK_FALSE( app.m_learning );
+    CHECK_FALSE( app.m_sequenceRunning );
+    CHECK( app.m_predicting );
+
+    const auto updates = app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates;
+    frame();
+    CHECK( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates == updates ); // Frozen.
+
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_learning["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_indiP_learnStd["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_indiP_predicting["toggle"].getSwitchState() == pcf::IndiElement::On );
+
+    // Restarted, then learning turned off by the operator: the sequence no longer stops anything.
+    REQUIRE( app.newCallBack_m_indiP_learnStd( learnStd ) == 0 );
+    REQUIRE( app.m_sequenceRunning );
+    auto learning = app.m_indiP_learning;
+    learning["toggle"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( app.newCallBack_m_indiP_learning( learning ) == 0 );
+    CHECK_FALSE( app.m_sequenceRunning );
+    CHECK( app.m_predicting );
 }
 
 /** \brief Copied scheduler slots form the training lift; missed slots and idle frames hold the retained copy. */

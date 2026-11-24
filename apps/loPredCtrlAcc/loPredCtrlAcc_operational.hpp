@@ -13,6 +13,7 @@
 #include <random>
 #include <sstream>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <fcntl.h>
@@ -287,6 +288,13 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     };
     std::vector<Stage>              m_exploration;
     std::default_random_engine      m_generator;
+
+    /// learn_std's sequence is installed; learning stops once it ends with the selected model ready. m_modelMutex.
+    bool m_sequenceRunning{ false };
+
+    /// The sequence stopped learning on the WFS thread; appLogic publishes learn and learn_std Off. m_modelMutex.
+    bool m_sequenceDone{ false };
+
     std::normal_distribution<float> m_distribution{ 0, 1 };
 
     /// Public controls and compact diagnostics; names retain the operational loPredCtrl workflow.
@@ -372,6 +380,10 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
                       const DDSPC::Matrix &applied /**< [in] Slot commands copied since the last decision. */,
                       std::int64_t         ordinal /**< [in] Newest copied slot ordinal at decision time, or -1. */,
                       std::int64_t         now /**< [in] Current monotonic decision time. */ );
+
+    /// Stop learning, not prediction, once learn_std's sequence has ended and the selected model is ready.
+    /** Caller holds m_modelMutex. Learning continues past the sequence until the model is ready. */
+    void finishSequence( bool ready /**< [in] The selected model can predict. */ );
 
     /// Check only current WFS/selected sensor input; bootstrap prediction may explore before a model is trained.
     bool outputValid() const;
@@ -1045,6 +1057,7 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
         m_wfsReceipt.store( now );
         m_inputValid.store( true );
     }
+    finishSequence( selectedReady );
     m_pending                = {};
     m_pending.m_index        = counter;
     m_pending.m_residual     = measurement;
@@ -1054,6 +1067,19 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
     m_havePending                                  = true;
     m_wfsCounter                                   = counter;
     return 0;
+}
+
+inline void loPredCtrlAcc_operational::finishSequence( bool ready )
+{
+    if( !m_sequenceRunning || !m_exploration.empty() || !ready )
+    {
+        return;
+    }
+
+    m_sequenceRunning = false;
+    m_sequenceDone    = true;
+    m_learning        = false;
+    applyTraining(); // The final stage's regularization stays in use.
 }
 
 inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measurement,
@@ -1130,6 +1156,7 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
         std::swap( m_gainBack, m_gainMiddle );
         m_gainFresh = true;
     }
+    finishSequence( m_multirate->status().m_ready ); // After the last update is learned.
     const auto done = synco::monotonicNs();
     m_learnUs.add( ( done - now ) / 1000. );
     if( m_lastFrameNs >= 0 && done - now > now - m_lastFrameNs )
@@ -1828,7 +1855,7 @@ inline int loPredCtrlAcc_operational::appLogic()
     const auto             output = m_output.status();
     DDSPC::ShadowStatus    standard;
     DDSPC::MultirateStatus assisted;
-    bool                   learning, predicting;
+    bool                   learning, predicting, sequenceDone;
     std::uint64_t          shifts, overruns, needed;
     Latency                learn;
     FastStats              fast;
@@ -1844,8 +1871,9 @@ inline int loPredCtrlAcc_operational::appLogic()
 
         standard   = m_models->status( DDSPC::ShadowMode::Standard );
         assisted   = m_multirate->status();
-        learning   = m_learning;
-        predicting = m_predicting;
+        learning     = m_learning;
+        predicting   = m_predicting;
+        sequenceDone = std::exchange( m_sequenceDone, false );
         learn      = m_learnUs;
         overruns   = m_learnOverruns;
         needed     = m_multirate->config().features( m_ratio - 1 );
@@ -2050,6 +2078,15 @@ inline int loPredCtrlAcc_operational::appLogic()
                            "toggle",
                            predicting ? pcf::IndiElement::On : pcf::IndiElement::Off,
                            output.m_fault || m_predictRejected ? INDI_ALERT : INDI_OK );
+
+    if( sequenceDone )
+    {
+        updateSwitchIfChanged( m_indiP_learning, "toggle", pcf::IndiElement::Off, INDI_OK );
+        updateSwitchIfChanged( m_indiP_learnStd, "toggle", pcf::IndiElement::Off, INDI_OK );
+        log<text_log>( "Standard learning sequence complete: learning stopped, prediction continues",
+                       logPrio::LOG_NOTICE );
+    }
+
     return 0;
 }
 
@@ -2086,6 +2123,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learning )( con
     if( !m_learning )
     {
         m_exploration.clear();
+        m_sequenceRunning = false;
         updateSwitchIfChanged( m_indiP_learnStd, "toggle", pcf::IndiElement::Off, INDI_OK );
     }
     updateSwitchIfChanged( m_indiP_learning, "toggle", value, INDI_OK );
@@ -2163,7 +2201,8 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
         m_predictRejected = false;
     }
 
-    m_learning = enabled;
+    m_learning        = enabled;
+    m_sequenceRunning = enabled;
     if( enabled )
     {
         m_exploration = parseExploration( "1000,0.05,100,1000,0.05,3,1000,0.05,0.1" );
@@ -2187,7 +2226,8 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_reset )( const 
     if( !removed() || !m_output.clear_fault() )
         return -1;
     std::lock_guard<std::mutex> modelLock( m_modelMutex );
-    m_predicting = false;
+    m_predicting      = false;
+    m_sequenceRunning = false;
     m_exploration.clear();
     resetModels();
     updateSwitchIfChanged( m_indiP_reset, "request", pcf::IndiElement::Off, INDI_OK );
@@ -2309,7 +2349,8 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_exploration )( 
         auto                        stages = parseExploration( text );
         std::lock_guard<std::mutex> indiLock( m_indiMutex );
         std::lock_guard<std::mutex> modelLock( m_modelMutex );
-        m_exploration = std::move( stages );
+        m_exploration     = std::move( stages );
+        m_sequenceRunning = false; // An operator's own sequence never stops learning by itself.
         updatesIfChanged<std::string>( m_indiP_exploration, { "current", "target" }, { text, text }, INDI_OK );
         return 0;
     }
