@@ -350,11 +350,17 @@ int shmimIntegrator_test::number( const std::string &name, double value )
     property.add( pcf::IndiElement( name == "fps" ? "current" : "target" ) );
     property[name == "fps" ? "current" : "target"].set( value );
     if( name == "nAverage" )
+    {
         return newCallBack_m_indiP_nAverage( property );
+    }
     if( name == "nUpdate" )
+    {
         return newCallBack_m_indiP_nUpdate( property );
+    }
     if( name == "avgTime" )
+    {
         return newCallBack_m_indiP_avgTime( property );
+    }
     return setCallBack_m_indiP_fpsSource( property );
 }
 
@@ -428,7 +434,9 @@ int shmimIntegrator_test::start()
 {
     int rv = configureAcquisition();
     if( rv != 0 )
+    {
         return rv;
+    }
     frameGrabberT::m_typeSize = sizeof( float );
     frameGrabberT::m_reconfig = false;
     return startAcquisition();
@@ -466,16 +474,34 @@ void shmimIntegrator_test::startWorkers( const std::string &sourceName,
     darkMonitorT::m_smThreadInit              = false;
     dark2MonitorT::m_smThreadInit             = false;
     frameGrabberT::m_fgThreadInit             = false;
-    shmimMonitorT::m_smThread                 = std::thread( [this]() { shmimMonitorT::smThreadExec(); } );
-    darkMonitorT::m_smThread                  = std::thread( [this]() { darkMonitorT::smThreadExec(); } );
-    dark2MonitorT::m_smThread                 = std::thread( [this]() { dark2MonitorT::smThreadExec(); } );
-    frameGrabberT::m_fgThread                 = std::thread( [this]() { frameGrabberT::fgThreadExec(); } );
+    shmimMonitorT::m_smThread                 = std::thread(
+        [this]()
+        {
+            shmimMonitorT::smThreadExec();
+        } );
+    darkMonitorT::m_smThread = std::thread(
+        [this]()
+        {
+            darkMonitorT::smThreadExec();
+        } );
+    dark2MonitorT::m_smThread = std::thread(
+        [this]()
+        {
+            dark2MonitorT::smThreadExec();
+        } );
+    frameGrabberT::m_fgThread = std::thread(
+        [this]()
+        {
+            frameGrabberT::fgThreadExec();
+        } );
 }
 
 void shmimIntegrator_test::stopWorkers()
 {
     if( !m_workersStarted )
+    {
         return;
+    }
     m_shutdown = 1; // The real base uses this flag; these tests are excluded from the app-only TSan run.
     appShutdown();
     sigaction( SIGUSR1, &m_previousSignal, nullptr );
@@ -487,12 +513,14 @@ bool shmimIntegrator_test::waitReady( uint32_t width, uint32_t height, uint64_t 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 6 );
     do
     {
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_imageMutex );
             if( m_generation > after && m_activeGeneration == m_generation && m_prepared && m_source.m_width == width &&
                 m_source.m_height == height && m_dark.m_info.m_width == width && m_dark.m_info.m_height == height &&
                 m_dark.m_set && m_dark2.m_info.m_width == width && m_dark2.m_info.m_height == height && m_dark2.m_set )
+            {
                 return true;
+            }
         }
         std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
     } while( std::chrono::steady_clock::now() < deadline );
@@ -567,11 +595,17 @@ localStream::~localStream()
 void localStream::close()
 {
     if( !m_open )
+    {
         return;
+    }
     if( m_owner )
+    {
         ImageStreamIO_destroyIm( &m_image );
+    }
     else
+    {
         ImageStreamIO_closeIm( &m_image );
+    }
     m_open = false;
 }
 
@@ -594,7 +628,9 @@ void localStream::create( uint32_t width, uint32_t height, float value )
     m_owner          = true;
     m_image.md->cnt1 = 0;
     for( size_t n = 0; n < size_t( width ) * height; ++n )
+    {
         m_image.array.F[n] = value;
+    }
 }
 
 void localStream::open()
@@ -810,7 +846,9 @@ TEST_CASE( "shmimIntegrator moving average cadence", "[shmimIntegrator]" )
     REQUIRE( app.dark( dark4ShmimT{}, 2, 2, 300 ) == 0 );
     REQUIRE( app.start() == 0 );
     for( float value : { 1, 2, 3 } )
+    {
         REQUIRE( app.feed( value ) == 0 );
+    }
     REQUIRE_FALSE( app.m_updated );
     REQUIRE( app.feed( 4 ) == 0 );
     REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 4, 2 ) ) );
@@ -1033,7 +1071,9 @@ TEST_CASE( "shmimIntegrator stages averaging and FPS changes", "[shmimIntegrator
     REQUIRE_FALSE( app.m_updated );
     REQUIRE( app.start() == 0 );
     for( unsigned n = 0; n < 5; ++n )
+    {
         REQUIRE( app.feed( 3 ) == 0 );
+    }
     REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 4, 3 ) ) );
     REQUIRE( app.number( "nUpdate", 0 ) == 0 );
     REQUIRE( app.number( "avgTime", 0.5 ) == 0 );
@@ -1044,7 +1084,9 @@ TEST_CASE( "shmimIntegrator stages averaging and FPS changes", "[shmimIntegrator
     REQUIRE( app.m_activeAverage == 4 );
     REQUIRE( app.fps() == Approx( 2 ) );
     for( unsigned n = 0; n < 4; ++n )
+    {
         REQUIRE( app.feed( 6 ) == 0 );
+    }
     REQUIRE_THAT( app.output(), Catch::Matchers::Approx( std::vector<float>( 4, 6 ) ) );
     REQUIRE( app.number( "fps", 0.25 ) == 0 );
     REQUIRE( app.start() == 0 );
@@ -1067,15 +1109,25 @@ TEST_CASE( "shmimIntegrator wakes idle output for restart and shutdown", "[shmim
     shmimIntegrator_test app;
     REQUIRE( app.source( 2, 2 ) == 0 );
     REQUIRE( app.start() == 0 );
-    auto waiter = std::async( std::launch::async, [&app]() { return app.acquireAndCheckValid(); } );
+    auto waiter = std::async( std::launch::async,
+                              [&app]()
+                              {
+                                  return app.acquireAndCheckValid();
+                              } );
     REQUIRE( app.source( 3, 2 ) == 0 );
     auto result = waiter.wait_for( std::chrono::seconds( 2 ) );
     if( result != std::future_status::ready )
+    {
         app.stop();
+    }
     REQUIRE( result == std::future_status::ready );
     REQUIRE( waiter.get() == 1 );
     REQUIRE( app.start() == 0 );
-    auto stopped = std::async( std::launch::async, [&app]() { return app.acquireAndCheckValid(); } );
+    auto stopped = std::async( std::launch::async,
+                               [&app]()
+                               {
+                                   return app.acquireAndCheckValid();
+                               } );
     // No monitor threads were started; real shutdown must still wake the waiter.
     REQUIRE( app.appShutdown() == 0 );
     REQUIRE( stopped.wait_for( std::chrono::seconds( 2 ) ) == std::future_status::ready );
@@ -1274,13 +1326,17 @@ TEST_CASE( "shmimIntegrator saves only valid completed one shots", "[shmimIntegr
     REQUIRE( app.start() == 0 );
     REQUIRE( app.feed( 4 ) == 0 );
     if( changeState )
+    {
         REQUIRE( app.stateUpdate( "stateB", true ) == 0 );
+    }
     REQUIRE( app.feed( 8 ) == 0 );
     REQUIRE_FALSE( app.m_running );
     REQUIRE( app.m_imageValid == !changeState );
     std::vector<std::string> files;
     for( auto &entry : std::filesystem::directory_iterator( app.m_directory ) )
+    {
         files.push_back( entry.path() );
+    }
     REQUIRE( files.size() == ( changeState ? 0 : 1 ) );
     if( !changeState )
     {
@@ -1366,7 +1422,9 @@ TEST_CASE( "shmimIntegrator workers recover across local stream replacements", "
         REQUIRE( app.waitReady( shape.first, shape.second, before + 3 ) );
         output.open();
         for( unsigned n = 0; n < 1 + index % 3; ++n )
+        {
             source.post();
+        }
         REQUIRE_THAT( output.read(),
                       Catch::Matchers::Approx( std::vector<float>( shape.first * shape.second, 17 + index ) ) );
         output.close();
@@ -1427,7 +1485,9 @@ TEST_CASE( "shmimIntegrator concurrent dark updates never tear", "[shmimIntegrat
             while( !stop.stop_requested() )
             {
                 if( app.darkPixels( false, one.data() ) != 0 || app.darkPixels( false, three.data() ) != 0 )
+                {
                     failed = true;
+                }
                 std::this_thread::yield();
             }
         } );
@@ -1461,13 +1521,17 @@ TEST_CASE( "shmimIntegrator coalesces concurrent monitor allocations", "[shmimIn
         for( unsigned n = 0; n < 50; ++n )
         {
             if( app.darkAllocate( second, 2 + n % 2, 2 ) != 0 )
+            {
                 failed = true;
+            }
             std::this_thread::yield();
         }
     };
     std::jthread first( allocateDark, false ), second( allocateDark, true );
     for( unsigned n = 0; n < 50; ++n )
+    {
         REQUIRE( app.source( 2 + n % 2, 2 ) == 0 );
+    }
     first.join();
     second.join();
     REQUIRE_FALSE( failed.load() );
