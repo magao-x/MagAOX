@@ -160,8 +160,13 @@ stream. For each step:
    deviation from that mean, summed over the modes, exceeds its pre-step mean by `calibrate.onsetSigma` (5) standard
    deviations.
 2. Each offload is placed at the first frame whose `atime` is at or after its woofer stamp (the `atime` t2wOffloader
-   writes on `aol0_tweeterOffload`). The first offload after the onset is lag 0.
-3. The error at each lag is the step's sign times the residual less the pre-step mean, less the response to the step
+   writes on `aol0_tweeterOffload`).
+3. In a measurement point (not the step-only response) the onset is then aligned on the step-only response. The
+   previous step's offload spikes are in the pre-step frames and can make the threshold onset early or late. Each
+   candidate onset up to 4 frames either side (never before the command) is scored by how well the step-only response
+   placed there matches the residual, over the frames before the first offload, so that the counter-offload error
+   itself is not used for alignment. The best candidate becomes the onset, and the first offload after it is lag 0.
+4. The error at each lag is the step's sign times the residual less the pre-step mean, less the response to the step
    alone at the same time after the onset (see below).
 
 The errors are averaged over the steps, aligned on the first offload: the offloads come at a different point of the
@@ -209,7 +214,7 @@ lowest one.
 6. Restore the original `leak`, the stepped mode's amplitude, and t2wOffloader's `offload` toggle. These are also
    restored on an abort.
 
-With the defaults a run is 58 measurements of about 5.2 s each, plus two step-only measurements, so about 5 minutes. The estimate is logged when a run
+With the defaults a run is 52 measurements of about 5.2 s each, plus two step-only measurements, so about 5 minutes. The estimate is logged when a run
 starts, as a WARNING if it is over 20 minutes, for example after widening a grid.
 
 **Clipping.** A point is never skipped because the counter command clips at `maxCommand`: strong turbulence can
@@ -259,7 +264,10 @@ The figures of merit, the noise estimate σ and the standard error of the confir
 Each run writes `<instance>_calib_<UTC time>.csv` in `csvDir`. Measurement rows have the time, stage, parameters,
 `stepMode` (the element), `stepAmp`, `stepCount`, `numModes`, `fom`, `fomStd`, `fomOff` (the latest baseline), `ratio`
 (to it), `ratioInterp` (to the interpolated baseline, the value the run uses), `fomTiming` and `fomGain`, then
-`clippedSlots` and `clipFrac`. They are written when their sweep closes. After
+`clippedSlots` and `clipFrac`, then the diagnostics `onsetDelay` and `onsetDelaySd` (onset after the step command, frames,
+over the steps used) and `phase` and `phaseSd` (first offload after the onset, frames). The `step only` row has the
+response energy as `fom` and its onset delay. Onset delays in the points that differ from the step-only row show the
+alignment at work. They are written when their sweep closes. After
 each sweep a `fit start`, `fit duration` or `fit gain` row records the decision: the parameters with the swept one at
 the candidate, then `fitCurrent` and `fitCandidate` (the predicted ratios; `fitCurrent` is empty if the current value
 was outside the sweep), `threshold`, `moved` (1 or 0) and `sigma`.
@@ -291,7 +299,7 @@ not start. All of them, and the grids, are logged at DEBUG at startup and at the
 | `calibrate.replicates` | 3 | Measurements of the starting parameters for the first noise estimate, 2 to 20. |
 | `calibrate.confirmPairs` | 3 | Measurements of the chosen parameters, each after a baseline, 1 to 20. |
 | `calibrate.moveSigma` | 1.5 | Standard errors of improvement needed to move a parameter. |
-| `calibrate.sigmaFloor` | 0.02 | Smallest noise estimate of the ratio used. |
+| `calibrate.sigmaFloor` | 0.002 | Smallest noise estimate of the ratio used. The step method's replicate scatter was 0.0013. |
 | `calibrate.rounds` | 2 | Rounds of sweeps; rounds after the first sweep only `rampStartUs` and `gain`, 1 to 5. |
 
 The scan grids and the step mode and amplitude are INDI properties only, not config keys. A change lasts until restart,
@@ -302,7 +310,7 @@ its value.
 | --- | --- | --- |
 | `calibStartGridUs` | 0, 150, 25 | `rampStartUs` scan; elements `min`, `max`, `step`. |
 | `calibDurationGridUs` | 200, 600, 100 | `rampDurationUs` scan; elements `min`, `max`, `step`. |
-| `calibGainGrid` | 0.3, 1.0, 0.1 | `gain` scan; elements `min`, `max`, `step`. |
+| `calibGainGrid` | 0.3, 0.7, 0.1 | `gain` scan; elements `min`, `max`, `step`. The loop went unstable above 0.7 (gain 0.9 is the likely point). |
 | `calibStep` | 5, 0.7 | `mode`: the `wooferModes` mode index stepped (5 is element `0005`, astig00); `amp`: the step amplitude a, > 0. |
 
 For example, to scan gains from 0.5 to 1.2:
