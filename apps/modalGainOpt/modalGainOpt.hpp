@@ -3536,7 +3536,7 @@ void modalGainOpt::syncSiGainStateFromAppliedGains()
 
     for( size_t n = 0; n < m_gainFacts.size(); ++n )
     {
-        const float factor = m_activeNoise == modalNoise::Source::empirical ? m_gainCalFacts[n] : 1;
+        const float factor = m_gainCalFacts[n];
 
         if( std::abs( factor ) <= tiny )
         {
@@ -4579,8 +4579,9 @@ int modalGainOpt::processImage( void *curr_src, const gainCalShmimT &dummy )
 
     if( change )
     {
-        m_sinceChange = -1;
-        m_updating = false;
+        m_siGainStateNeedsSync = true;
+        m_sinceChange          = -1;
+        m_updating             = false;
         std::cerr << "got gainCals: " << m_gainCals.size() << "\n";
         lock.unlock();
     }
@@ -4643,8 +4644,9 @@ int modalGainOpt::processImage( void *curr_src, const gainCalFactShmimT &dummy )
 
     if( change )
     {
-        m_sinceChange = -1;
-        m_updating = false;
+        m_siGainStateNeedsSync = true;
+        m_sinceChange          = -1;
+        m_updating             = false;
         std::cerr << "got gainCalsFacts: " << m_gainCalFacts.size() << "\n";
         lock.unlock();
     }
@@ -5433,7 +5435,7 @@ std::vector<float> modalGainOpt::selectNoisePrediction( float &fps, double &flux
 
 float modalGainOpt::commandedGain( size_t mode, float gain ) const
 {
-    const float factor  = m_activeNoise == modalNoise::Source::empirical ? m_gainCalFacts[mode] : 1;
+    const float factor  = m_gainCalFacts[mode];
     const float ceiling = modalNoise::ceilingForMode( m_gainCeilings, mode );
     return std::min( factor * gain, ceiling ) / m_gainCals[mode] / m_opticalGain;
 }
@@ -5495,7 +5497,6 @@ void modalGainOpt::goptThreadExec()
 
             if( previousSource != m_activeNoise )
             {
-                m_siGainStateNeedsSync = true;
                 std::fill( m_regScale.begin(), m_regScale.end(), -999 );
             }
 

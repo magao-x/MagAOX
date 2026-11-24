@@ -323,11 +323,24 @@ class modalGainOptHarness : public modalGainOpt
 
     using modalGainOpt::commandedGain;
 
-    /// Use a synthetic calibrated source and ceiling for publication tests.
-    void setCalibratedCeilingForTest( float gain /**< [in] New upper bound for the test modes. */ )
+    /// Set a mode ceiling for command publication.
+    void setGainCeilingForTest( float gain /**< [in] New upper bound for the second test mode. */ )
     {
-        m_activeNoise  = modalNoise::Source::camera;
         m_gainCeilings = { { 1, 1, gain } };
+    }
+
+    /// Simulate the source selection for the current PSD window.
+    void setActiveNoiseForTest( modalNoise::Source source /**< [in] Active noise PSD source. */ )
+    {
+        m_activeNoise = source;
+    }
+
+    /// Simulate a new calibration factor frame and rebase the integrated SI state.
+    void setGainCalFactorsForTest( std::vector<float> factors /**< [in] Loaded output calibration factors. */ )
+    {
+        m_gainFacts    = { 0.09F, 0.12F };
+        m_gainCalFacts = std::move( factors );
+        syncSiGainStateFromAppliedGains();
     }
 
     void updateIntegratedSiGainForTest( size_t modeIndex )
@@ -2179,7 +2192,7 @@ TEST_CASE( "modalGainOpt bounds cached recommendations and publishes calibrated 
                                      { 1.0F, 1.0F },
                                      0.5F );
     REQUIRE( app.commandedGain( 1, 0.6F ) == Approx( 0.08F ) );
-    app.setCalibratedCeilingForTest( 0.30F );
+    app.setGainCeilingForTest( 0.30F );
 
     // clang-format off
     #ifdef MODALGAINOPT_TEST_DOXYGEN_REF
@@ -2190,8 +2203,19 @@ TEST_CASE( "modalGainOpt bounds cached recommendations and publishes calibrated 
 
     app.updateIntegratedSiGainForTest( 1 );
     REQUIRE( app.integratedSiGainsForTest()[1] == Approx( 0.30F ) );
+    for( auto source : { modalNoise::Source::camera, modalNoise::Source::detector, modalNoise::Source::empirical } )
+    {
+        app.setActiveNoiseForTest( source );
+        REQUIRE( app.commandedGain( 0, 0.15F ) == Approx( 0.075F ) );
+        REQUIRE( app.commandedGain( 1, 0.6F ) == Approx( 0.08F ) );
+    }
+
+    app.setActiveNoiseForTest( modalNoise::Source::detector );
+    app.setGainCalFactorsForTest( { 1, 1 } );
     REQUIRE( app.commandedGain( 0, 0.15F ) == Approx( 0.15F ) );
     REQUIRE( app.commandedGain( 1, 0.6F ) == Approx( 0.20F ) );
+    REQUIRE( app.commandedGain( 0, app.integratedSiGainsForTest()[0] ) == Approx( 0.09F ) );
+    REQUIRE( app.commandedGain( 1, app.integratedSiGainsForTest()[1] ) == Approx( 0.12F ) );
 }
 
 /// Use the configured ceiling in LP regularization and subsequent gain updates.
