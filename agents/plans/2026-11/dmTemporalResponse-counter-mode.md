@@ -168,3 +168,15 @@ User: "ok, implement". Done in `apps/dmTemporalResponse/dmTemporalResponse.hpp`,
   t2wOffloader creates the stream with mxlib's `milkImage::create`, which (to be confirmed on exao2) makes it 3-D
   with one slice. The start check now uses `dmTemporalResponseMath::isFloatPlane`, which accepts 2-D, or 3-D with
   `size[2] == 1`; posting already writes plane 0 only. Unit-tested on metadata directly.
+- 2026-11-24, run 2026-11-24T190725 (`counter`, amp 0.5, gain 0.4, 20 delays over 1000 us, 20 trials): posts were
+  made (measured gap 17.4 us, achieved ~26 us after the stamp) but `SETTLED` was within +/-0.005 at every delay,
+  i.e. no counter at the WFS.  Cause: dmSyncopation's cycle zero is the main loop's command publication, so with
+  the loop open synco runs no slots and counterOffload never publishes (confirmed by the user).  The plan's
+  loop-open requirement was wrong.
+  - Fix: `counter` and `both` now start with the loop open or with holoop on at `loop_gain` 0 and
+    `loop_multcoeff` 1 (`dmTemporalResponseMath::loopQuiet`).  A running loop at gain 0 publishes its command
+    every frame, so synco runs, and holds the tweeter shape.  The app subscribes to holoop `loop_gain` and
+    `loop_multcoeff`, records them as `LOOPGAIN`/`LOOPMULT`, and a change during a run sets `LOOPCHG` (the run
+    continues, as for `loop_state`).  `counterSetting` became `watchedSetting` with the change flag as a
+    parameter.
+  - t2wOffloader stays with `offload` off, not at gain 0: offloading at any gain posts to the stream the app writes.

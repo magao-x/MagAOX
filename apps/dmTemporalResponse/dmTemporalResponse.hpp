@@ -157,6 +157,20 @@ inline std::string loopStateName( int state /**< [in] the loop state: 1 on, 0 of
     return "UNKNOWN";
 }
 
+/// Whether the high-order loop is not correcting: open, or running with gain 0 and mult coefficient 1.
+/** A running loop at gain 0 still publishes its command every frame, which dmSyncopation needs to schedule the
+ * counter, while holding the tweeter shape.
+ *
+ * \returns true if the loop is open, or on with gain == 0 and multcoeff == 1
+ */
+inline bool loopQuiet( int    state, /**< [in] the loop state: 1 on, 0 off, -1 unknown */
+                       double gain,  /**< [in] the loop gain, NaN if unknown */
+                       double mult   /**< [in] the loop mult coefficient, NaN if unknown */
+)
+{
+    return state == 0 || ( state == 1 && gain == 0 && mult == 1 );
+}
+
 /// Get the current CLOCK_REALTIME time.
 /** This is the default clock used for the poke busy-wait and the command timestamp.
  *
@@ -1399,6 +1413,10 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
         int m_loopState{ -1 }; ///< holoop loop_state at run start: 1 on, 0 off, -1 unknown.
 
+        double m_loopGain{ std::numeric_limits<double>::quiet_NaN() }; ///< holoop loop_gain at run start.
+
+        double m_loopMult{ std::numeric_limits<double>::quiet_NaN() }; ///< holoop loop_multcoeff at run start.
+
         dmTemporalResponseMath::offloadCase m_offloadCase{ dmTemporalResponseMath::offloadCase::woofer }; ///< The case.
 
         int m_t2wMode{ 4 }; ///< Mode index k in the t2wOffloader cubes (t2wMode).
@@ -1433,7 +1451,8 @@ class dmTemporalResponse : public MagAOXApp<true>,
     /// INDI device name of the WFS camera, used to read its fps and EM gain.  Default is wfscam.shmimName.
     std::string m_wfsCamDevName;
 
-    /// INDI device name of the high-order loop (a cacaoInterface), used to read its loop_state for the headers.
+    /// INDI device name of the high-order loop (a cacaoInterface), whose loop_state, loop_gain and loop_multcoeff are
+    /// recorded in the headers and checked at the start of the counter and both cases.
     std::string m_loopDevName{ "holoop" };
 
     /// The DM index NN in dm<NN>disp<MM>: 0 woofer, 1 tweeter, 2 NCPC.
@@ -1565,6 +1584,12 @@ class dmTemporalResponse : public MagAOXApp<true>,
 
     /// The holoop loop_state from INDI: 1 on, 0 off, -1 unknown.  Recorded in the headers.
     std::atomic<int> m_loopState{ -1 };
+
+    /// The holoop loop_gain from INDI, NaN if unknown.
+    std::atomic<double> m_loopGain{ std::numeric_limits<double>::quiet_NaN() };
+
+    /// The holoop loop_multcoeff from INDI, NaN if unknown.
+    std::atomic<double> m_loopMult{ std::numeric_limits<double>::quiet_NaN() };
 
     ///@}
 
@@ -1747,7 +1772,8 @@ class dmTemporalResponse : public MagAOXApp<true>,
     /// Set if the camWFS fps changes during a run.
     std::atomic<bool> m_fpsChanged{ false };
 
-    /// Set if the holoop loop_state changes during a run.  Recorded as LOOPCHG; does not abort the run.
+    /// Set if the holoop loop_state, loop_gain or loop_multcoeff changes during a run.  Recorded as LOOPCHG; does not
+    /// abort the run.
     std::atomic<bool> m_loopChanged{ false };
 
     /// Set if the camWFS stream is re-allocated during a run.
@@ -2301,6 +2327,12 @@ class dmTemporalResponse : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_loopState; ///< The high-order loop state, a set property.
     INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_loopState );
 
+    pcf::IndiProperty m_indiP_loopGain; ///< The high-order loop gain, a set property.
+    INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_loopGain );
+
+    pcf::IndiProperty m_indiP_loopMult; ///< The high-order loop mult coefficient, a set property.
+    INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_loopMult );
+
     pcf::IndiProperty m_indiP_t2wOffload; ///< t2wOffloader's offload toggle, a set property.
     INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_t2wOffload );
 
@@ -2319,13 +2351,14 @@ class dmTemporalResponse : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_coLeak; ///< counterOffload's leak, a set property.
     INDI_SETCALLBACK_DECL( dmTemporalResponse, m_indiP_coLeak );
 
-    /// Record a counterOffload setting from a set property, flagging a change during a run.
+    /// Record a watched setting from a set property's current element, flagging a change during a run.
     /**
      * \returns 0 always
      */
-    int counterSetting( std::atomic<double>     &value, /**< [out] the stored setting */
-                        double                   run,   /**< [in] the value at run start, NaN if unknown */
-                        const pcf::IndiProperty &ipRecv /**< [in] the received property */
+    int watchedSetting( std::atomic<double>     &value,   /**< [out] the stored setting */
+                        double                   run,     /**< [in] the value at run start, NaN if unknown */
+                        std::atomic<bool>       &changed, /**< [out] set on the first change during a run */
+                        const pcf::IndiProperty &ipRecv   /**< [in] the received property */
     );
 
     pcf::IndiProperty m_indiP_dmStream; ///< RO: the resolved DM stream name.
@@ -2389,7 +2422,8 @@ inline void dmTemporalResponse::setupConfig()
                 "devName",
                 false,
                 "string",
-                "INDI device name of the high-order loop, whose loop_state is recorded in the headers.  Default holoop." );
+                "INDI device name of the high-order loop, whose loop state, gain and mult coefficient are recorded in the "
+                "headers.  Default holoop." );
 
     config.add( "dm.index",
                 "",
@@ -2861,6 +2895,10 @@ inline int dmTemporalResponse::createIndiProperties()
     REG_INDI_SETPROP( m_indiP_wfsEMGain, m_wfsCamDevName, std::string( "emgain" ) );
 
     REG_INDI_SETPROP( m_indiP_loopState, m_loopDevName, std::string( "loop_state" ) );
+
+    REG_INDI_SETPROP( m_indiP_loopGain, m_loopDevName, std::string( "loop_gain" ) );
+
+    REG_INDI_SETPROP( m_indiP_loopMult, m_loopDevName, std::string( "loop_multcoeff" ) );
 
     REG_INDI_SETPROP( m_indiP_t2wOffload, m_offloaderDevName, std::string( "offload" ) );
 
@@ -3494,10 +3532,14 @@ inline int dmTemporalResponse::prepareCounter()
         return log<software_error, -1>( { __FILE__, __LINE__, m_counterDevName + " is not reported enabled" } );
     }
 
-    if( m_run.m_loopState != 0 )
+    // dmSyncopation schedules the counter only while the loop publishes its command, so a loop running at gain 0 is
+    // allowed.
+    if( !dmTemporalResponseMath::loopQuiet( m_run.m_loopState, m_run.m_loopGain, m_run.m_loopMult ) )
     {
         return log<software_error, -1>(
-            { __FILE__, __LINE__, m_loopDevName + " loop_state is not reported off: the loop must be open" } );
+            { __FILE__,
+              __LINE__,
+              m_loopDevName + " must be open, or on with loop_gain 0 and loop_multcoeff 1 so synco runs" } );
     }
 
     if( ImageStreamIO_openIm( &m_counterImage, m_run.m_counterStream.c_str() ) != IMAGESTREAMIO_SUCCESS )
@@ -3595,6 +3637,8 @@ inline void dmTemporalResponse::snapshotParams( runParams &params ) const
     params.m_fps            = m_wfsFps;
     params.m_emGain         = m_wfsEMGain;
     params.m_loopState      = m_loopState;
+    params.m_loopGain       = m_loopGain;
+    params.m_loopMult       = m_loopMult;
     dmTemporalResponseMath::parseOffloadCase( params.m_offloadCase, m_offloadCaseName );
     params.m_t2wMode          = m_t2wMode;
     params.m_wooferModesFile  = m_wooferModesFile;
@@ -4471,7 +4515,9 @@ inline void dmTemporalResponse::appendRunHeader( mx::fits::fitsHeader<XWC_DEFAUL
     fh.append( "WFSFPS", dmTemporalResponseMath::headerValue( m_run.m_fps ), "WFS camera fps at run start" );
     fh.append( "EMGAIN", dmTemporalResponseMath::headerValue( m_run.m_emGain ), "WFS camera EM gain at run start" );
     fh.append( "LOOPST", dmTemporalResponseMath::loopStateName( m_run.m_loopState ), "holoop loop_state at run start" );
-    fh.append( "LOOPCHG", static_cast<int>( m_loopChanged.load() ), "1 if loop_state changed during the run" );
+    fh.append( "LOOPGAIN", dmTemporalResponseMath::headerValue( m_run.m_loopGain ), "holoop loop_gain at run start" );
+    fh.append( "LOOPMULT", dmTemporalResponseMath::headerValue( m_run.m_loopMult ), "holoop loop_multcoeff at start" );
+    fh.append( "LOOPCHG", static_cast<int>( m_loopChanged.load() ), "1 if the loop state, gain or mult changed" );
     fh.append( "GITSHA1", std::string( MAGAOX_CURRENT_SHA1 ), "MagAOX git SHA-1 of this build" );
     fh.append( "GITMOD", static_cast<int>( MAGAOX_REPO_MODIFIED ), "1 if the build tree had uncommitted changes" );
     fh.append( "POKEMODE", dmTemporalResponseMath::pokeModeName( m_run.m_pokeMode ), "poke mode" );
@@ -5052,6 +5098,20 @@ INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_loopState )( const pcf::IndiP
     return 0;
 }
 
+INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_loopGain )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loopGain, ipRecv );
+
+    return watchedSetting( m_loopGain, m_run.m_loopGain, m_loopChanged, ipRecv );
+}
+
+INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_loopMult )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loopMult, ipRecv );
+
+    return watchedSetting( m_loopMult, m_run.m_loopMult, m_loopChanged, ipRecv );
+}
+
 INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_t2wOffload )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_t2wOffload, ipRecv );
@@ -5076,7 +5136,10 @@ INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_coEnable )( const pcf::IndiPr
     return 0;
 }
 
-inline int dmTemporalResponse::counterSetting( std::atomic<double> &value, double run, const pcf::IndiProperty &ipRecv )
+inline int dmTemporalResponse::watchedSetting( std::atomic<double>     &value,
+                                               double                   run,
+                                               std::atomic<bool>       &changed,
+                                               const pcf::IndiProperty &ipRecv )
 {
     if( !ipRecv.find( "current" ) )
     {
@@ -5085,11 +5148,11 @@ inline int dmTemporalResponse::counterSetting( std::atomic<double> &value, doubl
 
     double v = ipRecv["current"].get<double>();
 
-    // Recorded as COCHG; the run continues.  The first value received is not a change.
-    if( m_running && dmTemporalResponseMath::isFinite( run ) && v != run && !m_coChanged )
+    // Recorded in the headers; the run continues.  The first value received is not a change.
+    if( m_running && dmTemporalResponseMath::isFinite( run ) && v != run && !changed )
     {
-        m_coChanged = true;
-        log<text_log>( m_counterDevName + "." + ipRecv.getName() + " changed during run", logPrio::LOG_WARNING );
+        changed = true;
+        log<text_log>( ipRecv.getDevice() + "." + ipRecv.getName() + " changed during run", logPrio::LOG_WARNING );
     }
 
     value = v;
@@ -5101,28 +5164,28 @@ INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_coRampStart )( const pcf::Ind
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_coRampStart, ipRecv );
 
-    return counterSetting( m_coRampStartUs, m_run.m_coRampStartUs, ipRecv );
+    return watchedSetting( m_coRampStartUs, m_run.m_coRampStartUs, m_coChanged, ipRecv );
 }
 
 INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_coRampDuration )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_coRampDuration, ipRecv );
 
-    return counterSetting( m_coRampDurationUs, m_run.m_coRampDurationUs, ipRecv );
+    return watchedSetting( m_coRampDurationUs, m_run.m_coRampDurationUs, m_coChanged, ipRecv );
 }
 
 INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_coGain )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_coGain, ipRecv );
 
-    return counterSetting( m_coGain, m_run.m_coGain, ipRecv );
+    return watchedSetting( m_coGain, m_run.m_coGain, m_coChanged, ipRecv );
 }
 
 INDI_SETCALLBACK_DEFN( dmTemporalResponse, m_indiP_coLeak )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_coLeak, ipRecv );
 
-    return counterSetting( m_coLeak, m_run.m_coLeak, ipRecv );
+    return watchedSetting( m_coLeak, m_run.m_coLeak, m_coChanged, ipRecv );
 }
 
 } // namespace app

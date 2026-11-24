@@ -2212,6 +2212,8 @@ TEST_CASE( "dmTemporalResponse full synthetic run", "[dmTemporalResponse][run]" 
     // Provenance cards
     REQUIRE( fh["EMGAIN"].value<double>() == Approx( 250 ) );
     REQUIRE( fitsStr( fh["LOOPST"].value<std::string>() ) == "OFF" );
+    REQUIRE( fh["LOOPGAIN"].value<double>() == -999 );
+    REQUIRE( fh["LOOPMULT"].value<double>() == -999 );
     REQUIRE( fh["LOOPCHG"].value<int>() == 0 );
     REQUIRE( fitsStr( fh["GITSHA1"].value<std::string>() ) == std::string( MAGAOX_CURRENT_SHA1 ) );
     REQUIRE( fh["GITMOD"].value<int>() == static_cast<int>( MAGAOX_REPO_MODIFIED ) );
@@ -2575,6 +2577,7 @@ TEST_CASE( "dmTemporalResponse counter-offload helpers", "[dmTemporalResponse][h
     dmTemporalResponseMath::loadCubePlane( mx::improc::eigenImage<float>(), "", 0, 0, 0 );
     dmTemporalResponseMath::stampedGapUs( timespec(), timespec() );
     dmTemporalResponseMath::isFloatPlane( IMAGE_METADATA() );
+    dmTemporalResponseMath::loopQuiet( 0, 0, 0 );
     dmTemporalResponseMath::curveSummary( 0, 0, 0, {}, 0 );
     #endif
     // clang-format on
@@ -2663,6 +2666,19 @@ TEST_CASE( "dmTemporalResponse counter-offload helpers", "[dmTemporalResponse][h
         REQUIRE_FALSE( isFloatPlane( md ) );
     }
 
+    SECTION( "the loop is quiet when open, or on at gain 0 and mult coefficient 1" )
+    {
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+
+        REQUIRE( loopQuiet( 0, nan, nan ) );
+        REQUIRE( loopQuiet( 0, 0.5, 0.99 ) );
+        REQUIRE( loopQuiet( 1, 0, 1 ) );
+        REQUIRE_FALSE( loopQuiet( 1, 0.1, 1 ) );
+        REQUIRE_FALSE( loopQuiet( 1, 0, 0.99 ) );
+        REQUIRE_FALSE( loopQuiet( 1, nan, nan ) );
+        REQUIRE_FALSE( loopQuiet( -1, 0, 1 ) );
+    }
+
     SECTION( "the curve summary excludes the baseline point" )
     {
         double settled, peakAbs, rms;
@@ -2687,7 +2703,9 @@ TEST_CASE( "dmTemporalResponse counter-offload INDI", "[dmTemporalResponse][indi
     dmTemporalResponse::setCallBack_m_indiP_t2wOffload( pcf::IndiProperty() );
     dmTemporalResponse::setCallBack_m_indiP_coEnable( pcf::IndiProperty() );
     dmTemporalResponse::setCallBack_m_indiP_coGain( pcf::IndiProperty() );
-    dmTemporalResponse::counterSetting( m_coGain, 0, pcf::IndiProperty() );
+    dmTemporalResponse::setCallBack_m_indiP_loopGain( pcf::IndiProperty() );
+    dmTemporalResponse::setCallBack_m_indiP_loopMult( pcf::IndiProperty() );
+    dmTemporalResponse::watchedSetting( m_coGain, 0, m_coChanged, pcf::IndiProperty() );
     #endif
     // clang-format on
 
@@ -2743,6 +2761,38 @@ TEST_CASE( "dmTemporalResponse counter-offload INDI", "[dmTemporalResponse][indi
         REQUIRE( app.setCallBack_m_indiP_coGain( gain ) == 0 );
         REQUIRE( app.m_coGain == Approx( 0.6 ) );
         REQUIRE( app.m_coChanged );
+        REQUIRE_FALSE( app.m_loopChanged );
+        app.m_running = false;
+    }
+
+    SECTION( "the loop gain and mult coefficient are recorded, and a change during a run is flagged" )
+    {
+        pcf::IndiProperty gain( pcf::IndiProperty::Number );
+        gain.setDevice( app.m_loopDevName );
+        gain.setName( "loop_gain" );
+        gain.add( pcf::IndiElement( "current" ) );
+        gain["current"] = 0.0;
+
+        pcf::IndiProperty mult( pcf::IndiProperty::Number );
+        mult.setDevice( app.m_loopDevName );
+        mult.setName( "loop_multcoeff" );
+        mult.add( pcf::IndiElement( "current" ) );
+        mult["current"] = 1.0;
+
+        REQUIRE( app.setCallBack_m_indiP_loopGain( gain ) == 0 );
+        REQUIRE( app.setCallBack_m_indiP_loopMult( mult ) == 0 );
+        REQUIRE( app.m_loopGain == 0 );
+        REQUIRE( app.m_loopMult == 1 );
+        REQUIRE_FALSE( app.m_loopChanged );
+
+        app.m_running        = true;
+        app.m_run.m_loopGain = 0;
+        app.m_run.m_loopMult = 1;
+        mult["current"]      = 0.99;
+        REQUIRE( app.setCallBack_m_indiP_loopMult( mult ) == 0 );
+        REQUIRE( app.m_loopMult == Approx( 0.99 ) );
+        REQUIRE( app.m_loopChanged );
+        REQUIRE_FALSE( app.m_coChanged );
         app.m_running = false;
     }
 }
@@ -2798,10 +2848,19 @@ TEST_CASE( "dmTemporalResponse counter-offload start validation", "[dmTemporalRe
         REQUIRE( app.prepareRun( now ) == -1 );
     }
 
-    SECTION( "the loop must be reported open" )
+    SECTION( "the loop must be reported open, or on at gain 0 and mult coefficient 1" )
     {
         app.m_loopState = 1;
+        REQUIRE( app.prepareRun( now ) == -1 ); // gain and mult unknown
+
+        app.m_loopGain = 0.3;
+        app.m_loopMult = 1;
         REQUIRE( app.prepareRun( now ) == -1 );
+
+        app.m_loopGain = 0;
+        REQUIRE( app.prepareRun( now ) == 0 );
+        REQUIRE( app.m_run.m_loopGain == 0 );
+        REQUIRE( app.m_run.m_loopMult == 1 );
     }
 
     SECTION( "the counter stream must exist and match the tweeter mode plane" )
