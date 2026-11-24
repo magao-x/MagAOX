@@ -595,7 +595,7 @@ inline void shmimIntegrator::setupConfig()
                 "stateSource",
                 false,
                 "string",
-                "///< Device name for getting the state string for file management.  This device should have "
+                "Device name for getting the state string for file management. This device should have "
                 "*.state_string.current." );
     config.add( "integrator.fileSaver",
                 "",
