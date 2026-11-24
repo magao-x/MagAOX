@@ -171,13 +171,24 @@ stream. For each step:
 
 The errors are averaged over the steps, aligned on the first offload: the offloads come at a different point of the
 step in each step, and aligning on the step would smear them. The figure of merit is the energy of the average, summed
-over lags and over the first `t2wOffloader.numModes` modes, less the noise bias. `fomTiming` is the part in the first
-two frames after each offload and `fomGain` the rest. A step whose onset is not found, or whose first offload is more
+over the first `t2wOffloader.numModes` modes and over the lags within `calibrate.fomWindowMs` (50 ms) of the first
+offload, where the offload train is. The rest of the step period is mostly residual noise, and summing it made the
+first runs' figure of merit a stable noise floor that the parameters barely changed.
+
+The energy at each lag is estimated without the noise: (|Σₖ eₖ|² − Σₖ |eₖ|²) / (n(n − 1)) over the n steps removes
+each step's independent noise exactly, and the noise of the step-only response (its scatter over its steps) is
+subtracted as well. An estimate can therefore be slightly negative when there is no error. `fomTiming` is the part in
+the first two frames after each offload and `fomGain` the rest. A step whose onset is not found, or whose first offload is more
 than 16 frames after its onset, is not used; a measurement needs at least half the steps (and 2).
 
+**Lag profile.** Each run also writes `<instance>_calib_<UTC time>_lags.csv`: for every measurement (and each
+step-only response), the time, stage, parameters, the number of lags, then the energy at each lag summed over the
+modes, for up to 400 lags (200 ms at 2 kHz). It shows where the error is, so `fomWindowMs` can be chosen from data.
+
 **Step-only response.** The step's own transient is not counter-offloaded and is the same at every setting. It is
-measured with t2wOffloader's `offload` toggle off, at the start of the run and again before the confirmation, and
-subtracted from every step, so a perfect counter-offload gives ratio 0. Its energy is written as a `step only` CSV row,
+measured with 2 × `stepCount` steps, since it is subtracted from every step and its noise is not reduced by averaging
+the points, with t2wOffloader's `offload` toggle off, at the start of the run and again before the confirmation, and
+subtracted from every step, so a perfect counter-offload gives ratio 0. Its energy (noise removed) is written as a `step only` CSV row,
 and the change between the two measurements is logged as a drift check. Offloading is turned back on after each, and
 the run waits two step periods for the resulting offload train.
 
@@ -294,6 +305,7 @@ not start. All of them, and the grids, are logged at DEBUG at startup and at the
 | `calibrate.stepPeriodS` | 0.5 | Time between steps; must exceed the offload train's settling, s. |
 | `calibrate.stepCount` | 10 | Steps per measurement, alternating in sign, 2 to 1000. |
 | `calibrate.onsetSigma` | 5 | Onset threshold, in standard deviations of the pre-step residual energy. |
+| `calibrate.fomWindowMs` | 50 | Time after the first offload summed into the figure of merit, ms; capped by the step period. |
 | `calibrate.abortRatio` | 3 | Abort above this multiple of the baseline. |
 | `calibrate.leak` | 0.0025 | `leak` used during a run, restored afterwards; must be above 0. |
 | `calibrate.replicates` | 3 | Measurements of the starting parameters for the first noise estimate, 2 to 20. |
