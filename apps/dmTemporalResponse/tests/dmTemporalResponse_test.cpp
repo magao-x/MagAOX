@@ -2574,6 +2574,7 @@ TEST_CASE( "dmTemporalResponse counter-offload helpers", "[dmTemporalResponse][h
     dmTemporalResponseMath::offloadCaseName( offloadCase() );
     dmTemporalResponseMath::loadCubePlane( mx::improc::eigenImage<float>(), "", 0, 0, 0 );
     dmTemporalResponseMath::stampedGapUs( timespec(), timespec() );
+    dmTemporalResponseMath::isFloatPlane( IMAGE_METADATA() );
     dmTemporalResponseMath::curveSummary( 0, 0, 0, {}, 0 );
     #endif
     // clang-format on
@@ -2635,6 +2636,31 @@ TEST_CASE( "dmTemporalResponse counter-offload helpers", "[dmTemporalResponse][h
         REQUIRE( stampedGapUs( w, w ) == -1 );                      // no stamp
         REQUIRE( stampedGapUs( timespec{ 100, 60000 }, w ) == -1 ); // negative
         REQUIRE( stampedGapUs( timespec{ 99, 0 }, w ) == -1 );      // over 1000 us
+    }
+
+    SECTION( "a float plane is 2-D, or 3-D with one slice as milkImage creates it" )
+    {
+        IMAGE_METADATA md{};
+        md.datatype = _DATATYPE_FLOAT;
+        md.size[0]  = 50;
+        md.size[1]  = 50;
+        md.size[2]  = 1;
+
+        md.naxis = 2;
+        REQUIRE( isFloatPlane( md ) );
+
+        md.naxis = 3;
+        REQUIRE( isFloatPlane( md ) );
+
+        md.size[2] = 2;
+        REQUIRE_FALSE( isFloatPlane( md ) );
+
+        md.naxis = 1;
+        REQUIRE_FALSE( isFloatPlane( md ) );
+
+        md.naxis    = 2;
+        md.datatype = _DATATYPE_DOUBLE;
+        REQUIRE_FALSE( isFloatPlane( md ) );
     }
 
     SECTION( "the curve summary excludes the baseline point" )

@@ -551,6 +551,16 @@ inline double stampedGapUs( const timespec &atime,    /**< [in] the frame's atim
     return ( gap >= 0 && gap <= 1000 ) ? gap : -1;
 }
 
+/// Whether a stream holds a single float image plane.
+/** mxlib's milkImage creates 2-D images as 3-D with one slice, so both forms are accepted.
+ *
+ * \returns true if the stream is float and either 2-D or 3-D with size[2] == 1
+ */
+inline bool isFloatPlane( const IMAGE_METADATA &md /**< [in] the stream's metadata */ )
+{
+    return md.datatype == _DATATYPE_FLOAT && ( md.naxis == 2 || ( md.naxis == 3 && md.size[2] == 1 ) );
+}
+
 /// Summarize a mean response curve: the settled value, the peak |r| and the RMS of r after the command.
 /** Point 0 of the curve is the pre-poke baseline and is excluded from the peak and the RMS.
  *
@@ -3497,10 +3507,11 @@ inline int dmTemporalResponse::prepareCounter()
 
     m_counterOpened = true;
 
-    if( m_counterImage.md->datatype != _DATATYPE_FLOAT || m_counterImage.md->naxis != 2 )
+    if( !isFloatPlane( *m_counterImage.md ) )
     {
         closeCounter();
-        return log<software_error, -1>( { __FILE__, __LINE__, m_run.m_counterStream + " must be a 2-D float image" } );
+        return log<software_error, -1>(
+            { __FILE__, __LINE__, m_run.m_counterStream + " must be a float image with one plane" } );
     }
 
     const uint32_t rows = m_counterImage.md->size[0];

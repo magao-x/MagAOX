@@ -161,3 +161,10 @@ User: "ok, implement". Done in `apps/dmTemporalResponse/dmTemporalResponse.hpp`,
     - the counter start checks (offload on or unknown, counterOffload disabled, loop on, missing stream, unstamped and stamped post delay, the woofer case);
     - a `counter` run: only the reference writes the woofer; one post and zero per trial; the stream's `atime` is the stamp; settled ≈ −gain; t50 = post delay + latency + τ ln 2;
     - a `both` run: residual < 1%, 12 metrics columns.
+
+## Debugging
+
+- 2026-11-24, first bench run with `counter`: start refused with "aol0_tweeterOffload must be a 2-D float image".
+  t2wOffloader creates the stream with mxlib's `milkImage::create`, which (to be confirmed on exao2) makes it 3-D
+  with one slice. The start check now uses `dmTemporalResponseMath::isFloatPlane`, which accepts 2-D, or 3-D with
+  `size[2] == 1`; posting already writes plane 0 only. Unit-tested on metadata directly.
