@@ -151,14 +151,19 @@ The default allows the watchdog, start and stop timing and restart directives (`
 `RuntimeMaxSec`, `Restart`, `StartLimitBurst`, `KillSignal`, ...), the CPU (`Nice`, `CPUAffinity`,
 `CPUSchedulingPolicy`, `CPUSchedulingPriority`, `NUMAPolicy`, `AllowedCPUs`, ...), memory and I/O (`MemoryMax`,
 `TasksMax`, `IOWeight`, `OOMScoreAdjust`, ...), every `Limit...` (`LimitMEMLOCK`, `LimitRTPRIO`, `LimitCORE`, ...),
-and `Environment`, e.g. `environment = CUDA_VISIBLE_DEVICES=1` to choose a GPU. Never add directives that name files
-or paths systemd opens as root, that run commands, or that change who the app runs as.
+and `Environment`, e.g. `environment = CUDA_VISIBLE_DEVICES=1` to choose a GPU.
 
-Some directives are refused even if listed: those `xctrl` sets itself (`Type`, use the `-` proclist prefix instead;
-`NotifyAccess`, `User`, `Group`, `DynamicUser` and every `Exec...` command), those that could give an app more
-privileges than `xsup` has (`SupplementaryGroups`, `AmbientCapabilities`, `CapabilityBoundingSet`, `SecureBits`,
-`NoNewPrivileges`, `PAMName`, `PermissionsStartOnly`, `RootDirectoryStartOnly`), and those that act on the whole
-host, e.g. reboot it (`FailureAction`, `SuccessAction`, `StartLimitAction`, `JobTimeoutAction`).
+xctrl sets any directive the allow list has; it refuses none for what it does. Adding one is the site's decision, so
+know these before adding them to `systemd-directives.local.txt`:
+
+| Directives | Why they are dangerous |
+|---|---|
+| `ExecStart`, `ExecStartPre`, `ExecStartPost`, `ExecStop`, `ExecStopPost`, `ExecReload`, `ExecCondition` | run any command; a `+` prefix runs it as root, so a proclist editor could become root |
+| `User`, `Group`, `DynamicUser`, `SupplementaryGroups`, `PAMName` | change who the app runs as, e.g. root |
+| `AmbientCapabilities`, `CapabilityBoundingSet`, `SecureBits`, `NoNewPrivileges` | give the app privileges `xsup` does not have |
+| `StandardInput`, `StandardOutput`, `StandardError` (`file:...`), `TTYPath`, `PIDFile`, `RootDirectory`, `RootImage`, `BindPaths`, `ReadWritePaths`, `LoadCredential`, `StateDirectory`, `LogsDirectory`, `PermissionsStartOnly`, `RootDirectoryStartOnly` | make systemd open, create or mount files and paths as root, e.g. overwrite any file |
+| `FailureAction`, `SuccessAction`, `StartLimitAction`, `JobTimeoutAction` | act on the whole host, e.g. reboot it |
+| `Type`, `NotifyAccess`, `ExecStart`, `User` | set by xctrl itself; setting them breaks the units (use the `-` proclist prefix instead of `Type`) |
 
 The apps ignore the `[systemd]` section; only `xctrl` reads it. A key that can not be used is a warning, and the app
 is registered without it, so with the role's value or systemd's default:

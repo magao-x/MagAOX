@@ -123,13 +123,6 @@ directiveSections parseDirectiveDump( const std::string &dump /**< [in] the outp
  */
 const directiveSections &systemdDirectives();
 
-/// Directives a `[systemd]` section may not set: xctrl sets them, or they could give an app more than xsup's
-/// privileges or act on the whole host, while any member of magaox-dev may edit the configuration
-/**
- * \returns true if the directive may not be set
- */
-bool deniedDirective( const std::string &directive /**< [in] the directive name */ );
-
 /// Return s in lower case
 std::string lower( const std::string &s /**< [in] the string */ );
 
@@ -202,7 +195,7 @@ allowList parseAllowList( std::istream &in /**< [in] the list */ );
 /** Each key is a systemd directive, in any case: `runtimeMaxSec = 20` and `cpuAffinity = 2` set `RuntimeMaxSec=20` and
  * `CPUAffinity=2`, spelled as this systemd's list has them.
  * A key is used only if it is in the allow list, is a directive this systemd has in [Unit] or [Service], is not
- * denied (deniedDirective()), is not set twice, and its value has no control characters.  Any other is reported in
+ * set twice, and its value has no control characters.  Any other is reported in
  * warnings and ignored.  Values are checked by systemd itself, in xCtrl::dropBadValues().
  */
 void systemdSettings( directiveMap             &dirs,     /**< [in.out] directives, updated with the settings found */
@@ -1093,34 +1086,6 @@ inline const directiveSections &systemdDirectives()
     return dirs;
 }
 
-inline bool deniedDirective( const std::string &d )
-{
-    static const std::set<std::string> denied = {
-        // set by xctrl: the command, how the app reports, and the user it runs as
-        "Type",
-        "NotifyAccess",
-        "User",
-        "Group",
-        "DynamicUser",
-        // more privileges than xsup's
-        "SupplementaryGroups",
-        "AmbientCapabilities",
-        "CapabilityBoundingSet",
-        "SecureBits",
-        "NoNewPrivileges",
-        "PAMName",
-        "PermissionsStartOnly",
-        "RootDirectoryStartOnly",
-        // actions on the whole host, e.g. a reboot
-        "FailureAction",
-        "SuccessAction",
-        "StartLimitAction",
-        "JobTimeoutAction" };
-
-    // ExecStart, ExecStartPre, ExecStop, ...: commands, which a + prefix would run as root
-    return denied.count( d ) > 0 || d.compare( 0, 4, "Exec" ) == 0;
-}
-
 inline allowList parseAllowList( std::istream &in )
 {
     allowList allow;
@@ -1163,11 +1128,6 @@ inline void systemdSettings( directiveMap             &dirs,
         if( seen.count( d ) )
         {
             why = " directive for " + source + " is also set as " + seen[d];
-        }
-        else if( deniedDirective( d ) )
-        {
-            why = " directive for " + source + " can not be set: xctrl sets it, or it could give the app more " +
-                  "privileges than xsup has or act on the whole host";
         }
         else if( !allow.count( d ) )
         {

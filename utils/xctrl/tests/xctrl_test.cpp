@@ -198,7 +198,7 @@ TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
         REQUIRE( d["CPUAffinity"] == "6" ); // any case, as systemd spells it
     }
 
-    SECTION( "keys not allowed, not in systemd, denied, repeated, or with control characters are ignored" )
+    SECTION( "keys not allowed, not in systemd, repeated, or with control characters are ignored" )
     {
         directiveMap d;
         systemdSettings( d,
@@ -219,10 +219,13 @@ TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
         REQUIRE( d["RuntimeMaxSec"] == "20" );
         REQUIRE( d["OnFailure"] == "notify@%n.service" );
         REQUIRE( d["WatchdogSec"] == "30" );
-        REQUIRE( d.size() == 3 );
+        // nothing is refused for what it does: an allowed ExecStartPre or User is the allow list's choice
+        REQUIRE( d["ExecStartPre"] == "+/bin/sh" );
+        REQUIRE( d["User"] == "root" );
+        REQUIRE( d.size() == 5 );
 
-        // a typo and Nice not in the allow list, FooSec not in systemd, two denied, a newline, WatchdogSec twice
-        REQUIRE( warnings.size() == 7 );
+        // a typo and Nice not in the allow list, FooSec not in systemd, a newline, WatchdogSec twice
+        REQUIRE( warnings.size() == 5 );
         auto has = [&]( const std::string &text )
         {
             return std::any_of( warnings.begin(),
@@ -232,11 +235,12 @@ TEST_CASE( "xctrl maps app configuration to systemd directives", "[xctrl]" )
         REQUIRE( has( "[systemd] nice directive for cam not in systemd-directives allow list; ignoring directive" ) );
         REQUIRE(
             has( "[systemd] fooSec directive for cam does not exist on this version of systemd; ignoring directive" ) );
-        REQUIRE( has( "[systemd] user directive for cam can not be set" ) );
         REQUIRE( has( "for cam is an invalid value; ignoring directive" ) );
 
         // written in their sections, Type first, then by name
         std::ostringstream unit, service;
+        d.erase( "ExecStartPre" );
+        d.erase( "User" );
         appendDirectives( unit, d, true, sections );
         appendDirectives( service,
                           directiveMap{ { "WatchdogSec", "30" }, { "RuntimeMaxSec", "20" }, { "Type", "simple" } },
