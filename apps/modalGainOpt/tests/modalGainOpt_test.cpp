@@ -4,6 +4,8 @@
  * \ingroup modalGainOpt_files
  */
 
+#include <random>
+
 #include "../../../tests/testXWC.hpp"
 
 #include "../modalGainOpt.hpp"
@@ -2272,6 +2274,119 @@ static void writeNoiseArchive( const std::filesystem::path &directory /**< [in] 
     std::filesystem::create_symlink( "response.fits", directory / "selfRM_cal.fits" );
 }
 /// \endcond
+
+/// Repair isolated acquisition gaps and preserve estimates for blocks outside a gap.
+TEST_CASE( "modalGainOpt camera noise repairs isolated missing frames", "[modalGainOpt]" )
+{
+    char                                        path[] = "/tmp/modalGainOpt_camera_XXXXXX";
+    std::unique_ptr<char, void ( * )( char * )> directory( mkdtemp( path ),
+                                                           []( char *name )
+                                                           {
+                                                               std::error_code error;
+                                                               std::filesystem::remove_all( name, error );
+                                                           } );
+    REQUIRE( directory );
+    const std::filesystem::path archive = directory.get();
+    writeNoiseArchive( archive, { 1, 2, 3, 1, -1, 0, 2, 4 }, false );
+    modalNoise::Calibration calibration;
+    REQUIRE( calibration.load(
+        { archive / "wfsmask.fits", archive / "wfsref.fits", archive / "CMmodesWFS.fits", archive / "selfRM_cal.fits" },
+        1,
+        1,
+        true ) );
+
+    modalNoise::CameraNoise camera;
+    constexpr size_t        depth   = 4800;
+    constexpr size_t        samples = 4100;
+    constexpr double        fps     = 1000;
+
+    const auto estimate = [&]( const std::vector<size_t> &omitted,
+                               const std::vector<size_t> &zeroFrames,
+                               bool                       renumber     = false,
+                               bool                       oneZeroPixel = false )
+    {
+        std::vector<uint16_t>              frames( 4 * depth );
+        std::vector<timespec>              times( depth );
+        std::vector<uint64_t>              counters( depth );
+        std::minstd_rand                   random( 86 );
+        std::uniform_int_distribution<int> adu( 960, 1040 );
+        size_t                             slot    = 4200;
+        size_t                             skipped = 0;
+
+        for( size_t n = 0; n < samples; ++n )
+        {
+            std::array<uint16_t, 4> pixels{ static_cast<uint16_t>( adu( random ) ),
+                                            static_cast<uint16_t>( adu( random ) ),
+                                            static_cast<uint16_t>( adu( random ) ),
+                                            static_cast<uint16_t>( adu( random ) ) };
+
+            if( std::find( omitted.begin(), omitted.end(), n ) != omitted.end() )
+            {
+                ++skipped;
+                continue;
+            }
+
+            slot           = ( slot + 1 ) % depth;
+            times[slot]    = { 100 + static_cast<time_t>( n / 1000 ), static_cast<long>( n % 1000 ) * 1000000 };
+            counters[slot] = n + 1 - ( renumber ? skipped : 0 );
+
+            if( std::find( zeroFrames.begin(), zeroFrames.end(), n ) != zeroFrames.end() )
+            {
+                pixels.fill( 0 );
+            }
+            else if( oneZeroPixel && n == 500 )
+            {
+                pixels[0] = 0;
+            }
+
+            std::copy( pixels.begin(), pixels.end(), frames.begin() + 4 * slot );
+        }
+
+        IMAGE_METADATA metadata{};
+        metadata.naxis   = 3;
+        metadata.size[0] = metadata.size[1] = 2;
+        metadata.size[2]                    = depth;
+        metadata.imagetype                  = CIRCULAR_BUFFER | ZAXIS_TEMPORAL;
+        metadata.datatype                   = _DATATYPE_UINT16;
+        metadata.cnt0                       = counters[slot];
+        metadata.cnt1                       = slot;
+
+        IMAGE image{};
+        image.md         = &metadata;
+        image.array.UI16 = frames.data();
+        image.atimearray = times.data();
+        image.cntarray   = counters.data();
+        return camera.estimate( image, calibration, 100, 104, fps );
+    };
+
+    // clang-format off
+    #ifdef MODALGAINOPT_TEST_DOXYGEN_REF
+    modalNoise::CameraNoise::estimate( IMAGE{}, calibration, 100, 104, fps );
+    #endif
+    // clang-format on
+
+    const auto complete = estimate( {}, {} );
+    REQUIRE( complete.size() == 3 );
+    REQUIRE( ( complete > 0 ).all() );
+
+    const auto dropped = estimate( { 500, 1500 }, {} );
+    const auto blank   = estimate( {}, { 500, 1500 } );
+    REQUIRE( dropped.size() == complete.size() );
+    REQUIRE( blank.isApprox( dropped, 1e-6 ) );
+    REQUIRE( dropped.isApprox( complete, 0.08 ) );
+    const auto droppedEdges = estimate( { 436, 563 }, {} );
+    REQUIRE( droppedEdges.size() == complete.size() );
+    REQUIRE( droppedEdges.isApprox( estimate( {}, { 436, 563 } ), 1e-6 ) );
+    REQUIRE( estimate( { 1000 }, {} ).isApprox( complete, 1e-6 ) );
+    REQUIRE( estimate( { 500, 501 }, {} ).size() == 0 );
+    REQUIRE( estimate( {}, { 500, 501 } ).size() == 0 );
+    REQUIRE( estimate( { 500 }, {}, true ).size() == 0 );
+
+    const auto oneZeroPixel = estimate( {}, {}, false, true );
+    REQUIRE( oneZeroPixel.size() == complete.size() );
+    REQUIRE( oneZeroPixel[0] > 2 * complete[0] );
+    REQUIRE( oneZeroPixel[1] == Approx( complete[1] ) );
+}
 
 /// Use the requested source, fall back on missing inputs, and reject mixed camera settings.
 TEST_CASE( "modalGainOpt selects a matched noise source for the current PSD window", "[modalGainOpt]" )

@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <complex>
 #include <filesystem>
 #include <initializer_list>
 #include <limits>
@@ -592,7 +594,7 @@ inline double seconds( const timespec &time /**< [in] Timestamp to convert. */ )
 class CameraNoise
 {
   public:
-    /// Copy contiguous camera blocks from a buffered raw WFS stream and estimate their pixel variance.
+    /// Estimate raw WFS pixel variance, filling isolated gaps from the neighboring frames.
     Eigen::ArrayXd estimate( const std::string &name /**< [in] Raw camera circular buffer name. */,
                              const Calibration &calibration /**< [in] Matched WFS pixel selection. */,
                              double             start /**< [in] Start of the modal PSD interval in Unix seconds. */,
@@ -607,8 +609,31 @@ class CameraNoise
                              double             fps /**< [in] Measured camera sampling rate. */ );
 
   private:
-    static constexpr size_t c_blockFrames = 128; ///< Short, contiguous window for the pixel periodogram.
+    static constexpr size_t c_blockFrames = 128; ///< Number of evenly spaced samples in each periodogram.
     static constexpr size_t c_blocks      = 4;   ///< Sample windows distributed over the modal PSD interval.
+    static constexpr size_t c_firstBin = ( 4 * ( c_blockFrames / 2 ) + 4 ) / 5; ///< First bin at or above 0.8 Nyquist.
+    static constexpr size_t c_endBin   = c_blockFrames / 2;                     ///< Excluded standalone Nyquist bin.
+
+    /// Pixel time series with space for a real neighbor at either edge of the FFT block.
+    using FrameBlock = Eigen::Array<float, c_blockFrames + 2, Eigen::Dynamic>;
+
+    /// Per-row flags distinguishing camera samples from interpolated data.
+    using FramePresence = std::array<bool, c_blockFrames + 2>;
+
+    /// Find a block by acquisition time, copy its pixels and interpolate isolated missing frames.
+    static bool readBlock( FrameBlock                &frames /**< [out] Private time-series data for the block. */,
+                           FramePresence             &present /**< [out] Rows backed by actual frames. */,
+                           const IMAGE               &image /**< [in] Timestamped raw camera history. */,
+                           const std::vector<size_t> &pixels /**< [in] Selected native pixel offsets. */,
+                           uint64_t                   latest /**< [in] Latest slot of the validated camera snapshot. */,
+                           double start /**< [in] Start of the modal PSD interval in Unix seconds. */,
+                           double end /**< [in] End of the modal PSD interval in Unix seconds. */,
+                           double center /**< [in] Nominal center of this block in Unix seconds. */,
+                           double fps /**< [in] Measured camera sampling rate. */ );
+
+    /// Adjust the Hann power normalization for the white-noise attenuation caused by interpolation.
+    double blockNormalization( const FramePresence &present /**< [in] Rows backed by actual frames. */,
+                               double completeNormalization /**< [in] Normalization for a complete block. */ ) const;
 
     /// FFTW-deleter for aligned FFT work arrays.
     struct FftFree
@@ -662,10 +687,9 @@ CameraNoise::estimate( const IMAGE &image, const Calibration &calibration, doubl
         return {};
     }
 
-    const uint64_t depth       = md->size[2];
-    const size_t   framePixels = static_cast<size_t>( md->size[0] ) * md->size[1];
-    const auto    &pixels      = calibration.pixels();
-    const uint64_t latest      = __atomic_load_n( &md->cnt1, __ATOMIC_ACQUIRE );
+    const uint64_t depth  = md->size[2];
+    const auto    &pixels = calibration.pixels();
+    const uint64_t latest = __atomic_load_n( &md->cnt1, __ATOMIC_ACQUIRE );
 
     if( latest >= depth || depth <= c_blockFrames + 2 )
     {
@@ -673,7 +697,6 @@ CameraNoise::estimate( const IMAGE &image, const Calibration &calibration, doubl
     }
 
     const uint64_t latestCount = __atomic_load_n( &image.cntarray[latest], __ATOMIC_ACQUIRE );
-    const double   latestTime  = seconds( image.atimearray[latest] );
 
     if( latestCount == 0 || latest != __atomic_load_n( &md->cnt1, __ATOMIC_ACQUIRE ) ||
         latestCount != __atomic_load_n( &md->cnt0, __ATOMIC_ACQUIRE ) )
@@ -690,72 +713,229 @@ CameraNoise::estimate( const IMAGE &image, const Calibration &calibration, doubl
         m_fft.plan( c_blockFrames, mx::math::ft::dir::forward, false );
     }
 
-    constexpr size_t firstBin = ( 4 * ( c_blockFrames / 2 ) + 4 ) / 5;
-    constexpr size_t endBin   = c_blockFrames / 2;
-    const double     normalization =
-        ( endBin - firstBin ) * Eigen::Map<const Eigen::ArrayXf>( m_window.data(), c_blockFrames ).square().sum();
-    Eigen::Array<float, c_blockFrames, Eigen::Dynamic> frames( c_blockFrames, pixels.size() );
-    Eigen::ArrayXd                                     power = Eigen::ArrayXd::Zero( pixels.size() );
+    const Eigen::Map<const Eigen::ArrayXf> window( m_window.data(), c_blockFrames );
+    const double                           completeNormalization = ( c_endBin - c_firstBin ) * window.square().sum();
+    FrameBlock                             frames( c_blockFrames + 2, pixels.size() );
+    Eigen::ArrayXd                         power         = Eigen::ArrayXd::Zero( pixels.size() );
+    double                                 normalization = 0;
 
     for( size_t block = 0; block < c_blocks; ++block )
     {
-        const double center = start + ( end - start ) * ( block + 0.5 ) / c_blocks;
-        const double age    = ( latestTime - center ) * fps + c_blockFrames / 2;
+        const double  center = start + ( end - start ) * ( block + 0.5 ) / c_blocks;
+        FramePresence present{};
 
-        // Leave the latest slot and the next write slot out of the snapshot.
-        if( age < c_blockFrames || age >= depth - 1.5 || age >= latestCount - 0.5 )
+        if( !readBlock( frames, present, image, pixels, latest, start, end, center, fps ) )
         {
             return {};
         }
 
-        const uint64_t firstAge = std::llround( age );
-        double         previous = 0;
-
-        for( size_t frame = 0; frame < c_blockFrames; ++frame )
-        {
-            const uint64_t offset = firstAge - frame;
-            const uint64_t slot   = ( latest + depth - offset ) % depth;
-            const double   time   = seconds( image.atimearray[slot] );
-
-            if( __atomic_load_n( &image.cntarray[slot], __ATOMIC_ACQUIRE ) != latestCount - offset || time < start ||
-                time > end || std::abs( ( time - center ) * fps + c_blockFrames / 2 - frame ) > 2.5 ||
-                ( frame > 0 && std::abs( ( time - previous ) * fps - 1 ) > 0.25 ) )
-            {
-                return {};
-            }
-
-            const uint16_t *data = image.array.UI16 + framePixels * slot;
-
-            for( size_t p = 0; p < pixels.size(); ++p )
-            {
-                frames( frame, p ) = data[pixels[p]];
-            }
-
-            previous = time;
-        }
-
-        // Reject a block if the producer could have started reusing its oldest frame.
-        if( __atomic_load_n( &md->cnt0, __ATOMIC_ACQUIRE ) - ( latestCount - firstAge ) >= depth - 1 )
-        {
-            return {};
-        }
-
-        const Eigen::Map<const Eigen::ArrayXf> window( m_window.data(), c_blockFrames );
-        Eigen::Map<Eigen::ArrayXf>             work( m_time.get(), c_blockFrames );
+        normalization += blockNormalization( present, completeNormalization );
+        Eigen::Map<Eigen::ArrayXf> work( m_time.get(), c_blockFrames );
 
         for( size_t p = 0; p < pixels.size(); ++p )
         {
-            work = ( frames.col( p ) - frames.col( p ).mean() ) * window;
+            const auto samples = frames.col( p ).segment<c_blockFrames>( 1 );
+            work               = ( samples - samples.mean() ) * window;
             m_fft( m_spectrum.get(), m_time.get() );
 
-            for( size_t f = firstBin; f < endBin; ++f )
+            for( size_t f = c_firstBin; f < c_endBin; ++f )
             {
                 power[p] += std::norm( m_spectrum.get()[f] );
             }
         }
     }
 
-    return power / ( c_blocks * normalization );
+    return power / normalization;
+}
+
+inline bool CameraNoise::readBlock( FrameBlock                &frames,
+                                    FramePresence             &present,
+                                    const IMAGE               &image,
+                                    const std::vector<size_t> &pixels,
+                                    uint64_t                   latest,
+                                    double                     start,
+                                    double                     end,
+                                    double                     center,
+                                    double                     fps )
+{
+    const auto    *md          = image.md;
+    const uint64_t depth       = md->size[2];
+    const size_t   framePixels = static_cast<size_t>( md->size[0] ) * md->size[1];
+    const auto     slotByAge   = [latest, depth]( uint64_t age )
+    {
+        return ( latest + depth - age ) % depth;
+    };
+    const double expectedFirst = center - ( c_blockFrames / 2 + 1 ) / fps;
+    const double threshold     = expectedFirst + 0.5 / fps;
+
+    // Search by time because an omitted frame uses no physical ring slot.
+    uint64_t firstAge = 1;
+    uint64_t limit    = depth - 1;
+
+    while( firstAge < limit )
+    {
+        const uint64_t middle = firstAge + ( limit - firstAge ) / 2;
+
+        if( seconds( image.atimearray[slotByAge( middle )] ) > threshold )
+        {
+            firstAge = middle + 1;
+        }
+        else
+        {
+            limit = middle;
+        }
+    }
+
+    if( firstAge == depth - 1 )
+    {
+        return false;
+    }
+
+    double   previousTime  = 0;
+    uint64_t previousCount = 0;
+    uint64_t oldestCount   = 0;
+    size_t   frame         = 0;
+
+    for( uint64_t age = firstAge; age > 0; --age )
+    {
+        const uint64_t slot  = slotByAge( age );
+        const uint64_t count = __atomic_load_n( &image.cntarray[slot], __ATOMIC_ACQUIRE );
+        const double   time  = seconds( image.atimearray[slot] );
+
+        if( age == firstAge )
+        {
+            oldestCount = count;
+        }
+        else
+        {
+            const auto step = count - previousCount;
+
+            if( count <= previousCount || step > 2 || std::abs( ( time - previousTime ) * fps - step ) > 0.25 )
+            {
+                return false;
+            }
+
+            frame += step;
+        }
+
+        if( frame >= present.size() )
+        {
+            break;
+        }
+
+        if( count == 0 || time < start || time > end || std::abs( ( time - expectedFirst ) * fps - frame ) > 2.5 )
+        {
+            return false;
+        }
+
+        const uint16_t *data    = image.array.UI16 + framePixels * slot;
+        const bool      nonzero = std::any_of( data,
+                                          data + framePixels,
+                                          []( uint16_t value )
+                                          {
+                                              return value != 0;
+                                          } );
+
+        if( nonzero )
+        {
+            for( size_t p = 0; p < pixels.size(); ++p )
+            {
+                frames( frame, p ) = data[pixels[p]];
+            }
+
+            present[frame] = true;
+        }
+
+        if( __atomic_load_n( &image.cntarray[slot], __ATOMIC_ACQUIRE ) != count )
+        {
+            return false;
+        }
+
+        if( frame == c_blockFrames + 1 || ( frame == c_blockFrames && present[frame] ) )
+        {
+            break;
+        }
+
+        previousCount = count;
+        previousTime  = time;
+    }
+
+    // The writer may start reusing a slot one publication before advancing the counter.
+    if( __atomic_load_n( &md->cnt0, __ATOMIC_ACQUIRE ) - oldestCount >= depth - 1 )
+    {
+        return false;
+    }
+
+    for( size_t n = 1; n <= c_blockFrames; ++n )
+    {
+        if( !present[n] )
+        {
+            if( !present[n - 1] || !present[n + 1] )
+            {
+                return false;
+            }
+
+            frames.row( n ) = 0.5F * ( frames.row( n - 1 ) + frames.row( n + 1 ) );
+        }
+    }
+
+    return true;
+}
+
+inline double CameraNoise::blockNormalization( const FramePresence &present, double completeNormalization ) const
+{
+    if( std::all_of( present.begin() + 1,
+                     present.end() - 1,
+                     []( bool value )
+                     {
+                         return value;
+                     } ) )
+    {
+        return completeNormalization;
+    }
+
+    double completePower     = 0;
+    double interpolatedPower = 0;
+
+    for( size_t f = c_firstBin; f < c_endBin; ++f )
+    {
+        std::array<std::complex<double>, c_blockFrames + 2> weights{};
+        std::complex<double>                                meanWeight = 0;
+
+        for( size_t n = 0; n < c_blockFrames; ++n )
+        {
+            const double angle = -2 * mx::math::pi<double>() * f * n / c_blockFrames;
+            weights[n + 1]     = static_cast<double>( m_window[n] ) * std::polar( 1.0, angle );
+            meanWeight += weights[n + 1];
+        }
+
+        meanWeight /= c_blockFrames;
+
+        for( size_t n = 1; n <= c_blockFrames; ++n )
+        {
+            // Mean subtraction precedes windowing in the periodogram.
+            weights[n] -= meanWeight;
+            completePower += std::norm( weights[n] );
+        }
+
+        for( size_t n = 1; n <= c_blockFrames; ++n )
+        {
+            if( !present[n] )
+            {
+                // Transfer this FFT sample's weight to the measured neighbors used to synthesize it.
+                weights[n - 1] += 0.5 * weights[n];
+                weights[n + 1] += 0.5 * weights[n];
+                weights[n] = 0;
+            }
+        }
+
+        for( const auto &weight : weights )
+        {
+            interpolatedPower += std::norm( weight );
+        }
+    }
+
+    return completeNormalization * interpolatedPower / completePower;
 }
 
 /// Convert the recovered WFS disturbance and sampled detector noise to DM units.
