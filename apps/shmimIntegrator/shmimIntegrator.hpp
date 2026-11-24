@@ -11,6 +11,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <limits>
+#include <utility>
 
 #include <mx/math/floatUtils.hpp>
 
@@ -337,6 +338,10 @@ class shmimIntegrator : public MagAOXApp<true>,
     /// Publish an image-state snapshot; caller holds m_indiMutex.
     void updateIntegratorINDI();
 
+    /// Return the running frame count and output stride, or zeros while awaiting reconfiguration.
+    /** The caller holds m_imageMutex. */
+    std::pair<unsigned, unsigned> appliedAveraging() const;
+
     /// Invalidate unclaimed work and advance the request generation; caller holds m_imageMutex.
     void requestReconfigure();
 
@@ -432,7 +437,7 @@ class shmimIntegrator : public MagAOXApp<true>,
     int reconfig();
     ///@}
 
-    pcf::IndiProperty m_indiP_nAverage; ///< Requested/current frame count.
+    pcf::IndiProperty m_indiP_nAverage; ///< Requested and applied frame counts and applied publication stride.
 
     pcf::IndiProperty m_indiP_avgTime; ///< Requested/current averaging duration.
 
@@ -658,6 +663,10 @@ inline int shmimIntegrator::appStartup()
         m_indiP_nAverage, "nAverage", 1, std::numeric_limits<unsigned>::max(), 1, "%u" );
     m_indiP_nAverage["current"].set( m_nAverage );
     m_indiP_nAverage["target"].set( m_nAverage );
+    m_indiP_nAverage.add( pcf::IndiElement( "applied" ) );
+    m_indiP_nAverage["applied"] = 0u;
+    m_indiP_nAverage.add( pcf::IndiElement( "stride" ) );
+    m_indiP_nAverage["stride"] = 0u;
 
     if( registerIndiPropertyNew( m_indiP_nAverage, INDI_NEWCALLBACK( m_indiP_nAverage ) ) < 0 )
     {
@@ -806,15 +815,28 @@ inline int shmimIntegrator::appLogic()
     }
 
     FRAMEGRABBER_UPDATE_INDI;
+
     updateIntegratorINDI();
+
     return 0;
+}
+
+inline std::pair<unsigned, unsigned> shmimIntegrator::appliedAveraging() const
+{
+    if( m_running && m_prepared && !m_savedImage && m_activeGeneration == m_generation )
+    {
+        return { m_activeAverage, m_activeUpdate ? m_activeUpdate : m_activeAverage };
+    }
+
+    return { 0, 0 };
 }
 
 inline void shmimIntegrator::updateIntegratorINDI()
 {
-    bool     running, valid;
-    unsigned average, update;
-    float    time;
+    bool                          running, valid;
+    unsigned                      average, update;
+    std::pair<unsigned, unsigned> applied;
+    float                         time;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_imageMutex );
         running = m_running;
@@ -822,6 +844,8 @@ inline void shmimIntegrator::updateIntegratorINDI()
         average = m_nAverage;
         update  = m_nUpdate;
         time    = m_avgTime;
+
+        applied = appliedAveraging();
     }
     state( running ? stateCodes::OPERATING : stateCodes::READY );
     updateSwitchIfChanged( m_indiP_startAveraging,
@@ -832,8 +856,10 @@ inline void shmimIntegrator::updateIntegratorINDI()
     {
         updateIfChanged( m_indiP_imageValid, "flag", valid ? "yes" : "no" );
     }
-    updateIfChanged( m_indiP_nAverage, "current", average, INDI_IDLE );
-    updateIfChanged( m_indiP_nAverage, "target", average, INDI_IDLE );
+    updateIfChanged<unsigned>( m_indiP_nAverage,
+                               { "current", "target", "applied", "stride" },
+                               { average, average, applied.first, applied.second },
+                               INDI_IDLE );
     updateIfChanged( m_indiP_avgTime, "current", time, INDI_IDLE );
     updateIfChanged( m_indiP_avgTime, "target", time, INDI_IDLE );
     updateIfChanged( m_indiP_nUpdate, "current", update, INDI_IDLE );

@@ -59,6 +59,8 @@ class shmimIntegrator_test : public shmimIntegrator
   public:
     using shmimIntegrator::acquireAndCheckValid;
 
+    using shmimIntegrator::appliedAveraging;
+
     using shmimIntegrator::config;
 
     using shmimIntegrator::configureAcquisition;
@@ -1046,6 +1048,36 @@ TEST_CASE( "shmimIntegrator validates sizes and averaging parameters", "[shmimIn
     REQUIRE( app.number( "nAverage", 2 ) == 0 );
     REQUIRE( app.start() == 0 );
     REQUIRE( app.sourcePixels( nullptr ) < 0 );
+}
+
+/// Advertise the new window and stride only when the worker starts the requested generation.
+/** \ingroup shmimIntegrator_unit_test */
+TEST_CASE( "shmimIntegrator confirms the applied frame count and stride", "[shmimIntegrator]" )
+{
+    // clang-format off
+    #ifdef SHMIMINTEGRATOR_TEST_DOXYGEN_REF
+    MagAOX::app::shmimIntegrator::appliedAveraging;
+    MagAOX::app::shmimIntegrator::startAcquisition;
+    #endif
+    // clang-format on
+
+    shmimIntegrator_test app( 4, 0 );
+    REQUIRE( app.source( 2, 2 ) == 0 );
+    REQUIRE( app.start() == 0 );
+    CHECK( app.appliedAveraging() == std::pair{ 4u, 4u } );
+
+    REQUIRE( app.number( "nAverage", 32 ) == 0 );
+    CHECK( app.appliedAveraging() == std::pair{ 0u, 0u } );
+    REQUIRE( app.configureAcquisition() == 0 );
+    CHECK( app.appliedAveraging() == std::pair{ 0u, 0u } );
+    REQUIRE( app.startAcquisition() == 0 );
+    CHECK( app.appliedAveraging() == std::pair{ 32u, 32u } );
+
+    REQUIRE( app.number( "nUpdate", 1 ) == 0 );
+    REQUIRE( app.start() == 0 );
+    CHECK( app.appliedAveraging() == std::pair{ 32u, 1u } );
+    REQUIRE( app.run( false ) == 0 );
+    CHECK( app.appliedAveraging() == std::pair{ 0u, 0u } );
 }
 
 /// Runtime requests gate old buffers until the coherent new mode is acknowledged.
