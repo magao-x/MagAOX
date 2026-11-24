@@ -80,7 +80,7 @@ getINDI 'loPredCtrlAcc.safety.*' 'loPredCtrlAcc.ddspc_control.*' 'loPredCtrlAcc.
 getINDI 'acc000.timingDiag.mode_code' 'acc000.timingDiag.delay_lock'   # both 1 for assisted mode
 ```
 
-Wait for `safety.zero_confirmed=true`, the consumer's receipt for the initial own-channel zero. If it stays false, check the scheduler, the channel and `safety.output_state`. If a readiness flag stays false, `ddspc_control.standard_state` and `assisted_state` give the reason. A refused `predict` or `learn_std` request is answered at once with its unchanged state and Alert; `predict` stays Alert until a request is accepted, which `loPredCtrlAccGUI` shows as a warning. Possible reasons are an absent WFS, the upstream lock, sensor history, insufficient training or excitation, and numerical faults.
+Wait for `safety.zero_confirmed=true`, the consumer's receipt for the initial own-channel zero. If it stays false, check the scheduler, the channel and `safety.output_state`. If a readiness flag stays false, `ddspc_control.standard_state` and `assisted_state` give the reason. Possible reasons are an absent WFS, the upstream lock, sensor history, insufficient training or excitation, and numerical faults. A refused `predict` or `learn_std` request is answered at once with its unchanged state and Alert; `predict` stays Alert until a request is accepted, which `loPredCtrlAccGUI` shows as a warning.
 
 Start the disturbance and record a 60 s baseline with prediction off:
 
@@ -121,7 +121,9 @@ setINDI -s 'loPredCtrlAcc.predict.toggle=On'
 getINDI 'loPredCtrlAcc.ddspc_control.*' 'loPredCtrlAcc.ddspc_performance.*' 'loPredCtrlAcc.safety.*'
 ```
 
-The triples are loPredCtrl's original sequence: WFS frames, Gaussian standard deviation in modal command units, and regularization. Use the middle value that matches the deployed modal scale. `setINDI -s 'loPredCtrlAcc.learn_std.toggle=On'` installs the same triples and enables learning and prediction together. During the 3,000-frame sequence (1.5 s), `prediction=warming` shows probe or feedback commands. When `standard_ready=true`, freeze the fit and measure:
+The triples are loPredCtrl's original sequence: WFS frames, Gaussian standard deviation in modal command units, and regularization. Use the middle value that matches the deployed modal scale. `setINDI -s 'loPredCtrlAcc.learn_std.toggle=On'` installs `1000,0.05,100,1000,0.05,3,1000,0.05,0.1` and enables learning and prediction together. During the 3,000-frame sequence (1.5 s), `prediction=warming` shows probe or feedback commands.
+
+`learn_std` freezes the fit itself: after its last stage, once the selected model is ready, learning stops and `learn` and `learn_std` turn Off, while prediction stays on. If the model is not ready when the sequence ends, learning continues until it is. The final stage's regularization (0.1) stays in use until `reset_model`; a later `exploration_sequence` stage applies only while learning is on. Turning `learn` off, resetting the models or installing an `exploration_sequence` cancels the automatic stop. With `learn` and `predict` set separately, freeze the fit by hand once `standard_ready=true`, then measure:
 
 ```bash
 setINDI -s 'loPredCtrlAcc.learn.toggle=Off'
