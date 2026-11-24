@@ -39,7 +39,10 @@ namespace MagAOX::app
 {
 /// Operational loPredCtrl workflow; upstream owns ACC/WFS synchronization and the DM owns its scheduler.
 /** Standard mode is unchanged loPredCtrl DDSPC: one decision per WFS frame on the WFS monitor thread, held on the q DM
- * slots of the frame, trained only while standard is selected.
+ * slots of the frame, trained only while standard is selected. The original's commands were increments integrated by
+ * the main loop's mfilt; by default this app applies them as absolute positions. The optional [integrator] restores
+ * the mfilt law, s = mult*s - gain*delta, and trains the fit on the deltas
+ * (agents/plans/2026-11/ddspc-standard-integrator.md).
  *
  * Assisted mode (agents/plans/2026-11/ddspc-multirate-8khz-assisted.md) recalculates every DM slot on the DM worker.
  * The WFS thread appends each frame to DDSPC::MultirateDDSPC, publishes the frame's origin, then performs the single
@@ -289,6 +292,20 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     std::atomic<DDSPC::ShadowMode> m_mode{ DDSPC::ShadowMode::Standard };
     DDSPC::realT                   m_gain{ .3f };
 
+    /** \name Standard integrator - Data
+     * Optional mfilt-equivalent output of standard mode: s = mult*s - gain*delta, where delta is the DDSPC command, as
+     * the original loPredCtrl's commands were integrated by the main loop. See
+     * agents/plans/2026-11/ddspc-standard-integrator.md.
+     * @{ */
+    bool          m_integrate{ false };        ///< Integrate standard commands; the fit is trained on the deltas.
+    DDSPC::realT  m_intGain{ 1 };              ///< mfilt-equivalent gain applied to each delta.
+    DDSPC::realT  m_intMult{ 1 };              ///< mfilt-equivalent multiplier of the previous state; below 1 leaks.
+    DDSPC::realT  m_intLimit{ 0 };             ///< Per-mode absolute limit on the state [modal units].
+    DDSPC::Matrix m_intState;                  ///< Integrator state, the held standard position; WFS thread.
+    DDSPC::Matrix m_intPrevious;               ///< Mean copied position of the previous decision interval.
+    bool          m_intPreviousKnown{ false }; ///< m_intPrevious is valid, so the next delta can be recovered.
+    /// @}
+
     /// Original count, Gaussian strength, regularization exploration stages, consumed once per WFS decision.
     struct Stage
     {
@@ -363,6 +380,14 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
      * Fewer than q new copies (missed slots or idle output) are preceded by the retained previous copy.
      */
     std::int64_t appliedSlots( DDSPC::Matrix &applied /**< [out] Chronological copied modal commands. */ ) const;
+
+    /// Return the standard fit's input for the interval just closed, and whether it is known.
+    /** The input is the mean copied slot command, or with the integrator the delta that produced it,
+     * -(p_k - mult*p_(k-1))/gain, so missed slots and clipping are seen as applied. Call once per decision so the
+     * previous position stays current; an interval without a complete slot history makes the next delta unknown.
+     */
+    bool standardInput( const DDSPC::Matrix &applied /**< [in] Slot commands copied since the last decision. */,
+                        DDSPC::Matrix       &input /**< [out] Mean position or integrator delta, when known. */ );
 
     /// Process one WFS decision, closing the preceding interval with the commands copied during it.
     int step( const DDSPC::Matrix &measurement /**< [in] Current calibrated WFS modes. */,
@@ -603,6 +628,14 @@ inline void loPredCtrlAcc_operational::setupConfig()
     add( "parameters", "dm_slots", "int", "DM slots per WFS frame: the scheduler's steps per cycle (default 4)." );
     add( "parameters", "acc_ratio", "int", "Upstream ACC samples per WFS frame (default 4)." );
     add( "parameters", "qrd", "bool", "Use QR-RLS for both independent models." );
+    add( "integrator",
+         "enabled",
+         "bool",
+         "Integrate standard commands as mfilt does, s = mult*s - gain*delta, and train on the deltas (default "
+         "false)." );
+    add( "integrator", "gain", "float", "mfilt-equivalent gain on each DDSPC delta, in (0,10] (default 1)." );
+    add( "integrator", "mult", "float", "mfilt-equivalent multiplier of the previous state, in (0,1] (default 1)." );
+    add( "integrator", "limit", "float", "Per-mode absolute state limit [modal units]; required when enabled." );
     add( "parameters",
          "own_shmim",
          "bool",
@@ -677,6 +710,26 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
             !std::isfinite( renderLeadUs ) || renderLeadUs < 0 || renderLeadUs > 1000 || !std::isfinite( m_ripple ) ||
             m_ripple < 0 )
             throw std::invalid_argument( "Invalid operational WFS, producer, gain or model configuration" );
+
+        config( m_integrate, "integrator.enabled" );
+        config( m_intGain, "integrator.gain" );
+        config( m_intMult, "integrator.mult" );
+        config( m_intLimit, "integrator.limit" );
+
+        if( m_integrate &&
+            ( !std::isfinite( m_intGain ) || m_intGain <= 0 || m_intGain > 10 || !std::isfinite( m_intMult ) ||
+              m_intMult <= 0 || m_intMult > 1 || !std::isfinite( m_intLimit ) || m_intLimit <= 0 ) )
+        {
+            throw std::invalid_argument( "Invalid integrator gain, mult or limit" );
+        }
+
+        if( m_integrate )
+        {
+            log<text_log>( "Standard integrator enabled: gain=" + std::to_string( m_intGain ) +
+                               " mult=" + std::to_string( m_intMult ) + " limit=" + std::to_string( m_intLimit ),
+                           logPrio::LOG_NOTICE );
+        }
+
         m_renderLeadNs             = std::llround( renderLeadUs * 1000 );
         m_ring                     = 4 * m_slots;
         m_settings.m_accelChannels = 2 * m_ratio * m_accelHistory;
@@ -801,8 +854,10 @@ inline void loPredCtrlAcc_operational::resetModels()
     m_plans[0] = DDSPC::Matrix::Zero( m_settings.m_future * m_settings.m_modes, 1 );
     m_plans[1] = DDSPC::Matrix::Zero( m_settings.m_future * m_settings.m_modes * m_settings.m_assistedCommandSlots, 1 );
     m_pending  = {};
-    m_havePending = false;
-    m_wfsCounter  = 0;
+    m_havePending      = false;
+    m_wfsCounter       = 0;
+    m_intState         = DDSPC::Matrix::Zero( m_settings.m_modes, 1 );
+    m_intPreviousKnown = false;
     std::lock_guard<std::mutex> lock( m_commandMutex );
     m_slotPlan        = DDSPC::Matrix::Zero( m_settings.m_modes, m_settings.m_future * m_slots );
     m_planBase        = -1;
@@ -949,6 +1004,33 @@ inline std::int64_t loPredCtrlAcc_operational::appliedSlots( DDSPC::Matrix &appl
     return m_appliedOrdinal;
 }
 
+inline bool loPredCtrlAcc_operational::standardInput( const DDSPC::Matrix &applied, DDSPC::Matrix &input )
+{
+    if( applied.rows() != m_settings.m_modes || applied.cols() != m_slots )
+    {
+        m_intPreviousKnown = false;
+        return false;
+    }
+
+    // The standard single-rate input is the frame's mean slot command, equal to the held command in standard mode.
+    const DDSPC::Matrix position = applied.rowwise().mean();
+    if( !m_integrate )
+    {
+        input = position;
+        return true;
+    }
+
+    const bool known = m_intPreviousKnown;
+    if( known )
+    {
+        input = -( position - m_intMult * m_intPrevious ) / m_intGain;
+    }
+
+    m_intPrevious      = position;
+    m_intPreviousKnown = true;
+    return known;
+}
+
 inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
                                             std::uint64_t        counter,
                                             const DDSPC::Matrix &features,
@@ -971,6 +1053,15 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
         m_models->invalidate( {} );
         m_havePending = false;
     }
+
+    // Every decision, so the integrator's previous position stays current across gaps and mode changes.
+    DDSPC::Matrix input;
+    m_pending.m_appliedValid = standardInput( applied, input );
+    if( m_pending.m_appliedValid )
+    {
+        m_pending.m_appliedCommand = input;
+    }
+
     const auto selected = m_mode.load();
     if( selected == DDSPC::ShadowMode::AccelAssisted )
         return stepAssisted( measurement, counter, features, assistedValid, applied, ordinal, now );
@@ -981,13 +1072,11 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
     const int modes = m_settings.m_modes, frames = m_settings.m_future;
     if( m_havePending )
     {
-        // The standard single-rate input is the frame's mean slot command, equal to the held command in standard mode.
+        // The standard input was set by standardInput(); the shadow assisted bank keeps the individual slots.
         const bool known                 = applied.rows() == modes && applied.cols() == m_slots;
-        m_pending.m_appliedValid         = known;
         m_pending.m_assistedAppliedValid = known;
         if( known )
         {
-            m_pending.m_appliedCommand = applied.rowwise().mean();
             m_pending.m_assistedAppliedCommand.resize( modes * m_slots, 1 );
             for( int j = 0; j < m_slots; ++j ) // Newest slot first, as ShadowRecord requires.
                 m_pending.m_assistedAppliedCommand.middleRows( ( m_slots - 1 - j ) * modes, modes ) = applied.col( j );
@@ -1033,7 +1122,18 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
             m_exploration.erase( m_exploration.begin() );
     }
     if( !m_predicting || numericalFault )
+    {
         plan.setZero();
+        m_intState.setZero(); // Prediction always restarts from the confirmed own-channel zero.
+    }
+    else if( m_integrate && plan.allFinite() )
+    {
+        // mfilt: the first column is this frame's delta; the state is held on every slot until the next decision.
+        m_intState =
+            ( m_intMult * m_intState - m_intGain * plan.col( 0 ) ).cwiseMax( -m_intLimit ).cwiseMin( m_intLimit );
+        plan = m_intState.replicate( 1, plan.cols() );
+    }
+
     const bool finite = plan.allFinite();
     { //mutex scope
         std::lock_guard<std::mutex> commandLock( m_commandMutex );
@@ -1079,14 +1179,10 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
     if( probing )
         m_multirate->regularization( m_exploration.front().m_lambda );
     // Keep the frozen standard fit's histories continuous so it resumes without a gap when standard is reselected.
-    if( m_havePending )
+    if( m_havePending ) // step() set the standard input, in the same units as the standard fit was trained on.
     {
-        const bool known                 = applied.rows() == modes && applied.cols() == m_slots;
-        m_pending.m_appliedValid         = known;
         m_pending.m_assistedAppliedValid = false;
         m_pending.m_accelValid           = false;
-        if( known )
-            m_pending.m_appliedCommand = applied.rowwise().mean();
         m_models->process( m_pending );
     }
     // Frame i: y_i, the q slots copied over [i-1, i) and the ACC base window ending at the anchor c_i.

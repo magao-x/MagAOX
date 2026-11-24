@@ -69,6 +69,11 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_indiP_sync;
     using loPredCtrlAcc_operational::m_indiP_zeroDm;
     using loPredCtrlAcc_operational::m_inputValid;
+    using loPredCtrlAcc_operational::m_integrate;
+    using loPredCtrlAcc_operational::m_intGain;
+    using loPredCtrlAcc_operational::m_intLimit;
+    using loPredCtrlAcc_operational::m_intMult;
+    using loPredCtrlAcc_operational::m_intState;
     using loPredCtrlAcc_operational::m_invalidReason;
     using loPredCtrlAcc_operational::m_invalidWindow;
     using loPredCtrlAcc_operational::m_learning;
@@ -105,6 +110,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::processImage;
     using loPredCtrlAcc_operational::resetModels;
     using loPredCtrlAcc_operational::sensorHistory;
+    using loPredCtrlAcc_operational::standardInput;
     using loPredCtrlAcc_operational::step;
     using loPredCtrlAcc_operational::validateModalOutput;
 
@@ -556,6 +562,106 @@ TEST_CASE( "Operational standard DDSPC corrects without accelerometers", "[rtc-c
     REQUIRE( assisted.m_updates == 0 );
     REQUIRE( app.m_multirate->status().m_updates == 0 ); // Only the selected mode learns.
     REQUIRE( residual < .25 * uncontrolled );
+}
+
+/** \brief The standard integrator applies the mfilt law, holds and clips its state, and restarts from zero. */
+TEST_CASE( "Standard integrator follows the mfilt law", "[rtc-controller][integrator]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::step;
+    MagAOX::app::loPredCtrlAcc_operational::standardInput;
+#endif
+    // clang-format on
+    Controller app( true );
+    app.m_integrate  = true;
+    app.m_intGain    = .5f;
+    app.m_intMult    = .9f;
+    app.m_intLimit   = .3f;
+    app.m_gain       = .2f;
+    app.m_predicting = true; // Untrained: each delta is gain*y alone.
+
+    DDSPC::Matrix y( 2, 1 ), empty, expected = DDSPC::Matrix::Zero( 2, 1 );
+    for( int n = 0; n < 12; ++n )
+    {
+        y << .4f + .1f * n, -.6f;
+        expected         = ( .9f * expected - .5f * .2f * y ).cwiseMax( -.3f ).cwiseMin( .3f );
+        const auto slots = app.advance( y, empty, false );
+        for( int j = 0; j < 4; ++j )
+        {
+            REQUIRE( slots.col( j ).isApprox( expected, 1e-6f ) );
+        }
+    }
+    REQUIRE( expected( 0 ) == Approx( -.3f ) ); // The limit was reached.
+
+    app.m_predicting = false;
+    REQUIRE( app.advance( y, empty, false ).isZero() );
+    REQUIRE( app.m_intState.isZero() );
+
+    app.m_predicting = true;
+    REQUIRE( app.advance( y, empty, false ).col( 0 ).isApprox( -.5f * .2f * y, 1e-6f ) );
+
+    // Training input: the delta that produced each copied position, unknown without a previous position.
+    app.resetModels();
+    DDSPC::Matrix applied( 2, 4 ), input;
+    applied.row( 0 ).setConstant( .2f );
+    applied.row( 1 ).setConstant( -.1f );
+    REQUIRE_FALSE( app.standardInput( applied, input ) );
+    applied.row( 0 ).setConstant( .1f );
+    applied.row( 1 ).setConstant( .05f );
+    REQUIRE( app.standardInput( applied, input ) );
+    REQUIRE( input( 0 ) == Approx( -( .1f - .9f * .2f ) / .5f ) );
+    REQUIRE( input( 1 ) == Approx( -( .05f + .9f * .1f ) / .5f ) );
+
+    app.m_integrate = false;
+    REQUIRE( app.standardInput( applied, input ) );
+    REQUIRE( input.isApprox( applied.col( 0 ) ) );
+}
+
+/** \brief With the integrator, standard DDSPC learns from deltas and also rejects a constant disturbance. */
+TEST_CASE( "Standard integrator corrects and removes a static offset", "[rtc-controller][integrator]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::step;
+#endif
+    // clang-format on
+    const bool qr = GENERATE( false, true );
+    Controller app( qr );
+    app.m_integrate = true;
+    app.m_intLimit  = 10;
+    app.m_gain      = .2f;
+    app.train();
+
+    DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), empty, mean = DDSPC::Matrix::Zero( 2, 1 );
+    double        residual = 0, uncontrolled = 0;
+    for( int n = 0; n < 6000; ++n )
+    {
+        DDSPC::Matrix disturbance( 2, 1 );
+        disturbance << .5 + std::sin( .09 * n ) + .4 * std::cos( .17 * n ),
+            -.3 + .8 * std::cos( .13 * n ) + .3 * std::sin( .055 * n );
+        y = disturbance + .8f * command;
+
+        if( n == 3000 )
+        {
+            app.freeze();
+        }
+
+        const auto slots = app.advance( y, empty, false );
+        REQUIRE( slots.allFinite() );
+        command = response( slots ) / .8f;
+
+        if( n >= 4000 )
+        {
+            residual += y.squaredNorm();
+            uncontrolled += disturbance.squaredNorm();
+            mean += y / 2000;
+        }
+    }
+    INFO( "residual ratio " << std::sqrt( residual / uncontrolled ) << ", mean residual " << mean.transpose() );
+    REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready );
+    REQUIRE( residual < .25 * uncontrolled );
+    REQUIRE( mean.cwiseAbs().maxCoeff() < .05 );
 }
 
 /// \cond RTC_TEST_SUPPORT
