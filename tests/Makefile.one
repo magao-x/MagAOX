@@ -42,6 +42,9 @@ EDT_TESTS = ocam2KCtrl_test ocam2KCtrl_emgain_test ocam2KCtrl_lifecycle_test oca
 
 ifeq ($(notdir $(TESTNAME)),acronameUsbHub_test)
 	CPPFLAGS += -I$(TESTS_DIR)/../libs/BrainStem2
+else ifeq ($(notdir $(TESTNAME)),dlDataCollection_test)
+	LDLIBS += -lcrypto
+	CXXFLAGS += -fno-fast-math
 else ifeq ($(notdir $(TESTNAME)),kcubeCtrl_test)
     TMC_CONTROLLER_PATH ?= /opt/MagAOX/source/tmcController
     FTDI_CFLAGS ?= $(shell pkg-config --cflags libftdi1)
