@@ -41,6 +41,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::loadCalibration;
     using loPredCtrlAcc_operational::loadImageIntoStream;
     using loPredCtrlAcc_operational::m_accelEnabled;
+    using loPredCtrlAcc_operational::m_accFilled;
     using loPredCtrlAcc_operational::m_adcAnchor;
     using loPredCtrlAcc_operational::m_adcSegment;
     using loPredCtrlAcc_operational::m_assistedDiagnostic;
@@ -54,6 +55,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_fastPrefix;
     using loPredCtrlAcc_operational::m_fastSamples;
     using loPredCtrlAcc_operational::m_fastStats;
+    using loPredCtrlAcc_operational::m_fillHoldoff;
     using loPredCtrlAcc_operational::m_gain;
     using loPredCtrlAcc_operational::m_gainFront;
     using loPredCtrlAcc_operational::m_gainSets;
@@ -79,6 +81,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_invalidWindow;
     using loPredCtrlAcc_operational::m_learning;
     using loPredCtrlAcc_operational::m_learnUs;
+    using loPredCtrlAcc_operational::m_maxFill;
     using loPredCtrlAcc_operational::m_modalEngaged;
     using loPredCtrlAcc_operational::m_modalFresh;
     using loPredCtrlAcc_operational::m_modalLock;
@@ -103,6 +106,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_unlockedTraining;
     using loPredCtrlAcc_operational::m_wasValid;
     using loPredCtrlAcc_operational::m_wfsCounter;
+    using loPredCtrlAcc_operational::m_wfsFills;
     using loPredCtrlAcc_operational::m_wfsReceipt;
     using loPredCtrlAcc_operational::m_windowReason;
     using loPredCtrlAcc_operational::modalZeroed;
@@ -130,7 +134,8 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     /** Returns the copied modal commands, modes by four, oldest slot first. */
     DDSPC::Matrix advance( const DDSPC::Matrix &y /**< [in] WFS residual. */,
                            const DDSPC::Matrix &a /**< [in] Individual ACC history. */,
-                           bool                 valid /**< [in] Upstream ACC validity. */ );
+                           bool                 valid /**< [in] Upstream ACC validity. */,
+                           int missed = 0 /**< [in] WFS frames missed first: their slots are copied, no decision. */ );
 
     /// Render one scheduler slot through the actual candidate and report it copied unless skipped.
     DDSPC::Matrix slot( std::int64_t ordinal /**< [in] Slot ordinal, cycle*q+step. */,
@@ -159,7 +164,8 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     /** Returns the copied modal commands, modes by q, oldest slot first. Slots listed in skip are not copied. */
     DDSPC::Matrix advanceAssisted( const DDSPC::Matrix &y /**< [in] WFS residual. */,
                                    int                  skip   = -1 /**< [in] Slot index not copied, or -1. */,
-                                   bool                 locked = true /**< [in] Upstream lock reported. */ );
+                                   bool                 locked = true /**< [in] Upstream lock reported. */,
+                                   int missed = 0 /**< [in] WFS frames missed first: ACC and slots continue. */ );
 
     /// Enable learning of the selected fit and original-format Gaussian excitation on the actual WFS path.
     void train( const char *sequence = "3000,0.15,0.1" /**< [in] Exploration triples. */ );
@@ -295,8 +301,18 @@ DDSPC::Matrix Controller::window()
     return features;
 }
 
-DDSPC::Matrix Controller::advanceAssisted( const DDSPC::Matrix &y, int skip, bool locked )
+DDSPC::Matrix Controller::advanceAssisted( const DDSPC::Matrix &y, int skip, bool locked, int missed )
 {
+    for( int k = 0; k < missed; ++k ) // The missed frames' ACC samples arrive and their slots are copied.
+    {
+        const auto anchor = nextFrame();
+        for( int p = 0; p < m_slots; ++p )
+        {
+            deliver( anchor + p * m_ratio / m_slots );
+            slot( m_slot++ );
+        }
+    }
+
     const auto anchor   = nextFrame();
     const auto features = window();
     m_windowValid       = features.size() > 0; // As acceleration() reports a complete window.
@@ -307,7 +323,7 @@ DDSPC::Matrix Controller::advanceAssisted( const DDSPC::Matrix &y, int skip, boo
         ordinal = appliedSlots( applied );
     }
     REQUIRE( step( y,
-                   m_wfsCounter + 1,
+                   m_wfsCounter + 1 + missed,
                    features,
                    features.size() > 0 && locked,
                    applied,
@@ -348,15 +364,20 @@ DDSPC::Matrix Controller::slot( std::int64_t ordinal, std::int64_t epoch, bool c
     return m_calibration.m_projection * Eigen::Map<const DDSPC::Matrix>( image.data(), 4, 1 );
 }
 
-DDSPC::Matrix Controller::advance( const DDSPC::Matrix &y, const DDSPC::Matrix &a, bool valid )
+DDSPC::Matrix Controller::advance( const DDSPC::Matrix &y, const DDSPC::Matrix &a, bool valid, int missed )
 {
+    for( int k = 0; k < missed * m_slots; ++k ) // The missed frames' slots are still copied.
+    {
+        slot( m_slot++ );
+    }
+
     DDSPC::Matrix applied;
     std::int64_t  ordinal;
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_commandMutex );
         ordinal = appliedSlots( applied );
     }
-    REQUIRE( step( y, m_wfsCounter + 1, a, valid, applied, ordinal, MagAOX::app::synco::monotonicNs() ) == 0 );
+    REQUIRE( step( y, m_wfsCounter + 1 + missed, a, valid, applied, ordinal, MagAOX::app::synco::monotonicNs() ) == 0 );
     DDSPC::Matrix slots( 2, m_slots );
     for( int j = 0; j < m_slots; ++j )
         slots.col( j ) = slot( m_slot++ );
@@ -538,8 +559,46 @@ TEST_CASE( "Operational WFS decision consumes individual upstream sensor samples
         REQUIRE( features( 2 * i ) == 3 - i );
         REQUIRE( features( 2 * i + 1 ) == -double( 3 - i ) );
     }
+    // A missed ACC frame is filled one frame on, holding the newest sample; a second consecutive one is not.
+    batch.m_count = 0;
+    REQUIRE( app.sensorHistory( batch, rows, features, 1500000 ) );
+    REQUIRE( app.m_adcAnchor == 17 );
+    REQUIRE( app.m_accFilled );
+    for( unsigned i = 0; i < 4; ++i )
+    {
+        REQUIRE( features( 2 * i ) == 3 );
+    }
+    REQUIRE_FALSE( app.sensorHistory( batch, rows, features, 1500000 ) );
+    REQUIRE( std::string( app.m_windowReason.load() ) == "no_new_sample" );
+
+    // One missing sample inside the window holds the sample before it: counters 20-23, then 24, 26, 27.
+    for( unsigned i = 0; i < 4; ++i )
+    {
+        rows[i].m_frame.m_counter = 20 + i;
+    }
+    batch.m_count = 4;
+    REQUIRE( app.sensorHistory( batch, rows, features, 1500000 ) );
+    REQUIRE_FALSE( app.m_accFilled );
+    for( unsigned i = 0; i < 3; ++i )
+    {
+        rows[i].m_frame.m_counter = i ? 25 + i : 24;
+        rows[i].m_acceleration    = { 10. + i, 0 };
+    }
+    batch.m_count = 3;
+    REQUIRE( app.sensorHistory( batch, rows, features, 1500000 ) );
+    REQUIRE( app.m_accFilled );
+    REQUIRE( app.m_adcAnchor == 27 );
+    REQUIRE( features( 0 ) == 12 ); // 27
+    REQUIRE( features( 2 ) == 11 ); // 26
+    REQUIRE( features( 4 ) == 10 ); // 25, missing: holds 24
+    REQUIRE( features( 6 ) == 10 ); // 24
+
+    // Without filling, a missed ACC frame stops the window, as before.
+    app.m_maxFill = 0;
     batch.m_count = 0;
     REQUIRE_FALSE( app.sensorHistory( batch, rows, features, 1500000 ) );
+    app.m_maxFill = 1;
+
     batch.m_discontinuity = true;
     batch.m_count         = 1;
     REQUIRE_FALSE( app.sensorHistory( batch, rows, features, 1500000 ) );
@@ -1224,6 +1283,149 @@ TEST_CASE( "Assisted integrator corrects and removes a static offset", "[rtc-con
         REQUIRE( std::abs( mean[axis] ) < .05 * std::abs( offset[axis] ) );
         REQUIRE( variance[axis] < .5 * open[axis] );
     }
+}
+
+/** \brief A missed WFS frame is filled: standard prediction continues without a fault, and learning pauses. */
+TEST_CASE( "Standard prediction continues through a missed WFS frame", "[rtc-controller][fill]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::step;
+    MagAOX::app::loPredCtrlAcc_operational::fillFrame;
+#endif
+    // clang-format on
+    const bool integrate = GENERATE( false, true );
+    Controller app( true );
+    if( integrate )
+    {
+        app.mainLoop( 1, 1, 10 );
+        app.m_gain = .2f;
+    }
+    app.train();
+
+    DDSPC::Matrix command  = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), empty;
+    double        residual = 0, uncontrolled = 0;
+    auto          frame = [&]( int n, int missed )
+    {
+        DDSPC::Matrix disturbance( 2, 1 );
+        disturbance << std::sin( .09 * n ) + .4 * std::cos( .17 * n ),
+            .8 * std::cos( .13 * n ) + .3 * std::sin( .055 * n );
+        y                = disturbance + .8f * command;
+        const auto slots = app.advance( y, empty, false, missed );
+        REQUIRE( slots.allFinite() );
+        command = response( slots ) / .8f;
+        if( n >= 3500 )
+        {
+            residual += y.squaredNorm();
+            uncontrolled += disturbance.squaredNorm();
+        }
+    };
+
+    int n = 0;
+    for( ; n < 2500; ++n ) // Learning: a missed frame pauses it for history + future + 1 frames.
+    {
+        frame( n, 0 );
+    }
+
+    // The frame before the gap is still learned (its example is all real); then learning pauses.
+    frame( n++, 1 );
+    REQUIRE( app.m_wfsFills == 1 );
+    const auto learned = app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates;
+    for( int k = 0; k < 5; ++k, ++n )
+    {
+        frame( n, 0 );
+        REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates == learned );
+    }
+    for( int k = 0; k < 3; ++k, ++n )
+    {
+        frame( n, 0 );
+    }
+    REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates > learned );
+
+    for( ; n < 3000; ++n )
+    {
+        frame( n, 0 );
+    }
+
+    // Frozen: each missed frame keeps the fit ready and the output qualified, with no slot shift.
+    app.freeze();
+    const auto shifts = app.m_slotShifts;
+    for( ; n < 4500; ++n )
+    {
+        frame( n, n % 97 == 0 ? 1 : 0 );
+        REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready );
+        REQUIRE( app.m_candidateValid.load() );
+    }
+    REQUIRE( app.m_wfsFills > 10 );
+    REQUIRE( app.m_slotShifts == shifts );
+    INFO( "residual ratio with missed frames " << std::sqrt( residual / uncontrolled ) );
+    REQUIRE( residual < .25 * uncontrolled );
+
+    // Without filling a missed frame breaks the history, and the frozen fit stops qualifying.
+    app.m_maxFill = 0;
+    frame( n++, 1 );
+    REQUIRE_FALSE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready );
+    REQUIRE_FALSE( app.m_candidateValid.load() );
+}
+
+/** \brief A missed WFS frame is filled: the assisted history is not broken and every slot is still predicted. */
+TEST_CASE( "Assisted prediction continues through a missed WFS frame", "[rtc-controller][fill]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::stepAssisted;
+    MagAOX::app::loPredCtrlAcc_operational::fillFrame;
+#endif
+    // clang-format on
+    const bool integrate = GENERATE( false, true );
+    Controller app( true );
+    Plant      plant( .02 );
+    assisted( app, plant );
+    if( integrate )
+    {
+        app.mainLoop( 1, 1, 10 );
+        app.m_gain = .2f;
+    }
+    app.train( "1500,0.1,0.1" );
+
+    DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 ), y = DDSPC::Matrix::Zero( 2, 1 );
+    std::uint64_t slotNumber = 0;
+    auto          frame      = [&]( int missed )
+    {
+        slotNumber += 4 * missed; // The plant continues through the missed frames.
+        const auto slots = app.advanceAssisted( y, -1, true, missed );
+        REQUIRE( slots.allFinite() );
+        y.setZero();
+        for( int p = 0; p < slots.cols(); ++p, ++slotNumber )
+        {
+            const auto e = plant.residual( slotNumber, command );
+            command      = slots.col( p );
+            for( int axis = 0; axis < 2; ++axis )
+            {
+                y( axis ) += e[axis] / slots.cols();
+            }
+        }
+    };
+
+    for( int i = 0; i < 2000; ++i )
+    {
+        frame( 0 );
+    }
+    app.freeze();
+    app.m_exploration.clear();
+    frame( 0 );
+
+    const auto breaks = app.m_multirate->status().m_breaks;
+    for( int i = 0; i < 200; ++i )
+    {
+        const auto predictions = app.m_fastStats.m_predictions;
+        frame( i % 23 == 0 ? 1 : 0 );
+        REQUIRE( app.m_fastStats.m_predictions - predictions == 4 ); // The frame after a gap is predicted too.
+        REQUIRE( app.m_candidateValid.load() );
+    }
+    REQUIRE( app.m_wfsFills > 5 );
+    REQUIRE( app.m_multirate->status().m_breaks == breaks );
+    REQUIRE( app.m_multirate->status().m_ready );
 }
 
 /** \brief assisted_qualification names every failing condition and the upstream values behind it. */

@@ -41,13 +41,19 @@ class TraceController : public MagAOX::app::loPredCtrlAcc_operational
     /// Measured step() durations [us].
     std::vector<double> m_decisionUs;
 
-    /// Turn off the integrator, on by default where it exists, so both versions render absolute positions.
+    /// Turn off the integrator and missed-frame filling where they exist, so both versions behave as the original.
+    /** Both are tested separately; T1 checks that nothing else changed. */
     template <class T>
     static void absolute( T &self /**< [in,out] Application under test. */ )
     {
         if constexpr( requires { self.m_integrate; } )
         {
             self.m_integrate = false;
+        }
+
+        if constexpr( requires { self.m_maxFill; } )
+        {
+            self.m_maxFill = 0;
         }
     }
 
