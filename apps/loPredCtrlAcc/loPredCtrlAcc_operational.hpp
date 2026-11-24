@@ -88,7 +88,7 @@ struct ddspcLimitFactShmimT
 /// Operational loPredCtrl workflow; upstream owns ACC/WFS synchronization and the DM owns its scheduler.
 /** Standard mode is unchanged loPredCtrl DDSPC: one decision per WFS frame on the WFS monitor thread, held on the q DM
  * slots of the frame, trained only while standard is selected. The original's commands were increments integrated by
- * the main loop's mfilt; by default this app applies them as absolute positions. The optional [integrator] restores
+ * the main loop's mfilt. By default [integrator] does the same here with the main loop's parameters, applying
  * the mfilt law, s = mult*s - gain*delta, in both modes (standard per WFS frame, assisted per DM slot) and trains each
  * fit on its deltas (agents/plans/2026-11/ddspc-standard-integrator.md).
  *
@@ -358,7 +358,7 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
      * integrates every DM slot with gain/q. Each fit is trained on its deltas. See
      * agents/plans/2026-11/ddspc-standard-integrator.md.
      * @{ */
-    bool m_integrate{ false }; ///< Integrate DDSPC commands in both modes; fits learn the deltas.
+    bool m_integrate{ true }; ///< Integrate DDSPC commands in both modes (default); fits learn the deltas.
 
     std::string m_loopDevice{ "holoop" }; ///< Main loop's cacaoInterface INDI device.
     int         m_loopNumber{ 1 };        ///< cacao loop number N of the aolN_m*fact streams.
@@ -778,7 +778,7 @@ inline void loPredCtrlAcc_operational::setupConfig()
          "enabled",
          "bool",
          "Integrate DDSPC commands with the main loop's mfilt law and parameters, s = mult*s - gain*delta: standard "
-         "per WFS frame, assisted per DM slot with gain/q; both fits train on the deltas (default false)." );
+         "per WFS frame, assisted per DM slot with gain/q; both fits train on the deltas (default true)." );
     add( "loop", "device", "string", "Main loop's cacaoInterface INDI device, for gain, mc and limit (holoop)." );
     add( "loop", "number", "int", "cacao loop number N of the aolN_mgainfact/mmultfact/mlimitfact streams (1)." );
     add( "parameters",

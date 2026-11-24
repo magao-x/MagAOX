@@ -123,6 +123,9 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     /// Next scheduler slot ordinal (cycle*4+step) rendered by advance().
     std::int64_t m_slot{ 8 };
 
+    /// The application's default integrator setting, before the constructor turns it off.
+    bool m_defaultIntegrate{ false };
+
     /// Advance one real decision, then render and copy the four following slots as the scheduler would.
     /** Returns the copied modal commands, modes by four, oldest slot first. */
     DDSPC::Matrix advance( const DDSPC::Matrix &y /**< [in] WFS residual. */,
@@ -179,6 +182,10 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
 
 Controller::Controller( bool qr )
 {
+    // The integrator is on by default; the absolute-position tests turn it off, and the integrator tests back on.
+    m_defaultIntegrate = m_integrate;
+    m_integrate        = false;
+
     m_settings.m_history       = 3;
     m_settings.m_future        = 2;
     m_settings.m_accelChannels = 8;
@@ -2117,6 +2124,7 @@ TEST_CASE( "Integrator prediction waits for the main loop's parameters", "[rtc-c
 #endif
     // clang-format on
     Controller app( true );
+    REQUIRE( app.m_defaultIntegrate ); // The integrator is on by default.
     app.qualifyOutput();
     app.train();
     app.m_predicting = false;

@@ -25,7 +25,7 @@ Running the original loPredCtrl on the RTC (Jared's request) tests the mfilt rou
 
 ## Design
 
-`[integrator] enabled` (default `false`, so existing behaviour and the T1 standard trace are unchanged) turns on the
+`[integrator] enabled` (default `true`, user direction 2026-11-24; `false` keeps absolute positions) turns on the
 mfilt law in both modes. DDSPC does not set the filter's parameters (user direction, 2026-11-24): they are always the
 main loop's, followed as they change, and DDSPC learns its optimal command for whatever they are. For DDSPC mode `i`
 (WFS index `modal_index0/1`), as cacao mfilt combines them:
@@ -85,8 +85,8 @@ leaving the multiplier and limit unchanged.
 - Confirm that `holoop` is the cacaoInterface of the loop whose mfilt drives tip/tilt, and that `aol1_m*fact` are that
   loop's factors.
 - Confirm cacao mfilt's limit semantics (`|DM| ≤ loop_max_limit × mlimitfact`), which this implementation copies.
-- If the main loop's tip/tilt gain factor is set to 0 while DDSPC owns tip/tilt, the integrator has no gain and stays
-  not ready.
+- The main loop's tip/tilt gain is always nonzero on holoop (user, 2026-11-24); with zero gain the integrator would stay
+  not ready and prediction refused.
 - Deployed `loPredCtrl.conf` (`is_integrating`, `gain`, `history`, `future`): if `is_integrating=true`, the original
   integrated twice and the target behaviour differs.
 - Sign check: with the integrator, the feedback sign matches mfilt only if `dm.modeCube` planes 0 and 1 use mfilt's DM
@@ -120,5 +120,9 @@ leaving the multiplier and limit unchanged.
   unit tests, `check-operational-output` 5/5, and T1 `standard_equivalence.py --base HEAD`: rendered standard values
   bit-for-bit identical with the integrator off. `make check` stops at `verify-legacy` (pinned `apps/loPredCtrl` tree
   hash) and one `native_linux_build_test` shadow-only guard; both fail identically on `0b756556`, before this work.
+- Default on (`m_integrate{ true }`, `enabled = true` in both configs). The test harness `Controller` records the default
+  (asserted on) and turns the integrator off for the absolute-position tests; the integrator tests turn it back on.
+  `standard_trace_test.cpp` turns it off through a `requires` check, so T1 still compiles and passes against
+  `1ff631bb` (no integrator) and against HEAD: 192000 values bit-for-bit identical in both.
 - Formatting: the repository's clang-format (Apple 21, `InsertBraces`) would reformat hundreds of existing lines in
   both files; only the changed line ranges were formatted. Whole-file formatting is left for a separate commit.

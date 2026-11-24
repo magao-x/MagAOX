@@ -41,6 +41,16 @@ class TraceController : public MagAOX::app::loPredCtrlAcc_operational
     /// Measured step() durations [us].
     std::vector<double> m_decisionUs;
 
+    /// Turn off the integrator, on by default where it exists, so both versions render absolute positions.
+    template <class T>
+    static void absolute( T &self /**< [in,out] Application under test. */ )
+    {
+        if constexpr( requires { self.m_integrate; } )
+        {
+            self.m_integrate = false;
+        }
+    }
+
     /// Next slot ordinal.
     std::int64_t m_slot{ 8 };
 
@@ -54,6 +64,7 @@ class TraceController : public MagAOX::app::loPredCtrlAcc_operational
 
 TraceController::TraceController( bool qr, bool rtc )
 {
+    absolute( *this );
     m_settings.m_history       = rtc ? 15 : 3;
     m_settings.m_future        = rtc ? 3 : 2;
     m_settings.m_accelChannels = rtc ? 40 : 8;
