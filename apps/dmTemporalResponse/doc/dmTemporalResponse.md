@@ -71,7 +71,14 @@ In every mode the largest absolute command must not exceed `poke.maxCommand` (de
 ## Counter-offload cases
 
 `counter.case` (or INDI `offload_case`) selects what each measurement trial does.  The app then stands in for
-t2wOffloader so that counterOffload makes its real counter ramp, and the WFS response is measured with the loop open.
+t2wOffloader so that counterOffload makes its real counter ramp, and the WFS response is measured with the loop not
+correcting.
+
+- **Loop at gain 0.** dmSyncopation schedules its slots from the main loop's command publication, so with the loop
+  open counterOffload has no slots and the counter never reaches the tweeter.  Run `counter` and `both` with holoop
+  on at `loop_gain` 0 and `loop_multcoeff` 1: the loop then publishes every frame without correcting, and holds the
+  tweeter shape.  Keep t2wOffloader's `offload` off (not at gain 0), since offloading at any gain posts to the
+  stream the app writes.
 
 | Case | Trial |
 |---|---|
@@ -109,7 +116,7 @@ t2wOffloader so that counterOffload makes its real counter ramp, and the WFS res
   - the poke mode is `t2wMode`;
   - t2wOffloader's `offload` is reported off, since the app writes the stream t2wOffloader posts to;
   - counterOffload's `enable` is reported on;
-  - holoop's `loop_state` is reported off;
+  - holoop's `loop_state` is reported off, or on with `loop_gain` 0 and `loop_multcoeff` 1;
   - `counter.stream` is a float image with one plane (2-D, or 3-D with one slice as t2wOffloader creates it) the size of the tweeter plane;
   - the post delay is known.
 
@@ -142,7 +149,7 @@ t2wOffloader so that counterOffload makes its real counter ramp, and the WFS res
 |---|---|---|---|
 | `wfscam.shmimName` | string | `camwfs` | camWFS stream |
 | `wfscam.camDevName` | string | = shmimName | INDI device used to read `fps` and `emgain` |
-| `holoop.devName` | string | `holoop` | INDI device whose `loop_state` is recorded in the headers |
+| `holoop.devName` | string | `holoop` | INDI device whose `loop_state`, `loop_gain` and `loop_multcoeff` are recorded in the headers |
 | `wfscam.threadPrio` | int | 2 | real-time priority of the trigger/poke thread |
 | `wfscam.cpuset` | string | | cpuset of the trigger/poke thread |
 | `dm.index` | int | 0 | DM number `NN` in `dm<NN>disp<MM>`: 0 woofer, 1 tweeter, 2 NCPC |
@@ -204,7 +211,8 @@ Tunable properties (`current`/`target`), all rejected while a run is in progress
 `poke_amp`, `nDelays`, `delaySpan`, `nFrames`, `nTrials`, `settle`, `nSettle`, `maskThresh`, `bestMetric`,
 `offload_case` (selection: `woofer`/`counter`/`both`), `t2w_mode`.  The two mode cube paths are config only.
 
-Subscribed: t2wOffloader `offload`; counterOffload `enable`, `rampStartUs`, `rampDurationUs`, `gain`, `leak`.
+Subscribed: holoop `loop_state`, `loop_gain`, `loop_multcoeff`; t2wOffloader `offload`; counterOffload `enable`,
+`rampStartUs`, `rampDurationUs`, `gain`, `leak`.
 
 Controls: `start.request`, `stop.request`.
 
@@ -243,7 +251,8 @@ Every file carries the run header: `DATE-OBS`, `DMSTREAM`, `WFSSHMIM`, `WFSFPS`,
 |---|---|
 | `EMGAIN` | camWFS `emgain` at run start, `-999` if never received |
 | `LOOPST` | `holoop` `loop_state` at run start: `ON`, `OFF`, or `UNKNOWN` if never received |
-| `LOOPCHG` | 1 if `loop_state` changed during the run, as of when the file was written; the run is not aborted |
+| `LOOPGAIN`, `LOOPMULT` | `holoop` `loop_gain` and `loop_multcoeff` at run start (`-999` if never received) |
+| `LOOPCHG` | 1 if `loop_state`, `loop_gain` or `loop_multcoeff` changed during the run, as of when the file was written; the run is not aborted |
 | `GITSHA1` | git SHA-1 of the MagAOX build |
 | `GITMOD` | 1 if the build tree had uncommitted changes |
 
@@ -265,7 +274,8 @@ Live shared memory, updated during a run: `<name>_ref` (P), `<name>_resp` (mean 
 
 # SAFETY
 
-- Use a DM channel that no other process writes (default `dm00disp07`), with the AO loop open.
+- Use a DM channel that no other process writes (default `dm00disp07`), with the AO loop open, or for `counter` and
+  `both` on at gain 0 and mult coefficient 1.
 - Start with a small `poke_amp`.  `poke.maxCommand` limits the command in both modes.
 - The DM channel is zeroed after every trial and whenever the run ends, including on stop, error, and shutdown.
 - In `counter` and `both` the app writes `aol0_tweeterOffload`, which belongs to t2wOffloader. It does so only while
