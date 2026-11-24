@@ -12,6 +12,8 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstring>
+#include <deque>
 #include <mx/sigproc/circularBuffer.hpp>
 #include <mx/sigproc/signalWindows.hpp>
 
@@ -581,7 +583,7 @@ int modalPSDs::appLogic()
 
 int modalPSDs::appShutdown()
 {
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_psdMutex );
         m_psdWaiting = false;
     }
@@ -641,7 +643,7 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
         mx::sys::sleep( 1 );
     }
 
-    { // mutex scope
+    { //mutex scope
         std::unique_lock<std::mutex> lock( m_psdMutex );
         m_psdCond.wait( lock, [this]() { return m_psdWaiting || shutdown(); } );
     }
@@ -789,7 +791,7 @@ int modalPSDs::allocate( const dev::shmimT &dummy )
 
     std::cerr << "done restarting\n";
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_psdMutex );
         m_psdWaiting = false;
         m_psdRestarting.store( false, std::memory_order_release );
@@ -845,7 +847,7 @@ int modalPSDs::allocatePSDStreams()
                                 -1,
                                 1,
                                 IMAGE_NB_SEMAPHORE,
-                                0,
+                                1,
                                 CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
                                 0 );
 
@@ -892,6 +894,7 @@ void modalPSDs::psdThreadExec()
     bool                    haveMeanSums     = false;
     std::vector<double>     avgPsdSum;
     uint64_t                avgPsdWindowCount = 0;
+    std::deque<timespec>    windowStarts;
 
     while( m_psdThreadInit == true && shutdown() == 0 )
     {
@@ -900,7 +903,7 @@ void modalPSDs::psdThreadExec()
 
     while( shutdown() == 0 )
     {
-        { // mutex scope
+        { //mutex scope
             std::unique_lock<std::mutex> lock( m_psdMutex );
 
             if( m_psdRestarting.load( std::memory_order_acquire ) == true || m_ampCircBuff.maxEntries() == 0 )
@@ -948,6 +951,7 @@ void modalPSDs::psdThreadExec()
         haveMeanSums     = false;
         avgPsdSum.clear();
         avgPsdWindowCount = 0;
+        windowStarts.clear();
 
         while( m_psdRestarting.load( std::memory_order_acquire ) == false && !shutdown() )
         {
@@ -958,6 +962,16 @@ void modalPSDs::psdThreadExec()
             if( !loadPsdInputWindows( tsSnap ) )
             {
                 continue;
+            }
+
+            const auto &source = shmimMonitorT::m_imageStream;
+            timespec    windowStart{}, windowEnd{};
+
+            if( source.md && source.md->naxis == 3 &&
+                ( source.md->imagetype & 0xF000F ) == ( CIRCULAR_BUFFER | ZAXIS_TEMPORAL ) )
+            {
+                windowStart = source.atimearray[( m_tsPtrs.front() - source.array.F ) / m_nModes];
+                windowEnd   = source.atimearray[( m_tsPtrs.back() - source.array.F ) / m_nModes];
             }
 
             cbIndexT tsRefEntry   = latestWindowRefEntry( tsSnap, m_tsSize );
@@ -1079,6 +1093,13 @@ void modalPSDs::psdThreadExec()
             uint64_t storedRawPsdCount = storedRawPSDCount();
             uint64_t nextWindowCount   = std::min<uint64_t>( desiredPsdWindow, storedRawPsdCount );
 
+            windowStarts.push_back( windowStart );
+
+            while( windowStarts.size() > storedRawPsdCount )
+            {
+                windowStarts.pop_front();
+            }
+
             const realT *latestPlane = rawPSDPlaneByAge( 0, planeElements );
 
             bool recomputeAvgPsd = ( nextWindowCount == 0 || latestPlane == nullptr || avgPsdWindowCount == 0 ||
@@ -1117,7 +1138,20 @@ void modalPSDs::psdThreadExec()
 
             // Set the time of last write
             clock_gettime( CLOCK_REALTIME, &m_avgpsdStream->md->writetime );
-            m_avgpsdStream->md->atime = m_avgpsdStream->md->writetime;
+            m_avgpsdStream->md->atime = windowEnd.tv_sec > 0 ? windowEnd : m_avgpsdStream->md->writetime;
+
+            auto &startKeyword = m_avgpsdStream->kw[0];
+            std::strcpy( startKeyword.name, "PSDT0" );
+            startKeyword.type       = 'D';
+            startKeyword.value.numf = 0;
+
+            if( nextWindowCount > 0 && nextWindowCount <= windowStarts.size() )
+            {
+                const auto &begin       = windowStarts[windowStarts.size() - nextWindowCount];
+                startKeyword.value.numf = begin.tv_sec + 1e-9 * begin.tv_nsec;
+            }
+
+            ++startKeyword.cnt;
 
             // Move to next pointer
             F = m_avgpsdStream->array.F;

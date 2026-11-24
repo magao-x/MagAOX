@@ -11,12 +11,17 @@
 #include <atomic>
 #include <cctype>
 #include <cmath>
+#include <cstring>
+#include <deque>
 
 #include <mx/ao/analysis/clAOLinearPredictor.hpp>
 #include <mx/ao/analysis/clGainOpt.hpp>
 #include <mx/mxException.hpp>
 
+#include "modalNoiseModel.hpp"
 #include "modalPsdProcessor.hpp"
+
+#include "../../libMagAOX/common/streamCopy.hpp"
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -1021,11 +1026,39 @@ class modalGainOpt : public MagAOXApp<true>,
 
     eigenImage<float> m_noiseParams; ///< WFS noise model parameters by mode.
 
-    eigenImage<float> m_wfsavg;      ///< Average WFS image used for photon-noise estimates.
-    eigenImage<float> m_wfsmask;     ///< WFS mask selecting pixels for noise estimates.
-    float             m_counts{ 0 }; ///< Masked WFS photon count.
-    float             m_emg{ 1 };    ///< Electron multiplication gain for the WFS noise model.
-    int               m_npix{ 0 };   ///< Number of active pixels in the WFS mask.
+    eigenImage<float>  m_wfsavg;                   ///< Average WFS image used for photon-noise estimates.
+    eigenImage<float>  m_wfsmask;                  ///< WFS mask selecting pixels for noise estimates.
+    float              m_counts{ 0 };              ///< Masked WFS photon count.
+    bool               m_calibratedNoise{ false }; ///< Enable independent WFS noise estimation.
+    modalNoise::Source m_requestedNoise{ modalNoise::Source::camera }; ///< Operator-selected source.
+    modalNoise::Source m_activeNoise{
+        modalNoise::Source::empirical }; ///< Source used for the last published optimization.
+    std::string m_noiseCalDir;           ///< Directory containing the active WFS reconstruction FITS calibration.
+    std::string m_noiseSelfRm{ "selfRM.fits" };              ///< Matched plane-5 self response FITS cube.
+    std::string m_cameraNoiseBuffer{ "camwfs_noise_cbuff" }; ///< Buffered raw camera input for pixel periodograms.
+    double      m_noiseFloorPerPixel{ 1 };  ///< Active WFS normalization floor in ADU per full-frame pixel.
+    double      m_noiseResponseBeta{ 0 };   ///< Flux normalization fraction at the self-response calibration.
+    bool m_halfWeightNoiseNyquist{ false }; ///< Whether the input PSD weights its standalone Nyquist bin by one half.
+    bool m_noiseModeNorm{ true };           ///< Runtime WFS reconstructor MODENORM setting.
+    modalNoise::Calibration m_noiseCalibration; ///< Cached matched reconstructor and noise contractions.
+    modalNoise::CameraNoise m_cameraNoise;      ///< Periodogram work area owned by the optimizer thread.
+    std::vector<std::pair<std::filesystem::path, std::filesystem::file_time_type>>
+           m_noiseFiles;                                ///< Cached calibration file identities.
+    double m_noiseCalChanged{ 0 };                      ///< Time when a changed calibration invalidated prior samples.
+    double m_cameraSettingsSince{ 0 };                  ///< Time the current FPS and EM gain last changed.
+    bool   m_haveEmGain{ false };                       ///< Whether the camera has provided its actual EM setting.
+    double m_cameraFps{ 0 };                            ///< Reported actual camera FPS.
+    std::deque<std::pair<double, float>> m_fluxHistory; ///< Timestamped masked dark-subtracted flux samples.
+    double m_psdWindowStart{ 0 };        ///< Acquisition time of the oldest sample averaged into the PSD, if supplied.
+    eigenImage<float> m_psdStaging;      ///< Private copy used to validate a PSD and its timestamps together.
+    timespec          m_psdWindowEnd{};  ///< Timestamp for the current modal PSD window.
+    std::string       m_gainCeilingSpec; ///< Requested mode ranges and effective ceilings.
+    std::vector<modalNoise::GainCeiling> m_gainCeilings; ///< Validated gain ceiling ranges.
+    IMAGE *m_noiseComparisonStream{ nullptr };           ///< Per-mode raw WFS measured and predicted noise floors.
+    IMAGE *m_gainLimitsStream{ nullptr }; ///< Applied effective limits and ceiling-hit flags for SI and LP.
+
+    float m_emg{ 1 };  ///< Electron multiplication gain for the WFS noise model.
+    int   m_npix{ 0 }; ///< Number of active pixels in the WFS mask.
 
     int m_sinceChange{ -1 }; ///< Optimization cycles since the latest controller change.
 
@@ -1093,12 +1126,13 @@ class modalGainOpt : public MagAOXApp<true>,
     void destroyImageStream( IMAGE *&stream /**< [in,out] stream pointer to destroy and clear */ );
 
     /// Allocate and create an owned ImageStreamIO output stream.
-    int createImageStream( IMAGE            *&stream,  /**< [in,out] stream pointer to allocate and create */
-                           const std::string &name,    /**< [in] shmim name for the output stream */
-                           uint32_t           size0,   /**< [in] first axis size */
-                           uint32_t           size1,   /**< [in] second axis size */
-                           uint32_t           size2,   /**< [in] third axis size */
-                           uint8_t            dataType /**< [in] ImageStreamIO datatype for the stream */
+    int createImageStream( IMAGE            *&stream,       /**< [in,out] stream pointer to allocate and create */
+                           const std::string &name,         /**< [in] shmim name for the output stream */
+                           uint32_t           size0,        /**< [in] first axis size */
+                           uint32_t           size1,        /**< [in] second axis size */
+                           uint32_t           size2,        /**< [in] third axis size */
+                           uint8_t            dataType,     /**< [in] ImageStreamIO datatype for the stream */
+                           int                nKeywords = 0 /**< [in] Number of optional stream keywords. */
     );
 
     /// Populate the published gain and variance arrays from the current
@@ -1417,6 +1451,19 @@ class modalGainOpt : public MagAOXApp<true>,
                                         ///< and the gopt thread.
     bool m_goptSemaphoreInit{ false };  ///< Tracks whether the gain optimization semaphore needs cleanup.
 
+    /// Reload noise calibration when its resolved FITS inputs change.
+    void refreshNoiseCalibration();
+
+    /// Check whether the actual camera rate matches the input PSD grid.
+    bool cameraRateMatchesPsd() const;
+
+    /// Select an available independent raw WFS noise floor and the matching sampled frame rate.
+    std::vector<float> selectNoisePrediction( float  &fps /**< [out] Calibrated PSD sampling rate in Hz. */,
+                                              double &flux /**< [out] Masked mean ADU within the PSD interval. */ );
+
+    /// Convert an effective gain recommendation to the commanded per-mode gain factor.
+    float commandedGain( size_t mode /**< [in] Zero-based mode. */, float gain /**< [in] Effective gain. */ ) const;
+
     /// Estimate the WFS noise PSD for a mode.
     float noisePSD( int n /**< [in] mode index */ );
 
@@ -1476,15 +1523,18 @@ class modalGainOpt : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_extrapClSignificanceThreshold;  ///< INDI property for extrap cl significance threshold.
     pcf::IndiProperty m_indiP_extrapClMinSignificantFraction; ///< INDI property for extrap cl min significant fraction.
 
-    pcf::IndiProperty m_indiP_emg;        ///< INDI property for emg.
-    pcf::IndiProperty m_indiP_psdTime;    ///< INDI property for psd time.
-    pcf::IndiProperty m_indiP_psdAvgTime; ///< INDI property for psd avg time.
-    pcf::IndiProperty m_indiP_loop;       ///< INDI property for loop.
-    pcf::IndiProperty m_indiP_siGain;     ///< INDI property for si gain.
-    pcf::IndiProperty m_indiP_siMult;     ///< INDI property for si mult.
-    pcf::IndiProperty m_indiP_pcGain;     ///< INDI property for pc gain.
-    pcf::IndiProperty m_indiP_pcMult;     ///< INDI property for pc mult.
-    pcf::IndiProperty m_indiP_pcOn;       ///< INDI property for pc on.
+    pcf::IndiProperty m_indiP_noiseSource;  ///< Requested and active noise sources.
+    pcf::IndiProperty m_indiP_gainCeilings; ///< Runtime effective gain ceiling ranges.
+    pcf::IndiProperty m_indiP_cameraFps;    ///< Subscription to the camera sampling rate.
+    pcf::IndiProperty m_indiP_emg;          ///< INDI property for emg.
+    pcf::IndiProperty m_indiP_psdTime;      ///< INDI property for psd time.
+    pcf::IndiProperty m_indiP_psdAvgTime;   ///< INDI property for psd avg time.
+    pcf::IndiProperty m_indiP_loop;         ///< INDI property for loop.
+    pcf::IndiProperty m_indiP_siGain;       ///< INDI property for si gain.
+    pcf::IndiProperty m_indiP_siMult;       ///< INDI property for si mult.
+    pcf::IndiProperty m_indiP_pcGain;       ///< INDI property for pc gain.
+    pcf::IndiProperty m_indiP_pcMult;       ///< INDI property for pc mult.
+    pcf::IndiProperty m_indiP_pcOn;         ///< INDI property for pc on.
 
     pcf::IndiProperty m_indiP_modesOn; ///< INDI property for modes on.
 
@@ -1589,6 +1639,15 @@ class modalGainOpt : public MagAOXApp<true>,
 
     /// Handle updates to the emg INDI property.
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_emg );
+
+    /// Set the requested independent noise source.
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_noiseSource );
+
+    /// Update the effective gain ceiling ranges.
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_gainCeilings );
+
+    /// Record actual camera sampling rate changes.
+    INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_cameraFps );
 
     /// Handle updates to the psd time INDI property.
     INDI_SETCALLBACK_DECL( modalGainOpt, m_indiP_psdTime );
@@ -2054,6 +2113,97 @@ void modalGainOpt::setupConfig()
                 "The minimum fraction of raw CL PSD bins that must exceed the "
                 "significance threshold for a mode to remain active." );
 
+    config.add( "noise.enabled",
+                "",
+                "noise.enabled",
+                argType::True,
+                "noise",
+                "enabled",
+                false,
+                "bool",
+                "Enable independent WFS noise modeling." );
+    config.add( "noise.source",
+                "",
+                "noise.source",
+                argType::Required,
+                "noise",
+                "source",
+                false,
+                "string",
+                "Requested source: camera, detector or empirical." );
+    config.add( "noise.calibrationDir",
+                "",
+                "noise.calibrationDir",
+                argType::Required,
+                "noise",
+                "calibrationDir",
+                false,
+                "string",
+                "Path to the active reconstruction calibration directory." );
+    config.add( "noise.selfRM",
+                "",
+                "noise.selfRM",
+                argType::Required,
+                "noise",
+                "selfRM",
+                false,
+                "string",
+                "Matched selfRM FITS filename within calibrationDir, or an absolute path." );
+    config.add( "noise.selfRMBeta",
+                "",
+                "noise.selfRMBeta",
+                argType::Required,
+                "noise",
+                "selfRMBeta",
+                false,
+                "double",
+                "Flux fraction S/(S+K) at acquisition of the matched selfRM." );
+    config.add( "noise.floorPerPixel",
+                "",
+                "noise.floorPerPixel",
+                argType::Required,
+                "noise",
+                "floorPerPixel",
+                false,
+                "double",
+                "Active WFS normalization floor in ADU per full-frame pixel." );
+    config.add( "noise.modeNorm",
+                "",
+                "noise.modeNorm",
+                argType::Required,
+                "noise",
+                "modeNorm",
+                false,
+                "bool",
+                "Whether the active WFS reconstructor uses MODENORM." );
+    config.add( "noise.halfWeightNyquist",
+                "",
+                "noise.halfWeightNyquist",
+                argType::Required,
+                "noise",
+                "halfWeightNyquist",
+                false,
+                "bool",
+                "Exclude a standalone Nyquist bin given half weight by the PSD producer." );
+    config.add( "noise.cameraBuffer",
+                "",
+                "noise.cameraBuffer",
+                argType::Required,
+                "noise",
+                "cameraBuffer",
+                false,
+                "string",
+                "Raw WFS uint16 timestamped circular buffer for the camera estimate." );
+    config.add( "loop.effectiveGainCeilings",
+                "",
+                "loop.effectiveGainCeilings",
+                argType::Required,
+                "loop",
+                "effectiveGainCeilings",
+                false,
+                "string",
+                "Comma-separated inclusive first-last:gain ranges or none." );
+
     SHMIMMONITORT_SETUP_CONFIG( psdShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( freqShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( gainFactShmimMonitorT, config );
@@ -2080,6 +2230,30 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_autoUpdate, "loop.autoUpdate" );
     _config( m_gainGain, "loop.gainGain" );
     _config( m_gainLeak, "loop.gainLeak" );
+    _config( m_calibratedNoise, "noise.enabled" );
+    std::string noiseSource = "camera";
+    _config( noiseSource, "noise.source" );
+    _config( m_noiseCalDir, "noise.calibrationDir" );
+    _config( m_noiseSelfRm, "noise.selfRM" );
+    _config( m_noiseResponseBeta, "noise.selfRMBeta" );
+    _config( m_noiseFloorPerPixel, "noise.floorPerPixel" );
+    _config( m_noiseModeNorm, "noise.modeNorm" );
+    _config( m_halfWeightNoiseNyquist, "noise.halfWeightNyquist" );
+    _config( m_cameraNoiseBuffer, "noise.cameraBuffer" );
+    m_gainCeilingSpec = m_loopNum == 1 ? "840-:0.30" : "none";
+    _config( m_gainCeilingSpec, "loop.effectiveGainCeilings" );
+
+    if( !modalNoise::parseSource( m_requestedNoise, noiseSource ) ||
+        !modalNoise::parseCeilings( m_gainCeilings, m_gainCeilingSpec ) )
+    {
+        m_shutdown = true;
+        return log<text_log, -1>( "Invalid noise source or effective gain ceiling ranges", logPrio::LOG_CRITICAL );
+    }
+
+    if( !m_calibratedNoise )
+    {
+        m_requestedNoise = modalNoise::Source::empirical;
+    }
 
     std::string extrapMethod = olProcessMethodName( m_extrapOL );
     _config( extrapMethod, "extrapolation.method" );
@@ -2189,7 +2363,7 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     SHMIMMONITORT_LOAD_CONFIG( noiseShmimMonitorT, _config );
 
     snprintf( shmim, sizeof( shmim ), "aol%d_wfsavg", m_loopNum );
-    wfsavgShmimMonitorT::m_shmimName = shmim;
+    wfsavgShmimMonitorT::m_shmimName = m_calibratedNoise ? m_wfsDevice + "_avg" : shmim;
     SHMIMMONITORT_LOAD_CONFIG( wfsavgShmimMonitorT, _config );
 
     snprintf( shmim, sizeof( shmim ), "aol%d_wfsmask", m_loopNum );
@@ -2577,6 +2751,14 @@ int modalGainOpt::appStartup()
                                  "CL Min Significant Fraction",
                                  "Extrapolation" );
 
+    CREATE_REG_INDI_NEW_TEXT( m_indiP_gainCeilings, "effective_gain_ceilings", "Effective Gain Ceilings", "Gain Opt." );
+
+    if( m_calibratedNoise )
+    {
+        CREATE_REG_INDI_NEW_TEXT( m_indiP_noiseSource, "noise_source", "WFS Noise Source", "Gain Opt." );
+        REG_INDI_SETPROP( m_indiP_cameraFps, m_wfsDevice, "fps" );
+    }
+
     REG_INDI_SETPROP( m_indiP_emg, m_wfsDevice, "emgain" );
     REG_INDI_SETPROP( m_indiP_psdTime, m_psdDevice, "psdTime" );
     REG_INDI_SETPROP( m_indiP_psdAvgTime, m_psdDevice, "psdAvgTime" );
@@ -2673,10 +2855,14 @@ int modalGainOpt::appLogic()
     int modesOn = 0;
     int modesOnSI = 0;
     int modesOnLP = 0;
+    std::string                              requestedNoise, activeNoise, ceilingSpec;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_goptMutex );
 
+        requestedNoise                   = modalNoise::sourceName( m_requestedNoise );
+        activeNoise                      = modalNoise::sourceName( m_activeNoise );
+        ceilingSpec                      = m_gainCeilingSpec;
         autoUpdate = m_autoUpdate;
         updateOnce = m_updateOnce;
         dump = m_dump;
@@ -2703,6 +2889,13 @@ int modalGainOpt::appLogic()
     else
     {
         updateSwitchIfChanged( m_indiP_autoUpdate, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+    }
+
+    updatesIfChanged<std::string>( m_indiP_gainCeilings, { "current", "target" }, { ceilingSpec, ceilingSpec } );
+
+    if( m_calibratedNoise )
+    {
+        updatesIfChanged<std::string>( m_indiP_noiseSource, { "current", "target" }, { activeNoise, requestedNoise } );
     }
 
     if( updateOnce )
@@ -2863,6 +3056,8 @@ int modalGainOpt::appShutdown()
     destroyImageStream( m_rawOlPSDStream );
     destroyImageStream( m_smoothOlPSDStream );
     destroyImageStream( m_noisePSDStream );
+    destroyImageStream( m_noiseComparisonStream );
+    destroyImageStream( m_gainLimitsStream );
     destroyImageStream( m_clXferCurrentStream );
     destroyImageStream( m_clNtfCurrentStream );
     destroyImageStream( m_clXferSIStream );
@@ -2949,8 +3144,13 @@ void modalGainOpt::destroyImageStream( IMAGE *&stream )
     stream = nullptr;
 }
 
-int modalGainOpt::createImageStream(
-    IMAGE *&stream, const std::string &name, uint32_t size0, uint32_t size1, uint32_t size2, uint8_t dataType )
+int modalGainOpt::createImageStream( IMAGE            *&stream,
+                                     const std::string &name,
+                                     uint32_t           size0,
+                                     uint32_t           size1,
+                                     uint32_t           size2,
+                                     uint8_t            dataType,
+                                     int                nKeywords )
 {
     destroyImageStream( stream );
 
@@ -2973,7 +3173,7 @@ int modalGainOpt::createImageStream(
                                     -1,
                                     1,
                                     IMAGE_NB_SEMAPHORE,
-                                    0,
+                                    nKeywords,
                                     CIRCULAR_BUFFER | ZAXIS_TEMPORAL,
                                     0 ) != 0 )
     {
@@ -3006,13 +3206,13 @@ void modalGainOpt::writePublishedGainArrays( float *currentData,
 
     for( size_t n = 0; n < m_optGainSI.size(); ++n )
     {
-        currentData[n] = ( m_gainCalFacts[n] * m_optGainSI[n] / m_gainCals[n] ) / m_opticalGain;
-        siRawData[n] = ( m_gainCalFacts[n] * m_optGainSIRaw[n] / m_gainCals[n] ) / m_opticalGain;
-        siData[n] = currentData[n];
-        maxSiData[n] = ( m_gainCalFacts[n] * m_gmaxSI[n] / m_gainCals[n] ) / m_opticalGain;
+        currentData[n] = commandedGain( n, m_optGainSI[n] );
+        siRawData[n]   = commandedGain( n, m_optGainSIRaw[n] );
+        siData[n]      = currentData[n];
+        maxSiData[n]   = commandedGain( n, m_gmaxSI[n] );
 
-        lpData[n] = ( m_gainCalFacts[n] * m_optGainLP[n] / m_gainCals[n] ) / m_opticalGain;
-        maxLpData[n] = ( m_gainCalFacts[n] * m_gmaxLP[n] / m_gainCals[n] ) / m_opticalGain;
+        lpData[n]    = commandedGain( n, m_optGainLP[n] );
+        maxLpData[n] = commandedGain( n, m_gmaxLP[n] );
 
         modeVars( 0, n ) = m_modeVarOL[n];
         modeVars( 1, n ) = m_modeVarSI[n];
@@ -3025,11 +3225,18 @@ void modalGainOpt::writePublishedPredictorArrays(
 {
     for( size_t n = 0; n < m_optGainLP.size(); ++n )
     {
-        const float targetGain = ( m_gainCalFacts[n] * m_optGainLP[n] / m_gainCals[n] ) / m_opticalGain;
+        const float targetGain = commandedGain( n, m_optGainLP[n] );
+        const float ceiling    = modalNoise::ceilingForMode( m_gainCeilings, n );
 
         if( blend )
         {
-            pcGainData[n] = pcGainData[n] + m_gainGain * ( targetGain - pcGainData[n] );
+            pcGainData[n] += m_gainGain * ( targetGain - pcGainData[n] );
+
+            if( mx::math::isFinite( ceiling ) )
+            {
+                const float bound = std::min( ceiling, m_gmaxLP[n] * m_goptLP[n].m_minFindMaxFact );
+                pcGainData[n]     = std::min( pcGainData[n], bound / ( m_gainCals[n] * m_opticalGain ) );
+            }
         }
         else
         {
@@ -3236,6 +3443,8 @@ bool modalGainOpt::refreshGoptStructures()
 
     std::cerr << "updating gopt structures\n";
 
+    const float controllerFps = m_calibratedNoise && cameraRateMatchesPsd() ? m_cameraFps : m_fps;
+
     m_goptCurrent.resize( m_gainFacts.size() );
     m_goptSI.resize( m_gainFacts.size() );
     m_goptLP.resize( m_gainFacts.size() );
@@ -3243,13 +3452,13 @@ bool modalGainOpt::refreshGoptStructures()
 
     for( size_t n = 0; n < m_goptCurrent.size(); ++n )
     {
-        m_goptCurrent[n].Ti( 1.0 / m_fps );
+        m_goptCurrent[n].Ti( 1.0 / controllerFps );
         m_goptCurrent[n].tau( m_taus[n] );
 
-        m_goptSI[n].Ti( 1.0 / m_fps );
+        m_goptSI[n].Ti( 1.0 / controllerFps );
         m_goptSI[n].tau( m_taus[n] );
 
-        m_goptLP[n].Ti( 1.0 / m_fps );
+        m_goptLP[n].Ti( 1.0 / controllerFps );
         m_goptLP[n].tau( m_taus[n] );
 
         if( !m_pcOn )
@@ -3322,13 +3531,15 @@ void modalGainOpt::syncSiGainStateFromAppliedGains()
 
     for( size_t n = 0; n < m_gainFacts.size(); ++n )
     {
-        if( std::abs( m_gainCalFacts[n] ) <= tiny )
+        const float factor = m_activeNoise == modalNoise::Source::empirical ? m_gainCalFacts[n] : 1;
+
+        if( std::abs( factor ) <= tiny )
         {
             m_optGainSI[n] = 0.0F;
             continue;
         }
 
-        m_optGainSI[n] = m_gainFacts[n] * m_gainCals[n] * m_opticalGain / m_gainCalFacts[n];
+        m_optGainSI[n] = m_gainFacts[n] * m_gainCals[n] * m_opticalGain / factor;
     }
 
     m_siGainStateNeedsSync = false;
@@ -3338,6 +3549,9 @@ void modalGainOpt::updateIntegratedSiGain( size_t modeIndex )
 {
     m_optGainSI[modeIndex] =
         m_gainGain * ( m_optGainSIRaw[modeIndex] - m_optGainSI[modeIndex] ) + m_gainLeak * m_optGainSI[modeIndex];
+
+    m_optGainSI[modeIndex] =
+        std::min( m_optGainSI[modeIndex], modalNoise::ceilingForMode( m_gainCeilings, modeIndex ) );
 }
 
 int modalGainOpt::allocatePCShmims()
@@ -3416,10 +3630,38 @@ int modalGainOpt::allocate( const psdShmimT &dummy )
 
     m_updating = true;
 
+    if( m_calibratedNoise && psdShmimMonitorT::m_dataType != _DATATYPE_FLOAT )
+    {
+        m_updating = false;
+        return log<software_error, -1>( { "Calibrated gain optimization requires float modal PSDs" } );
+    }
+
     m_nFreq = psdShmimMonitorT::m_width;
     m_nModes = psdShmimMonitorT::m_height;
 
     m_clPSDs.resize( m_nFreq, m_nModes );
+
+    if( m_noiseComparisonStream != nullptr && m_noiseComparisonStream->md->size[1] != m_nModes )
+    {
+        destroyImageStream( m_noiseComparisonStream );
+    }
+
+    if( m_gainLimitsStream != nullptr && m_gainLimitsStream->md->size[1] != m_nModes )
+    {
+        destroyImageStream( m_gainLimitsStream );
+    }
+
+    const std::string prefix = "aol" + std::to_string( m_loopNum );
+
+    if( ( m_calibratedNoise && m_noiseComparisonStream == nullptr &&
+          createImageStream(
+              m_noiseComparisonStream, prefix + "_noiseComparison", 2, m_nModes, 1, _DATATYPE_FLOAT, 1 ) < 0 ) ||
+        ( m_gainLimitsStream == nullptr &&
+          createImageStream( m_gainLimitsStream, prefix + "_gainLimits", 4, m_nModes, 1, _DATATYPE_FLOAT ) < 0 ) )
+    {
+        m_updating = false;
+        return log<software_error, -1>( { "Failed to allocate noise or gain limit diagnostics" } );
+    }
 
     m_clXferCurrent.resize( m_nFreq, m_nModes );
     m_clNtfCurrent.resize( m_nFreq, m_nModes );
@@ -3661,9 +3903,52 @@ int modalGainOpt::processImage( void *curr_src, const psdShmimT &dummy )
 
     m_updating = true;
 
-    m_clPSDs = Eigen::Map<Eigen::Array<float, -1, -1>>( static_cast<float *>( curr_src ),
-                                                        psdShmimMonitorT::m_width,
-                                                        psdShmimMonitorT::m_height );
+    const auto frame = Eigen::Map<const Eigen::Array<float, -1, -1>>(
+        static_cast<float *>( curr_src ), psdShmimMonitorT::m_width, psdShmimMonitorT::m_height );
+
+    if( m_calibratedNoise )
+    {
+        const IMAGE &source = psdShmimMonitorT::m_imageStream;
+        const auto   count  = __atomic_load_n( &source.md->cnt0, __ATOMIC_ACQUIRE );
+
+        if( __atomic_load_n( &source.md->write, __ATOMIC_ACQUIRE ) != 0 )
+        {
+            m_updating = false;
+            return 0;
+        }
+
+        const timespec end   = psdShmimMonitorT::currAtime();
+        double         start = 0;
+
+        for( uint16_t k = 0; k < source.md->NBkw; ++k )
+        {
+            if( source.kw[k].type == 'D' &&
+                std::strncmp( source.kw[k].name, "PSDT0", sizeof( source.kw[k].name ) ) == 0 )
+            {
+                start = source.kw[k].value.numf;
+                break;
+            }
+        }
+
+        m_psdStaging = frame;
+        std::atomic_thread_fence( std::memory_order_acquire );
+
+        if( __atomic_load_n( &source.md->write, __ATOMIC_ACQUIRE ) != 0 ||
+            __atomic_load_n( &source.md->cnt0, __ATOMIC_ACQUIRE ) != count )
+        {
+            m_updating = false;
+            return 0;
+        }
+
+        m_clPSDs.swap( m_psdStaging );
+        m_psdWindowStart = start;
+        m_psdWindowEnd   = end;
+    }
+    else
+    {
+        m_clPSDs       = frame;
+        m_psdWindowEnd = psdShmimMonitorT::currAtime();
+    }
 
     m_updating = false;
 
@@ -4495,6 +4780,17 @@ int modalGainOpt::allocate( const wfsavgShmimT &dummy )
 {
     static_cast<void>( dummy );
 
+    if( m_calibratedNoise )
+    {
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+        m_fluxHistory.clear();
+    }
+
+    if( m_calibratedNoise && wfsavgShmimMonitorT::m_dataType != _DATATYPE_FLOAT )
+    {
+        return log<software_error, -1>( { "Calibrated gain optimization requires a float WFS average" } );
+    }
+
     std::cerr << "Got WFS avg: " << wfsavgShmimMonitorT::m_width << " x " << wfsavgShmimMonitorT::m_height << '\n';
     return 0;
 }
@@ -4503,7 +4799,7 @@ int modalGainOpt::processImage( void *curr_src, const wfsavgShmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_goptMutex );
 
         m_wfsavg = mx::improc::eigenMap<float>( reinterpret_cast<float *>( curr_src ),
@@ -4513,6 +4809,15 @@ int modalGainOpt::processImage( void *curr_src, const wfsavgShmimT &dummy )
         if( m_wfsavg.rows() == m_wfsmask.rows() && m_wfsavg.cols() == m_wfsmask.cols() )
         {
             m_counts = ( m_wfsavg * m_wfsmask ).sum();
+            if( m_calibratedNoise && mx::math::isFinite( m_counts ) && m_counts > 0 )
+            {
+                m_fluxHistory.emplace_back( modalNoise::seconds( wfsavgShmimMonitorT::currAtime() ), m_counts );
+
+                if( m_fluxHistory.size() > 128 )
+                {
+                    m_fluxHistory.pop_front();
+                }
+            }
         }
     }
 
@@ -4523,6 +4828,14 @@ int modalGainOpt::allocate( const wfsmaskShmimT &dummy )
 {
     static_cast<void>( dummy );
 
+    if( m_calibratedNoise && wfsmaskShmimMonitorT::m_dataType != _DATATYPE_FLOAT )
+    {
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+        m_fluxHistory.clear();
+        m_wfsmask.resize( 0, 0 );
+        return log<software_error, -1>( { "Calibrated gain optimization requires a float WFS mask" } );
+    }
+
     std::cerr << "Got WFS mask: " << wfsmaskShmimMonitorT::m_width << " x " << wfsmaskShmimMonitorT::m_height << '\n';
     return 0;
 }
@@ -4531,14 +4844,20 @@ int modalGainOpt::processImage( void *curr_src, const wfsmaskShmimT &dummy )
 {
     static_cast<void>( dummy );
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_goptMutex );
 
-        m_wfsmask = mx::improc::eigenMap<float>( reinterpret_cast<float *>( curr_src ),
-                                                 wfsmaskShmimMonitorT::m_width,
-                                                 wfsmaskShmimMonitorT::m_height );
+        const mx::improc::eigenMap<float> mask(
+            static_cast<float *>( curr_src ), wfsmaskShmimMonitorT::m_width, wfsmaskShmimMonitorT::m_height );
 
-        m_npix = m_wfsmask.sum();
+        if( m_calibratedNoise &&
+            ( mask.rows() != m_wfsmask.rows() || mask.cols() != m_wfsmask.cols() || ( mask != m_wfsmask ).any() ) )
+        {
+            m_fluxHistory.clear();
+        }
+
+        m_wfsmask = mask;
+        m_npix    = m_wfsmask.sum();
 
         if( m_wfsavg.rows() == m_wfsmask.rows() && m_wfsavg.cols() == m_wfsmask.cols() )
         {
@@ -4652,6 +4971,11 @@ int modalGainOpt::checkSizes()
         return -1;
     }
     logged[L++] = false;
+
+    if( m_gainLimitsStream == nullptr || ( m_calibratedNoise && m_noiseComparisonStream == nullptr ) )
+    {
+        return -1;
+    }
 
     if( m_olPSDStream == nullptr )
     {
@@ -4841,7 +5165,7 @@ int modalGainOpt::checkSizes()
     }
     logged[L++] = false;
 
-    if( m_nModes != m_optGainLP.size() )
+    if( m_nModes != m_optGainLP.size() || m_nModes != m_gmaxLP.size() )
     {
         if( !logged[L] )
         {
@@ -4853,6 +5177,175 @@ int modalGainOpt::checkSizes()
     logged[L++] = false;
 
     return 0;
+}
+
+void modalGainOpt::refreshNoiseCalibration()
+{
+    if( m_noiseCalDir.empty() )
+    {
+        return;
+    }
+
+    const std::filesystem::path directory( m_noiseCalDir );
+    decltype( m_noiseFiles )    files;
+
+    for( const auto &name : { std::string( "wfsmask.fits" ),
+                              std::string( "wfsref.fits" ),
+                              std::string( "CMmodesWFS.fits" ),
+                              m_noiseSelfRm } )
+    {
+        std::error_code error;
+        auto            path = std::filesystem::canonical( directory / name, error );
+
+        if( error )
+        {
+            m_noiseCalChanged  = modalNoise::seconds( m_psdWindowEnd );
+            m_noiseCalibration = {};
+            m_noiseFiles.clear();
+            return;
+        }
+
+        const auto modified = std::filesystem::last_write_time( path, error );
+
+        if( error )
+        {
+            m_noiseCalChanged  = modalNoise::seconds( m_psdWindowEnd );
+            m_noiseCalibration = {};
+            m_noiseFiles.clear();
+            return;
+        }
+
+        files.emplace_back( std::move( path ), modified );
+    }
+
+    if( files == m_noiseFiles )
+    {
+        return;
+    }
+
+    if( !m_noiseFiles.empty() || m_noiseCalChanged > 0 )
+    {
+        m_noiseCalChanged = modalNoise::seconds( m_psdWindowEnd );
+    }
+
+    m_noiseFiles       = std::move( files );
+    m_noiseCalibration = {};
+
+    try
+    {
+        if( m_noiseCalibration.load(
+                directory, m_noiseSelfRm, m_noiseFloorPerPixel, m_noiseResponseBeta, m_noiseModeNorm ) )
+        {
+            return;
+        }
+    }
+    catch( const std::exception &error )
+    {
+        log<text_log>( std::string( "WFS noise calibration: " ) + error.what(), logPrio::LOG_WARNING );
+    }
+
+    log<text_log>( "WFS noise calibration unavailable or invalid in " + m_noiseCalDir, logPrio::LOG_WARNING );
+}
+
+bool modalGainOpt::cameraRateMatchesPsd() const
+{
+    return mx::math::isFinite( m_cameraFps ) && m_cameraFps > 0 && m_freq.size() > 1 &&
+           std::abs( m_cameraFps - m_fps ) < 2 * ( m_freq[1] - m_freq[0] );
+}
+
+std::vector<float> modalGainOpt::selectNoisePrediction( float &fps, double &flux )
+{
+    fps           = m_calibratedNoise && cameraRateMatchesPsd() ? m_cameraFps : m_fps;
+    flux          = 0;
+    m_activeNoise = modalNoise::Source::empirical;
+
+    if( !m_calibratedNoise || m_requestedNoise == modalNoise::Source::empirical )
+    {
+        return {};
+    }
+
+    refreshNoiseCalibration();
+
+    const double end          = modalNoise::seconds( m_psdWindowEnd );
+    const double stride       = m_psdTime * m_psdOverlapFraction;
+    const double averageCount = std::max( 1.0, std::ceil( m_psdAvgTime / stride ) );
+    const double start        = m_psdWindowStart > 0 && m_psdWindowStart < end
+                                    ? m_psdWindowStart
+                                    : end - m_psdTime - ( averageCount - 1 ) * stride;
+    if( !cameraRateMatchesPsd() || !m_haveEmGain || m_cameraSettingsSince <= 0 || m_cameraSettingsSince > start ||
+        m_noiseCalChanged > start || m_noiseCalibration.modes() != m_nModes ||
+        !m_noiseCalibration.matchesFrame( m_wfsmask.rows(), m_wfsmask.cols() ) ||
+        !m_noiseCalibration.matchesMask( m_wfsmask.data() ) || !mx::math::isFinite( m_emg ) || !( m_emg > 0 ) ||
+        !mx::math::isFinite( m_opticalGain ) || !( m_opticalGain > 0 ) )
+    {
+        return {};
+    }
+
+    size_t samples = 0;
+
+    for( const auto &[time, counts] : m_fluxHistory )
+    {
+        if( time >= start && time <= end )
+        {
+            flux += counts;
+            ++samples;
+        }
+    }
+
+    if( samples == 0 || !( flux > 0 ) )
+    {
+        return {};
+    }
+
+    flux /= samples;
+
+    auto prediction = [&]( modalNoise::Source source )
+    {
+        if( source == modalNoise::Source::detector )
+        {
+            return m_noiseCalibration.detectorPsd( flux, fps, modalNoise::detectorAt( m_emg ) );
+        }
+
+        return m_noiseCalibration.cameraPsd(
+            flux, fps, m_cameraNoise.estimate( m_cameraNoiseBuffer, m_noiseCalibration, start, end, fps ) );
+    };
+
+    const auto valid = [&]( const std::vector<float> &values )
+    {
+        return values.size() == m_nModes && std::all_of( values.begin(),
+                                                         values.end(),
+                                                         []( float value )
+                                                         {
+                                                             return mx::math::isFinite( value ) && value >= 0;
+                                                         } );
+    };
+
+    auto values = prediction( m_requestedNoise );
+
+    if( valid( values ) )
+    {
+        m_activeNoise = m_requestedNoise;
+        return values;
+    }
+
+    const auto alternative =
+        m_requestedNoise == modalNoise::Source::camera ? modalNoise::Source::detector : modalNoise::Source::camera;
+    values = prediction( alternative );
+
+    if( valid( values ) )
+    {
+        m_activeNoise = alternative;
+        return values;
+    }
+
+    return {};
+}
+
+float modalGainOpt::commandedGain( size_t mode, float gain ) const
+{
+    const float factor  = m_activeNoise == modalNoise::Source::empirical ? m_gainCalFacts[mode] : 1;
+    const float ceiling = modalNoise::ceilingForMode( m_gainCeilings, mode );
+    return std::min( factor * gain, ceiling ) / m_gainCals[mode] / m_opticalGain;
 }
 
 float modalGainOpt::noisePSD( int n )
@@ -4899,6 +5392,21 @@ void modalGainOpt::goptThreadExec()
             if( m_updating )
             {
                 continue;
+            }
+
+            const auto         previousSource      = m_activeNoise;
+            float              noiseFps            = 0;
+            double             noiseFlux           = 0;
+            const auto         predictedNoise      = selectNoisePrediction( noiseFps, noiseFlux );
+            const bool         useIndependentNoise = !predictedNoise.empty();
+            const float        unavailable         = std::numeric_limits<float>::quiet_NaN();
+            std::vector<float> noiseComparison( m_noiseComparisonStream ? 2 * m_nModes : 0, unavailable );
+            std::vector<float> gainLimits( 4 * m_nModes, unavailable );
+
+            if( previousSource != m_activeNoise )
+            {
+                m_siGainStateNeedsSync = true;
+                std::fill( m_regScale.begin(), m_regScale.end(), -999 );
             }
 
             if( m_siGainStateNeedsSync )
@@ -4980,8 +5488,20 @@ void modalGainOpt::goptThreadExec()
                 ntfCorrectionPsd[0] = ntfCorrectionPsd[1];
                 m_olPSDs[n][0] = m_olPSDs[n][1];
 
+                const float ceiling = modalNoise::ceilingForMode( m_gainCeilings, n );
+                const float siBound = std::min( ceiling, m_gmaxSI[n] * m_goptSI[n].m_minFindMaxFact );
+                gainLimits[4 * n]   = siBound;
+
+                if( !noiseComparison.empty() )
+                {
+                    noiseComparison[2 * n] = modalNoise::measuredFloor(
+                        m_clPSDs.col( n ).data(), m_freq, etfCorrectionPsd, noiseFps, m_halfWeightNoiseNyquist );
+                    noiseComparison[2 * n + 1] = useIndependentNoise ? predictedNoise[n] : unavailable;
+                }
+
                 bool flagOff = false;
                 std::vector<float> lpProcessPsd = m_olPSDs[n];
+
                 bool useClosedLoopNoiseEstimate =
                     m_extrapNoiseEstimateDomain == c_extrapNoiseEstimateClosedLoopPreXfer && m_loop;
                 bool useNtfAwareClosedLoopEstimate =
@@ -4994,7 +5514,7 @@ void modalGainOpt::goptThreadExec()
                     m_extrapConfig.m_clSignificanceThreshold > 0 && m_extrapConfig.m_clMinSignificantFraction > 0;
                 const std::vector<float> *noiseEstimateSourcePsd =
                     useClosedLoopNoiseEstimate ? &clMeasuredPsd : &m_olPSDs[n];
-                if( useNtfAwareClosedLoopEstimate )
+                if( !useIndependentNoise && useNtfAwareClosedLoopEstimate )
                 {
                     const float tiny = std::numeric_limits<float>::min();
                     noiseEstimateWorkPsd.resize( clMeasuredPsd.size(), 0.0F );
@@ -5006,7 +5526,7 @@ void modalGainOpt::goptThreadExec()
                     noiseEstimateSourcePsd = &noiseEstimateWorkPsd;
                 }
 
-                if( doClSignificanceCheck )
+                if( !useIndependentNoise && doClSignificanceCheck )
                 {
                     mx::error_t clSignificanceErr =
                         processPsdProcessorT::estimateNoisePsd( clSignificanceNoisePsd,
@@ -5028,7 +5548,93 @@ void modalGainOpt::goptThreadExec()
                     }
                 }
 
-                if( m_extrapOL == c_olProcessNone )
+                if( useIndependentNoise )
+                {
+                    const float noise = predictedNoise[n];
+                    const bool  halfWeightNyquist =
+                        m_halfWeightNoiseNyquist && std::abs( m_freq.back() - noiseFps / 2 ) <=
+                                                        2 * noiseFps * std::numeric_limits<float>::epsilon();
+                    auto config     = m_extrapConfig;
+                    config.m_method = olProcessMethodName( m_extrapOL );
+                    processPsdProcessorT::processResults result;
+                    const auto                          *etf    = m_loop ? &etfCorrectionPsd : nullptr;
+                    const auto                          *rawPsd = m_clPSDs.col( n ).data();
+                    std::vector<float>                   measured( rawPsd, rawPsd + m_nFreq );
+                    measured[0] = measured[1];
+
+                    auto error = processPsdProcessorT::analyzePsd( result,
+                                                                   measured,
+                                                                   m_freq,
+                                                                   n,
+                                                                   config,
+                                                                   0,
+                                                                   processPsdProcessorT::c_defaultLpContinuumWidthHz,
+                                                                   etf,
+                                                                   nullptr,
+                                                                   noise,
+                                                                   halfWeightNyquist );
+
+                    if( !!error )
+                    {
+                        config.m_method = "none";
+                        error           = processPsdProcessorT::analyzePsd( result,
+                                                                  measured,
+                                                                  m_freq,
+                                                                  n,
+                                                                  config,
+                                                                  0,
+                                                                  processPsdProcessorT::c_defaultLpContinuumWidthHz,
+                                                                  etf,
+                                                                  nullptr,
+                                                                  noise,
+                                                                  halfWeightNyquist );
+                    }
+
+                    if( !!error )
+                    {
+                        flagOff = true;
+                        result.m_processPsd.assign( m_nFreq, 0 );
+                        result.m_rawProcessPsd = result.m_smoothedProcessPsd = result.m_lpProcessPsd =
+                            result.m_processPsd;
+                        result.m_noisePsd.assign( m_nFreq, noise );
+                    }
+
+                    if( doClSignificanceCheck )
+                    {
+                        size_t significant = 0;
+                        size_t valid       = 0;
+
+                        for( size_t f = 1; f < m_nFreq; ++f )
+                        {
+                            if( mx::math::isFinite( measured[f] ) && mx::math::isFinite( etfCorrectionPsd[f] ) &&
+                                etfCorrectionPsd[f] > 1e-12F )
+                            {
+                                ++valid;
+                                const float binNoise = result.m_noisePsd[f];
+                                significant += measured[f] > m_extrapConfig.m_clSignificanceThreshold * binNoise *
+                                                                 etfCorrectionPsd[f];
+                            }
+                        }
+
+                        flagOff = flagOff || valid == 0 ||
+                                  static_cast<float>( significant ) / valid < m_extrapConfig.m_clMinSignificantFraction;
+                    }
+
+                    const double response = m_noiseCalibration.responsePower( n, noiseFlux, m_opticalGain );
+                    modalNoise::referToDm(
+                        result.m_processPsd,
+                        result.m_noisePsd,
+                        m_freq,
+                        noiseFps,
+                        response,
+                        { &result.m_rawProcessPsd, &result.m_smoothedProcessPsd, &result.m_lpProcessPsd } );
+                    m_olPSDs[n]       = std::move( result.m_processPsd );
+                    m_nPSDs[n]        = std::move( result.m_noisePsd );
+                    m_rawOlPSDs[n]    = std::move( result.m_rawProcessPsd );
+                    m_smoothOlPSDs[n] = std::move( result.m_smoothedProcessPsd );
+                    lpProcessPsd      = std::move( result.m_lpProcessPsd );
+                }
+                else if( m_extrapOL == c_olProcessNone )
                 {
                     float noiseFloor = 0;
                     mx::error_t errc =
@@ -5190,7 +5796,7 @@ void modalGainOpt::goptThreadExec()
                     }
                 }
 
-                if( !flagOff && doClSignificanceCheck && clMeasuredPsd.size() > 1 )
+                if( !useIndependentNoise && !flagOff && doClSignificanceCheck && clMeasuredPsd.size() > 1 )
                 {
                     size_t significantCount = 0;
                     size_t totalCount = 0;
@@ -5245,8 +5851,8 @@ void modalGainOpt::goptThreadExec()
                     MGO_BREADCRUMB;
                     m_modeVarOL[n] = mx::sigproc::psdVar( m_freq, m_olPSDs[n] );
 
-                    const mx::error_t siOptError = m_goptSI[n].optGainOpenLoop(
-                        m_optGainSIRaw[n], m_modeVarSI[n], m_olPSDs[n], m_nPSDs[n], m_gmaxSI[n], false );
+                    const mx::error_t siOptError = modalNoise::optimizeWithCeiling(
+                        m_optGainSIRaw[n], m_modeVarSI[n], m_goptSI[n], m_olPSDs[n], m_nPSDs[n], m_gmaxSI[n], ceiling );
 
                     if( siOptError != mx::error_t::noerror ||
                         ( m_modeVarSI[n] - m_modeVarOL[n] ) / m_modeVarOL[n] > -0.001 )
@@ -5300,7 +5906,14 @@ void modalGainOpt::goptThreadExec()
                     }
                 }
 
+                gainLimits[4 * n + 2] =
+                    static_cast<float>( mx::math::isFinite( ceiling ) && m_optGainSIRaw[n] == ceiling );
                 updateIntegratedSiGain( n );
+
+                if( mx::math::isFinite( ceiling ) )
+                {
+                    m_optGainSI[n] = std::min( m_optGainSI[n], siBound );
+                }
 
                 if( m_doPCCalcs && !flagOff )
                 {
@@ -5311,14 +5924,17 @@ void modalGainOpt::goptThreadExec()
                         float min_sc;
                         float gmax_lp = 0;
 
-                        if( m_linPred[n].regularizeCoefficients( gmax_lp,
+                        if( !!modalNoise::regularizeWithCeiling( gmax_lp,
                                                                  m_optGainLP[n],
                                                                  m_modeVarLP[n],
                                                                  min_sc,
+                                                                 m_linPred[n],
                                                                  m_goptLP[n],
                                                                  lpProcessPsd,
+                                                                 m_olPSDs[n],
                                                                  m_nPSDs[n],
-                                                                 m_Na[n] ) != mx::error_t::noerror )
+                                                                 m_Na[n],
+                                                                 ceiling ) )
                         {
                             MGO_BREADCRUMB;
 
@@ -5367,9 +5983,20 @@ void modalGainOpt::goptThreadExec()
                             m_goptLP[n].a( m_linPred[n].m_lp.m_c );
                             m_goptLP[n].b( m_linPred[n].m_lp.m_c );
 
-                            if( m_goptLP[n].optGainOpenLoop(
-                                    m_optGainLP[n], m_modeVarLP[n], m_olPSDs[n], m_nPSDs[n], m_gmaxLP[n], false ) !=
-                                mx::error_t::noerror )
+                            const bool limited = mx::math::isFinite( ceiling );
+
+                            if( limited && !!m_goptLP[n].maxStableGain( m_gmaxLP[n] ) )
+                            {
+                                m_gmaxLP[n] = 0;
+                            }
+
+                            if( !!modalNoise::optimizeWithCeiling( m_optGainLP[n],
+                                                                   m_modeVarLP[n],
+                                                                   m_goptLP[n],
+                                                                   m_olPSDs[n],
+                                                                   m_nPSDs[n],
+                                                                   m_gmaxLP[n],
+                                                                   ceiling ) )
                             {
                                 m_optGainLP[n] = 0;
                                 m_modeVarLP[n] = m_modeVarOL[n];
@@ -5393,6 +6020,9 @@ void modalGainOpt::goptThreadExec()
                         m_timesOnLP[n] = 0;
                     }
                     else*/
+                    const float lpBound   = std::min( ceiling, m_gmaxLP[n] * m_goptLP[n].m_minFindMaxFact );
+                    gainLimits[4 * n + 1] = lpBound;
+
                     if( ( m_modeVarLP[n] - m_modeVarSI[n] ) / m_modeVarSI[n] > -0.001 )
                     {
 #pragma omp critical
@@ -5401,7 +6031,8 @@ void modalGainOpt::goptThreadExec()
                         }
 
                         MGO_BREADCRUMB;
-                        m_optGainLP[n] = m_optGainSI[n];
+                        m_optGainLP[n] =
+                            mx::math::isFinite( ceiling ) ? std::min( m_optGainSI[n], lpBound ) : m_optGainSI[n];
                         m_modeVarLP[n] = m_modeVarSI[n];
 
                         for( size_t f = 0; f < m_goptCurrent[n].f_size(); ++f )
@@ -5420,7 +6051,8 @@ void modalGainOpt::goptThreadExec()
                         }
 
                         MGO_BREADCRUMB;
-                        m_optGainLP[n] = m_optGainSI[n];
+                        m_optGainLP[n] =
+                            mx::math::isFinite( ceiling ) ? std::min( m_optGainSI[n], lpBound ) : m_optGainSI[n];
                         m_modeVarLP[n] = m_modeVarSI[n];
 
                         for( size_t f = 0; f < m_goptCurrent[n].f_size(); ++f )
@@ -5441,6 +6073,9 @@ void modalGainOpt::goptThreadExec()
 
                         ++m_timesOnLP[n];
                     }
+
+                    gainLimits[4 * n + 3] = static_cast<float>( mx::math::isFinite( ceiling ) &&
+                                                                m_optGainLP[n] >= std::nextafter( ceiling, 0.0F ) );
                 }
                 else
                 {
@@ -5523,7 +6158,7 @@ void modalGainOpt::goptThreadExec()
                 gainFactShmimMonitorT::m_imageStream.md->write = 1;
                 for( size_t n = 0; n < m_nModes; ++n )
                 {
-                    f[n] = ( m_gainCalFacts[n] * m_optGainSI[n] / m_gainCals[n] ) / m_opticalGain;
+                    f[n] = commandedGain( n, m_optGainSI[n] );
                 }
 
                 ImageStreamIO_UpdateIm( &( gainFactShmimMonitorT::m_imageStream ) );
@@ -5617,6 +6252,27 @@ void modalGainOpt::goptThreadExec()
             ImageStreamIO_UpdateIm( m_rawOlPSDStream );
             ImageStreamIO_UpdateIm( m_smoothOlPSDStream );
             ImageStreamIO_UpdateIm( m_noisePSDStream );
+
+            if( m_noiseComparisonStream != nullptr )
+            {
+                m_noiseComparisonStream->md->write = 1;
+                MagAOX::streamCopy( m_noiseComparisonStream->array.F,
+                                    noiseComparison.data(),
+                                    noiseComparison.size() * sizeof( float ) );
+                auto &source = m_noiseComparisonStream->kw[0];
+                source.type  = 'S';
+                std::snprintf( source.name, sizeof( source.name ), "SOURCE" );
+                std::snprintf( source.value.valstr,
+                               sizeof( source.value.valstr ),
+                               "%s",
+                               modalNoise::sourceName( m_activeNoise ).c_str() );
+                ++source.cnt;
+                ImageStreamIO_UpdateIm_atime( m_noiseComparisonStream, &m_psdWindowEnd );
+            }
+
+            m_gainLimitsStream->md->write = 1;
+            MagAOX::streamCopy( m_gainLimitsStream->array.F, gainLimits.data(), gainLimits.size() * sizeof( float ) );
+            ImageStreamIO_UpdateIm_atime( m_gainLimitsStream, &m_psdWindowEnd );
             ImageStreamIO_UpdateIm( m_clXferCurrentStream );
             ImageStreamIO_UpdateIm( m_clNtfCurrentStream );
             ImageStreamIO_UpdateIm( m_clXferSIStream );
@@ -5833,7 +6489,7 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_gainGain )
         return -1;
     }
 
-    { // mutex scope
+    { //mutex scope
         recordModalGainOpt( false );
 
         std::lock_guard<std::mutex> lock( m_goptMutex );
@@ -5857,7 +6513,7 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_gainLeak )
         return -1;
     }
 
-    { // mutex scope
+    { //mutex scope
         recordModalGainOpt( false );
 
         std::lock_guard<std::mutex> lock( m_goptMutex );
@@ -6602,6 +7258,75 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_extrapClMinSignificantFraction )
                                        "extrap CL minimum significant fraction" );
 }
 
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_noiseSource )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_noiseSource, ipRecv );
+    modalNoise::Source source;
+
+    if( !ipRecv.find( "target" ) || !modalNoise::parseSource( source, ipRecv["target"].get<std::string>() ) )
+    {
+        return log<software_error, -1>( { "Unknown noise source, expected camera, detector or empirical" } );
+    }
+
+    std::lock_guard<std::mutex> lock( m_goptMutex );
+    m_requestedNoise = source;
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_gainCeilings )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_gainCeilings, ipRecv );
+
+    if( !ipRecv.find( "target" ) )
+    {
+        return -1;
+    }
+
+    const std::string                    specification = ipRecv["target"].get<std::string>();
+    std::vector<modalNoise::GainCeiling> ceilings;
+
+    if( !modalNoise::parseCeilings( ceilings, specification ) )
+    {
+        return log<software_error, -1>( { "Invalid effective gain ceiling ranges" } );
+    }
+
+    std::lock_guard<std::mutex> lock( m_goptMutex );
+
+    if( specification != m_gainCeilingSpec )
+    {
+        m_gainCeilingSpec = specification;
+        m_gainCeilings    = std::move( ceilings );
+        std::fill( m_regScale.begin(), m_regScale.end(), -999 );
+    }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_cameraFps )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_cameraFps, ipRecv );
+
+    if( ipRecv.find( "current" ) )
+    {
+        const double                fps = ipRecv["current"].get<double>();
+        std::lock_guard<std::mutex> lock( m_goptMutex );
+
+        if( fps != m_cameraFps )
+        {
+            timespec now{};
+            clock_gettime( CLOCK_REALTIME, &now );
+            m_cameraSettingsSince = modalNoise::seconds( now );
+            m_cameraFps           = fps;
+            m_goptUpdated         = true;
+        }
+    }
+
+    return 0;
+}
+
 INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_emg )
 ( const pcf::IndiProperty &ipRecv )
 {
@@ -6613,9 +7338,13 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_emg )
 
         float emg = ipRecv["current"].get<float>();
 
-        if( emg != m_emg )
+        if( !m_haveEmGain || emg != m_emg )
         {
-            m_emg = emg;
+            m_haveEmGain = true;
+            timespec now{};
+            clock_gettime( CLOCK_REALTIME, &now );
+            m_cameraSettingsSince = modalNoise::seconds( now );
+            m_emg                 = emg;
             std::cerr << "Got EMG: " << m_emg << '\n';
         }
     }

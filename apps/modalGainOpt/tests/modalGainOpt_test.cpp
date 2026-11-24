@@ -1,6 +1,5 @@
 /** \file modalGainOpt_test.cpp
  * \brief Catch2 tests for the modalGainOpt app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup modalGainOpt_files
  */
@@ -266,6 +265,60 @@ class modalGainOptHarness : public modalGainOpt
         m_optGainSI = gainSI;
         m_gainGain = gainGain;
         m_gainLeak = gainLeak;
+    }
+
+    using modalGainOpt::selectNoisePrediction;
+
+    /// Provide a matched timestamped flux and camera state for offline source selection.
+    void configureNoiseForTest( const std::string &directory /**< [in] Directory of synthetic matched FITS files. */ )
+    {
+        m_calibratedNoise   = true;
+        m_noiseCalDir       = directory;
+        m_noiseResponseBeta = 1;
+        m_cameraNoiseBuffer.clear();
+        m_nModes              = 2;
+        m_freq                = { 0, 500, 1000 };
+        m_fps                 = 2000;
+        m_cameraFps           = 2000;
+        m_emg                 = 100;
+        m_haveEmGain          = true;
+        m_cameraSettingsSince = 80;
+        m_psdWindowStart      = 90;
+        m_psdWindowEnd        = { 100, 0 };
+        m_fluxHistory         = { { 88, 40000 }, { 94, 20000 }, { 98, 30000 }, { 101, 50000 } };
+        m_wfsmask.resize( 2, 2 );
+        m_wfsmask << 1, 1, 1, 0;
+        createStandardIndiText( m_indiP_noiseSource, "noise_source" );
+    }
+
+    /// Send a synthetic source selection through the ordinary INDI callback.
+    void requestNoiseForTest( const std::string &name /**< [in] Requested INDI source. */ )
+    {
+        auto request = m_indiP_noiseSource;
+        request["target"].set( name );
+        REQUIRE( newCallBack_m_indiP_noiseSource( request ) == 0 );
+    }
+
+    /// Supply actual EM state and the time when it began.
+    void setNoiseEmForTest( float emg /**< [in] Camera EM gain. */, double since /**< [in] State start time. */ )
+    {
+        m_emg                 = emg;
+        m_cameraSettingsSince = since;
+    }
+
+    /// Get the source used by the most recent prediction request.
+    modalNoise::Source activeNoiseForTest() const
+    {
+        return m_activeNoise;
+    }
+
+    using modalGainOpt::commandedGain;
+
+    /// Use a synthetic calibrated source and ceiling for publication tests.
+    void setCalibratedCeilingForTest( float gain /**< [in] New upper bound for the test modes. */ )
+    {
+        m_activeNoise  = modalNoise::Source::camera;
+        m_gainCeilings = { { 1, 1, gain } };
     }
 
     void updateIntegratedSiGainForTest( size_t modeIndex )
@@ -1925,6 +1978,301 @@ TEST_CASE( "modalGainOpt PC multiplier updates set pcgoptUpdated without "
     REQUIRE( app.sinceChange() == 11 );
     REQUIRE( app.goptUpdated() == false );
     REQUIRE( app.pcgoptUpdated() == true );
+}
+
+/// Compare the compact calibration and camera estimate with a direct normalization Jacobian.
+TEST_CASE( "modalGainOpt propagates detector and camera noise through flux normalization", "[modalGainOpt]" )
+{
+    namespace noise = MagAOX::app::modalNoise;
+    noise::Calibration::Rows rows( 3, 2 );
+    rows << 2, -1, 1, 3, 4, 2;
+    Eigen::ArrayXd fractions( 3 ), response( 2 );
+    fractions << 0.15, 0.3, 0.55;
+    response << 0.9, 1.4;
+    const auto *detector = noise::detectorAt( 595 );
+    REQUIRE( detector );
+    REQUIRE_FALSE( noise::detectorAt( 200 ) );
+
+    for( double floor : { 0.0, 300.0 } )
+    {
+        noise::Calibration cal;
+        REQUIRE( cal.set( rows, fractions, response, floor, 0.9 ) );
+
+        for( double flux : { 1.0, 1e5, 2e5 } )
+        {
+            constexpr double fps           = 2000;
+            const double     den           = flux + floor;
+            Eigen::ArrayXd   pixelVariance = ( 2 - 1 / detector->m_emg ) * flux / detector->m_gain * fractions +
+                                           std::pow( detector->m_ron / detector->m_gain, 2 );
+            const auto detectorPsd = cal.detectorPsd( flux, fps, detector );
+            const auto cameraPsd   = cal.cameraPsd( flux, fps, pixelVariance );
+
+            for( int mode = 0; mode < rows.cols(); ++mode )
+            {
+                Eigen::ArrayXd jacobian =
+                    ( rows.col( mode ) - flux / den * ( rows.col( mode ) * fractions ).sum() ) / den;
+                const double variance = ( jacobian.square() * pixelVariance ).sum();
+                REQUIRE( detectorPsd[mode] * fps / 2 == Approx( variance ).epsilon( 1e-6 ) );
+                REQUIRE( cameraPsd[mode] == Approx( detectorPsd[mode] ).epsilon( 1e-6 ) );
+                REQUIRE( cal.responsePower( mode, flux, 0.8 ) ==
+                         Approx( std::pow( response[mode] * 0.8 * flux / den / 0.9, 2 ) ) );
+            }
+        }
+
+        REQUIRE( cal.detectorPsd( -1, 2000, detector ).empty() );
+        REQUIRE( cal.detectorPsd( 100, 2000, nullptr ).empty() );
+        REQUIRE( cal.cameraPsd( 100, 2000, Eigen::ArrayXd::Zero( 2 ) ).empty() );
+    }
+
+    noise::Calibration invalid;
+    response[1] = std::numeric_limits<double>::quiet_NaN();
+    REQUIRE_FALSE( invalid.set( rows, fractions, response, 0, 1 ) );
+}
+
+/// Recover the same underlying disturbance with open-loop and closed-loop detector noise.
+TEST_CASE( "modalGainOpt uses measured residual ETF for independent WFS noise", "[modalGainOpt]" )
+{
+    constexpr float    noise = 1e-6F;
+    constexpr float    fps   = 2000;
+    std::vector<float> freq( 1001 ), process( freq.size() ), open( freq.size() ), closed( freq.size() );
+    std::vector<float> etf( freq.size() ), ntf( freq.size() );
+    processPsdProcessorT::processModelConfig config;
+    config.m_method = "none";
+    mx::AO::analysis::clGainOpt<float> controller;
+    for( size_t f = 0; f < freq.size(); ++f )
+    {
+        freq[f]    = f;
+        process[f] = 0.04F / ( ( f + 4 ) * ( f + 4 ) );
+        open[f]    = process[f] + noise;
+    }
+
+    controller.Ti( 1 / fps );
+    controller.tau( 546.65e-6F );
+    controller.setLeakyIntegrator( 0.98 );
+    controller.f( freq );
+
+    for( const float gain : { 0.1F, 0.3F, 0.6F } )
+    {
+        etf[0] = 1;
+
+        for( size_t f = 1; f < freq.size(); ++f )
+        {
+            controller.clTF2( etf[f], ntf[f], f, gain );
+        }
+
+        for( size_t f = 0; f < freq.size(); ++f )
+        {
+            closed[f] = open[f] * etf[f];
+        }
+
+        REQUIRE( etf[800] > 2 * ntf[800] );
+        processPsdProcessorT::processResults fromOpen, fromClosed;
+        REQUIRE( !processPsdProcessorT::analyzePsd( fromOpen, open, freq, 0, config, 0, 30, nullptr, nullptr, noise ) );
+        REQUIRE( !processPsdProcessorT::analyzePsd( fromClosed, closed, freq, 0, config, 0, 30, &etf, &ntf, noise ) );
+
+        for( size_t f = 1; f < freq.size(); ++f )
+        {
+            REQUIRE( fromClosed.m_processPsd[f] == Approx( process[f] ).epsilon( 1e-5 ) );
+            REQUIRE( fromClosed.m_processPsd[f] == Approx( fromOpen.m_processPsd[f] ).epsilon( 1e-5 ) );
+        }
+
+        REQUIRE( fromClosed.m_noiseFloor == noise );
+        REQUIRE( process[800] < noise );
+    }
+
+    processPsdProcessorT::processResults extrapolated, openExtrapolated;
+    config.m_method                    = "power-law-only";
+    config.m_powerLawIndex             = 2;
+    config.m_powerLawCrossoverMode     = "auto_smoothed_crossing";
+    config.m_powerLawAutoSmoothWidthHz = 30;
+    REQUIRE( !processPsdProcessorT::analyzePsd( extrapolated, closed, freq, 0, config, 0, 30, &etf, &ntf, noise ) );
+    REQUIRE(
+        !processPsdProcessorT::analyzePsd( openExtrapolated, open, freq, 0, config, 0, 30, nullptr, nullptr, noise ) );
+    REQUIRE( extrapolated.m_powerLawMatchFreq == Approx( 196 ).margin( 20 ) );
+    REQUIRE( extrapolated.m_powerLawMatchFreq == Approx( openExtrapolated.m_powerLawMatchFreq ).margin( 1 ) );
+    REQUIRE( extrapolated.m_processPsd[800] == Approx( process[800] ).epsilon( 0.1 ) );
+
+    config.m_method = "none";
+    etf[500]        = 1e-25F;
+    REQUIRE( !processPsdProcessorT::analyzePsd( extrapolated, closed, freq, 0, config, 0, 30, &etf, nullptr, noise ) );
+    REQUIRE( extrapolated.m_rawProcessPsd[500] == 0 );
+
+    const float expectedDisturbance =
+        extrapolated.m_processPsd[800] * std::pow( 0.4 * M_PI / std::sin( 0.4 * M_PI ), 2 ) / 4;
+    modalNoise::referToDm( extrapolated.m_processPsd, extrapolated.m_noisePsd, freq, fps, 4 );
+    REQUIRE( extrapolated.m_processPsd[800] == Approx( expectedDisturbance ) );
+    REQUIRE( extrapolated.m_noisePsd[800] == Approx( noise / 4 ) );
+}
+
+/// Include the correct band bins and use the ETF-corrected logarithmic median.
+TEST_CASE( "modalGainOpt comparison floor uses WFS units and handles unavailable bins", "[modalGainOpt]" )
+{
+    const std::vector<float> freq{ 700, 800, 850, 900, 950, 1000 };
+    const std::vector<float> etf{ 1, 2, 0.5, 0, 1, 1 };
+    const std::vector<float> psd{ 1000, 8, 0.5, 2000, 0, 1000 };
+
+    REQUIRE( modalNoise::measuredFloor( psd.data(), freq, etf, 2000 ) == Approx( 4 ) );
+    REQUIRE( modalNoise::measuredFloor( psd.data(), freq, etf, 2000, true ) == Approx( 2 ) );
+    REQUIRE( modalNoise::measuredFloor( psd.data(), freq, std::vector<float>( freq.size(), 1 ), 2000, true ) ==
+             Approx( 8 ) );
+    REQUIRE( mx::math::isNan( modalNoise::measuredFloor( psd.data(), freq, etf, 4000 ) ) );
+}
+
+/// Optimize inside configured ranges and retain tighter controller stability bounds.
+TEST_CASE( "modalGainOpt applies an effective ceiling after the stability margin", "[modalGainOpt]" )
+{
+    std::vector<modalNoise::GainCeiling> ranges;
+    REQUIRE( modalNoise::parseCeilings( ranges, "840-:0.30,850-899:0.25" ) );
+    REQUIRE_FALSE( mx::math::isFinite( modalNoise::ceilingForMode( ranges, 839 ) ) );
+    REQUIRE( modalNoise::ceilingForMode( ranges, 840 ) == Approx( 0.3 ) );
+    REQUIRE( modalNoise::ceilingForMode( ranges, 860 ) == Approx( 0.25 ) );
+    REQUIRE( modalNoise::ceilingForMode( ranges, 1562 ) == Approx( 0.3 ) );
+    REQUIRE_FALSE( modalNoise::parseCeilings( ranges, "840-:0.30,100-2:0.25" ) );
+
+    std::vector<float> freq( 1001 ), noise( freq.size(), 1e-7 ), disturbance( freq.size() );
+    for( size_t f = 0; f < freq.size(); ++f )
+    {
+        freq[f]        = f;
+        disturbance[f] = 0.04F / ( ( f + 4 ) * ( f + 4 ) );
+    }
+
+    mx::AO::analysis::clGainOpt<float> controller;
+    controller.Ti( 1.0F / 2000 );
+    controller.tau( 546.65e-6F );
+    controller.setLeakyIntegrator( 0.98 );
+    controller.f( freq );
+    float gain     = 0;
+    float variance = 0;
+    REQUIRE( !modalNoise::optimizeWithCeiling( gain, variance, controller, disturbance, noise, 0.8, 0.30 ) );
+    REQUIRE( gain == Approx( 0.30 ).margin( 1e-6 ) );
+    REQUIRE( variance == Approx( controller.clVariance( disturbance, noise, gain ) ) );
+    REQUIRE( !modalNoise::optimizeWithCeiling( gain, variance, controller, disturbance, noise, 0.2, 0.30 ) );
+    REQUIRE( gain <= 0.2F * controller.m_minFindMaxFact );
+
+    std::fill( noise.begin(), noise.end(), 1e-2 );
+    REQUIRE( !modalNoise::optimizeWithCeiling( gain, variance, controller, disturbance, noise, 0.8, 0.30 ) );
+    REQUIRE( gain < 0.3 );
+}
+
+/// Apply a lowered ceiling to a cached gain and use the live gain calibration for publication.
+TEST_CASE( "modalGainOpt bounds cached recommendations and publishes calibrated command gains", "[modalGainOpt]" )
+{
+    modalGainOptHarness app;
+    app.configurePublishedGainState( { 0.5F, 0.2F },
+                                     { 0.15F, 0.5F },
+                                     { 0.15F, 0.8F },
+                                     { 0.9F, 0.9F },
+                                     { 0.2F, 0.6F },
+                                     { 0.9F, 0.9F },
+                                     { 2.0F, 3.0F },
+                                     { 3.0F, 3.0F },
+                                     { 2.0F, 2.0F },
+                                     { 1.0F, 1.0F },
+                                     0.5F );
+    REQUIRE( app.commandedGain( 1, 0.6F ) == Approx( 0.08F ) );
+    app.setCalibratedCeilingForTest( 0.30F );
+
+    // clang-format off
+    #ifdef MODALGAINOPT_TEST_DOXYGEN_REF
+    modalGainOpt::updateIntegratedSiGain( 1 );
+    modalGainOpt::commandedGain( 1, 0.3F );
+    #endif
+    // clang-format on
+
+    app.updateIntegratedSiGainForTest( 1 );
+    REQUIRE( app.integratedSiGainsForTest()[1] == Approx( 0.30F ) );
+    REQUIRE( app.commandedGain( 0, 0.15F ) == Approx( 0.15F ) );
+    REQUIRE( app.commandedGain( 1, 0.6F ) == Approx( 0.20F ) );
+}
+
+/// Use the configured ceiling in LP regularization and subsequent gain updates.
+TEST_CASE( "modalGainOpt bounds predictor regularization and cached coefficient gain updates", "[modalGainOpt]" )
+{
+    std::vector<float> freq( 1001 ), disturbance( freq.size() ), noise( freq.size(), 1e-7F );
+
+    for( size_t f = 0; f < freq.size(); ++f )
+    {
+        freq[f]        = f;
+        disturbance[f] = 0.04F / ( ( f + 4 ) * ( f + 4 ) );
+    }
+
+    mx::AO::analysis::clGainOpt<float> controller;
+    controller.Ti( 1.0F / 2000 );
+    controller.tau( 546.65e-6F );
+    controller.remember( 0.98F );
+    controller.f( freq );
+
+    mx::AO::analysis::clAOLinearPredictor<float> predictor;
+    float                                        stability = 0, gain = 0, variance = 0, scale = 0;
+    REQUIRE( !modalNoise::regularizeWithCeiling(
+        stability, gain, variance, scale, predictor, controller, disturbance, disturbance, noise, 4, 0.30F ) );
+    REQUIRE( gain <= std::min( 0.30F, stability * controller.m_minFindMaxFact ) );
+    REQUIRE( variance == Approx( controller.clVariance( disturbance, noise, gain ) ) );
+
+    REQUIRE( !predictor.calcCoefficients( disturbance, noise, disturbance[0] * pow( 10, -scale / 10 ), 4 ) );
+    controller.a( predictor.m_lp.m_c );
+    controller.b( predictor.m_lp.m_c );
+    REQUIRE( !controller.maxStableGain( stability ) );
+    REQUIRE( !modalNoise::optimizeWithCeiling( gain, variance, controller, disturbance, noise, stability, 0.20F ) );
+    REQUIRE( gain <= std::min( 0.20F, stability * controller.m_minFindMaxFact ) );
+}
+
+/// Use the requested source, fall back on missing inputs, and reject mixed camera settings.
+TEST_CASE( "modalGainOpt selects a matched noise source for the current PSD window", "[modalGainOpt]" )
+{
+    char                                        path[] = "/tmp/modalGainOpt_calibration_XXXXXX";
+    std::unique_ptr<char, void ( * )( char * )> directory( mkdtemp( path ),
+                                                           []( char *name )
+                                                           {
+                                                               std::error_code error;
+                                                               std::filesystem::remove_all( name, error );
+                                                           } );
+    REQUIRE( directory );
+    const std::string          base = std::string( directory.get() ) + "/";
+    const std::array<float, 4> mask{ 1, 1, 1, 0 };
+    const std::array<float, 4> reference{ 4, 3, 2, 0 };
+    const std::array<float, 8> modes{ 1, 2, 3, 1, -1, 0, 2, 4 };
+    std::array<float, 24>      response{};
+    response[20] = 0.8F;
+    response[23] = 0.9F;
+
+    mx::fits::fitsFile<float> file;
+    REQUIRE( !file.write( base + "wfsmask.fits", mask.data(), 2, 2, 1 ) );
+    REQUIRE( !file.write( base + "wfsref.fits", reference.data(), 2, 2, 1 ) );
+    REQUIRE( !file.write( base + "CMmodesWFS.fits", modes.data(), 2, 2, 2 ) );
+    REQUIRE( !file.write( base + "selfRM.fits", response.data(), 2, 2, 6 ) );
+
+    modalGainOptHarness app;
+    app.configureNoiseForTest( base );
+    float  fps  = 0;
+    double flux = 0;
+
+    // clang-format off
+    #ifdef MODALGAINOPT_TEST_DOXYGEN_REF
+    modalGainOpt::selectNoisePrediction( fps, flux );
+    modalGainOpt::newCallBack_m_indiP_noiseSource( pcf::IndiProperty() );
+    #endif
+    // clang-format on
+
+    const auto fallback = app.selectNoisePrediction( fps, flux );
+    REQUIRE( fallback.size() == 2 );
+    REQUIRE( app.activeNoiseForTest() == modalNoise::Source::detector );
+    REQUIRE( flux == Approx( 25000 ) );
+    REQUIRE( fps == Approx( 2000 ) );
+
+    app.requestNoiseForTest( "empirical" );
+    REQUIRE( app.selectNoisePrediction( fps, flux ).empty() );
+    REQUIRE( app.activeNoiseForTest() == modalNoise::Source::empirical );
+
+    app.requestNoiseForTest( "detector" );
+    REQUIRE( app.selectNoisePrediction( fps, flux ) == fallback );
+    app.setNoiseEmForTest( 595, 95 );
+    REQUIRE( app.selectNoisePrediction( fps, flux ).empty() );
+    app.setNoiseEmForTest( 595, 80 );
+    REQUIRE( app.selectNoisePrediction( fps, flux ) != fallback );
+    app.setNoiseEmForTest( 200, 80 );
+    REQUIRE( app.selectNoisePrediction( fps, flux ).empty() );
+    REQUIRE( app.activeNoiseForTest() == modalNoise::Source::empirical );
 }
 
 } // namespace modalGainOptTest

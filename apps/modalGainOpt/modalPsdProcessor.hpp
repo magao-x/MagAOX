@@ -2,7 +2,6 @@
  * \brief Header-only template class for modal PSD noise estimation and
  * disturbance extrapolation.
  *
- * \author OpenAI Codex
  */
 
 #ifndef modalPsdProcessor_hpp
@@ -16,6 +15,7 @@
 #include <vector>
 
 #include <mx/error/error.hpp>
+#include <mx/math/floatUtils.hpp>
 #include <mx/math/func/moffat.hpp>
 #include <mx/math/vectorUtils.hpp>
 
@@ -402,15 +402,18 @@ class modalPsdProcessor
 
     /// Build the noise PSD, disturbance PSD, and LP continuum PSD for one mode.
     static mx::error_t
-    analyzePsd( processResults &result,                          /**< [out] the populated process-model results */
-                const std::vector<realT> &measuredPsd,           /**< [in] the measured one-sided PSD */
-                const std::vector<realT> &freq,                  /**< [in] the one-sided frequency grid */
-                size_t modeIndex,                                /**< [in] the zero-based mode index */
-                const processModelConfig &config,                /**< [in] the disturbance-PSD configuration */
-                realT lpContinuumFreq = static_cast<realT>( 0 ), /**< [in] the LP continuum cutoff */
-                realT lpContinuumWidthHz = c_defaultLpContinuumWidthHz, /**< [in] LP smoothing width */
-                const std::vector<realT> *etfPsd = nullptr,             /**< [in] optional CL ETF^2 correction */
-                const std::vector<realT> *ntfPsd = nullptr              /**< [in] optional CL NTF^2 correction */
+    analyzePsd( processResults           &result,      /**< [out] the populated process-model results */
+                const std::vector<realT> &measuredPsd, /**< [in] the measured one-sided PSD */
+                const std::vector<realT> &freq,        /**< [in] the one-sided frequency grid */
+                size_t                    modeIndex,   /**< [in] the zero-based mode index */
+                const processModelConfig &config,      /**< [in] the disturbance-PSD configuration */
+                realT lpContinuumFreq            = static_cast<realT>( 0 ),     /**< [in] the LP continuum cutoff */
+                realT lpContinuumWidthHz         = c_defaultLpContinuumWidthHz, /**< [in] LP smoothing width */
+                const std::vector<realT> *etfPsd = nullptr, /**< [in] optional CL ETF^2 correction */
+                const std::vector<realT> *ntfPsd =
+                    nullptr,              /**< [in] optional physical-residual NTF power for legacy processing */
+                realT detectorNoise = -1, /**< [in] Independent raw WFS noise PSD, or -1 for the empirical estimator. */
+                bool  halfWeightNyquist = false /**< [in] Whether the final bin represents half-width Nyquist noise. */
     );
 
     /// Estimate the flat noise PSD using the configured modalGainOpt statistic.
@@ -744,7 +747,9 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
                                                   realT lpContinuumFreq,
                                                   realT lpContinuumWidthHz,
                                                   const std::vector<realT> *etfPsd,
-                                                  const std::vector<realT> *ntfPsd )
+                                                  const std::vector<realT> *ntfPsd,
+                                                  realT                     detectorNoise,
+                                                  bool                      halfWeightNyquist )
 {
     if( measuredPsd.size() != freq.size() )
     {
@@ -887,24 +892,68 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
             "Automatic power-law crossover maximum-frequency fraction must be between 0 and 1" );
     }
 
-    const std::vector<realT> &noiseEstimatePsd = measuredPsd;
+    const bool  useDetector = detectorNoise >= 0 && mx::math::isFinite( detectorNoise );
+    mx::error_t errc        = mx::error_t::noerror;
 
-    mx::error_t errc = estimateNoisePsd( result.m_noisePsd,
-                                         result.m_noiseFloor,
-                                         noiseEstimatePsd,
-                                         freq,
-                                         modeIndex,
-                                         result.m_noiseEstimateRange,
-                                         result.m_noiseEstimateStatistic,
-                                         result.m_noiseEstimateLowFreqMaxHz );
-    if( !!errc )
+    if( useDetector )
     {
-        return errc;
+        result.m_noiseFloor = detectorNoise;
+        result.m_noisePsd.assign( freq.size(), detectorNoise );
+
+        if( halfWeightNyquist )
+        {
+            result.m_noisePsd.back() *= static_cast<realT>( 0.5 );
+        }
+    }
+    else
+    {
+        errc = estimateNoisePsd( result.m_noisePsd,
+                                 result.m_noiseFloor,
+                                 measuredPsd,
+                                 freq,
+                                 modeIndex,
+                                 result.m_noiseEstimateRange,
+                                 result.m_noiseEstimateStatistic,
+                                 result.m_noiseEstimateLowFreqMaxHz );
+
+        if( !!errc )
+        {
+            return errc;
+        }
     }
 
     std::vector<realT> processMeasuredPsd = measuredPsd;
     std::vector<realT> processNoisePsd = result.m_noisePsd;
-    if( result.m_noiseEstimateDomain == "closed-loop-pre-xfer" )
+
+    if( useDetector )
+    {
+        if( etfPsd && etfPsd->size() != measuredPsd.size() )
+        {
+            return mx::error_t::sizeerr;
+        }
+
+        result.m_rawProcessPsd.resize( freq.size() );
+
+        for( size_t f = 0; f < freq.size(); ++f )
+        {
+            const realT etf = etfPsd ? ( *etfPsd )[f] : 1;
+            const realT equivalent =
+                etf > static_cast<realT>( 1e-12 ) && mx::math::isFinite( etf ) ? measuredPsd[f] / etf : 0;
+            const realT recovered =
+                mx::math::isFinite( equivalent ) ? std::max( equivalent - processNoisePsd[f], realT( 0 ) ) : 0;
+            result.m_rawProcessPsd[f] = recovered;
+            processMeasuredPsd[f]     = recovered + processNoisePsd[f];
+        }
+
+        if( config.m_method == "none" )
+        {
+            result.m_smoothedProcessPsd = result.m_rawProcessPsd;
+            result.m_processPsd         = result.m_rawProcessPsd;
+            return applyLpContinuum(
+                result.m_lpProcessPsd, result.m_processPsd, freq, lpContinuumFreq, lpContinuumWidthHz );
+        }
+    }
+    else if( result.m_noiseEstimateDomain == "closed-loop-pre-xfer" )
     {
         if( etfPsd == nullptr )
         {
@@ -964,10 +1013,14 @@ mx::error_t modalPsdProcessor<realT>::analyzePsd( processResults &result,
     effectiveConfig.m_powerLawAutoMaxFreqFraction = result.m_powerLawAutoMaxFreqFraction;
 
     const realT tiny = std::numeric_limits<realT>::min();
-    result.m_rawProcessPsd.resize( processMeasuredPsd.size() );
-    for( size_t n = 0; n < processMeasuredPsd.size(); ++n )
+    if( !useDetector )
     {
-        result.m_rawProcessPsd[n] = std::max( processMeasuredPsd[n] - processNoisePsd[n], tiny );
+        result.m_rawProcessPsd.resize( processMeasuredPsd.size() );
+
+        for( size_t n = 0; n < processMeasuredPsd.size(); ++n )
+        {
+            result.m_rawProcessPsd[n] = std::max( processMeasuredPsd[n] - processNoisePsd[n], tiny );
+        }
     }
 
     if( effectiveConfig.m_method == "power-law-only" || effectiveConfig.m_method == "moffat-peaks" )
