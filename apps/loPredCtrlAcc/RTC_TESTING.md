@@ -280,4 +280,10 @@ Prediction turns off and own-channel zero is requested when any of these occur:
 - invalid selected sensor data;
 - a numerical fault.
 
-`safety.output_state` gives the reason, and keeps it in parentheses after the zero is acknowledged, for example `fault_zero_acknowledged (input_or_model_qualification_lost: acc_window stale_sample)`. Each fault is also logged as "DDSPC output fault, prediction stopped". A lost qualification names the first failed condition: `wfs_invalid`, `command_invalid`, `wfs_stale` (no WFS frame within `input_timeout`), `acc_window` with the ACC window reason, or `upstream_unlocked`. After confirmed removal, prediction can be re-enabled, or the models reset and retrained (`setINDI -s 'loPredCtrlAcc.reset_model.request=On'`). A normal exit also attempts an acknowledged own-channel removal.
+`safety.output_state` gives the reason, and keeps it in parentheses after the zero is acknowledged, for example `fault_zero_acknowledged (input_or_model_qualification_lost: acc_window stale_sample)`. Each fault is also logged as "DDSPC output fault, prediction stopped". A lost qualification names the first failed condition: `wfs_invalid`, `integrator_parameters` (the main loop's parameters are missing), `command_invalid`, `wfs_stale` (no WFS frame within `input_timeout`), `acc_window` with the ACC window reason, or `upstream_unlocked`. After confirmed removal, prediction can be re-enabled, or the models reset and retrained (`setINDI -s 'loPredCtrlAcc.reset_model.request=On'`). A normal exit also attempts an acknowledged own-channel removal.
+
+Every stop of prediction and every refused request is also logged as a note, with its reason: `DDSPC prediction stopped: <reason>` (turned off by request, Zero DDSPC DM requested, or tip/tilt returned to the main loop), `DDSPC prediction request refused: <reason>` and `DDSPC standard learning sequence refused: <reason>`. Faults keep their warning entry. To list them all:
+
+```bash
+logdump --nfiles=3 loPredCtrlAcc | grep 'DDSPC '
+```
