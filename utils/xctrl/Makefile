@@ -21,7 +21,11 @@ $(LOGGEN):
 # completed, for users whose ~/.bashrc enables bash-completion; the profile.d hook loads it for every other user
 COMPLETIONS_DIR ?= /usr/share/bash-completion/completions
 
-# setuid root so xsup and group magaox can start and stop apps; configuration changes still need sudo
+# the root-owned allow list of [systemd] directives: installed only when run as root, never overwritten
+ALLOW_LIST = /etc/magaox/systemd-directives.txt
+
+# setuid root so xsup and group magaox can start and stop apps, and proclist editors (magaox-dev) can sync; xctrl
+# drops to the caller at once and takes root back only to write its units and run systemctl
 install: all
 	sudo install -d $(BIN_PATH)
 	sudo install $(TARGET) $(BIN_PATH) --mode=4755 --owner=root
@@ -29,6 +33,15 @@ install: all
 	sudo install -d $(COMPLETIONS_DIR)
 	sudo install -m 0644 xctrl.bash-completion $(COMPLETIONS_DIR)/$(TARGET)
 	sudo install -m 0644 xctrl_completion.sh /etc/profile.d/xctrl_completion.sh
+	@if [ -e $(ALLOW_LIST) ]; then \
+	  echo "warning: $(ALLOW_LIST) already exists, not overwritten; compare it with systemd-directives.txt"; \
+	elif [ "$$(id -u)" -ne 0 ]; then \
+	  echo "warning: $(ALLOW_LIST) not installed: it must be owned by root, run sudo make install"; \
+	else \
+	  install -d -o root -g root -m 0755 $(dir $(ALLOW_LIST)) && \
+	  install -o root -g root -m 0644 systemd-directives.txt $(ALLOW_LIST) && \
+	  echo "installed $(ALLOW_LIST)"; \
+	fi
 
 .PHONY: clean
 clean:

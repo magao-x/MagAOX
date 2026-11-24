@@ -1,0 +1,93 @@
+# systemd directives that the [systemd] section of magaox.conf or an app's .conf may set.
+#
+# xctrl sync writes these into the apps' systemd units, as root, for any user who can edit the proclist, so this
+# list is what keeps that from granting more than the app's own resources and timing.  It is installed by
+# make install in utils/xctrl as /etc/magaox/systemd-directives.txt, owned by root and writable only by root; edit
+# that copy, with sudo, to change what a site allows.  One directive per line, as systemd spells it; # starts a
+# comment.  A [systemd] key may start with a lower-case letter: watchdogSec sets WatchdogSec.
+#
+# Never add directives that name files or paths systemd opens or mounts as root (StandardOutput=file:...,
+# StandardInput, StandardError, TTYPath, RootDirectory, RootImage, BindPaths, ReadWritePaths, LoadCredential,
+# StateDirectory, LogsDirectory, PIDFile), that run commands (Exec...), or that change who the app runs as or what
+# it may do (User, Group, capabilities): any of those would let a proclist editor become root.  xctrl refuses the
+# worst of them (Exec..., User, Group, capabilities, host actions such as a reboot) even if they are listed here.
+
+# The watchdog, start and stop timing, and restarts
+WatchdogSec
+WatchdogSignal
+TimeoutStartSec
+TimeoutStopSec
+TimeoutAbortSec
+TimeoutStartFailureMode
+TimeoutStopFailureMode
+RuntimeMaxSec
+RuntimeRandomizedExtraSec
+Restart
+RestartSec
+RestartSteps
+RestartMaxDelaySec
+RestartPreventExitStatus
+RestartForceExitStatus
+SuccessExitStatus
+StartLimitIntervalSec
+StartLimitBurst
+KillSignal
+RestartKillSignal
+FinalKillSignal
+SendSIGKILL
+SendSIGHUP
+OOMPolicy
+
+# CPU: priority, real-time scheduling, which cores and NUMA nodes
+Nice
+CPUAffinity
+CPUSchedulingPolicy
+CPUSchedulingPriority
+CPUSchedulingResetOnFork
+NUMAPolicy
+NUMAMask
+IOSchedulingClass
+IOSchedulingPriority
+TimerSlackNSec
+CPUWeight
+StartupCPUWeight
+CPUQuota
+CPUQuotaPeriodSec
+AllowedCPUs
+StartupAllowedCPUs
+AllowedMemoryNodes
+
+# Memory, tasks and I/O of the app's own cgroup, and how the kernel treats it when memory runs out
+MemoryMin
+MemoryLow
+MemoryHigh
+MemoryMax
+MemorySwapMax
+MemoryZSwapMax
+TasksMax
+IOWeight
+OOMScoreAdjust
+ManagedOOMPreference
+
+# Resource limits of the app's processes (ulimit), e.g. LimitMEMLOCK=infinity for shared memory, LimitRTPRIO for
+# real-time threads, LimitCORE=infinity for full core dumps
+LimitCPU
+LimitFSIZE
+LimitDATA
+LimitSTACK
+LimitCORE
+LimitRSS
+LimitNOFILE
+LimitAS
+LimitNPROC
+LimitMEMLOCK
+LimitLOCKS
+LimitSIGPENDING
+LimitMSGQUEUE
+LimitNICE
+LimitRTPRIO
+LimitRTTIME
+
+# The app's environment, e.g. Environment=CUDA_VISIBLE_DEVICES=1 to choose its GPU
+Environment
+UnsetEnvironment

@@ -249,16 +249,26 @@ std::string editProclist( const std::string &text,    /**< [in] the proclist con
  */
 double timespanSeconds( const std::string &span /**< [in] the time span */ );
 
-/// Collect systemd directives from the `[systemd]` section of a configuration
-/** Each key is a systemd directive of [Unit] or [Service], its first letter in either case: `runtimeMaxSec = 20`
- * sets `RuntimeMaxSec=20`.  The values of settingDefs() keys are checked; others are passed to systemd as they are.
- * Keys systemd does not know, denied directives (deniedDirective()), and invalid values are reported in errors and
- * skipped.
+/// The systemd directives `[systemd]` sections may set, one name per line, `#` comments
+typedef std::set<std::string> allowList;
+
+/// Read a directive allow list, e.g. /etc/magaox/systemd-directives.txt
+/**
+ * \returns the directive names; names that are not plain words are skipped
  */
-void systemdSettings( directiveMap             &dirs,   /**< [in.out] directives, updated with the settings found */
-                      std::vector<std::string> &errors, /**< [in.out] problems found, appended to */
-                      const confMap            &conf,   /**< [in] the configuration */
-                      const std::string        &source, /**< [in] the configuration's name, for messages */
+allowList parseAllowList( std::istream &in /**< [in] the list */ );
+
+/// Collect systemd directives from the `[systemd]` section of a configuration
+/** Each key is a systemd directive, its first letter in either case: `runtimeMaxSec = 20` sets `RuntimeMaxSec=20`.
+ * A key is used only if it is in the allow list, is a directive this systemd has in [Unit] or [Service], is not
+ * denied (deniedDirective()), is not set twice, and its value is valid: settingDefs() keys are checked, others need
+ * only be free of control characters.  Any other is reported in warnings and ignored.
+ */
+void systemdSettings( directiveMap             &dirs,     /**< [in.out] directives, updated with the settings found */
+                      std::vector<std::string> &warnings, /**< [in.out] directives ignored, and why, appended to */
+                      const confMap            &conf,     /**< [in] the configuration */
+                      const std::string        &source,   /**< [in] whose configuration, for messages */
+                      const allowList          &allow,    /**< [in] the directives that may be set */
                       const directiveSections  &sections = systemdDirectives() /**< [in] [optional] the directives
                                                                                   systemd accepts, for tests */ );
 
@@ -267,9 +277,12 @@ void systemdSettings( directiveMap             &dirs,   /**< [in.out] directives
  *
  * \returns the directives that differ from the template
  */
-directiveMap appDirectives( const appEntry           &app,  /**< [in] the app */
-                            const confMap            &conf, /**< [in] the app's configuration */
-                            std::vector<std::string> &errors /**< [in.out] problems found, appended to */ );
+directiveMap appDirectives( const appEntry           &app,      /**< [in] the app */
+                            const confMap            &conf,     /**< [in] the app's configuration */
+                            std::vector<std::string> &warnings, /**< [in.out] directives ignored, appended to */
+                            const allowList          &allow,    /**< [in] the directives that may be set */
+                            const directiveSections  &sections = systemdDirectives() /**< [in] [optional] the
+                                                                                    directives systemd accepts */ );
 
 /// Names of the units of a role
 /**
@@ -328,11 +341,28 @@ std::string dropIn( const unitNames                &units,  /**< [in] the role's
                     const std::string              &server, /**< [in] the role's INDI server, "" if none */
                     const std::vector<std::string> &tunnels /**< [in] the role's ssh tunnel apps */ );
 
-/// Generate the registry entry of one app
-/**
- * \returns the registry file contents
+/// Root for one block of code, in a setuid run that has dropped to the caller
+/** xctrl gives up root at startup, keeping only the saved uid 0, and takes it back with one of these around each
+ * action that needs it: writing or removing generated files, opening the log, running systemctl.  The effective gid
+ * goes to 0 too, so files and directories come out root:root.  Nothing happens if root is not ours to take back, or
+ * we already are root (sudo).  Both ids are restored when it goes out of scope.
+ *
+ * \ingroup xctrl
  */
-std::string registryEntry( const appEntry &app /**< [in] the app */ );
+class rootScope
+{
+  protected:
+    uid_t m_uid;             ///< the effective uid to return to
+    gid_t m_gid;             ///< the effective gid to return to
+    bool  m_raised{ false }; ///< whether this raised them
+
+  public:
+    /// Take root back, if it is ours to take
+    rootScope();
+
+    /// Return to the caller's effective ids
+    ~rootScope();
+};
 
 /// Whether the file at path holds exactly content
 bool sameContent( const std::string &path, /**< [in] the file */
@@ -347,7 +377,7 @@ int writeIfChanged( const std::string &path,    /**< [in] the file */
                     mode_t             mode /**< [in] its permissions */ );
 
 /// Run a command, without a shell
-/** When xctrl runs setuid root, the command runs either as the calling user, or fully as root.
+/** The command runs as the calling user, or, if root is ours to take, fully as root.
  *
  * \returns the exit status, or -1 if it could not be run
  */
@@ -419,17 +449,20 @@ class xCtrl
     std::string m_sysroot;            ///< prefix for /etc files, for testing; systemctl then only enables and disables
     bool        m_dryRun{ false };    ///< print commands and changes instead of making them
     bool        m_all{ false };       ///< --all was given
-    bool        m_keepRunning{ false }; ///< register leaves apps that became disabled running
-    bool        m_verbose{ false };     ///< status shows a table with systemd and resource details
-    int         m_lines{ -1 };          ///< log lines for peek and inspect, -1 for their defaults
-    std::string m_prog{ "xctrl" };      ///< the name we were run as
-    bool        m_color{ false };       ///< color the output, when it is a terminal and NO_COLOR is not set
-    bool m_privileged{ false }; ///< may change the systemd configuration: root, or a user who can write the proclist
-    bool m_proclistChecked{ false };    ///< warnIfProclistChanged() has run
-    bool m_rolesChecked{ false };       ///< warnOtherRoles() has run
-    std::string              m_cmdLine; ///< the command line, for the log
-    std::string              m_verb;    ///< the command
-    std::vector<std::string> m_names;   ///< the app names given
+    bool        m_verbose{ false };   ///< status shows a table with systemd and resource details
+    int         m_lines{ -1 };        ///< log lines for peek and inspect, -1 for their defaults
+    std::string m_prog{ "xctrl" };    ///< the name we were run as
+    bool        m_color{ false };     ///< color the output, when it is a terminal and NO_COLOR is not set
+    bool      m_privileged{ false };  ///< may edit the proclist and sync it: root, or a user who can write the proclist
+    bool      m_allowRead{ false };   ///< the directive allow list has been read
+    bool      m_allowOk{ false };     ///< it was there, and safe to use
+    allowList m_allow;                ///< the directive allow list
+    std::string              m_allowError;               ///< why it can not be used
+    bool                     m_proclistChecked{ false }; ///< warnIfProclistChanged() has run
+    bool                     m_rolesChecked{ false };    ///< warnOtherRoles() has run
+    std::string              m_cmdLine;                  ///< the command line, for the log
+    std::string              m_verb;                     ///< the command
+    std::vector<std::string> m_names;                    ///< the app names given
 
     ///@}
 
@@ -440,17 +473,14 @@ class xCtrl
     /// Directory of the systemd units
     std::string unitDir() const;
 
-    /// Directory of the app registry, /etc/magaox-<role>/apps
-    std::string regDir() const;
-
     /// The optional environment file for all apps of the role, as seen by systemd
     std::string envFile() const;
 
     /// The proclist of the role
     std::string proclistPath() const;
 
-    /// The last applied proclist
-    std::string activePath() const;
+    /// The root-owned allow list of the systemd directives `[systemd]` sections may set
+    std::string allowListPath() const;
 
     ///@}
 
@@ -461,10 +491,10 @@ class xCtrl
     bool operatorAllowed() const;
 
     /// Settle privileges for the command before running it
-    /** Commands that change which apps are configured need a privileged user: root, e.g. through sudo, or one who
-     * may write the role's proclist (group magaox-dev, for a normal config checkout).  Starting and stopping apps
-     * needs operatorAllowed().  xctrl is installed setuid root for both.  Everything else, and any testing option,
-     * runs as the calling user.
+    /** A setuid run drops to the caller's effective ids at once, keeping the saved uid 0, so rootScope can take root
+     * back for the few actions that need it; commands that never need root drop it for good.  The caller must be an
+     * editor (root, or able to write the proclist) for sync, add, enable, disable, delete and boot, and an operator
+     * (root, xsup, group magaox) for startup, start, shutdown, stop and restart.  Test runs never keep root.
      *
      * \returns 0 if the command may run, -1 with a message on stderr if not
      */
@@ -499,15 +529,28 @@ class xCtrl
                    const std::string &content, /**< [in] its contents */
                    mode_t             mode /**< [in] its permissions */ );
 
-    /// The names of the registered apps
+    /// The names of the registered apps: those with a drop-in, magaox-<role>-app@NAME.service.d/override.conf
     std::vector<std::string> registered() const;
 
-    /// Read the registry entry of an app
+    /// Read a registered app back from its drop-in: the executable from ExecStart, the - prefix from Type=simple
     /**
      * \returns true if the app is registered
      */
     bool registryRead( appEntry          &app, /**< [out] the app */
                        const std::string &name /**< [in] its name */ ) const;
+
+    /// Whether path is one of the files xctrl generates for this role, which it may write or remove as root
+    bool generatedPath( const std::string &path /**< [in] the path */ ) const;
+
+    /// Remove an app's drop-in, as root; the only removals xctrl makes as root, with removeLegacy()
+    /**
+     * \returns 0, or -1 with a message
+     */
+    int removeDropIn( const std::string &name /**< [in] the app */ );
+
+    /// Remove what older xctrl versions kept: /etc/magaox-<role>/apps and
+    /// sys/sentinel_proclist/proclist_<role>.txt.active
+    void removeLegacy();
 
     /// Whether an app is enabled for automatic startup
     bool enabled( const std::string &name /**< [in] the app */ ) const;
@@ -531,7 +574,7 @@ class xCtrl
     struct roleApps
     {
         std::string              name;          ///< the role as set, e.g. ICC, from its template, else in lower case
-        std::vector<std::string> registered;    ///< apps in its registry, /etc/magaox-<role>/apps
+        std::vector<std::string> registered;    ///< apps with a drop-in, magaox-<role>-app@NAME.service.d
         std::vector<std::string> running;       ///< apps whose magaox-<role>-app@NAME.service is active or starting
         std::vector<std::string> autostart;     ///< apps enabled to start with the role's target
         bool                     boot{ false }; ///< the role's target starts at boot (xctrl boot on)
@@ -558,16 +601,26 @@ class xCtrl
      */
     int stopApps( const std::vector<std::string> &names /**< [in] the app names */ );
 
+    /// The directive allow list, read once: it must exist, and, outside tests, be owned by root and writable by
+    /// root only, as must its directory
+    /**
+     * \returns the list, or nullptr with the reason in m_allowError
+     */
+    const allowList *allowedDirectives();
+
     /// The role-wide directives: the template defaults with magaox.conf `[systemd]` settings
-    directiveMap roleDirectives( std::vector<std::string> &errors /**< [in.out] problems found, appended to */ );
+    directiveMap roleDirectives( std::vector<std::string> &warnings, /**< [in.out] directives ignored, appended to */
+                                 const allowList          &allow /**< [in] the directives that may be set */ );
 
     /// Check that an app can be registered, and work out its systemd directives from its .conf
     /**
      * \returns true if it can, false with the reasons appended to errors
      */
-    bool prepareApp( const appEntry           &app,    /**< [in] the app */
-                     directiveMap             &dirs,   /**< [out] its directives */
-                     std::vector<std::string> &errors, /**< [in.out] problems found, appended to */
+    bool prepareApp( const appEntry           &app,      /**< [in] the app */
+                     directiveMap             &dirs,     /**< [out] its directives */
+                     std::vector<std::string> &errors,   /**< [in.out] why it can not be registered, appended to */
+                     std::vector<std::string> &warnings, /**< [in.out] directives ignored, appended to */
+                     const allowList          &allow,    /**< [in] the directives that may be set */
                      bool                     *hasConf = nullptr /**< [out] [optional] whether it has a .conf */ );
 
     /// Find the role's INDI server and ssh tunnels among apps, for the drop-ins' ordering
@@ -575,13 +628,12 @@ class xCtrl
                            std::string                 &server, /**< [out] the INDI server, "" if none */
                            std::vector<std::string>    &tunnels /**< [out] the ssh tunnel apps */ );
 
-    /// Warn, once, if the proclist differs from the one last registered, recorded in activePath()
-    /** Compares the apps, their autostart (`#!`) and their watchdog (`-`), not comments or order.
+    /// Warn, once, if the proclist differs from what is registered: the drop-ins and autostart links
+    /** Compares the apps, their autostart (`#!`), their watchdog (`-`) and executables, not comments or order.
      */
     void warnIfProclistChanged();
 
-    /// Edit an app's lines in the role's proclist, and the same in the registration record, in place so they keep
-    /// their owners and permissions
+    /// Edit an app's lines in the role's proclist, as the caller, in place so it keeps its owner and permissions
     /**
      * \returns the number of lines changed, or -1 with a message on stderr
      */
@@ -598,21 +650,18 @@ class xCtrl
 
     /// Register one app from its .conf, without reloading systemd
     /**
-     * \returns 0 if registered, -1 with messages on stderr if not
+     * \returns 1 if its drop-in was written, 0 if it was up to date, -1 with messages if not registered
      */
     int registerApp( const appEntry &app /**< [in] the app */ );
 
-    /// Stop, disable and deregister apps, without reloading systemd
+    /// Stop, disable and unregister apps, without reloading systemd
     /**
      * \returns 0 if all went well, else non-zero
      */
     int deregister( const std::vector<std::string> &names /**< [in] the app names */ );
 
-    /// Bring registered apps' drop-ins up to date with their .conf before they start
-    /** Regenerates each app's drop-in, and reloads systemd if one changed, if systemd still has older unit
-     * files loaded, or if the watchdog systemd has for an app differs from its configuration.  For a user who may not
-     * change the systemd configuration (m_privileged false), nothing is written or reloaded: apps whose settings are
-     * out of date are only reported, and start with their registered settings.
+    /// Before apps start, warn about any whose registered settings differ from their .conf
+    /** Nothing is written or reloaded: the apps start as they are registered, and sync applies changes.
      *
      * \returns 0 if all went well, else non-zero
      */
@@ -641,7 +690,22 @@ class xCtrl
      * @{
      */
 
-    int cmdRegister(); ///< Register the proclist's apps with systemd and reconcile what changed
+    /// Bring systemd in line with the proclist and the apps' .conf: register new and changed apps, unregister
+    /// removed ones that are not running, set autostart links; never start or stop apps
+    /** Apps disabled (#!) in the proclist, or removed from it while running, keep running but lose their autostart
+     * link, so neither startup nor a reboot starts them; the user is told which.
+     *
+     * \returns 0 if all went well, else non-zero
+     */
+    int doSync( bool summary /**< [in] list the roles on this host first */ );
+
+    /// Whether the proclist or any app's .conf differs from what is registered
+    bool syncNeeded();
+
+    /// Warn about apps running that are no longer in the proclist
+    void warnRemovedRunning();
+
+    int cmdSync();     ///< Sync the role's apps with systemd: doSync()
     int cmdAdd();      ///< Add an app to the proclist, disabled, and register it
     int cmdStartup();  ///< Start enabled apps, or enable and start named ones
     int cmdShutdown(); ///< Stop all apps, or named ones
@@ -652,7 +716,7 @@ class xCtrl
     int cmdPeek();     ///< Report state and the last log lines of apps
     int cmdInspect();  ///< Follow an app's console output in the journal
     int cmdEnable();   ///< Enable or disable named apps, or all, for automatic startup
-    int cmdDelete();   ///< Remove named apps, or all, from the proclist, stop and deregister them
+    int cmdDelete();   ///< Remove named apps, or all, from the proclist, stop and unregister them
     int cmdBoot();     ///< Start the role at boot, or not
 
     ///@}
@@ -1129,10 +1193,25 @@ inline bool deniedDirective( const std::string &d )
     return denied.count( d ) > 0 || d.compare( 0, 4, "Exec" ) == 0;
 }
 
+inline allowList parseAllowList( std::istream &in )
+{
+    allowList allow;
+    for( std::string l; std::getline( in, l ); )
+    {
+        std::string d = trim( l.substr( 0, l.find( '#' ) ) );
+        if( !d.empty() && std::all_of( d.begin(), d.end(), []( char c ) { return isalnum( (unsigned char)c ); } ) )
+        {
+            allow.insert( d );
+        }
+    }
+    return allow;
+}
+
 inline void systemdSettings( directiveMap             &dirs,
-                             std::vector<std::string> &errors,
+                             std::vector<std::string> &warnings,
                              const confMap            &conf,
                              const std::string        &source,
+                             const allowList          &allow,
                              const directiveSections  &sections )
 {
     std::map<std::string, std::string> seen; // directive: the key that set it, to catch two spellings of one
@@ -1152,20 +1231,23 @@ inline void systemdSettings( directiveMap             &dirs,
             def = d == sd.directive ? &sd : def;
         }
 
+        std::string why;
         if( seen.count( d ) )
         {
-            errors.push_back( source + ": [systemd] " + key + " and " + seen[d] + " both set " + d );
+            why = " directive for " + source + " is also set as " + seen[d];
         }
         else if( deniedDirective( d ) )
         {
-            errors.push_back( source + ": [systemd] " + key + " can not be set here: xctrl sets it, or it could " +
-                              "give the app more privileges than xsup has or act on the whole host" );
+            why = " directive for " + source + " can not be set: xctrl sets it, or it could give the app more " +
+                  "privileges than xsup has or act on the whole host";
+        }
+        else if( !allow.count( d ) )
+        {
+            why = " directive for " + source + " not in systemd-directives.txt allow list";
         }
         else if( !def && !sections.count( d ) )
         {
-            errors.push_back( source + ": unknown setting [systemd] " + key +
-                              ( sections.empty() ? " (systemd's directives could not be read to check it)"
-                                                 : ": not a systemd [Unit] or [Service] directive" ) );
+            why = " directive for " + source + " does not exist on this version of systemd";
         }
         else if( def ? !validValue( def->kind, kv.second )
                      : std::any_of( kv.second.begin(),
@@ -1173,22 +1255,29 @@ inline void systemdSettings( directiveMap             &dirs,
                                     []( char c ) { return iscntrl( static_cast<unsigned char>( c ) ); } ) )
         {
             // a control character, e.g. a newline, could start another directive in the unit file
-            errors.push_back( source + ": invalid [systemd] " + key + " = " + kv.second );
+            why = " = " + kv.second + " for " + source + " is an invalid value";
         }
-        else
+
+        if( why.empty() )
         {
             dirs[d] = kv.second;
             seen[d] = key;
         }
+        else
+        {
+            warnings.push_back( "[systemd] " + key + why + "; ignoring directive" );
+        }
     }
 }
 
-inline directiveMap appDirectives( const appEntry &app, const confMap &conf, std::vector<std::string> &errors )
+inline directiveMap appDirectives( const appEntry           &app,
+                                   const confMap            &conf,
+                                   std::vector<std::string> &warnings,
+                                   const allowList          &allow,
+                                   const directiveSections  &sections )
 {
     directiveMap dirs;
-    std::string  source = app.name + ".conf";
-
-    systemdSettings( dirs, errors, conf, source );
+    systemdSettings( dirs, warnings, conf, app.name, allow, sections );
 
     if( !app.notifies() )
     {
@@ -1265,8 +1354,8 @@ inline void appendDirectives( std::ostringstream      &os,
 inline std::string templateUnit( const unitNames &units, const directiveMap &dirs, const std::string &envFile )
 {
     std::ostringstream os;
-    os << "# Generated by xctrl register for MAGAOX_ROLE=" << units.role << ".  Do not edit: set [systemd] in\n"
-       << "# magaox.conf, or in an app's .conf for that app, then rerun xctrl register.\n"
+    os << "# Generated by xctrl sync for MAGAOX_ROLE=" << units.role << ".  Do not edit: set [systemd] in\n"
+       << "# magaox.conf, or in an app's .conf for that app, then rerun xctrl sync.\n"
        << "[Unit]\n"
        << "Description=MagAO-X app %i (role " << units.role << ")\n"
        << "PartOf=" << units.target() << "\n"
@@ -1294,7 +1383,7 @@ inline std::string templateUnit( const unitNames &units, const directiveMap &dir
 inline std::string targetUnit( const unitNames &units )
 {
     std::ostringstream os;
-    os << "# Generated by xctrl register for MAGAOX_ROLE=" << units.role << ".  Do not edit.\n"
+    os << "# Generated by xctrl sync for MAGAOX_ROLE=" << units.role << ".  Do not edit.\n"
        << "# Wants the apps enabled for automatic startup; xctrl boot on|off starts it at boot or not.\n"
        << "[Unit]\n"
        << "Description=MagAO-X apps of role " << units.role << "\n"
@@ -1311,8 +1400,8 @@ inline std::string dropIn( const unitNames                &units,
                            const std::vector<std::string> &tunnels )
 {
     std::ostringstream os;
-    os << "# Generated by xctrl register from proclist_" << units.role << ".txt and " << app.name << ".conf.\n"
-       << "# Do not edit: change those, then rerun xctrl register.\n"
+    os << "# Generated by xctrl sync from proclist_" << units.role << ".txt and " << app.name << ".conf.\n"
+       << "# Do not edit: change those, then rerun xctrl sync.\n"
        << "[Unit]\n";
     if( app.isServer() )
     {
@@ -1335,10 +1424,27 @@ inline std::string dropIn( const unitNames                &units,
     return os.str();
 }
 
-inline std::string registryEntry( const appEntry &app )
+inline rootScope::rootScope() : m_uid( geteuid() ), m_gid( getegid() )
 {
-    return "# xctrl registry entry, written by xctrl register\nname=" + app.name + "\nexec=" + app.exec +
-           "\nprefix=" + app.prefix + "\n";
+    uid_t r, e, s;
+    if( m_uid != 0 && getresuid( &r, &e, &s ) == 0 && s == 0 && seteuid( 0 ) == 0 )
+    {
+        m_raised = true;
+        if( setegid( 0 ) < 0 )
+        {
+            // files keep the caller's group
+        }
+    }
+}
+
+inline rootScope::~rootScope()
+{
+    // the group first, while we are still root; staying root by mistake is not an option
+    if( m_raised && ( setegid( m_gid ) < 0 || seteuid( m_uid ) < 0 ) )
+    {
+        std::cerr << "xctrl: could not give up root again: " << strerror( errno ) << "\n";
+        std::abort();
+    }
 }
 
 inline bool sameContent( const std::string &path, const std::string &content )
@@ -1413,13 +1519,22 @@ inline int runCommand( const std::vector<std::string> &argv, std::string *output
             close( pfd[0] );
             close( pfd[1] );
         }
-        // setuid, we are root only in effect: become wholly the caller, or wholly root, as systemctl needs.  The
-        // group goes first, as only root may change it.  126, as a shell does, for a command that could not run.
-        if( geteuid() == 0 )
+        // become wholly the caller, or, if root is ours (saved or effective uid 0, setuid or sudo), wholly root, as
+        // systemctl needs.  Dropping, the group goes first, while it may still change; raising, the uid goes first,
+        // from the saved uid, as only root may set the group to 0.  126, as a shell does, for a command not run.
+        uid_t r, e, s;
+        getresuid( &r, &e, &s );
+        if( asCaller )
         {
-            uid_t u = asCaller ? getuid() : 0;
-            gid_t g = asCaller ? getgid() : 0;
-            if( setresgid( g, g, g ) < 0 || setresuid( u, u, u ) < 0 )
+            gid_t g = getgid();
+            if( setresgid( g, g, g ) < 0 || setresuid( r, r, r ) < 0 )
+            {
+                _exit( 126 );
+            }
+        }
+        else if( e == 0 || s == 0 )
+        {
+            if( setresuid( 0, 0, 0 ) < 0 || setresgid( 0, 0, 0 ) < 0 )
             {
                 _exit( 126 );
             }
@@ -1517,11 +1632,6 @@ inline std::string xCtrl::unitDir() const
     return m_sysroot + "/etc/systemd/system";
 }
 
-inline std::string xCtrl::regDir() const
-{
-    return m_sysroot + "/etc/magaox-" + lower( m_role ) + "/apps";
-}
-
 inline std::string xCtrl::envFile() const
 {
     return "/etc/magaox-" + lower( m_role ) + "/environment";
@@ -1532,9 +1642,9 @@ inline std::string xCtrl::proclistPath() const
     return m_top + "/" + MAGAOX_configRelPath + "/proclist_" + m_role + ".txt";
 }
 
-inline std::string xCtrl::activePath() const
+inline std::string xCtrl::allowListPath() const
 {
-    return m_top + "/" + MAGAOX_sysRelPath + "/sentinel_proclist/proclist_" + m_role + ".txt.active";
+    return m_sysroot + "/etc/magaox/systemd-directives.txt";
 }
 
 inline void xCtrl::usage( std::ostream &os ) const
@@ -1544,7 +1654,8 @@ inline void xCtrl::usage( std::ostream &os ) const
           "MagAO-X process control: run the apps of a role (MAGAOX_ROLE, or -r) as systemd services, one\n"
           "instance of magaox-<role>-app@.service per app in /opt/MagAOX/config/proclist_<role>.txt.\n"
           "\n"
-          "Any user can look; xsup and members of group magaox can start and stop apps:\n"
+          "Any user can look (inspect reads the journal: sudo, or group systemd-journal); xsup and\n"
+          "members of group magaox can start and stop apps:\n"
           "  status [NAME...]       state and pid of the apps; -v adds autostart, restarts, uptime,\n"
           "                         last watchdog ping, CPU, memory and GPU memory\n"
           "  peek [NAME...]         state and last log lines of the apps (-n LINES, default 10)\n"
@@ -1552,27 +1663,25 @@ inline void xCtrl::usage( std::ostream &os ) const
           "  startup [NAME...]      start the apps enabled for automatic startup, the INDI server first;\n"
           "                         with names, start those apps\n"
           "  start NAME...          start apps, enabled or not; systemd supervises them either way.\n"
-          "                         start, startup and restart first apply changes in the apps' .conf,\n"
-          "                         e.g. a new [systemd] watchdogSec\n"
+          "                         For a user who can edit the proclist, start and startup sync first\n"
           "  stop NAME...           stop apps; they stay stopped until started again\n"
           "  shutdown NAME...|--all stop apps, or all running apps of the role, the INDI server last\n"
           "  restart NAME...|--all  restart apps, or stop then start everything\n"
           "\n"
-          "Changing which apps are configured needs root (sudo), or write access to the proclist:\n"
-          "  sudo xctrl register              register the proclist's apps from their .conf and enable\n"
-          "                                   them for automatic startup; disabled (#!) apps with a .conf\n"
-          "                                   are registered but disabled (and stopped), to start by hand;\n"
-          "                                   apps no longer in the proclist are stopped and deregistered;\n"
-          "                                   new apps start at once if the role is up\n"
-          "  sudo xctrl add NAME EXECUTABLE   add the app to the proclist disabled (#!), and register it;\n"
-          "                                   it needs NAME.conf; add -- -NAME EXECUTABLE for an app\n"
-          "                                   without a watchdog\n"
-          "  sudo xctrl enable NAME...|--all  autostart on: remove the app's #! in the proclist (adding it if\n"
-          "                                   needed) and register it if it is not; does not start it\n"
-          "  sudo xctrl disable NAME...|--all autostart off: disable the app with #! in the proclist; it stays\n"
-          "                                   registered to start by hand; does not stop it\n"
-          "  sudo xctrl delete NAME...|--all  remove the app from the proclist, stop and deregister it\n"
-          "  sudo xctrl boot on|off           start the role's enabled apps at boot, or not\n"
+          "Changing which apps are configured needs write access to the proclist (group magaox-dev):\n"
+          "  sync                   bring systemd in line with the proclist and the apps' .conf: register\n"
+          "                         new and changed apps, set autostart from #!, unregister apps no\n"
+          "                         longer in the proclist unless they are running; starts and stops\n"
+          "                         nothing.  [systemd] directives must be in the root-owned allow list\n"
+          "                         /etc/magaox/systemd-directives.txt\n"
+          "  add NAME EXECUTABLE    add the app to the proclist disabled (#!), and register it; it needs\n"
+          "                         NAME.conf; add -- -NAME EXECUTABLE for an app without a watchdog\n"
+          "  enable NAME...|--all   autostart on: remove the app's #! in the proclist (adding it if\n"
+          "                         needed) and register it if it is not; does not start it\n"
+          "  disable NAME...|--all  autostart off: disable the app with #! in the proclist; it stays\n"
+          "                         registered to start by hand; does not stop it\n"
+          "  delete NAME...|--all   remove the app from the proclist, stop and unregister it\n"
+          "  boot on|off            start the role's enabled apps at boot, or not\n"
           "\n"
           "Options:\n"
           "  -r, --role ROLE      the MagAO-X role, else MAGAOX_ROLE or /etc/profile.d/magaox_role.sh\n"
@@ -1580,7 +1689,6 @@ inline void xCtrl::usage( std::ostream &os ) const
           "  -v, --verbose        status shows a table with more details\n"
           "  -q, --quiet          show no warnings, only the normal output and errors; they are still logged\n"
           "  --                   end of options, so a name may start with -\n"
-          "  --keep-running       register leaves apps that became disabled running\n"
           "  -n, --lines N        log lines for peek and inspect\n"
           "  --dry-run            print what would be done, change nothing\n"
           "  --top DIR            MagAO-X directory, default " MAGAOX_path ", with --sysroot or --dry-run\n"
@@ -1622,27 +1730,35 @@ inline bool xCtrl::operatorAllowed() const
 
 inline int xCtrl::settlePrivileges()
 {
-    static const std::set<std::string> admin = {
-        "register", "add", "enable", "disable", "delete", "deregister", "boot" };
+    // who may do what, checked as the caller: editors change the proclist and what is registered, operators start
+    // and stop; anyone looks
+    static const std::set<std::string> edit      = { "sync", "add", "enable", "disable", "delete", "boot" };
     static const std::set<std::string> operate   = { "startup", "start", "shutdown", "stop", "restart" };
     bool                               setuidRun = geteuid() == 0 && getuid() != 0;
     bool                               testing = m_dryRun || !m_sysroot.empty() || m_top != std::string( MAGAOX_path );
 
-    // a setuid program trusts nothing from the caller's environment
     if( setuidRun )
     {
+        // a setuid program trusts nothing from the caller's environment
         clearenv();
         setenv( "PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/MagAOX/bin", 1 );
         setenv( "SYSTEMD_PAGER", "", 1 );
         setenv( "PAGER", "cat", 1 );
+
+        // from here on the caller's effective ids; the saved uid stays 0, so rootScope can take root back where needed
+        if( setegid( getgid() ) < 0 || seteuid( getuid() ) < 0 )
+        {
+            std::cerr << "xctrl: dropping privileges: " << strerror( errno ) << "\n";
+            return -1;
+        }
     }
 
     // journalctl (peek, inspect) colors warnings and errors only on a terminal whose TERM it knows, and TERM was just
     // cleared; tell it directly, as decided for our own output, which also honors NO_COLOR
     setenv( "SYSTEMD_COLORS", m_color ? "1" : "0", 1 );
 
-    // every command but looking is logged; a real run opens the log as root, before privileges are dropped, so any
-    // user's commands go to the one log.  A test run logs under --top as the caller, a dry run not at all.
+    // every command but looking is logged; a real run opens the log as root, so any user's commands go to the one
+    // log.  A test run logs under --top as the caller, a dry run not at all.
     static const std::set<std::string> look = { "status", "lstatus", "peek", "inspect" };
     bool logged  = !look.count( m_verb ) && !m_dryRun && !( testing && m_top == std::string( MAGAOX_path ) );
     auto openLog = [&]()
@@ -1657,55 +1773,35 @@ inline int xCtrl::settlePrivileges()
     };
     if( logged && !testing )
     {
+        rootScope root;
         openLog();
     }
 
-    // access() checks the real user, the one who ran us, not our setuid root
+    struct passwd *pw   = getpwuid( getuid() );
+    std::string    user = pw ? pw->pw_name : std::to_string( getuid() );
+
+    // an editor may write the proclist; access() checks the real user, the caller
     m_privileged = getuid() == 0 || access( proclistPath().c_str(), W_OK ) == 0;
-    if( admin.count( m_verb ) && !m_privileged )
+    if( edit.count( m_verb ) && !m_privileged )
     {
         if( errno == ENOENT )
         {
             say( msgLevel::error ) << "no proclist " << proclistPath() << " for role " << m_role;
             return -1;
         }
-        struct passwd *pw   = getpwuid( getuid() );
-        std::string    what = m_verb;
-        for( const auto &n : m_names )
-        {
-            what += " " + n;
-        }
-        say( msgLevel::error ) << "cannot " << what << " as user " << ( pw ? pw->pw_name : std::to_string( getuid() ) )
-                               << ": " << m_verb << " requires permissions or sudo";
+        say( msgLevel::error ) << "cannot " << m_verb << " as user " << user << ": " << m_verb
+                               << " needs write access to " << proclistPath() << " (group magaox-dev), or sudo";
+        return -1;
+    }
+    if( operate.count( m_verb ) && !operatorAllowed() )
+    {
+        say( msgLevel::error ) << "cannot " << m_verb << " as user " << user << ": only root, xsup and members of "
+                               << "group magaox can start and stop apps";
         return -1;
     }
 
-    bool keepRoot = false;
-    if( testing )
-    {
-        keepRoot = false;
-    }
-    else if( admin.count( m_verb ) )
-    {
-        keepRoot = true;
-    }
-    else if( operate.count( m_verb ) )
-    {
-        if( !operatorAllowed() )
-        {
-            say( msgLevel::error ) << "only xsup and members of group magaox can " << m_verb << " apps";
-            return -1;
-        }
-        keepRoot = true;
-    }
-    else
-    {
-        // looking: the journal is readable as root only for those who may operate the apps
-        keepRoot = operatorAllowed();
-    }
-
-    // for good: real, effective and saved ids all the caller's, the group first while we may still change it
-    if( setuidRun && !keepRoot )
+    // for good, the saved uid too, for commands that never need root and for tests: root can not come back
+    if( setuidRun && ( testing || !( edit.count( m_verb ) || operate.count( m_verb ) ) ) )
     {
         gid_t g = getgid();
         uid_t u = getuid();
@@ -1815,10 +1911,6 @@ inline int xCtrl::parseArgs( int argc, char **argv )
                 xlog().quiet( true );
             }
         }
-        else if( a == "--keep-running" )
-        {
-            m_keepRunning = true;
-        }
         else
         {
             say( msgLevel::error ) << "unknown option " << a << "; try --help";
@@ -1920,13 +2012,21 @@ inline int xCtrl::systemctl( const std::vector<std::string> &args, bool offline 
 
 inline std::vector<std::string> xCtrl::registered() const
 {
+    unitNames                u( m_role );
     std::vector<std::string> names;
     std::error_code          ec;
-    for( const auto &e : std::filesystem::directory_iterator( regDir(), ec ) )
+    for( const auto &e : std::filesystem::directory_iterator( unitDir(), ec ) )
     {
-        if( e.path().extension() == ".conf" )
+        // magaox-<role>-app@NAME.service.d, without its .d (2 characters), names an app's instance
+        std::string d = e.path().filename().string(), n;
+        if( d.size() > 2 && d.compare( d.size() - 2, 2, ".d" ) == 0 )
         {
-            names.push_back( e.path().stem().string() );
+            n = u.appName( d.substr( 0, d.size() - 2 ) );
+        }
+        std::error_code ec2;
+        if( validName( n ) && std::filesystem::exists( e.path() / "override.conf", ec2 ) )
+        {
+            names.push_back( n );
         }
     }
     std::sort( names.begin(), names.end() );
@@ -1935,15 +2035,98 @@ inline std::vector<std::string> xCtrl::registered() const
 
 inline bool xCtrl::registryRead( appEntry &app, const std::string &name ) const
 {
-    confMap c;
-    if( !readConf( c, regDir() + "/" + name + ".conf" ) || c["name"] != name )
+    unitNames     u( m_role );
+    std::ifstream f( unitDir() + "/" + u.instance( name ) + ".d/override.conf" );
+    std::string   exec, type;
+    for( std::string l; std::getline( f, l ); )
+    {
+        // ExecStart=/opt/MagAOX/bin/EXEC -n NAME, after the empty ExecStart= that clears the template's
+        if( l.compare( 0, 10, "ExecStart=" ) == 0 && l.size() > 10 ) // 10 is the length of "ExecStart="
+        {
+            std::string cmd = l.substr( 10, l.find( ' ' ) - 10 );
+            exec            = cmd.substr( cmd.find_last_of( '/' ) + 1 );
+        }
+        else if( l.compare( 0, 5, "Type=" ) == 0 ) // Type= is 5 characters
+        {
+            type = l.substr( 5 );
+        }
+    }
+    if( exec.empty() )
     {
         return false;
     }
     app.name   = name;
-    app.exec   = c["exec"];
-    app.prefix = c["prefix"];
+    app.exec   = exec;
+    app.prefix = type == "simple" ? "-" : "";
     return true;
+}
+
+inline bool xCtrl::generatedPath( const std::string &path ) const
+{
+    unitNames   u( m_role );
+    std::string dir = unitDir() + "/";
+    if( path.compare( 0, dir.size(), dir ) != 0 )
+    {
+        return false;
+    }
+    std::string rel = path.substr( dir.size() );
+    if( rel == u.templ() || rel == u.target() )
+    {
+        return true;
+    }
+
+    // magaox-<role>-app@NAME.service.d/override.conf, with a valid NAME, so nothing like ../ gets through
+    std::string tail = ".d/override.conf";
+    if( rel.size() <= tail.size() || rel.compare( rel.size() - tail.size(), tail.size(), tail ) != 0 )
+    {
+        return false;
+    }
+    return validName( u.appName( rel.substr( 0, rel.size() - tail.size() ) ) );
+}
+
+inline int xCtrl::removeDropIn( const std::string &name )
+{
+    unitNames   u( m_role );
+    std::string d = unitDir() + "/" + u.instance( name ) + ".d";
+    if( !validName( name ) || !generatedPath( d + "/override.conf" ) )
+    {
+        say( msgLevel::error ) << "refusing to remove the drop-in of [" << name << "]";
+        return -1;
+    }
+    if( m_dryRun )
+    {
+        say( msgLevel::info ) << "[dry-run] would remove " << d;
+        return 0;
+    }
+    rootScope       root;
+    std::error_code ec;
+    std::filesystem::remove( d + "/override.conf", ec );
+    std::filesystem::remove( d, ec ); // only if nothing else is there
+    return 0;
+}
+
+inline void xCtrl::removeLegacy()
+{
+    std::string     apps = m_sysroot + "/etc/magaox-" + lower( m_role ) + "/apps";
+    std::string     rec  = m_top + "/" + MAGAOX_sysRelPath + "/sentinel_proclist/proclist_" + m_role + ".txt.active";
+    std::error_code ec;
+    bool            has = std::filesystem::exists( apps, ec ) || std::filesystem::exists( rec, ec );
+    if( !has || m_dryRun )
+    {
+        return;
+    }
+    rootScope root;
+    for( const auto &e : std::filesystem::directory_iterator( apps, ec ) )
+    {
+        if( e.path().extension() == ".conf" && !e.is_symlink() )
+        {
+            std::filesystem::remove( e.path(), ec );
+        }
+    }
+    std::filesystem::remove( apps, ec ); // only if empty
+    std::filesystem::remove( rec, ec );
+    say( msgLevel::info ) << "removed the old registry " << apps << " and record " << rec
+                          << ": the drop-ins are the registry now";
 }
 
 inline bool xCtrl::enabled( const std::string &name ) const
@@ -1971,8 +2154,8 @@ inline std::vector<appEntry> xCtrl::namedApps()
         }
         else
         {
-            say( msgLevel::error ) << n << " is not registered: add it to " << proclistPath()
-                                   << " and run sudo xctrl register";
+            say( msgLevel::error ) << n << " is not registered: add it to " << proclistPath() << ", then " << m_prog
+                                   << " sync, by a user who can edit the proclist, registers it";
             ok = false;
         }
     }
@@ -2036,7 +2219,8 @@ inline std::vector<std::string> xCtrl::activeApps()
                   "--no-legend",
                   "--no-pager",
                   "magaox-" + u.lrole + "-app@*.service" },
-                &out );
+                &out,
+                true );
     std::istringstream ss( out );
     std::string        line;
     while( std::getline( ss, line ) )
@@ -2053,17 +2237,52 @@ inline std::vector<std::string> xCtrl::activeApps()
     return names;
 }
 
-inline directiveMap xCtrl::roleDirectives( std::vector<std::string> &errors )
+inline const allowList *xCtrl::allowedDirectives()
+{
+    if( m_allowRead )
+    {
+        return m_allowOk ? &m_allow : nullptr;
+    }
+    m_allowRead = true;
+
+    std::string path = allowListPath(), dir = path.substr( 0, path.rfind( '/' ) );
+    struct stat fs, ds;
+    if( lstat( path.c_str(), &fs ) < 0 || !S_ISREG( fs.st_mode ) )
+    {
+        m_allowError = "no directive allow list " + path + ": install it with sudo make install in utils/xctrl";
+        return nullptr;
+    }
+
+    // it decides what root writes into units, so only root may change it; tests (--sysroot) are exempt
+    bool safe = [&]( const struct stat &s ) { return s.st_uid == 0 && !( s.st_mode & ( S_IWGRP | S_IWOTH ) ); }( fs );
+    if( m_sysroot.empty() &&
+        ( !safe || lstat( dir.c_str(), &ds ) < 0 || ds.st_uid != 0 || ( ds.st_mode & ( S_IWGRP | S_IWOTH ) ) ) )
+    {
+        m_allowError = path + " and " + dir + " must be owned by root and writable only by root";
+        return nullptr;
+    }
+
+    std::ifstream f( path );
+    m_allow   = parseAllowList( f );
+    m_allowOk = true;
+    return &m_allow;
+}
+
+inline directiveMap xCtrl::roleDirectives( std::vector<std::string> &warnings, const allowList &allow )
 {
     directiveMap dirs = defaultDirectives();
     confMap      gconf;
     readConf( gconf, m_top + "/" + MAGAOX_configRelPath + "/" + MAGAOX_globalConfig );
-    systemdSettings( dirs, errors, gconf, MAGAOX_globalConfig );
+    systemdSettings( dirs, warnings, gconf, MAGAOX_globalConfig, allow );
     return dirs;
 }
 
-inline bool
-xCtrl::prepareApp( const appEntry &app, directiveMap &dirs, std::vector<std::string> &errors, bool *hasConf )
+inline bool xCtrl::prepareApp( const appEntry           &app,
+                               directiveMap             &dirs,
+                               std::vector<std::string> &errors,
+                               std::vector<std::string> &warnings,
+                               const allowList          &allow,
+                               bool                     *hasConf )
 {
     std::string exe = m_top + "/bin/" + app.exec;
     struct stat st;
@@ -2079,10 +2298,8 @@ xCtrl::prepareApp( const appEntry &app, directiveMap &dirs, std::vector<std::str
     {
         *hasConf = found;
     }
-
-    size_t n = errors.size();
-    dirs     = appDirectives( app, c, errors );
-    return errors.size() == n;
+    dirs = appDirectives( app, c, warnings, allow );
+    return true;
 }
 
 inline void
@@ -2108,21 +2325,22 @@ inline std::map<std::string, xCtrl::roleApps> xCtrl::hostRoles()
     std::map<std::string, roleApps> roles;
     std::error_code                 ec;
 
-    // registered: each /etc/magaox-<role>/apps/NAME.conf
-    for( const auto &e : std::filesystem::directory_iterator( m_sysroot + "/etc", ec ) )
+    // registered: each drop-in directory, magaox-<role>-app@NAME.service.d, holding an override.conf
+    for( const auto &e : std::filesystem::directory_iterator( unitDir(), ec ) )
     {
-        std::string dir = e.path().filename().string();
-        if( dir.compare( 0, 7, "magaox-" ) != 0 ) // 7 is the length of "magaox-"
+        std::string     d  = e.path().filename().string();
+        size_t          at = d.find( "-app@" );
+        std::error_code ec2;
+        if( d.compare( 0, 7, "magaox-" ) != 0 || at == std::string::npos || d.size() < 2 ||
+            d.compare( d.size() - 2, 2, ".d" ) != 0 || !std::filesystem::exists( e.path() / "override.conf", ec2 ) )
         {
             continue;
         }
-        std::error_code ec2;
-        for( const auto &a : std::filesystem::directory_iterator( e.path() / "apps", ec2 ) )
+        std::string role = d.substr( 7, at - 7 ); // after the 7 characters of "magaox-"
+        std::string name = unitNames( role ).appName( d.substr( 0, d.size() - 2 ) );
+        if( validName( name ) )
         {
-            if( a.path().extension() == ".conf" )
-            {
-                roles[dir.substr( 7 )].registered.push_back( a.path().stem().string() );
-            }
+            roles[role].registered.push_back( name );
         }
     }
 
@@ -2132,7 +2350,8 @@ inline std::map<std::string, xCtrl::roleApps> xCtrl::hostRoles()
         std::string out;
         runCommand(
             { "systemctl", "list-units", "--all", "--plain", "--no-legend", "--no-pager", "magaox-*-app@*.service" },
-            &out );
+            &out,
+            true );
         std::istringstream ss( out );
         for( std::string line; std::getline( ss, line ); )
         {
@@ -2226,26 +2445,32 @@ inline void xCtrl::warnIfProclistChanged()
     }
     m_proclistChecked = true;
 
-    std::ifstream pf( proclistPath() ), af( activePath() );
+    std::ifstream pf( proclistPath() );
     if( !pf )
     {
         return;
     }
-    auto lines = []( const proclist &pl )
+
+    // NAME: [#!][-]EXEC, as the proclist says and as it is registered (#! when not linked for autostart)
+    std::map<std::string, std::string> now, reg;
+    proclist                           pl = parseProclist( pf );
+    for( const auto &a : pl.apps )
     {
-        std::map<std::string, std::string> m;
-        for( const auto &a : pl.apps )
+        now[a.name] = a.prefix + a.exec;
+    }
+    for( const auto &a : pl.disabled )
+    {
+        now[a.name] = "#!" + a.prefix + a.exec;
+    }
+    for( const auto &n : registered() )
+    {
+        appEntry a;
+        if( registryRead( a, n ) )
         {
-            m[a.name] = a.prefix + a.name + " " + a.exec;
+            reg[n] = ( enabled( n ) ? "" : "#!" ) + a.prefix + a.exec;
         }
-        for( const auto &a : pl.disabled )
-        {
-            m[a.name] = "#!" + a.prefix + a.name + " " + a.exec;
-        }
-        return m;
-    };
-    auto now = lines( parseProclist( pf ) ), was = lines( parseProclist( af ) );
-    if( now == was )
+    }
+    if( now == reg )
     {
         return;
     }
@@ -2253,28 +2478,28 @@ inline void xCtrl::warnIfProclistChanged()
     std::string added, removed, changed;
     for( const auto &kv : now )
     {
-        if( !was.count( kv.first ) )
+        if( !reg.count( kv.first ) )
         {
             added += " " + kv.first;
         }
-        else if( was[kv.first] != kv.second )
+        else if( reg[kv.first] != kv.second )
         {
             changed += " " + kv.first;
         }
     }
-    for( const auto &kv : was )
+    for( const auto &kv : reg )
     {
         if( !now.count( kv.first ) )
         {
             removed += " " + kv.first;
         }
     }
-    say( msgLevel::warning ) << proclistPath() << " changed since the last registration"
-                             << ( added.empty() ? "" : "; new:" + added )
-                             << ( removed.empty() ? "" : "; removed:" + removed )
+    say( msgLevel::warning ) << proclistPath() << " differs from what is synced with systemd"
+                             << ( added.empty() ? "" : "; not registered:" + added )
+                             << ( removed.empty() ? "" : "; registered, no longer in the proclist:" + removed )
                              << ( changed.empty() ? ""
                                                   : "; autostart (#!), watchdog (-) or executable changed:" + changed );
-    say( msgLevel::warning ) << "run sudo " << m_prog << " register to apply it";
+    say( msgLevel::warning ) << m_prog << " sync applies it, by a user who can edit the proclist";
 }
 
 inline int xCtrl::updateProclist( const std::string &name, proclistEdit edit, const std::string &newLine )
@@ -2315,16 +2540,6 @@ inline int xCtrl::updateProclist( const std::string &name, proclistEdit edit, co
             return -1;
         }
     }
-
-    // the same edit to the record of the last registration, as this command also changes the registration
-    std::ifstream af( activePath() );
-    if( af )
-    {
-        std::stringstream ss;
-        ss << af.rdbuf();
-        int c = 0;
-        writeFile( activePath(), editProclist( ss.str(), name, edit, newLine, c ), 0664 );
-    }
     return changed;
 }
 
@@ -2354,8 +2569,19 @@ inline int xCtrl::registerApp( const appEntry &app )
 {
     unitNames                u( m_role );
     directiveMap             dirs;
-    std::vector<std::string> errors;
-    if( !prepareApp( app, dirs, errors ) )
+    std::vector<std::string> errors, warnings;
+    const allowList         *allow = allowedDirectives();
+    if( !allow )
+    {
+        say( msgLevel::error ) << m_allowError << "; " << app.name << " not registered";
+        return -1;
+    }
+    bool ok = prepareApp( app, dirs, errors, warnings, *allow );
+    for( const auto &w : warnings )
+    {
+        say( msgLevel::warning ) << w;
+    }
+    if( !ok )
     {
         for( const auto &e : errors )
         {
@@ -2377,11 +2603,10 @@ inline int xCtrl::registerApp( const appEntry &app )
     std::vector<std::string> tunnels;
     serverAndTunnels( all, server, tunnels );
 
-    int rc = writeFile( unitDir() + "/" + u.instance( app.name ) + ".d/override.conf",
-                        dropIn( u, app, m_top + "/bin", dirs, server, tunnels ),
-                        0644 ) < 0;
-    rc |= writeFile( regDir() + "/" + app.name + ".conf", registryEntry( app ), 0644 ) < 0;
-    return rc ? -1 : 0;
+    int w = writeFile( unitDir() + "/" + u.instance( app.name ) + ".d/override.conf",
+                       dropIn( u, app, m_top + "/bin", dirs, server, tunnels ),
+                       0644 );
+    return w;
 }
 
 inline int xCtrl::deregister( const std::vector<std::string> &names )
@@ -2402,17 +2627,10 @@ inline int xCtrl::deregister( const std::vector<std::string> &names )
     rc |= systemctl( dis, true );
     for( const auto &n : names )
     {
-        std::string d = unitDir() + "/" + u.instance( n ) + ".d", r = regDir() + "/" + n + ".conf";
-        if( m_dryRun )
+        if( removeDropIn( n ) == 0 && !m_dryRun )
         {
-            say( msgLevel::info ) << "[dry-run] would remove " << d << " and " << r;
-            continue;
+            say( msgLevel::success ) << "unregistered " << n;
         }
-        std::error_code ec;
-        std::filesystem::remove( d + "/override.conf", ec );
-        std::filesystem::remove( d, ec ); // only if nothing else is there
-        std::filesystem::remove( r, ec );
-        say( msgLevel::success ) << "deregistered " << n;
     }
     return rc;
 }
@@ -2446,10 +2664,17 @@ inline settingsState xCtrl::checkSettings( const appEntry                     &a
                                            const std::vector<std::string>     &tunnels,
                                            std::map<std::string, std::string> &p )
 {
-    unitNames     u( m_role );
-    settingsState st;
-    directiveMap  dirs;
-    if( !prepareApp( app, dirs, st.errors ) )
+    unitNames                u( m_role );
+    settingsState            st;
+    directiveMap             dirs;
+    std::vector<std::string> ignored; // reported by sync, not again here
+    const allowList         *allow = allowedDirectives();
+    if( !allow )
+    {
+        st.errors.push_back( m_allowError );
+        return st;
+    }
+    if( !prepareApp( app, dirs, st.errors, ignored, *allow ) )
     {
         return st;
     }
@@ -2492,8 +2717,13 @@ inline void xCtrl::warnOutdatedRunning( const std::vector<std::string>          
                                         std::map<std::string, std::map<std::string, std::string>> &props )
 {
     std::string              server;
-    std::vector<std::string> tunnels, errors;
-    directiveMap             role = roleDirectives( errors );
+    std::vector<std::string> tunnels, ignored;
+    const allowList         *allow = allowedDirectives();
+    if( !allow )
+    {
+        return; // without it, what sync would register is not known
+    }
+    directiveMap role = roleDirectives( ignored, *allow );
     registeredOrdering( server, tunnels );
 
     for( const auto &n : names )
@@ -2517,9 +2747,9 @@ inline void xCtrl::warnOutdatedRunning( const std::vector<std::string>          
         }
         else if( st.fileStale || st.loadStale )
         {
-            say( msgLevel::warning ) << n << ": " << n << ".conf changed since it was registered; it runs with the "
-                                     << "old settings until a privileged user restarts it: sudo " << m_prog
-                                     << " restart " << n;
+            say( msgLevel::warning ) << n << ": running with magaox.conf defaults or old [systemd] settings in " << n
+                                     << ".conf; " << m_prog << " sync, then " << m_prog << " restart " << n
+                                     << ", applies them";
         }
         else if( st.runStale )
         {
@@ -2536,29 +2766,23 @@ inline void xCtrl::warnOutdatedRunning( const std::vector<std::string>          
 
 inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
 {
-    if( apps.empty() )
+    const allowList *allow = allowedDirectives();
+    if( apps.empty() || !allow )
     {
-        return 0;
+        return 0; // without the allow list, what sync would register is not known
     }
 
     // the ordering in the drop-ins depends on all registered apps
     std::string              server;
-    std::vector<std::string> tunnels, errors, names;
+    std::vector<std::string> tunnels, ignored, names;
     registeredOrdering( server, tunnels );
-    directiveMap role = roleDirectives( errors );
-    for( const auto &e : errors )
-    {
-        say( msgLevel::warning ) << e;
-    }
+    directiveMap role = roleDirectives( ignored, *allow );
     for( const auto &a : apps )
     {
         names.push_back( a.name );
     }
     auto props = showProps( names );
 
-    bool                     reload = false;
-    int                      rc     = 0;
-    std::vector<std::string> outdated;
     for( const auto &a : apps )
     {
         settingsState st = checkSettings( a, role, server, tunnels, props[a.name] );
@@ -2568,48 +2792,22 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
             {
                 say( msgLevel::warning ) << e;
             }
-            say( msgLevel::warning ) << a.name << " starts with its last good settings";
-            continue;
+            say( msgLevel::warning ) << a.name << " starts with its last synced settings";
         }
-        // anything systemd has, or would start the app with, differing from its .conf
-        bool changed = st.fileStale || st.loadStale || ( st.running && !st.wdHave.empty() );
-
-        // a user who may not change the systemd configuration starts the app as it is registered
-        if( !m_privileged )
+        else if( st.fileStale || st.loadStale )
         {
-            if( changed )
-            {
-                outdated.push_back( a.name );
-            }
-            continue;
+            say( msgLevel::warning ) << a.name << ": " << a.name
+                                     << ".conf or magaox.conf changed since the last sync; it "
+                                     << "starts with the synced settings. " << m_prog
+                                     << " sync, by a user who can edit the proclist, applies them";
         }
-
-        int w = writeFile( st.path, st.content, 0644 );
-        rc |= w < 0;
-        if( w == 1 )
+        else if( st.running && !st.wdHave.empty() )
         {
-            say( msgLevel::info ) << a.name << ": settings updated from its configuration";
+            say( msgLevel::warning ) << a.name << " is running with settings synced before it started; " << m_prog
+                                     << " restart " << a.name << " applies them";
         }
-        if( st.running && ( w == 1 || !st.wdHave.empty() ) )
-        {
-            say( msgLevel::warning ) << a.name << " is running: " << m_prog << " restart " << a.name
-                                     << " applies its new settings";
-        }
-        reload = reload || w == 1 || st.loadStale || !st.wdHave.empty();
     }
-
-    if( reload )
-    {
-        rc |= systemctl( { "daemon-reload" } ) != 0;
-    }
-
-    for( const auto &n : outdated )
-    {
-        say( msgLevel::warning ) << n << ": " << n << ".conf changed since it was registered; it starts with the "
-                                 << "registered settings. To apply the new ones, re-register it (sudo " << m_prog
-                                 << " register) or start it with sudo (sudo " << m_prog << " start " << n << ")";
-    }
-    return rc;
+    return 0;
 }
 
 inline int xCtrl::startApps( const std::vector<appEntry> &apps )
@@ -2689,6 +2887,12 @@ inline int xCtrl::stopApps( const std::vector<std::string> &names )
 
 inline int xCtrl::writeFile( const std::string &path, const std::string &content, mode_t mode )
 {
+    // root writes nothing but this role's template, target and drop-ins
+    if( !generatedPath( path ) )
+    {
+        say( msgLevel::error ) << "refusing to write " << path << ": not a file xctrl generates";
+        return -1;
+    }
     if( m_dryRun )
     {
         std::ifstream     f( path );
@@ -2704,13 +2908,22 @@ inline int xCtrl::writeFile( const std::string &path, const std::string &content
         say( msgLevel::info ) << "[dry-run] would write " << path << ":\n" << content;
         return 1;
     }
+    rootScope root;
     return writeIfChanged( path, content, mode );
 }
 
-inline int xCtrl::cmdRegister()
+inline int xCtrl::doSync( bool summary )
 {
     unitNames                u( m_role );
     std::vector<std::string> errors, warnings;
+
+    // nothing without the allow list: it decides which [systemd] directives root may write
+    const allowList *allow = allowedDirectives();
+    if( !allow )
+    {
+        say( msgLevel::error ) << m_allowError << "; nothing synced";
+        return 1;
+    }
 
     std::ifstream pf( proclistPath() );
     if( !pf )
@@ -2724,22 +2937,36 @@ inline int xCtrl::cmdRegister()
 
     // every role on this host first, warning about other roles' running apps, then this one
     auto roles = hostRoles();
-    for( const auto &kv : roles )
+    if( summary )
     {
-        if( kv.first != u.lrole )
+        for( const auto &kv : roles )
         {
-            const roleApps &r = kv.second;
-            say( r.running.empty() ? msgLevel::info : msgLevel::warning )
-                << "role " << r.name << ": " << r.registered.size() << " app(s) registered, " << r.running.size()
-                << " running";
+            if( kv.first != u.lrole )
+            {
+                const roleApps &r = kv.second;
+                say( r.running.empty() ? msgLevel::info : msgLevel::warning )
+                    << "role " << r.name << ": " << r.registered.size() << " app(s) registered, " << r.running.size()
+                    << " running";
+            }
+        }
+        say( msgLevel::info ) << "Current role: " << m_role << ": " << roles[u.lrole].registered.size()
+                              << " app(s) registered, " << roles[u.lrole].running.size() << " running";
+    }
+
+    // allow list entries this systemd does not have
+    const directiveSections &sections = systemdDirectives();
+    for( const auto &d : *allow )
+    {
+        if( !sections.empty() && !sections.count( d ) )
+        {
+            warnings.push_back( allowListPath() + " allows " + d +
+                                ", which does not exist on this version of systemd" );
         }
     }
-    say( msgLevel::info ) << "Current role: " << m_role << ": " << roles[u.lrole].registered.size()
-                          << " app(s) registered, " << roles[u.lrole].running.size() << " running";
 
     // role-wide defaults, from magaox.conf [systemd]
     std::string  cfgDir = m_top + "/" + MAGAOX_configRelPath;
-    directiveMap gdirs  = roleDirectives( errors );
+    directiveMap gdirs  = roleDirectives( warnings, *allow );
 
     // the INDI server and the apps must agree on the control FIFO
     confMap gconf, isconf;
@@ -2747,9 +2974,9 @@ inline int xCtrl::cmdRegister()
     if( readConf( isconf, cfgDir + "/is" + m_role + ".conf" ) && isconf.count( "indiserver.f" ) &&
         gconf.count( "indiserver_ctrl_fifo" ) && isconf["indiserver.f"] != gconf["indiserver_ctrl_fifo"] )
     {
-        say( msgLevel::warning ) << "[indiserver] f = " << isconf["indiserver.f"] << " in is" << m_role
-                                 << ".conf differs from indiserver_ctrl_fifo = " << gconf["indiserver_ctrl_fifo"]
-                                 << " in magaox.conf";
+        warnings.push_back( "[indiserver] f = " + isconf["indiserver.f"] + " in is" + m_role +
+                            ".conf differs from indiserver_ctrl_fifo = " + gconf["indiserver_ctrl_fifo"] +
+                            " in magaox.conf" );
     }
 
     struct valid
@@ -2760,16 +2987,18 @@ inline int xCtrl::cmdRegister()
     };
     std::vector<valid> apps;
 
-    // names in the proclist that keep any registration they have, though they could not be (re)registered now
-    std::set<std::string> keep;
+    // names in the proclist that keep any registration they have, though they could not be (re)registered now,
+    // and those of them that are disabled (#!), so lose their autostart
+    std::set<std::string>    keep;
+    std::vector<std::string> keepOff;
 
-    // active lines: registered and started automatically; invalid ones keep their earlier registration and state
+    // active lines: registered and started automatically; invalid ones keep their earlier registration
     for( const auto &app : pl.apps )
     {
         directiveMap d;
         bool         hasConf = false;
         size_t       n       = errors.size();
-        if( !prepareApp( app, d, errors, &hasConf ) )
+        if( !prepareApp( app, d, errors, warnings, *allow, &hasConf ) )
         {
             errors.insert( errors.begin() + n,
                            "proclist line " + std::to_string( app.line ) + ": " + app.name + " not (re)registered:" );
@@ -2784,7 +3013,6 @@ inline int xCtrl::cmdRegister()
     }
 
     // disabled lines, #!: registered, to start by hand, but not started automatically; they need a .conf
-    std::set<std::string> commented;
     for( const auto &app : pl.disabled )
     {
         if( access( ( cfgDir + "/" + app.name + ".conf" ).c_str(), R_OK ) != 0 )
@@ -2793,15 +3021,14 @@ inline int xCtrl::cmdRegister()
                                 app.name + ".conf, not registered; use # for comments" );
             continue;
         }
-        commented.insert( app.name );
-        directiveMap             d;
-        std::vector<std::string> aerr;
-        if( !prepareApp( app, d, aerr ) )
+        directiveMap d;
+        size_t       n = errors.size();
+        if( !prepareApp( app, d, errors, warnings, *allow ) )
         {
-            warnings.push_back( "proclist line " + std::to_string( app.line ) + ": disabled " + app.name +
-                                " not (re)registered:" );
-            warnings.insert( warnings.end(), aerr.begin(), aerr.end() );
+            errors.insert( errors.begin() + n,
+                           "proclist line " + std::to_string( app.line ) + ": " + app.name + " not (re)registered:" );
             keep.insert( app.name );
+            keepOff.push_back( app.name );
             continue;
         }
         apps.push_back( { app, d, false } );
@@ -2832,135 +3059,155 @@ inline int xCtrl::cmdRegister()
     std::vector<std::string> tunnels;
     serverAndTunnels( entries, server, tunnels );
 
-    // registered apps no longer in the proclist at all are stopped and deregistered
-    std::vector<std::string> before = registered(), removed;
-    std::set<std::string>    wasRegistered( before.begin(), before.end() );
-    std::set<std::string>    listed( keep.begin(), keep.end() );
+    // registered apps no longer in the proclist are unregistered, unless they are still running: those stay
+    // registered, to be stopped by name, but lose their autostart, so neither startup nor a reboot starts them
+    std::vector<std::string> before = registered(), removed, keptRunning, running = activeApps();
+    std::set<std::string>    wasRegistered( before.begin(), before.end() ), listed( keep.begin(), keep.end() );
+    std::set<std::string>    isRunning( running.begin(), running.end() );
     for( const auto &v : apps )
     {
         listed.insert( v.app.name );
     }
     for( const auto &n : before )
     {
-        if( !listed.count( n ) )
+        if( listed.count( n ) )
         {
-            removed.push_back( n );
+            continue;
         }
+        if( isRunning.count( n ) )
+        {
+            warnings.push_back( n + " removed from proclist but still running, so still registered; stop it first (" +
+                                m_prog + " stop " + n + "), then " + m_prog + " sync unregisters it" );
+            keptRunning.push_back( n );
+            continue;
+        }
+        removed.push_back( n );
     }
-    int rc = deregister( removed );
 
-    // the role's template and target, then each app's drop-in and registry entry
-    rc |= writeFile( unitDir() + "/" + u.templ(), templateUnit( u, gdirs, envFile() ), 0644 ) < 0;
-    rc |= writeFile( unitDir() + "/" + u.target(), targetUnit( u ), 0644 ) < 0;
+    // write only what changed: the role's template and target, then each app's drop-in
+    int  rc    = 0;
+    bool wrote = false;
+    for( const auto &f : { std::make_pair( u.templ(), templateUnit( u, gdirs, envFile() ) ),
+                           std::make_pair( u.target(), targetUnit( u ) ) } )
+    {
+        int w = writeFile( unitDir() + "/" + f.first, f.second, 0644 );
+        rc |= w < 0;
+        wrote = wrote || w == 1;
+    }
 
-    std::vector<std::string> changed, toEnable, toDisable, stopNow;
-    std::vector<appEntry>    newlyEnabled;
+    // apps whose autostart is turned off, and why, to tell the user
+    std::vector<std::string>                         added, changed, toEnable{ "enable" }, toDisable{ "disable" };
+    std::vector<std::pair<std::string, std::string>> turnedOff;
     for( const auto &v : apps )
     {
         int w = writeFile( unitDir() + "/" + u.instance( v.app.name ) + ".d/override.conf",
                            dropIn( u, v.app, m_top + "/bin", v.dirs, server, tunnels ),
                            0644 );
         rc |= w < 0;
-        rc |= writeFile( regDir() + "/" + v.app.name + ".conf", registryEntry( v.app ), 0644 ) < 0;
-        if( w == 1 && wasRegistered.count( v.app.name ) )
+        wrote = wrote || w == 1;
+        if( w == 1 )
         {
-            changed.push_back( v.app.name );
+            ( wasRegistered.count( v.app.name ) ? changed : added ).push_back( v.app.name );
         }
-        if( v.autostart && !enabled( v.app.name ) )
+        if( v.autostart != enabled( v.app.name ) )
         {
-            toEnable.push_back( u.instance( v.app.name ) );
-            newlyEnabled.push_back( v.app );
-        }
-        if( !v.autostart && enabled( v.app.name ) )
-        {
-            toDisable.push_back( u.instance( v.app.name ) );
-            stopNow.push_back( v.app.name );
+            ( v.autostart ? toEnable : toDisable ).push_back( u.instance( v.app.name ) );
+            if( !v.autostart )
+            {
+                turnedOff.push_back( { v.app.name, "disabled (#!) in the proclist" } );
+            }
         }
     }
-    // disabled apps that could not be re-registered still leave automatic startup
-    for( const auto &n : commented )
+    for( const auto &n : keepOff )
     {
-        if( keep.count( n ) && wasRegistered.count( n ) && enabled( n ) )
+        if( enabled( n ) )
         {
             toDisable.push_back( u.instance( n ) );
-            stopNow.push_back( n );
+            turnedOff.push_back( { n, "disabled (#!) in the proclist" } );
+        }
+    }
+    for( const auto &n : keptRunning )
+    {
+        if( enabled( n ) )
+        {
+            toDisable.push_back( u.instance( n ) );
+            turnedOff.push_back( { n, "removed from the proclist" } );
+        }
+    }
+    for( const auto &n : removed )
+    {
+        if( enabled( n ) )
+        {
+            toDisable.push_back( u.instance( n ) );
         }
     }
     if( rc )
     {
-        say( msgLevel::error ) << "could not write the systemd configuration; run with sudo";
+        say( msgLevel::error ) << "could not write the systemd configuration";
         return 1;
     }
 
-    systemctl( { "daemon-reload" } );
-    if( !toEnable.empty() )
+    // links first, while systemd still has the removed apps' units, then the removals
+    if( toDisable.size() > 1 )
     {
-        toEnable.insert( toEnable.begin(), "enable" );
-        rc |= systemctl( toEnable, true ) != 0;
-    }
-    if( !toDisable.empty() )
-    {
-        toDisable.insert( toDisable.begin(), "disable" );
         rc |= systemctl( toDisable, true ) != 0;
     }
-
-    // apps just disabled also stop, unless --keep-running
-    if( !stopNow.empty() && !m_keepRunning )
+    for( const auto &n : removed )
     {
-        std::vector<std::string> act = activeApps(), stop;
-        for( const auto &n : stopNow )
+        rc |= removeDropIn( n ) != 0;
+        wrote = true;
+    }
+
+    // a reload only if a unit file changed, or systemd still has older ones loaded
+    bool stale = false;
+    for( auto &kv : showProps( before ) )
+    {
+        stale = stale || kv.second["NeedDaemonReload"] == "yes";
+    }
+    if( wrote || stale )
+    {
+        rc |= systemctl( { "daemon-reload" } ) != 0;
+    }
+    if( toEnable.size() > 1 )
+    {
+        rc |= systemctl( toEnable, true ) != 0;
+    }
+    removeLegacy();
+
+    auto list = []( const std::vector<std::string> &v )
+    {
+        std::string s;
+        for( const auto &n : v )
         {
-            if( std::find( act.begin(), act.end(), n ) != act.end() )
-            {
-                stop.push_back( n );
-            }
+            s += " " + n;
         }
-        if( !stop.empty() )
-        {
-            rc |= stopApps( stop ) != 0;
-        }
-    }
-
-    // a role that is up starts its new apps now
-    bool up = !m_dryRun && m_sysroot.empty() && runCommand( { "systemctl", "is-active", "--quiet", u.target() } ) == 0;
-    if( up && !newlyEnabled.empty() )
-    {
-        rc |= startApps( newlyEnabled ) != 0;
-    }
-
-    // record the proclist registered, for warnIfProclistChanged(); apps that could not be registered were reported
-    std::ostringstream active;
-    active << "# Registered by xctrl register from " << proclistPath() << "; do not edit\n";
-    for( const auto &a : pl.apps )
-    {
-        active << a.prefix << a.name << " " << a.exec << "\n";
-    }
-    for( const auto &a : pl.disabled )
-    {
-        active << "#!" << a.prefix << a.name << " " << a.exec << "\n";
-    }
+        return s;
+    };
     size_t nauto = 0;
     for( const auto &v : apps )
     {
         nauto += v.autostart;
     }
-    if( writeFile( activePath(), active.str(), 0664 ) < 0 )
-    {
-        rc = 1;
-    }
-
-    std::string gone;
-    for( const auto &n : removed )
-    {
-        gone += " " + n;
-    }
-    say( msgLevel::success ) << "role " << m_role << ": registered " << nauto << " app(s) for automatic startup ("
-                             << newlyEnabled.size() << " new), " << apps.size() - nauto
-                             << " app(s) with autostart disabled"
-                             << ( gone.empty() ? "" : "; deregistered, no longer in the proclist:" + gone );
+    say( msgLevel::success ) << "role " << m_role << ": " << nauto << " app(s) for automatic startup, "
+                             << apps.size() - nauto << " with autostart disabled"
+                             << ( added.empty() ? "" : "; registered:" + list( added ) )
+                             << ( changed.empty() ? "" : "; updated:" + list( changed ) )
+                             << ( removed.empty() ? "" : "; unregistered:" + list( removed ) )
+                             << ( wrote || stale || toEnable.size() > 1 || toDisable.size() > 1 ? ""
+                                                                                                : "; nothing changed" );
     for( const auto &n : changed )
     {
-        say( msgLevel::info ) << n << ": settings changed, applied at its next start or restart command";
+        if( isRunning.count( n ) )
+        {
+            say( msgLevel::info ) << n << " is running with its old settings; " << m_prog << " restart " << n
+                                  << " applies the new ones";
+        }
+    }
+    for( const auto &off : turnedOff )
+    {
+        say( msgLevel::info ) << off.first << ": autostart turned off, as it is " << off.second
+                              << "; neither startup nor a reboot starts it"
+                              << ( isRunning.count( off.first ) ? "; still running, not stopped" : "" );
     }
     for( const auto &w : warnings )
     {
@@ -2970,8 +3217,83 @@ inline int xCtrl::cmdRegister()
     {
         say( msgLevel::error ) << e;
     }
-
     return ( rc || !errors.empty() ) ? 1 : 0;
+}
+
+inline int xCtrl::cmdSync()
+{
+    return doSync( true );
+}
+
+inline bool xCtrl::syncNeeded()
+{
+    // the proclist against the drop-ins and links, as warnIfProclistChanged() compares them
+    std::ifstream         pf( proclistPath() );
+    proclist              pl = parseProclist( pf );
+    std::set<std::string> listed;
+    for( const auto *list : { &pl.apps, &pl.disabled } )
+    {
+        for( const auto &a : *list )
+        {
+            appEntry reg;
+            listed.insert( a.name );
+            if( !registryRead( reg, a.name ) || reg.exec != a.exec || reg.prefix != a.prefix ||
+                enabled( a.name ) != ( list == &pl.apps ) )
+            {
+                return true;
+            }
+        }
+    }
+    for( const auto &n : registered() )
+    {
+        if( !listed.count( n ) )
+        {
+            return true;
+        }
+    }
+
+    // and each drop-in against what its .conf makes now
+    const allowList *allow = allowedDirectives();
+    if( !allow )
+    {
+        return true; // doSync() then says why it can not run
+    }
+    std::string              server;
+    std::vector<std::string> tunnels, ignored;
+    registeredOrdering( server, tunnels );
+    directiveMap                       role = roleDirectives( ignored, *allow );
+    std::map<std::string, std::string> none;
+    for( const auto &n : registered() )
+    {
+        appEntry a;
+        if( registryRead( a, n ) && checkSettings( a, role, server, tunnels, none ).fileStale )
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline void xCtrl::warnRemovedRunning()
+{
+    std::ifstream         pf( proclistPath() );
+    proclist              pl = parseProclist( pf );
+    std::set<std::string> listed;
+    for( const auto *list : { &pl.apps, &pl.disabled } )
+    {
+        for( const auto &a : *list )
+        {
+            listed.insert( a.name );
+        }
+    }
+    for( const auto &n : activeApps() )
+    {
+        if( !listed.count( n ) )
+        {
+            say( msgLevel::warning ) << n << " removed from proclist but still running; stop it first (" << m_prog
+                                     << " stop " << n << "), then " << m_prog << " sync unregisters it";
+        }
+    }
 }
 
 inline int xCtrl::cmdStartup()
@@ -2980,6 +3302,12 @@ inline int xCtrl::cmdStartup()
     if( !m_names.empty() )
     {
         return cmdStart();
+    }
+
+    // an editor's startup first syncs new and changed apps; without the allow list, nothing starts
+    if( m_privileged && syncNeeded() && doSync( false ) != 0 && !allowedDirectives() )
+    {
+        return 1;
     }
     warnIfProclistChanged();
     warnOtherRoles();
@@ -2996,7 +3324,8 @@ inline int xCtrl::cmdStartup()
     }
     if( apps.empty() )
     {
-        say( msgLevel::error ) << "no apps enabled for role " << m_role << "; run sudo xctrl register";
+        say( msgLevel::error ) << "no apps enabled for role " << m_role << "; " << m_prog
+                               << " sync, by a user who can edit the proclist, registers them";
         return 1;
     }
     int rc = startApps( apps );
@@ -3029,6 +3358,11 @@ inline int xCtrl::cmdShutdown()
 
 inline int xCtrl::cmdStart()
 {
+    // an editor's start first syncs new and changed apps; without the allow list, nothing starts
+    if( m_privileged && syncNeeded() && doSync( false ) != 0 && !allowedDirectives() )
+    {
+        return 1;
+    }
     warnIfProclistChanged();
     warnOtherRoles();
     std::vector<appEntry> apps = namedApps();
@@ -3113,7 +3447,7 @@ xCtrl::showProps( const std::vector<std::string> &names )
         argv.push_back( u.instance( n ) );
     }
     std::string out;
-    runCommand( argv, &out );
+    runCommand( argv, &out, true ); // read-only, as the caller
 
     std::istringstream                 ss( out );
     std::string                        line;
@@ -3146,6 +3480,7 @@ xCtrl::showProps( const std::vector<std::string> &names )
 inline int xCtrl::cmdStatus()
 {
     warnIfProclistChanged();
+    warnRemovedRunning();
     warnOtherRoles();
     warnOtherRolesBoot();
     std::vector<std::string> names = m_names;
@@ -3433,7 +3768,10 @@ inline int xCtrl::cmdPeek()
         if( active != "active" && active != "activating" && active != "unknown" )
         {
             std::cout << "--- console output (" << m_prog << " inspect " << n << " to follow):" << std::endl;
-            runCommand( { "journalctl", "-u", u.instance( n ), "-n", std::to_string( lines ), "--no-pager", "-q" } );
+            // as the caller: the journal is theirs to read with sudo or in group systemd-journal
+            runCommand( { "journalctl", "-u", u.instance( n ), "-n", std::to_string( lines ), "--no-pager", "-q" },
+                        nullptr,
+                        true );
         }
         std::cout << "End " << n << " logs\n\n";
     }
@@ -3459,7 +3797,9 @@ inline int xCtrl::cmdInspect()
                          "-n",
                          std::to_string( m_lines < 0 ? 50 : m_lines ),
                          "--no-pager",
-                         "-f" } );
+                         "-f" },
+                       nullptr,
+                       true ); // as the caller: sudo, or group systemd-journal, reads the journal
 }
 
 inline int xCtrl::cmdEnable()
@@ -3492,17 +3832,18 @@ inline int xCtrl::cmdEnable()
             continue;
         }
 
-        // an app disabled without a .conf, or added since the last register, is registered now
+        // an app disabled without a .conf, or added since the last sync, is registered now
         appEntry reg;
         if( enable && !registryRead( reg, n ) )
         {
-            if( registerApp( app ) < 0 )
+            int w = registerApp( app );
+            if( w < 0 )
             {
                 say( msgLevel::error ) << n << " is enabled in the proclist but could not be registered";
                 rc = 1;
                 continue;
             }
-            reload = true;
+            reload = reload || w == 1;
         }
         if( registryRead( reg, n ) )
         {
@@ -3631,10 +3972,16 @@ inline int xCtrl::cmdAdd()
         }
     }
 
-    // check the executable and the settings before changing the proclist
+    // check the allow list, the executable and the settings before changing the proclist
     directiveMap             dirs;
-    std::vector<std::string> errors;
-    if( !prepareApp( app, dirs, errors ) )
+    std::vector<std::string> errors, ignored; // registerApp() reports the ignored directives
+    const allowList         *allow = allowedDirectives();
+    if( !allow )
+    {
+        say( msgLevel::error ) << m_allowError << "; " << app.name << " not added";
+        return 1;
+    }
+    if( !prepareApp( app, dirs, errors, ignored, *allow ) )
     {
         for( const auto &e : errors )
         {
@@ -3644,19 +3991,20 @@ inline int xCtrl::cmdAdd()
         return 1;
     }
 
+    int w = -1;
     if( updateProclist( app.name, proclistEdit::append, "#!" + app.prefix + app.name + " " + app.exec ) < 0 ||
-        registerApp( app ) < 0 )
+        ( w = registerApp( app ) ) < 0 )
     {
         return 1;
     }
-    int rc = systemctl( { "daemon-reload" } ) != 0;
+    int rc = w == 1 ? systemctl( { "daemon-reload" } ) != 0 : 0;
     if( enabled( app.name ) )
     {
         rc |= systemctl( { "disable", u.instance( app.name ) }, true ) != 0;
     }
     say( msgLevel::success ) << "added #!" << app.prefix << app.name << " " << app.exec << " to " << proclistPath()
-                             << " and registered it, autostart off: " << m_prog << " start " << app.name
-                             << " runs it, sudo " << m_prog << " enable " << app.name << " starts it automatically";
+                             << " and registered it, autostart off: " << m_prog << " start " << app.name << " runs it, "
+                             << m_prog << " enable " << app.name << " starts it automatically";
     return rc;
 }
 
@@ -3687,7 +4035,7 @@ inline int xCtrl::main( int argc, char **argv )
         return 0;
     }
 
-    static const std::map<std::string, int ( xCtrl::* )()> verbs = { { "register", &xCtrl::cmdRegister },
+    static const std::map<std::string, int ( xCtrl::* )()> verbs = { { "sync", &xCtrl::cmdSync },
                                                                      { "add", &xCtrl::cmdAdd },
                                                                      { "startup", &xCtrl::cmdStartup },
                                                                      { "shutdown", &xCtrl::cmdShutdown },
@@ -3701,9 +4049,14 @@ inline int xCtrl::main( int argc, char **argv )
                                                                      { "enable", &xCtrl::cmdEnable },
                                                                      { "disable", &xCtrl::cmdEnable },
                                                                      { "delete", &xCtrl::cmdDelete },
-                                                                     { "deregister", &xCtrl::cmdDelete },
                                                                      { "boot", &xCtrl::cmdBoot } };
     auto                                                   it    = verbs.find( m_verb );
+    if( m_verb == "register" || m_verb == "deregister" )
+    {
+        say( msgLevel::error ) << m_verb << " is now sync: " << m_prog << " sync registers new and changed apps and "
+                               << "unregisters removed ones";
+        return 2;
+    }
     if( it == verbs.end() )
     {
         say( msgLevel::error ) << "unknown command " << m_verb << "; try --help";
