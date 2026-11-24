@@ -1,9 +1,7 @@
 allall: all
-OTHER_HEADERS=
-NEED_CUDA = yes
+OTHER_HEADERS=dlCollection.hpp dlObservation.hpp
 TARGET=dlDataCollection
-CXXFLAGS += -Wno-deprecated-declarations
-CXXFLAGS += -lnvinfer -lcudart
-EXTRA_LDFLAGS += -L/opt/MagAOX/vendor/TensorRT-10.0.0.6/lib -L/usr/local/cuda/lib64/
-INCLUDES += -I/opt/MagAOX/vendor/TensorRT-10.0.0.6/include -I/usr/local/cuda/include
+# File and image validation must not assume NaN/Inf are impossible.
+OPTIMIZE = -fno-fast-math
+EXTRA_LDFLAGS += -lcrypto
 include ../../Make/magAOXApp.mk

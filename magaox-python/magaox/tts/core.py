@@ -126,16 +126,16 @@ def load_voice(name=DEFAULT_VOICE_NAME, reload=False) -> Voice:
     return _LOADED_VOICES[name]
 
 
-def get_or_create_speech_file(speech: Speech, cache):
+def get_or_create_speech_file(speech: Speech, cache: bool, output_dir: Path=CACHE_DIR):
     filename = f"{speech.fingerprint}.wav"
     if cache:
-        if not CACHE_DIR.exists():
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        fpath = CACHE_DIR / filename
-        if (CACHE_DIR / filename).exists():
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True, exist_ok=True)
+        fpath = output_dir / filename
+        if (output_dir / filename).exists():
             return fpath
     else:
-        fd, fpath = tempfile.mkstemp(".wav", "magao-x-tts")
+        fd, fpath = tempfile.mkstemp(".wav", "magao-x-tts", dir=output_dir)
         fpath = Path(fpath)
     with wave.open(fpath.as_posix(), "wb") as wav_file:
         speech.voice.model.synthesize_wav(speech.text, wav_file)

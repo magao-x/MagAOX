@@ -1,0 +1,89 @@
+-+-[0000:60]-+-00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse Root Complex
+ |           +-00.2  Advanced Micro Devices, Inc. [AMD] Starship/Matisse IOMMU
+ |           +-01.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-01.1-[61]----00.0  Realtek Semiconductor Co., Ltd. RTL8111/8168/8211/8411 PCI Express Gigabit Ethernet Controller
+ |           +-02.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-03.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-03.1-[62]----00.0  Engineering Design Team, Inc. VisionLink F4
+ |           +-04.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-05.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-07.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-07.1-[63]----00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Function
+ |           +-08.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           \-08.1-[64]----00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse Reserved SPP
+ +-[0000:40]-+-00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse Root Complex
+ |           +-00.2  Advanced Micro Devices, Inc. [AMD] Starship/Matisse IOMMU
+ |           +-01.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-01.1-[41-44]----00.0-[42-44]--+-08.0-[43]----00.0  Device 1b6b:0001
+ |           |                               \-09.0-[44]----00.0  Device 1b6b:0001
+ |           +-02.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-03.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-03.1-[45]----00.0  Realtek Semiconductor Co., Ltd. RTL8111/8168/8211/8411 PCI Express Gigabit Ethernet Controller
+ |           +-04.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-05.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-07.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-07.1-[46]----00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Function
+ |           +-08.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           \-08.1-[47]----00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse Reserved SPP
+ +-[0000:20]-+-00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse Root Complex
+ |           +-00.2  Advanced Micro Devices, Inc. [AMD] Starship/Matisse IOMMU
+ |           +-01.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-01.1-[21-2b]----00.0-[22-2b]--+-01.0-[23]----00.0  ASMedia Technology Inc. ASM3242 USB 3.2 Host Controller
+ |           |                               +-02.0-[24]--+-00.0  Intel Corporation Ethernet Controller X550
+ |           |                               |            \-00.1  Intel Corporation Ethernet Controller X550
+ |           |                               +-03.0-[25]----00.0  Intel Corporation Wi-Fi 6 AX200
+ |           |                               +-04.0-[26]----00.0  ASMedia Technology Inc. ASM1061/ASM1062 Serial ATA Controller
+ |           |                               +-05.0-[27]----00.0  ASMedia Technology Inc. ASM1061/ASM1062 Serial ATA Controller
+ |           |                               +-06.0-[28-29]----00.0-[29]----00.0  ASPEED Technology, Inc. ASPEED Graphics Family
+ |           |                               +-08.0-[2a]--+-00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse Reserved SPP
+ |           |                               |            +-00.1  Advanced Micro Devices, Inc. [AMD] Matisse USB 3.0 Host Controller
+ |           |                               |            \-00.3  Advanced Micro Devices, Inc. [AMD] Matisse USB 3.0 Host Controller
+ |           |                               \-0a.0-[2b]----00.0  Advanced Micro Devices, Inc. [AMD] FCH SATA Controller [AHCI mode]
+ |           +-02.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-03.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-03.1-[2c]----00.0  Device 1a8f:2000
+ |           +-04.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-05.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-07.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           +-07.1-[2d]----00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Function
+ |           +-08.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+ |           \-08.1-[2e]--+-00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse Reserved SPP
+ |                        +-00.1  Advanced Micro Devices, Inc. [AMD] Starship/Matisse Cryptographic Coprocessor PSPCPP
+ |                        +-00.3  Advanced Micro Devices, Inc. [AMD] Starship USB 3.0 Host Controller
+ |                        \-00.4  Advanced Micro Devices, Inc. [AMD] Starship/Matisse HD Audio Controller
+ \-[0000:00]-+-00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse Root Complex
+             +-00.2  Advanced Micro Devices, Inc. [AMD] Starship/Matisse IOMMU
+             +-01.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+             +-01.1-[01]--+-00.0  Intel Corporation Ethernet Controller 10-Gigabit X540-AT2
+             |            \-00.1  Intel Corporation Ethernet Controller 10-Gigabit X540-AT2
+             +-02.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+             +-03.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+             +-03.1-[02-1d]----00.0-[03-1d]--+-00.0-[04-1c]----00.0-[05-1c]----10.0-[06-1c]----00.0-[07-1c]--+-00.0-[08-1b]----00.0-[09-1b]----00.0-[0a-1b]----00.0-[0b-1b]--+-00.0-[0c-0e]----00.0-[0d-0e]----10.0-[0e]--
+             |                               |                                                               |                                                               +-04.0-[0f-12]----00.0-[10-12]--+-00.0-[11]--+-00.0  NVIDIA Corporation AD102 [GeForce RTX 4090]
+             |                               |                                                               |                                                               |                               |            \-00.1  NVIDIA Corporation AD102 High Definition Audio Controller
+             |                               |                                                               |                                                               |                               \-10.0-[12]--
+             |                               |                                                               |                                                               +-08.0-[13-16]----00.0-[14-16]--+-00.0-[15]--+-00.0  NVIDIA Corporation AD102 [GeForce RTX 4090]
+             |                               |                                                               |                                                               |                               |            \-00.1  NVIDIA Corporation AD102 High Definition Audio Controller
+             |                               |                                                               |                                                               |                               \-10.0-[16]--
+             |                               |                                                               |                                                               +-0c.0-[17-1a]----00.0-[18-1a]--+-14.0-[19]--
+             |                               |                                                               |                                                               |                               \-15.0-[1a]--
+             |                               |                                                               |                                                               \-1c.0-[1b]----00.0  Broadcom / LSI PEX880xx PCIe Gen 4 Switch
+             |                               |                                                               \-1c.0-[1c]----00.0  Broadcom / LSI PEX880xx PCIe Gen 4 Switch
+             |                               \-1c.0-[1d]----00.0  Broadcom / LSI PEX880xx PCIe Gen 4 Switch
+             +-04.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+             +-05.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+             +-07.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+             +-07.1-[1e]----00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Function
+             +-08.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse PCIe Dummy Host Bridge
+             +-08.1-[1f]--+-00.0  Advanced Micro Devices, Inc. [AMD] Starship/Matisse Reserved SPP
+             |            \-00.3  Advanced Micro Devices, Inc. [AMD] Starship USB 3.0 Host Controller
+             +-14.0  Advanced Micro Devices, Inc. [AMD] FCH SMBus Controller
+             +-14.3  Advanced Micro Devices, Inc. [AMD] FCH LPC Bridge
+             +-18.0  Advanced Micro Devices, Inc. [AMD] Starship Device 24; Function 0
+             +-18.1  Advanced Micro Devices, Inc. [AMD] Starship Device 24; Function 1
+             +-18.2  Advanced Micro Devices, Inc. [AMD] Starship Device 24; Function 2
+             +-18.3  Advanced Micro Devices, Inc. [AMD] Starship Device 24; Function 3
+             +-18.4  Advanced Micro Devices, Inc. [AMD] Starship Device 24; Function 4
+             +-18.5  Advanced Micro Devices, Inc. [AMD] Starship Device 24; Function 5
+             +-18.6  Advanced Micro Devices, Inc. [AMD] Starship Device 24; Function 6
+             \-18.7  Advanced Micro Devices, Inc. [AMD] Starship Device 24; Function 7

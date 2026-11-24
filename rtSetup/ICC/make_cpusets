@@ -1,19 +1,24 @@
 #!/bin/bash
 
 #####################################################
-## MagAO-X ICC cpuset configuration
+## \file
+## \brief Configure ICC system and dedicated real-time cpusets.
 ##
 ## See https://linux.die.net/man/7/cpuset
 ##
 ## Run this as sudo at startup of the system
-## Then run rtc_procset after starting all loop processes
+## Before changing names or CPU assignments, stop instrument processes and run remove_cpusets.
+## Applications and CACAO FPS settings place their threads in these sets.
 ##
 ####################################################
+
+# cpuset-role: ICC
 
 source /etc/profile.d/cgroups1_cpuset_mountpoint.sh
 cpusetMount=$CGROUPS1_CPUSET_MOUNTPOINT
 
-# RTC w/ AMD Threadripper 64 core / 128 threads
+# ICC: AMD Ryzen Threadripper PRO 3995WX, 64 cores / 128 threads (Zen 2).
+# Operator readback confirms L3 groups 44-47, 52-55, 56-59 and 60-63 (2026-11-15).
 
 set -xeuo pipefail
 
@@ -56,7 +61,7 @@ echo 0 > cpuset.sched_load_balance
 echo 1 > system/cpuset.sched_load_balance
 
 ###############
-# Now setup cpusets for the RTC R/T processes
+# Now setup cpusets for the ICC R/T processes
 ###############
 
 
@@ -114,7 +119,7 @@ mkdir -p $cpusetMount/camsci2
 /bin/echo 1 > $cpusetMount/camsci2/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/camsci2/cpuset.mems
 
-#camsci2_sw offload process
+#camsci2_sw: recorder acquisition thread
 mkdir -p $cpusetMount/camsci2_sw
 /bin/echo 41 > $cpusetMount/camsci2_sw/cpuset.cpus
 /bin/echo 1 > $cpusetMount/camsci2_sw/cpuset.cpu_exclusive
@@ -138,17 +143,17 @@ mkdir -p $cpusetMount/spare44
 /bin/echo 1 > $cpusetMount/spare44/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/spare44/cpuset.mems
 
-#acqu_mvm
+#acqu_mvm: acquisition, reconstruction and modal filtering
 mkdir -p $cpusetMount/acqu_mvm
 /bin/echo 45 > $cpusetMount/acqu_mvm/cpuset.cpus
 /bin/echo 1 > $cpusetMount/acqu_mvm/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/acqu_mvm/cpuset.mems
 
-#mfilt
-mkdir -p $cpusetMount/mfilt
-/bin/echo 46 > $cpusetMount/mfilt/cpuset.cpus
-/bin/echo 1 > $cpusetMount/mfilt/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/mfilt/cpuset.mems
+#spare46: released by moving modal filtering to acqu_mvm
+mkdir -p $cpusetMount/spare46
+/bin/echo 46 > $cpusetMount/spare46/cpuset.cpus
+/bin/echo 1 > $cpusetMount/spare46/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/spare46/cpuset.mems
 
 #spare47
 mkdir -p $cpusetMount/spare47
@@ -162,7 +167,7 @@ mkdir -p $cpusetMount/mlat
 /bin/echo 1 > $cpusetMount/mlat/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/mlat/cpuset.mems
 
-#RTmon
+#RTmon: milk-shmimmon
 mkdir -p $cpusetMount/RTmon
 /bin/echo 49 > $cpusetMount/RTmon/cpuset.cpus
 /bin/echo 1 > $cpusetMount/RTmon/cpuset.cpu_exclusive
@@ -198,35 +203,25 @@ mkdir -p $cpusetMount/camllowfs_avg_fit
 /bin/echo 1 > $cpusetMount/camllowfs_avg_fit/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/camllowfs_avg_fit/cpuset.mems
 
-#spare55
-mkdir -p $cpusetMount/spare55
-/bin/echo 55 > $cpusetMount/spare55/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare55/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare55/cpuset.mems
+#camscc_sw: recorder acquisition thread
+mkdir -p $cpusetMount/camscc_sw
+/bin/echo 55 > $cpusetMount/camscc_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camscc_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/camscc_sw/cpuset.mems
 
-#spare56
-mkdir -p $cpusetMount/spare56
-/bin/echo 56 > $cpusetMount/spare56/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare56/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare56/cpuset.mems
+#camscc: three camera cores sharing L3 56-59, separate from acqu_mvm's L3 44-47
+# Move the former CPU59 recorder to inactive acc001's CPU61; retain shmimTCP and NIC IRQs on CPU58.
+mkdir -p $cpusetMount/camscc
+/bin/echo 56-57,59 > $cpusetMount/camscc/cpuset.cpus
+/bin/echo 1 > $cpusetMount/camscc/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/camscc/cpuset.mems
 
-#spare57
-mkdir -p $cpusetMount/spare57
-/bin/echo 57 > $cpusetMount/spare57/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare57/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare57/cpuset.mems
-
-#shmimTCP
+#shmimTCP: intermittent CACAO network transfer; NIC IRQs also routed here by move_irqs
+# Operator accepts sharing L3 56-59 with camscc for now.
 mkdir -p $cpusetMount/shmimTCP
 /bin/echo 58 > $cpusetMount/shmimTCP/cpuset.cpus
 /bin/echo 1 > $cpusetMount/shmimTCP/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/shmimTCP/cpuset.mems
-
-#dm02disp09_sw
-mkdir -p $cpusetMount/dm02disp09_sw
-/bin/echo 59 > $cpusetMount/dm02disp09_sw/cpuset.cpus
-/bin/echo 1 > $cpusetMount/dm02disp09_sw/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/dm02disp09_sw/cpuset.mems
 
 #dm02disp_sw
 mkdir -p $cpusetMount/dm02disp_sw
@@ -234,11 +229,11 @@ mkdir -p $cpusetMount/dm02disp_sw
 /bin/echo 1 > $cpusetMount/dm02disp_sw/cpuset.cpu_exclusive
 /bin/echo 0 > $cpusetMount/dm02disp_sw/cpuset.mems
 
-#spare61
-mkdir -p $cpusetMount/spare61
-/bin/echo 61 > $cpusetMount/spare61/cpuset.cpus
-/bin/echo 1 > $cpusetMount/spare61/cpuset.cpu_exclusive
-/bin/echo 0 > $cpusetMount/spare61/cpuset.mems
+#dm02disp09_sw: moved from CPU59 to keep camscc within one L3
+mkdir -p $cpusetMount/dm02disp09_sw
+/bin/echo 61 > $cpusetMount/dm02disp09_sw/cpuset.cpus
+/bin/echo 1 > $cpusetMount/dm02disp09_sw/cpuset.cpu_exclusive
+/bin/echo 0 > $cpusetMount/dm02disp09_sw/cpuset.mems
 
 #spare62
 mkdir -p $cpusetMount/spare62

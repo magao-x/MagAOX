@@ -1,0 +1,1 @@
+{"pdu1": {"props": ["camwfs", "state"], "setdt": 0}, "observers": {"props": ["obs", "state"], "setdt": 0}, "instgraph": {"props": ["state"]}, "camwfs": {"props": ["state", "fps"], "setdt": 1.0}, "ttmpupil": {"props": ["state", "pos"]}, "holoop": {"props": ["state"]}, "loloop": {"props": ["state"]}, "logopt": {"props": ["state"]}}

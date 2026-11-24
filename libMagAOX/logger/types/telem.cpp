@@ -1,6 +1,5 @@
 /** \file telem.cpp
- * \brief The MagAO-X logger telemetery library
- * \author Jared R. Males (jaredmales@gmail.com)
+ * \brief The MagAO-X logger telemetry library
  *
  * \ingroup logger_types_files
  *
@@ -13,6 +12,8 @@ namespace MagAOX
 namespace logger
 {
 
+timespec telem_outlet::lastRecord         = { 0, 0 };
+timespec telem_pdu::lastRecord            = { 0, 0 };
 timespec cred2_temps::lastRecord          = { 0, 0 };
 timespec ocam_temps::lastRecord           = { 0, 0 };
 timespec telem_blockgains::lastRecord     = { 0, 0 };
@@ -21,9 +22,13 @@ timespec telem_chrony_status::lastRecord  = { 0, 0 };
 timespec telem_cooler::lastRecord         = { 0, 0 };
 timespec telem_coreloads::lastRecord      = { 0, 0 };
 timespec telem_coretemps::lastRecord      = { 0, 0 };
+timespec telem_gpu::lastRecord            = { 0, 0 };
+timespec telem_irq::lastRecord            = { 0, 0 };
+timespec telem_raid::lastRecord           = { 0, 0 };
 timespec telem_dmmodes::lastRecord        = { 0, 0 };
 timespec telem_dmspeck::lastRecord        = { 0, 0 };
 timespec telem_drivetemps::lastRecord     = { 0, 0 };
+timespec telem_po4ao::lastRecord          = { 0, 0 };
 timespec telem_fgtimings::lastRecord      = { 0, 0 };
 timespec telem_flowrpm::lastRecord        = { 0, 0 };
 timespec telem_fxngen::lastRecord         = { 0, 0 };
@@ -35,10 +40,13 @@ timespec telem_w2tcsoffloader::lastRecord = { 0, 0 };
 timespec telem_pi335::lastRecord          = { 0, 0 };
 timespec telem_pico::lastRecord           = { 0, 0 };
 timespec telem_position::lastRecord       = { 0, 0 };
+timespec telem_pupilfit::lastRecord       = { 0, 0 };
+timespec telem_pupilfit_state::lastRecord = { 0, 0 };
 timespec telem_psfacq::lastRecord         = { 0, 0 };
 timespec telem_pokecenter::lastRecord     = { 0, 0 };
 timespec telem_pokeloop::lastRecord       = { 0, 0 };
 timespec telem_poltrack::lastRecord       = { 0, 0 };
+timespec telem_qwptrack::lastRecord       = { 0, 0 };
 timespec telem_rhusb::lastRecord          = { 0, 0 };
 timespec telem_saving::lastRecord         = { 0, 0 };
 timespec telem_saving_state::lastRecord   = { 0, 0 };
@@ -46,6 +54,7 @@ timespec telem_sparkleclock::lastRecord   = { 0, 0 };
 timespec telem_stage::lastRecord          = { 0, 0 };
 timespec telem_stdcam::lastRecord         = { 0, 0 };
 timespec telem_adctrack::lastRecord       = { 0, 0 };
+timespec telem_qwppupil::lastRecord       = { 0, 0 };
 timespec telem_telcat::lastRecord         = { 0, 0 };
 timespec telem_teldata::lastRecord        = { 0, 0 };
 timespec telem_tcsi_focus::lastRecord     = { 0, 0 };

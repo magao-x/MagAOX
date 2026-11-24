@@ -23,19 +23,24 @@ apps_common = \
 	closedLoopIndi
 
 apps_aoc = \
+	virtualPDU \
 	trippLitePDU \
 	xt1121Ctrl \
 	xt1121DCDU \
 	tcsInterface \
 	adcTracker \
+	hwpSequencer \
 	hwpTracker \
+	qwpPupilTracker \
 	kTracker \
 	koolanceCtrl \
 	observerCtrl \
+	qwpTracker \
 	stateRuleEngine \
 	xInstGraph
 
 pythonapps_aoc = \
+	virtualPDU \
 	audibleAlerts
 
 # Apps common to RTC and ICC on MagAO-X
@@ -72,6 +77,8 @@ apps_rtc = \
 	pupilFit \
 	t2wOffloader \
 	dmSpeckle \
+	dmSyncopation \
+	loopTimingMonitor \
 	w2tcsOffloader \
 	pwfsSlopeCalc \
     kcubeCtrl \
@@ -82,11 +89,14 @@ apps_rtc = \
 	modalFilter \
 	dmRecon
 pythonapps_rtc = \
-	efcControl
+	efcControl \
+	po4aoTrainer
 
 # Apps needed on ICC
 apps_icc = \
 	dmPokeCenter \
+	elliptecCtrl \
+	elliptecLowLevel \
 	filterWheelCtrl \
 	smc100ccCtrl \
 	usbtempMon \
@@ -118,9 +128,12 @@ apps_tic = \
 
 # Apps with simulator mode
 apps_sim = \
+	virtualPDU \
 	trippLitePDU
 
 all_buildable_apps = \
+	virtualPDU \
+	acronameUsbHub \
 	adcTracker \
 	alignLoop \
 	cacaoInterface \
@@ -129,7 +142,11 @@ all_buildable_apps = \
 	dmPokeCenter \
 	dmPokeXCorr \
 	dmSpeckle \
+	dmSyncopation \
 	dmTemporalResponse \
+	elliptecCtrl \
+	elliptecLowLevel \
+	loopTimingMonitor \
 	filterWheelCtrl \
 	flipperCtrl \
 	flowRPM \
@@ -151,6 +168,7 @@ all_buildable_apps = \
 	psfFit \
 	pupilFit \
 	pwfsSlopeCalc \
+	qwpPupilTracker \
 	refRMS \
 	rhusbMon \
 	shmimIntegrator \
@@ -223,6 +241,7 @@ ifeq ($(ALL_APPS),1)
 endif
 
 all_guis = \
+	po4aoGUI \
 	dmCtrlGUI \
 	dmModeGUI \
 	offloadCtrlGUI \
@@ -230,9 +249,11 @@ all_guis = \
 	pwr \
 	coronAlignGUI \
 	loopCtrlGUI \
+	timingGUI \
 	roiGUI \
 	cameraGUI \
-	stageGUI
+	stageGUI \
+	polarimetryGUI \
 
 # If building for coverage, don't build guis for now
 ifeq ($(NO_GUIS),1)
@@ -260,7 +281,8 @@ all_rtimv_plugins = \
 	pwfsAlignment \
 	dmStatus \
 	warnings \
-	acquisition
+	acquisition \
+	valueDisplay
 
 ifeq ($(MAGAOX_ROLE),RTC)
   rtimv_plugins_to_build =
@@ -305,7 +327,8 @@ scripts_to_install = \
 	inventory_files \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
-	cyverse_replicate 
+	cyverse_replicate \
+	xnormconfig
 
 ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup
@@ -488,7 +511,7 @@ scripts_install:
 
 .PHONY: rtscripts_install
 rtscripts_install:
-	for scriptname in make_cpusets move_irqs; do \
+	for scriptname in make_cpusets move_irqs remove_cpusets; do \
 		sudo -H install -d /opt/MagAOX/bin && \
 		if [ -e rtSetup/$(MAGAOX_ROLE)/$$scriptname ]; then \
 			sudo -H install rtSetup/$(MAGAOX_ROLE)/$$scriptname /opt/MagAOX/bin/$$scriptname && \
@@ -517,6 +540,34 @@ utils_clean:
 		for app in ${utils_to_build}; do \
 			(cd utils/$$app && ${MAKE} clean) || exit 1; \
 		done
+
+# INDI-client-only machines: INDI tools (getINDI, setINDI, etc.), cursesINDI,
+# rtimv plugins, and GUIs.  None of these link libMagAOX, so no apps, libs,
+# or log utilities are built.
+# If mxlib and rtimv have successfully been installed the only additional
+# dependencies will be qwt and maybe svg:
+#  On Ubuntu 24/26: sudo apt install -y libqt5svg5-dev libqwtmathml-qt5-dev
+
+client_utils = cursesINDI
+
+# Run make (with optional goal $(3)) in each directory $(2) under $(1)
+make_each = for d in $(2); do (cd $(1)/$$d && ${MAKE} $(3)) || exit 1; done
+
+.PHONY: client
+client: indi_all
+	$(call make_each,gui/rtimv/plugins,${rtimv_plugins_to_build})
+	$(call make_each,gui/apps,${guis_to_build})
+	$(call make_each,utils,${client_utils})
+
+.PHONY: client_install
+client_install: indi_install
+	$(call make_each,gui/rtimv/plugins,${rtimv_plugins_to_build},install)
+	$(call make_each,gui/apps,${guis_to_build},install)
+	$(call make_each,utils,${client_utils},install)
+
+.PHONY: client_clean
+client_clean: indi_clean guis_clean
+	$(call make_each,utils,${client_utils},clean)
 
 .PHONY: test
 test: tests_clean

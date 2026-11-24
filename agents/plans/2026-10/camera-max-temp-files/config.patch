@@ -1,0 +1,44 @@
+diff --git a/camsci1.conf b/camsci1.conf
+index cea2992..79c199b 100644
+--- a/camsci1.conf
++++ b/camsci1.conf
+@@ -8,0 +9,2 @@ emGainTemp=-50
++emGainTempMode=maxTemp
++emGainMaxTemp=-40
+diff --git a/labrules/cameratemp.conf b/labrules/cameratemp.conf
+index 5a47955..eaca753 100644
+--- a/labrules/cameratemp.conf
++++ b/labrules/cameratemp.conf
+@@ -2,2 +2,3 @@
+-# Powered cameras must be locked onto their required EM-gain temperatures.
+-# Keep numeric targets below equal to camera.emGainTemp in each camera config.
++# Powered cameras must meet their configured EM-gain temperature requirements.
++# Keep locked-mode numeric targets below equal to camera.emGainTemp in each camera config.
++# camsci1 uses the shared readiness result, including valid samples and the maximum temperature.
+@@ -39,13 +39,0 @@ rule2=camwfs-temp-not-ready
+-[camsci1-temp-locked]
+-ruleType=txtVal
+-property=camsci1.temp_control
+-element=status
+-target=LOCKED
+-
+-[camsci1-temp-setpoint-expected]
+-ruleType=numVal
+-property=camsci1.temp_ccd
+-element=target
+-target=-50
+-tol=0
+-
+@@ -53,4 +41,5 @@ tol=0
+-ruleType=ruleComp
+-rule1=camsci1-temp-locked
+-rule2=camsci1-temp-setpoint-expected
+-comp=Nand
++ruleType=swVal
++property=camsci1.emgain_temp_ready
++element=toggle
++comp=Neq
++target=On
+@@ -61 +50 @@ priority=caution
+-message=camsci1 temperature is not locked at -50 C
++message=camsci1 temperature is not ready for EM gain

@@ -1,18 +1,20 @@
 #!/bin/bash
+# \file
+# \brief Prevent irqbalance from moving the RTC's latency-sensitive device IRQs.
 #
-# Prevent rebalancing IRQs for latency-sensitive hardware interrupts
+# move_irqs routes each of these to its dedicated core.
 #
 # Install to /usr/local/bin ensuring *only* root can write to the file
 # (because it is invoked with root privileges).
 #
 # Driver names are actually patterns, i.e. enx matches enx2cfda1c6db1a.
 
-#edt: any EDT gramegrabber
-#nvidia: any NVIDIA GPU
+#edt: any EDT framegrabber
 #enx98b78501aebc: shmimTCP NIC
 #cp2x72c: ALPAO -> dmwoofer
+#NVIDIA GPU IRQs are not banned: irqbalance keeps them on the system CPUs.
 
-for driverPattern in edt nvidia enx98b78501aebc cp2x72c; do
+for driverPattern in edt enx98b78501aebc cp2x72c; do
     if [[ $(grep -e "^\s*$2" /proc/interrupts) == *"$driverPattern"* ]]; then
         echo "ban=true"
         exit 0

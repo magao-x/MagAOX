@@ -1,0 +1,52 @@
+#!/bin/bash
+
+# Note: use ${VAR#*=} will take the string VAR, find all text up to the first equals sign and remove it, leaving just the value of the INDI state behind
+
+echo "setting transport mode"
+
+# do power checks first and fail fast. if no errors, then move stages.
+
+# stagepickoff + stagek
+STAGESMC_POWER=$(getINDI "pdu1.stagesmc.state")
+if [[ "${STAGESMC_POWER#*=}" != "On" ]]; then
+    echo "stagesmc is not on! cannot move stagek or stagepickoff"
+    exit 1
+fi
+
+# stagepollin
+ZABER_POWER=$(getINDI "vpdu0.stagezaber.state")
+if [[ "${ZABER_POWER#*=}" != "On" ]]; then
+    echo "stagezaber is not on"
+    exit 1
+fi
+
+# fwsci1
+FWSCI1_POWER=$(getINDI "dcdu0.fwsci1.state")
+if [[ "${FWSCI1_POWER#*=}" != "On" ]]; then
+    echo "fwsci1 is not on"
+    exit 1
+fi
+
+# fwsci2
+FWSCI2_POWER=$(getINDI "dcdu0.fwsci2.state")
+if [[ "${FWSCI2_POWER#*=}" != "On" ]]; then
+    echo "fwsci2 is not on"
+    exit 1
+fi
+
+# tracking laws
+setINDI "adctrack.tracking.toggle=Off"
+KTRACK_STATE=$(getINDI "ktrack.tracking.toggle")
+# only add this if so we don't have to sleep 2 seconds if we're rerunning this script
+if [[ "${KTRACK_STATE#*=}" != "Off" ]]; then
+    setINDI "ktrack.tracking.toggle=Off"
+    sleep 2
+fi
+
+setINDI "stagepickoff.presetName.lab=Off;none=Off;tel=On"
+setINDI "stagek.presetName.gmt=Off;lab=Off;none=Off;transport=On"
+setINDI "stagepollin.presetName.in=Off;out=Off;shutter=Off;transport=On"
+setINDI "fwsci1.filterName.CH4-875=On,Ha-Cont=Off;i=Off;open=Off;r=Off;z=Off"
+setINDI "fwsci2.filterName.Ha-narrow=On;Halpha=Off;g=Off;i=Off;r=Off;z=Off"
+
+xlog "ran xtransportmode"
