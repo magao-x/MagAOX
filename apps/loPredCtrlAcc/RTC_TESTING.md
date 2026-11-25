@@ -9,6 +9,7 @@ Every WFS frame is also republished to the main AO loop. With prediction off it 
 
 - **Main-loop route** (`ddspc_mode.main_loop`) runs the standard model without the DM channel, as the original loPredCtrl: its tip/tilt delta goes into the main loop's modal input for mfilt to integrate (see "Main-loop route").
 - **mfilt copy** (`ddspc_mode.mfilt_copy_8k` or `mfilt_copy_2k`) runs no DDSPC: the main loop's own tip/tilt integrator, reproduced here, drives `dm.channelName` while main-loop tip/tilt is zero, written on every DM slot (8k) or once per WFS frame (2k). It tests the DM channel path by itself (see "mfilt copy").
+- **mfilt clone** (`ddspc_mode.mfilt_clone_8k` or `mfilt_clone_2k`) is the mfilt copy started from `aol1_modevalDM`, so it picks up where mfilt left off, with the DM total equal to mfilt's state; 2k writes only step 0, with the main loop's write, and both report whether step 0 is in sync with it (see "mfilt clone").
 
 Each model trains only while its mode is selected, so the standard and assisted fits are independent experiments. Both learn only from genuine WFS measurements and the commands the scheduler copied from this channel.
 
@@ -304,6 +305,33 @@ getINDI 'loPredCtrlAcc.ddspc_control.*'   # requested_mode=mfilt_copy_2k, predic
 ```
 
 Details: `agents/plans/2026-11/ddspc-mfilt-copy.md`.
+
+## mfilt clone
+
+`ddspc_mode.mfilt_clone_8k` and `mfilt_clone_2k` are the closest this channel gets to the main loop itself: the only intended difference is that tip/tilt reaches the DM through synco. While `predict` is on:
+- at the start, the clone's state `s` is read from modes 0 and 1 of `aol1_modevalDM`, mfilt's output (published as `mfilt_clone.start_tt0/1`); `predict` is refused if that stream is not available;
+- each WFS frame, `s = clamp(mult*s - gain*y, ±limit)` with the main loop's parameters, as mfilt;
+- main-loop tip/tilt is zero, so mfilt keeps its last output on its own channel, decaying by `mult`. The clone writes `s` minus that held output to `dm.channelName`, so the DM total is `s` and the switch has no jump;
+- `mfilt_clone_2k` writes only step 0, the slot synco copies with the main loop's write; a decision that is not ready by then waits a frame for the next step 0. `mfilt_clone_8k` writes every slot.
+
+Check that step 0 is in sync with the main loop:
+
+```bash
+getINDI 'loPredCtrlAcc.mfilt_clone.*'
+# step0_in_sync   step 0 carried the decision for the frame the main loop's write carries
+# step0_missed    the clone was a frame behind the main loop; should stay at or near zero
+# step0_margin_us_min/mean   render minus decision completion; lower dm.renderLeadUs if missed rises with small margins
+```
+
+Select it like the copy, with `predict` off and `zero_confirmed=true`:
+
+```bash
+setINDI -s 'loPredCtrlAcc.ddspc_mode.standard=Off;accel_assisted=Off;main_loop=Off;mfilt_copy_8k=Off;mfilt_copy_2k=Off;mfilt_clone_8k=Off;mfilt_clone_2k=On'
+setINDI -s 'loPredCtrlAcc.predict.toggle=On'
+getINDI 'loPredCtrlAcc.ddspc_control.*'   # requested_mode=mfilt_clone_2k, main_loop_tt=zeroed
+```
+
+The held output is modelled from the start value, not re-read. If `aol1_modevalDMf` feedback rewrites mfilt's state, the DM total differs from `s` by that. Details: `agents/plans/2026-11/ddspc-mfilt-clone.md`.
 
 ## Remove the contribution
 
