@@ -1221,6 +1221,31 @@ The INDI `ke_setpoint` range widens to ±180, since m (a difference or sum of tw
   - Using the wrong left sign also fails it, and the left-mask loop diverges (δ1 → 2.41 instead of 0.3).
   - At the tests' 17° pattern the difference would still converge, at about half the sensitivity; at 45° it would see nothing.
 
+**Left/right set points estimated from the lab sweep (2026-11-24).** The user asked for starting values while the instrument is unavailable. Data: `Data/ADC/2026B/lab/z_sparkles_15ld45deg_calib.fits`, 21 unmasked frames, ADC offsets −4° to +4° in 0.4° steps (assumed from the user's plot).
+- **Method.**
+  - Each frame is bias-subtracted (median), and the half the mask would block is zeroed beyond an edge 6 λ/D from the star.
+  - The star is the centre of the four sparkles; the saturated core is smeared about 20 px vertically, so its peak is about 16 px off.
+  - The app's `measure_knife_edge` then runs on the turned frame.
+  - m is fitted against offset over −2° to 0° and read at the zero-dispersion offset, where the app's pair offsets cross zero: −0.9° (−1.07 and −0.68 for the two pairs).
+  - Moving the edge to 4 or 9 λ/D changes m by less than 0.2°.
+- **Results.**
+
+  | Mask | Slope of m | m at zero dispersion | m at offset 0 | Measured |
+  |---|---|---|---|---|
+  | top | −5.83 | −0.70 | −5.98 | −6.835 |
+  | bottom | −5.71 | 2.44 | −2.72 | 170.4 (≡ −9.6) |
+  | left | −5.84 | 0.32 | −4.96 | — |
+  | right | −6.22 | 2.44 | −3.19 | — |
+
+- **Findings.**
+  - All four masks respond with nearly the same slope on real data, which confirms the sum form for left/right and one `ke_gain` for all masks.
+  - The cross-check does not agree. The measured top value matches m at offset 0, not at zero dispersion: either it was captured near the nominal ADC position, or the real mask shifts m by about −6° compared with the synthetic edge. The bottom value matches neither.
+- **Defaults set** to the zero-dispersion estimates: `ke_setpoint_left = 0.32` and `ke_setpoint_right = 2.44`. If the top value turns out to have been captured at the nominal position, the offset-0 values (−4.96 and −3.19) are the consistent alternative.
+- **The app's slopes differ from the user's notebook.** The app measures pair slopes of −6.3 and −5.8 on this cube; the notebook gave −8.08 and −7.44. With the app's slopes, `ctrl_mtx` would be about [−0.159, −0.172] and `ke_gain` about −0.34. The defaults were not changed.
+- **Spot scale.** The sparkles are 132–135 px apart across the star, a radius of 19.0 grid units. 15 λ/D at 908 nm (the filter, confirmed by the user) is 20.76 units at 0.2857 λ/D per pixel. The user's calibration script places them at 15 λ/D. Not resolved; the pixel scale is the open question.
+  - In the app, the left pair's spacing came out 10.5% short of the expected value, outside `ke_pair_tolerance` (0.1). The estimate script set the expected separation to the measured one; the angles do not depend on it.
+  - On the instrument, the left/right masks may fail with "no pair of spots with the expected spacing found". If so, widen `ke_pair_tolerance`.
+
 **On-instrument follow-up.**
 - With the left and right masks: measure-only (star estimate, `ke_sep` ≈ 15 at 15 λ/D), capture set points (they then go in `ke_setpoint_left/right`), and check that the same `ke_gain` and `loop_sign` converge.
 - Check that "left" on camsci1 is smaller x in the raw frame.

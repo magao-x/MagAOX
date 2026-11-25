@@ -1139,11 +1139,11 @@ def test_ke_mask_switch_mirrors_spots_and_swaps_setpoints():
     # left and right: the selection turns with the transmitted half
     send(dev, "ke_spots", spot1=ON)  # physical spots 2 and 1 again
     send(dev, "coronagraph", knife_edge_left=ON)
-    assert dev._ke_mask == "left" and dev.ke_spots() == (3, 2) and dev._ke_setpoint == 0.0
+    assert dev._ke_mask == "left" and dev.ke_spots() == (3, 2) and dev._ke_setpoint == 0.32
     assert dev.properties["coronagraph"]["knife_edge_left"] == ON
     assert [dev.properties["ke_spots"][f"spot{n}"] for n in range(4)] == [OFF, OFF, ON, ON]
     send(dev, "coronagraph", knife_edge_right=ON)
-    assert dev._ke_mask == "right" and dev.ke_spots() == (1, 0) and dev._ke_setpoint == 0.0
+    assert dev._ke_mask == "right" and dev.ke_spots() == (1, 0) and dev._ke_setpoint == 2.44
     assert dev.coronagraph_name() == "knife_edge_right"
 
 
