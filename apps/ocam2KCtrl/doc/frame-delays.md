@@ -41,8 +41,9 @@ spans, and the rate and sample count used to derive the nominal spans.
 The explicit `reconfigure.request` switch saves the preceding history, ending
 at the operator's request. Mode, FPS, and sync changes and automatic recovery
 do not produce dumps. Relative `dumpDir` values are resolved below the normal
-camera log directory. The writer retains the latest five binary files and
-reports the filename, row count, and diagnostic losses through the app log.
+camera log directory. New dumps follow the same file creation permissions as
+ordinary app logs. The writer retains the latest five binary files and reports
+the filename, row count, and diagnostic losses through the app log.
 A second manual request while a dump is queued or being written still requests
 camera reconfiguration. Its skipped dump is logged.
 
