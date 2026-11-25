@@ -66,6 +66,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_indiP_integrator;
     using loPredCtrlAcc_operational::m_indiP_learning;
     using loPredCtrlAcc_operational::m_indiP_learnStd;
+    using loPredCtrlAcc_operational::m_indiP_learnStdExtra;
     using loPredCtrlAcc_operational::m_indiP_loopGain;
     using loPredCtrlAcc_operational::m_indiP_mode;
     using loPredCtrlAcc_operational::m_indiP_predicting;
@@ -81,6 +82,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_invalidReason;
     using loPredCtrlAcc_operational::m_invalidWindow;
     using loPredCtrlAcc_operational::m_learning;
+    using loPredCtrlAcc_operational::m_learnStdExtra;
     using loPredCtrlAcc_operational::m_learnUs;
     using loPredCtrlAcc_operational::m_maxFill;
     using loPredCtrlAcc_operational::m_modalEngaged;
@@ -2417,6 +2419,71 @@ TEST_CASE( "learn_std ends with a probe-free stage, then stops learning", "[rtc-
     }
     CHECK( app.m_exploration.empty() );
     CHECK( app.m_learning );
+}
+
+/** \brief learn_std_extra (INDI, default 0) keeps learn_std learning for that many seconds after its sequence ends,
+ * then stops learning while prediction continues; a change applies at once.
+ */
+TEST_CASE( "learn_std_extra keeps learning after the sequence", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_learnStdExtra;
+    MagAOX::app::loPredCtrlAcc_operational::learnStdEnded;
+    MagAOX::app::loPredCtrlAcc_operational::step;
+#endif
+    // clang-format on
+    Controller app( true );
+    app.qualifyOutput();
+    REQUIRE( app.m_learnStdExtra == 0 ); // The default: learning stops at the sequence's end.
+    REQUIRE( app.m_indiP_learnStdExtra["current"].get<double>() == 0 );
+
+    auto extra = [&]( double seconds )
+    {
+        auto property = app.m_indiP_learnStdExtra;
+        property["target"].set( seconds );
+        return app.newCallBack_m_indiP_learnStdExtra( property );
+    };
+    REQUIRE( extra( -1 ) < 0 );
+    REQUIRE( extra( .05 ) == 0 );
+    CHECK( app.m_learnStdExtra == Approx( .05 ) );
+    CHECK( app.m_indiP_learnStdExtra["current"].get<double>() == Approx( .05 ) );
+
+    DDSPC::Matrix y( 2, 1 ), empty;
+    y << .1f, -.1f;
+    auto sequence = [&]()
+    {
+        auto learnStd = app.m_indiP_learnStd;
+        learnStd["toggle"].setSwitchState( pcf::IndiElement::On );
+        REQUIRE( app.newCallBack_m_indiP_learnStd( learnStd ) == 0 );
+        app.m_exploration = app.parseExploration( "5,0.05,0.1" ); // A short sequence in place of the original.
+        for( int n = 0; n < 5; ++n )
+        {
+            app.advance( y, empty, false );
+        }
+        REQUIRE( app.m_exploration.empty() );
+    };
+
+    // Learning continues after the sequence until learn_std_extra has passed.
+    sequence();
+    app.advance( y, empty, false );
+    CHECK( app.m_learning );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 80 ) );
+    app.advance( y, empty, false );
+    CHECK_FALSE( app.m_learning );
+    CHECK( app.m_predicting );
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_learning["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_indiP_learnStd["toggle"].getSwitchState() == pcf::IndiElement::Off );
+
+    // A change applies at once, also while the extra learning runs.
+    REQUIRE( extra( 600 ) == 0 );
+    sequence();
+    app.advance( y, empty, false );
+    CHECK( app.m_learning );
+    REQUIRE( extra( 0 ) == 0 );
+    app.advance( y, empty, false );
+    CHECK_FALSE( app.m_learning );
 }
 
 /** \brief Every prediction stop and every refused request is logged as a note with its reason. */

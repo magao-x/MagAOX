@@ -354,6 +354,13 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// learn_std started the current learning; its sequence's end turns learning off. Under m_modelMutex.
     bool m_learnStdActive{ false };
 
+    /// Seconds of learning after the learn_std sequence ends before learning turns off (0: at its end). INDI
+    /// learn_std_extra; under m_modelMutex.
+    double m_learnStdExtra{ 0 };
+
+    /// When the learn_std sequence's last stage ended, -1 before; under m_modelMutex.
+    std::int64_t m_learnStdEndNs{ -1 };
+
     /// The learn_std sequence ended on the WFS thread; appLogic updates the switches and logs it.
     std::atomic<bool> m_learnStdFinished{ false };
 
@@ -433,6 +440,9 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Public controls and compact diagnostics; names retain the operational loPredCtrl workflow.
     pcf::IndiProperty m_indiP_learning, m_indiP_predicting, m_indiP_learnStd, m_indiP_reset;
     pcf::IndiProperty m_indiP_mode, m_indiP_gain, m_indiP_exploration, m_indiP_sync;
+
+    /// Seconds of learning after the learn_std sequence ends.
+    pcf::IndiProperty m_indiP_learnStdExtra;
     pcf::IndiProperty m_indiP_control, m_indiP_performance, m_indiP_safety, m_indiP_adc;
 
     /// Every assisted-mode qualification condition and the upstream values behind it.
@@ -476,8 +486,11 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Train only the selected mode's model: standard while standard is selected, the multirate learner otherwise.
     void applyTraining();
 
-    /// End a learn_std run after its last stage: stop learning at once, and let appLogic show it; WFS thread.
+    /// End a learn_std run after its last stage and learn_std_extra: stop learning at once, and let appLogic show it.
     void learnStdFinished();
+
+    /// The learn_std sequence's last stage ended: stop learning now, or after learn_std_extra seconds; WFS thread.
+    void learnStdEnded( std::int64_t now /**< [in] Current monotonic time [ns]. */ );
 
     /// Return whether the selected mode's model is ready.
     bool selectedReady() const;
@@ -728,6 +741,9 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Set the additive current-residual feedback gain used by loPredCtrl.
     INDI_NEWCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_gain );
 
+    /// Set the seconds of learning after the learn_std sequence ends; applies at once, including to a running one.
+    INDI_NEWCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_learnStdExtra );
+
     /// Install an original-format explicit exploration sequence.
     INDI_NEWCALLBACK_DECL( loPredCtrlAcc_operational, m_indiP_exploration );
 
@@ -820,6 +836,11 @@ inline void loPredCtrlAcc_operational::setupConfig()
          "Consecutive missed WFS frames, and WFS frames of missed ACC samples, filled instead of stopping (0-20, "
          "default 5)." );
     add( "parameters", "qrd", "bool", "Use QR-RLS for both independent models." );
+    add( "parameters",
+         "learn_std_extra",
+         "float",
+         "Seconds of learning after the learn_std sequence ends before learning turns off; INDI learn_std_extra "
+         "(default 0)." );
     add( "integrator",
          "enabled",
          "bool",
@@ -895,6 +916,7 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         config( m_slots, "parameters.dm_slots" );
         config( m_ratio, "parameters.acc_ratio" );
         config( m_maxFill, "parameters.max_fill" );
+        config( m_learnStdExtra, "parameters.learn_std_extra" );
         config( m_ripple, "parameters.ripple" );
         config( m_assistedDiagnostic, "parameters.assisted_diagnostic" );
         double renderLeadUs = m_renderLeadNs / 1000.;
@@ -913,7 +935,8 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
             m_inputTimeout <= 0 || m_inputTimeout > 1 || m_settings.m_modes < 1 || m_settings.m_modes > 2 ||
             m_accelHistory < 1 || m_accelHistory > 16 || m_slots < 1 || m_slots > 16 || m_ratio < 1 || m_ratio > 16 ||
             !std::isfinite( renderLeadUs ) || renderLeadUs < 0 || renderLeadUs > 1000 || !std::isfinite( m_ripple ) ||
-            m_ripple < 0 || m_maxFill < 0 || m_maxFill > 20 )
+            m_ripple < 0 || m_maxFill < 0 || m_maxFill > 20 || !std::isfinite( m_learnStdExtra ) ||
+            m_learnStdExtra < 0 || m_learnStdExtra > 3600 )
         {
             throw std::invalid_argument( "Invalid operational WFS, producer, gain or model configuration" );
         }
@@ -1095,8 +1118,20 @@ inline void loPredCtrlAcc_operational::learnStdFinished()
 {
     m_learning       = false;
     m_learnStdActive = false;
+    m_learnStdEndNs  = -1;
     applyTraining();
     m_learnStdFinished.store( true );
+}
+
+inline void loPredCtrlAcc_operational::learnStdEnded( std::int64_t now )
+{
+    if( m_learnStdExtra > 0 )
+    {
+        m_learnStdEndNs = now; // step() stops learning learn_std_extra seconds from now.
+        return;
+    }
+
+    learnStdFinished();
 }
 
 inline bool loPredCtrlAcc_operational::selectedReady() const
@@ -1584,6 +1619,12 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
 
     m_lastMeasurement = measurement;
 
+    // learn_std_extra seconds after the learn_std sequence ended (read now, so a change applies at once).
+    if( m_learnStdActive && m_learnStdEndNs >= 0 && now - m_learnStdEndNs >= m_learnStdExtra * 1e9 )
+    {
+        learnStdFinished();
+    }
+
     // Every decision, so the integrator's previous position stays current across gaps and mode changes.
     DDSPC::Matrix input;
     m_pending.m_appliedValid = standardInput( applied, input );
@@ -1657,7 +1698,7 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
             m_exploration.erase( m_exploration.begin() );
             if( m_exploration.empty() && m_learnStdActive )
             {
-                learnStdFinished();
+                learnStdEnded( now );
             }
         }
     }
@@ -1778,7 +1819,7 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
         m_exploration.erase( m_exploration.begin() );
         if( m_exploration.empty() && m_learnStdActive )
         {
-            learnStdFinished();
+            learnStdEnded( now );
         }
     }
     // One shared QR-RLS update per genuine WFS target, then every phase's coefficients and slot gains.
@@ -2406,6 +2447,14 @@ inline int loPredCtrlAcc_operational::setupINDI()
     m_indiP_gain["target"].set( m_gain );
     if( registerIndiPropertyNew( m_indiP_gain, INDI_NEWCALLBACK( m_indiP_gain ) ) < 0 )
         return -1;
+    createStandardIndiNumber<float>( m_indiP_learnStdExtra, "learn_std_extra", 0, 3600, .1, "%0.1f" );
+    m_indiP_learnStdExtra["current"].set( m_learnStdExtra );
+    m_indiP_learnStdExtra["target"].set( m_learnStdExtra );
+    if( registerIndiPropertyNew( m_indiP_learnStdExtra, INDI_NEWCALLBACK( m_indiP_learnStdExtra ) ) < 0 )
+    {
+        return -1;
+    }
+
     createStandardIndiText( m_indiP_exploration, "exploration_sequence", "Exploration sequence", "DDSPC" );
     if( registerIndiPropertyNew( m_indiP_exploration, INDI_NEWCALLBACK( m_indiP_exploration ) ) < 0 )
         return -1;
@@ -3011,6 +3060,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
 
     m_learning       = enabled;
     m_learnStdActive = enabled;
+    m_learnStdEndNs  = -1;
     if( enabled )
     {
         // loPredCtrl's three stages, then 1000 frames learning without probes; its end turns learning off.
@@ -3147,6 +3197,36 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_gain )( const p
     return 0;
 }
 
+inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStdExtra )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_learnStdExtra, ipRecv );
+    if( !ipRecv.find( "target" ) )
+    {
+        return -1;
+    }
+
+    double seconds;
+    try
+    {
+        seconds = number( ipRecv["target"] );
+    }
+    catch( const std::exception & )
+    {
+        return -1;
+    }
+
+    if( !std::isfinite( seconds ) || seconds < 0 || seconds > 3600 )
+    {
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> indiLock( m_indiMutex );
+    std::lock_guard<std::mutex> modelLock( m_modelMutex );
+    m_learnStdExtra = seconds;
+    updatesIfChanged<double>( m_indiP_learnStdExtra, { "current", "target" }, { seconds, seconds }, INDI_OK );
+    return 0;
+}
+
 inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_exploration )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_exploration, ipRecv );
@@ -3158,7 +3238,8 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_exploration )( 
         auto                        stages = parseExploration( text );
         std::lock_guard<std::mutex> indiLock( m_indiMutex );
         std::lock_guard<std::mutex> modelLock( m_modelMutex );
-        m_exploration = std::move( stages );
+        m_exploration   = std::move( stages );
+        m_learnStdEndNs = -1; // A new sequence: the extra learning counts from its end.
         updatesIfChanged<std::string>( m_indiP_exploration, { "current", "target" }, { text, text }, INDI_OK );
         return 0;
     }
