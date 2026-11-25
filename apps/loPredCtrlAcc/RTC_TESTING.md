@@ -284,7 +284,7 @@ Changing `ddspc_mode` while predicting in this route stops prediction ("DDSPC pr
 ## mfilt copy
 
 `ddspc_mode.mfilt_copy_8k` and `mfilt_copy_2k` move the main loop's tip/tilt control onto the DDSPC DM channel without DDSPC. They compute the same thing and differ only in how often it is written. Each WFS frame (2 kHz) while `predict` is on:
-- `s = clamp(mult*s - gain*copy_sign*y, ±limit)` for modes 0 and 1, where `y` is the `aol1_modevalWFS` tip/tilt and `gain`, `mult`, `limit` are the main loop's own (`holoop` `loop_gain`/`loop_multcoeff`/`loop_max_limit` times `aol1_mgainfact`/`mmultfact`/`mlimitfact`, the `integrator` property). With `[integrator] copy_sign = 1` this is mfilt's law as modelled; the default `-1` inverts the copy's command, after the first on-sky `mfilt_copy_2k` test with `1` diverged (restart the app to change it);
+- `s = clamp(mult*s - gain*y, ±limit)` for modes 0 and 1, where `y` is the `aol1_modevalWFS` tip/tilt and `gain`, `mult`, `limit` are the main loop's own (`holoop` `loop_gain`/`loop_multcoeff`/`loop_max_limit` times `aol1_mgainfact`/`mmultfact`/`mlimitfact`, the `integrator` property). This is mfilt's law;
 - `s` is converted through `modeCube` planes 0 and 1 and written to `dm.channelName`:
   - `mfilt_copy_8k`: on all four DM slots of the frame, so synco writes the channel at 8 kHz with the value changing at 2 kHz;
   - `mfilt_copy_2k`: once per frame, on the first slot synco copies after the decision (a late slot is retried on the next). synco holds it on the other three slots, so the DM sees the same command. Those three slots count in `ddspc_performance.transport_skipped` (6000 per second), so that counter is not a health measure in this mode;

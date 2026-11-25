@@ -55,15 +55,3 @@ conversion. Those are what the mode tests.
   `requested_mode=mfilt_copy_8k`; off returns the channel and state to zero.
 - `check-operational-controls` 16/16 and config tests OK.
 - T1 `standard_equivalence.py --base HEAD`: 192000 standard rendered values bit-for-bit identical.
-
-## copy_sign (after the first on-sky test)
-
-The first on-sky `mfilt_copy_2k` test diverged. The modelled law (`- gain*y`, from `apps/modalFilter`) has not been
-checked against cacao's mfilt, and `modeCube` planes 0 and 1 may differ in sign from cacao's modes-to-DM conversion,
-so `[integrator] copy_sign` (1 or -1, default -1) now multiplies the copy's input: `s = clamp(mult*s -
-gain*copy_sign*y, +/-limit)`. It affects only `mfilt_copy_8k`/`2k`; standard, assisted and main-loop are unchanged.
-Config only (restart to change). If -1 also diverges, the sign is not the cause: check that `modeCube` matches cacao's
-live DM modes and that the integrator parameters match cacao's effective tip/tilt gain, mult and limit.
-
-Verification: `check-rtc-controller` 37/37 (the 8k case runs the default -1, the 2k case 1, each against the reference
-law with that sign); `check-operational-controls` OK.
