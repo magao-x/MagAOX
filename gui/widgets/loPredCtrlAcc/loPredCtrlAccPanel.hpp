@@ -92,6 +92,8 @@ class loPredCtrlAccPanel : public xWidget
     QPushButton *m_mainLoop{ nullptr };  ///< ddspc_mode.main_loop selector: standard DDSPC through the main loop.
     QPushButton *m_copy8k{ nullptr };    ///< ddspc_mode.mfilt_copy_8k: the main loop's integrator, every DM slot.
     QPushButton *m_copy2k{ nullptr };    ///< ddspc_mode.mfilt_copy_2k: the main loop's integrator, once per frame.
+    QPushButton *m_clone8k{ nullptr };   ///< ddspc_mode.mfilt_clone_8k: mfilt's state from aol1_modevalDM, every slot.
+    QPushButton *m_clone2k{ nullptr };   ///< ddspc_mode.mfilt_clone_2k: mfilt's state from aol1_modevalDM, step 0 only.
     QPushButton *m_reset{ nullptr };     ///< reset_model request.
     QPushButton *m_zeroDm{ nullptr };    ///< zero_dm request: stop prediction and re-zero the DDSPC DM channel.
     QPushButton *m_releaseTT{ nullptr }; ///< release_tt request: stop prediction and return tip/tilt to the main loop.

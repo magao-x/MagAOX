@@ -630,6 +630,77 @@ TEST_CASE( "loPredCtrlAccGUI selects the mfilt copies", "[loPredCtrlAccGUI]" )
     CHECK( fixture.widget<QLabel>( "prediction.banner" )->text() ==
            "MFILT COPY ACTIVE (8 kHz): main-loop tip/tilt integrator on the DDSPC DM channel" );
 }
+
+/** \brief The two mfilt clone buttons are offered only by a controller with their ddspc_mode elements and each sends
+ * its own, with every element the controller publishes; the banner names the rate and the step-0 sync counts, which
+ * also have their own status row.
+ */
+TEST_CASE( "loPredCtrlAccGUI selects the mfilt clones", "[loPredCtrlAccGUI]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACCGUI_TEST_DOXYGEN_REF
+    xqt::loPredCtrlAccPanel::sendMode;
+    xqt::loPredCtrlAccPanel::refresh;
+#endif
+    // clang-format on
+    Fixture fixture;
+    fixture.defineAll();
+    auto *clone8k = fixture.widget<QPushButton>( "ddspc_mode.mfilt_clone_8k" );
+    auto *clone2k = fixture.widget<QPushButton>( "ddspc_mode.mfilt_clone_2k" );
+    CHECK_FALSE( clone8k->isEnabled() ); // An older controller without the elements.
+    CHECK_FALSE( clone2k->isEnabled() );
+
+    pcf::IndiProperty mode( pcf::IndiProperty::Switch, "loPredCtrlAcc", "ddspc_mode" );
+    for( const char *element : { "standard",
+                                 "accel_assisted",
+                                 "main_loop",
+                                 "mfilt_copy_8k",
+                                 "mfilt_copy_2k",
+                                 "mfilt_clone_8k",
+                                 "mfilt_clone_2k" } )
+    {
+        mode.add( pcf::IndiElement(
+            element, std::strcmp( element, "standard" ) ? pcf::IndiElement::Off : pcf::IndiElement::On ) );
+    }
+    fixture.publish( mode, true );
+    REQUIRE( clone8k->isEnabled() );
+    REQUIRE( clone2k->isEnabled() );
+    clone2k->click();
+    clone8k->click();
+    QApplication::processEvents();
+    REQUIRE( fixture.m_publisher.m_commands.size() == 2 );
+    const auto &sent2k = fixture.m_publisher.m_commands[0], &sent8k = fixture.m_publisher.m_commands[1];
+    CHECK( sent2k.getElements().size() == 7 );
+    CHECK( sent2k["mfilt_clone_2k"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( sent2k["mfilt_copy_2k"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( sent2k["mfilt_clone_8k"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( sent8k["mfilt_clone_8k"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( sent8k["mfilt_clone_2k"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( sent8k["standard"].getSwitchState() == pcf::IndiElement::Off );
+
+    fixture.publishSwitch( "ddspc_mode", "standard", pcf::IndiElement::Off );
+    fixture.publishSwitch( "ddspc_mode", "mfilt_clone_2k", pcf::IndiElement::On );
+    CHECK( clone2k->isChecked() );
+    CHECK_FALSE( clone8k->isChecked() );
+
+    pcf::IndiProperty clone( pcf::IndiProperty::Number, "loPredCtrlAcc", "mfilt_clone" );
+    clone.add( pcf::IndiElement( "step0_in_sync", 1990.0 ) );
+    clone.add( pcf::IndiElement( "step0_missed", 3.0 ) );
+    fixture.publish( clone, true );
+    const auto inSync = QString::fromStdString( clone["step0_in_sync"].get() );
+    const auto missed = QString::fromStdString( clone["step0_missed"].get() );
+    CHECK( QString::fromStdString( fixture.status( "cloneStep0" ) ) == inSync + " / " + missed );
+
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::On );
+    fixture.publishText( "ddspc_control", "requested_mode", "mfilt_clone_2k" );
+    fixture.publishText( "ddspc_control", "prediction", "active" );
+    fixture.publishText( "ddspc_control", "main_loop_tt", "zeroed" );
+    CHECK( fixture.widget<QLabel>( "prediction.banner" )->text() ==
+           "MFILT CLONE ACTIVE (2 kHz): mfilt's tip/tilt state on the DDSPC DM channel; step 0 in sync " + inSync +
+               ", missed " + missed );
+    fixture.publishText( "ddspc_control", "requested_mode", "mfilt_clone_8k" );
+    CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().startsWith( "MFILT CLONE ACTIVE (8 kHz)" ) );
+}
 } // namespace loPredCtrlAccGUITest
 } // namespace libXWCTest
 

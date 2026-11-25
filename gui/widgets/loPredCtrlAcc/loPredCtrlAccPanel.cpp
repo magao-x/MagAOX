@@ -166,27 +166,41 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
     m_mainLoop       = new QPushButton( QStringLiteral( "Main Loop" ), modeBox );
     m_copy8k         = new QPushButton( QStringLiteral( "mfilt Copy 8 kHz" ), modeBox );
     m_copy2k         = new QPushButton( QStringLiteral( "mfilt Copy 2 kHz" ), modeBox );
+    m_clone8k        = new QPushButton( QStringLiteral( "mfilt Clone 8 kHz" ), modeBox );
+    m_clone2k        = new QPushButton( QStringLiteral( "mfilt Clone 2 kHz" ), modeBox );
     m_standard->setObjectName( QStringLiteral( "ddspc_mode.standard" ) );
     m_assisted->setObjectName( QStringLiteral( "ddspc_mode.accel_assisted" ) );
     m_mainLoop->setObjectName( QStringLiteral( "ddspc_mode.main_loop" ) );
     m_copy8k->setObjectName( QStringLiteral( "ddspc_mode.mfilt_copy_8k" ) );
     m_copy2k->setObjectName( QStringLiteral( "ddspc_mode.mfilt_copy_2k" ) );
+    m_clone8k->setObjectName( QStringLiteral( "ddspc_mode.mfilt_clone_8k" ) );
+    m_clone2k->setObjectName( QStringLiteral( "ddspc_mode.mfilt_clone_2k" ) );
     m_copy8k->setWhatsThis(
         QStringLiteral( "No DDSPC: the main loop's tip/tilt integrator, copied, drives the DDSPC DM "
                         "channel on every DM slot while main-loop tip/tilt is zero." ) );
     m_copy2k->setWhatsThis(
         QStringLiteral( "No DDSPC: the main loop's tip/tilt integrator, copied, drives the DDSPC DM "
                         "channel once per WFS frame while main-loop tip/tilt is zero." ) );
+    m_clone8k->setWhatsThis(
+        QStringLiteral( "No DDSPC: mfilt's tip/tilt state, picked up from aol1_modevalDM, drives the DDSPC DM channel "
+                        "on every DM slot while main-loop tip/tilt is zero; the DM total stays mfilt's state." ) );
+    m_clone2k->setWhatsThis(
+        QStringLiteral( "No DDSPC: mfilt's tip/tilt state, picked up from aol1_modevalDM, drives the DDSPC DM channel "
+                        "on step 0 only, with the main loop's write; step-0 sync is reported." ) );
     m_mainLoop->setWhatsThis( QStringLiteral( "Standard DDSPC sent through the main loop's mfilt, as loPredCtrl: no "
                                               "DDSPC DM channel, tip/tilt never zeroed." ) );
 
-    auto *copyRow = new QHBoxLayout; // The mfilt copies, below the controller modes.
+    auto *copyRow  = new QHBoxLayout; // The mfilt copies, below the controller modes.
+    auto *cloneRow = new QHBoxLayout; // The mfilt clones, below the copies.
 
-    for( auto *button : { m_standard, m_assisted, m_mainLoop, m_copy8k, m_copy2k } )
+    for( auto *button : { m_standard, m_assisted, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
     {
         button->setCheckable( true );
         setXwFont( button );
-        ( button == m_copy8k || button == m_copy2k ? copyRow : modeRow )->addWidget( button );
+        ( button == m_copy8k || button == m_copy2k     ? copyRow
+          : button == m_clone8k || button == m_clone2k ? cloneRow
+                                                       : modeRow )
+            ->addWidget( button );
     }
 
     connect( m_standard,
@@ -224,8 +238,23 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
              {
                  sendMode( "mfilt_copy_2k" );
              } );
+    connect( m_clone8k,
+             &QPushButton::clicked,
+             this,
+             [this]()
+             {
+                 sendMode( "mfilt_clone_8k" );
+             } );
+    connect( m_clone2k,
+             &QPushButton::clicked,
+             this,
+             [this]()
+             {
+                 sendMode( "mfilt_clone_2k" );
+             } );
     modeLayout->addLayout( modeRow );
     modeLayout->addLayout( copyRow );
+    modeLayout->addLayout( cloneRow );
     m_interlock = new QLabel( modeBox );
     m_interlock->setObjectName( QStringLiteral( "interlock" ) );
     m_interlock->setWordWrap( true );
@@ -376,6 +405,18 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
                 return state.empty() ? c_missing : QString::fromStdString( state );
             } );
     addElementRow( statusGrid, "Learning overruns", "ddspc_performance", "learn_overruns" );
+    addRow( statusGrid,
+            "cloneStep0",
+            "Clone step 0 (in sync / missed)",
+            [this]()
+            {
+                const auto inSync = value( "mfilt_clone", "step0_in_sync" );
+                const auto missed = value( "mfilt_clone", "step0_missed" );
+
+                return inSync.empty() || missed.empty() ? c_missing
+                                                        : QString::fromStdString( inSync ) + QStringLiteral( " / " ) +
+                                                              QString::fromStdString( missed );
+            } );
 
     m_warnings = new QLabel( statusBox );
     m_warnings->setObjectName( QStringLiteral( "warnings" ) );
@@ -463,7 +504,8 @@ void loPredCtrlAccPanel::subscribe()
                                   "ddspc_performance",
                                   "safety",
                                   "adc_values",
-                                  "integrator" } )
+                                  "integrator",
+                                  "mfilt_clone" } )
     {
         m_parent->addSubscriberProperty( this, m_device, property );
     }
@@ -670,7 +712,9 @@ QString loPredCtrlAccPanel::refusalReason() const
     double     enabled, ready;
     const bool mainLoop = switchState( "ddspc_mode", "main_loop" ) == pcf::IndiElement::On; // Needs no integrator.
     const bool copy     = switchState( "ddspc_mode", "mfilt_copy_8k" ) == pcf::IndiElement::On ||
-                      switchState( "ddspc_mode", "mfilt_copy_2k" ) == pcf::IndiElement::On; // Always integrates.
+                      switchState( "ddspc_mode", "mfilt_copy_2k" ) == pcf::IndiElement::On ||
+                      switchState( "ddspc_mode", "mfilt_clone_8k" ) == pcf::IndiElement::On ||
+                      switchState( "ddspc_mode", "mfilt_clone_2k" ) == pcf::IndiElement::On; // Always integrates.
 
     if( !mainLoop && ( copy || ( finiteNumber( value( "integrator", "enabled" ), enabled ) && enabled == 1 ) ) &&
         finiteNumber( value( "integrator", "ready" ), ready ) && ready == 0 )
@@ -712,11 +756,17 @@ void loPredCtrlAccPanel::sendMode( const char *selected )
         pcf::IndiProperty request( pcf::IndiProperty::Switch, m_device, "ddspc_mode" );
         request.setRule( pcf::IndiProperty::OneOfMany );
 
-        for( const char *element : { "standard", "accel_assisted", "main_loop", "mfilt_copy_8k", "mfilt_copy_2k" } )
+        for( const char *element : { "standard",
+                                     "accel_assisted",
+                                     "main_loop",
+                                     "mfilt_copy_8k",
+                                     "mfilt_copy_2k",
+                                     "mfilt_clone_8k",
+                                     "mfilt_clone_2k" } )
         {
             if( switchState( "ddspc_mode", element ) == pcf::IndiElement::UnknownSwitchState )
             {
-                continue; // An older controller without the main_loop or mfilt_copy_* elements.
+                continue; // An older controller without the main_loop, mfilt_copy_* or mfilt_clone_* elements.
             }
 
             request.add( pcf::IndiElement(
@@ -772,14 +822,16 @@ void loPredCtrlAccPanel::refresh()
     m_mainLoop->setChecked( switchState( "ddspc_mode", "main_loop" ) == pcf::IndiElement::On );
     m_copy8k->setChecked( switchState( "ddspc_mode", "mfilt_copy_8k" ) == pcf::IndiElement::On );
     m_copy2k->setChecked( switchState( "ddspc_mode", "mfilt_copy_2k" ) == pcf::IndiElement::On );
+    m_clone8k->setChecked( switchState( "ddspc_mode", "mfilt_clone_8k" ) == pcf::IndiElement::On );
+    m_clone2k->setChecked( switchState( "ddspc_mode", "mfilt_clone_2k" ) == pcf::IndiElement::On );
 
-    for( auto *button : { m_standard, m_assisted, m_mainLoop, m_copy8k, m_copy2k } )
+    for( auto *button : { m_standard, m_assisted, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
     {
         button->setEnabled( blocked.isEmpty() );
         button->setToolTip( blocked.isEmpty() ? button->whatsThis() : blocked );
     }
 
-    for( auto *button : { m_mainLoop, m_copy8k, m_copy2k } )
+    for( auto *button : { m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
     {
         const auto element = button->objectName().toStdString().substr( std::strlen( "ddspc_mode." ) );
 
@@ -804,8 +856,18 @@ void loPredCtrlAccPanel::refresh()
 
     if( ops && !prediction.empty() )
     {
-        if( const auto mode = value( "ddspc_control", "requested_mode" );
-            prediction == "active" && ( mode == "mfilt_copy_8k" || mode == "mfilt_copy_2k" ) )
+        const auto mode = value( "ddspc_control", "requested_mode" );
+
+        if( prediction == "active" && ( mode == "mfilt_clone_8k" || mode == "mfilt_clone_2k" ) )
+        {
+            banner = QStringLiteral( "MFILT CLONE ACTIVE (%1): mfilt's tip/tilt state on the DDSPC DM channel; step 0 "
+                                     "in sync %2, missed %3" )
+                         .arg( mode == "mfilt_clone_8k" ? QStringLiteral( "8 kHz" ) : QStringLiteral( "2 kHz" ),
+                               QString::fromStdString( value( "mfilt_clone", "step0_in_sync" ) ),
+                               QString::fromStdString( value( "mfilt_clone", "step0_missed" ) ) );
+            style = QStringLiteral( "background: #1e7b34; color: white;" );
+        }
+        else if( prediction == "active" && ( mode == "mfilt_copy_8k" || mode == "mfilt_copy_2k" ) )
         {
             banner = QStringLiteral( "MFILT COPY ACTIVE (%1): main-loop tip/tilt integrator on the DDSPC DM channel" )
                          .arg( mode == "mfilt_copy_8k" ? QStringLiteral( "8 kHz" ) : QStringLiteral( "2 kHz" ) );
