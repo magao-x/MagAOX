@@ -20,7 +20,7 @@ Each model trains only while its mode is selected, so the standard and assisted 
 | `dm.threadPrio` | `20` | Dedicated producer worker started by `MagAOXApp::threadStart`, as in accelSim and dmSpeckle. It runs below the scheduler's priority 30. |
 | `dm.cpuset` | `spare29` | Dedicated development core (CPU 29). acc000 uses `spare30` and `spare31`. |
 | `shmimMonitor.cpuset` | `spare28` | Runs the WFS decisions and all learning. Assisted learning takes about 160 µs per 500 µs frame on a development Mac (one 212-column QR update, four phase solutions, 16 slot gains). |
-| `dm.renderLeadUs` | `40` | Assisted only. Each slot is calculated at `cutoff - renderLeadUs` with the newest ACC sample; the calculation takes about 1 µs. Standard slots are still rendered on eligibility. |
+| `dm.renderLeadUs` | `40` | Each slot is rendered at `cutoff - renderLeadUs` from the newest WFS decision (assisted: and the newest ACC sample); the calculation takes about 1 µs. Before this, standard and mfilt copy slots were rendered when selected, up to a slot (125 µs) before their cutoff, so a decision completed in between reached the DM a slot late. |
 | `syncopation.writeLeadUs` | `125` | Publishes as soon as a slot is rendered. |
 | `parameters.dm_slots`, `acc_ratio` | `4`, `4` | DM slots and ACC samples per WFS frame. Other integer ratios are supported (1–16) when the scheduler and upstream sampling provide them. |
 | `parameters.ripple` | `10` | Assisted only; see below. |
