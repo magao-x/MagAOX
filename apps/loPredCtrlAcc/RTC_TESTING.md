@@ -158,7 +158,11 @@ setINDI -s 'loPredCtrlAcc.predict.toggle=On'
 getINDI 'loPredCtrlAcc.ddspc_control.*' 'loPredCtrlAcc.ddspc_performance.*' 'loPredCtrlAcc.safety.*'
 ```
 
-The triples are loPredCtrl's original sequence: WFS frames, Gaussian standard deviation in modal command units, and regularization. Use the middle value that matches the deployed modal scale. `setINDI -s 'loPredCtrlAcc.learn_std.toggle=On'` installs `1000,0.05,100,1000,0.05,3,1000,0.05,0.1,1000,0,0.1` and enables learning and prediction together: loPredCtrl's three stages, then 1000 frames of learning without probes. During the 4,000-frame sequence (2 s), `prediction=warming` shows probe or feedback commands. When the last stage ends, `learn` and `learn_std` turn off by themselves and prediction continues with the frozen fit; the log notes "DDSPC standard learning sequence finished". The final regularization (0.1) stays in use until `reset_model`. Learning turned on by hand (`learn`) is never stopped by an exploration sequence. Check that learning has stopped and the fit is ready, then measure:
+The triples are loPredCtrl's original sequence: WFS frames, Gaussian standard deviation in modal command units, and regularization. Use the middle value that matches the deployed modal scale. `setINDI -s 'loPredCtrlAcc.learn_std.toggle=On'` installs `1000,0.05,100,1000,0.05,3,1000,0.05,0.1,1000,0,0.1` and enables learning and prediction together: loPredCtrl's three stages, then 1000 frames of learning without probes. During the 4,000-frame sequence (2 s), `prediction=warming` shows probe or feedback commands. When the last stage ends, `learn` and `learn_std` turn off by themselves and prediction continues with the frozen fit; the log notes "DDSPC standard learning sequence finished". To keep learning for X more seconds first, set `learn_std_extra` (default 0, also `parameters.learn_std_extra`); a change applies at once, including during a running sequence:
+
+```bash
+setINDI -n 'loPredCtrlAcc.learn_std_extra.target=3'
+``` The final regularization (0.1) stays in use until `reset_model`. Learning turned on by hand (`learn`) is never stopped by an exploration sequence. Check that learning has stopped and the fit is ready, then measure:
 
 ```bash
 getINDI 'loPredCtrlAcc.ddspc_control.*'   # learning=false, standard_ready=true
