@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <sys/stat.h>
@@ -123,7 +124,8 @@ class Harness : public alignLoop
 {
   public:
     /// Configure two simulated stages and an idle stream monitor.
-    explicit Harness( const std::filesystem::path &telemetryPath /**< [in] private telemetry directory */ );
+    explicit Harness( const std::filesystem::path &telemetryPath, /**< [in] private telemetry directory */
+                      bool                         alternate = false /**< [in] enable the alternate input */ );
 
     /// Stop the idle monitor before tearing down the local app.
     ~Harness();
@@ -137,8 +139,19 @@ class Harness : public alignLoop
     void stageReadbacks();
 
     /// Feed a two-axis synthetic frame through the production monitor callback.
-    int frame( float x, /**< [in] first measurement */
-               float y /**< [in] second measurement */ );
+    int frame( float x,                 /**< [in] first measurement */
+               float y,                 /**< [in] second measurement */
+               bool  alternate = false, /**< [in] true to use the alternate input */
+               bool  fresh     = false /**< [in] true to assign a post-switch acquisition time */ );
+
+    /// Request a source through the registered INDI callback.
+    void select( const std::string &source /**< [in] INDI element to turn on */ );
+
+    /// Clear readiness as a disconnect would on the selected monitor thread.
+    void disconnectAlternate();
+
+    /// Simulate an upstream close update through the subscribed property.
+    void upstreamClose();
 
     /// Access local publications and captured commands.
     LocalDriver &driver();
@@ -151,18 +164,31 @@ class Harness : public alignLoop
     IMAGE_METADATA m_metadata{};
 };
 
-Harness::Harness( const std::filesystem::path &telemetryPath )
+Harness::Harness( const std::filesystem::path &telemetryPath, bool alternate )
 {
-    m_configName     = "align-loop-test";
-    m_ctrlDevices    = { "local-stage-0", "local-stage-1" };
-    m_ctrlProperties = { "position", "position" };
-    m_ctrlCurrents   = { "current", "current" };
-    m_ctrlTargets    = { "target", "target" };
-    m_defaultGains   = { 0.5f, 0.25f };
-    m_ggain          = 0.5f;
-    m_smThreadPrio   = 0;
-    m_width          = 2;
-    m_height         = 1;
+    m_configName                  = "align-loop-test";
+    m_ctrlDevices                 = { "local-stage-0", "local-stage-1" };
+    m_ctrlProperties              = { "position", "position" };
+    m_ctrlCurrents                = { "current", "current" };
+    m_ctrlTargets                 = { "target", "target" };
+    m_defaultGains                = { 0.5f, 0.25f };
+    m_ggain                       = 0.5f;
+    shmimMonitorT::m_smThreadPrio = 0;
+    shmimMonitorT::m_width        = 2;
+    shmimMonitorT::m_height       = 1;
+    shmimMonitorT::m_dataType     = _DATATYPE_FLOAT;
+
+    if( alternate )
+    {
+        alternateMonitorT::m_shmimName      = "test-align-loop-idle-alternate";
+        alternateMonitorT::m_smThreadPrio   = 0;
+        alternateMonitorT::m_width          = 2;
+        alternateMonitorT::m_height         = 1;
+        alternateMonitorT::m_dataType       = _DATATYPE_FLOAT;
+        alternateMonitorT::m_imageStream.md = &m_metadata;
+        m_upstreamDevice                    = "local-upstream";
+        m_upstreamFollowClosed              = true;
+    }
 
     m_tel.logPath( telemetryPath.string() );
     m_tel.logName( m_configName );
@@ -217,11 +243,46 @@ void Harness::stageReadbacks()
     }
 }
 
-int Harness::frame( float x, float y )
+int Harness::frame( float x, float y, bool alternate, bool fresh )
 {
     float measurements[]{ x, y };
     ++m_metadata.cnt0;
+    m_metadata.atime = { 123, 456 };
+
+    if( fresh )
+    {
+        REQUIRE( clock_gettime( CLOCK_REALTIME, &m_metadata.atime ) == 0 );
+    }
+
+    if( alternate )
+    {
+        return processImage( measurements, alternateAlignShmimT() );
+    }
+
     return processImage( measurements, MagAOX::app::dev::shmimT() );
+}
+
+void Harness::select( const std::string &source )
+{
+    pcf::IndiProperty request( pcf::IndiProperty::Switch );
+    request.setDevice( m_indiP_input.getDevice() );
+    request.setName( m_indiP_input.getName() );
+    request.add( pcf::IndiElement( source, pcf::IndiElement::On ) );
+    handleNewProperty( request );
+}
+
+void Harness::disconnectAlternate()
+{
+    shmimMonitorTiming( alternateAlignShmimT(), dev::shmimMonitorEvent::disconnected );
+}
+
+void Harness::upstreamClose()
+{
+    pcf::IndiProperty update( pcf::IndiProperty::Switch );
+    update.setDevice( m_upstreamDevice );
+    update.setName( m_upstreamProperty );
+    update.add( pcf::IndiElement( "toggle", pcf::IndiElement::On ) );
+    handleSetProperty( update );
 }
 
 LocalDriver &Harness::driver()
@@ -229,6 +290,62 @@ LocalDriver &Harness::driver()
     return *static_cast<LocalDriver *>( m_indiDriver );
 }
 /// \endcond
+
+/// Verify the selected monitor must supply a fresh, valid frame before an open loop can reclose.
+/** \ingroup alignLoop_unit_test */
+TEST_CASE( "alignLoop selects inputs only while open and waits for a fresh measurement", "[alignLoop]" )
+{
+    // clang-format off
+    #ifdef ALIGNLOOP_TEST_DOXYGEN_REF
+    alignLoop::m_indiP_input;
+    alignLoop::processInput;
+    alignLoop::toggleLoop;
+    #endif
+    // clang-format on
+
+    TelemetryDirectory directory;
+    Harness            app( directory.m_path, true );
+    REQUIRE( app.appStartup() == 0 );
+    app.stageReadbacks();
+    REQUIRE( app.frame( 0.25f, -0.1f ) == 0 );
+    REQUIRE( app.toggleLoop( true ) == 0 );
+    app.select( "alternate" );
+    CHECK( app.m_indiP_input["primary"].getSwitchState() == pcf::IndiElement::On );
+    REQUIRE( app.frame( 0.25f, -0.1f ) == 0 );
+    REQUIRE( app.driver().m_commands.size() == 2 );
+    const auto primaryTargets = app.driver().m_commands;
+    app.driver().m_commands.clear();
+
+    REQUIRE( app.toggleLoop( false ) == 0 );
+    app.select( "alternate" );
+    REQUIRE( app.m_indiP_input["alternate"].getSwitchState() == pcf::IndiElement::On );
+    REQUIRE( app.frame( 1, 1, false, true ) == 0 );
+    REQUIRE( app.frame( 1, 1, true ) == 0 );
+    REQUIRE( app.frame( std::numeric_limits<float>::quiet_NaN(), 0, true, true ) == 0 );
+    app.upstreamClose();
+    CHECK( app.m_indiP_ctrlEnabled["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.driver().m_commands.empty() );
+
+    REQUIRE( app.frame( 0.25f, -0.1f, true, true ) == 0 );
+    REQUIRE( app.toggleLoop( true ) == 0 );
+    REQUIRE( app.frame( 0.25f, -0.1f, true, true ) == 0 );
+    REQUIRE( app.driver().m_commands.size() == 2 );
+    CHECK( app.driver().m_commands[0]["target"].get<float>() == primaryTargets[0]["target"].get<float>() );
+    CHECK( app.driver().m_commands[1]["target"].get<float>() == primaryTargets[1]["target"].get<float>() );
+    REQUIRE( app.frame( 1, 1, false, true ) == 0 );
+    REQUIRE( app.frame( std::numeric_limits<float>::infinity(), 0, true, true ) == 0 );
+    CHECK( app.driver().m_commands.size() == 2 );
+
+    REQUIRE( app.toggleLoop( false ) == 0 );
+    REQUIRE( app.frame( 0.25f, -0.1f, true, true ) == 0 );
+    app.disconnectAlternate();
+    app.upstreamClose();
+    CHECK( app.m_indiP_ctrlEnabled["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    app.select( "primary" );
+    REQUIRE( app.frame( 0.25f, -0.1f, false, true ) == 0 );
+    app.upstreamClose();
+    CHECK( app.m_indiP_ctrlEnabled["toggle"].getSwitchState() == pcf::IndiElement::On );
+}
 
 /// Verify INDI defaults, validation and independent axis writes in both loop states.
 /**

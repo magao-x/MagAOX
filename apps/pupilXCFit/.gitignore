@@ -1,0 +1,2 @@
+# Build products specific to this app. Generic patterns are in the top-level .gitignore.
+/pupilXCFit

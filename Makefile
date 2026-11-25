@@ -75,6 +75,7 @@ apps_rtc = \
 	ttmModulator \
 	pi335Ctrl \
 	pupilFit \
+	pupilXCFit \
 	t2wOffloader \
 	dmSpeckle \
 	dmSyncopation \
@@ -165,6 +166,7 @@ all_buildable_apps = \
 	psfAcq \
 	psfFit \
 	pupilFit \
+	pupilXCFit \
 	pwfsSlopeCalc \
 	qwpPupilTracker \
 	refRMS \

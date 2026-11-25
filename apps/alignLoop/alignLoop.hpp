@@ -7,6 +7,8 @@
 #ifndef alignLoop_hpp
 #define alignLoop_hpp
 
+#include <array>
+#include <atomic>
 #include <cmath>
 #include <sstream>
 
@@ -30,6 +32,16 @@ namespace MagAOX
 namespace app
 {
 
+/// Shared-memory monitor tag for the optional alternate input.
+struct alternateAlignShmimT
+{
+    /// Return the configuration section for the alternate monitor.
+    static std::string configSection();
+
+    /// Return the INDI prefix for the alternate monitor.
+    static std::string indiPrefix();
+};
+
 /// Drive two controller axes from a shared-memory measurement stream.
 /**
  * The loop subtracts `offset0` and `offset1` from the two measurement axes before
@@ -39,7 +51,10 @@ namespace app
  *
  * \ingroup alignLoop
  */
-class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>, public dev::telemeter<alignLoop>
+class alignLoop : public MagAOXApp<true>,
+                  public dev::shmimMonitor<alignLoop>,
+                  public dev::shmimMonitor<alignLoop, alternateAlignShmimT>,
+                  public dev::telemeter<alignLoop>
 {
     /// Give the test harness access to internal loop state.
     friend class alignLoop_test;
@@ -47,12 +62,18 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>, p
     /// Allow the stream monitor to dispatch frames to this app.
     friend class dev::shmimMonitor<alignLoop>;
 
+    /// Allow the alternate monitor to dispatch frames to this app.
+    friend class dev::shmimMonitor<alignLoop, alternateAlignShmimT>;
+
     /// Allow periodic telemetry to request a state record.
     friend class dev::telemeter<alignLoop>;
 
   public:
     /// Stream monitor for the alignment measurements.
     typedef dev::shmimMonitor<alignLoop> shmimMonitorT;
+
+    /// Optional second stream monitor, enabled by its configured stream name.
+    typedef dev::shmimMonitor<alignLoop, alternateAlignShmimT> alternateMonitorT;
 
     /// Binary telemetry writer for alignment records.
     typedef dev::telemeter<alignLoop> telemeterT;
@@ -130,6 +151,15 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>, p
     /// True when stage output is enabled, protected by m_indiMutex.
     bool m_ctrlEnabled{ false };
 
+    /// Selected monitor, protected by m_indiMutex.
+    bool m_alternateSelected{ false };
+
+    /// Earliest eligible acquisition time, set when selecting a different input.
+    timespec m_inputAfter{};
+
+    /// Per-monitor readiness, cleared by the monitor thread on disconnect.
+    std::array<std::atomic<bool>, 2> m_inputReady{};
+
   public:
     /// Construct the app with the current repository version.
     alignLoop();
@@ -168,13 +198,28 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>, p
     int toggleLoop( bool onoff /**< [in] true to close the loop and false to open it */ );
 
     // shmimMonitor interface:
-    /// Allocate working memory for the monitored image stream.
+    /// Invalidate readiness when the primary monitor attaches.
     int allocate( const dev::shmimT &dummy /**< [in] input monitor dispatch tag */ );
+
+    /// Invalidate readiness when the alternate monitor attaches.
+    int allocate( const alternateAlignShmimT &tag /**< [in] alternate monitor dispatch tag */ );
 
     /// Publish the corrected measurement residuals and send any closed-loop correction.
     int processImage( void              *curr_src /**< [in] pointer to the current image buffer */,
                       const dev::shmimT &dummy /**< [in] input monitor dispatch tag */
     );
+
+    /// Process an alternate measurement through the common control path.
+    int processImage( void                       *curr_src /**< [in] current alternate stream pixels */,
+                      const alternateAlignShmimT &tag /**< [in] alternate monitor dispatch tag */ );
+
+    /// Invalidate the primary source when its monitor disconnects.
+    void shmimMonitorTiming( const dev::shmimT     &tag /**< [in] primary monitor dispatch tag */,
+                             dev::shmimMonitorEvent event /**< [in] event observed by the monitor */ );
+
+    /// Invalidate the alternate source when its monitor disconnects.
+    void shmimMonitorTiming( const alternateAlignShmimT &tag /**< [in] alternate monitor dispatch tag */,
+                             dev::shmimMonitorEvent      event /**< [in] event observed by the monitor */ );
 
     /// Send each computed target to its configured controller property.
     /**
@@ -211,6 +256,12 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>, p
     /// Open or close the loop from the incoming INDI request `ipRecv`.
     INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_ctrlEnabled );
 
+    /// Select the measurement source and report its readiness.
+    pcf::IndiProperty m_indiP_input;
+
+    /// Apply a source selection while the loop is open.
+    INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_input );
+
     /// Route controller property updates into the instance callback.
     static int st_setCallBack_ctrl( void                    *app /**< [in] application instance pointer */,
                                     const pcf::IndiProperty &ipRecv /**< [in] controller property update */
@@ -232,6 +283,14 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>, p
     INDI_SETCALLBACK_DECL( alignLoop, m_indiP_upstream );
 
   protected:
+    /// Validate the selected stream frame and run the existing control calculation.
+    template <class monitorT>
+    int processInput( const void *pixels /**< [in] current stream pixels */,
+                      bool        alternate /**< [in] true for the alternate monitor */ );
+
+    /// Publish the selected source and readiness while holding m_indiMutex.
+    void updateInputSelection();
+
     /// Apply and acknowledge a valid offset request.
     int setOffset( float                   &offset, /**< [in/out] active setpoint for the requested axis */
                    pcf::IndiProperty       &prop,   /**< [in/out] local offset property */
@@ -249,6 +308,16 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>, p
                          uint8_t                sentMask = 0 /**< [in] mask of successful local sends */ );
 };
 
+inline std::string alternateAlignShmimT::configSection()
+{
+    return "alternateShmim";
+}
+
+inline std::string alternateAlignShmimT::indiPrefix()
+{
+    return "alternate";
+}
+
 alignLoop::alignLoop() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
 
@@ -257,7 +326,9 @@ alignLoop::alignLoop() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 
 void alignLoop::setupConfig()
 {
-    shmimMonitorT::setupConfig( config );
+    SHMIMMONITOR_SETUP_CONFIG( config );
+    SHMIMMONITORT_SETUP_CONFIG( alternateMonitorT, config );
+    alternateMonitorT::m_shmimName.clear();
     TELEMETER_SETUP_CONFIG( config );
 
     config.add( "ctrl.devices",
@@ -349,7 +420,8 @@ void alignLoop::setupConfig()
 
 int alignLoop::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-    shmimMonitorT::loadConfig( _config );
+    SHMIMMONITOR_LOAD_CONFIG( _config );
+    SHMIMMONITORT_LOAD_CONFIG( alternateMonitorT, _config );
     TELEMETER_LOAD_CONFIG( _config );
 
     _config( m_ctrlDevices, "ctrl.devices" );
@@ -372,6 +444,11 @@ void alignLoop::loadConfig()
 
 int alignLoop::appStartup()
 {
+    if( m_ctrlTargets.size() < 2 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "alignLoop needs at least two controller axes" } );
+    }
+
     if( m_ctrlTargets.size() != m_ctrlDevices.size() )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "ctrl.Targets and ctrl.devices are not the same size" } );
@@ -440,6 +517,18 @@ int alignLoop::appStartup()
         return -1;
     }
 
+    if( !alternateMonitorT::m_shmimName.empty() )
+    {
+        createStandardIndiSelectionSw( m_indiP_input, "input_source", { "primary", "alternate" }, "Input Source" );
+        m_indiP_input["primary"].setSwitchState( pcf::IndiElement::On );
+        m_indiP_input.setState( INDI_BUSY );
+
+        if( registerIndiPropertyNew( m_indiP_input, INDI_NEWCALLBACK( m_indiP_input ) ) < 0 )
+        {
+            return log<software_error, -1>( { __FILE__, __LINE__, "registering input_source failed" } );
+        }
+    }
+
     m_currents.resize( m_ctrlDevices.size(), -1e15 );
 
     m_indiP_ctrl.resize( m_ctrlDevices.size() );
@@ -449,7 +538,8 @@ int alignLoop::appStartup()
         registerIndiPropertySet( m_indiP_ctrl[n], m_ctrlDevices[n], m_ctrlProperties[n], &st_setCallBack_ctrl );
     }
 
-    m_commands.resize( m_ctrlTargets.size(), m_ctrlTargets.size() );
+    m_measurements.resize( m_ctrlTargets.size(), 1 );
+    m_commands.resize( m_ctrlTargets.size(), 1 );
     m_commands.setZero();
 
     m_intMat.resize( m_ctrlTargets.size(), m_ctrlTargets.size() );
@@ -494,9 +584,11 @@ int alignLoop::appStartup()
     TELEMETER_APP_STARTUP;
     recordAlignment();
 
-    if( shmimMonitorT::appStartup() < 0 )
+    SHMIMMONITOR_APP_STARTUP;
+
+    if( !alternateMonitorT::m_shmimName.empty() )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
+        SHMIMMONITORT_APP_STARTUP( alternateMonitorT );
     }
 
     return 0;
@@ -504,9 +596,13 @@ int alignLoop::appStartup()
 
 int alignLoop::appLogic()
 {
-    if( shmimMonitorT::appLogic() < 0 )
+    SHMIMMONITOR_APP_LOGIC;
+
+    if( !alternateMonitorT::m_shmimName.empty() )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
+        SHMIMMONITORT_APP_LOGIC( alternateMonitorT );
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+        updateInputSelection();
     }
 
     state( stateCodes::OPERATING );
@@ -517,7 +613,8 @@ int alignLoop::appLogic()
 
 int alignLoop::appShutdown()
 {
-    shmimMonitorT::appShutdown();
+    SHMIMMONITORT_APP_SHUTDOWN( alternateMonitorT );
+    SHMIMMONITOR_APP_SHUTDOWN;
     TELEMETER_APP_SHUTDOWN;
 
     return 0;
@@ -529,6 +626,12 @@ int alignLoop::toggleLoop( bool onoff )
 
     if( !m_ctrlEnabled && onoff ) // not enabled so change
     {
+        if( !alternateMonitorT::m_shmimName.empty() && !m_inputReady[m_alternateSelected] )
+        {
+            updateSwitchIfChanged( m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::Off, INDI_ALERT );
+            return 0;
+        }
+
         m_ctrlEnabled = true;
         log<loop_closed>();
         recordAlignment();
@@ -549,32 +652,78 @@ int alignLoop::toggleLoop( bool onoff )
     return 0;
 }
 
-inline int alignLoop::allocate( const dev::shmimT &dummy )
+inline int alignLoop::allocate( const dev::shmimT & )
 {
-    static_cast<void>( dummy );
-
-    std::lock_guard<std::mutex> guard( m_indiMutex );
-
-    std::cerr << shmimMonitorT::m_width << shmimMonitorT::m_height << "\n";
-    m_measurements.resize( shmimMonitorT::m_width, shmimMonitorT::m_height );
-
+    m_inputReady[0] = false;
     return 0;
 }
 
-inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
+inline int alignLoop::allocate( const alternateAlignShmimT & )
 {
-    static_cast<void>( dummy );
-    const uint64_t frame    = shmimMonitorT::currCnt0();
-    const timespec acquired = shmimMonitorT::currAtime();
+    m_inputReady[1] = false;
+    return 0;
+}
 
-    for( unsigned nn = 0; nn < shmimMonitorT::m_width * shmimMonitorT::m_height; ++nn )
+inline void alignLoop::shmimMonitorTiming( const dev::shmimT &, dev::shmimMonitorEvent event )
+{
+    if( event == dev::shmimMonitorEvent::disconnected )
     {
-        m_measurements.data()[nn] = ( static_cast<float *>( curr_src ) )[nn];
+        m_inputReady[0] = false;
     }
+}
 
-    // Keep the accepted offsets and stage-send decision consistent for this frame.
+inline void alignLoop::shmimMonitorTiming( const alternateAlignShmimT &, dev::shmimMonitorEvent event )
+{
+    if( event == dev::shmimMonitorEvent::disconnected )
+    {
+        m_inputReady[1] = false;
+    }
+}
+
+inline int alignLoop::processImage( void *curr_src, const dev::shmimT & )
+{
+    return processInput<shmimMonitorT>( curr_src, false );
+}
+
+inline int alignLoop::processImage( void *curr_src, const alternateAlignShmimT & )
+{
+    return processInput<alternateMonitorT>( curr_src, true );
+}
+
+template <class monitorT>
+int alignLoop::processInput( const void *pixels, bool alternate )
+{
+    const uint64_t frame    = monitorT::currCnt0();
+    const timespec acquired = monitorT::currAtime();
+
+    // Serialize source selection, offsets and correction sends for each measurement.
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
+    if( m_alternateSelected != alternate ||
+        ( acquired.tv_sec < m_inputAfter.tv_sec ||
+          ( acquired.tv_sec == m_inputAfter.tv_sec && acquired.tv_nsec < m_inputAfter.tv_nsec ) ) )
+    {
+        return 0;
+    }
+
+    if( monitorT::m_dataType != _DATATYPE_FLOAT || monitorT::m_width != m_ctrlTargets.size() ||
+        monitorT::m_height == 0 || ( alternate && monitorT::m_height != 1 ) )
+    {
+        m_inputReady[alternate] = false;
+        return 0;
+    }
+
+    std::copy_n( static_cast<const float *>( pixels ), m_measurements.size(), m_measurements.data() );
+    for( Eigen::Index axis = 0; axis < m_measurements.size(); ++axis )
+    {
+        if( !mx::math::isFinite( m_measurements( axis, 0 ) ) )
+        {
+            m_inputReady[alternate] = false;
+            return 0;
+        }
+    }
+
+    m_inputReady[alternate] = true;
     const AlignLoopAxes measurement{ m_measurements( 0, 0 ), m_measurements( 1, 0 ) };
     m_measurements( 0, 0 ) -= m_offset0;
     m_measurements( 1, 0 ) -= m_offset1;
@@ -629,6 +778,45 @@ inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
     }
 
     recordAlignment( &sample );
+    return 0;
+}
+
+inline void alignLoop::updateInputSelection()
+{
+    indi::updateSelectionSwitchIfChanged( m_indiP_input,
+                                          m_alternateSelected ? "alternate" : "primary",
+                                          m_indiDriver,
+                                          m_inputReady[m_alternateSelected] ? INDI_OK : INDI_BUSY );
+}
+
+INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_input )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_input, ipRecv );
+
+    const bool primary   = ipRecv.find( "primary" ) && ipRecv["primary"].getSwitchState() == pcf::IndiElement::On;
+    const bool alternate = ipRecv.find( "alternate" ) && ipRecv["alternate"].getSwitchState() == pcf::IndiElement::On;
+
+    if( primary == alternate )
+    {
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+    if( alternate == m_alternateSelected )
+    {
+        return 0;
+    }
+
+    if( m_ctrlEnabled || alternateMonitorT::m_shmimName.empty() || clock_gettime( CLOCK_REALTIME, &m_inputAfter ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "input changes require an open loop and two inputs" } );
+    }
+
+    m_alternateSelected     = alternate;
+    m_inputReady[alternate] = false;
+    updateInputSelection();
+    log<text_log>( "Alignment input selected: " +
+                   ( alternate ? alternateMonitorT::m_shmimName : shmimMonitorT::m_shmimName ) );
     return 0;
 }
 

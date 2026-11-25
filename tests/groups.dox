@@ -72,6 +72,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup pupilXCFit_unit_test pupilXCFit Unit Tests
+ * \brief Offline cross-correlation measurements and reference lifecycle tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup sysMonitor_unit_test sysMonitor Unit Tests
  * \brief Offline system diagnostic collectors, publication, and lifecycle tests.
  * \ingroup application_unit_test
