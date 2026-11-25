@@ -163,10 +163,14 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
     auto *modeRow    = new QHBoxLayout;
     m_standard       = new QPushButton( QStringLiteral( "Standard" ), modeBox );
     m_assisted       = new QPushButton( QStringLiteral( "ACC Assisted" ), modeBox );
+    m_mainLoop       = new QPushButton( QStringLiteral( "Main Loop" ), modeBox );
     m_standard->setObjectName( QStringLiteral( "ddspc_mode.standard" ) );
     m_assisted->setObjectName( QStringLiteral( "ddspc_mode.accel_assisted" ) );
+    m_mainLoop->setObjectName( QStringLiteral( "ddspc_mode.main_loop" ) );
+    m_mainLoop->setWhatsThis( QStringLiteral( "Standard DDSPC sent through the main loop's mfilt, as loPredCtrl: no "
+                                              "DDSPC DM channel, tip/tilt never zeroed." ) );
 
-    for( auto *button : { m_standard, m_assisted } )
+    for( auto *button : { m_standard, m_assisted, m_mainLoop } )
     {
         button->setCheckable( true );
         setXwFont( button );
@@ -186,6 +190,13 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
              [this]()
              {
                  sendMode( "accel_assisted" );
+             } );
+    connect( m_mainLoop,
+             &QPushButton::clicked,
+             this,
+             [this]()
+             {
+                 sendMode( "main_loop" );
              } );
     modeLayout->addLayout( modeRow );
     m_interlock = new QLabel( modeBox );
@@ -629,15 +640,16 @@ QString loPredCtrlAccPanel::stopReason() const
 QString loPredCtrlAccPanel::refusalReason() const
 {
     // The controller's own conditions for accepting a request, in the order it checks them.
-    double enabled, ready;
+    double     enabled, ready;
+    const bool mainLoop = switchState( "ddspc_mode", "main_loop" ) == pcf::IndiElement::On; // Needs no integrator.
 
-    if( finiteNumber( value( "integrator", "enabled" ), enabled ) && enabled == 1 &&
+    if( !mainLoop && finiteNumber( value( "integrator", "enabled" ), enabled ) && enabled == 1 &&
         finiteNumber( value( "integrator", "ready" ), ready ) && ready == 0 )
     {
         return QStringLiteral( "the main loop's integrator parameters have not been received" );
     }
 
-    const bool        standard = switchState( "ddspc_mode", "standard" ) == pcf::IndiElement::On;
+    const bool        standard = mainLoop || switchState( "ddspc_mode", "standard" ) == pcf::IndiElement::On;
     const std::string mode     = standard ? "standard" : "assisted";
 
     if( value( "ddspc_control", mode + "_ready" ) != "true" &&
@@ -671,8 +683,13 @@ void loPredCtrlAccPanel::sendMode( const char *selected )
         pcf::IndiProperty request( pcf::IndiProperty::Switch, m_device, "ddspc_mode" );
         request.setRule( pcf::IndiProperty::OneOfMany );
 
-        for( const char *element : { "standard", "accel_assisted" } )
+        for( const char *element : { "standard", "accel_assisted", "main_loop" } )
         {
+            if( switchState( "ddspc_mode", element ) == pcf::IndiElement::UnknownSwitchState )
+            {
+                continue; // An older controller without the main_loop element.
+            }
+
             request.add( pcf::IndiElement(
                 element, std::strcmp( element, selected ) ? pcf::IndiElement::Off : pcf::IndiElement::On ) );
         }
@@ -723,11 +740,18 @@ void loPredCtrlAccPanel::refresh()
     m_interlock->setText( blocked.isEmpty() ? QStringLiteral( "Mode change and reset available." ) : blocked );
     m_standard->setChecked( switchState( "ddspc_mode", "standard" ) == pcf::IndiElement::On );
     m_assisted->setChecked( switchState( "ddspc_mode", "accel_assisted" ) == pcf::IndiElement::On );
+    m_mainLoop->setChecked( switchState( "ddspc_mode", "main_loop" ) == pcf::IndiElement::On );
 
-    for( auto *button : { m_standard, m_assisted } )
+    for( auto *button : { m_standard, m_assisted, m_mainLoop } )
     {
         button->setEnabled( blocked.isEmpty() );
-        button->setToolTip( blocked );
+        button->setToolTip( blocked.isEmpty() ? button->whatsThis() : blocked );
+    }
+
+    if( switchState( "ddspc_mode", "main_loop" ) == pcf::IndiElement::UnknownSwitchState )
+    {
+        m_mainLoop->setEnabled( false );
+        m_mainLoop->setToolTip( QStringLiteral( "This controller has no main_loop mode." ) );
     }
 
     m_reset->setEnabled( blocked.isEmpty() && m_readbacks.count( "reset_model" ) );
@@ -743,7 +767,12 @@ void loPredCtrlAccPanel::refresh()
 
     if( ops && !prediction.empty() )
     {
-        if( prediction == "active" )
+        if( prediction == "active" && value( "ddspc_control", "main_loop_tt" ) == "predicted" )
+        {
+            banner = QStringLiteral( "PREDICTION ACTIVE: DDSPC tip/tilt through the main loop" );
+            style  = QStringLiteral( "background: #1e7b34; color: white;" );
+        }
+        else if( prediction == "active" )
         {
             banner = QStringLiteral( "PREDICTION ACTIVE: DDSPC is correcting tip/tilt" );
             style  = QStringLiteral( "background: #1e7b34; color: white;" );

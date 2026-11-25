@@ -505,6 +505,59 @@ TEST_CASE( "loPredCtrlAccGUI sets the extra learning time", "[loPredCtrlAccGUI]"
     CHECK_FALSE( entry->isEnabled() );
 }
 
+/** \brief The Main Loop button is offered only by a controller with ddspc_mode.main_loop, sends all three elements,
+ * and its banner and refusal reasons follow the main-loop route.
+ */
+TEST_CASE( "loPredCtrlAccGUI selects the main-loop route", "[loPredCtrlAccGUI]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACCGUI_TEST_DOXYGEN_REF
+    xqt::loPredCtrlAccPanel::sendMode;
+    xqt::loPredCtrlAccPanel::refusalReason;
+#endif
+    // clang-format on
+    Fixture fixture;
+    fixture.defineAll();
+    auto *mainLoop = fixture.widget<QPushButton>( "ddspc_mode.main_loop" );
+    CHECK_FALSE( mainLoop->isEnabled() ); // An older controller without the element.
+
+    pcf::IndiProperty mode( pcf::IndiProperty::Switch, "loPredCtrlAcc", "ddspc_mode" );
+    mode.add( pcf::IndiElement( "standard", pcf::IndiElement::On ) );
+    mode.add( pcf::IndiElement( "accel_assisted", pcf::IndiElement::Off ) );
+    mode.add( pcf::IndiElement( "main_loop", pcf::IndiElement::Off ) );
+    fixture.publish( mode, true ); // A controller with the main-loop route.
+    REQUIRE( mainLoop->isEnabled() );
+    mainLoop->click();
+    QApplication::processEvents();
+    REQUIRE( fixture.m_publisher.m_commands.size() == 1 );
+    const auto &command = fixture.m_publisher.m_commands.back();
+    CHECK( command.getName() == "ddspc_mode" );
+    CHECK( command.getElements().size() == 3 );
+    CHECK( command["main_loop"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( command["standard"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( command["accel_assisted"].getSwitchState() == pcf::IndiElement::Off );
+
+    fixture.publishSwitch( "ddspc_mode", "standard", pcf::IndiElement::Off );
+    fixture.publishSwitch( "ddspc_mode", "main_loop", pcf::IndiElement::On );
+    CHECK( mainLoop->isChecked() );
+    CHECK_FALSE( fixture.widget<QPushButton>( "ddspc_mode.standard" )->isChecked() );
+
+    // The route needs no integrator parameters, so a refusal names the standard model instead.
+    pcf::IndiProperty integrator( pcf::IndiProperty::Number, "loPredCtrlAcc", "integrator" );
+    integrator.add( pcf::IndiElement( "enabled", 1.0 ) );
+    integrator.add( pcf::IndiElement( "ready", 0.0 ) );
+    fixture.publish( integrator, true );
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Alert );
+    CHECK( fixture.widget<QLabel>( "warnings" )
+               ->text()
+               .contains( "Prediction request refused: the standard model is not ready" ) );
+
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::On );
+    fixture.publishText( "ddspc_control", "prediction", "active" );
+    fixture.publishText( "ddspc_control", "main_loop_tt", "predicted" );
+    CHECK( fixture.widget<QLabel>( "prediction.banner" )->text() ==
+           "PREDICTION ACTIVE: DDSPC tip/tilt through the main loop" );
+}
 } // namespace loPredCtrlAccGUITest
 } // namespace libXWCTest
 

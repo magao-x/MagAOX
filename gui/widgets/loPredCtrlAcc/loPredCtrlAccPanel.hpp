@@ -89,6 +89,7 @@ class loPredCtrlAccPanel : public xWidget
 
     QPushButton *m_standard{ nullptr };  ///< ddspc_mode.standard selector.
     QPushButton *m_assisted{ nullptr };  ///< ddspc_mode.accel_assisted selector.
+    QPushButton *m_mainLoop{ nullptr };  ///< ddspc_mode.main_loop selector: standard DDSPC through the main loop.
     QPushButton *m_reset{ nullptr };     ///< reset_model request.
     QPushButton *m_zeroDm{ nullptr };    ///< zero_dm request: stop prediction and re-zero the DDSPC DM channel.
     QPushButton *m_releaseTT{ nullptr }; ///< release_tt request: stop prediction and return tip/tilt to the main loop.
