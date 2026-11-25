@@ -19,7 +19,7 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 | Control | INDI property and elements |
 | --- | --- |
 | Standard / ACC Assisted | `ddspc_mode.standard`, `ddspc_mode.accel_assisted` (both sent, exactly one `On`) |
-| Standard sequence | `learn_std.toggle`. Turning it on also turns on learning and prediction, so probes and feedback reach the DM. |
+| Standard sequence | `learn_std.toggle`. loPredCtrl's three exploration stages, then 1000 frames of learning without probes. Turning it on also turns on learning and prediction, so probes and feedback reach the DM. When it ends, `loPredCtrlAcc` turns learning and this switch off; prediction continues. |
 | Learning | `learn.toggle` |
 | Reset models | `reset_model.request` |
 | Prediction | `predict.toggle` |
