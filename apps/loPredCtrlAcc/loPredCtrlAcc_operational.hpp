@@ -330,7 +330,7 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     std::default_random_engine       m_fastGenerator;            ///< Per-slot probe source of the assisted model.
     std::normal_distribution<double> m_fastDistribution{ 0, 1 };
 
-    std::int64_t m_renderLeadNs{ 40000 }; ///< Assisted slots are calculated at cutoff minus this lead [ns].
+    std::int64_t m_renderLeadNs{ 40000 }; ///< Every slot is rendered at cutoff minus this lead [ns].
 
     /// Assisted per-slot diagnostics, under m_commandMutex; latency distributions cover one INDI interval.
     struct FastStats
@@ -647,10 +647,13 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Check only current WFS/selected sensor input; bootstrap prediction may explore before a model is trained.
     bool outputValid() const;
 
-    /// Render the modal command of an actual existing producer Request.
+    /// Render the modal command of an actual existing producer Request at cutoff minus the render lead.
     bool outputCandidate( const synco::Request &request /**< [in] Exact slot being prepared. */,
                           const synco::Record  &schedule /**< [in] Coherent schedule, for steps per cycle. */,
                           std::span<float>      pixels /**< [out] Complete own auxiliary payload. */ );
+
+    /// Wait until the slot's cutoff minus the render lead, so the slot is rendered from the newest decision.
+    void renderWait( const synco::Request &request /**< [in] Exact slot being prepared. */ );
 
     /// Calculate an assisted slot at cutoff minus the render lead from the newest ACC samples and executed slots.
     bool assistedCandidate( const synco::Request &request /**< [in] Exact slot being prepared. */,
@@ -914,7 +917,7 @@ inline void loPredCtrlAcc_operational::setupConfig()
     add( "dm",
          "renderLeadUs",
          "float",
-         "Assisted slots are calculated this long before their cutoff [us] (default 40)." );
+         "Every slot is rendered this long before its cutoff, from the newest decision [us] (default 40)." );
     add( "adc", "enabled", "bool", "Use upstream synchronized ADC inputs for the assisted model." );
     for( const auto &key : { "shmimName", "profile", "sync_device", "sync_property" } )
         add( "adc", key, "string", "Existing ADC source or existing upstream lock diagnostic." );
@@ -1981,6 +1984,11 @@ inline bool loPredCtrlAcc_operational::outputCandidate( const synco::Request &re
     {
         return assistedCandidate( request, schedule, pixels );
     }
+
+    // Rendered on eligibility, a slot would carry the decision of up to a slot earlier: a WFS decision completed while
+    // the slot waited to publish would reach the DM a slot (125 us) late.
+    renderWait( request );
+
     std::lock_guard<std::mutex> lock( m_commandMutex );
     if( pixels.size() != std::size_t( m_calibration.m_shapes.rows() ) || !m_slotPlan.cols() )
     {
@@ -2053,20 +2061,27 @@ inline const DDSPC::AdcSample *loPredCtrlAcc_operational::fastSamples( std::int6
     return m_fastHaveSample ? &m_fastSamples[m_fastNewest % m_fastSamples.size()] : nullptr;
 }
 
+inline void loPredCtrlAcc_operational::renderWait( const synco::Request &request )
+{
+    // Sleep to 20 us before the render time, then poll the clock: sleep wake-up jitter stays out of the margin.
+    const std::int64_t renderAt = request.cutoffNs - m_renderLeadNs;
+    if( const auto wait = renderAt - synco::monotonicNs(); wait > 20000 )
+    {
+        std::this_thread::sleep_for( std::chrono::nanoseconds( wait - 20000 ) );
+    }
+
+    while( synco::monotonicNs() < renderAt )
+    {
+    }
+}
+
 inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &request,
                                                           const synco::Record  &schedule,
                                                           std::span<float>      pixels )
 {
     if( pixels.size() != std::size_t( m_calibration.m_shapes.rows() ) )
         return false;
-    // Calculate as late as the render lead allows, so the newest ACC sample is used.
-    // Sleep to 20 us before the render time, then poll the clock: sleep wake-up jitter stays out of the margin.
-    const std::int64_t renderAt = request.cutoffNs - m_renderLeadNs;
-    if( const auto wait = renderAt - synco::monotonicNs(); wait > 20000 )
-        std::this_thread::sleep_for( std::chrono::nanoseconds( wait - 20000 ) );
-    while( synco::monotonicNs() < renderAt )
-    {
-    }
+    renderWait( request ); // Calculate as late as the render lead allows, so the newest ACC sample is used.
     const auto start = synco::monotonicNs();
     const int  modes = m_settings.m_modes;
     int        prefix;
@@ -2228,7 +2243,7 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
             if( request.cutoffNs > 0 )
             {
                 stats.m_margin.add( ( request.cutoffNs - end ) / 1000. );
-                stats.m_wake.add( std::max<std::int64_t>( 0, start - renderAt ) / 1000. );
+                stats.m_wake.add( std::max<std::int64_t>( 0, start - ( request.cutoffNs - m_renderLeadNs ) ) / 1000. );
             }
             if( newest && newest->m_acquiredNs > 0 )
             {

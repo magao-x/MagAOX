@@ -55,3 +55,19 @@ conversion. Those are what the mode tests.
   `requested_mode=mfilt_copy_8k`; off returns the channel and state to zero.
 - `check-operational-controls` 16/16 and config tests OK.
 - T1 `standard_equivalence.py --base HEAD`: 192000 standard rendered values bit-for-bit identical.
+
+## Late render for standard-path slots (after the first on-sky test)
+
+The first on-sky `mfilt_copy_2k` test diverged. The DM worker (`SyncoOutput`) asks for a slot's image as soon as the
+slot is selected, about a slot before its cutoff, and the producer publishes it at `cutoff - writeLeadUs`. The assisted
+candidate already waited until `cutoff - dm.renderLeadUs` before calculating; the standard candidate (standard DDSPC
+and both mfilt copies) rendered at once. A WFS decision completed between selection and render therefore reached the DM
+a slot (125 us) later than necessary, adding up to a quarter frame of delay relative to the main loop.
+
+The wait is now `renderWait()`, shared by both candidates: sleep to 20 us before `cutoff - renderLeadUs`, then poll the
+clock. The rendered values for a given decision and slot are unchanged (T1 bit-for-bit); only which decision a slot
+carries changes, to the newest. Latency is not yet measured on the RTC; `margin_us_*` covers only the assisted path.
+
+Verification: `check-rtc-controller` 38/38. The new case selects a slot 5 ms before its cutoff, completes a decision
+while it waits, and requires the slot rendered no earlier than `cutoff - renderLeadUs` with the newer decision; without
+`renderWait()` in the standard candidate it fails. `check-operational-controls` OK. T1 192000 values identical.

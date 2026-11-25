@@ -2664,6 +2664,71 @@ TEST_CASE( "mfilt copy 2k writes the DM channel once per WFS frame", "[rtc-contr
     CHECK( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates == 0 );
 }
 
+/** \brief A standard-path slot (here mfilt_copy_8k) is rendered at its cutoff minus dm.renderLeadUs, not when the
+ * slot is selected, so a WFS decision completed while the slot waited reaches that slot rather than the next one.
+ */
+TEST_CASE( "Standard slots are rendered from the newest decision at the render lead", "[rtc-controller][integrator]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::outputCandidate;
+    MagAOX::app::loPredCtrlAcc_operational::renderWait;
+#endif
+    // clang-format on
+    namespace synco = MagAOX::app::synco;
+    Controller app( true );
+    REQUIRE( selectMode( app, "mfilt_copy_8k" ) == 0 );
+    app.qualifyOutput();
+    app.mainLoop( .25, .9, .3, { 2, 1, 7 }, { 1, 1, 7 }, { 1, 2, 7 } );
+    auto predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+
+    DDSPC::Matrix empty;
+    const auto    decide = [&]( const DDSPC::Matrix &y )
+    {
+        DDSPC::Matrix applied;
+        std::int64_t  ordinal;
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( app.m_commandMutex );
+            ordinal = app.appliedSlots( applied );
+        }
+        REQUIRE( app.step( y, app.m_wfsCounter + 1, empty, false, applied, ordinal, synco::monotonicNs() ) == 0 );
+    };
+    DDSPC::Matrix y( 2, 1 );
+    y << .1f, -.2f;
+    decide( y );
+
+    // The slot is selected 5 ms before its cutoff; the next decision completes while it waits to render.
+    const std::int64_t   cutoff = synco::monotonicNs() + 5000000;
+    const synco::Request request{ 1, 1, 2, 0, cutoff + 70000, cutoff };
+    synco::Record        schedule{};
+    schedule[synco::steps] = 4;
+    std::array<float, 4> image{};
+    bool                 offered  = false;
+    std::int64_t         rendered = 0;
+    std::thread          worker(
+        [&]
+        {
+            offered  = app.outputCandidate( request, schedule, image );
+            rendered = synco::monotonicNs();
+        } );
+    y << .3f, .4f;
+    decide( y );
+    worker.join();
+
+    REQUIRE( offered );
+    CHECK( rendered >= cutoff - app.m_renderLeadNs );
+    const DDSPC::Matrix modal = app.m_calibration.m_projection * Eigen::Map<const DDSPC::Matrix>( image.data(), 4, 1 );
+    const std::array<double, 2> gain{ .5, .25 }, limit{ .3, .6 };
+    for( int mode = 0; mode < 2; ++mode )
+    {
+        double expected = std::clamp( -gain[mode] * ( mode ? -.2 : .1 ), -limit[mode], limit[mode] );
+        expected        = std::clamp( .9 * expected - gain[mode] * y( mode ), -limit[mode], limit[mode] );
+        CHECK( modal( mode ) == Approx( expected ).margin( 1e-6 ) ); // The second decision, not the first.
+    }
+}
+
 /** \brief A refused predict or learn_std request is answered at once with its unchanged state and INDI_ALERT, which
  * appLogic keeps until a request is accepted, so loPredCtrlAccGUI reverts the toggle and shows the refusal.
  */
