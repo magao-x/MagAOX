@@ -7,6 +7,8 @@ The normal build runs closed-loop DDSPC on the existing WFS monitor (`aol1_modev
 
 Every WFS frame is also republished to the main AO loop. With prediction off it is unchanged; with prediction on, tip/tilt is set to zero, so DDSPC is the only tip/tilt controller (see "Main-loop modal output").
 
+- **Main-loop route** (`ddspc_mode.main_loop`) runs the standard model without the DM channel, as the original loPredCtrl: its tip/tilt delta goes into the main loop's modal input for mfilt to integrate (see "Main-loop route").
+
 Each model trains only while its mode is selected, so the standard and assisted fits are independent experiments. Both learn only from genuine WFS measurements and the commands the scheduler copied from this channel.
 
 ## DM channel, worker and timing
@@ -252,6 +254,31 @@ Handover, with every step an operator decision:
 To hand tip/tilt back, turn prediction off. Once `zero_confirmed=true`, `main_loop_tt` returns to `passthrough` and the main loop resumes tip/tilt correction from its held state. loPredCtrlAcc can keep running; stop it and restore loPredCtrl only to remove it from the main loop's input path.
 
 The main loop's modal input depends on loPredCtrlAcc, as it did on loPredCtrl: if loPredCtrlAcc stops, the main loop stops receiving frames for every mode. The output carries the WFS frame's acquisition time. `fps()` is 0, so `fg_timing` latency statistics stay empty. Check publication with `getINDI 'loPredCtrlAcc.fg_shmimName.*' 'loPredCtrlAcc.fg_frameSize.*'` and the stream's counter, which advances once per WFS frame. To confirm what the main loop receives, read one frame of the output stream: with prediction on, entries 0 and 1 are zero and the rest match the same `aol1_modevalWFS` frame; with prediction off, every entry matches.
+
+## Main-loop route
+
+`ddspc_mode.main_loop` is the standard model delivered the way the original loPredCtrl delivers it. Standard and assisted are unchanged. Each WFS frame:
+- the standard decision (`gain*y` plus the learned prediction, plus probes while exploring) replaces modes 0 and 1 of the main-loop modal output, and every other mode is copied;
+- the main loop's mfilt integrates it with its own gain, multiplier and limit, at the WFS rate;
+- nothing is written to `dm.channelName` (`dm01disp05_aux`), and tip/tilt is never zeroed;
+- the model trains on the tip/tilt it published.
+
+| State | Main-loop modes 0 and 1 | `ddspc_control.main_loop_tt` |
+| --- | --- | --- |
+| Prediction off | unchanged WFS tip/tilt | `passthrough` |
+| Prediction on (`predict` or `learn_std`) | DDSPC delta | `predicted` |
+
+`requested_mode` reads `main_loop`. The integrator's parameters are not needed (`integrator.ready` may be false). With no model yet, prediction on sends `gain*y`: the main loop's own control with its gain scaled by `gain`, so `gain=1` changes nothing and is a safe first check. A numerical fault publishes the measurement and stops prediction with a logged reason.
+
+```bash
+setINDI -s 'loPredCtrlAcc.predict.toggle=Off'
+getINDI 'loPredCtrlAcc.safety.*'   # zero_confirmed=true
+setINDI -s 'loPredCtrlAcc.ddspc_mode.standard=Off;accel_assisted=Off;main_loop=On'
+setINDI -s 'loPredCtrlAcc.learn_std.toggle=On'
+getINDI 'loPredCtrlAcc.ddspc_control.*'   # requested_mode=main_loop, main_loop_tt=predicted
+```
+
+Changing `ddspc_mode` while predicting in this route stops prediction ("DDSPC prediction stopped: DDSPC mode changed"), and tip/tilt passes through from the next frame. `predict` off or `release_tt` also return tip/tilt on the next frame; there is no own-channel zero to wait for. The decision now precedes publication, so each frame's output waits for the standard decision, including its RLS update while learning (13.5 µs mean on a development Mac, 1.4 µs frozen). Details: `agents/plans/2026-11/ddspc-main-loop-route.md`.
 
 ## Remove the contribution
 
