@@ -51,6 +51,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_candidateValid;
     using loPredCtrlAcc_operational::m_commandKnown;
     using loPredCtrlAcc_operational::m_commandMutex;
+    using loPredCtrlAcc_operational::m_copySign;
     using loPredCtrlAcc_operational::m_decisionOrdinal;
     using loPredCtrlAcc_operational::m_exploration;
     using loPredCtrlAcc_operational::m_fastPrefix;
@@ -2475,8 +2476,9 @@ TEST_CASE( "Main-loop route trains and corrects through mfilt", "[rtc-controller
 }
 
 /** \brief ddspc_mode mfilt_copy_8k runs no DDSPC: with predict on, the main loop's tip/tilt integrator,
- * s = clamp(mult*s - gain*y, +/-limit) with its own parameters, is rendered on every own-channel slot even with
- * [integrator] disabled, main-loop tip/tilt is zeroed, nothing learns, and learn_std is refused.
+ * s = clamp(mult*s - gain*copy_sign*y, +/-limit) with its own parameters (default copy_sign -1), is rendered on
+ * every own-channel slot even with [integrator] disabled, main-loop tip/tilt is zeroed, nothing learns, and
+ * learn_std is refused.
  */
 TEST_CASE( "mfilt copy applies the main loop's tip/tilt integrator on the own channel", "[rtc-controller][integrator]" )
 {
@@ -2507,6 +2509,7 @@ TEST_CASE( "mfilt copy applies the main loop's tip/tilt integrator on the own ch
     app.mainLoop( .25, .9, .3, { 2, 1, 7 }, { 1, 1, 7 }, { 1, 2, 7 } );
     app.m_integrate = false; // [integrator] enabled=false: the copy integrates regardless.
     app.m_gain      = .2f;   // Unused: the copy's input is the measurement itself.
+    REQUIRE( app.m_copySign == -1 ); // Default copy_sign: the copy's command is inverted.
     auto learning   = app.m_indiP_learning;
     learning["toggle"].setSwitchState( pcf::IndiElement::On );
     REQUIRE( app.newCallBack_m_indiP_learning( learning ) == 0 );
@@ -2528,14 +2531,14 @@ TEST_CASE( "mfilt copy applies the main loop's tip/tilt integrator on the own ch
         const auto slots = app.advance( y, empty, false );
         for( int mode = 0; mode < 2; ++mode )
         {
-            expected[mode] = std::clamp( .9 * expected[mode] - gain[mode] * y( mode ), -limit[mode], limit[mode] );
+            expected[mode] = std::clamp( .9 * expected[mode] + gain[mode] * y( mode ), -limit[mode], limit[mode] );
             for( int j = 0; j < 4; ++j )
             {
                 REQUIRE( slots( mode, j ) == Approx( expected[mode] ).margin( 1e-6 ) );
             }
         }
     }
-    REQUIRE( expected[0] == Approx( -.3 ) ); // The limit was reached.
+    REQUIRE( expected[0] == Approx( .3 ) ); // The limit was reached.
     CHECK( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates == 0 );
     REQUIRE( app.outputValid() );
 
@@ -2568,6 +2571,7 @@ TEST_CASE( "mfilt copy 2k writes the DM channel once per WFS frame", "[rtc-contr
     using Image     = std::array<float, 4>;
     Controller app( true );
     REQUIRE( selectMode( app, "mfilt_copy_2k" ) == 0 );
+    app.m_copySign = 1; // copy_sign 1: mfilt's law as modelled.
     CHECK( app.m_indiP_mode["mfilt_copy_2k"].getSwitchState() == pcf::IndiElement::On );
     CHECK( app.m_indiP_mode["mfilt_copy_8k"].getSwitchState() == pcf::IndiElement::Off );
     app.qualifyOutput();

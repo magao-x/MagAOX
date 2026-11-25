@@ -515,6 +515,10 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// ddspc_mode mfilt_copy_2k: the copy is written once per WFS decision, not on every DM slot; same locking.
     std::atomic<bool> m_copyOnce{ false };
 
+    /// [integrator] copy_sign: multiplies the mfilt copy's input, s = mult*s - gain*copy_sign*y. 1 is mfilt's law as
+    /// modelled; -1 (default, after the first on-sky test diverged) inverts the copy's command. Copy modes only.
+    float m_copySign{ -1 };
+
     /// WFS decisions stored in m_slotPlan; under m_commandMutex.
     std::uint64_t m_planDecisions{ 0 };
 
@@ -901,6 +905,10 @@ inline void loPredCtrlAcc_operational::setupConfig()
          "bool",
          "Integrate DDSPC commands with the main loop's mfilt law and parameters, s = mult*s - gain*delta: standard "
          "per WFS frame, assisted per DM slot with gain/q; both fits train on the deltas (default true)." );
+    add( "integrator",
+         "copy_sign",
+         "float",
+         "mfilt_copy_8k/2k only: sign on the copy's input, s = mult*s - gain*copy_sign*y; 1 or -1 (default -1)." );
     add( "loop", "device", "string", "Main loop's cacaoInterface INDI device, for gain, mc and limit (holoop)." );
     add( "loop", "number", "int", "cacao loop number N of the aolN_mgainfact/mmultfact/mlimitfact streams (1)." );
     add( "parameters",
@@ -942,6 +950,7 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         SHMIMMONITOR_LOAD_CONFIG( config );
 
         config( m_integrate, "integrator.enabled" );
+        config( m_copySign, "integrator.copy_sign" );
         config( m_loopDevice, "loop.device" );
         config( m_loopNumber, "loop.number" );
 
@@ -991,7 +1000,7 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
             m_accelHistory < 1 || m_accelHistory > 16 || m_slots < 1 || m_slots > 16 || m_ratio < 1 || m_ratio > 16 ||
             !std::isfinite( renderLeadUs ) || renderLeadUs < 0 || renderLeadUs > 1000 || !std::isfinite( m_ripple ) ||
             m_ripple < 0 || m_maxFill < 0 || m_maxFill > 20 || !std::isfinite( m_learnStdExtra ) ||
-            m_learnStdExtra < 0 || m_learnStdExtra > 3600 )
+            m_learnStdExtra < 0 || m_learnStdExtra > 3600 || std::abs( m_copySign ) != 1 )
         {
             throw std::invalid_argument( "Invalid operational WFS, producer, gain or model configuration" );
         }
@@ -1782,7 +1791,7 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
     }
     if( mfiltCopy )
     {
-        plan = measurement.replicate( 1, plan.cols() ); // mfilt's own input: the WFS measurement, no DDSPC.
+        plan = ( m_copySign * measurement ).replicate( 1, plan.cols() ); // mfilt's own input, signed; no DDSPC.
     }
 
     if( mainLoop )
