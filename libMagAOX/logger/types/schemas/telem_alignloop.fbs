@@ -1,0 +1,47 @@
+/// \file telem_alignloop.fbs
+/// \brief Alignment loop state and optional processed measurement.
+namespace MagAOX.logger;
+
+/// Values in the order of the two loop axes.
+struct AlignLoopAxes
+{
+    /// Value for the first axis.
+    axis0:float;
+    /// Value for the second axis.
+    axis1:float;
+}
+
+/// Input stream metadata and measurements for one processed frame.
+struct AlignLoopSample
+{
+    /// Frame counter of the input stream monitored by alignLoop.
+    frame:ulong;
+    /// Seconds of the input acquisition timestamp.
+    acq_sec:long;
+    /// Nanoseconds of the input acquisition timestamp.
+    acq_nsec:int;
+    /// Input measurements before subtracting the loop offsets.
+    measurement:AlignLoopAxes;
+    /// Corrected measurements after subtracting the loop offsets.
+    residual:AlignLoopAxes;
+}
+
+table Telem_alignloop_fb
+{
+    /// True when the loop is closed.
+    closed:bool;
+    /// Global loop gain.
+    gain:float;
+    /// Gains applied to each controller axis in addition to the global gain.
+    axis_gains:AlignLoopAxes (required);
+    /// Setpoints subtracted from the input in measurement units.
+    offsets:AlignLoopAxes (required);
+    /// Processed frame, absent for a state-only record.
+    sample:AlignLoopSample;
+    /// Absolute INDI targets in controller units, present when sending was attempted.
+    targets:AlignLoopAxes;
+    /// Bits 0 and 1 identify the axes for which the local INDI send succeeded.
+    sent_mask:ubyte;
+}
+
+root_type Telem_alignloop_fb;

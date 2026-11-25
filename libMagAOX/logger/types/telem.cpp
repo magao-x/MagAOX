@@ -12,6 +12,8 @@ namespace MagAOX
 namespace logger
 {
 
+/// Initial last-record times for the telemetry types tracked by the recorder.
+timespec telem_alignloop::lastRecord      = { 0, 0 };
 timespec telem_outlet::lastRecord         = { 0, 0 };
 timespec telem_pdu::lastRecord            = { 0, 0 };
 timespec cred2_temps::lastRecord          = { 0, 0 };
