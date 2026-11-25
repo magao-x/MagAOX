@@ -107,6 +107,10 @@ struct ddspcLimitFactShmimT
  * until its own-channel zero is confirmed after prediction stops) modes 0 and 1 are set to zero and every other mode
  * is copied unchanged, so the main loop keeps correcting higher-order modes while DDSPC alone drives tip/tilt. The WFS
  * input stream and the DDSPC measurement are never modified.
+ *
+ * Main-loop route (ddspc_mode main_loop; agents/plans/2026-11/ddspc-main-loop-route.md), as the original loPredCtrl:
+ * the standard fit at the WFS rate, whose delta replaces modes 0 and 1 of the modal output after each decision, so the
+ * main loop's mfilt integrates it. The own DM channel is never requested, and the fit trains on the published deltas.
  */
 class loPredCtrlAcc_operational : public MagAOXApp<true>,
                                   public dev::shmimMonitor<loPredCtrlAcc_operational>,
@@ -475,6 +479,25 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Prediction was accepted since the own-channel zero was last confirmed; written under m_indiMutex.
     /** Distinguishes removal of a DDSPC contribution, during which tip/tilt stays zeroed, from the startup zero. */
     std::atomic<bool> m_modalEngaged{ false };
+
+    /// ddspc_mode main_loop: standard DDSPC at the WFS rate, whose delta replaces modes 0 and 1 of this output for the
+    /// main loop's mfilt to integrate, as loPredCtrl. The own DM channel is never requested. Changed only while the
+    /// own channel's removal is confirmed, under m_indiMutex and m_modelMutex.
+    std::atomic<bool> m_mainLoop{ false };
+
+    /// Main-loop route tip/tilt of the latest decision: the delta while predicting, else the measurement passed
+    /// through. Until the next decision, the standard fit's applied input. Written by the WFS thread under
+    /// m_modelMutex.
+    DDSPC::Matrix m_mainLoopCommand;
+
+    /// m_mainLoopCommand holds the previous frame's published tip/tilt; under m_modelMutex.
+    bool m_mainLoopKnown{ false };
+
+    /// m_mainLoopCommand replaces modes 0 and 1 of the current frame's output; WFS thread only.
+    bool m_mainLoopPredicted{ false };
+
+    /// A main-loop route decision was not finite while predicting; appLogic stops prediction and logs it.
+    std::atomic<bool> m_mainLoopFault{ false };
     /// @}
 
     /// Load the existing calibration or selected finite masked cube planes; derive the request projection by QR.
@@ -524,6 +547,10 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
      * slot position or the main-loop parameters are unknown. Call once per decision so that position stays current.
      */
     DDSPC::Matrix slotInputs( const DDSPC::Matrix &applied /**< [in] Slot commands copied since the last decision. */ );
+
+    /// Main-loop route: the pending frame's applied input is the tip/tilt published after it; caller holds
+    /// m_modelMutex.
+    void mainLoopInput();
 
     /// Return a copy of the combined main-loop integrator parameters.
     Integrator integrator();
@@ -652,7 +679,8 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     static bool modalZeroed( const SyncoOutputStatus &output /**< [in] Own-channel output status. */,
                              bool engaged /**< [in] Prediction accepted since the last confirmed zero. */ );
 
-    /// Zero tip/tilt in m_modalScratch while DDSPC owns it, exchange it for the frameGrabber and signal it; WFS thread.
+    /// Set tip/tilt in m_modalScratch (the main-loop route's delta, or zero while DDSPC owns it), exchange it for the
+    /// frameGrabber and signal it; WFS thread.
     void publishModal( std::uint64_t   counter /**< [in] WFS counter of the copied frame. */,
                        const timespec &atime /**< [in] WFS acquisition time of the copied frame. */ );
 
@@ -1373,6 +1401,15 @@ inline DDSPC::Matrix loPredCtrlAcc_operational::slotInputs( const DDSPC::Matrix 
     return deltas;
 }
 
+inline void loPredCtrlAcc_operational::mainLoopInput()
+{
+    m_pending.m_appliedValid = m_mainLoopKnown;
+    if( m_mainLoopKnown )
+    {
+        m_pending.m_appliedCommand = m_mainLoopCommand;
+    }
+}
+
 inline loPredCtrlAcc_operational::Integrator loPredCtrlAcc_operational::integrator()
 {
     std::lock_guard<std::mutex> lock( m_commandMutex );
@@ -1413,6 +1450,13 @@ inline void loPredCtrlAcc_operational::fillFrame( std::uint64_t counter, std::ui
     if( m_pending.m_appliedValid )
     {
         m_pending.m_appliedCommand = input;
+    }
+
+    // Main-loop route: nothing was published for the missed frame, so mfilt received no delta.
+    if( m_mainLoop.load() )
+    {
+        mainLoopInput();
+        m_mainLoopCommand.setZero();
     }
 
     const DDSPC::Matrix slots = slotInputs( applied );
@@ -1633,6 +1677,12 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
         m_pending.m_appliedCommand = input;
     }
 
+    const bool mainLoop = m_mainLoop.load();
+    if( mainLoop )
+    {
+        mainLoopInput(); // The tip/tilt the main loop received, not the own channel's copies.
+    }
+
     const DDSPC::Matrix slots = slotInputs( applied ); // Positions, or per-slot deltas when integrating.
 
     const auto selected = m_mode.load();
@@ -1702,7 +1752,22 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
             }
         }
     }
-    if( !m_predicting || numericalFault )
+    if( mainLoop )
+    {
+        // Main-loop route, as loPredCtrl: this frame's delta replaces modes 0 and 1 of the modal output and mfilt
+        // integrates it; not predicting, the measurement passes through. The own channel's plan stays zero.
+        m_mainLoopPredicted = m_predicting && !numericalFault && plan.allFinite();
+        m_mainLoopCommand   = m_mainLoopPredicted ? DDSPC::Matrix( plan.col( 0 ) ) : measurement;
+        m_mainLoopKnown     = true;
+        if( m_predicting && !m_mainLoopPredicted )
+        {
+            m_mainLoopFault.store( true );
+        }
+
+        plan.setZero();
+        m_intState.setZero();
+    }
+    else if( !m_predicting || numericalFault )
     {
         plan.setZero();
         m_intState.setZero(); // Prediction always restarts from the confirmed own-channel zero.
@@ -2184,31 +2249,51 @@ inline int loPredCtrlAcc_operational::processImage( void *source, const dev::shm
     const auto &metadata = *shmimMonitorT::m_imageStream.md;
     const auto  counter  = metadata.cnt0;
     if( metadata.write || !source )
+    {
         return 0;
+    }
     if( metadata.naxis == 3 )
     {
         const auto plane = metadata.cnt1;
         if( plane >= metadata.size[2] ||
             source != shmimMonitorT::m_imageStream.array.F +
                           plane * std::size_t( shmimMonitorT::m_width ) * shmimMonitorT::m_height )
+        {
             return 0;
+        }
     }
     std::atomic_thread_fence( std::memory_order_acquire );
     DDSPC::Matrix measurement( m_settings.m_modes, 1 ), features;
     for( int mode = 0; mode < m_settings.m_modes; ++mode )
+    {
         measurement( mode ) = static_cast<const float *>( source )[m_calibration.m_indices[mode]];
+    }
     // The modal output copies the same coherent frame; the input and the measurement above are never modified.
     const bool     modal = !m_modalScratch.empty(); // Sized by allocate().
     const timespec atime = metadata.atime;
     if( modal )
+    {
         std::memcpy( m_modalScratch.data(), source, m_modalScratch.size() * sizeof( float ) );
+    }
     std::atomic_thread_fence( std::memory_order_acquire );
     if( metadata.write || counter != metadata.cnt0 )
+    {
         return 0;
-    if( modal ) // Before learning, as loPredCtrl posts its output before updating the model.
+    }
+    const bool mainLoop = m_mainLoop.load();
+    m_mainLoopPredicted = false; // Set only by this frame's main-loop route decision.
+    if( modal && !mainLoop )     // Before learning, as loPredCtrl posts its output before updating the model.
+    {
         publishModal( counter, atime );
-    const bool valid = acceleration( features, now );
-    return step( measurement, counter, features, valid, applied, ordinal, now );
+    }
+    const bool valid  = acceleration( features, now );
+    const int  result = step( measurement, counter, features, valid, applied, ordinal, now );
+    if( modal && mainLoop ) // The main-loop route publishes this frame's decision.
+    {
+        publishModal( counter, atime );
+    }
+
+    return result;
 }
 
 inline void loPredCtrlAcc_operational::validateModalOutput() const
@@ -2234,7 +2319,14 @@ inline void loPredCtrlAcc_operational::publishModal( std::uint64_t counter, cons
         return;
     }
 
-    if( modalZeroed( m_output.status(), m_modalEngaged.load() ) )
+    if( m_mainLoopPredicted )
+    {
+        for( int mode = 0; mode < m_settings.m_modes; ++mode ) // Validated to be exactly modes 0 and 1.
+        {
+            m_modalScratch[m_calibration.m_indices[mode]] = m_mainLoopCommand( mode );
+        }
+    }
+    else if( modalZeroed( m_output.status(), m_modalEngaged.load() ) )
     {
         for( int mode = 0; mode < m_settings.m_modes; ++mode ) // Validated to be exactly modes 0 and 1.
         {
@@ -2438,7 +2530,8 @@ inline int loPredCtrlAcc_operational::setupINDI()
     {
         return -1;
     }
-    createStandardIndiSelectionSw( m_indiP_mode, "ddspc_mode", { "standard", "accel_assisted" }, "Mode", "DDSPC" );
+    createStandardIndiSelectionSw(
+        m_indiP_mode, "ddspc_mode", { "standard", "accel_assisted", "main_loop" }, "Mode", "DDSPC" );
     m_indiP_mode["standard"].setSwitchState( pcf::IndiElement::On );
     if( registerIndiPropertyNew( m_indiP_mode, INDI_NEWCALLBACK( m_indiP_mode ) ) < 0 )
         return -1;
@@ -2655,8 +2748,15 @@ inline int loPredCtrlAcc_operational::appLogic()
     FastStats              fast;
     { //mutex scope
         std::lock_guard<std::mutex> modelLock( m_modelMutex );
-        if( !output.m_requested )
+        if( !output.m_requested && !m_mainLoop.load() ) // The main-loop route never requests the own channel.
+        {
             m_predicting = false;
+        }
+
+        if( m_mainLoopFault.exchange( false ) )
+        {
+            stopPrediction( "standard model numerical fault; main-loop tip/tilt passed through" );
+        }
 
         if( !output.m_requested && output.m_zeroConfirmed )
         {
@@ -2714,6 +2814,7 @@ inline int loPredCtrlAcc_operational::appLogic()
     }
     const bool selected      = m_mode.load() == DDSPC::ShadowMode::Standard;
     const bool selectedReady = selected ? standard.m_ready : assisted.m_ready;
+    const bool mainLoop      = m_mainLoop.load();
     const bool locked = m_syncLocked.load(), samples = m_assistedValid.load();
     // Every failing assisted-mode condition, in dependence order; the first is reported as assisted_state.
     std::string blockers;
@@ -2764,11 +2865,14 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      "standard_state",
                                      "assisted_state",
                                      "main_loop_tt" },
-                                   { selected ? "standard" : "accel_assisted",
+                                   { mainLoop   ? "main_loop"
+                                     : selected ? "standard"
+                                                : "accel_assisted",
                                      standard.m_ready && fresh ? "true" : "false",
                                      assisted.m_ready && fresh && samples && locked ? "true" : "false",
                                      learning ? "true" : "false",
                                      !predicting             ? "off"
+                                     : mainLoop              ? ( selectedReady ? "active" : "warming" )
                                      : !valid                ? "inhibited"
                                      : !selectedReady        ? "warming"
                                      : output.m_acknowledged ? "active"
@@ -2778,7 +2882,9 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      : standard.m_ready ? "ready"
                                                         : DDSPC::shadow_reason( standard.m_reason ),
                                      assistedState,
-                                     modalZeroed( output, m_modalEngaged.load() ) ? "zeroed" : "passthrough" },
+                                     mainLoop && predicting                         ? "predicted"
+                                     : modalZeroed( output, m_modalEngaged.load() ) ? "zeroed"
+                                                                                    : "passthrough" },
                                    INDI_OK );
     updatesIfChanged<std::string>( m_indiP_qualification,
                                    { "blockers",
@@ -2962,6 +3068,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
     const bool                  enabled = value == pcf::IndiElement::On;
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     std::lock_guard<std::mutex> modelLock( m_modelMutex );
+    const bool                  mainLoop = m_mainLoop.load();
     if( enabled && !m_predicting )
     { //mutex scope
         std::lock_guard<std::mutex> commandLock( m_commandMutex );
@@ -2975,7 +3082,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
     {
         refused = "the assisted fit learned without upstream lock; reset the models";
     }
-    else if( enabled && m_integrate && !m_integratorReady.load() )
+    else if( enabled && m_integrate && !mainLoop && !m_integratorReady.load() )
     {
         refused = "the main loop's integrator parameters have not been received";
     }
@@ -2983,7 +3090,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
     {
         refused = "the selected model is not ready, and learning is off or has neither gain nor exploration";
     }
-    else if( !m_output.request( enabled ) )
+    else if( !m_output.request( enabled && !mainLoop ) ) // The main-loop route writes only the modal output.
     {
         refused = std::string( "the DDSPC output is not available (" ) + m_output.status().m_reason + ")";
     }
@@ -3005,7 +3112,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
         m_predicting = enabled;
     }
 
-    if( m_predicting )
+    if( m_predicting && !mainLoop )
     {
         m_modalEngaged.store( true ); // Only an accepted request engages; the request itself already zeroes.
     }
@@ -3035,12 +3142,13 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
         m_slotPlan.setZero();
         m_fastClear = true;
     }
+    const bool  mainLoop = m_mainLoop.load();
     std::string refused;
-    if( enabled && m_integrate && !m_integratorReady.load() )
+    if( enabled && m_integrate && !mainLoop && !m_integratorReady.load() )
     {
         refused = "the main loop's integrator parameters have not been received";
     }
-    else if( enabled && !m_output.request( true ) )
+    else if( enabled && !mainLoop && !m_output.request( true ) ) // The main-loop route writes only the modal output.
     {
         refused = std::string( "the DDSPC output is not available (" ) + m_output.status().m_reason + ")";
     }
@@ -3066,7 +3174,10 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
         // loPredCtrl's three stages, then 1000 frames learning without probes; its end turns learning off.
         m_exploration = parseExploration( "1000,0.05,100,1000,0.05,3,1000,0.05,0.1,1000,0,0.1" );
         m_predicting  = true;
-        m_modalEngaged.store( true );
+        if( !mainLoop )
+        {
+            m_modalEngaged.store( true );
+        }
     }
     else
         m_exploration.clear();
@@ -3142,35 +3253,55 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_mode, ipRecv );
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     if( !removed() )
+    {
         return -1;
+    }
     unsigned          selected = 0;
     DDSPC::ShadowMode mode     = DDSPC::ShadowMode::Standard;
+    bool              mainLoop = false; // main_loop is the standard fit, delivered through the main loop's mfilt.
     for( const auto &entry : ipRecv.getElements() )
     {
-        if( entry.first != "standard" && entry.first != "accel_assisted" )
+        if( entry.first != "standard" && entry.first != "accel_assisted" && entry.first != "main_loop" )
+        {
             return -1;
+        }
         if( entry.second.getSwitchState() == pcf::IndiElement::On )
         {
             ++selected;
-            mode = entry.first == "standard" ? DDSPC::ShadowMode::Standard : DDSPC::ShadowMode::AccelAssisted;
+            mode     = entry.first == "accel_assisted" ? DDSPC::ShadowMode::AccelAssisted : DDSPC::ShadowMode::Standard;
+            mainLoop = entry.first == "main_loop";
         }
         else if( entry.second.getSwitchState() != pcf::IndiElement::Off )
+        {
             return -1;
+        }
     }
     if( selected != 1 )
+    {
         return -1;
+    }
     std::lock_guard<std::mutex> modelLock( m_modelMutex );
+    if( m_predicting ) // Only the main-loop route predicts with the own channel removed.
+    {
+        stopPrediction( "DDSPC mode changed" );
+    }
+
     m_mode.store( mode );
-    m_predicting = false;
+    m_mainLoop.store( mainLoop );
+    m_mainLoopKnown = false;
+    m_predicting    = false;
     applyTraining();
     updateSwitchIfChanged( m_indiP_mode,
                            "standard",
-                           mode == DDSPC::ShadowMode::Standard ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           mode == DDSPC::ShadowMode::Standard && !mainLoop ? pcf::IndiElement::On
+                                                                            : pcf::IndiElement::Off,
                            INDI_OK );
     updateSwitchIfChanged( m_indiP_mode,
                            "accel_assisted",
                            mode == DDSPC::ShadowMode::AccelAssisted ? pcf::IndiElement::On : pcf::IndiElement::Off,
                            INDI_OK );
+    updateSwitchIfChanged(
+        m_indiP_mode, "main_loop", mainLoop ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
     return 0;
 }
 

@@ -84,6 +84,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_learning;
     using loPredCtrlAcc_operational::m_learnStdExtra;
     using loPredCtrlAcc_operational::m_learnUs;
+    using loPredCtrlAcc_operational::m_mainLoop;
     using loPredCtrlAcc_operational::m_maxFill;
     using loPredCtrlAcc_operational::m_modalEngaged;
     using loPredCtrlAcc_operational::m_modalFresh;
@@ -95,6 +96,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_multirate;
     using loPredCtrlAcc_operational::m_output;
     using loPredCtrlAcc_operational::m_outputThread;
+    using loPredCtrlAcc_operational::m_pending;
     using loPredCtrlAcc_operational::m_planBase;
     using loPredCtrlAcc_operational::m_predicting;
     using loPredCtrlAcc_operational::m_ratio;
@@ -112,6 +114,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_wfsFills;
     using loPredCtrlAcc_operational::m_wfsReceipt;
     using loPredCtrlAcc_operational::m_windowReason;
+    using loPredCtrlAcc_operational::mainLoopInput;
     using loPredCtrlAcc_operational::modalZeroed;
     using loPredCtrlAcc_operational::outputCandidate;
     using loPredCtrlAcc_operational::outputValid;
@@ -2281,6 +2284,194 @@ TEST_CASE( "Operator zero and tip/tilt release controls", "[rtc-controller][moda
     REQUIRE( app.newCallBack_m_indiP_zeroDm( zero ) == 0 );
     CHECK( publish() == input );
     std::filesystem::remove( path );
+}
+
+/// \cond RTC_TEST_SUPPORT
+namespace
+{
+/// Select ddspc_mode element on through the real callback, with every other element off.
+int selectMode( Controller &app /**< [in,out] Application under test. */, const char *on /**< [in] Element. */ )
+{
+    auto mode = app.m_indiP_mode;
+    for( const char *element : { "standard", "accel_assisted", "main_loop" } )
+    {
+        mode[element].setSwitchState( std::string( element ) == on ? pcf::IndiElement::On : pcf::IndiElement::Off );
+    }
+
+    return app.newCallBack_m_indiP_mode( mode );
+}
+
+/// Closed loop through the main loop's mfilt, DM = DM - gain*input, with the main-loop route selected.
+/** Returns the residual over the last 2000 of 6000 frames relative to the disturbance. With learn, DDSPC learns with
+ * probes for 3000 frames, then is frozen and keeps predicting; without it, the main loop corrects tip/tilt alone.
+ */
+double mainLoopRun( bool learn /**< [in] Train and predict with DDSPC; otherwise prediction stays off. */ )
+{
+    const std::string name = "ddspc_main_loop_run_test";
+    char              path[4096];
+    REQUIRE( ImageStreamIO_filename( path, sizeof( path ), name.c_str() ) == 0 );
+    std::filesystem::create_directories( std::filesystem::path( path ).parent_path() );
+    std::filesystem::remove( path );
+    Controller           app( true );
+    IMAGE_METADATA       md{};
+    std::array<float, 6> wfs{};
+    app.m_imageStream.array.F = wfs.data();
+    md.naxis                  = 2;
+    md.size[0]                = 6;
+    md.size[1]                = 1;
+    prepareModal( app, md, name );
+    REQUIRE( app.configureAcquisition() == 0 );
+    REQUIRE( selectMode( app, "main_loop" ) == 0 );
+    app.m_gain = 1; // Untrained, the delta is the measurement: the main loop's own integrator.
+    if( learn )
+    {
+        app.train();
+    }
+
+    constexpr double gain = .5;
+    double           dm[2]{}, residual = 0, uncontrolled = 0;
+    for( int n = 0; n < 6000; ++n )
+    {
+        const double disturbance[2]{ std::sin( .09 * n ) + .4 * std::cos( .17 * n ),
+                                     .8 * std::cos( .13 * n ) + .3 * std::sin( .055 * n ) };
+        for( int m = 0; m < 2; ++m )
+        {
+            wfs[m] = float( disturbance[m] + dm[m] );
+        }
+
+        if( n >= 4000 )
+        {
+            residual += wfs[0] * wfs[0] + wfs[1] * wfs[1];
+            uncontrolled += disturbance[0] * disturbance[0] + disturbance[1] * disturbance[1];
+        }
+
+        if( learn && n == 3000 )
+        {
+            app.freeze();
+        }
+
+        md.cnt0 = n + 1;
+        REQUIRE( app.processImage( wfs.data(), MagAOX::app::dev::shmimT{} ) == 0 );
+        std::vector<float> out( wfs.size() );
+        REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
+        for( int m = 0; m < 2; ++m )
+        {
+            dm[m] -= gain * out[m]; // mfilt, which acts on the next WFS frame.
+        }
+    }
+
+    REQUIRE_FALSE( app.m_output.status().m_requested ); // The own DM channel is never used.
+    REQUIRE( app.m_slotPlan.isZero() );
+    if( learn )
+    {
+        REQUIRE( app.m_models->status( DDSPC::ShadowMode::Standard ).m_ready );
+    }
+
+    std::filesystem::remove( path );
+    return std::sqrt( residual / uncontrolled );
+}
+} // namespace
+/// \endcond
+
+/** \brief ddspc_mode main_loop, as loPredCtrl: each frame's standard DDSPC delta replaces modes 0 and 1 of the modal
+ * output after the decision, for the main loop's mfilt to integrate. Prediction needs neither the own channel nor the
+ * integrator parameters, the own channel is never requested, and prediction off passes tip/tilt through unchanged.
+ */
+TEST_CASE( "Main-loop route sends the DDSPC delta through the modal output", "[rtc-controller][modal-output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_mode;
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_predicting;
+    MagAOX::app::loPredCtrlAcc_operational::publishModal;
+    MagAOX::app::loPredCtrlAcc_operational::mainLoopInput;
+    MagAOX::app::loPredCtrlAcc_operational::appLogic;
+#endif
+    // clang-format on
+    const std::string name = "ddspc_main_loop_test";
+    char              path[4096];
+    REQUIRE( ImageStreamIO_filename( path, sizeof( path ), name.c_str() ) == 0 );
+    std::filesystem::create_directories( std::filesystem::path( path ).parent_path() );
+    std::filesystem::remove( path );
+    Controller           app( true );
+    IMAGE_METADATA       md{};
+    std::array<float, 6> wfs{ 1, 2, 3, 4, 5, 6 };
+    app.m_imageStream.array.F = wfs.data();
+    md.naxis                  = 2;
+    md.size[0]                = 6;
+    md.size[1]                = 1;
+    prepareModal( app, md, name );
+    REQUIRE( app.configureAcquisition() == 0 );
+    app.m_integrate = true; // The main loop's parameters are never received; this route does not need them.
+    app.m_gain      = .5f;
+    auto learning   = app.m_indiP_learning;
+    learning["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_learning( learning ) == 0 );
+
+    std::uint64_t counter = 0;
+    const auto    publish = [&]()
+    {
+        md.cnt0 = ++counter;
+        REQUIRE( app.processImage( wfs.data(), MagAOX::app::dev::shmimT{} ) == 0 );
+        std::vector<float> out( wfs.size(), -1 );
+        REQUIRE( app.loadImageIntoStream( out.data() ) == 0 );
+        return out;
+    };
+    const std::vector<float> input( wfs.begin(), wfs.end() ), delta{ .5f, 1, 3, 4, 5, 6 };
+
+    REQUIRE( selectMode( app, "main_loop" ) == 0 );
+    CHECK( app.m_mode.load() == DDSPC::ShadowMode::Standard );
+    CHECK( app.m_indiP_mode["main_loop"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( app.m_indiP_mode["standard"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( publish() == input ); // Prediction off: unchanged.
+
+    auto predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+    CHECK_FALSE( app.m_output.status().m_requested );
+    CHECK_FALSE( app.m_modalEngaged );
+    CHECK( publish() == delta ); // Untrained: gain*y in tip/tilt, every other mode copied.
+    CHECK( publish() == delta );
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_predicting ); // Not stopped for lack of an own-channel request.
+    CHECK( app.m_indiP_control["requested_mode"].get<std::string>() == "main_loop" );
+    CHECK( app.m_indiP_control["main_loop_tt"].get<std::string>() == "predicted" );
+    CHECK( app.m_slotPlan.isZero() );
+
+    // The fit's applied input is the published delta, not the own channel's copies.
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( app.m_modelMutex );
+        app.m_pending = {};
+        app.mainLoopInput();
+        REQUIRE( app.m_pending.m_appliedValid );
+        CHECK( app.m_pending.m_appliedCommand( 0 ) == Approx( .5 ) );
+        CHECK( app.m_pending.m_appliedCommand( 1 ) == Approx( 1 ) );
+    }
+
+    // A mode change while predicting stops prediction, logged, and tip/tilt passes through at once.
+    REQUIRE( selectMode( app, "standard" ) == 0 );
+    CHECK_FALSE( app.m_predicting );
+    CHECK( app.m_textLogs.back().first == "DDSPC prediction stopped: DDSPC mode changed" );
+    CHECK( app.m_indiP_mode["standard"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( app.m_indiP_mode["main_loop"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( publish() == input );
+    std::filesystem::remove( path );
+}
+
+/** \brief Through the main loop's mfilt, the main-loop route learns from its published deltas and predicts a
+ * disturbance the main loop's integrator alone corrects poorly.
+ */
+TEST_CASE( "Main-loop route trains and corrects through mfilt", "[rtc-controller][modal-output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::step;
+    MagAOX::app::loPredCtrlAcc_operational::processImage;
+#endif
+    // clang-format on
+    const double alone = mainLoopRun( false ), ddspc = mainLoopRun( true );
+    INFO( "residual ratio: main loop alone " << alone << ", DDSPC through the main loop " << ddspc );
+    REQUIRE( ddspc < .5 * alone );
 }
 
 /** \brief A refused predict or learn_std request is answered at once with its unchanged state and INDI_ALERT, which
