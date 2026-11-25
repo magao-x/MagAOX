@@ -1,0 +1,4 @@
+#!/bin/bash
+
+sudo chown -R xsup:magaox /opt/MagAOX/calib/
+sudo chmod -R g+w /opt/MagAOX/calib/

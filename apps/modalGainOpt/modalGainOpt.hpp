@@ -14,6 +14,7 @@
 #include <cstring>
 #include <deque>
 #include <fstream>
+#include <sstream>
 
 #include <mx/ao/analysis/clAOLinearPredictor.hpp>
 #include <mx/ao/analysis/clGainOpt.hpp>
@@ -830,6 +831,8 @@ class modalGainOpt : public MagAOXApp<true>,
 
     float m_gainGain{ 0.1 };           ///< The gain to use for SI gain correction updates.  Default is 0.1.
     float m_gainLeak{ 0.9 };           ///< The leak factor used for SI gain integration. Default is 0.9.
+    double m_computeTauReference{ 139e-6 }; ///< Compute latency included in the looptau calibration, in seconds.
+
     processPsdProcessorT::processModelConfig m_extrapConfig; ///< Configuration of the OL PSD extrapolation model.
 
     uint32_t m_maxNCoeff{ modalPredictor::maxTaps }; ///< Maximum number of predictor coefficients accepted.
@@ -958,7 +961,9 @@ class modalGainOpt : public MagAOXApp<true>,
 
     std::vector<float> m_gainCalFacts; ///< Gain calibration factors by mode.
 
-    std::vector<float> m_taus; ///< Measured loop delays by mode.
+    std::vector<float> m_taus; ///< Measured per-mode loop delays from looptau, in seconds.
+
+    double m_computeTau{ m_computeTauReference }; ///< Operator's total compute latency in seconds.
 
     eigenImage<float> m_noiseParams; ///< WFS noise model parameters by mode.
 
@@ -1123,14 +1128,16 @@ class modalGainOpt : public MagAOXApp<true>,
                                size_t size            /**< [in] number of frequency samples in `incoming` */
     );
 
-    /// Refresh gain-optimization structures after coefficient, multiplier, or
-    /// frequency changes.
+    /// Refresh gain-optimization structures after coefficient, multiplier, delay, or frequency changes.
     /** The gain-optimization mutex must be locked before calling this helper.
      *
      * \returns true when a structure refresh was performed
      * \returns false when no refresh was needed
      */
     bool refreshGoptStructures();
+
+    /// Set the runtime compute latency and invalidate optimization state that depends on the delay.
+    void setComputeTau( double seconds /**< [in] Total compute latency in seconds. */ );
 
     /// Synchronize the integrated SI gain state from the applied gain-factor stream.
     void syncSiGainStateFromAppliedGains();
@@ -1396,6 +1403,10 @@ class modalGainOpt : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_opticalGain; ///< INDI property for optical gain.
 
+    pcf::IndiProperty m_indiP_computeTau; ///< Total compute latency in seconds.
+
+    pcf::IndiProperty m_indiP_computeTauReset; ///< Request to restore the compute latency of the looptau calibration.
+
     pcf::IndiProperty m_indiP_gainGain;                     ///< INDI property for gain gain.
     pcf::IndiProperty m_indiP_gainLeak;                     ///< INDI property for gain leak.
     pcf::IndiProperty m_indiP_zeroGains;                    ///< INDI property for zero gains.
@@ -1460,6 +1471,12 @@ class modalGainOpt : public MagAOXApp<true>,
 
     /// Apply the operator's requested optical gain directly.
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_opticalGain );
+
+    /// Apply the requested total compute latency in seconds.
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_computeTau );
+
+    /// Restore the compute latency of the looptau calibration.
+    INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_computeTauReset );
 
     /// Handle updates to the gain gain INDI property.
     INDI_NEWCALLBACK_DECL( modalGainOpt, m_indiP_gainGain );
@@ -1686,6 +1703,16 @@ void modalGainOpt::setupConfig()
                 false,
                 "float",
                 "The leak factor to use for SI optimal-gain integration.  Default is 0.9" );
+
+    config.add( "loop.computeTauReference",
+                "",
+                "loop.computeTauReference",
+                argType::Required,
+                "loop",
+                "computeTauReference",
+                false,
+                "double",
+                "Compute latency included in the looptau calibration, in seconds. Default is 0.000139." );
 
     config.add( "extrapolation.method",
                 "",
@@ -2133,6 +2160,16 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_autoUpdate, "loop.autoUpdate" );
     _config( m_gainGain, "loop.gainGain" );
     _config( m_gainLeak, "loop.gainLeak" );
+    _config( m_computeTauReference, "loop.computeTauReference" );
+    if( !mx::math::isFinite( m_computeTauReference ) || m_computeTauReference < 0 ||
+        m_computeTauReference > std::numeric_limits<float>::max() )
+    {
+        m_shutdown = true;
+        return log<software_critical, -1>(
+            { "Invalid loop.computeTauReference. Enter a finite nonnegative time in seconds." } );
+    }
+
+    m_computeTau = m_computeTauReference;
     _config( m_calibratedNoise, "noise.enabled" );
     std::string noiseSource = "camera";
     _config( noiseSource, "noise.source" );
@@ -2350,6 +2387,26 @@ int modalGainOpt::appStartup()
     CREATE_REG_INDI_NEW_REQUESTSWITCH( m_indiP_updateOnce, "update_once" );
     CREATE_REG_INDI_NEW_REQUESTSWITCH( m_indiP_dump, "update_dump" );
     CREATE_REG_INDI_NEW_REQUESTSWITCH( m_indiP_zeroGains, "zero_gains" );
+    CREATE_REG_INDI_NEW_REQUESTSWITCH( m_indiP_computeTauReset, "computeTauReset" );
+
+    if( createStandardIndiNumber<double>( m_indiP_computeTau,
+                                          "computeTau",
+                                          0,
+                                          std::numeric_limits<float>::max(),
+                                          1e-6,
+                                          "%0.9f",
+                                          "Compute Tau (s)",
+                                          "Gain Opt." ) < 0 )
+    {
+        return log<software_error, -1>( { "Error creating computeTau INDI property" } );
+    }
+
+    m_indiP_computeTau["current"] = m_computeTau;
+    m_indiP_computeTau["target"]  = m_computeTau;
+    if( registerIndiPropertyNew( m_indiP_computeTau, INDI_NEWCALLBACK( m_indiP_computeTau ) ) < 0 )
+    {
+        return log<software_error, -1>( { "Error registering computeTau INDI property" } );
+    }
 
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_opticalGain,
                                  "opticalGain",
@@ -2726,6 +2783,7 @@ int modalGainOpt::appLogic()
     bool zeroGains = false;
     bool opticalGainUpdate = false;
     float opticalGain = 0;
+    double                                   computeTau        = 0;
     float gainGain = 0;
     float gainLeak = 0;
     processPsdProcessorT::processModelConfig extrapConfig;
@@ -2751,6 +2809,7 @@ int modalGainOpt::appLogic()
         zeroGains = m_zeroGains;
         opticalGainUpdate = m_opticalGainUpdate;
         opticalGain = m_opticalGain;
+        computeTau                       = m_computeTau;
         gainGain = m_gainGain;
         gainLeak = m_gainLeak;
         extrapConfig = m_extrapConfig;
@@ -2817,6 +2876,7 @@ int modalGainOpt::appLogic()
     }
 
     updatesIfChanged<float>( m_indiP_opticalGain, { "current", "target" }, { opticalGain, opticalGain } );
+    updatesIfChanged<double>( m_indiP_computeTau, { "current", "target" }, { computeTau, computeTau } );
 
     updatesIfChanged<float>( m_indiP_gainGain, { "current", "target" }, { gainGain, gainGain } );
     updatesIfChanged<float>( m_indiP_gainLeak, { "current", "target" }, { gainLeak, gainLeak } );
@@ -3344,6 +3404,7 @@ bool modalGainOpt::refreshGoptStructures()
     std::cerr << "updating gopt structures\n";
 
     const float controllerFps = m_calibratedNoise && cameraRateMatchesPsd() ? m_cameraFps : m_fps;
+    const double computeOffset = m_computeTau - m_computeTauReference;
 
     m_goptCurrent.resize( m_gainFacts.size() );
     m_goptSI.resize( m_gainFacts.size() );
@@ -3352,14 +3413,16 @@ bool modalGainOpt::refreshGoptStructures()
 
     for( size_t n = 0; n < m_goptCurrent.size(); ++n )
     {
+        const float tau = m_taus[n] + computeOffset;
+
         m_goptCurrent[n].Ti( 1.0 / controllerFps );
-        m_goptCurrent[n].tau( m_taus[n] );
+        m_goptCurrent[n].tau( tau );
 
         m_goptSI[n].Ti( 1.0 / controllerFps );
-        m_goptSI[n].tau( m_taus[n] );
+        m_goptSI[n].tau( tau );
 
         m_goptLP[n].Ti( 1.0 / controllerFps );
-        m_goptLP[n].tau( m_taus[n] );
+        m_goptLP[n].tau( tau );
 
         if( !currentModeUsesPredictor( n ) )
         {
@@ -3398,6 +3461,19 @@ bool modalGainOpt::refreshGoptStructures()
 
     std::cerr << "done.\n";
     return true;
+}
+
+void modalGainOpt::setComputeTau( double seconds )
+{
+    std::lock_guard<std::mutex> lock( m_goptMutex );
+
+    if( seconds != m_computeTau )
+    {
+        m_computeTau  = seconds;
+        m_goptUpdated = true;
+        m_sinceChange = -1;
+        std::fill( m_regScale.begin(), m_regScale.end(), -999 );
+    }
 }
 
 void modalGainOpt::syncSiGainStateFromAppliedGains()
@@ -6063,6 +6139,44 @@ INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_opticalGain )
     }
 
     recordModalGainOpt( false );
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_computeTau )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_computeTau, ipRecv );
+
+    const char *element = ipRecv.find( "target" ) ? "target" : "current";
+    if( !ipRecv.find( element ) )
+    {
+        return log<software_error, -1>( { "Missing computeTau value" } );
+    }
+
+    std::istringstream input( ipRecv[element].get() );
+    double             target = 0;
+    if( !( input >> target ) || !( input >> std::ws ).eof() || !mx::math::isFinite( target ) || target < 0 ||
+        target > std::numeric_limits<float>::max() )
+    {
+        return log<software_error, -1>( { "Invalid computeTau. Enter a finite nonnegative time in seconds." } );
+    }
+
+    setComputeTau( target );
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( modalGainOpt, m_indiP_computeTauReset )
+( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_computeTauReset, ipRecv );
+
+    if( ipRecv.find( "request" ) && ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+    {
+        updateSwitchIfChanged( m_indiP_computeTauReset, "request", pcf::IndiElement::On, INDI_BUSY );
+        setComputeTau( m_computeTauReference );
+        updateSwitchIfChanged( m_indiP_computeTauReset, "request", pcf::IndiElement::Off, INDI_OK );
+    }
 
     return 0;
 }

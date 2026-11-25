@@ -470,6 +470,48 @@ class modalGainOptHarness : public modalGainOpt
         return refreshGoptStructures();
     }
 
+    /// Prepare synthetic compute-time requests for the ordinary INDI callbacks.
+    void initComputeTauPropertiesForTest()
+    {
+        createStandardIndiNumber<double>( m_indiP_computeTau, "computeTau", 0, 1, 1e-6, "%0.9f" );
+        createStandardIndiRequestSw( m_indiP_computeTauReset, "computeTauReset" );
+    }
+
+    /// Return the selected total compute latency in seconds.
+    double computeTauForTest() const
+    {
+        return m_computeTau;
+    }
+
+    /// Send a compute-time target through the normal callback.
+    int requestComputeTauForTest( const std::string &value /**< [in] Requested INDI element text. */ )
+    {
+        auto request = m_indiP_computeTau;
+        request["target"].set( value );
+        return newCallBack_m_indiP_computeTau( request );
+    }
+
+    /// Request restoration of the looptau reference.
+    int requestComputeTauResetForTest()
+    {
+        auto request = m_indiP_computeTauReset;
+        request["request"].setSwitchState( pcf::IndiElement::On );
+        return newCallBack_m_indiP_computeTauReset( request );
+    }
+
+    /// Replace the baseline with newly loaded loop delays and mark the model dirty.
+    void loadLoopTausForTest( std::vector<float> taus /**< [in] Calibrated delays in seconds. */ )
+    {
+        m_taus        = std::move( taus );
+        m_goptUpdated = true;
+    }
+
+    /// Read the three modeled delays for one mode.
+    std::array<float, 3> controllerTausForTest( size_t mode /**< [in] Mode index. */ )
+    {
+        return { m_goptCurrent[mode].tau(), m_goptSI[mode].tau(), m_goptLP[mode].tau() };
+    }
+
     void initExtrapSelectionPropertiesForTest()
     {
         createStandardIndiSelectionSw( m_indiP_extrapMethod,
@@ -692,13 +734,13 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without "
 
     mx::app::writeConfigFile( "/tmp/modalGainOpt_test.conf",
                               { "loop",          "loop",          "loop",          "loop",          "loop",
-                                "loop",          "extrapolation", "extrapolation", "extrapolation", "extrapolation",
+                                "loop",          "loop",          "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
                                 "extrapolation", "extrapolation", "extrapolation", "extrapolation", "extrapolation",
-                                "extrapolation", "extrapolation" },
+                                "extrapolation", "extrapolation", "extrapolation" },
                               {
                                   "number",
                                   "name",
@@ -706,6 +748,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without "
                                   "gainGain",
                                   "gainLeak",
                                   "psdDev",
+                                  "computeTauReference",
                                   "method",
                                   "noiseEstimateDomain",
                                   "noiseEstimateRange",
@@ -744,6 +787,7 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without "
                                 "0.35",
                                 "0.65",
                                 "psdDevice",
+                                "0.000155",
                                 "moffat_peaks",
                                 "closed_loop_pre_xfer",
                                 "low_freq",
@@ -789,6 +833,12 @@ TEST_CASE( "modalGainOpt configuration loads PSD-processing settings without "
     REQUIRE( app.autoUpdate() == false );
     REQUIRE( app.gainGain() == Approx( 0.35F ) );
     REQUIRE( app.gainLeak() == Approx( 0.65F ) );
+    REQUIRE( app.computeTauForTest() == Approx( 155e-6 ) );
+    app.initComputeTauPropertiesForTest();
+    REQUIRE( app.requestComputeTauForTest( "0.000185" ) == 0 );
+    REQUIRE( app.computeTauForTest() == Approx( 185e-6 ) );
+    REQUIRE( app.requestComputeTauResetForTest() == 0 );
+    CHECK( app.computeTauForTest() == Approx( 155e-6 ) );
     REQUIRE( app.extrapMethod() == c_olProcessMoffatPeaks );
     REQUIRE( app.extrapNoiseEstimateDomain() == c_extrapNoiseEstimateClosedLoopPreXfer );
     REQUIRE( app.extrapNoiseEstimateRange() == c_extrapNoiseEstimateLowFreq );
@@ -1781,6 +1831,54 @@ TEST_CASE( "modalGainOpt refreshes pending gopt structures without a PSD wakeup"
     REQUIRE( app.goptUpdated() == false );
     REQUIRE( app.pcgoptUpdated() == false );
     REQUIRE( app.freqUpdated() == false );
+}
+
+/// Apply a signed compute-delay correction to the calibration and restore it on request.
+TEST_CASE( "modalGainOpt corrects looptau with the total compute latency", "[modalGainOpt]" )
+{
+    modalGainOptHarness app;
+    app.initComputeTauPropertiesForTest();
+    app.setFpsForTest( 2000.0F );
+    app.configureGoptStructureInputsForTest( { 1, 1 }, { 546.65e-6F, 610e-6F }, { 0.9F, 0.9F }, { 0, 500, 1000 } );
+
+    // clang-format off
+    #ifdef MODALGAINOPT_TEST_DOXYGEN_REF
+    modalGainOpt::newCallBack_m_indiP_computeTau( pcf::IndiProperty{} );
+    modalGainOpt::newCallBack_m_indiP_computeTauReset( pcf::IndiProperty{} );
+    modalGainOpt::refreshGoptStructures();
+    #endif
+    // clang-format on
+
+    const auto checkDelays = [&]( double first, double second )
+    {
+        REQUIRE( app.refreshGoptStructuresForTest() );
+        for( float tau : app.controllerTausForTest( 0 ) )
+        {
+            CHECK( tau == Approx( first ).margin( 1e-10 ) );
+        }
+
+        for( float tau : app.controllerTausForTest( 1 ) )
+        {
+            CHECK( tau == Approx( second ).margin( 1e-10 ) );
+        }
+    };
+
+    checkDelays( 546.65e-6, 610e-6 );
+    app.setSinceChangeForTest( 20 );
+    REQUIRE( app.requestComputeTauForTest( "0.000185" ) == 0 );
+    CHECK( app.sinceChange() == -1 );
+    checkDelays( 592.65e-6, 656e-6 );
+
+    REQUIRE( app.requestComputeTauForTest( "1e-4" ) == 0 );
+    checkDelays( 507.65e-6, 571e-6 );
+    REQUIRE( app.requestComputeTauForTest( "-0.0001" ) < 0 );
+    REQUIRE( app.requestComputeTauForTest( "0.0001 s" ) < 0 );
+    CHECK_FALSE( app.refreshGoptStructuresForTest() );
+
+    app.loadLoopTausForTest( { 550e-6F, 700e-6F } );
+    checkDelays( 511e-6, 661e-6 );
+    REQUIRE( app.requestComputeTauResetForTest() == 0 );
+    checkDelays( 550e-6, 700e-6 );
 }
 
 /// Pack the optimizer's gains, multipliers and independent tap lengths as one mode-major frame.
