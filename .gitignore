@@ -142,8 +142,6 @@ apps/photonCounter
 #r
 apps/rhusbMon/rhusbMon
 apps/refRMS/refRMS
-apps/resurrector/resurrector_indi
-apps/resurrector/test/test_resurrector
 
 #s
 apps/shmimIntegrator/shmimIntegrator
@@ -208,6 +206,9 @@ utils/logdump/logdump
 utils/logsurgeon/logsurgeon
 utils/cursesINDI/cursesINDI
 utils/logstream/logstream
+utils/xctrl/xctrl
+utils/shmimDelta/shmimDelta
+utils/shmimInfo/shmimInfo
 utils/shmimPlot/shmimPlot
 utils/xrif2shmim/xrif2shmim
 utils/xrif2fits/xrif2fits
@@ -221,6 +222,7 @@ tests/singleTest
 tests/testMagAOX
 tests/testMagAOXsetuid
 tests/test_stderr.txt
+tests/results/
 
 
 #Devel stuff in flatlogs
@@ -257,3 +259,5 @@ coverage_report/
 
 # Valgrind logs
 tests/valgrind/logs/*
+
+apps/virtualPDU/virtualPDU

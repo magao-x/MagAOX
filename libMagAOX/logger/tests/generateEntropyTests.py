@@ -1,5 +1,11 @@
 #!/bin/env python3
 
+'''Generate mixed-log round-trip tests using the regular generator's fixtures.
+
+Options select the number of log types (-n), repetitions (-e), seed (-s),
+and required comma-separated log types (-f). See flatlogs.md for usage.
+'''
+
 import os
 import sys
 import pathlib
@@ -8,14 +14,6 @@ import random
 from generateTemplatedCatch2Tests import *
 import json
 
-'''
-command line options:
-    -n number of flatlog types to include
-    -e entropy number. how many flatlogs will be created and checked
-Future add:
-    -s random seed val
-    config for specifying log types to use
-'''
 # check jinja2 is installed. install it if not
 try:
     import jinja2
@@ -26,6 +24,7 @@ except ModuleNotFoundError:
 
 
 def usage():
+    """Print accepted command-line options and exit."""
     print("Usage: python3 ./generateEntropyTests.py\n" +
           "-n <number of types>\n" +
           "-e <entropy>\n" +
@@ -34,6 +33,7 @@ def usage():
     exit(0)
 
 def main():
+    """Select log types, generate inputs and assertions, and render the test."""
     # default entropy, number of flatlog types, and random seed
     seed = 1
     entropy = 1
@@ -53,7 +53,7 @@ def main():
     )
 
     # get list of flatlogs for which there are generated_tests
-    allTypes = os.listdir(genTestsFolderPath)
+    allTypes = [name for name in os.listdir(genTestsFolderPath) if name.endswith("_generated_tests.cpp")]
     if (nTypes > len(allTypes)):
         print(f"Error: n cannot be larger than amount of types in generated_tests. Retry with n < {len(allTypes)}.")
         exit(0)
@@ -161,33 +161,34 @@ def main():
         for type in typesInfoList:
 
             objName    = f"{type["classVarName"]}_{objCount}"
-            initObjStr = f"{type["className"]}_0 {objName} = {type["className"]}_0("
+            arguments = []
 
             for field in type["messageTypes"][0]:
+                if "defaultArg" in field:
+                    # Defaults (including the wrapper's source_location) are
+                    # checked in the regular generated scenario.
+                    continue
 
                 # make test variable
                 testValName = f"{type["classVarName"]}{field["name"].capitalize()}_{str(totalFieldCount).rjust(8, '0')}"
 
-                initObjStr += f"(char *) {testValName}, " if "char *" in field["type"] else f"{testValName}, "
-                if field == type["messageTypes"][0][-1]:
-                    initObjStr = initObjStr[:-2] + ");"  # remove comma if last member of class
+                arguments.append(f"(char *) {testValName}" if "char *" in field["type"] else testValName)
 
                 constVarStr = f"const {field["type"]} {testValName} = {makeTestVal(field)};"
                 testVariables.append(constVarStr)
 
-                # make catch 2 assertion
-                if "char *" in field["type"]:
-                    catchAssertStr = f"REQUIRE(strcmp({objName}.m_{field["name"]}, {testValName}) == 0);"
-                else:
-                    catchAssertStr = f"REQUIRE({objName}.m_{field["name"]} == {testValName});"
-                catchAsserts.append(catchAssertStr)
+                # Use the same transformed-value and component comparisons as regular tests.
+                expected = testValName
+                if "specialAssertVal" in field:
+                    expected += "_expected"
+                    testVariables.append(f"const {field['type']} {expected} = {field['specialAssertVal']};")
+                catchAsserts.extend(makeFieldAssertions(field, f"{objName}.m_{field['name']}", expected))
 
                 totalFieldCount += 1
 
             catchAsserts.append(f"REQUIRE({objName}.m_verify);")
-            initObjStr = initObjStr[:-2] if (len(type["messageTypes"][0]) != 0) else initObjStr
-            initObjStr += ");"
-            objectCtors.append(initObjStr)
+            objectCtors.append(f"{type['className']}_0 {objName}({', '.join(arguments)});" if arguments
+                               else f"{type['className']}_0 {objName};")
             objCount += 1
 
     jinjaDict = dict()

@@ -1,9 +1,18 @@
 
+/** \file cursesINDI.hpp
+ * \brief A curses INDI client showing every property of an INDI server
+ */
+
+#include <filesystem>
+#include <format>
 #include <fstream>
 
 #include <thread>
 #include <mutex>
 #include <set>
+
+#include <pwd.h>
+#include <unistd.h>
 
 
 #include "../../INDI/libcommon/IndiClient.hpp"
@@ -84,7 +93,7 @@ public:
    std::thread m_drawThread;
    std::mutex m_drawMutex;
 
-   std::string m_msgFile {"/tmp/cursesINDI_logs.txt"};
+   std::string m_msgFile; ///< INDI messages log, one per user so any user can run cursesINDI
    std::ofstream m_msgout;
    int m_msgsPrinted {0};
    int m_msgsMax {10000};
@@ -209,12 +218,15 @@ cursesINDI::cursesINDI( const std::string &szName,
 
    m_yBot = 1;
 
+   // /tmp is shared and sticky: another user's log there can be neither written nor removed
+   struct passwd * pw = getpwuid(getuid());
+   m_msgFile = "/tmp/cursesINDI_logs_" + (pw ? std::string(pw->pw_name) : std::to_string(getuid())) + ".txt";
 
    m_msgout.open(m_msgFile);
 
    if(!m_msgout)
    {
-      throw std::filesystem::filesystem_error(std::format("can't open log file.  you probably need to delete {}", m_msgFile), std::error_code(EPERM, std::system_category()));
+      throw std::filesystem::filesystem_error(std::format("can't open log file {}", m_msgFile), std::error_code(EPERM, std::system_category()));
    }
 
 

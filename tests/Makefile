@@ -1,7 +1,8 @@
 ############################################################
 #                makefile for MagAOX tests                 #
 #                                                          #
-# Add tests to tests.list  and build with `make`           #
+# Add tests to tests.list and build with `make`.            #
+# `make test` runs all suites and saves logs in results/.   #
 #                                                          #
 #                                                          #
 # notes:                                                   #
@@ -24,9 +25,7 @@ all:
 
 .PHONY: test
 test: all
-	@for test in ${TESTOBJS}; do \
-	  ./$$test || exit 1; \
-	done
+	@bash ./testMagAOX.bash
 
 .PHONY: clean
 clean:

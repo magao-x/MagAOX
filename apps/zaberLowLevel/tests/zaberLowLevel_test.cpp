@@ -1,6 +1,5 @@
 /** \file zaberLowLevel_test.cpp
  * \brief Catch2 tests for the zaberLowLevel app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup zaberLowLevel_files
  */
@@ -41,177 +40,232 @@ class zaberLowLevel_test : public zaberLowLevel
 {
   public:
     /// Construct a testable low-level controller instance.
-    zaberLowLevel_test( const std::string &device )
-    {
-        m_configName = device;
-
-        XWCTEST_SETUP_INDI_NEW_PROP( tgt_pos );
-        XWCTEST_SETUP_INDI_NEW_PROP( req_home );
-        XWCTEST_SETUP_INDI_NEW_PROP( req_home_all );
-        XWCTEST_SETUP_INDI_NEW_PROP( req_halt );
-        XWCTEST_SETUP_INDI_NEW_PROP( req_ehalt );
-        XWCTEST_SETUP_INDI_NEW_PROP( knob_enable );
-        XWCTEST_SETUP_INDI_NEW_PROP( led_enable );
-    }
+    zaberLowLevel_test( const std::string &device /**< [in] Isolated test device name. */ );
 
     /// Set up a single staged snapshot and INDI transport for power-off tests.
-    int setupPowerOffSnapshot( const std::string &stageName, long rawPos, bool parked, long maxPos, time_t lastHomed )
-    {
-        std::error_code ec;
-
-        m_testRoot = std::filesystem::temp_directory_path() / ( "zaberLowLevel_test_" + m_configName );
-        std::filesystem::remove_all( m_testRoot, ec );
-
-        m_basePath = m_testRoot.string();
-        m_sysPath  = ( m_testRoot / "sys" ).string();
-
-        std::filesystem::create_directories( m_testRoot / MAGAOX_driverFIFORelPath );
-        std::filesystem::create_directories( std::filesystem::path( m_sysPath ) / m_configName );
-
-        m_stages.emplace_back( this );
-        m_stages.back().name( stageName );
-        m_stages.back().serial( "serial0" );
-
-        {
-            std::ofstream stateOut( std::filesystem::path( m_sysPath ) / m_configName / stageName );
-            stateOut << rawPos << '\n' << parked << '\n' << maxPos << '\n' << lastHomed << '\n';
-        }
-
-        if( appStartup() < 0 )
-        {
-            return -1;
-        }
-
-        if( createINDIFIFOS() < 0 )
-        {
-            return -1;
-        }
-
-        m_indiDriver = new indiDriver<MagAOXAppT>( this, m_configName, "0", "0" );
-
-        return ( m_indiDriver && m_indiDriver->good() ) ? 0 : -1;
-    }
+    int setupPowerOffSnapshot( const std::string &stageName, /**< [in] Retained stage name. */
+                               long               rawPos,    /**< [in] Retained raw position. */
+                               bool               parked,    /**< [in] Retained parked state. */
+                               long               maxPos,    /**< [in] Retained position limit. */
+                               time_t             lastHomed /**< [in] Retained last-home time. */ );
 
     /// Configure a stage entry for discovery tests.
-    int addConfiguredStage( const std::string &stageName, const std::string &serial, int deviceAddress = -1 )
-    {
-        m_stages.emplace_back( this );
-        m_stages.back().name( stageName );
-        m_stages.back().serial( serial );
-        m_stages.back().deviceAddress( deviceAddress );
-
-        const size_t idx = m_stages.size() - 1;
-
-        m_stageName.insert( { stageName, idx } );
-        m_stageSerial.insert( { serial, idx } );
-
-        return 0;
-    }
+    int addConfiguredStage( const std::string &stageName, /**< [in] Configured stage name. */
+                            const std::string &serial,    /**< [in] Configured serial number. */
+                            int deviceAddress = -1 /**< [in] Cached address, or -1 if not discovered. */ );
 
     /// Load the parsed system-serial snapshot through the production discovery code.
-    int loadParsedStages( std::string serialResponse )
-    {
-        return loadStages( serialResponse );
-    }
+    int loadParsedStages( std::string serialResponse /**< [in] Scripted system.serial reply. */ );
 
     /// Set the cached device address for a configured stage.
-    int setDeviceAddressFor( size_t stageIndex, int deviceAddress )
-    {
-        m_stages.at( stageIndex ).deviceAddress( deviceAddress );
-        return 0;
-    }
+    int setDeviceAddressFor( size_t stageIndex, /**< [in] Configured stage index. */
+                             int    deviceAddress /**< [in] New cached address. */ );
 
     /// Get the cached device address for a configured stage.
-    int deviceAddressFor( size_t stageIndex ) const
-    {
-        return m_stages.at( stageIndex ).deviceAddress();
-    }
+    int deviceAddressFor( size_t stageIndex /**< [in] Configured stage index. */ );
 
     /// Drive the recoverable error handler under test.
-    int recoverTransportError( bool devicePresent )
-    {
-        return recoverFromError( devicePresent );
-    }
+    int recoverTransportError( bool devicePresent /**< [in] Whether the simulated USB tty is present. */ );
 
     /// Set the FSM state for recovery tests.
-    int setAppState( stateCodes::stateCodeT newState )
-    {
-        state( newState );
-        return 0;
-    }
+    int setAppState( stateCodes::stateCodeT newState /**< [in] Test FSM state. */ );
 
     /// Get the FSM state for recovery tests.
-    stateCodes::stateCodeT appState() const
-    {
-        return state();
-    }
+    stateCodes::stateCodeT appState();
 
     /// Read the value of a text or number element from a test property.
-    std::string propertyValue( const pcf::IndiProperty &property, const std::string &element ) const
-    {
-        return property[element].getValue();
-    }
+    std::string propertyValue( const pcf::IndiProperty &property, /**< [in] Test property to inspect. */
+                               const std::string &element /**< [in] Element whose stored value is requested. */ ) const;
 
     /// Get the current-position property value for a stage.
-    std::string currPosValue( const std::string &stageName ) const
-    {
-        return propertyValue( m_indiP_curr_pos, stageName );
-    }
+    std::string currPosValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the target-position property value for a stage.
-    std::string tgtPosValue( const std::string &stageName ) const
-    {
-        return propertyValue( m_indiP_tgt_pos, stageName );
-    }
+    std::string tgtPosValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the parked-state property value for a stage.
-    std::string parkedValue( const std::string &stageName ) const
-    {
-        return propertyValue( m_indiP_parked, stageName );
-    }
+    std::string parkedValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the last-homed property value for a stage.
-    std::string lastHomedValue( const std::string &stageName ) const
-    {
-        return propertyValue( m_indiP_lastHomed, stageName );
-    }
+    std::string lastHomedValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the max-position property value for a stage.
-    std::string maxPosValue( const std::string &stageName ) const
-    {
-        return propertyValue( m_indiP_max_pos, stageName );
-    }
+    std::string maxPosValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Get the current-state property value for a stage.
-    std::string currStateValue( const std::string &stageName ) const
-    {
-        return propertyValue( m_indiP_curr_state, stageName );
-    }
+    std::string currStateValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
-    /// Get the warning-switch property value for a stage.
-    std::string warnValue( const std::string &stageName ) const
-    {
-        return propertyValue( m_indiP_warn, stageName );
-    }
+    /// Get the typed warning-switch state for a stage.
+    pcf::IndiElement::SwitchStateType
+    warnValue( const std::string &stageName /**< [in] Configured stage name. */ ) const;
 
     /// Invoke the power-off handling under test.
-    int doOnPowerOff()
-    {
-        return onPowerOff();
-    }
+    int doOnPowerOff();
 
-    ~zaberLowLevel_test() noexcept
-    {
-        std::error_code ec;
-
-        delete m_indiDriver;
-        m_indiDriver = nullptr;
-        std::filesystem::remove_all( m_testRoot, ec );
-    }
+    /// Delete the private FIFO driver and only this fixture's temporary files.
+    ~zaberLowLevel_test() noexcept;
 
   private:
     std::filesystem::path m_testRoot; ///< Temporary directory backing the test FIFOs and state snapshot.
 };
+
+inline zaberLowLevel_test::zaberLowLevel_test( const std::string &device )
+{
+    m_configName = device;
+
+    XWCTEST_SETUP_INDI_NEW_PROP( tgt_pos );
+    XWCTEST_SETUP_INDI_NEW_PROP( req_home );
+    XWCTEST_SETUP_INDI_NEW_PROP( req_home_all );
+    XWCTEST_SETUP_INDI_NEW_PROP( req_halt );
+    XWCTEST_SETUP_INDI_NEW_PROP( req_ehalt );
+    XWCTEST_SETUP_INDI_NEW_PROP( knob_enable );
+    XWCTEST_SETUP_INDI_NEW_PROP( led_enable );
+}
+
+inline int zaberLowLevel_test::setupPowerOffSnapshot(
+    const std::string &stageName, long rawPos, bool parked, long maxPos, time_t lastHomed )
+{
+    std::error_code ec;
+
+    m_testRoot = std::filesystem::temp_directory_path() / ( "zaberLowLevel_test_" + m_configName );
+    std::filesystem::remove_all( m_testRoot, ec );
+
+    m_basePath = m_testRoot.string();
+    m_sysPath  = ( m_testRoot / "sys" ).string();
+
+    std::filesystem::create_directories( m_testRoot / MAGAOX_driverFIFORelPath );
+    std::filesystem::create_directories( std::filesystem::path( m_sysPath ) / m_configName );
+
+    m_stages.emplace_back( this );
+    m_stages.back().name( stageName );
+    m_stages.back().serial( "serial0" );
+
+    {
+        std::ofstream stateOut( std::filesystem::path( m_sysPath ) / m_configName / stageName );
+        stateOut << rawPos << '\n' << parked << '\n' << maxPos << '\n' << lastHomed << '\n';
+    }
+
+    createStandardIndiText( m_indiP_state, "fsm" );
+    m_indiP_state.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_state.add( pcf::IndiElement( "state" ) );
+    state( stateCodes::INITIALIZED );
+    if( appStartup() < 0 )
+    {
+        return -1;
+    }
+
+    if( createINDIFIFOS() < 0 )
+    {
+        return -1;
+    }
+
+    m_indiDriver = new indiDriver<MagAOXAppT>( this, m_configName, "0", "0" );
+
+    return ( m_indiDriver && m_indiDriver->good() ) ? 0 : -1;
+}
+
+inline int
+zaberLowLevel_test::addConfiguredStage( const std::string &stageName, const std::string &serial, int deviceAddress )
+{
+    m_stages.emplace_back( this );
+    m_stages.back().name( stageName );
+    m_stages.back().serial( serial );
+    m_stages.back().deviceAddress( deviceAddress );
+
+    const size_t idx = m_stages.size() - 1;
+
+    m_stageName.insert( { stageName, idx } );
+    m_stageSerial.insert( { serial, idx } );
+
+    return 0;
+}
+
+inline int zaberLowLevel_test::loadParsedStages( std::string serialResponse )
+{
+    return loadStages( serialResponse );
+}
+
+inline int zaberLowLevel_test::setDeviceAddressFor( size_t stageIndex, int deviceAddress )
+{
+    m_stages.at( stageIndex ).deviceAddress( deviceAddress );
+    return 0;
+}
+
+inline int zaberLowLevel_test::deviceAddressFor( size_t stageIndex )
+{
+    return m_stages.at( stageIndex ).deviceAddress();
+}
+
+inline int zaberLowLevel_test::recoverTransportError( bool devicePresent )
+{
+    return recoverFromError( devicePresent );
+}
+
+inline int zaberLowLevel_test::setAppState( stateCodes::stateCodeT newState )
+{
+    state( newState );
+    return 0;
+}
+
+inline stateCodes::stateCodeT zaberLowLevel_test::appState()
+{
+    return state();
+}
+
+inline std::string zaberLowLevel_test::propertyValue( const pcf::IndiProperty &property,
+                                                      const std::string       &element ) const
+{
+    return property[element].getValue();
+}
+
+inline int zaberLowLevel_test::doOnPowerOff()
+{
+    return onPowerOff();
+}
+
+inline zaberLowLevel_test::~zaberLowLevel_test() noexcept
+{
+    std::error_code ec;
+
+    delete m_indiDriver;
+    m_indiDriver = nullptr;
+    std::filesystem::remove_all( m_testRoot, ec );
+}
+
+inline std::string zaberLowLevel_test::currPosValue( const std::string &stageName ) const
+{
+    return propertyValue( m_indiP_curr_pos, stageName );
+}
+
+inline std::string zaberLowLevel_test::tgtPosValue( const std::string &stageName ) const
+{
+    return propertyValue( m_indiP_tgt_pos, stageName );
+}
+
+inline std::string zaberLowLevel_test::parkedValue( const std::string &stageName ) const
+{
+    return propertyValue( m_indiP_parked, stageName );
+}
+
+inline std::string zaberLowLevel_test::lastHomedValue( const std::string &stageName ) const
+{
+    return propertyValue( m_indiP_lastHomed, stageName );
+}
+
+inline std::string zaberLowLevel_test::maxPosValue( const std::string &stageName ) const
+{
+    return propertyValue( m_indiP_max_pos, stageName );
+}
+
+inline std::string zaberLowLevel_test::currStateValue( const std::string &stageName ) const
+{
+    return propertyValue( m_indiP_curr_state, stageName );
+}
+
+inline pcf::IndiElement::SwitchStateType zaberLowLevel_test::warnValue( const std::string &stageName ) const
+{
+    return m_indiP_warn[stageName].getSwitchState();
+}
 /// \endcond
 
 /// Verify zaberLowLevel callback validation and power-off snapshots preserve stage state.
@@ -237,8 +291,15 @@ SCENARIO( "INDI Callbacks", "[zaberLowLevel]" )
     XWCTEST_INDI_NEW_CALLBACK( zaberLowLevel, led_enable );
 }
 
+/// Verify observed power-off preserves retained position/parked metadata while clearing warnings.
+/** \ingroup zaberLowLevel_unit_test */
 SCENARIO( "Power-off INDI snapshot retains stage state", "[zaberLowLevel]" )
 {
+    // clang-format off
+    #ifdef ZABERLOWLEVEL_TEST_DOXYGEN_REF
+    zaberLowLevel::appStartup(); zaberLowLevel::onPowerOff();
+    #endif
+    // clang-format on
     zaberLowLevel_test zllt( "zlltest" );
 
     REQUIRE( zllt.setupPowerOffSnapshot( "stageA", 12345, true, 54321, 77 ) == 0 );
@@ -251,7 +312,7 @@ SCENARIO( "Power-off INDI snapshot retains stage state", "[zaberLowLevel]" )
     REQUIRE( zllt.lastHomedValue( "stageA" ) == "77" );
     REQUIRE( zllt.maxPosValue( "stageA" ) == "54321" );
     REQUIRE( zllt.currStateValue( "stageA" ) == "POWEROFF" );
-    REQUIRE( zllt.warnValue( "stageA" ) == "Off" );
+    REQUIRE( zllt.warnValue( "stageA" ) == pcf::IndiElement::Off );
 }
 
 /// Verify discovery clears stale addresses and reports missing configured stages safely.
@@ -284,6 +345,11 @@ SCENARIO( "Stage discovery resets stale device addresses", "[zaberLowLevel]" )
  */
 SCENARIO( "Stage discovery can find devices that appear later", "[zaberLowLevel]" )
 {
+    // clang-format off
+    #ifdef ZABERLOWLEVEL_TEST_DOXYGEN_REF
+    zaberLowLevel::loadStages();
+    #endif
+    // clang-format on
     zaberLowLevel_test zllt( "zlltest_rediscover" );
 
     REQUIRE( zllt.addConfiguredStage( "stagebs", "49820" ) == 0 );

@@ -1,0 +1,10 @@
+TEMPLATE = app
+TARGET = multiIndiPublisher_test
+QT += core
+QT -= gui
+CONFIG += console c++20
+CONFIG -= app_bundle
+OBJECTS_DIR = obj/
+MAKEFILE = makefile.multiIndiPublisher_test
+SOURCES += multiIndiPublisher_test.cpp
+LIBS += $$PWD/../../../INDI/libcommon/libcommon.a $$PWD/../../../INDI/liblilxml/liblilxml.a

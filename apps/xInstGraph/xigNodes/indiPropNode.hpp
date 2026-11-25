@@ -17,7 +17,7 @@ class indiPropNode : public fsmNode
 {
 
   protected:
-    std::string m_propKey; ///< unique key, device.name, of the property tp track
+    std::string m_propKey; ///< unique key, device.name, of the property to track
     std::string m_propEl;  ///< the element of the property to track
 
     std::string m_propValStr; ///< the target value of the element. This is always set.
@@ -36,21 +36,30 @@ class indiPropNode : public fsmNode
 
     double m_tol{ 1e-7 }; ///< The tolerance for floating point comparison.  Default is 1e-7.
 
-    bool m_state{ false }; ///< The current state of the comparison.
+    bool m_state{ false }; ///< The current state of the tracked-property comparison.
 
-    bool m_first{ true }; ///< Flag indicating if it's the first call to \ref handleSetProperty
+    /// Current put state after applying the FSM gate to the property comparison.
+    bool m_effectiveState{ false };
 
-    std::string m_onStr {"ON"};
-    std::string m_offStr {"OFF"};
+    /// Whether the effective put state has been published at least once.
+    bool m_effectiveInitialized{ false };
+
+    bool m_first{ true }; ///< Whether the first tracked-property update is still pending.
+
+    /// Label shown when the effective put state is on.
+    std::string m_onStr{ "ON" };
+
+    /// Label shown when the effective put state is off.
+    std::string m_offStr{ "OFF" };
 
   public:
     /// Only c'tor.  Must be constructed with node name and a parent graph.
-    indiPropNode( const std::string  &name,       /** [in] the name of this node*/
-                  ingr::instGraphXML *parentGraph /** [in] the graph which this node belongs to*/
+    indiPropNode( const std::string  &name,       /**< [in] the name of this node */
+                  ingr::instGraphXML *parentGraph /**< [in] the graph which this node belongs to */
     );
 
     /// Set the unique key of the INDI property to track
-    void propKey( const std::string &pk /** [in] */ );
+    void propKey( const std::string &pk /**< [in] device.property key */ );
 
     /// Get the unique key of the INDI property to track
     /**
@@ -59,7 +68,7 @@ class indiPropNode : public fsmNode
     const std::string &propKey() const;
 
     /// Set the element of the INDI property to track
-    void propEl( const std::string &pe /** [in] */ );
+    void propEl( const std::string &pe /**< [in] element name */ );
 
     /// Get the element of the INDI property to track
     /**
@@ -70,7 +79,7 @@ class indiPropNode : public fsmNode
     /// Set the target value of the INDI element.
     /** Always set in its string form and converted as needed
      */
-    void propValStr( const std::string &pv /** [in] */ );
+    void propValStr( const std::string &pv /**< [in] target element value */ );
 
     /// Get the target value of the INDI element.
     /**
@@ -102,15 +111,18 @@ class indiPropNode : public fsmNode
      */
     const double &tol() const;
 
-    /// Get the current value of the comparison
+    /// Get the current tracked-property comparison, before applying the FSM gate.
     /**
      * \returns the value of m_state
      */
     const bool &state() const;
 
   protected:
-    /// On first call to handleSetProperty we find the property type and convert the target value
-    virtual int firstSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property*/ );
+    /// On the first tracked-property update, determine its type and convert the target value.
+    virtual int firstSetProperty( const pcf::IndiProperty &ipRecv /**< [in] the received INDI property */ );
+
+    /// Apply the conjunction of the tracked property and any configured FSM gate.
+    void updateEffectiveState( bool force /**< [in] reapply after the base FSM handler changed puts */ );
 
   public:
     /// INDI SetProperty callback
@@ -122,11 +134,12 @@ class indiPropNode : public fsmNode
     /// Toggle all puts off
     virtual void toggleOff();
 
-    /// Configure this node form an appConfigurator.
+    /// Configure this node from an appConfigurator.
     void loadConfig( mx::app::appConfigurator &config /**< [in] the loaded configuration */ );
 };
 
-indiPropNode::indiPropNode( const std::string &name, ingr::instGraphXML *parentGraph ) : fsmNode( name, parentGraph )
+inline indiPropNode::indiPropNode( const std::string &name, ingr::instGraphXML *parentGraph )
+    : fsmNode( name, parentGraph )
 {
     if( m_parentGraph )
     {
@@ -141,7 +154,7 @@ inline void indiPropNode::propKey( const std::string &pk )
     key( m_propKey );
 }
 
-const std::string &indiPropNode::propKey() const
+inline const std::string &indiPropNode::propKey() const
 {
     return m_propKey;
 }
@@ -151,7 +164,7 @@ inline void indiPropNode::propEl( const std::string &pe )
     m_propEl = pe;
 }
 
-const std::string &indiPropNode::propEl() const
+inline const std::string &indiPropNode::propEl() const
 {
     return m_propEl;
 }
@@ -161,32 +174,32 @@ inline void indiPropNode::propValStr( const std::string &pv )
     m_propValStr = pv;
 }
 
-const std::string &indiPropNode::propValStr() const
+inline const std::string &indiPropNode::propValStr() const
 {
     return m_propValStr;
 }
 
-const double &indiPropNode::propValNum() const
+inline const double &indiPropNode::propValNum() const
 {
     return m_propValNum;
 }
 
-const pcf::IndiElement::SwitchStateType &indiPropNode::propValSw()
+inline const pcf::IndiElement::SwitchStateType &indiPropNode::propValSw()
 {
     return m_propValSw;
 }
 
-const pcf::IndiProperty::Type &indiPropNode::type() const
+inline const pcf::IndiProperty::Type &indiPropNode::type() const
 {
     return m_type;
 }
 
-const double &indiPropNode::tol() const
+inline const double &indiPropNode::tol() const
 {
     return m_tol;
 }
 
-const bool &indiPropNode::state() const
+inline const bool &indiPropNode::state() const
 {
     return m_state;
 }
@@ -255,24 +268,51 @@ inline int indiPropNode::firstSetProperty( const pcf::IndiProperty &ipRecv )
     return 0;
 }
 
+inline void indiPropNode::updateEffectiveState( bool force )
+{
+    const bool gateOpen  = m_fsmAction == fsmNodeActionT::passive || m_stateOnTarget;
+    const bool effective = m_state && gateOpen;
+    if( m_effectiveInitialized && effective == m_effectiveState && !force )
+    {
+        return;
+    }
+
+    if( !m_effectiveInitialized || effective != m_effectiveState )
+    {
+        ++m_changes;
+    }
+    m_effectiveState       = effective;
+    m_effectiveInitialized = true;
+
+    if( effective )
+    {
+        toggleOn();
+        m_parentGraph->valueExtra( m_node->name(), "state", m_onStr );
+    }
+    else
+    {
+        toggleOff();
+        m_parentGraph->valueExtra( m_node->name(), "state", m_offStr );
+    }
+}
+
 inline int indiPropNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-    bool actionTaken = false;
-
-    int rv = fsmNode::handleSetProperty( actionTaken, ipRecv );
+    const std::string key         = ipRecv.createUniqueKey();
+    const bool        fsmUpdate   = key == m_fsmKey && ipRecv.find( m_fsmElName );
+    bool              actionTaken = false;
+    int               rv          = fsmNode::handleSetProperty( actionTaken, ipRecv );
     if( rv < 0 )
     {
-        std::cerr << "Error from fsmNode::handleSetProperty\n";
         return rv;
     }
 
-    if( actionTaken )
+    if( key != m_propKey )
     {
-        return 0;
-    }
-
-    if( ipRecv.createUniqueKey() != m_propKey )
-    {
+        if( fsmUpdate )
+        {
+            updateEffectiveState( true );
+        }
         return 0;
     }
 
@@ -286,10 +326,9 @@ inline int indiPropNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
     {
         try
         {
-            int rv = firstSetProperty( ipRecv );
-            if(rv < 0)
+            rv = firstSetProperty( ipRecv );
+            if( rv < 0 )
             {
-                std::cerr << "Error from firstSetProperty\n";
                 return rv;
             }
         }
@@ -298,74 +337,31 @@ inline int indiPropNode::handleSetProperty( const pcf::IndiProperty &ipRecv )
             std::string msg = XIGN_EXCEPTION( "indiPropNode::handleSetProperty", "exception caught" );
             msg += ": ";
             msg += e.what();
-
             throw std::runtime_error( msg );
         }
     }
 
     bool on = false;
-
     if( m_type == pcf::IndiProperty::Type::Number )
     {
-        if( fabs( ipRecv[m_propEl].get<double>() - m_propValNum ) <= m_tol )
-        {
-            on = true;
-        }
+        on = fabs( ipRecv[m_propEl].get<double>() - m_propValNum ) <= m_tol;
     }
     else if( m_type == pcf::IndiProperty::Type::Switch )
     {
-        if( ipRecv[m_propEl].getSwitchState() == m_propValSw )
-        {
-            on = true;
-        }
+        on = ipRecv[m_propEl].getSwitchState() == m_propValSw;
     }
     else if( m_type == pcf::IndiProperty::Type::Text )
     {
-        if( ipRecv[m_propEl].get() == m_propValStr )
-        {
-            on = true;
-        }
+        on = ipRecv[m_propEl].get() == m_propValStr;
     }
     else
     {
-        std::string msg = XIGN_EXCEPTION( "indiPropNode::handleSetProperty", "type not implemented" );
-        throw std::runtime_error( msg );
+        throw std::runtime_error( XIGN_EXCEPTION( "indiPropNode::handleSetProperty", "type not implemented" ) );
     }
 
-    if( m_first )
-    {
-        // trigger the change on the first run.
-        if( on )
-        {
-            m_state = false;
-        }
-        else
-        {
-            m_state = true;
-        }
-
-        // made this it's own branch so we don't do this every time:
-        m_first = false;
-    }
-
-    if( on != m_state )
-    {
-        ++m_changes;
-        m_state = on;
-        if( on )
-        {
-            toggleOn();
-            m_parentGraph->valueExtra( m_node->name(), "state", m_onStr );
-            return 0;
-        }
-        else
-        {
-            toggleOff();
-            m_parentGraph->valueExtra( m_node->name(), "state", m_offStr );
-            return 0;
-        }
-    }
-
+    m_state = on;
+    m_first = false;
+    updateEffectiveState( fsmUpdate );
     return 0;
 }
 

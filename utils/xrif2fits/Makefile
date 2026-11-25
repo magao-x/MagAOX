@@ -5,5 +5,9 @@ OTHER_HEADERS=
 TARGET=xrif2fits
 LDLIBS += -lcfitsio
 #OPTIMIZE=-ggdb
-include ../../Make/magAOXUtil.mk
 
+ifeq ($(DEBUG),1)
+  CXXFLAGS += -DXRIF2FITS_DEBUG
+endif
+
+include ../../Make/magAOXUtil.mk

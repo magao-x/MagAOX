@@ -106,6 +106,8 @@ class IndiConnection : public pcf::Thread
     void setName( const std::string &szName );
     /// Which FD will be used for output?
     void setOutputFd( const int &iFd );
+    /// How many messages were dropped because the output FIFO was full?
+    uint64_t outputDrops() const;
     /// Set the version of the INDI protocol.
     void setProtocolVersion( const std::string &szProtocolVersion );
     /// Sets the INDI protocol version.
@@ -157,6 +159,18 @@ class IndiConnection : public pcf::Thread
 
     /// The file descriptor to ::write to.
     int m_fdOutput;
+
+    /// True if m_fdOutput is a FIFO, which sendXml never blocks on.
+    bool m_oOutputIsFifo{ false };
+
+    /// True while the output FIFO has been too full to take messages, so they are dropped without waiting.
+    mutable bool m_oOutputStalled{ false };
+
+    /// Number of messages dropped because the output FIFO was full.
+    mutable std::atomic<uint64_t> m_nOutputDrops{ 0 };
+
+    /// Longest sendXml waits for room in a full output FIFO before dropping messages, ms.
+    static constexpr int OutputWaitMs{ 250 };
 
     /// If the processing of INDI messages is put in a separate thread,
     /// this is the thread id of it.
