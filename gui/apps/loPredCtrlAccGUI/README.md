@@ -24,6 +24,7 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 | Reset models | `reset_model.request` |
 | Prediction | `predict.toggle` |
 | Gain | `gain.current`/`target` |
+| Extra learning [s] | `learn_std_extra.current`/`target`: seconds the Standard sequence keeps learning after its last stage before learning turns off (0: at its end). Applies at once, including during a running sequence. Disabled with a controller that does not publish it. |
 | Zero DDSPC DM | `zero_dm.request`. Turns prediction off and writes a fresh zero to the DDSPC auxiliary channel (`dm.channelName`), even if the last zero was already confirmed. |
 | Return tip/tilt to main loop | `release_tt.request`. Turns prediction off and passes main-loop tip/tilt through from the next WFS frame without waiting for `safety.zero_confirmed`; the zero is still retried. |
 
