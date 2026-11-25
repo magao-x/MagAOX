@@ -1,5 +1,5 @@
 /** \file psfAcq_test.cpp
- * \brief Offline star list, seeing display, and acquire command tests for the psfAcq GUI widget.
+ * \brief Offline star list, seeing display, seeing-star selection, and acquire command tests for the psfAcq GUI widget.
  * \ingroup psfAcqGUI_unit_test
  */
 #define CATCH_CONFIG_RUNNER
@@ -29,6 +29,9 @@ class Widget : public xqt::psfAcq
 
     /// Define one `star_N` property with a seeing value and refresh the widget.
     void star( int n /**< [in] Star index. */, double seeing /**< [in] Seeing in arcsec. */ );
+
+    /// Deliver the star the device uses for its published seeing and refresh the widget.
+    void seeingStar( int n /**< [in] Star index, or -1 for none. */ );
 
     /// Delete one `star_N` property and refresh the widget.
     void delStar( int n /**< [in] Star index. */ );
@@ -65,6 +68,15 @@ void Widget::star( int n, double seeing )
     updateGUI();
 }
 
+void Widget::seeingStar( int n )
+{
+    pcf::IndiProperty p( pcf::IndiProperty::Number, "camacq-acq", "seeing_star" );
+    p.add( pcf::IndiElement( "current" ) );
+    p["current"] = n;
+    handleSetProperty( p );
+    updateGUI();
+}
+
 void Widget::delStar( int n )
 {
     pcf::IndiProperty p( pcf::IndiProperty::Number, "camacq-acq", "star_" + std::to_string( n ) );
@@ -86,7 +98,8 @@ TEST_CASE( "psfAcq widget parses star property names", "[psfAcqGUI]" )
     CHECK( xqt::psfAcq::starIndex( "seeing_star" ) == -1 );
 }
 
-/** \brief Detected stars populate the list, the selected star's seeing is shown, and Acquire sends its index.
+/** \brief Detected stars populate the list, star 0 is selected by default with its seeing shown, and selections are
+ * sent.
  * \ingroup psfAcqGUI_unit_test
  */
 TEST_CASE( "psfAcq widget selects a star, shows its seeing, and acquires it", "[psfAcqGUI]" )
@@ -94,7 +107,7 @@ TEST_CASE( "psfAcq widget selects a star, shows its seeing, and acquires it", "[
     // clang-format off
 #ifdef PSFACQ_GUI_TEST_DOXYGEN_REF
     xqt::psfAcq::handleSetProperty; xqt::psfAcq::handleDelProperty; xqt::psfAcq::updateGUI;
-    xqt::psfAcq::on_button_acquire_pressed;
+    xqt::psfAcq::on_button_acquire_pressed; xqt::psfAcq::on_combo_star_activated;
 #endif
     // clang-format on
     std::string name = "camacq-acq";
@@ -107,39 +120,50 @@ TEST_CASE( "psfAcq widget selects a star, shows its seeing, and acquires it", "[
     REQUIRE( seeing );
     REQUIRE( acquire );
 
-    widget.star( 0, 0.85 );
     widget.star( 1, 1.25 );
+    CHECK( combo->currentData().toInt() == 1 );
+
+    widget.star( 0, 0.85 );
     CHECK( combo->count() == 2 );
+    CHECK( combo->currentData().toInt() == 0 );
     CHECK_FALSE( acquire->isEnabled() );
-    CHECK( seeing->text() == "---" );
+    CHECK( seeing->text() == "0.85\"" );
 
     widget.fsm( "OPERATING" );
     CHECK( acquire->isEnabled() );
     CHECK( seeing->text() == "0.85\"" );
+    CHECK( widget.m_sent.empty() );
 
     combo->setCurrentIndex( 1 );
+    emit combo->activated( 1 );
     widget.updateGUI();
     CHECK( seeing->text() == "1.25\"" );
+    REQUIRE( widget.m_sent.size() == 1 );
+    CHECK( widget.m_sent.back().getName() == "seeing_star" );
+    CHECK( widget.m_sent.back()["target"].get<int>() == 1 );
+    widget.seeingStar( 1 );
 
     widget.star( 2, 2.0 );
     CHECK( combo->count() == 3 );
     CHECK( combo->currentData().toInt() == 1 );
 
     widget.on_button_acquire_pressed();
-    REQUIRE( widget.m_sent.size() == 1 );
+    REQUIRE( widget.m_sent.size() == 2 );
     CHECK( widget.m_sent.back().getDevice() == "camacq-acq" );
     CHECK( widget.m_sent.back().getName() == "acquire_star" );
     CHECK( widget.m_sent.back()["target"].get<int>() == 1 );
 
+    widget.seeingStar( 0 );
     widget.delStar( 1 );
     CHECK( combo->count() == 2 );
-    CHECK( combo->currentData().toInt() != 1 );
+    CHECK( combo->currentData().toInt() == 0 );
+    CHECK( seeing->text() == "0.85\"" );
 
     widget.onDisconnect();
     CHECK( combo->count() == 0 );
     CHECK_FALSE( acquire->isEnabled() );
     widget.on_button_acquire_pressed();
-    CHECK( widget.m_sent.size() == 1 );
+    CHECK( widget.m_sent.size() == 2 );
 }
 } // namespace psfAcqGUITest
 } // namespace libXWCTest
