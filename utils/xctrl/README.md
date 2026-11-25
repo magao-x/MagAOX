@@ -33,6 +33,10 @@ For `MAGAOX_ROLE=ICC`, `xctrl sync` writes:
                                           [systemd] with camsci1.conf's in their place
 /etc/magaox-icc/
     environment                           optional, not generated: extra environment for all apps
+
+/etc/magaox/
+    systemd-directives.txt                systemd default allowlist for directives, installed via `make install` in utils/xctrl
+    systemd-directives.local.txt          allowlist xctrl uses for app `.conf` and `magaox.conf` directives. Users edit this
 ```
 
 The proclist says what should be registered; the drop-ins and links are what is registered. An app is registered when
@@ -45,7 +49,8 @@ record of earlier versions, and rewrites every drop-in once, as their header cha
 
 Each app runs as `/opt/MagAOX/bin/<executable> -n <name>`, as user `xsup`, with `MAGAOX_ROLE` set, and
 `PYTHONUNBUFFERED=1` so that Python apps' output is not held back. Its output goes to the journal
-(`xctrl peek NAME`); its binary logs are unchanged (`logdump NAME`).
+(`xctrl peek NAME`); its binary logs are unchanged (`logdump NAME`). `xctrl inspect` shows `journald`
+ output for an app and requires a user with `adm`, `systemd-journal`, or `sudo` to view.
 
 Unit names use the role in lower case. App names may contain `-`; units use them as is (`%i`).
 
@@ -59,7 +64,7 @@ Unit names use the role in lower case. App names may contain `-`; units use them
 | `-camsci1  picamCtrl`    | an app, registered and started automatically, without a watchdog                 |
 | `#!camsci1  picamCtrl`   | a disabled app: registered if `camsci1.conf` exists, but started only by hand    |
 | `#!-camsci1  picamCtrl`  | a disabled app without a watchdog                                                |
-| `#camsci1  picamCtrl`    | a comment, like any line starting with `#` but not `#!`: not an app, not registered |
+| `#camsci1  picamCtrl`    | a comment, like any line starting with `#` but not `#!`                          |
 | `#-camsci1  picamCtrl`   | a comment too                                                                    |
 
 `#!` may be followed by spaces: `#! camsci1 picamCtrl` is the same disabled app. A `#!` line that is not
@@ -71,19 +76,36 @@ touched by `enable`, `disable`, `add` or `delete`.
 | none        | the app notifies systemd: `Type=notify`, with a watchdog                        |
 | `-`         | the app does not notify systemd: `Type=simple`, no watchdog, still restarted if it exits |
 
-On the command line, `--` lets a name start with `-`: `xctrl add -- -camsci-1 someExec`.
+On the command line, `--` lets a name start with `-`: `xctrl add -- -camsci1 picamCtrl`.
 
-The app run by `xindiserver` is the role's INDI server. Apps are ordered after it, so it starts first and they stop
-before it, and their last messages get through; it is ordered after the `sshDigger` tunnels, which start before it.
+The app run by `xindiserver` is the role's INDI server. `sshDigger` tunnels start first, then the INDI server,
+then regular apps on `startup`, and on `shutdown` apps stop first, then INDI server, then ssh tunnels. 
+
+`xctrl` calls to `systemctl` would execute: 
+
+```
+$ xctrl startup
++ systemctl start magaox-<role>-app@<sshDigger>.service 
++ systemctl start magaox-<role>-app@is<role>.service
++ systemctl start magaox-<role>-app@<app>.service
++ systemctl start magaox-<role>.target
+
+$ xctrl shutdown --all
++ systemctl stop magaox-<role>.target
++ systemctl stop magaox-<role>-app@<app>.service
++ systemctl stop magaox-<role>-app@is<role>.service
++ systemctl stop magaox-<role>-app@<sshDigger>.service 
+```
 
 # Settings
 
-xctrl sets no defaults of its own. `magaox.conf` sets them for every app of the role, and an app's `.conf` changes
-them for that app, both under `[systemd]`. Both go into the app's drop-in, the app's value in place of the role's,
-so each directive is set in one file only; that holds even for directives systemd would otherwise merge across
-files, e.g. `CPUAffinity`. A directive set in neither file has systemd's own default, which for most of these is not
-what MagAO-X wants: `Restart=no`, no watchdog, a 90 s start and stop timeout, 5 starts in 10 s. So `magaox.conf`
-should hold at least:
+xctrl sets no defaults of its own. `magaox.conf` sets the default `[systemd]` configuration for every app of the 
+role, and an app's `.conf` overrides them for that app. Settings go into the app's drop-in, the app's value in place of 
+the role's, so each directive is set once. If a directive is not present in either the `magaox.conf` or the app's 
+.conf, the app would inherit systemd's own default, which is typically not what MagAOX desires, e.g.: `Restart=no`,
+providing no watchdog.
+
+`magaox.conf` should at a minimum contain these directives (set values to your needs):
 
 ```
 [systemd]
@@ -195,13 +217,14 @@ limitMEMLOCK = infinity
 Any user can run `xctrl`. It is installed setuid root, and decides from who ran it what it does for them:
 
 - **Looking** (`status`, `peek`): anyone. `inspect` follows the journal as the caller, so it needs `sudo` or
-  membership in group `systemd-journal`; `peek` shows journal lines only to those too.
+  membership in group `systemd-journal` or `adm`; `peek` shows the last few lines of the binary log (trimmed 
+  `logdump`).
 - **Starting and stopping** registered apps (`start`, `stop`, `startup`, `shutdown`, `restart`): operators, meaning
   root, `xsup` and members of group `magaox`. `xsup` can start a disabled (`#!`) app by hand.
 - **Changing what is registered or enabled** (`sync`, `add`, `enable`, `disable`, `delete`, `boot`): editors,
   meaning root (e.g. through `sudo`) or a user who may write the role's proclist. The config checkout is normally
-  group `magaox-dev` writable, so its members qualify. `xsup` must not be able to write the proclist, so that it can
-  do nothing that changes it; check this on each machine. Anyone else gets, for example:
+  group `magaox-dev` writable, so its members qualify. `xsup` who is not able to write the proclist, would get
+  an error running these, for example:
 
   ```
   error: cannot enable camsci1 as user xsup: enable needs write access to /opt/MagAOX/config/proclist_ICC.txt (group magaox-dev), or sudo
