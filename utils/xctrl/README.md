@@ -239,12 +239,12 @@ xctrl gives up root as soon as it starts: it runs as the caller, and reads the p
 `.conf` files with the caller's permissions. It takes root back only for a moment, to open its log, to write or remove
 a generated file (only the role's template, target, links and `magaox-<role>-app@NAME.service.d/override.conf`), and
 to run the `systemctl` commands that change something. Files it writes are owned by root:root. `status`, `peek`,
-`inspect` and `--help` give up root for good. This guards against mistakes in what xctrl parses and builds; it does
-not make it safe against a memory-safety bug, as root can still be taken back while it runs.
+`inspect` and `--help` give up root for good. This guards against mistakes in what xctrl parses and builds, but does
+not make it safe against a memory-safety bug as root can still be taken back while it runs.
 
 | Who                         | Command                | What it does                                                             |
 |-----------------------------|------------------------|--------------------------------------------------------------------------|
-| anyone                      | `status [NAME...]`     | Every registered app, one line each, `name: state (pid: N)`, colored and sorted by state: running green, manually started (running with autostart off) blue, disabled (`#!`, not running) yellow, not started cyan, starting/stopping magenta, dead red. `-v` adds a table with autostart, restarts, uptime, seconds since the last watchdog notification, watchdog timeout, CPU % now, memory and GPU memory. |
+| anyone                      | `status [NAME...]`     | Every registered app, one line each, `name: state (pid: N)`, colored and sorted by state: running green, manually started (running with autostart off) blue, disabled (`#!`, not running) yellow, not started cyan, starting/stopping magenta, dead red. `-v` for verbose options adds a table with autostart, restarts, uptime, seconds since the last watchdog notification, watchdog timeout, CPU % now, memory and GPU memory. `-q` for quiet hushes warnings and is a usable option with all other commands. It does not hush errors. |
 | anyone                      | `peek [NAME...]`       | State and the last `logdump` lines of the apps (`-n LINES`, default 10), with the console output of an app that is not running. |
 | anyone                      | `inspect NAME`         | Follow the app's console output. `journalctl` on the .service will show similar output. |
 | xsup, group magaox          | `startup [NAME...]`    | Start the INDI server, then the apps enabled for automatic startup; with names, start those apps, the INDI server first. An editor's `startup` syncs first if the proclist or a `.conf` changed. |
@@ -273,19 +273,23 @@ If the proclist differs from what is registered, e.g. after editing it by hand, 
 different autostart (`#!`), watchdog (`-`) or executable:
 
 ```
-warning: /opt/MagAOX/config/proclist_CO4.txt differs from what is synced with systemd; not registered: maths_new; registered, no longer in the proclist: maths_q; autostart (#!), watchdog (-) or executable changed: camsci_1 maths_CO4
+warning: /opt/MagAOX/config/proclist_CO4.txt differs from what is synced with systemd; not registered: maths_new; registered, no longer in the proclist: maths_old; autostart (#!), watchdog (-) or executable changed: camsci1
 warning: xctrl sync applies it, by a user who can edit the proclist
 ```
 
-Comments and the order of lines do not count. `add`, `enable`, `disable` and `delete` change the registration along
-with the proclist, so they cause no warning. An app removed from the proclist while running stays registered until
-it is stopped; `status` and `sync` say so. `sync` also turns its autostart off, so neither `startup` nor a reboot
-with `boot on` starts it again, and does the same for a running app newly disabled (`#!`), without stopping either:
+`add`, `enable`, `disable` and `delete` change the registration along with the proclist, so they cause no warning. 
+An app removed from the proclist while running stays registered until it is stopped; `status` and `sync` say so. 
+`sync` also turns its autostart off, so neither `startup` nor a reboot with `boot on` starts it again, and does the
+ same for a running app newly disabled (`#!`), without stopping either:
 
 ```
-warning: maths_q removed from proclist but still running, so still registered; stop it first (xctrl stop maths_q), then xctrl sync unregisters it
-maths_q: autostart turned off (now removed from proclist); however the app is still running.
-maths_r: autostart turned off (now #! disabled in proclist); however the app is still running.
+warning: camsci1 removed from proclist but still running, so still registered; stop it first (xctrl stop camsci1), then xctrl sync unregisters it
+camsci1: autostart turned off (now removed from proclist); however the app is still running.
+```
+
+or after `disable` while running:
+```
+camsci1: autostart turned off (now #! disabled in proclist); however the app is still running.
 ```
 
 The role comes from `-r ROLE`, `MAGAOX_ROLE`, or `/etc/profile.d/magaox_role.sh`, since `sudo` can drop the
@@ -326,21 +330,21 @@ a time, but finds the others from their drop-ins and from systemd's
 `magaox-<role>-app@NAME.service` units. `startup`, `start` and `status` warn about apps of another role still running:
 
 ```
-warning: 4 app(s) of role TST still running: isTST longer_app_name_x maths_a maths_b; xctrl -r TST shutdown --all stops them
+warning: 4 app(s) of role AOCTest still running: isAOCTest tcsi sysMonAOC labCool; xctrl -r AOCTest shutdown --all stops them
 ```
 
 `status` also warns about another role whose target starts at boot (`xctrl -r ROLE boot on`) with apps enabled, as
 they would start after a reboot alongside, and perhaps in conflict with, the current role's:
 
 ```
-warning: role TST starts 2 app(s) at boot, which may conflict with role OTH after a reboot; xctrl -r TST boot off stops that
+warning: role AOCTest starts 2 app(s) at boot, which may conflict with role AOC after a reboot; xctrl -r AOCTest boot off stops that
 ```
 
 `sync` first lists every other role, as a warning if any of its apps are running, then the current one:
 
 ```
-warning: role TST: 5 app(s) registered, 4 running
-Current role: OTH: 0 app(s) registered, 0 running
+warning: role AOCTest: 5 app(s) registered, 4 running
+Current role: AOC: 0 app(s) registered, 0 running
 ```
 
 Stopping and disabling are separate: `stop`/`shutdown` never change what starts automatically, and
@@ -360,8 +364,8 @@ After the start limit (`startLimitBurst` starts within `startLimitIntervalSec`) 
 `/etc/profile.d/xctrl_completion.sh`, which loads it in every bash login shell. So completion works for every user
 in a new login shell, e.g. a new ssh session or `su - USER`, whether or not their `~/.bashrc` enables the
 `bash-completion` package. In a shell opened before the install, `source /etc/profile.d/xctrl_completion.sh`.
-`xctrl <TAB>` lists the commands, and `xctrl start CO2<TAB>` completes, or lists, the registered apps of the role
-starting with `CO2`; likewise for every command that takes app names, also after `sudo`. `enable`, `disable` and
+`xctrl <TAB>` lists the commands, and `xctrl start AOC<TAB>` completes, or lists, the registered apps of the role
+starting with `AOC`; likewise for every command that takes app names, also after `sudo`. `enable`, `disable` and
 `delete` also offer the apps in the proclist, `add` the apps with a `.conf` not yet in the proclist and then the
 executables, `boot` on and off, and `-r` the roles with a proclist. The role is the one xctrl would use: `-r`, else
 `MAGAOX_ROLE`, else `/etc/profile.d/magaox_role.sh`. Names come from the apps' drop-ins and the proclist, never from
