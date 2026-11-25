@@ -200,8 +200,9 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
     m_learnStd       = addToggle( ctrlLayout,
                             "learn_std",
                             "Standard sequence",
-                            "Original three-stage exploration. Turning it on also enables learning and prediction, "
-                                  "so probes and feedback reach the DM." );
+                            "loPredCtrl's three exploration stages, then 1000 frames of learning without probes. "
+                                  "Turning it on also enables learning and prediction, so probes and feedback reach the "
+                                  "DM. When it ends, learning turns off and prediction continues." );
     m_learn = addToggle( ctrlLayout, "learn", "Learning", "Update the selected model; the other model stays frozen." );
     m_predict   = addToggle( ctrlLayout,
                            "predict",
