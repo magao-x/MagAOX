@@ -12,13 +12,13 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 - **Controller mode and Reset models** are offered only when prediction is off and `safety.zero_confirmed=true`, the state in which `loPredCtrlAcc` accepts them. The controller still validates every request.
 - **Reset models asks for confirmation.**
 - **DM recovery is always offered while the controller is `OPERATING`,** including during prediction, because both requests only turn prediction off. Neither changes the main loop's own integrator; a tip/tilt command it held while DDSPC owned tip/tilt stays until the main loop corrects it.
-- **Who corrects tip/tilt.** With prediction on, `loPredCtrlAcc` sends zero for modes 0 and 1 to the main AO loop, so DDSPC alone corrects tip/tilt. With prediction off, the main loop receives unchanged frames and corrects tip/tilt itself, but only after DDSPC's own-channel zero is confirmed; until then tip/tilt is uncorrected. The prediction banner and the Main-loop tip/tilt row show which (`ddspc_control.main_loop_tt`).
+- **Who corrects tip/tilt.** With prediction on, `loPredCtrlAcc` sends zero for modes 0 and 1 to the main AO loop, so DDSPC alone corrects tip/tilt. With prediction off, the main loop receives unchanged frames and corrects tip/tilt itself, but only after DDSPC's own-channel zero is confirmed; until then tip/tilt is uncorrected. In Main Loop mode, modes 0 and 1 carry DDSPC's tip/tilt delta instead (`predicted`). The prediction banner and the Main-loop tip/tilt row show which (`ddspc_control.main_loop_tt`).
 
 ## Controls
 
 | Control | INDI property and elements |
 | --- | --- |
-| Standard / ACC Assisted | `ddspc_mode.standard`, `ddspc_mode.accel_assisted` (both sent, exactly one `On`) |
+| Standard / ACC Assisted / Main Loop | `ddspc_mode.standard`, `ddspc_mode.accel_assisted`, `ddspc_mode.main_loop` (all the controller publishes are sent, exactly one `On`). Main Loop is standard DDSPC sent through the main loop's mfilt, as loPredCtrl: no DDSPC DM channel, and tip/tilt is never zeroed. It is disabled with a controller that has no `main_loop` element. |
 | Standard sequence | `learn_std.toggle`. loPredCtrl's three exploration stages, then 1000 frames of learning without probes. Turning it on also turns on learning and prediction, so probes and feedback reach the DM. When it ends, `loPredCtrlAcc` turns learning and this switch off; prediction continues. |
 | Learning | `learn.toggle` |
 | Reset models | `reset_model.request` |
@@ -40,7 +40,7 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 | Last stop | Why prediction last stopped: the decoded fault from `safety.output_state`, a stop by request, or `running` |
 | Main-loop tip/tilt | `ddspc_control.main_loop_tt`: `zeroed` (DDSPC only) or `passthrough` (main loop) |
 | Learning overruns | `ddspc_performance.learn_overruns` (assisted-mode WFS-thread work that delays the next main-loop frame) |
-| Warnings | A controller that is not `OPERATING`; an output fault with its reason; a refused prediction request with the condition that refused it (`integrator.ready`, then the selected model's `ddspc_control.*_ready`/`*_state` with learning off, then `safety.output_state`) |
+| Warnings | A controller that is not `OPERATING`; an output fault with its reason; a refused prediction request with the condition that refused it (`integrator.ready`, not needed in Main Loop mode, then the selected model's `ddspc_control.*_ready`/`*_state` with learning off, then `safety.output_state`) |
 
 ## Why prediction stopped
 
