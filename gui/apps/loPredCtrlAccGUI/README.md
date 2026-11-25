@@ -18,7 +18,7 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 
 | Control | INDI property and elements |
 | --- | --- |
-| Standard / ACC Assisted / Main Loop | `ddspc_mode.standard`, `ddspc_mode.accel_assisted`, `ddspc_mode.main_loop` (all the controller publishes are sent, exactly one `On`). Main Loop is standard DDSPC sent through the main loop's mfilt, as loPredCtrl: no DDSPC DM channel, and tip/tilt is never zeroed. It is disabled with a controller that has no `main_loop` element. |
+| Standard / ACC Assisted / Main Loop / mfilt Copy | `ddspc_mode.standard`, `ddspc_mode.accel_assisted`, `ddspc_mode.main_loop`, `ddspc_mode.mfilt_copy` (all the controller publishes are sent, exactly one `On`). Main Loop is standard DDSPC sent through the main loop's mfilt, as loPredCtrl: no DDSPC DM channel, and tip/tilt is never zeroed. mfilt Copy runs no DDSPC: with Predict on, the main loop's tip/tilt integrator, copied with its own parameters, drives the DDSPC DM channel while main-loop tip/tilt is zero. Each is disabled with a controller that lacks its element. |
 | Standard sequence | `learn_std.toggle`. loPredCtrl's three exploration stages, then 1000 frames of learning without probes. Turning it on also turns on learning and prediction, so probes and feedback reach the DM. When it ends, `loPredCtrlAcc` turns learning and this switch off; prediction continues. |
 | Learning | `learn.toggle` |
 | Reset models | `reset_model.request` |
@@ -40,7 +40,7 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 | Last stop | Why prediction last stopped: the decoded fault from `safety.output_state`, a stop by request, or `running` |
 | Main-loop tip/tilt | `ddspc_control.main_loop_tt`: `zeroed` (DDSPC only) or `passthrough` (main loop) |
 | Learning overruns | `ddspc_performance.learn_overruns` (assisted-mode WFS-thread work that delays the next main-loop frame) |
-| Warnings | A controller that is not `OPERATING`; an output fault with its reason; a refused prediction request with the condition that refused it (`integrator.ready`, not needed in Main Loop mode, then the selected model's `ddspc_control.*_ready`/`*_state` with learning off, then `safety.output_state`) |
+| Warnings | A controller that is not `OPERATING`; an output fault with its reason; a refused prediction request with the condition that refused it (`integrator.ready`, not needed in Main Loop mode and always needed in mfilt Copy, then the selected model's `ddspc_control.*_ready`/`*_state` with learning off, then `safety.output_state`) |
 
 ## Why prediction stopped
 
