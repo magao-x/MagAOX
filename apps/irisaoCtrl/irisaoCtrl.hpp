@@ -312,7 +312,7 @@ int irisaoCtrl::appLogic()
 
     if( m_nsat > 0 )
     {
-        log<text_log>( "Saturated actuators in last second: " + std::to_string( m_nsat ), logPrio::LOG_WARNING );
+        log<text_log>( "Saturated actuators in last second: " + std::to_string( m_nsat ), logPrio::LOG_NOTICE );
     }
 
     m_nsat = 0;

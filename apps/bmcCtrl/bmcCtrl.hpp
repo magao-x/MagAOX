@@ -940,7 +940,7 @@ int bmcCtrl::appLogic()
 
     if( saturated > m_satThresh )
     {
-        log<text_log>( "Saturated actuators in last second: " + std::to_string( saturated ), logPrio::LOG_WARNING );
+        log<text_log>( "Saturated actuators in last second: " + std::to_string( saturated ), logPrio::LOG_NOTICE );
     }
 
     DM_UPDATE_INDI;
