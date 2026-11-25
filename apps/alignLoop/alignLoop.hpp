@@ -18,10 +18,7 @@
 /** \defgroup alignLoop
  * \brief The MagAO-X application for alignment-loop control.
  *
- * <a href="../handbook/operating/software/apps/XXXXXX.html">Application Documentation</a>
- *
  * \ingroup apps
- *
  */
 
 /** \defgroup alignLoop_files
@@ -33,19 +30,24 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X alignment-loop controller.
+/// Drive two controller axes from a shared-memory measurement stream.
 /**
+ * The loop subtracts `offset0` and `offset1` from the two measurement axes before
+ * publishing residuals and converting them to stage corrections. Each INDI offset
+ * is a live setpoint in measurement units and starts at zero.
+ *
  * \ingroup alignLoop
  */
 class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
 {
-    // Give the test harness access.
+    /// Give the test harness access to internal loop state.
     friend class alignLoop_test;
 
+    /// Allow the stream monitor to dispatch frames to this app.
     friend class dev::shmimMonitor<alignLoop>;
 
   public:
-    // The base shmimMonitor type
+    /// Stream monitor for the alignment measurements.
     typedef dev::shmimMonitor<alignLoop> shmimMonitorT;
 
   protected:
@@ -53,118 +55,150 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
      *@{
      */
 
-    std::vector<std::string> m_ctrlDevices;    ///< Device names of the controlled axes.
-    std::vector<std::string> m_ctrlProperties; ///< INDI properties used to send loop commands.
-    std::vector<std::string> m_ctrlCurrents;   ///< INDI elements holding the current controller values.
-    std::vector<std::string> m_ctrlTargets;    ///< INDI elements to which updated commands are written.
+    /// Device name for each controlled axis.
+    std::vector<std::string> m_ctrlDevices;
 
-    std::vector<float> m_currents; ///< Most recently received controller values.
+    /// INDI property used to read and command each axis.
+    std::vector<std::string> m_ctrlProperties;
 
-    std::vector<pcf::IndiProperty> m_indiP_ctrl; ///< Registered controller properties for each axis.
+    /// INDI readback element for each axis.
+    std::vector<std::string> m_ctrlCurrents;
 
-    std::string m_intMatFile; ///< Interaction matrix file name from configuration.
+    /// INDI command element for each axis.
+    std::vector<std::string> m_ctrlTargets;
 
-    std::vector<float> m_defaultGains; ///< Default per-axis gains loaded from configuration.
+    /// Latest controller readback for each axis, protected by m_indiMutex after startup.
+    std::vector<float> m_currents;
 
-    std::string m_upstreamDevice;                   ///< Upstream loop device that this loop can follow.
-    std::string m_upstreamProperty{ "loop_state" }; ///< Toggle property on the upstream loop to monitor.
-    bool        m_upstreamFollowClosed{ false };    ///< If true, this loop closes when the upstream loop closes.
+    /// Registered INDI subscriptions to controller readback properties.
+    std::vector<pcf::IndiProperty> m_indiP_ctrl;
+
+    /// Configured file name reserved for loading an interaction matrix.
+    std::string m_intMatFile;
+
+    /// Startup gains, either one shared value or one value per axis.
+    std::vector<float> m_defaultGains;
+
+    /// Optional upstream loop device whose open state opens this loop.
+    std::string m_upstreamDevice;
+
+    /// INDI toggle property of the upstream loop.
+    std::string m_upstreamProperty{ "loop_state" };
+
+    /// Whether to close this loop when the upstream loop closes.
+    bool m_upstreamFollowClosed{ false };
 
     ///@}
 
-    mx::improc::eigenImage<float> m_intMat; ///< Interaction matrix mapping measurements to commands.
+    /// Interaction matrix mapping measurement residuals to command deltas.
+    mx::improc::eigenImage<float> m_intMat;
 
-    mx::improc::eigenImage<float> m_measurements; ///< Private copy of the measurement frame, corrected in place.
-    float                         m_delta0{ 0 };  ///< Latest first-axis residual.
-    float                         m_delta1{ 0 };  ///< Latest second-axis residual.
+    /// Private copy of the current measurement frame, corrected in place.
+    mx::improc::eigenImage<float> m_measurements;
 
-    static constexpr float c_maxOffset{ 1e15f }; ///< Magnitude limit for a measurement setpoint.
+    /// Latest first-axis residual.
+    float m_delta0{ 0 };
 
-    float m_offset0{ 0 }; ///< Active first-axis measurement setpoint.
+    /// Latest second-axis residual.
+    float m_delta1{ 0 };
 
-    float m_offset1{ 0 }; ///< Active second-axis measurement setpoint.
+    /// Magnitude limit used for offset validation and INDI number metadata.
+    static constexpr float c_maxOffset{ 1e15f };
 
-    mx::improc::eigenImage<float> m_commands; ///< Most recent command delta vector.
+    /// Active first-axis measurement setpoint, protected by m_indiMutex.
+    float m_offset0{ 0 };
 
-    float m_ggain{ 0 }; ///< Global loop gain applied to all axes.
+    /// Active second-axis measurement setpoint, protected by m_indiMutex.
+    float m_offset1{ 0 };
 
-    std::vector<float> m_gains; ///< Active per-axis gains.
+    /// Most recent mapped command deltas before gain and sign are applied.
+    mx::improc::eigenImage<float> m_commands;
 
-    bool m_ctrlEnabled{ false }; ///< True when the loop is closed and may send controller commands.
+    /// Global loop gain, protected by m_indiMutex after startup.
+    float m_ggain{ 0 };
+
+    /// Per-axis loop gains initialized during startup.
+    std::vector<float> m_gains;
+
+    /// True when stage output is enabled, protected by m_indiMutex.
+    bool m_ctrlEnabled{ false };
 
   public:
-    /// Default c'tor.
+    /// Construct the app with the current repository version.
     alignLoop();
 
-    /// D'tor, declared and defined for noexcept.
+    /// Destroy the app after shutdown.
     ~alignLoop() noexcept
     {
     }
 
-    /// Set up the app configuration interface.
+    /// Register the monitor and loop configuration keys.
     virtual void setupConfig();
 
-    /// Implementation of loadConfig logic, separated for testing.
-    /** This is called by loadConfig().
-     */
-    int loadConfigImpl(
-        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
+    /// Load monitor and loop settings from the supplied configuration.
+    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] configuration from which to load values */ );
 
     /// Load the application configuration.
     virtual void loadConfig();
 
-    /// Startup function
+    /// Start the input monitor and initialize the INDI properties and controller state.
     /**
-     *
+     * \returns 0 on success or -1 on a startup error.
      */
     virtual int appStartup();
 
-    /// Implementation of the FSM for alignLoop.
+    /// Check monitor health and keep the app in the operating state.
     /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Stop the input stream monitor.
     virtual int appShutdown();
 
-    /// Change the loop state.
+    /// Change the loop state and acknowledge it over INDI.
     int toggleLoop( bool onoff /**< [in] true to close the loop and false to open it */ );
 
     // shmimMonitor interface:
     /// Allocate working memory for the monitored image stream.
-    int allocate( const dev::shmimT &dummy /**< [in] ignored shmim descriptor */ );
+    int allocate( const dev::shmimT &dummy /**< [in] input monitor dispatch tag */ );
 
-    /// Process a new measurement image from the monitored stream.
+    /// Publish the corrected measurement residuals and send any closed-loop correction.
     int processImage( void              *curr_src /**< [in] pointer to the current image buffer */,
-                      const dev::shmimT &dummy /**< [in] ignored shmim descriptor */
+                      const dev::shmimT &dummy /**< [in] input monitor dispatch tag */
     );
 
-    /// Send the newly computed commands to the controller devices.
+    /// Send each computed target to its configured controller property.
     int sendCommands( std::vector<float> &commands /**< [in] command values to transmit */ );
 
     // INDI
 
-    pcf::IndiProperty m_indiP_deltas; ///< Published loop residual values.
+    /// Published offset-corrected loop residuals.
+    pcf::IndiProperty m_indiP_deltas;
 
-    pcf::IndiProperty m_indiP_offset0; ///< First-axis measurement setpoint.
+    /// First-axis offset with current and target elements.
+    pcf::IndiProperty m_indiP_offset0;
 
-    /// Handle a first-axis offset request (ipRecv).
+    /// Apply the first-axis offset from the incoming INDI request `ipRecv`.
     INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_offset0 );
 
-    pcf::IndiProperty m_indiP_offset1; ///< Second-axis measurement setpoint.
+    /// Second-axis offset with current and target elements.
+    pcf::IndiProperty m_indiP_offset1;
 
-    /// Handle a second-axis offset request (ipRecv).
+    /// Apply the second-axis offset from the incoming INDI request `ipRecv`.
     INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_offset1 );
 
-    pcf::IndiProperty m_indiP_ggain;       ///< INDI property exposing the global loop gain.
-    pcf::IndiProperty m_indiP_ctrlEnabled; ///< INDI property exposing the loop open/closed state.
+    /// Global loop gain with current and target elements.
+    pcf::IndiProperty m_indiP_ggain;
 
+    /// INDI toggle exposing whether the loop is closed.
+    pcf::IndiProperty m_indiP_ctrlEnabled;
+
+    /// Apply the requested global gain from the incoming INDI request `ipRecv`.
     INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_ggain );
+
+    /// Open or close the loop from the incoming INDI request `ipRecv`.
     INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_ctrlEnabled );
 
     /// Route controller property updates into the instance callback.
@@ -178,9 +212,13 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
     /// Update cached controller current values from an INDI property callback.
     int setCallBack_ctrl( const pcf::IndiProperty &ipRecv /**< [in] controller property update */ );
 
-    int               m_upstreamState{ 0 }; ///< Cached upstream state indicator.
-    pcf::IndiProperty m_indiP_upstream;     ///< Property used to monitor the upstream loop state.
+    /// Storage reserved for a cached upstream state indicator.
+    int m_upstreamState{ 0 };
 
+    /// INDI subscription to the upstream loop toggle.
+    pcf::IndiProperty m_indiP_upstream;
+
+    /// Follow the upstream loop state reported by the subscribed INDI update `ipRecv`.
     INDI_SETCALLBACK_DECL( alignLoop, m_indiP_upstream );
 
   protected:
@@ -502,6 +540,7 @@ inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
         m_measurements.data()[nn] = ( static_cast<float *>( curr_src ) )[nn];
     }
 
+    // Keep the accepted offsets and stage-send decision consistent for this frame.
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
     m_measurements( 0, 0 ) -= m_offset0;
