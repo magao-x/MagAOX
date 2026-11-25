@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <deque>
+#include <fcntl.h>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -466,8 +467,10 @@ ocamFrameDelay::write( Snapshot snapshot, const std::filesystem::path &directory
     const auto        destination = directory / ( prefix + std::to_string( snapshot.requestedAt ) + "-" +
                                            std::to_string( getpid() ) + "-" + std::to_string( snapshot.id ) + ".bin" );
     fs::create_directories( directory );
-    std::string temp = destination.string() + ".XXXXXX";
-    const int   fd   = mkstemp( temp.data() );
+
+    const std::string temp = destination.string() + ".tmp";
+    // Match the normal app logger's fopen mode and let the process umask apply.
+    const int fd = ::open( temp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0666 );
 
     if( fd < 0 )
     {

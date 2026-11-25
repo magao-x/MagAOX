@@ -2,6 +2,7 @@
  * \brief Offline cadence, timing handoff, and rolling frame history tests.
  * \ingroup ocamFrameDelay_unit_test
  */
+#include <cstdio>
 #include <fstream>
 
 #include "../../../tests/testXWC.hpp"
@@ -176,7 +177,7 @@ TEST_CASE( "OCAM raw timing handoff includes arrival and a loss-aware fence", "[
     CHECK( events.back().fps == 3000 );
 }
 
-/// Keep the requested chronological slice across sealed chunks and rotate binary output after successful writes.
+/// Keep the requested chronological slice, rotate completed dumps, and match ordinary log permissions.
 /** \ingroup ocamFrameDelay_unit_test */
 TEST_CASE( "OCAM manual snapshots share chunks and enforce both time and sequence cutoff", "[ocamFrameDelay]" )
 {
@@ -209,6 +210,13 @@ TEST_CASE( "OCAM manual snapshots share chunks and enforce both time and sequenc
 
     CHECK( std::distance( std::filesystem::directory_iterator( directory.path ),
                           std::filesystem::directory_iterator() ) == 5 );
+
+    const auto logPath = directory.path / "camwfs.binlog";
+    auto      *logFile = std::fopen( logPath.c_str(), "wb" );
+    REQUIRE( logFile != nullptr );
+    REQUIRE( std::fclose( logFile ) == 0 );
+    CHECK( std::filesystem::status( file ).permissions() == std::filesystem::status( logPath ).permissions() );
+
     std::ifstream       input( file, std::ios::binary );
     std::array<char, 8> magic{};
     input.read( magic.data(), magic.size() );
