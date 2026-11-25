@@ -14,6 +14,8 @@
 #include "../../../lib/tests/offlineIndiPublisher.hpp"
 #include "../loPredCtrlAccPanel.hpp"
 
+#include <cstring>
+
 namespace libXWCTest
 {
 namespace loPredCtrlAccGUITest
@@ -557,6 +559,65 @@ TEST_CASE( "loPredCtrlAccGUI selects the main-loop route", "[loPredCtrlAccGUI]" 
     fixture.publishText( "ddspc_control", "main_loop_tt", "predicted" );
     CHECK( fixture.widget<QLabel>( "prediction.banner" )->text() ==
            "PREDICTION ACTIVE: DDSPC tip/tilt through the main loop" );
+}
+/** \brief The mfilt Copy button is offered only by a controller with ddspc_mode.mfilt_copy and sends it; a refusal
+ * names the integrator parameters, never a model, and the banner says the copy is active.
+ */
+TEST_CASE( "loPredCtrlAccGUI selects the mfilt copy", "[loPredCtrlAccGUI]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACCGUI_TEST_DOXYGEN_REF
+    xqt::loPredCtrlAccPanel::sendMode;
+    xqt::loPredCtrlAccPanel::refusalReason;
+#endif
+    // clang-format on
+    Fixture fixture;
+    fixture.defineAll();
+    auto *copy = fixture.widget<QPushButton>( "ddspc_mode.mfilt_copy" );
+    CHECK_FALSE( copy->isEnabled() ); // An older controller without the element.
+
+    pcf::IndiProperty mode( pcf::IndiProperty::Switch, "loPredCtrlAcc", "ddspc_mode" );
+    for( const char *element : { "standard", "accel_assisted", "main_loop", "mfilt_copy" } )
+    {
+        mode.add( pcf::IndiElement(
+            element, std::strcmp( element, "standard" ) ? pcf::IndiElement::Off : pcf::IndiElement::On ) );
+    }
+    fixture.publish( mode, true );
+    REQUIRE( copy->isEnabled() );
+    copy->click();
+    QApplication::processEvents();
+    REQUIRE( fixture.m_publisher.m_commands.size() == 1 );
+    const auto &command = fixture.m_publisher.m_commands.back();
+    CHECK( command.getElements().size() == 4 );
+    CHECK( command["mfilt_copy"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( command["standard"].getSwitchState() == pcf::IndiElement::Off );
+
+    fixture.publishSwitch( "ddspc_mode", "standard", pcf::IndiElement::Off );
+    fixture.publishSwitch( "ddspc_mode", "mfilt_copy", pcf::IndiElement::On );
+    CHECK( copy->isChecked() );
+
+    // Integrator parameters are required even with [integrator] disabled; no model is.
+    pcf::IndiProperty integrator( pcf::IndiProperty::Number, "loPredCtrlAcc", "integrator" );
+    integrator.add( pcf::IndiElement( "enabled", 0.0 ) );
+    integrator.add( pcf::IndiElement( "ready", 0.0 ) );
+    fixture.publish( integrator, true );
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Alert );
+    auto warnings = [&]()
+    {
+        return fixture.widget<QLabel>( "warnings" )->text();
+    };
+    CHECK( warnings().contains(
+        "Prediction request refused: the main loop's integrator parameters have not been received" ) );
+    integrator["ready"].set( 1.0 );
+    fixture.publish( integrator );
+    CHECK_FALSE( warnings().contains( "model is not ready" ) );
+
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::On );
+    fixture.publishText( "ddspc_control", "requested_mode", "mfilt_copy" );
+    fixture.publishText( "ddspc_control", "prediction", "active" );
+    fixture.publishText( "ddspc_control", "main_loop_tt", "zeroed" );
+    CHECK( fixture.widget<QLabel>( "prediction.banner" )->text() ==
+           "MFILT COPY ACTIVE: main-loop tip/tilt integrator on the DDSPC DM channel" );
 }
 } // namespace loPredCtrlAccGUITest
 } // namespace libXWCTest
