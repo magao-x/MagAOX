@@ -7,6 +7,7 @@
 
 #include <QApplication>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 #include <QSlider>
 
@@ -158,6 +159,18 @@ void Fixture::defineAll()
         gain[element].setFormat( "%0.4f" );
     }
     publish( gain, true );
+
+    // As createStandardIndiNumber<float>( m_indiP_learnStdExtra, "learn_std_extra", 0, 3600, .1, "%0.1f" ).
+    pcf::IndiProperty extra( pcf::IndiProperty::Number, "loPredCtrlAcc", "learn_std_extra" );
+    for( const char *element : { "current", "target" } )
+    {
+        extra.add( pcf::IndiElement( element, 0.0 ) );
+        extra[element].setMin( "0" );
+        extra[element].setMax( "3600" );
+        extra[element].setStep( "0.1" );
+        extra[element].setFormat( "%0.1f" );
+    }
+    publish( extra, true );
 
     text( "ddspc_control",
           { { "requested_mode", "standard" },
@@ -459,6 +472,37 @@ TEST_CASE( "loPredCtrlAccGUI explains why prediction stopped", "[loPredCtrlAccGU
     fixture.publish( integrator, true );
     CHECK( warnings().contains(
         "Prediction request refused: the main loop's integrator parameters have not been received" ) );
+}
+
+/** \brief The extra-learning entry is available only once the controller publishes learn_std_extra, and sends the
+ * typed seconds as its target.
+ */
+TEST_CASE( "loPredCtrlAccGUI sets the extra learning time", "[loPredCtrlAccGUI]" )
+{
+    Fixture fixture;
+    auto   *entry = fixture.widget<QWidget>( "learn_std_extra.entry" );
+    CHECK_FALSE( entry->isEnabled() );
+
+    fixture.defineAll();
+    REQUIRE( entry->isEnabled() );
+    CHECK( fixture.m_publisher.m_commands.empty() );
+
+    auto *edit = entry->findChild<QLineEdit *>( QStringLiteral( "value" ) );
+    REQUIRE( edit );
+    edit->setText( QStringLiteral( "2.5" ) );
+    emit edit->returnPressed();
+    QApplication::processEvents();
+    REQUIRE( fixture.m_publisher.m_commands.size() == 1 );
+    const auto &command = fixture.m_publisher.m_commands.back();
+    CHECK( command.getDevice() == "loPredCtrlAcc" );
+    CHECK( command.getName() == "learn_std_extra" );
+    CHECK( command["target"].get() == "2.5" );
+
+    // A controller without the property (an older version) leaves the entry disabled.
+    pcf::IndiProperty gone( pcf::IndiProperty::Number, "loPredCtrlAcc", "learn_std_extra" );
+    fixture.m_publisher.handleDelProperty( gone );
+    QApplication::processEvents();
+    CHECK_FALSE( entry->isEnabled() );
 }
 
 } // namespace loPredCtrlAccGUITest

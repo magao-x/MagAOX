@@ -214,6 +214,14 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
     m_gainEntry->setStretch( 0, 1, 2 );
     m_gainEntry->setToolTip( QStringLiteral( "Added current-WFS feedback gain*y. Enter a target and press Return." ) );
     ctrlLayout->addWidget( m_gainEntry );
+    m_learnStdExtraEntry =
+        new statusEntry( m_device, "learn_std_extra", statusEntry::FLOAT, "Extra learning [s]", "", ctrlBox );
+    m_learnStdExtraEntry->setObjectName( QStringLiteral( "learn_std_extra.entry" ) );
+    m_learnStdExtraEntry->setStretch( 0, 1, 2 );
+    m_learnStdExtraEntry->setToolTip(
+        QStringLiteral( "Seconds the Standard sequence keeps learning after its last stage before learning turns off "
+                        "(0: at its end). Enter seconds and press Return; it applies at once." ) );
+    ctrlLayout->addWidget( m_learnStdExtraEntry );
     m_reset = new QPushButton( QStringLiteral( "Reset models..." ), ctrlBox );
     m_reset->setObjectName( QStringLiteral( "reset_model" ) );
     setXwFont( m_reset );
@@ -397,8 +405,8 @@ void loPredCtrlAccPanel::subscribe()
     }
 
     // Standard widgets send through this panel; their readbacks are routed by handleSetProperty().
-    for( multiIndiSubscriber *widget :
-         std::initializer_list<multiIndiSubscriber *>{ m_learnStd, m_learn, m_predict, m_gainEntry } )
+    for( multiIndiSubscriber *widget : std::initializer_list<multiIndiSubscriber *>{
+             m_learnStd, m_learn, m_predict, m_gainEntry, m_learnStdExtraEntry } )
     {
         registerSubscriber( widget );
     }
@@ -412,6 +420,7 @@ void loPredCtrlAccPanel::subscribe()
                                   "zero_dm",
                                   "release_tt",
                                   "gain",
+                                  "learn_std_extra",
                                   "ddspc_control",
                                   "ddspc_performance",
                                   "safety",
@@ -432,6 +441,7 @@ void loPredCtrlAccPanel::onConnect()
     }
 
     m_gainEntry->onConnect();
+    m_learnStdExtraEntry->onConnect();
 }
 
 void loPredCtrlAccPanel::onDisconnect()
@@ -445,6 +455,7 @@ void loPredCtrlAccPanel::onDisconnect()
     }
 
     m_gainEntry->onDisconnect();
+    m_learnStdExtraEntry->onDisconnect();
     refresh();
 }
 
@@ -480,6 +491,10 @@ void loPredCtrlAccPanel::handleDelProperty( const pcf::IndiProperty &property )
     {
         m_gainEntry->onDisconnect();
     }
+    else if( name == "learn_std_extra" )
+    {
+        m_learnStdExtraEntry->onDisconnect();
+    }
 
     refresh();
 }
@@ -510,6 +525,10 @@ void loPredCtrlAccPanel::handleSetProperty( const pcf::IndiProperty &property )
     else if( name == "gain" )
     {
         m_gainEntry->handleSetProperty( property );
+    }
+    else if( name == "learn_std_extra" )
+    {
+        m_learnStdExtraEntry->handleSetProperty( property );
     }
 }
 
@@ -698,6 +717,7 @@ void loPredCtrlAccPanel::refresh()
     }
 
     m_gainEntry->setEnabled( ops && m_readbacks.count( "gain" ) );
+    m_learnStdExtraEntry->setEnabled( ops && m_readbacks.count( "learn_std_extra" ) );
 
     const QString blocked = interlock();
     m_interlock->setText( blocked.isEmpty() ? QStringLiteral( "Mode change and reset available." ) : blocked );

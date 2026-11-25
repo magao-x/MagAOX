@@ -98,6 +98,8 @@ class loPredCtrlAccPanel : public xWidget
 
     statusEntry *m_gainEntry{ nullptr }; ///< Gain current value and numeric target entry.
 
+    statusEntry *m_learnStdExtraEntry{ nullptr }; ///< Seconds of learning after the Standard sequence ends.
+
     std::function<bool()> m_confirmReset; ///< Reset confirmation.
 
     /// Return an element value as text, or an empty string when unavailable.
