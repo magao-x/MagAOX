@@ -8,7 +8,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <random>
 #include <sstream>
@@ -112,9 +114,11 @@ struct ddspcLimitFactShmimT
  * the standard fit at the WFS rate, whose delta replaces modes 0 and 1 of the modal output after each decision, so the
  * main loop's mfilt integrates it. The own DM channel is never requested, and the fit trains on the published deltas.
  *
- * mfilt copy (ddspc_mode mfilt_copy; agents/plans/2026-11/ddspc-mfilt-copy.md): no DDSPC. While predict is on, the main
- * loop's tip/tilt integrator is reproduced with its own parameters, s = clamp(mult*s - gain*y, +/-limit), and written
- * to the own DM channel like a standard command, while modes 0 and 1 of the modal output are zero. Nothing learns.
+ * mfilt copy (ddspc_mode mfilt_copy_8k and mfilt_copy_2k; agents/plans/2026-11/ddspc-mfilt-copy.md): no DDSPC. While
+ * predict is on, the main loop's tip/tilt integrator is reproduced with its own parameters,
+ * s = clamp(mult*s - gain*y, +/-limit), once per WFS frame, while modes 0 and 1 of the modal output are zero. 8k writes
+ * s to the own DM channel on every DM slot like a standard command; 2k writes it once per WFS frame and synco holds it
+ * on the other slots. Nothing learns.
  */
 class loPredCtrlAcc_operational : public MagAOXApp<true>,
                                   public dev::shmimMonitor<loPredCtrlAcc_operational>,
@@ -503,10 +507,24 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// A main-loop route decision was not finite while predicting; appLogic stops prediction and logs it.
     std::atomic<bool> m_mainLoopFault{ false };
 
-    /// ddspc_mode mfilt_copy: no DDSPC; the main loop's tip/tilt integrator runs on the WFS measurement and its state
-    /// is written to the own DM channel while modes 0 and 1 of this output are zero. Changed only while the own
-    /// channel's removal is confirmed, under m_indiMutex and m_modelMutex.
+    /// ddspc_mode mfilt_copy_8k or mfilt_copy_2k: no DDSPC; the main loop's tip/tilt integrator runs on the WFS
+    /// measurement and its state is written to the own DM channel while modes 0 and 1 of this output are zero. Changed
+    /// only while the own channel's removal is confirmed, under m_indiMutex and m_modelMutex.
     std::atomic<bool> m_mfiltCopy{ false };
+
+    /// ddspc_mode mfilt_copy_2k: the copy is written once per WFS decision, not on every DM slot; same locking.
+    std::atomic<bool> m_copyOnce{ false };
+
+    /// WFS decisions stored in m_slotPlan; under m_commandMutex.
+    std::uint64_t m_planDecisions{ 0 };
+
+    /// mfilt_copy_2k: the decision last offered to synco, and the one whose command synco has copied; under
+    /// m_commandMutex.
+    std::uint64_t m_onceOffered{ std::numeric_limits<std::uint64_t>::max() },
+        m_onceCopied{ std::numeric_limits<std::uint64_t>::max() };
+
+    /// mfilt_copy_2k: the image offered for m_onceOffered, matched against copy receipts; under m_commandMutex.
+    std::vector<float> m_onceImage;
     /// @}
 
     /// Load the existing calibration or selected finite masked cube planes; derive the request projection by QR.
@@ -1816,6 +1834,7 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
         {
             m_slotPlan = plan;
             m_planBase = ordinal;
+            ++m_planDecisions;
         }
         m_assistedValid.store( assistedValid );
         m_candidateValid.store(
@@ -1959,18 +1978,38 @@ inline bool loPredCtrlAcc_operational::outputCandidate( const synco::Request &re
                                                         std::span<float>      pixels )
 {
     if( m_mode.load() == DDSPC::ShadowMode::AccelAssisted ) // Mode changes only after confirmed removal.
+    {
         return assistedCandidate( request, schedule, pixels );
+    }
     std::lock_guard<std::mutex> lock( m_commandMutex );
     if( pixels.size() != std::size_t( m_calibration.m_shapes.rows() ) || !m_slotPlan.cols() )
+    {
         return false;
+    }
+    // mfilt_copy_2k: offer each decision until synco has copied it once (a late slot retries on the next); on the other
+    // slots synco holds the last copy, counted in transport_skipped.
+    const bool once = m_copyOnce.load();
+    if( once && m_onceCopied == m_planDecisions )
+    {
+        return false;
+    }
+
     m_steps                = schedule[synco::steps];
     const auto   ordinal   = request.cycle * m_steps + request.step;
     std::int64_t slot      = 0; // Unknown base: the decision's first slot, as with a held command.
     const bool   sameEpoch = request.epoch == m_appliedEpoch && request.generation == m_appliedGeneration;
     if( m_planBase >= 0 && sameEpoch && ordinal > m_planBase )
+    {
         slot = std::min<std::int64_t>( ordinal - m_planBase - 1, m_slotPlan.cols() - 1 );
+    }
     Eigen::Map<DDSPC::Matrix>( pixels.data(), pixels.size(), 1 ).noalias() =
         m_calibration.m_shapes * m_slotPlan.col( slot );
+    if( once )
+    {
+        m_onceOffered = m_planDecisions;
+        m_onceImage.assign( pixels.begin(), pixels.end() ); // Same size each time: no allocation after the first.
+    }
+
     return true;
 }
 
@@ -2223,6 +2262,13 @@ inline void loPredCtrlAcc_operational::copied( const synco::CommitRecord &commit
             m_appliedSlots.col( skipped % m_ring ) = m_appliedSlots.col( m_appliedOrdinal % m_ring );
     m_appliedSlots.col( ordinal % m_ring ) = m_copiedCommand;
     m_appliedOrdinal                       = ordinal;
+
+    // mfilt_copy_2k: the offered image was copied (an earlier decision's late receipt does not match it).
+    if( m_onceOffered != m_onceCopied &&
+        std::equal( pixels.begin(), pixels.end(), m_onceImage.begin(), m_onceImage.end() ) )
+    {
+        m_onceCopied = m_onceOffered;
+    }
 }
 
 inline int loPredCtrlAcc_operational::allocate( const dev::shmimT & )
@@ -2546,8 +2592,11 @@ inline int loPredCtrlAcc_operational::setupINDI()
     {
         return -1;
     }
-    createStandardIndiSelectionSw(
-        m_indiP_mode, "ddspc_mode", { "standard", "accel_assisted", "main_loop", "mfilt_copy" }, "Mode", "DDSPC" );
+    createStandardIndiSelectionSw( m_indiP_mode,
+                                   "ddspc_mode",
+                                   { "standard", "accel_assisted", "main_loop", "mfilt_copy_8k", "mfilt_copy_2k" },
+                                   "Mode",
+                                   "DDSPC" );
     m_indiP_mode["standard"].setSwitchState( pcf::IndiElement::On );
     if( registerIndiPropertyNew( m_indiP_mode, INDI_NEWCALLBACK( m_indiP_mode ) ) < 0 )
         return -1;
@@ -2883,7 +2932,7 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      "assisted_state",
                                      "main_loop_tt" },
                                    { mainLoop    ? "main_loop"
-                                     : mfiltCopy ? "mfilt_copy"
+                                     : mfiltCopy ? ( m_copyOnce.load() ? "mfilt_copy_2k" : "mfilt_copy_8k" )
                                      : selected  ? "standard"
                                                  : "accel_assisted",
                                      standard.m_ready && fresh ? "true" : "false",
@@ -3164,7 +3213,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
     std::string refused;
     if( enabled && m_mfiltCopy.load() )
     {
-        refused = "mfilt_copy runs no DDSPC model";
+        refused = "mfilt copy runs no DDSPC model";
     }
     else if( enabled && m_integrate && !mainLoop && !m_integratorReady.load() )
     {
@@ -3281,11 +3330,12 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
     unsigned          selected  = 0;
     DDSPC::ShadowMode mode      = DDSPC::ShadowMode::Standard;
     bool              mainLoop  = false; // main_loop is the standard fit, delivered through the main loop's mfilt.
-    bool              mfiltCopy = false; // mfilt_copy runs the main loop's tip/tilt integrator on the own channel.
+    bool              mfiltCopy = false; // mfilt_copy_*: the main loop's tip/tilt integrator on the own channel.
+    bool              copyOnce  = false; // mfilt_copy_2k: written once per WFS frame instead of every DM slot.
     for( const auto &entry : ipRecv.getElements() )
     {
         if( entry.first != "standard" && entry.first != "accel_assisted" && entry.first != "main_loop" &&
-            entry.first != "mfilt_copy" )
+            entry.first != "mfilt_copy_8k" && entry.first != "mfilt_copy_2k" )
         {
             return -1;
         }
@@ -3294,7 +3344,8 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
             ++selected;
             mode     = entry.first == "accel_assisted" ? DDSPC::ShadowMode::AccelAssisted : DDSPC::ShadowMode::Standard;
             mainLoop = entry.first == "main_loop";
-            mfiltCopy = entry.first == "mfilt_copy";
+            copyOnce = entry.first == "mfilt_copy_2k";
+            mfiltCopy = copyOnce || entry.first == "mfilt_copy_8k";
         }
         else if( entry.second.getSwitchState() != pcf::IndiElement::Off )
         {
@@ -3314,6 +3365,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
     m_mode.store( mode );
     m_mainLoop.store( mainLoop );
     m_mfiltCopy.store( mfiltCopy );
+    m_copyOnce.store( copyOnce );
     m_mainLoopKnown = false;
     m_predicting    = false;
     applyTraining();
@@ -3329,7 +3381,9 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
     updateSwitchIfChanged(
         m_indiP_mode, "main_loop", mainLoop ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
     updateSwitchIfChanged(
-        m_indiP_mode, "mfilt_copy", mfiltCopy ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
+        m_indiP_mode, "mfilt_copy_8k", mfiltCopy && !copyOnce ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
+    updateSwitchIfChanged(
+        m_indiP_mode, "mfilt_copy_2k", copyOnce ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
     return 0;
 }
 

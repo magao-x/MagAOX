@@ -2293,7 +2293,7 @@ namespace
 int selectMode( Controller &app /**< [in,out] Application under test. */, const char *on /**< [in] Element. */ )
 {
     auto mode = app.m_indiP_mode;
-    for( const char *element : { "standard", "accel_assisted", "main_loop", "mfilt_copy" } )
+    for( const char *element : { "standard", "accel_assisted", "main_loop", "mfilt_copy_8k", "mfilt_copy_2k" } )
     {
         mode[element].setSwitchState( std::string( element ) == on ? pcf::IndiElement::On : pcf::IndiElement::Off );
     }
@@ -2474,7 +2474,7 @@ TEST_CASE( "Main-loop route trains and corrects through mfilt", "[rtc-controller
     REQUIRE( ddspc < .5 * alone );
 }
 
-/** \brief ddspc_mode mfilt_copy runs no DDSPC: with predict on, the main loop's tip/tilt integrator,
+/** \brief ddspc_mode mfilt_copy_8k runs no DDSPC: with predict on, the main loop's tip/tilt integrator,
  * s = clamp(mult*s - gain*y, +/-limit) with its own parameters, is rendered on every own-channel slot even with
  * [integrator] disabled, main-loop tip/tilt is zeroed, nothing learns, and learn_std is refused.
  */
@@ -2490,10 +2490,11 @@ TEST_CASE( "mfilt copy applies the main loop's tip/tilt integrator on the own ch
 #endif
     // clang-format on
     Controller app( true );
-    REQUIRE( selectMode( app, "mfilt_copy" ) == 0 );
+    REQUIRE( selectMode( app, "mfilt_copy_8k" ) == 0 );
     app.qualifyOutput();
     CHECK( app.m_mode.load() == DDSPC::ShadowMode::Standard );
-    CHECK( app.m_indiP_mode["mfilt_copy"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( app.m_indiP_mode["mfilt_copy_8k"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( app.m_indiP_mode["mfilt_copy_2k"].getSwitchState() == pcf::IndiElement::Off );
     CHECK( app.m_indiP_mode["standard"].getSwitchState() == pcf::IndiElement::Off );
 
     auto predict = app.m_indiP_predicting;
@@ -2512,7 +2513,7 @@ TEST_CASE( "mfilt copy applies the main loop's tip/tilt integrator on the own ch
     auto learnStd = app.m_indiP_learnStd;
     learnStd["toggle"].setSwitchState( pcf::IndiElement::On );
     REQUIRE( app.newCallBack_m_indiP_learnStd( learnStd ) == -1 );
-    CHECK( app.m_textLogs.back().first == "DDSPC standard learning sequence refused: mfilt_copy runs no DDSPC model" );
+    CHECK( app.m_textLogs.back().first == "DDSPC standard learning sequence refused: mfilt copy runs no DDSPC model" );
 
     REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 ); // No model needed.
     CHECK( app.m_output.status().m_requested );
@@ -2540,13 +2541,127 @@ TEST_CASE( "mfilt copy applies the main loop's tip/tilt integrator on the own ch
 
     REQUIRE( app.appLogic() == 0 );
     CHECK( app.m_predicting );
-    CHECK( app.m_indiP_control["requested_mode"].get<std::string>() == "mfilt_copy" );
+    CHECK( app.m_indiP_control["requested_mode"].get<std::string>() == "mfilt_copy_8k" );
     CHECK( app.m_indiP_control["main_loop_tt"].get<std::string>() == "zeroed" );
 
     predict["toggle"].setSwitchState( pcf::IndiElement::Off );
     REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
     REQUIRE( app.advance( y, empty, false ).isZero() );
     REQUIRE( app.m_intState.isZero() ); // The next start is from zero, with the main loop's held state.
+}
+
+/** \brief ddspc_mode mfilt_copy_2k computes the same mfilt copy but offers each WFS decision's command to synco only
+ * until it is copied once, so the DDSPC channel is written once per frame and synco holds it on the other slots. A
+ * slot that is not copied (late) is retried on the next, and a late receipt for an earlier decision does not count as
+ * the newer decision's copy.
+ */
+TEST_CASE( "mfilt copy 2k writes the DM channel once per WFS frame", "[rtc-controller][integrator]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::outputCandidate;
+    MagAOX::app::loPredCtrlAcc_operational::copied;
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_mode;
+#endif
+    // clang-format on
+    namespace synco = MagAOX::app::synco;
+    using Image     = std::array<float, 4>;
+    Controller app( true );
+    REQUIRE( selectMode( app, "mfilt_copy_2k" ) == 0 );
+    CHECK( app.m_indiP_mode["mfilt_copy_2k"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( app.m_indiP_mode["mfilt_copy_8k"].getSwitchState() == pcf::IndiElement::Off );
+    app.qualifyOutput();
+    app.mainLoop( .25, .9, .3, { 2, 1, 7 }, { 1, 1, 7 }, { 1, 2, 7 } );
+    auto predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+
+    DDSPC::Matrix empty;
+    const auto    decide = [&]( const DDSPC::Matrix &y )
+    {
+        DDSPC::Matrix applied;
+        std::int64_t  ordinal;
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( app.m_commandMutex );
+            ordinal = app.appliedSlots( applied );
+        }
+        REQUIRE( app.step( y, app.m_wfsCounter + 1, empty, false, applied, ordinal, synco::monotonicNs() ) == 0 );
+    };
+    std::int64_t ordinal = 8;
+    const auto   offer   = [&]( Image &image )
+    {
+        const synco::Request request{ 1, 1, ordinal / 4, int( ordinal % 4 ), 0, 0 };
+        synco::Record        schedule{};
+        schedule[synco::steps] = 4;
+        image                  = {};
+        return app.outputCandidate( request, schedule, image );
+    };
+    const auto copy = [&]( std::int64_t slot, const Image &image )
+    {
+        synco::CommitRecord commit{};
+        commit[synco::cmdEpoch]      = 1;
+        commit[synco::cmdGeneration] = 1;
+        commit[synco::cmdCycle]      = slot / 4;
+        commit[synco::cmdStep]       = slot % 4;
+        app.copied( commit, image );
+    };
+    const auto modal = [&]( const Image &image ) -> DDSPC::Matrix
+    {
+        return app.m_calibration.m_projection * Eigen::Map<const DDSPC::Matrix>( image.data(), 4, 1 );
+    };
+
+    // Every frame: the first slot carries the reference mfilt value; the other three are not offered.
+    const std::array<double, 2> gain{ .5, .25 }, limit{ .3, .6 };
+    std::array<double, 2>       expected{};
+    DDSPC::Matrix               y( 2, 1 );
+    Image                       image;
+    for( int n = 0; n < 12; ++n )
+    {
+        y << .1f + .05f * n, -.6f;
+        decide( y );
+        REQUIRE( offer( image ) );
+        for( int mode = 0; mode < 2; ++mode )
+        {
+            expected[mode] = std::clamp( .9 * expected[mode] - gain[mode] * y( mode ), -limit[mode], limit[mode] );
+            REQUIRE( modal( image )( mode ) == Approx( expected[mode] ).margin( 1e-6 ) );
+        }
+        copy( ordinal++, image );
+        for( int j = 1; j < 4; ++j, ++ordinal )
+        {
+            REQUIRE_FALSE( offer( image ) );
+        }
+    }
+
+    // A slot that was offered but never copied (late) is offered again on the next slot, then not after its copy.
+    y << .2f, .1f;
+    decide( y );
+    REQUIRE( offer( image ) );
+    ++ordinal; // Not copied.
+    Image retry;
+    REQUIRE( offer( retry ) );
+    CHECK( retry == image );
+    copy( ordinal++, retry );
+    REQUIRE_FALSE( offer( image ) );
+    ++ordinal;
+
+    // A late receipt for the previous decision's image does not mark the newer decision as written.
+    y << -.3f, .4f;
+    decide( y );
+    Image first, second;
+    REQUIRE( offer( first ) );
+    const auto firstSlot = ordinal++;
+    y << .3f, -.2f;
+    decide( y );
+    REQUIRE( offer( second ) );
+    REQUIRE( second != first );
+    copy( firstSlot, first );
+    REQUIRE( offer( second ) );
+    copy( ordinal++, second );
+    REQUIRE_FALSE( offer( image ) );
+
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_control["requested_mode"].get<std::string>() == "mfilt_copy_2k" );
+    CHECK( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates == 0 );
 }
 
 /** \brief A refused predict or learn_std request is answered at once with its unchanged state and INDI_ALERT, which
