@@ -8,6 +8,7 @@ The normal build runs closed-loop DDSPC on the existing WFS monitor (`aol1_modev
 Every WFS frame is also republished to the main AO loop. With prediction off it is unchanged; with prediction on, tip/tilt is set to zero, so DDSPC is the only tip/tilt controller (see "Main-loop modal output").
 
 - **Main-loop route** (`ddspc_mode.main_loop`) runs the standard model without the DM channel, as the original loPredCtrl: its tip/tilt delta goes into the main loop's modal input for mfilt to integrate (see "Main-loop route").
+- **mfilt copy** (`ddspc_mode.mfilt_copy`) runs no DDSPC: the main loop's own tip/tilt integrator, reproduced here, drives `dm.channelName` while main-loop tip/tilt is zero. It tests the DM channel path by itself (see "mfilt copy").
 
 Each model trains only while its mode is selected, so the standard and assisted fits are independent experiments. Both learn only from genuine WFS measurements and the commands the scheduler copied from this channel.
 
@@ -279,6 +280,28 @@ getINDI 'loPredCtrlAcc.ddspc_control.*'   # requested_mode=main_loop, main_loop_
 ```
 
 Changing `ddspc_mode` while predicting in this route stops prediction ("DDSPC prediction stopped: DDSPC mode changed"), and tip/tilt passes through from the next frame. `predict` off or `release_tt` also return tip/tilt on the next frame; there is no own-channel zero to wait for. The decision now precedes publication, so each frame's output waits for the standard decision, including its RLS update while learning (13.5 µs mean on a development Mac, 1.4 µs frozen). Details: `agents/plans/2026-11/ddspc-main-loop-route.md`.
+
+## mfilt copy
+
+`ddspc_mode.mfilt_copy` moves the main loop's tip/tilt control onto the DDSPC DM channel without DDSPC. Each WFS frame while `predict` is on:
+- `s = clamp(mult*s - gain*y, ±limit)` for modes 0 and 1, where `y` is the `aol1_modevalWFS` tip/tilt and `gain`, `mult`, `limit` are the main loop's own (`holoop` `loop_gain`/`loop_multcoeff`/`loop_max_limit` times `aol1_mgainfact`/`mmultfact`/`mlimitfact`, the `integrator` property). This is mfilt's law;
+- `s` is written through `modeCube` planes 0 and 1 to `dm.channelName` on the frame's four DM slots;
+- main-loop modes 0 and 1 are zero (`main_loop_tt=zeroed`), exactly as in standard mode, so mfilt's tip/tilt state holds and the copy starts from zero on top of it.
+
+No model is used or trained: `gain`, `learn` and exploration have no effect, and `learn_std` is refused. `predict` is refused until the main loop's parameters are received (`integrator.ready=true`), even with `[integrator] enabled=false`. Turning `predict` off zeroes the channel and returns tip/tilt to the main loop once `zero_confirmed=true`, as in standard mode.
+
+If the loop holds as it does with the main loop alone, the DM channel path (shapes and sign of `modeCube`, synco timing, `dm01disp05` routing) is right, and any instability in standard or assisted mode comes from DDSPC. If it does not, the path is the problem. A sign error shows as tip/tilt running away within a few frames; turn `predict` off.
+
+```bash
+setINDI -s 'loPredCtrlAcc.predict.toggle=Off'
+getINDI 'loPredCtrlAcc.safety.*'   # zero_confirmed=true
+setINDI -s 'loPredCtrlAcc.ddspc_mode.standard=Off;accel_assisted=Off;main_loop=Off;mfilt_copy=On'
+getINDI 'loPredCtrlAcc.integrator.*'   # ready=1
+setINDI -s 'loPredCtrlAcc.predict.toggle=On'
+getINDI 'loPredCtrlAcc.ddspc_control.*'   # requested_mode=mfilt_copy, prediction=active, main_loop_tt=zeroed
+```
+
+Details: `agents/plans/2026-11/ddspc-mfilt-copy.md`.
 
 ## Remove the contribution
 
