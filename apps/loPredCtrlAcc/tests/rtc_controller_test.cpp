@@ -2324,6 +2324,101 @@ TEST_CASE( "Refused prediction requests are answered with an alert", "[rtc-contr
     CHECK( app.m_indiP_predicting.getState() == pcf::IndiProperty::Ok );
 }
 
+/** \brief learn_std runs loPredCtrl's three stages and a fourth without probes, then stops learning while prediction
+ * continues; learning turned on by hand is never stopped by an exploration sequence.
+ */
+TEST_CASE( "learn_std ends with a probe-free stage, then stops learning", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_learnStd;
+    MagAOX::app::loPredCtrlAcc_operational::learnStdFinished;
+    MagAOX::app::loPredCtrlAcc_operational::appLogic;
+#endif
+    // clang-format on
+    Controller app( true );
+    app.qualifyOutput();
+    auto on = []( pcf::IndiProperty property )
+    {
+        property["toggle"].setSwitchState( pcf::IndiElement::On );
+        return property;
+    };
+    REQUIRE( app.newCallBack_m_indiP_learnStd( on( app.m_indiP_learnStd ) ) == 0 );
+    REQUIRE( app.m_learning );
+    REQUIRE( app.m_predicting );
+
+    // Four stages of 1000 frames; the last has no probes and keeps the final regularization.
+    REQUIRE( app.m_exploration.size() == 4 );
+    const std::array<float, 4> sigma{ .05f, .05f, .05f, 0 }, lambda{ 100, 3, .1f, .1f };
+    for( int k = 0; k < 4; ++k )
+    {
+        CHECK( app.m_exploration[k].m_count == 1000 );
+        CHECK( app.m_exploration[k].m_sigma == Approx( sigma[k] ) );
+        CHECK( app.m_exploration[k].m_lambda == Approx( lambda[k] ) );
+    }
+
+    DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 ), y( 2, 1 ), empty;
+    auto          frame   = [&]( int n )
+    {
+        y << std::sin( .09 * n ), .8 * std::cos( .13 * n );
+        y += .8f * command;
+        command = response( app.advance( y, empty, false ) ) / .8f;
+    };
+
+    int n = 0;
+    for( ; n < 3999; ++n )
+    {
+        frame( n );
+    }
+    REQUIRE( app.m_learning );
+    REQUIRE( app.m_exploration.size() == 1 );
+
+    // The last frame of the sequence stops learning at once; prediction continues with the frozen fit.
+    frame( n++ );
+    CHECK( app.m_exploration.empty() );
+    CHECK_FALSE( app.m_learning );
+    CHECK( app.m_predicting );
+    const auto updates = app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates;
+    for( int k = 0; k < 20; ++k, ++n )
+    {
+        frame( n );
+    }
+    CHECK( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates == updates );
+    CHECK( app.m_candidateValid.load() );
+
+    // appLogic shows it: both switches off and a note in the log.
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_learning["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_indiP_learnStd["toggle"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_textLogs.back().first ==
+           "DDSPC standard learning sequence finished: learning off, prediction continues" );
+
+    // The assisted mode's sequence ends the same way.
+    Controller assistedApp( true );
+    Plant      plant( .02 );
+    assisted( assistedApp, plant );
+    assistedApp.qualifyOutput();
+    REQUIRE( assistedApp.newCallBack_m_indiP_learnStd( on( assistedApp.m_indiP_learnStd ) ) == 0 );
+    // Assisted stages count only frames with a valid ACC window, so the first frames while it fills are extra.
+    for( int k = 0; k < 4100 && assistedApp.m_learning; ++k )
+    {
+        assistedApp.advanceAssisted( DDSPC::Matrix::Zero( 2, 1 ) );
+    }
+    CHECK( assistedApp.m_exploration.empty() );
+    CHECK_FALSE( assistedApp.m_learning );
+    CHECK( assistedApp.m_predicting );
+
+    // Learning turned on by hand keeps learning after an exploration sequence ends.
+    REQUIRE( app.newCallBack_m_indiP_learning( on( app.m_indiP_learning ) ) == 0 );
+    app.m_exploration = app.parseExploration( "5,0.05,0.1" );
+    for( int k = 0; k < 10; ++k, ++n )
+    {
+        frame( n );
+    }
+    CHECK( app.m_exploration.empty() );
+    CHECK( app.m_learning );
+}
+
 /** \brief Every prediction stop and every refused request is logged as a note with its reason. */
 TEST_CASE( "Prediction stops and refusals are logged with their reason", "[rtc-controller]" )
 {

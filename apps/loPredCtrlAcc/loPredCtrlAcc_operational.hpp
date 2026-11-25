@@ -351,6 +351,12 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     std::atomic<DDSPC::ShadowMode> m_mode{ DDSPC::ShadowMode::Standard };
     DDSPC::realT                   m_gain{ .3f };
 
+    /// learn_std started the current learning; its sequence's end turns learning off. Under m_modelMutex.
+    bool m_learnStdActive{ false };
+
+    /// The learn_std sequence ended on the WFS thread; appLogic updates the switches and logs it.
+    std::atomic<bool> m_learnStdFinished{ false };
+
     /** \name Integrator - Data
      * Optional mfilt-equivalent output: s = mult*s - gain*delta, clipped to +/-limit, where delta is the DDSPC command,
      * as the original loPredCtrl's commands were integrated by the main loop. gain, mult and limit are always the main
@@ -469,6 +475,9 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
     /// Train only the selected mode's model: standard while standard is selected, the multirate learner otherwise.
     void applyTraining();
+
+    /// End a learn_std run after its last stage: stop learning at once, and let appLogic show it; WFS thread.
+    void learnStdFinished();
 
     /// Return whether the selected mode's model is ready.
     bool selectedReady() const;
@@ -1082,6 +1091,14 @@ inline void loPredCtrlAcc_operational::applyTraining()
     m_multirate->training( learning && assisted );
 }
 
+inline void loPredCtrlAcc_operational::learnStdFinished()
+{
+    m_learning       = false;
+    m_learnStdActive = false;
+    applyTraining();
+    m_learnStdFinished.store( true );
+}
+
 inline bool loPredCtrlAcc_operational::selectedReady() const
 {
     return m_mode.load() == DDSPC::ShadowMode::Standard ? m_models->status( DDSPC::ShadowMode::Standard ).m_ready
@@ -1636,7 +1653,13 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
             }
         }
         if( !--stage.m_count )
+        {
             m_exploration.erase( m_exploration.begin() );
+            if( m_exploration.empty() && m_learnStdActive )
+            {
+                learnStdFinished();
+            }
+        }
     }
     if( !m_predicting || numericalFault )
     {
@@ -1751,7 +1774,13 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
         m_inputValid.store( true );
     }
     if( probing && !--m_exploration.front().m_count )
+    {
         m_exploration.erase( m_exploration.begin() );
+        if( m_exploration.empty() && m_learnStdActive )
+        {
+            learnStdFinished();
+        }
+    }
     // One shared QR-RLS update per genuine WFS target, then every phase's coefficients and slot gains.
     m_multirate->learn();
     if( m_multirate->refresh( m_gainSets[m_gainBack] ) )
@@ -2585,6 +2614,15 @@ inline int loPredCtrlAcc_operational::appLogic()
             m_modalEngaged.store( false ); // DDSPC's contribution is removed: main-loop tip/tilt passes through.
         }
 
+        // The learn_std sequence ended on the WFS thread, which already stopped learning: show it.
+        if( m_learnStdFinished.exchange( false ) && !m_learning )
+        {
+            updateSwitchIfChanged( m_indiP_learning, "toggle", pcf::IndiElement::Off, INDI_OK );
+            updateSwitchIfChanged( m_indiP_learnStd, "toggle", pcf::IndiElement::Off, INDI_OK );
+            log<text_log>( "DDSPC standard learning sequence finished: learning off, prediction continues",
+                           logPrio::LOG_NOTICE );
+        }
+
         standard   = m_models->status( DDSPC::ShadowMode::Standard );
         assisted   = m_multirate->status();
         learning   = m_learning;
@@ -2852,7 +2890,8 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learning )( con
         return -1;
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     std::lock_guard<std::mutex> modelLock( m_modelMutex );
-    m_learning = value == pcf::IndiElement::On;
+    m_learning       = value == pcf::IndiElement::On;
+    m_learnStdActive = false; // Learning set by hand is never stopped automatically.
     applyTraining();
     if( !m_learning )
     {
@@ -2970,10 +3009,12 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
         m_predictRejected = false;
     }
 
-    m_learning = enabled;
+    m_learning       = enabled;
+    m_learnStdActive = enabled;
     if( enabled )
     {
-        m_exploration = parseExploration( "1000,0.05,100,1000,0.05,3,1000,0.05,0.1" );
+        // loPredCtrl's three stages, then 1000 frames learning without probes; its end turns learning off.
+        m_exploration = parseExploration( "1000,0.05,100,1000,0.05,3,1000,0.05,0.1,1000,0,0.1" );
         m_predicting  = true;
         m_modalEngaged.store( true );
     }
@@ -2994,7 +3035,8 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_reset )( const 
     if( !removed() || !m_output.clear_fault() )
         return -1;
     std::lock_guard<std::mutex> modelLock( m_modelMutex );
-    m_predicting = false;
+    m_predicting     = false;
+    m_learnStdActive = false; // The sequence's exploration is discarded with the models.
     m_exploration.clear();
     resetModels();
     updateSwitchIfChanged( m_indiP_reset, "request", pcf::IndiElement::Off, INDI_OK );
