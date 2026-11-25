@@ -221,9 +221,9 @@ class koolanceCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::
     ///@}
 };
 
-koolanceCtrl::koolanceCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
+koolanceCtrl::koolanceCtrl() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-   return;
+    return;
 }
 
 void koolanceCtrl::setupConfig()
@@ -305,216 +305,223 @@ int koolanceCtrl::appStartup()
 int koolanceCtrl::appLogic()
 {
 
-   if( state() == stateCodes::NODEVICE )
-   {
-      int rv = tty::usbDevice::getDeviceName();
-      if(rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES)
-      {
-         state(stateCodes::FAILURE);
-         if(!stateLogged())
-         {
-            log<software_critical>({__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
-         }
-         return -1;
-      }
-
-      if(rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES)
-      {
-         state(stateCodes::NODEVICE);
-
-         if(!stateLogged())
-         {
-            std::stringstream logs;
-            logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " not found in udev";
-            log<text_log>(logs.str());
-         }
-         return 0;
-      }
-      else
-      {
-         std::stringstream logs;
-         logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as " << m_deviceName;
-         log<text_log>(logs.str());
-
-         state(stateCodes::NOTCONNECTED);
-      }
-   }
-
-   if( state() == stateCodes::NOTCONNECTED )
-   {
-      int rv = 0;
-      {
-         elevatedPrivileges ep(this);
-         rv = connect();
-      }
-
-      if(rv < 0)
-      {
-         int nrv = tty::usbDevice::getDeviceName();
-         if(nrv < 0 && nrv != TTY_E_DEVNOTFOUND && nrv != TTY_E_NODEVNAMES)
-         {
-            state(stateCodes::FAILURE);
-            if(!stateLogged()) log<software_critical>({__FILE__, __LINE__, nrv, tty::ttyErrorString(nrv)});
+    if( state() == stateCodes::NODEVICE )
+    {
+        int rv = tty::usbDevice::getDeviceName();
+        if( rv < 0 && rv != TTY_E_DEVNOTFOUND && rv != TTY_E_NODEVNAMES )
+        {
+            state( stateCodes::FAILURE );
+            if( !stateLogged() )
+            {
+                log<software_critical>( { __FILE__, __LINE__, rv, tty::ttyErrorString( rv ) } );
+            }
             return -1;
-         }
+        }
 
-         if(nrv == TTY_E_DEVNOTFOUND || nrv == TTY_E_NODEVNAMES)
-         {
-            state(stateCodes::NODEVICE);
+        if( rv == TTY_E_DEVNOTFOUND || rv == TTY_E_NODEVNAMES )
+        {
+            state( stateCodes::NODEVICE );
 
-            if(!stateLogged())
+            if( !stateLogged() )
             {
-               std::stringstream logs;
-               logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " no longer found in udev";
-               log<text_log>(logs.str());
+                std::stringstream logs;
+                logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " not found in udev";
+                log<text_log>( logs.str() );
             }
             return 0;
-         }
+        }
+        else
+        {
+            std::stringstream logs;
+            logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial << " found in udev as "
+                 << m_deviceName;
+            log<text_log>( logs.str() );
 
-         //if connect failed, and there is a device, then we have some other problem.
-         sleep(1); //wait to see if power state updates
-         if(m_powerState == 0) return 0;
+            state( stateCodes::NOTCONNECTED );
+        }
+    }
 
-         //Ok we can't figure this out, die.
-         state(stateCodes::FAILURE);
-         if(!stateLogged()) log<software_error>({__FILE__,__LINE__,rv, tty::ttyErrorString(rv)});
-         return -1;
+    if( state() == stateCodes::NOTCONNECTED )
+    {
+        int rv = 0;
+        {
+            elevatedPrivileges ep( this );
+            rv = connect();
+        }
 
-      }
-      else
-      {
-         std::unique_lock<std::mutex> lock(m_indiMutex);
-         if(initialConnect () == 0)
-         {
-            state(stateCodes::CONNECTED);
-         }
-         else
-         {
-            if(!stateLogged())
+        if( rv < 0 )
+        {
+            int nrv = tty::usbDevice::getDeviceName();
+            if( nrv < 0 && nrv != TTY_E_DEVNOTFOUND && nrv != TTY_E_NODEVNAMES )
             {
-               log<text_log>("no response from device");
+                state( stateCodes::FAILURE );
+                if( !stateLogged() )
+                {
+                    log<software_critical>( { __FILE__, __LINE__, nrv, tty::ttyErrorString( nrv ) } );
+                }
+                return -1;
             }
+
+            if( nrv == TTY_E_DEVNOTFOUND || nrv == TTY_E_NODEVNAMES )
+            {
+                state( stateCodes::NODEVICE );
+
+                if( !stateLogged() )
+                {
+                    std::stringstream logs;
+                    logs << "USB Device " << m_idVendor << ":" << m_idProduct << ":" << m_serial
+                         << " no longer found in udev";
+                    log<text_log>( logs.str() );
+                }
+                return 0;
+            }
+
+            //if connect failed, and there is a device, then we have some other problem.
+            sleep( 1 ); //wait to see if power state updates
+            if( m_powerState == 0 )
+            {
+                return 0;
+            }
+
+            //Ok we can't figure this out, die.
+            state( stateCodes::FAILURE );
+            if( !stateLogged() )
+            {
+                log<software_error>( { __FILE__, __LINE__, rv, tty::ttyErrorString( rv ) } );
+            }
+            return -1;
+        }
+        else
+        {
+            std::unique_lock<std::mutex> lock( m_indiMutex );
+            if( initialConnect() == 0 )
+            {
+                state( stateCodes::CONNECTED );
+            }
+            else
+            {
+                if( !stateLogged() )
+                {
+                    log<text_log>( "no response from device" );
+                }
+                return 0;
+            }
+        }
+
+        if( state() == stateCodes::CONNECTED )
+        {
+            std::stringstream logs;
+            logs << "Connected to koolance system on " << m_deviceName;
+            log<text_log>( logs.str() );
+            state( stateCodes::READY );
             return 0;
-         }
-      }
+        }
+    }
 
-      if(state() == stateCodes::CONNECTED)
-      {
-         std::stringstream logs;
-         logs << "Connected to koolance system on " << m_deviceName;
-         log<text_log>(logs.str());
-         state(stateCodes::READY);
-         return 0;
-      }
+    if( state() == stateCodes::READY )
+    {
+        { //mutex scope
+            std::unique_lock<std::mutex> lock( m_indiMutex );
+            if( getStatus() < 0 )
+            {
+                log<software_error>( { __FILE__, __LINE__ } );
+            }
+        }
 
-   }
+        if( telemeter<koolanceCtrl>::appLogic() < 0 )
+        {
+            log<software_error>( { __FILE__, __LINE__ } );
+            return 0;
+        }
+        return 0;
+    }
 
-   if( state() == stateCodes::READY )
-   {
-      { //mutex scope
-         std::unique_lock<std::mutex> lock(m_indiMutex);
-         if(getStatus() < 0)
-         {
-            log<software_error>({__FILE__,__LINE__});
-         }
-      }
-
-      if(telemeter<koolanceCtrl>::appLogic() < 0)
-      {
-         log<software_error>({__FILE__, __LINE__});
-         return 0;
-      }
-      return 0;
-   }
-
-   return 0;
+    return 0;
 }
 
 int koolanceCtrl::appShutdown()
 {
-   dev::telemeter<koolanceCtrl>::appShutdown();
-   return 0;
+    dev::telemeter<koolanceCtrl>::appShutdown();
+    return 0;
 }
-
-
 
 int koolanceCtrl::initialConnect()
 {
-   int rv;
+    int rv;
 
-   std::vector<unsigned char> com;
-   com.resize(3, '\0');
-   com[0] = 0xCF;
-   com[1] = 0x01;
-   com[2] = 0x08;
+    std::vector<unsigned char> com;
+    com.resize( 3, '\0' );
+    com[0] = 0xCF;
+    com[1] = 0x01;
+    com[2] = 0x08;
 
-   rv = write(m_fileDescrip, com.data(), com.size());
+    rv = write( m_fileDescrip, com.data(), com.size() );
 
-   if(rv < 0)
-   {
-      log<software_error>({__FILE__,__LINE__, errno, "error from write"});
-      ::close(m_fileDescrip);
-      m_fileDescrip = 0;
-      state(stateCodes::NOTCONNECTED);
+    if( rv < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, errno, "error from write" } );
+        ::close( m_fileDescrip );
+        m_fileDescrip = 0;
+        state( stateCodes::NOTCONNECTED );
 
-      return -1;
-   }
+        return -1;
+    }
 
-   std::vector<unsigned char> resp;
-   resp.resize(51);
+    std::vector<unsigned char> resp;
+    resp.resize( 51 );
 
-   mx::sys::milliSleep(1000); //Sleep for a long time to make sure device responds
-   int readBytes;
-   rv = tty::ttyReadRaw(resp, readBytes, m_fileDescrip, 1000); ///\todo needs to be iodevice
+    mx::sys::milliSleep( 1000 ); //Sleep for a long time to make sure device responds
+    int readBytes;
+    rv = tty::ttyReadRaw( resp, readBytes, m_fileDescrip, 1000 ); ///\todo needs to be iodevice
 
-   if(rv < 0)
-   {
-      log<software_error>({__FILE__,__LINE__, errno, "error from read"});
-      ::close(m_fileDescrip);
-      m_fileDescrip = 0;
-      state(stateCodes::NOTCONNECTED);
+    if( rv < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, errno, "error from read" } );
+        ::close( m_fileDescrip );
+        m_fileDescrip = 0;
+        state( stateCodes::NOTCONNECTED );
 
-      return -1;
-   }
+        return -1;
+    }
 
-   if(readBytes == 43)
-   {
-      log<text_log>("found protocol 1 device");
-      m_protocolChars = 43;
-   }
-   else if(readBytes == 51)
-   {
-      log<text_log>("found protocol 2 device");
-      m_protocolChars = 51;
-   }
-   else
-   {
-      return -1;
-   }
+    if( readBytes == 43 )
+    {
+        log<text_log>( "found protocol 1 device" );
+        m_protocolChars = 43;
+    }
+    else if( readBytes == 51 )
+    {
+        log<text_log>( "found protocol 2 device" );
+        m_protocolChars = 51;
+    }
+    else
+    {
+        return -1;
+    }
 
-   if(!m_indiSetup)
-   {
-      if(readBytes == 43)
-      {
-          REG_INDI_NEWPROP_NOCB(m_indiP_pumplvl, "pump_level", pcf::IndiProperty::Number);
-          m_indiP_pumplvl.add(pcf::IndiElement("current"));
+    if( !m_indiSetup )
+    {
+        if( readBytes == 43 )
+        {
+            REG_INDI_NEWPROP_NOCB( m_indiP_pumplvl, "pump_level", pcf::IndiProperty::Number );
+            m_indiP_pumplvl.add( pcf::IndiElement( "current" ) );
 
-          REG_INDI_NEWPROP_NOCB(m_indiP_fanlvl, "fan_level", pcf::IndiProperty::Number);
-          m_indiP_fanlvl.add(pcf::IndiElement("current"));
-      }
-      else
-      {
-         createStandardIndiNumber<int>( m_indiP_pumplvl, "pump_level", 1, 10, 1, "%d", "Pump Level", "Lab");
-         registerIndiPropertyNew( m_indiP_pumplvl, INDI_NEWCALLBACK(m_indiP_pumplvl));
+            REG_INDI_NEWPROP_NOCB( m_indiP_fanlvl, "fan_level", pcf::IndiProperty::Number );
+            m_indiP_fanlvl.add( pcf::IndiElement( "current" ) );
+        }
+        else
+        {
+            createStandardIndiNumber<int>( m_indiP_pumplvl, "pump_level", 1, 10, 1, "%d", "Pump Level", "Lab" );
+            registerIndiPropertyNew( m_indiP_pumplvl, INDI_NEWCALLBACK( m_indiP_pumplvl ) );
 
-         createStandardIndiNumber<int>( m_indiP_fanlvl, "fan_level", 0, 100, 1, "%d", "Fan Level", "Lab");
-         registerIndiPropertyNew( m_indiP_fanlvl, INDI_NEWCALLBACK(m_indiP_fanlvl));
-      }
+            createStandardIndiNumber<int>( m_indiP_fanlvl, "fan_level", 0, 100, 1, "%d", "Fan Level", "Lab" );
+            registerIndiPropertyNew( m_indiP_fanlvl, INDI_NEWCALLBACK( m_indiP_fanlvl ) );
+        }
 
-      m_indiSetup = true;
-   }
+        m_indiSetup = true;
+    }
 
-   return 0;
+    return 0;
 }
 
 int koolanceCtrl::getStatus()
@@ -643,205 +650,218 @@ inline int koolanceCtrl::publishStatus( double rawFlowRate, double flowRateAvera
 
 int koolanceCtrl::setPumpLvl( int lvl )
 {
-   if(m_protocolChars == 43) return 0;
+    if( m_protocolChars == 43 )
+    {
+        return 0;
+    }
 
-   int rv;
+    int rv;
 
-   std::vector<unsigned char> com;
-   com.resize(m_protocolChars, '\0');
-   com[0] = 0xCF;
-   com[1] = 0x04;
+    std::vector<unsigned char> com;
+    com.resize( m_protocolChars, '\0' );
+    com[0] = 0xCF;
+    com[1] = 0x04;
 
-   com[15] = m_fanLvl;
-   com[17] = lvl;
+    com[15] = m_fanLvl;
+    com[17] = lvl;
 
-   //Disable most stuff.
-   for(size_t n = 20; n <m_protocolChars-1; ++n) com[n] = 0xAA;
+    //Disable most stuff.
+    for( size_t n = 20; n < m_protocolChars - 1; ++n )
+    {
+        com[n] = 0xAA;
+    }
 
-   //Preserve units
-   if(m_protocolChars > 43)
-   {
-      com[44] = 0;
-      com[45] = 0x0001;
-      com[46] = 0;
-      com[47] = 0;
-      com[48] = 0;
-      com[49] = 0;
-   }
+    //Preserve units
+    if( m_protocolChars > 43 )
+    {
+        com[44] = 0;
+        com[45] = 0x0001;
+        com[46] = 0;
+        com[47] = 0;
+        com[48] = 0;
+        com[49] = 0;
+    }
 
-   int checksum = 0;
-   for(size_t n = 0; n <m_protocolChars-1; ++n) checksum += com[n];
-   com[m_protocolChars-1] = checksum % 0x64;
+    int checksum = 0;
+    for( size_t n = 0; n < m_protocolChars - 1; ++n )
+    {
+        checksum += com[n];
+    }
+    com[m_protocolChars - 1] = checksum % 0x64;
 
-   rv = write(m_fileDescrip, com.data(), com.size());
+    rv = write( m_fileDescrip, com.data(), com.size() );
 
-   if(rv < 0)
-   {
-      log<software_error>({__FILE__,__LINE__, errno, "error from write"});
-      ::close(m_fileDescrip);
-      m_fileDescrip = 0;
-      state(stateCodes::NOTCONNECTED);
+    if( rv < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, errno, "error from write" } );
+        ::close( m_fileDescrip );
+        m_fileDescrip = 0;
+        state( stateCodes::NOTCONNECTED );
 
-      return -1;
-   }
+        return -1;
+    }
 
-   log<text_log>("set pump level to " + std::to_string(lvl));
+    log<text_log>( "set pump level to " + std::to_string( lvl ) );
 
-   return 0;
+    return 0;
 }
 
 int koolanceCtrl::setFanLvl( int lvl )
 {
-   if(m_protocolChars == 43) return 0;
+    if( m_protocolChars == 43 )
+    {
+        return 0;
+    }
 
-   int rv;
+    int rv;
 
-   std::vector<unsigned char> com;
-   com.resize(m_protocolChars, '\0');
-   com[0] = 0xCF;
-   com[1] = 0x04;
+    std::vector<unsigned char> com;
+    com.resize( m_protocolChars, '\0' );
+    com[0] = 0xCF;
+    com[1] = 0x04;
 
-   com[15] = lvl;
-   com[17] = m_pumpLvl;
+    com[15] = lvl;
+    com[17] = m_pumpLvl;
 
-   //Disable most stuff.
-   for(size_t n = 20; n <m_protocolChars-1; ++n) com[n] = 0xAA;
+    //Disable most stuff.
+    for( size_t n = 20; n < m_protocolChars - 1; ++n )
+    {
+        com[n] = 0xAA;
+    }
 
-   //Preserve units
-   if(m_protocolChars > 43)
-   {
-      com[44] = 0;
-      com[45] = 0x0001;
-      com[46] = 0;
-      com[47] = 0;
-      com[48] = 0;
-      com[49] = 0;
-   }
+    //Preserve units
+    if( m_protocolChars > 43 )
+    {
+        com[44] = 0;
+        com[45] = 0x0001;
+        com[46] = 0;
+        com[47] = 0;
+        com[48] = 0;
+        com[49] = 0;
+    }
 
-   int checksum = 0;
-   for(size_t n = 0; n <m_protocolChars-1; ++n) checksum += com[n];
-   com[m_protocolChars-1] = checksum % 0x64;
+    int checksum = 0;
+    for( size_t n = 0; n < m_protocolChars - 1; ++n )
+    {
+        checksum += com[n];
+    }
+    com[m_protocolChars - 1] = checksum % 0x64;
 
-   rv = write(m_fileDescrip, com.data(), com.size());
+    rv = write( m_fileDescrip, com.data(), com.size() );
 
-   if(rv < 0)
-   {
-      log<software_error>({__FILE__,__LINE__, errno, "error from write"});
-      ::close(m_fileDescrip);
-      m_fileDescrip = 0;
-      state(stateCodes::NOTCONNECTED);
+    if( rv < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, errno, "error from write" } );
+        ::close( m_fileDescrip );
+        m_fileDescrip = 0;
+        state( stateCodes::NOTCONNECTED );
 
-      return -1;
-   }
+        return -1;
+    }
 
-   log<text_log>("set fan level to " + std::to_string(lvl));
+    log<text_log>( "set fan level to " + std::to_string( lvl ) );
 
-   return 0;
+    return 0;
 }
 
-INDI_NEWCALLBACK_DEFN(koolanceCtrl, m_indiP_pumplvl)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN( koolanceCtrl, m_indiP_pumplvl )( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getName() != m_indiP_pumplvl.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+    if( ipRecv.getName() != m_indiP_pumplvl.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
+        return -1;
+    }
 
-   int lvl = -1;
+    int lvl = -1;
 
-   if( ipRecv.find("current") )
-   {
-      lvl = ipRecv["current"].get<int>();
-   }
+    if( ipRecv.find( "current" ) )
+    {
+        lvl = ipRecv["current"].get<int>();
+    }
 
-   if( ipRecv.find("target") )
-   {
-      lvl = ipRecv["target"].get<int>();
-   }
+    if( ipRecv.find( "target" ) )
+    {
+        lvl = ipRecv["target"].get<int>();
+    }
 
-   if(lvl < 1 || lvl > 10)
-   {
-      log<software_error>({__FILE__,__LINE__, "Pump level out of range"});
-      return 0;
-   }
+    if( lvl < 1 || lvl > 10 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "Pump level out of range" } );
+        return 0;
+    }
 
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-   updateIfChanged(m_indiP_pumplvl, "target", lvl);
-   return setPumpLvl(lvl);
-
-
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+    updateIfChanged( m_indiP_pumplvl, "target", lvl );
+    return setPumpLvl( lvl );
 }
 
-INDI_NEWCALLBACK_DEFN(koolanceCtrl, m_indiP_fanlvl)(const pcf::IndiProperty &ipRecv)
+INDI_NEWCALLBACK_DEFN( koolanceCtrl, m_indiP_fanlvl )( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getName() != m_indiP_fanlvl.getName())
-   {
-      log<software_error>({__FILE__,__LINE__, "wrong INDI property received."});
-      return -1;
-   }
+    if( ipRecv.getName() != m_indiP_fanlvl.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
+        return -1;
+    }
 
+    int lvl = -1;
 
-   int lvl = -1;
+    if( ipRecv.find( "current" ) )
+    {
+        lvl = ipRecv["current"].get<int>();
+    }
 
-   if( ipRecv.find("current") )
-   {
-      lvl = ipRecv["current"].get<int>();
-   }
+    if( ipRecv.find( "target" ) )
+    {
+        lvl = ipRecv["target"].get<int>();
+    }
 
-   if( ipRecv.find("target") )
-   {
-      lvl = ipRecv["target"].get<int>();
-   }
+    if( lvl < 0 || lvl > 100 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "Fan level out of range" } );
+        return 0;
+    }
 
-   if(lvl < 0 || lvl > 100)
-   {
-      log<software_error>({__FILE__,__LINE__, "Fan level out of range"});
-      return 0;
-   }
+    std::unique_lock<std::mutex> lock( m_indiMutex );
+    updateIfChanged( m_indiP_fanlvl, "target", lvl );
+    return setFanLvl( lvl );
 
-   std::unique_lock<std::mutex> lock(m_indiMutex);
-   updateIfChanged(m_indiP_fanlvl, "target", lvl);
-   return setFanLvl(lvl);
-
-   return 0;
+    return 0;
 }
 
-inline
-int koolanceCtrl::checkRecordTimes()
+inline int koolanceCtrl::checkRecordTimes()
 {
-   return telemeter<koolanceCtrl>::checkRecordTimes(telem_cooler());
+    return telemeter<koolanceCtrl>::checkRecordTimes( telem_cooler() );
 }
 
-inline
-int koolanceCtrl::recordTelem( const telem_cooler * )
+inline int koolanceCtrl::recordTelem( const telem_cooler * )
 {
-   return recordCooler(true);
+    return recordCooler( true );
 }
 
-inline
-int koolanceCtrl::recordCooler( bool force )
+inline int koolanceCtrl::recordCooler( bool force )
 {
-   static float last_liqTemp = std::numeric_limits<float>::max();
-   static float last_flowRate = std::numeric_limits<float>::max();
-   static int last_pumpLvl = std::numeric_limits<int>::max();
-   static int last_pumpRPM = std::numeric_limits<int>::max();
-   static int last_fanRPM = std::numeric_limits<int>::max();
-   static int last_fanLvl = std::numeric_limits<int>::max();
+    static float last_liqTemp  = std::numeric_limits<float>::max();
+    static float last_flowRate = std::numeric_limits<float>::max();
+    static int   last_pumpLvl  = std::numeric_limits<int>::max();
+    static int   last_pumpRPM  = std::numeric_limits<int>::max();
+    static int   last_fanRPM   = std::numeric_limits<int>::max();
+    static int   last_fanLvl   = std::numeric_limits<int>::max();
 
-   if( m_liqTemp != last_liqTemp || m_flowRate != last_flowRate || m_pumpLvl != last_pumpLvl ||
-          m_pumpRPM != last_pumpRPM || m_fanRPM != last_fanRPM || m_fanLvl != last_fanLvl || force )
-   {
-      telem<telem_cooler>({m_liqTemp, m_flowRate, (uint8_t) m_pumpLvl, (uint16_t) m_pumpRPM, (uint8_t) m_fanLvl, (uint16_t) m_fanRPM});
+    if( m_liqTemp != last_liqTemp || m_flowRate != last_flowRate || m_pumpLvl != last_pumpLvl ||
+        m_pumpRPM != last_pumpRPM || m_fanRPM != last_fanRPM || m_fanLvl != last_fanLvl || force )
+    {
+        telem<telem_cooler>(
+            { m_liqTemp, m_flowRate, (uint8_t)m_pumpLvl, (uint16_t)m_pumpRPM, (uint8_t)m_fanLvl, (uint16_t)m_fanRPM } );
 
-      last_liqTemp = m_liqTemp;
-      last_flowRate = m_flowRate;
-      last_pumpLvl = m_pumpLvl;
-      last_pumpRPM = m_pumpRPM;
-      last_fanLvl = m_fanLvl;
-      last_fanRPM = m_fanRPM;
-   }
+        last_liqTemp  = m_liqTemp;
+        last_flowRate = m_flowRate;
+        last_pumpLvl  = m_pumpLvl;
+        last_pumpRPM  = m_pumpRPM;
+        last_fanLvl   = m_fanLvl;
+        last_fanRPM   = m_fanRPM;
+    }
 
-   return 0;
+    return 0;
 }
 
 } //namespace app
