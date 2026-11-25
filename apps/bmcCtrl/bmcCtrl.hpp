@@ -87,7 +87,7 @@ class bmcCtrl : public MagAOXApp<true>,
 
     std::string m_serialNumber; ///< The BMC serial number used to open the correct DM profile
 
-    long m_satThresh{ 100000 }; ///< Threshold above which to log saturation.
+    long m_satThresh{ 100000 }; ///< Saturated actuator count above which to log a notice.
 
     ///@}
 
@@ -369,20 +369,13 @@ class bmcCtrl : public MagAOXApp<true>,
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Shut down the app.
     virtual int appShutdown();
 
-    /// Cleanup after a power off.
-    /**
-     */
+    /// Clean up after power is turned off.
     virtual int onPowerOff();
 
-    /// Maintenace while powered off.
-    /**
-     */
+    /// Run DM maintenance while powered off.
     virtual int whilePowerOff();
 
     /** \name DM Base Class Interface

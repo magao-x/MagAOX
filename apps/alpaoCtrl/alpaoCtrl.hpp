@@ -66,7 +66,7 @@ class alpaoCtrl : public MagAOXApp<true>,
 
     std::string m_serialNumber; ///< The ALPAO serial number used to find the default config directory.
 
-    long m_satThresh{ 100 }; ///< Threshold above which to log saturation.
+    long m_satThresh{ 100 }; ///< Saturated actuator count above which to log a notice.
 
     ///@}
 
@@ -104,20 +104,13 @@ class alpaoCtrl : public MagAOXApp<true>,
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Shut down the app.
     virtual int appShutdown();
 
-    /// Cleanup after a power off.
-    /**
-     */
+    /// Clean up after power is turned off.
     virtual int onPowerOff();
 
-    /// Maintenace while powered off.
-    /**
-     */
+    /// Run DM maintenance while powered off.
     virtual int whilePowerOff();
 
     /** \name DM Base Class Interface
