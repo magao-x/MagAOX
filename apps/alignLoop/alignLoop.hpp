@@ -35,10 +35,11 @@ namespace app
  * The loop subtracts `offset0` and `offset1` from the two measurement axes before
  * publishing residuals and converting them to stage corrections. Each INDI offset
  * is a live setpoint in measurement units and starts at zero.
+ * Binary telemetry records the loop state and its processed measurements.
  *
  * \ingroup alignLoop
  */
-class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
+class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>, public dev::telemeter<alignLoop>
 {
     /// Give the test harness access to internal loop state.
     friend class alignLoop_test;
@@ -46,9 +47,15 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
     /// Allow the stream monitor to dispatch frames to this app.
     friend class dev::shmimMonitor<alignLoop>;
 
+    /// Allow periodic telemetry to request a state record.
+    friend class dev::telemeter<alignLoop>;
+
   public:
     /// Stream monitor for the alignment measurements.
     typedef dev::shmimMonitor<alignLoop> shmimMonitorT;
+
+    /// Binary telemetry writer for alignment records.
+    typedef dev::telemeter<alignLoop> telemeterT;
 
   protected:
     /** \name Configurable Parameters
@@ -141,20 +148,20 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
     /// Load the application configuration.
     virtual void loadConfig();
 
-    /// Start the input monitor and initialize the INDI properties and controller state.
+    /// Initialize the control state, INDI properties, telemetry writer, and input monitor.
     /**
      * \returns 0 on success or -1 on a startup error.
      */
     virtual int appStartup();
 
-    /// Check monitor health and keep the app in the operating state.
+    /// Check monitor and telemetry health and keep the app in the operating state.
     /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
     virtual int appLogic();
 
-    /// Stop the input stream monitor.
+    /// Shut down the input stream monitor and telemetry interface.
     virtual int appShutdown();
 
     /// Change the loop state and acknowledge it over INDI.
@@ -170,7 +177,10 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
     );
 
     /// Send each computed target to its configured controller property.
-    int sendCommands( std::vector<float> &commands /**< [in] command values to transmit */ );
+    /**
+     * \returns A bit mask of successful local INDI sends for the first two controller axes.
+     */
+    uint8_t sendCommands( const std::vector<float> &commands /**< [in] command values to transmit */ );
 
     // INDI
 
@@ -226,6 +236,17 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
     int setOffset( float                   &offset, /**< [in/out] active setpoint for the requested axis */
                    pcf::IndiProperty       &prop,   /**< [in/out] local offset property */
                    const pcf::IndiProperty &ipRecv /**< [in] received offset property */ );
+
+    /// Refresh the archived state when no frame or state change has been recorded recently.
+    int checkRecordTimes();
+
+    /// Record the current state while holding m_indiMutex.
+    int recordTelem( const telem_alignloop *tag /**< [in] unused telemetry type selector */ );
+
+    /// Queue a state or frame record while holding m_indiMutex, or during startup.
+    int recordAlignment( const AlignLoopSample *sample  = nullptr, /**< [in] processed frame, if present */
+                         const AlignLoopAxes   *targets = nullptr, /**< [in] attempted controller targets, if present */
+                         uint8_t                sentMask = 0 /**< [in] mask of successful local sends */ );
 };
 
 alignLoop::alignLoop() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -237,6 +258,7 @@ alignLoop::alignLoop() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 void alignLoop::setupConfig()
 {
     shmimMonitorT::setupConfig( config );
+    TELEMETER_SETUP_CONFIG( config );
 
     config.add( "ctrl.devices",
                 "",
@@ -328,6 +350,7 @@ void alignLoop::setupConfig()
 int alignLoop::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     shmimMonitorT::loadConfig( _config );
+    TELEMETER_LOAD_CONFIG( _config );
 
     _config( m_ctrlDevices, "ctrl.devices" );
     _config( m_ctrlProperties, "ctrl.properties" );
@@ -349,11 +372,6 @@ void alignLoop::loadConfig()
 
 int alignLoop::appStartup()
 {
-    if( shmimMonitorT::appStartup() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
-
     if( m_ctrlTargets.size() != m_ctrlDevices.size() )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "ctrl.Targets and ctrl.devices are not the same size" } );
@@ -473,6 +491,14 @@ int alignLoop::appStartup()
         REG_INDI_SETPROP( m_indiP_upstream, m_upstreamDevice, m_upstreamProperty );
     }
 
+    TELEMETER_APP_STARTUP;
+    recordAlignment();
+
+    if( shmimMonitorT::appStartup() < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
     return 0;
 }
 
@@ -484,6 +510,7 @@ int alignLoop::appLogic()
     }
 
     state( stateCodes::OPERATING );
+    TELEMETER_APP_LOGIC;
 
     return 0;
 }
@@ -491,6 +518,7 @@ int alignLoop::appLogic()
 int alignLoop::appShutdown()
 {
     shmimMonitorT::appShutdown();
+    TELEMETER_APP_SHUTDOWN;
 
     return 0;
 }
@@ -503,6 +531,7 @@ int alignLoop::toggleLoop( bool onoff )
     {
         m_ctrlEnabled = true;
         log<loop_closed>();
+        recordAlignment();
         updateSwitchIfChanged( m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::On, INDI_OK );
         return 0;
     }
@@ -511,6 +540,7 @@ int alignLoop::toggleLoop( bool onoff )
     {
         m_ctrlEnabled = false;
         log<loop_open>();
+        recordAlignment();
         updateSwitchIfChanged( m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::Off, INDI_IDLE );
 
         return 0;
@@ -534,6 +564,8 @@ inline int alignLoop::allocate( const dev::shmimT &dummy )
 inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
+    const uint64_t frame    = shmimMonitorT::currCnt0();
+    const timespec acquired = shmimMonitorT::currAtime();
 
     for( unsigned nn = 0; nn < shmimMonitorT::m_width * shmimMonitorT::m_height; ++nn )
     {
@@ -543,10 +575,14 @@ inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
     // Keep the accepted offsets and stage-send decision consistent for this frame.
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
+    const AlignLoopAxes measurement{ m_measurements( 0, 0 ), m_measurements( 1, 0 ) };
     m_measurements( 0, 0 ) -= m_offset0;
     m_measurements( 1, 0 ) -= m_offset1;
     m_delta0 = m_measurements( 0, 0 );
     m_delta1 = m_measurements( 1, 0 );
+
+    const AlignLoopSample sample{
+        frame, acquired.tv_sec, static_cast<int32_t>( acquired.tv_nsec ), measurement, { m_delta0, m_delta1 } };
 
     updateIfChanged(
         m_indiP_deltas, std::vector<std::string>{ "delta0", "delta1" }, std::vector<float>{ m_delta0, m_delta1 } );
@@ -560,6 +596,7 @@ inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
 
     if( m_currents[0] < -1e14 )
     {
+        recordAlignment( &sample );
         return 0;
     }
 
@@ -585,14 +622,20 @@ inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
 
     if( m_ctrlEnabled && ( m_delta0 != 0 || m_delta1 != 0 ) )
     {
-        return sendCommands( commands );
+        const uint8_t       sentMask = sendCommands( commands );
+        const AlignLoopAxes targets{ commands[0], commands[1] };
+        recordAlignment( &sample, &targets, sentMask );
+        return 0;
     }
 
+    recordAlignment( &sample );
     return 0;
 }
 
-inline int alignLoop::sendCommands( std::vector<float> &commands )
+inline uint8_t alignLoop::sendCommands( const std::vector<float> &commands )
 {
+    uint8_t sentMask = 0;
+
     for( size_t n = 0; n < m_ctrlDevices.size(); ++n )
     {
         pcf::IndiProperty ip( pcf::IndiProperty::Number );
@@ -602,10 +645,30 @@ inline int alignLoop::sendCommands( std::vector<float> &commands )
         ip.add( pcf::IndiElement( m_ctrlTargets[n] ) );
         ip[m_ctrlTargets[n]] = commands[n];
 
-        sendNewProperty( ip );
+        if( sendNewProperty( ip ) == 0 && n < 2 )
+        {
+            sentMask |= static_cast<uint8_t>( 1u << n );
+        }
     }
 
-    return 0;
+    return sentMask;
+}
+
+inline int alignLoop::checkRecordTimes()
+{
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+    return telemeterT::checkRecordTimes( telem_alignloop() );
+}
+
+inline int alignLoop::recordTelem( const telem_alignloop * )
+{
+    return recordAlignment();
+}
+
+inline int alignLoop::recordAlignment( const AlignLoopSample *sample, const AlignLoopAxes *targets, uint8_t sentMask )
+{
+    return telem<telem_alignloop>(
+        { m_ctrlEnabled, m_ggain, { m_gains[0], m_gains[1] }, { m_offset0, m_offset1 }, sample, targets, sentMask } );
 }
 
 inline int alignLoop::setOffset( float &offset, pcf::IndiProperty &prop, const pcf::IndiProperty &ipRecv )
@@ -630,7 +693,14 @@ inline int alignLoop::setOffset( float &offset, pcf::IndiProperty &prop, const p
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    offset = target;
+    const bool changed = offset != target;
+    offset             = target;
+
+    if( changed )
+    {
+        recordAlignment();
+    }
+
     updateIfChanged( prop, std::vector<std::string>{ "current", "target" }, std::vector<float>{ target, target } );
 
     return 0;
@@ -664,7 +734,13 @@ INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_ggain )( const pcf::IndiProperty &ipRe
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    m_ggain = target;
+    const bool changed = m_ggain != target;
+    m_ggain            = target;
+
+    if( changed )
+    {
+        recordAlignment();
+    }
 
     updateIfChanged( m_indiP_ggain, "current", m_ggain );
     updateIfChanged( m_indiP_ggain, "target", m_ggain );

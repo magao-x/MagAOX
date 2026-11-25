@@ -132,3 +132,23 @@ and publish it as `deltas.delta0` and `deltas.delta1`. A measurement and offset 
   driver. The app build and targeted test suite passed with 75 assertions in two test cases.
 - The software checks ran offline. The modulation transition and stage response remain operator checks on
   the instrument.
+
+## Alignment loop telemetry
+
+- Use `dev::telemeter` and the existing FlatBuffers log pipeline. Add `telem_alignloop` (20073) because
+  `telem_loopgain` describes a multiplier and limit, and `telem_qwppupil` describes predicted shifts and
+  voltage changes relative to a baseline. Alignment needs its live two-axis offsets and absolute INDI
+  targets in the configured controller units.
+- Record open/closed state, global and per-axis gains, and offsets at startup, on accepted state changes,
+  and after the configured telemetry interval without a record. Each processed input frame also records
+  that state together with its counter, acquisition timestamp, raw measurements, and corrected residuals.
+- Include the two targets when the app attempts to send them. The send mask records the local INDI
+  transport result for each axis. Hardware readback and motion are tracked by the controllers.
+- Use the monitor's existing frame metadata accessors. The frame counter identifies the input stream to
+  `alignLoop`, which is the output offset stream when fed by `pupilFit`. The single-slot stream fallback
+  samples its shared metadata.
+- Queue frame telemetry after the command decision and any sends. Per-frame serialization and queueing
+  add work on the monitor thread. Instrument latency and telemetry throughput remain to be measured.
+- The app build and offline `alignLoop` suite passed with 178 assertions in three test cases. The
+  archive test reads back real `.bintel` output and checks state ordering, matching-offset frames,
+  partial send failures, and the generated text, JSON, and metadata dispatch.
