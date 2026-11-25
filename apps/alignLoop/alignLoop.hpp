@@ -7,6 +7,11 @@
 #ifndef alignLoop_hpp
 #define alignLoop_hpp
 
+#include <cmath>
+#include <sstream>
+
+#include <mx/math/floatUtils.hpp>
+
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -69,9 +74,15 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
 
     mx::improc::eigenImage<float> m_intMat; ///< Interaction matrix mapping measurements to commands.
 
-    mx::improc::eigenImage<float> m_measurements; ///< Most recent measured loop disturbance vector.
+    mx::improc::eigenImage<float> m_measurements; ///< Private copy of the measurement frame, corrected in place.
     float                         m_delta0{ 0 };  ///< Latest first-axis residual.
     float                         m_delta1{ 0 };  ///< Latest second-axis residual.
+
+    static constexpr float c_maxOffset{ 1e15f }; ///< Magnitude limit for a measurement setpoint.
+
+    float m_offset0{ 0 }; ///< Active first-axis measurement setpoint.
+
+    float m_offset1{ 0 }; ///< Active second-axis measurement setpoint.
 
     mx::improc::eigenImage<float> m_commands; ///< Most recent command delta vector.
 
@@ -140,6 +151,16 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
 
     pcf::IndiProperty m_indiP_deltas; ///< Published loop residual values.
 
+    pcf::IndiProperty m_indiP_offset0; ///< First-axis measurement setpoint.
+
+    /// Handle a first-axis offset request (ipRecv).
+    INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_offset0 );
+
+    pcf::IndiProperty m_indiP_offset1; ///< Second-axis measurement setpoint.
+
+    /// Handle a second-axis offset request (ipRecv).
+    INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_offset1 );
+
     pcf::IndiProperty m_indiP_ggain;       ///< INDI property exposing the global loop gain.
     pcf::IndiProperty m_indiP_ctrlEnabled; ///< INDI property exposing the loop open/closed state.
 
@@ -161,6 +182,12 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
     pcf::IndiProperty m_indiP_upstream;     ///< Property used to monitor the upstream loop state.
 
     INDI_SETCALLBACK_DECL( alignLoop, m_indiP_upstream );
+
+  protected:
+    /// Apply and acknowledge a valid offset request.
+    int setOffset( float                   &offset, /**< [in/out] active setpoint for the requested axis */
+                   pcf::IndiProperty       &prop,   /**< [in/out] local offset property */
+                   const pcf::IndiProperty &ipRecv /**< [in] received offset property */ );
 };
 
 alignLoop::alignLoop() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -327,9 +354,19 @@ int alignLoop::appStartup()
     m_indiP_deltas.add( pcf::IndiElement( "delta1" ) );
     m_indiP_deltas["delta1"] = 0;
 
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_offset0, "offset0", -c_maxOffset, c_maxOffset, 0, "%g", "Offset 0", "Loop" );
+    m_indiP_offset0["current"] = m_offset0;
+    m_indiP_offset0["target"]  = m_offset0;
+
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_offset1, "offset1", -c_maxOffset, c_maxOffset, 0, "%g", "Offset 1", "Loop" );
+    m_indiP_offset1["current"] = m_offset1;
+    m_indiP_offset1["target"]  = m_offset1;
+
     m_gains.resize( m_defaultGains.size() );
     for( size_t n = 0; n < m_defaultGains.size(); ++n )
+    {
         m_gains[n] = m_defaultGains[n];
+    }
 
     createStandardIndiNumber<unsigned>( m_indiP_ggain, "loop_gain", 0, 1, 0, "%0.2f" );
     m_indiP_ggain["current"] = m_ggain;
@@ -422,6 +459,8 @@ int alignLoop::appShutdown()
 
 int alignLoop::toggleLoop( bool onoff )
 {
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
     if( !m_ctrlEnabled && onoff ) // not enabled so change
     {
         m_ctrlEnabled = true;
@@ -463,8 +502,15 @@ inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
         m_measurements.data()[nn] = ( static_cast<float *>( curr_src ) )[nn];
     }
 
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    m_measurements( 0, 0 ) -= m_offset0;
+    m_measurements( 1, 0 ) -= m_offset1;
     m_delta0 = m_measurements( 0, 0 );
     m_delta1 = m_measurements( 1, 0 );
+
+    updateIfChanged(
+        m_indiP_deltas, std::vector<std::string>{ "delta0", "delta1" }, std::vector<float>{ m_delta0, m_delta1 } );
 
     std::cout << "measurements: ";
     for( int cc = 0; cc < m_measurements.rows(); ++cc )
@@ -474,7 +520,9 @@ inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
     std::cout << "\n";
 
     if( m_currents[0] < -1e14 )
+    {
         return 0;
+    }
 
     m_commands.matrix() = m_intMat.matrix() * m_measurements.matrix();
 
@@ -496,21 +544,12 @@ inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
     }
     std::cout << "\n";
 
-    // And send commands.
-    int rv;
-    if( m_ctrlEnabled )
+    if( m_ctrlEnabled && ( m_delta0 != 0 || m_delta1 != 0 ) )
     {
-        rv = sendCommands( commands );
-    }
-    else
-    {
-        rv = 0;
+        return sendCommands( commands );
     }
 
-    updateIfChanged( m_indiP_deltas,
-                     std::vector<std::string>( { "delta0", "delta1" } ),
-                     std::vector<float>( { m_delta0, m_delta1 } ) );
-    return rv;
+    return 0;
 }
 
 inline int alignLoop::sendCommands( std::vector<float> &commands )
@@ -530,6 +569,44 @@ inline int alignLoop::sendCommands( std::vector<float> &commands )
     return 0;
 }
 
+inline int alignLoop::setOffset( float &offset, pcf::IndiProperty &prop, const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( prop, ipRecv );
+
+    const char *element = ipRecv.find( "target" ) ? "target" : "current";
+
+    if( !ipRecv.find( element ) )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "missing offset value" } );
+    }
+
+    std::istringstream value( ipRecv[element].get() );
+    float              target;
+
+    if( !( value >> target ) || !( value >> std::ws ).eof() || !mx::math::isFinite( target ) ||
+        std::abs( target ) > c_maxOffset )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "invalid offset value" } );
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    offset = target;
+    updateIfChanged( prop, std::vector<std::string>{ "current", "target" }, std::vector<float>{ target, target } );
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_offset0 )( const pcf::IndiProperty &ipRecv )
+{
+    return setOffset( m_offset0, m_indiP_offset0, ipRecv );
+}
+
+INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_offset1 )( const pcf::IndiProperty &ipRecv )
+{
+    return setOffset( m_offset1, m_indiP_offset1, ipRecv );
+}
+
 INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_ggain )( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getName() != m_indiP_ggain.getName() )
@@ -545,6 +622,8 @@ INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_ggain )( const pcf::IndiProperty &ipRe
         log<software_error>( { __FILE__, __LINE__ } );
         return -1;
     }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
 
     m_ggain = target;
 
@@ -581,6 +660,8 @@ INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_ctrlEnabled )( const pcf::IndiProperty
 
 inline int alignLoop::setCallBack_ctrl( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
     for( size_t n = 0; n < m_ctrlDevices.size(); ++n )
     {
         if( ipRecv.getDevice() == m_ctrlDevices[n] )
@@ -603,7 +684,9 @@ INDI_SETCALLBACK_DEFN( alignLoop, m_indiP_upstream )( const pcf::IndiProperty &i
     }
 
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_upstreamFollowClosed )
     {
