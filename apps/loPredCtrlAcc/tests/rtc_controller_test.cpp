@@ -3,6 +3,7 @@
  * \ingroup loPredCtrlAcc_unit_test
  */
 #include "../../../tests/testXWC.hpp"
+#include "adc_transport_fixture.hpp"
 #include "app_test_support.hpp"
 #include "../loPredCtrlAcc_operational.hpp"
 #include <algorithm>
@@ -49,6 +50,8 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_assistedValid;
     using loPredCtrlAcc_operational::m_calibration;
     using loPredCtrlAcc_operational::m_candidateValid;
+    using loPredCtrlAcc_operational::m_cloneStarted;
+    using loPredCtrlAcc_operational::m_cloneStats;
     using loPredCtrlAcc_operational::m_commandKnown;
     using loPredCtrlAcc_operational::m_commandMutex;
     using loPredCtrlAcc_operational::m_decisionOrdinal;
@@ -60,6 +63,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_gain;
     using loPredCtrlAcc_operational::m_gainFront;
     using loPredCtrlAcc_operational::m_gainSets;
+    using loPredCtrlAcc_operational::m_indiP_clone;
     using loPredCtrlAcc_operational::m_indiP_control;
     using loPredCtrlAcc_operational::m_indiP_exploration;
     using loPredCtrlAcc_operational::m_indiP_gain;
@@ -93,6 +97,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_modeCube;
     using loPredCtrlAcc_operational::m_modelMutex;
     using loPredCtrlAcc_operational::m_models;
+    using loPredCtrlAcc_operational::m_modevalDMName;
     using loPredCtrlAcc_operational::m_multirate;
     using loPredCtrlAcc_operational::m_output;
     using loPredCtrlAcc_operational::m_outputThread;
@@ -110,6 +115,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_syncopationTiming;
     using loPredCtrlAcc_operational::m_unlockedTraining;
     using loPredCtrlAcc_operational::m_wasValid;
+    using loPredCtrlAcc_operational::m_wfsArrived;
     using loPredCtrlAcc_operational::m_wfsCounter;
     using loPredCtrlAcc_operational::m_wfsFills;
     using loPredCtrlAcc_operational::m_wfsReceipt;
@@ -2293,7 +2299,13 @@ namespace
 int selectMode( Controller &app /**< [in,out] Application under test. */, const char *on /**< [in] Element. */ )
 {
     auto mode = app.m_indiP_mode;
-    for( const char *element : { "standard", "accel_assisted", "main_loop", "mfilt_copy_8k", "mfilt_copy_2k" } )
+    for( const char *element : { "standard",
+                                 "accel_assisted",
+                                 "main_loop",
+                                 "mfilt_copy_8k",
+                                 "mfilt_copy_2k",
+                                 "mfilt_clone_8k",
+                                 "mfilt_clone_2k" } )
     {
         mode[element].setSwitchState( std::string( element ) == on ? pcf::IndiElement::On : pcf::IndiElement::Off );
     }
@@ -2727,6 +2739,218 @@ TEST_CASE( "Standard slots are rendered from the newest decision at the render l
         expected        = std::clamp( .9 * expected - gain[mode] * y( mode ), -limit[mode], limit[mode] );
         CHECK( modal( mode ) == Approx( expected ).margin( 1e-6 ) ); // The second decision, not the first.
     }
+}
+
+/** \brief mfilt_clone_8k starts mfilt's tip/tilt state s from aolN_modevalDM, so the switch picks up where mfilt left
+ * off, and writes s minus mfilt's held output (decaying by mult with zero input) on every slot, so the DM total is the
+ * reference mfilt state; refused without the stream, and a torn read retries on the next frame.
+ */
+TEST_CASE( "mfilt clone 8k picks up mfilt's output and keeps the DM total on its state",
+           "[rtc-controller][integrator]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_mode;
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_predicting;
+    MagAOX::app::loPredCtrlAcc_operational::startClone;
+    MagAOX::app::loPredCtrlAcc_operational::readModevalDM;
+    MagAOX::app::loPredCtrlAcc_operational::step;
+#endif
+    // clang-format on
+    Controller app( true );
+    REQUIRE( selectMode( app, "mfilt_clone_8k" ) == 0 );
+    CHECK( app.m_indiP_mode["mfilt_clone_8k"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( app.m_indiP_mode["mfilt_copy_8k"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_indiP_mode["standard"].getSwitchState() == pcf::IndiElement::Off );
+    app.qualifyOutput();
+    app.mainLoop( .25, .9, .3, { 2, 1, 7 }, { 1, 1, 7 }, { 1, 2, 7 } );
+    app.m_modevalDMName = "aol1_modevaldm_clone8k"; // Private fixture names are lower case.
+
+    auto predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == -1 );
+    CHECK( app.m_textLogs.back().first ==
+           "DDSPC prediction request refused: aol1_modevaldm_clone8k (mfilt's output) is "
+           "not available as FLOAT with the tip/tilt modes" );
+
+    // mfilt's output: tip .2, tilt -.1, being written at first.
+    IMAGE_METADATA     metadata;
+    std::vector<float> values{ .2f, -.1f, 7 };
+    metadata.datatype = _DATATYPE_FLOAT;
+    metadata.nelement = values.size();
+    metadata.cnt0     = 5;
+    metadata.write    = 1;
+    IMAGE image;
+    image.md      = &metadata;
+    image.array.F = values.data();
+    const libXWCTest::loPredCtrlAccTest::AdcTransportFixture fixture( app.m_modevalDMName, image );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+    CHECK( app.m_modalEngaged ); // Main-loop tip/tilt is zeroed.
+
+    DDSPC::Matrix y( 2, 1 ), empty;
+    y << .1f, -.6f;
+    REQUIRE( app.advance( y, empty, false ).isZero() ); // Torn read: nothing yet, mfilt holds tip/tilt.
+    CHECK_FALSE( app.m_cloneStarted );
+    metadata.write = 0;
+
+    const std::array<double, 2> gain{ .5, .25 }, limit{ .3, .6 };
+    std::array<double, 2>       state{ .2, -.1 }, held{ .2, -.1 };
+    for( int n = 0; n < 12; ++n )
+    {
+        y << .1f + .05f * n, -.6f;
+        const auto slots = app.advance( y, empty, false );
+        for( int mode = 0; mode < 2; ++mode )
+        {
+            state[mode] = std::clamp( .9 * state[mode] - gain[mode] * y( mode ), -limit[mode], limit[mode] );
+            held[mode]  = .9 * held[mode];
+            for( int j = 0; j < 4; ++j )
+            {
+                REQUIRE( slots( mode, j ) == Approx( state[mode] - held[mode] ).margin( 1e-6 ) );
+            }
+        }
+    }
+    REQUIRE( state[0] == Approx( -.3 ) ); // The limit applies to the whole state, as in mfilt.
+    CHECK( app.m_models->status( DDSPC::ShadowMode::Standard ).m_updates == 0 );
+
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_control["requested_mode"].get<std::string>() == "mfilt_clone_8k" );
+    CHECK( app.m_indiP_control["main_loop_tt"].get<std::string>() == "zeroed" );
+    CHECK( app.m_indiP_clone["start_tt0"].get<double>() == Approx( .2 ) );
+    CHECK( app.m_indiP_clone["start_tt1"].get<double>() == Approx( -.1 ) );
+
+    predict["toggle"].setSwitchState( pcf::IndiElement::Off );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+    REQUIRE( app.advance( y, empty, false ).isZero() );
+    CHECK_FALSE( app.m_cloneStarted ); // The next start reads mfilt's output again.
+}
+
+/** \brief mfilt_clone_2k offers only step 0, the slot copied with the main loop's write, and counts whether each step 0
+ * carries the decision for the WFS frame that write carries: in sync when the decision is for the newest frame received
+ * and that frame arrived after the previous step 0's target; missed when a newer frame is undecided or the decision's
+ * frame was already carried by the previous write.
+ */
+TEST_CASE( "mfilt clone 2k writes step 0 and verifies it is in sync with the main loop",
+           "[rtc-controller][integrator]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::outputCandidate;
+    MagAOX::app::loPredCtrlAcc_operational::cloneStep0;
+    MagAOX::app::loPredCtrlAcc_operational::appLogic;
+#endif
+    // clang-format on
+    namespace synco = MagAOX::app::synco;
+    using Image     = std::array<float, 4>;
+    Controller app( true );
+    REQUIRE( selectMode( app, "mfilt_clone_2k" ) == 0 );
+    CHECK( app.m_indiP_mode["mfilt_clone_2k"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( app.m_indiP_mode["mfilt_copy_2k"].getSwitchState() == pcf::IndiElement::Off );
+    app.qualifyOutput();
+    app.mainLoop( .25, .9, .3, { 2, 1, 7 }, { 1, 1, 7 }, { 1, 2, 7 } );
+    app.m_modevalDMName = "aol1_modevaldm_clone2k";
+    IMAGE_METADATA     metadata;
+    std::vector<float> values{ 0, 0 };
+    metadata.datatype = _DATATYPE_FLOAT;
+    IMAGE stream;
+    stream.md      = &metadata;
+    stream.array.F = values.data();
+    const libXWCTest::loPredCtrlAccTest::AdcTransportFixture fixture( app.m_modevalDMName, stream );
+    auto                                                     predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) == 0 );
+
+    DDSPC::Matrix empty, y( 2, 1 );
+    const auto    decide = [&]( bool arrived )
+    {
+        DDSPC::Matrix applied;
+        std::int64_t  ordinal;
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( app.m_commandMutex );
+            ordinal = app.appliedSlots( applied );
+        }
+        if( arrived )
+        {
+            app.m_wfsArrived.store( app.m_wfsCounter + 1 );
+        }
+        REQUIRE( app.step( y, app.m_wfsCounter + 1, empty, false, applied, ordinal, synco::monotonicNs() ) == 0 );
+    };
+    std::int64_t ordinal = 8;
+    const auto   offer   = [&]( std::int64_t target, Image &image )
+    {
+        const synco::Request request{ 1, 1, ordinal / 4, int( ordinal % 4 ), target, 0 };
+        synco::Record        schedule{};
+        schedule[synco::steps] = 4;
+        image                  = {};
+        return app.outputCandidate( request, schedule, image );
+    };
+    const auto copy = [&]( std::int64_t slot, const Image &image )
+    {
+        synco::CommitRecord commit{};
+        commit[synco::cmdEpoch]      = 1;
+        commit[synco::cmdGeneration] = 1;
+        commit[synco::cmdCycle]      = slot / 4;
+        commit[synco::cmdStep]       = slot % 4;
+        app.copied( commit, image );
+    };
+    const auto cycle = [&]( Image &image )
+    {
+        const bool offered = offer( synco::monotonicNs(), image ); // Step 0's target: this cycle's main loop write.
+        if( offered )
+        {
+            copy( ordinal, image );
+        }
+
+        ++ordinal;
+        for( int j = 1; j < 4; ++j, ++ordinal )
+        {
+            Image other;
+            REQUIRE_FALSE( offer( 0, other ) ); // Steps 1-3 are never written.
+        }
+
+        return offered;
+    };
+
+    // Each frame is decided before its cycle's step 0: written there, in sync with the main loop.
+    const std::array<double, 2> gain{ .5, .25 }, limit{ .3, .6 };
+    std::array<double, 2>       state{};
+    Image                       image;
+    y << .1f, -.2f;
+    decide( true );
+    REQUIRE( cycle( image ) ); // The first step 0 only anchors the previous write.
+    for( int n = 0; n < 5; ++n )
+    {
+        decide( true );
+        REQUIRE( cycle( image ) );
+    }
+    for( int n = 0; n < 6; ++n )
+    {
+        for( int mode = 0; mode < 2; ++mode )
+        {
+            state[mode] = std::clamp( .9 * state[mode] - gain[mode] * y( mode ), -limit[mode], limit[mode] );
+        }
+    }
+    const DDSPC::Matrix modal = app.m_calibration.m_projection * Eigen::Map<const DDSPC::Matrix>( image.data(), 4, 1 );
+    CHECK( modal( 0 ) == Approx( state[0] ).margin( 1e-6 ) ); // mfilt's output was zero: no held part.
+    CHECK( modal( 1 ) == Approx( state[1] ).margin( 1e-6 ) );
+    CHECK( app.m_cloneStats.m_inSync == 5 );
+    CHECK( app.m_cloneStats.m_missed == 0 );
+
+    // A newer frame has arrived but is not decided at step 0: the main loop's write carries it, the clone does not.
+    app.m_wfsArrived.store( app.m_wfsCounter + 1 );
+    REQUIRE_FALSE( cycle( image ) ); // The older decision was already written; synco holds it.
+    CHECK( app.m_cloneStats.m_missed == 1 );
+
+    // A decision whose frame arrived before the previous step 0's target was carried by that write: a frame behind.
+    decide( false );
+    REQUIRE( cycle( image ) );
+    CHECK( app.m_cloneStats.m_missed == 2 );
+    CHECK( app.m_cloneStats.m_inSync == 5 );
+
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_control["requested_mode"].get<std::string>() == "mfilt_clone_2k" );
+    CHECK( app.m_indiP_clone["step0_in_sync"].get<double>() == 5 );
+    CHECK( app.m_indiP_clone["step0_missed"].get<double>() == 2 );
+    CHECK( app.m_indiP_clone["step0_margin_us_min"].get<double>() >= 0 );
 }
 
 /** \brief A refused predict or learn_std request is answered at once with its unchanged state and INDI_ALERT, which

@@ -119,6 +119,13 @@ struct ddspcLimitFactShmimT
  * s = clamp(mult*s - gain*y, +/-limit), once per WFS frame, while modes 0 and 1 of the modal output are zero. 8k writes
  * s to the own DM channel on every DM slot like a standard command; 2k writes it once per WFS frame and synco holds it
  * on the other slots. Nothing learns.
+ *
+ * mfilt clone (ddspc_mode mfilt_clone_8k and mfilt_clone_2k; agents/plans/2026-11/ddspc-mfilt-clone.md): the mfilt
+ * copy, but s is mfilt's whole tip/tilt state, started from aolN_modevalDM (mfilt's output) so the switch picks up
+ * where mfilt left off. mfilt keeps its last output on its own channel, decaying by mult with zero input, so the own
+ * channel carries s minus that held output and the DM total is s. 2k writes only step 0, the slot copied with the main
+ * loop's write; both count whether each step 0 carries the decision for the WFS frame the main loop's write carries
+ * (mfilt_clone).
  */
 class loPredCtrlAcc_operational : public MagAOXApp<true>,
                                   public dev::shmimMonitor<loPredCtrlAcc_operational>,
@@ -457,6 +464,9 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_learnStdExtra;
     pcf::IndiProperty m_indiP_control, m_indiP_performance, m_indiP_safety, m_indiP_adc;
 
+    /// mfilt_clone: step-0 sync with the main loop's write, and the aolN_modevalDM tip/tilt the clone started from.
+    pcf::IndiProperty m_indiP_clone;
+
     /// Every assisted-mode qualification condition and the upstream values behind it.
     pcf::IndiProperty m_indiP_qualification;
 
@@ -525,6 +535,49 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
     /// mfilt_copy_2k: the image offered for m_onceOffered, matched against copy receipts; under m_commandMutex.
     std::vector<float> m_onceImage;
+
+    /// ddspc_mode mfilt_clone_8k or mfilt_clone_2k, set with m_mfiltCopy (and m_copyOnce for 2k): the copy clones
+    /// mfilt's whole tip/tilt state from aolN_modevalDM, and 2k writes only step 0. Same locking as m_mfiltCopy.
+    std::atomic<bool> m_mfiltClone{ false };
+
+    /// mfilt_clone: name of mfilt's output stream, aolN_modevalDM.
+    std::string m_modevalDMName;
+
+    /// mfilt_clone: mfilt's output stream, opened by an accepted predict request; under m_modelMutex.
+    IMAGE m_modevalDM{};
+
+    /// mfilt_clone: m_modevalDM is open; under m_modelMutex.
+    bool m_modevalDMOpen{ false };
+
+    /// mfilt_clone: the clone has started from aolN_modevalDM since predict was turned on; under m_modelMutex.
+    bool m_cloneStarted{ false };
+
+    /// mfilt_clone: mfilt's output held on the main loop's channel, modelled from its value at the start as decaying by
+    /// mult each frame (its tip/tilt input is zero); under m_modelMutex.
+    DDSPC::Matrix m_cloneHeld;
+
+    /// mfilt_clone: aolN_modevalDM tip/tilt read at the last start, for INDI; under m_modelMutex.
+    std::array<double, 2> m_cloneStart{};
+
+    /// mfilt_clone: the newest WFS frame counter processImage has received, before its decision.
+    std::atomic<std::uint64_t> m_wfsArrived{ 0 };
+
+    /// The WFS counter, receipt time and completion time of the decision in m_slotPlan; under m_commandMutex.
+    std::uint64_t m_planCounter{ 0 };
+    std::int64_t  m_planArrivalNs{ 0 }, m_planDoneNs{ 0 };
+
+    /// mfilt_clone: target of the previous step 0, the previous main loop write; under m_commandMutex.
+    std::int64_t m_step0TargetNs{ -1 };
+
+    /// mfilt_clone step-0 verification: in sync or missed, and the time from decision to step-0 render; under
+    /// m_commandMutex.
+    struct CloneStats
+    {
+        std::uint64_t m_inSync{ 0 }; ///< Step 0 carried the decision for the main loop's frame.
+        std::uint64_t m_missed{ 0 }; ///< Step 0 carried an older decision: the clone was a frame behind.
+        Latency       m_margin;      ///< Render minus decision completion when in sync [us].
+    };
+    CloneStats m_cloneStats;
     /// @}
 
     /// Load the existing calibration or selected finite masked cube planes; derive the request projection by QR.
@@ -651,6 +704,16 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     bool outputCandidate( const synco::Request &request /**< [in] Exact slot being prepared. */,
                           const synco::Record  &schedule /**< [in] Coherent schedule, for steps per cycle. */,
                           std::span<float>      pixels /**< [out] Complete own auxiliary payload. */ );
+
+    /// mfilt_clone: start s and the held output from aolN_modevalDM; false if it cannot be read this frame.
+    bool startClone();
+
+    /// mfilt_clone: read mfilt's tip/tilt output from aolN_modevalDM; false if it is unavailable or being written.
+    bool readModevalDM( DDSPC::Matrix &tt /**< [out] Tip/tilt at modal_index0/1. */ );
+
+    /// mfilt_clone: count whether a step-0 request carries the decision for the frame of the main loop's write.
+    void cloneStep0( const synco::Request &request /**< [in] Step-0 slot being prepared. */,
+                     std::int64_t          render /**< [in] Render time [ns]. */ );
 
     /// Wait until the slot's cutoff minus the render lead, so the slot is rendered from the newest decision.
     void renderWait( const synco::Request &request /**< [in] Exact slot being prepared. */ );
@@ -843,6 +906,10 @@ inline loPredCtrlAcc_operational::~loPredCtrlAcc_operational() noexcept
     shmimMonitorT::appShutdown();
     if( m_modalLock >= 0 )
         close( m_modalLock );
+    if( m_modevalDMOpen )
+    {
+        ImageStreamIO_closeIm( &m_modevalDM );
+    }
 }
 
 inline bool loPredCtrlAcc_operational::stopOutput()
@@ -949,6 +1016,7 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         config( m_loopNumber, "loop.number" );
 
         const std::string loop              = "aol" + std::to_string( m_loopNumber ) + "_";
+        m_modevalDMName                     = loop + "modevalDM";
         gainFactShmimMonitorT::m_shmimName  = loop + "mgainfact";
         multFactShmimMonitorT::m_shmimName  = loop + "mmultfact";
         limitFactShmimMonitorT::m_shmimName = loop + "mlimitfact";
@@ -1709,6 +1777,7 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
 
     const bool mainLoop  = m_mainLoop.load();
     const bool mfiltCopy = m_mfiltCopy.load();
+    const bool clone     = mfiltCopy && m_mfiltClone.load();
     if( mainLoop )
     {
         mainLoopInput(); // The tip/tilt the main loop received, not the own channel's copies.
@@ -1807,6 +1876,11 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
     {
         plan.setZero();
         m_intState.setZero(); // Prediction always restarts from the confirmed own-channel zero.
+        m_cloneStarted = false;
+    }
+    else if( clone && !m_cloneStarted && !startClone() )
+    {
+        plan.setZero(); // aolN_modevalDM is being written or unavailable: mfilt holds tip/tilt; retry next frame.
     }
     else if( ( m_integrate || mfiltCopy ) && plan.allFinite() )
     {
@@ -1820,7 +1894,20 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
                 law.m_ready ? DDSPC::realT( std::clamp( state, -law.m_limit[mode], law.m_limit[mode] ) ) : 0;
         }
 
-        plan = m_intState.replicate( 1, plan.cols() );
+        if( clone )
+        {
+            // mfilt's held output decays by mult with its tip/tilt input zero; the own channel adds the rest of s.
+            for( int mode = 0; mode < modes; ++mode )
+            {
+                m_cloneHeld( mode ) = law.m_ready ? DDSPC::realT( law.m_mult[mode] * m_cloneHeld( mode ) ) : 0;
+            }
+
+            plan = ( m_intState - m_cloneHeld ).replicate( 1, plan.cols() );
+        }
+        else
+        {
+            plan = m_intState.replicate( 1, plan.cols() );
+        }
     }
 
     const bool finite = plan.allFinite();
@@ -1838,6 +1925,12 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
             m_slotPlan = plan;
             m_planBase = ordinal;
             ++m_planDecisions;
+            if( clone )
+            {
+                m_planCounter   = counter;
+                m_planArrivalNs = now;
+                m_planDoneNs    = synco::monotonicNs();
+            }
         }
         m_assistedValid.store( assistedValid );
         m_candidateValid.store(
@@ -1989,14 +2082,27 @@ inline bool loPredCtrlAcc_operational::outputCandidate( const synco::Request &re
     // the slot waited to publish would reach the DM a slot (125 us) late.
     renderWait( request );
 
+    const bool                  clone = m_mfiltClone.load();
     std::lock_guard<std::mutex> lock( m_commandMutex );
     if( pixels.size() != std::size_t( m_calibration.m_shapes.rows() ) || !m_slotPlan.cols() )
     {
         return false;
     }
+
+    if( clone && request.step == 0 )
+    {
+        cloneStep0( request, synco::monotonicNs() );
+    }
+
     // mfilt_copy_2k: offer each decision until synco has copied it once (a late slot retries on the next); on the other
-    // slots synco holds the last copy, counted in transport_skipped.
+    // slots synco holds the last copy, counted in transport_skipped. mfilt_clone_2k offers only step 0, with the main
+    // loop's write; a decision that misses it waits for the next step 0.
     const bool once = m_copyOnce.load();
+    if( once && clone && request.step != 0 )
+    {
+        return false;
+    }
+
     if( once && m_onceCopied == m_planDecisions )
     {
         return false;
@@ -2059,6 +2165,61 @@ inline const DDSPC::AdcSample *loPredCtrlAcc_operational::fastSamples( std::int6
         }
     }
     return m_fastHaveSample ? &m_fastSamples[m_fastNewest % m_fastSamples.size()] : nullptr;
+}
+
+inline bool loPredCtrlAcc_operational::startClone()
+{
+    if( !readModevalDM( m_cloneHeld ) )
+    {
+        return false;
+    }
+
+    // Pick up where mfilt left off: s starts at its last output, which it keeps on its own channel.
+    m_intState     = m_cloneHeld;
+    m_cloneStart   = { m_cloneHeld( 0 ), m_settings.m_modes > 1 ? m_cloneHeld( 1 ) : 0 };
+    m_cloneStarted = true;
+    return true;
+}
+
+inline bool loPredCtrlAcc_operational::readModevalDM( DDSPC::Matrix &tt )
+{
+    if( !m_modevalDMOpen || !m_modevalDM.md )
+    {
+        return false;
+    }
+
+    // Read two floats between unchanged counters, without a copy of the frame or a semaphore.
+    const auto &metadata = *m_modevalDM.md;
+    const auto  before   = metadata.cnt0;
+    std::atomic_thread_fence( std::memory_order_acquire );
+    tt.resize( m_settings.m_modes, 1 );
+    for( int mode = 0; mode < m_settings.m_modes; ++mode )
+    {
+        tt( mode ) = m_modevalDM.array.F[m_calibration.m_indices[mode]];
+    }
+
+    std::atomic_thread_fence( std::memory_order_acquire );
+    return !metadata.write && metadata.cnt0 == before && tt.allFinite();
+}
+
+inline void loPredCtrlAcc_operational::cloneStep0( const synco::Request &request, std::int64_t render )
+{
+    // In sync: the decision is for the newest frame received, which arrived after the previous main loop write, so it
+    // is the frame this cycle's main loop write carries. Otherwise the clone is a frame behind the main loop.
+    if( m_step0TargetNs >= 0 && m_planDecisions )
+    {
+        if( m_planCounter == m_wfsArrived.load() && m_planArrivalNs > m_step0TargetNs )
+        {
+            ++m_cloneStats.m_inSync;
+            m_cloneStats.m_margin.add( ( render - m_planDoneNs ) / 1000. );
+        }
+        else
+        {
+            ++m_cloneStats.m_missed;
+        }
+    }
+
+    m_step0TargetNs = request.targetNs;
 }
 
 inline void loPredCtrlAcc_operational::renderWait( const synco::Request &request )
@@ -2363,6 +2524,11 @@ inline int loPredCtrlAcc_operational::processImage( void *source, const dev::shm
     {
         publishModal( counter, atime );
     }
+    if( m_mfiltClone.load() )
+    {
+        m_wfsArrived.store( counter );
+    }
+
     const bool valid  = acceleration( features, now );
     const int  result = step( measurement, counter, features, valid, applied, ordinal, now );
     if( modal && mainLoop ) // The main-loop route publishes this frame's decision.
@@ -2609,7 +2775,13 @@ inline int loPredCtrlAcc_operational::setupINDI()
     }
     createStandardIndiSelectionSw( m_indiP_mode,
                                    "ddspc_mode",
-                                   { "standard", "accel_assisted", "main_loop", "mfilt_copy_8k", "mfilt_copy_2k" },
+                                   { "standard",
+                                     "accel_assisted",
+                                     "main_loop",
+                                     "mfilt_copy_8k",
+                                     "mfilt_copy_2k",
+                                     "mfilt_clone_8k",
+                                     "mfilt_clone_2k" },
                                    "Mode",
                                    "DDSPC" );
     m_indiP_mode["standard"].setSwitchState( pcf::IndiElement::On );
@@ -2666,6 +2838,18 @@ inline int loPredCtrlAcc_operational::setupINDI()
         }
     if( registerIndiPropertyReadOnly( m_indiP_performance ) < 0 )
         return -1;
+    createROIndiNumber( m_indiP_clone, "mfilt_clone" );
+    for( const auto &key :
+         { "step0_in_sync", "step0_missed", "step0_margin_us_min", "step0_margin_us_mean", "start_tt0", "start_tt1" } )
+    {
+        m_indiP_clone.add( pcf::IndiElement( key, 0.0 ) );
+    }
+
+    if( registerIndiPropertyReadOnly( m_indiP_clone ) < 0 )
+    {
+        return -1;
+    }
+
     createROIndiText( m_indiP_safety, "safety", "output_state" );
     for( const auto &key : { "dm_write_enabled", "zero_confirmed" } )
         m_indiP_safety.add( pcf::IndiElement( key, "false" ) );
@@ -2826,6 +3010,8 @@ inline int loPredCtrlAcc_operational::appLogic()
     std::uint64_t          shifts, overruns, needed, wfsFills;
     Latency                learn;
     FastStats              fast;
+    CloneStats             clone;
+    std::array<double, 2>  cloneStart;
     { //mutex scope
         std::lock_guard<std::mutex> modelLock( m_modelMutex );
         if( !output.m_requested && !m_mainLoop.load() ) // The main-loop route never requests the own channel.
@@ -2859,6 +3045,7 @@ inline int loPredCtrlAcc_operational::appLogic()
         learn      = m_learnUs;
         overruns   = m_learnOverruns;
         wfsFills   = m_wfsFills;
+        cloneStart = m_cloneStart;
         needed     = m_multirate->config().features( m_ratio - 1 );
         m_learnUs  = {};
     }
@@ -2866,6 +3053,8 @@ inline int loPredCtrlAcc_operational::appLogic()
         std::lock_guard<std::mutex> commandLock( m_commandMutex );
         shifts = m_slotShifts;
         fast   = m_fastStats;
+        clone                 = m_cloneStats;
+        m_cloneStats.m_margin = {};
         for( auto *latency : { &m_fastStats.m_compute,
                                &m_fastStats.m_margin,
                                &m_fastStats.m_wake,
@@ -2946,7 +3135,9 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      "standard_state",
                                      "assisted_state",
                                      "main_loop_tt" },
-                                   { mainLoop    ? "main_loop"
+                                   { mainLoop ? "main_loop"
+                                     : mfiltCopy && m_mfiltClone.load()
+                                         ? ( m_copyOnce.load() ? "mfilt_clone_2k" : "mfilt_clone_8k" )
                                      : mfiltCopy ? ( m_copyOnce.load() ? "mfilt_copy_2k" : "mfilt_copy_8k" )
                                      : selected  ? "standard"
                                                  : "accel_assisted",
@@ -3061,6 +3252,16 @@ inline int loPredCtrlAcc_operational::appLogic()
         values.push_back( k < int( fast.m_phase.size() ) ? double( fast.m_phase[k] ) : 0 );
     }
     updatesIfChanged<double>( m_indiP_performance, names, values, INDI_OK );
+    updatesIfChanged<double>(
+        m_indiP_clone,
+        { "step0_in_sync", "step0_missed", "step0_margin_us_min", "step0_margin_us_mean", "start_tt0", "start_tt1" },
+        { double( clone.m_inSync ),
+          double( clone.m_missed ),
+          clone.m_margin.m_min,
+          clone.m_margin.mean(),
+          cloneStart[0],
+          cloneStart[1] },
+        INDI_OK );
     if( output.m_faults != m_faultsLogged )
     {
         m_faultsLogged = output.m_faults;
@@ -3151,11 +3352,28 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     std::lock_guard<std::mutex> modelLock( m_modelMutex );
     const bool                  mainLoop = m_mainLoop.load(), mfiltCopy = m_mfiltCopy.load();
+    const bool                  clone = mfiltCopy && m_mfiltClone.load();
     if( enabled && !m_predicting )
     { //mutex scope
         std::lock_guard<std::mutex> commandLock( m_commandMutex );
         m_slotPlan.setZero();
         m_fastClear = true;
+        if( clone )
+        {
+            m_step0TargetNs = -1;
+        }
+    }
+
+    if( enabled && clone && !m_modevalDMOpen )
+    {
+        m_modevalDMOpen = ImageStreamIO_openIm( &m_modevalDM, m_modevalDMName.c_str() ) == 0;
+        if( m_modevalDMOpen &&
+            ( m_modevalDM.md->datatype != _DATATYPE_FLOAT ||
+              m_modevalDM.md->nelement <= std::max( m_calibration.m_indices[0], m_calibration.m_indices[1] ) ) )
+        {
+            ImageStreamIO_closeIm( &m_modevalDM );
+            m_modevalDMOpen = false;
+        }
     }
     // Refused if learned without upstream lock (reset the models first), while integrating without the main loop's
     // parameters, with nothing to apply yet, or without the own-channel output. Off is always accepted.
@@ -3167,6 +3385,10 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
     else if( enabled && ( m_integrate || mfiltCopy ) && !mainLoop && !m_integratorReady.load() )
     {
         refused = "the main loop's integrator parameters have not been received";
+    }
+    else if( enabled && clone && !m_modevalDMOpen )
+    {
+        refused = m_modevalDMName + " (mfilt's output) is not available as FLOAT with the tip/tilt modes";
     }
     else if( enabled && !mfiltCopy && !selectedReady() && !( m_learning && ( m_gain != 0 || !m_exploration.empty() ) ) )
     {
@@ -3347,10 +3569,12 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
     bool              mainLoop  = false; // main_loop is the standard fit, delivered through the main loop's mfilt.
     bool              mfiltCopy = false; // mfilt_copy_*: the main loop's tip/tilt integrator on the own channel.
     bool              copyOnce  = false; // mfilt_copy_2k: written once per WFS frame instead of every DM slot.
+    bool              clone     = false; // mfilt_clone_*: the copy clones mfilt's state from aolN_modevalDM.
     for( const auto &entry : ipRecv.getElements() )
     {
         if( entry.first != "standard" && entry.first != "accel_assisted" && entry.first != "main_loop" &&
-            entry.first != "mfilt_copy_8k" && entry.first != "mfilt_copy_2k" )
+            entry.first != "mfilt_copy_8k" && entry.first != "mfilt_copy_2k" && entry.first != "mfilt_clone_8k" &&
+            entry.first != "mfilt_clone_2k" )
         {
             return -1;
         }
@@ -3359,8 +3583,9 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
             ++selected;
             mode     = entry.first == "accel_assisted" ? DDSPC::ShadowMode::AccelAssisted : DDSPC::ShadowMode::Standard;
             mainLoop = entry.first == "main_loop";
-            copyOnce = entry.first == "mfilt_copy_2k";
-            mfiltCopy = copyOnce || entry.first == "mfilt_copy_8k";
+            clone     = entry.first == "mfilt_clone_8k" || entry.first == "mfilt_clone_2k";
+            copyOnce  = entry.first == "mfilt_copy_2k" || entry.first == "mfilt_clone_2k";
+            mfiltCopy = copyOnce || clone || entry.first == "mfilt_copy_8k";
         }
         else if( entry.second.getSwitchState() != pcf::IndiElement::Off )
         {
@@ -3381,6 +3606,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
     m_mainLoop.store( mainLoop );
     m_mfiltCopy.store( mfiltCopy );
     m_copyOnce.store( copyOnce );
+    m_mfiltClone.store( clone );
     m_mainLoopKnown = false;
     m_predicting    = false;
     applyTraining();
@@ -3395,10 +3621,16 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
                            INDI_OK );
     updateSwitchIfChanged(
         m_indiP_mode, "main_loop", mainLoop ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
+    updateSwitchIfChanged( m_indiP_mode,
+                           "mfilt_copy_8k",
+                           mfiltCopy && !copyOnce && !clone ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           INDI_OK );
     updateSwitchIfChanged(
-        m_indiP_mode, "mfilt_copy_8k", mfiltCopy && !copyOnce ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
+        m_indiP_mode, "mfilt_copy_2k", copyOnce && !clone ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
     updateSwitchIfChanged(
-        m_indiP_mode, "mfilt_copy_2k", copyOnce ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
+        m_indiP_mode, "mfilt_clone_8k", clone && !copyOnce ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
+    updateSwitchIfChanged(
+        m_indiP_mode, "mfilt_clone_2k", clone && copyOnce ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
     return 0;
 }
 
