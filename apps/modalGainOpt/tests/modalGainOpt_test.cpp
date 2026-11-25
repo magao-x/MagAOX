@@ -381,6 +381,12 @@ class modalGainOptHarness : public modalGainOpt
                                            float opticalGain,
                                            float gainGain )
     {
+        m_nModes = gainLP.size();
+        m_pcGain = 1;
+        m_gainFacts.assign( m_nModes, 0 );
+        m_pcMultFacts.assign( m_nModes, 0.9F );
+        m_gmaxLP.assign( m_nModes, 20 );
+        m_timesOnLP.assign( m_nModes, 6 );
         m_gainCalFacts = gainCalFacts;
         m_optGainLP = gainLP;
         m_gainCals = gainCals;
@@ -397,10 +403,18 @@ class modalGainOptHarness : public modalGainOpt
         }
     }
 
-    void writePublishedPredictorArraysForTest(
-        float *pcGainData, float *aCoeffData, uint32_t aWidth, float *bCoeffData, uint32_t bWidth, bool blend )
+    /// Assemble a predictor frame through the production formatter and mark it applied.
+    const auto &predictorFrameForTest( bool blend /**< [in] Whether to blend the gain. */ )
     {
-        writePublishedPredictorArrays( pcGainData, aCoeffData, aWidth, bCoeffData, bWidth, blend );
+        stagePredictorFrame( blend );
+        m_predictorFrame.swap( m_predictorStaging );
+        return m_predictorFrame;
+    }
+
+    /// Set a mode to its pre-acceptance predictor debounce state.
+    void disablePredictorModeForTest( size_t mode /**< [in] Mode to suppress. */ )
+    {
+        m_timesOnLP[mode] = 0;
     }
 
     int countEnabledGainFactorsForTest( const std::vector<float> &gainFacts ) const
@@ -408,16 +422,17 @@ class modalGainOptHarness : public modalGainOpt
         return countEnabledGainFactors( gainFacts );
     }
 
-    void updateAppliedModeCountForTest( const std::vector<float> &gainFacts, bool predictorPath )
+    /// Count applied modes given their SI gains and the most recent predictor frame.
+    void updateAppliedModeCountForTest( const std::vector<float> &gainFacts /**< [in] SI gain factors. */ )
     {
-        updateAppliedModeCount( gainFacts, predictorPath );
+        updateAppliedModeCount( gainFacts );
     }
 
-    bool applyGainFactorUpdateForTest( std::vector<float> &gainFacts,
-                                       const std::vector<float> &incoming,
-                                       bool predictorPath )
+    /// Exercise an incoming SI gain update.
+    bool applyGainFactorUpdateForTest( std::vector<float>       &gainFacts /**< [in,out] Stored gains. */,
+                                       const std::vector<float> &incoming /**< [in] New gains. */ )
     {
-        return applyGainFactorUpdate( gainFacts, incoming.data(), incoming.size(), predictorPath );
+        return applyGainFactorUpdate( gainFacts, incoming.data(), incoming.size() );
     }
 
     bool applyMultiplierUpdateForTest( std::vector<float> &multFacts,
@@ -1597,11 +1612,11 @@ TEST_CASE( "modalGainOpt gain-factor updates leave state unchanged when the "
 
     // clang-format off
     #ifdef MODALGAINOPT_TEST_DOXYGEN_REF
-    modalGainOpt::applyGainFactorUpdate( storedGainFacts, static_cast<const float *>( nullptr ), 0, false );
+    modalGainOpt::applyGainFactorUpdate( storedGainFacts, static_cast<const float *>( nullptr ), 0 );
     #endif
     // clang-format on
 
-    REQUIRE( app.applyGainFactorUpdateForTest( storedGainFacts, { 1.0F, 0.5F, 0.0F }, false ) == false );
+    REQUIRE( app.applyGainFactorUpdateForTest( storedGainFacts, { 1.0F, 0.5F, 0.0F } ) == false );
     REQUIRE( storedGainFacts == std::vector<float>( { 1.0F, 0.5F, 0.0F } ) );
     REQUIRE( app.modesOn() == 7 );
     REQUIRE( app.sinceChange() == 12 );
@@ -1625,7 +1640,7 @@ TEST_CASE( "modalGainOpt gain-factor updates resize SI state and reset "
     app.setModesOnForTest( 0 );
     app.setSinceChangeForTest( 5 );
 
-    REQUIRE( app.applyGainFactorUpdateForTest( storedGainFacts, { 0.0F, 1.5F, -2.0F, 3.0F }, false ) == true );
+    REQUIRE( app.applyGainFactorUpdateForTest( storedGainFacts, { 0.0F, 1.5F, -2.0F, 3.0F } ) == true );
     REQUIRE( storedGainFacts == std::vector<float>( { 0.0F, 1.5F, -2.0F, 3.0F } ) );
     REQUIRE( app.modesOn() == 2 );
     REQUIRE( app.sinceChange() == -1 );
@@ -1768,215 +1783,51 @@ TEST_CASE( "modalGainOpt refreshes pending gopt structures without a PSD wakeup"
     REQUIRE( app.freqUpdated() == false );
 }
 
-/// Verify `modalGainOpt` writes predictive-control coefficients into per-mode
-/// blocks.
-/**
- * \ingroup modalGainOpt_unit_test
- */
-TEST_CASE( "modalGainOpt predictor publication preserves per-mode coefficient layout", "[modalGainOpt]" )
+/// Pack the optimizer's gains, multipliers and independent tap lengths as one mode-major frame.
+TEST_CASE( "modalGainOpt stages one coherent predictor frame with SI fallback", "[modalGainOpt]" )
 {
     modalGainOptHarness app;
-
-    app.configurePublishedPredictorState( { 2.0F, 4.0F },
-                                          { 3.0F, 5.0F },
-                                          { 1.0F, 2.0F },
+    app.configurePublishedPredictorState( { 2, 4 },
+                                          { 3, 5 },
+                                          { 1, 2 },
                                           { 2U, 1U },
                                           { 1U, 2U },
                                           { { 0.1F, 0.2F }, { 0.4F } },
                                           { { 0.3F }, { 0.5F, 0.6F } },
-                                          2.0F,
-                                          0.5F );
-
-    std::vector<float> pcGainData( 2, -1.0F );
-    std::vector<float> aCoeffData( 8, -1.0F );
-    std::vector<float> bCoeffData( 8, -1.0F );
-
-    app.writePublishedPredictorArraysForTest( pcGainData.data(), aCoeffData.data(), 4, bCoeffData.data(), 4, false );
-
-    REQUIRE( pcGainData[0] == Approx( 3.0F ) );
-    REQUIRE( pcGainData[1] == Approx( 5.0F ) );
-
-    REQUIRE( aCoeffData[0] == Approx( 2.0F ) );
-    REQUIRE( aCoeffData[1] == Approx( 0.1F ) );
-    REQUIRE( aCoeffData[2] == Approx( 0.2F ) );
-    REQUIRE( aCoeffData[3] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[4] == Approx( 1.0F ) );
-    REQUIRE( aCoeffData[5] == Approx( 0.4F ) );
-    REQUIRE( aCoeffData[6] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[7] == Approx( 0.0F ) );
-
-    REQUIRE( bCoeffData[0] == Approx( 1.0F ) );
-    REQUIRE( bCoeffData[1] == Approx( 0.3F ) );
-    REQUIRE( bCoeffData[2] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[3] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[4] == Approx( 2.0F ) );
-    REQUIRE( bCoeffData[5] == Approx( 0.5F ) );
-    REQUIRE( bCoeffData[6] == Approx( 0.6F ) );
-    REQUIRE( bCoeffData[7] == Approx( 0.0F ) );
-}
-
-/// Verify `modalGainOpt` blends predictive-control gains and coefficients
-/// against existing outputs.
-/**
- * \ingroup modalGainOpt_unit_test
- */
-TEST_CASE( "modalGainOpt predictor publication blends existing values and "
-           "clears stale coefficients",
-           "[modalGainOpt]" )
-{
-    modalGainOptHarness app;
-
-    app.configurePublishedPredictorState( { 2.0F, 4.0F },
-                                          { 3.0F, 5.0F },
-                                          { 1.0F, 2.0F },
-                                          { 2U, 1U },
-                                          { 1U, 2U },
-                                          { { 0.1F, 0.5F }, { 0.9F } },
-                                          { { 0.2F }, { 0.6F, 1.0F } },
-                                          2.0F,
+                                          2,
                                           0.25F );
-
-    std::vector<float> pcGainData( { 1.0F, 9.0F } );
-    std::vector<float> aCoeffData( { 9.0F, 1.0F, 2.0F, 3.0F, 8.0F, 4.0F, 5.0F, 6.0F } );
-    std::vector<float> bCoeffData( { 7.0F, 1.0F, 2.0F, 3.0F, 6.0F, 4.0F, 5.0F, 6.0F } );
-
-    app.writePublishedPredictorArraysForTest( pcGainData.data(), aCoeffData.data(), 4, bCoeffData.data(), 4, true );
-
-    REQUIRE( pcGainData[0] == Approx( 1.5F ) );
-    REQUIRE( pcGainData[1] == Approx( 8.0F ) );
-
-    REQUIRE( aCoeffData[0] == Approx( 2.0F ) );
-    REQUIRE( aCoeffData[1] == Approx( 0.775F ) );
-    REQUIRE( aCoeffData[2] == Approx( 1.625F ) );
-    REQUIRE( aCoeffData[3] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[4] == Approx( 1.0F ) );
-    REQUIRE( aCoeffData[5] == Approx( 3.225F ) );
-    REQUIRE( aCoeffData[6] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[7] == Approx( 0.0F ) );
-
-    REQUIRE( bCoeffData[0] == Approx( 1.0F ) );
-    REQUIRE( bCoeffData[1] == Approx( 0.8F ) );
-    REQUIRE( bCoeffData[2] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[3] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[4] == Approx( 2.0F ) );
-    REQUIRE( bCoeffData[5] == Approx( 3.15F ) );
-    REQUIRE( bCoeffData[6] == Approx( 4.0F ) );
-    REQUIRE( bCoeffData[7] == Approx( 0.0F ) );
-}
-
-/// Verify `modalGainOpt` only applies SI gain-factor mode counts when the SI
-/// path is active.
-/**
- * \ingroup modalGainOpt_unit_test
- */
-TEST_CASE( "modalGainOpt SI mode counts update only while predictor control is off", "[modalGainOpt]" )
-{
-    modalGainOptHarness app;
 
     // clang-format off
     #ifdef MODALGAINOPT_TEST_DOXYGEN_REF
-    modalGainOpt::updateAppliedModeCount( std::vector<float>(), false );
+    modalGainOpt::stagePredictorFrame( false );
+    modalGainOpt::updateAppliedModeCount( std::vector<float>{} );
     #endif
     // clang-format on
 
-    app.setPcOnForTest( false );
-    app.updateAppliedModeCountForTest( { 1.0F, 0.0F, -1.0F, 2.0F }, false );
-    REQUIRE( app.modesOn() == 2 );
+    const auto &blended = app.predictorFrameForTest( true );
+    REQUIRE( blended.rows() == 8 );
+    REQUIRE( blended.cols() == 2 );
+    modalPredictor::Mode first;
+    REQUIRE( modalPredictor::decode( first, { blended.col( 0 ).data(), 8 } ) );
+    REQUIRE( first.gain == Approx( 0.75F ) );
+    REQUIRE( first.mult == Approx( 0.9F ) );
+    REQUIRE( std::vector<float>( first.a.begin(), first.a.end() ) == std::vector<float>{ 0.1F, 0.2F } );
+    REQUIRE( std::vector<float>( first.b.begin(), first.b.end() ) == std::vector<float>{ 0.3F } );
+
+    app.disablePredictorModeForTest( 1 );
+    const auto &updated = app.predictorFrameForTest( true );
+    REQUIRE( modalPredictor::decode( first, { updated.col( 0 ).data(), 8 } ) );
+    CHECK( first.gain == Approx( 1.3125F ) );
+    modalPredictor::Mode fallback;
+    REQUIRE( modalPredictor::decode( fallback, { updated.col( 1 ).data(), 8 } ) );
+    CHECK_FALSE( fallback.enabled() );
 
     app.setPcOnForTest( true );
-    app.updateAppliedModeCountForTest( { 5.0F, 4.0F, 3.0F }, false );
-    REQUIRE( app.modesOn() == 2 );
-}
-
-/// Verify `modalGainOpt` clears stale predictor coefficients when a mode
-/// publishes zero-order predictors.
-/**
- * \ingroup modalGainOpt_unit_test
- */
-TEST_CASE( "modalGainOpt predictor publication clears stale coefficient blocks "
-           "for zero-order modes",
-           "[modalGainOpt]" )
-{
-    modalGainOptHarness app;
-
-    app.configurePublishedPredictorState( { 8.0F, 2.0F },
-                                          { 4.0F, 6.0F },
-                                          { 4.0F, 2.0F },
-                                          { 0U, 0U },
-                                          { 0U, 0U },
-                                          { {}, {} },
-                                          { {}, {} },
-                                          2.0F,
-                                          0.5F );
-
-    std::vector<float> pcGainData( { 9.0F, 10.0F } );
-    std::vector<float> aCoeffData( { 7.0F, 1.0F, 2.0F, 3.0F, 6.0F, 4.0F, 5.0F, 6.0F } );
-    std::vector<float> bCoeffData( { 5.0F, 7.0F, 8.0F, 9.0F, 4.0F, 10.0F, 11.0F, 12.0F } );
-
-    app.writePublishedPredictorArraysForTest( pcGainData.data(), aCoeffData.data(), 4, bCoeffData.data(), 4, false );
-
-    REQUIRE( pcGainData[0] == Approx( 4.0F ) );
-    REQUIRE( pcGainData[1] == Approx( 3.0F ) );
-
-    REQUIRE( aCoeffData[0] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[1] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[2] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[3] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[4] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[5] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[6] == Approx( 0.0F ) );
-    REQUIRE( aCoeffData[7] == Approx( 0.0F ) );
-
-    REQUIRE( bCoeffData[0] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[1] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[2] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[3] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[4] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[5] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[6] == Approx( 0.0F ) );
-    REQUIRE( bCoeffData[7] == Approx( 0.0F ) );
-}
-
-/// Verify `modalGainOpt` only applies PC gain-factor mode counts when predictor
-/// control is on.
-/**
- * \ingroup modalGainOpt_unit_test
- */
-TEST_CASE( "modalGainOpt PC mode counts update only while predictor control is on", "[modalGainOpt]" )
-{
-    modalGainOptHarness app;
-
+    app.updateAppliedModeCountForTest( { 0, 1 } );
+    CHECK( app.modesOn() == 2 );
     app.setPcOnForTest( false );
-    app.updateAppliedModeCountForTest( { 1.0F, 2.0F, 3.0F }, true );
-    REQUIRE( app.modesOn() == 0 );
-
-    app.setPcOnForTest( true );
-    app.updateAppliedModeCountForTest( { -1.0F, 0.25F, 0.0F, 0.75F }, true );
-    REQUIRE( app.modesOn() == 2 );
-}
-
-/// Verify `modalGainOpt` updates stored PC gain factors without disturbing
-/// SI-applied mode counts when predictor control is off.
-/**
- * \ingroup modalGainOpt_unit_test
- */
-TEST_CASE( "modalGainOpt PC gain-factor updates preserve applied mode counts "
-           "while predictor control is off",
-           "[modalGainOpt]" )
-{
-    modalGainOptHarness app;
-
-    std::vector<float> storedPcGainFacts( { 0.5F, 0.5F } );
-
-    app.setLoopForTest( false );
-    app.setPcOnForTest( false );
-    app.setModesOnForTest( 3 );
-    app.setSinceChangeForTest( 9 );
-
-    REQUIRE( app.applyGainFactorUpdateForTest( storedPcGainFacts, { 1.0F, 0.0F, 2.0F }, true ) == true );
-    REQUIRE( storedPcGainFacts == std::vector<float>( { 1.0F, 0.0F, 2.0F } ) );
-    REQUIRE( app.modesOn() == 3 );
-    REQUIRE( app.sinceChange() == 9 );
+    app.updateAppliedModeCountForTest( { 0, 1 } );
+    CHECK( app.modesOn() == 1 );
 }
 
 /// Verify `modalGainOpt` marks predictive-control optimizer state dirty when PC

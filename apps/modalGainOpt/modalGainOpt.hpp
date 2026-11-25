@@ -20,6 +20,7 @@
 #include <mx/mxException.hpp>
 #include <mx/sys/environment.hpp>
 
+#include "../../libMagAOX/app/dev/modalPredictorFrame.hpp"
 #include "modalNoiseModel.hpp"
 #include "modalPsdProcessor.hpp"
 
@@ -619,22 +620,6 @@ struct multFactShmimT
     };
 };
 
-/// Tag identifying the predictor gain-factor shared-memory input.
-struct pcGainFactShmimT
-{
-    /// Get the configuration section for this shared-memory input.
-    static std::string configSection()
-    {
-        return "pcGainFactShmim";
-    };
-
-    /// Get the INDI prefix for this shared-memory input.
-    static std::string indiPrefix()
-    {
-        return "pcGainFact";
-    };
-};
-
 /// Tag identifying the predictor multiplier-factor shared-memory input.
 struct pcMultFactShmimT
 {
@@ -664,38 +649,6 @@ struct numpccoeffShmimT
     static std::string indiPrefix()
     {
         return "numpccoeff";
-    };
-};
-
-/// Tag identifying the predictor A-coefficient shared-memory input.
-struct acoeffShmimT
-{
-    /// Get the configuration section for this shared-memory input.
-    static std::string configSection()
-    {
-        return "acoeffShmim";
-    };
-
-    /// Get the INDI prefix for this shared-memory input.
-    static std::string indiPrefix()
-    {
-        return "acoeff";
-    };
-};
-
-/// Tag identifying the predictor B-coefficient shared-memory input.
-struct bcoeffShmimT
-{
-    /// Get the configuration section for this shared-memory input.
-    static std::string configSection()
-    {
-        return "bcoeffShmim";
-    };
-
-    /// Get the INDI prefix for this shared-memory input.
-    static std::string indiPrefix()
-    {
-        return "bcoeff";
     };
 };
 
@@ -805,11 +758,8 @@ class modalGainOpt : public MagAOXApp<true>,
                      dev::shmimMonitor<modalGainOpt, freqShmimT>,
                      dev::shmimMonitor<modalGainOpt, gainFactShmimT>,
                      dev::shmimMonitor<modalGainOpt, multFactShmimT>,
-                     dev::shmimMonitor<modalGainOpt, pcGainFactShmimT>,
                      dev::shmimMonitor<modalGainOpt, pcMultFactShmimT>,
                      dev::shmimMonitor<modalGainOpt, numpccoeffShmimT>,
-                     dev::shmimMonitor<modalGainOpt, acoeffShmimT>,
-                     dev::shmimMonitor<modalGainOpt, bcoeffShmimT>,
                      dev::shmimMonitor<modalGainOpt, gainCalShmimT>,
                      dev::shmimMonitor<modalGainOpt, gainCalFactShmimT>,
                      dev::shmimMonitor<modalGainOpt, tauShmimT>,
@@ -829,11 +779,8 @@ class modalGainOpt : public MagAOXApp<true>,
     friend class dev::shmimMonitor<modalGainOpt, freqShmimT>;
     friend class dev::shmimMonitor<modalGainOpt, gainFactShmimT>;
     friend class dev::shmimMonitor<modalGainOpt, multFactShmimT>;
-    friend class dev::shmimMonitor<modalGainOpt, pcGainFactShmimT>;
     friend class dev::shmimMonitor<modalGainOpt, pcMultFactShmimT>;
     friend class dev::shmimMonitor<modalGainOpt, numpccoeffShmimT>;
-    friend class dev::shmimMonitor<modalGainOpt, acoeffShmimT>;
-    friend class dev::shmimMonitor<modalGainOpt, bcoeffShmimT>;
     friend class dev::shmimMonitor<modalGainOpt, gainCalShmimT>;
     friend class dev::shmimMonitor<modalGainOpt, gainCalFactShmimT>;
     friend class dev::shmimMonitor<modalGainOpt, tauShmimT>;
@@ -846,11 +793,8 @@ class modalGainOpt : public MagAOXApp<true>,
     typedef dev::shmimMonitor<modalGainOpt, freqShmimT> freqShmimMonitorT;
     typedef dev::shmimMonitor<modalGainOpt, gainFactShmimT> gainFactShmimMonitorT;
     typedef dev::shmimMonitor<modalGainOpt, multFactShmimT> multFactShmimMonitorT;
-    typedef dev::shmimMonitor<modalGainOpt, pcGainFactShmimT> pcGainFactShmimMonitorT;
     typedef dev::shmimMonitor<modalGainOpt, pcMultFactShmimT> pcMultFactShmimMonitorT;
     typedef dev::shmimMonitor<modalGainOpt, numpccoeffShmimT> numpccoeffShmimMonitorT;
-    typedef dev::shmimMonitor<modalGainOpt, acoeffShmimT> acoeffShmimMonitorT;
-    typedef dev::shmimMonitor<modalGainOpt, bcoeffShmimT> bcoeffShmimMonitorT;
     typedef dev::shmimMonitor<modalGainOpt, gainCalShmimT> gainCalShmimMonitorT;
     typedef dev::shmimMonitor<modalGainOpt, gainCalFactShmimT> gainCalFactShmimMonitorT;
     typedef dev::shmimMonitor<modalGainOpt, tauShmimT> tauShmimMonitorT;
@@ -888,7 +832,7 @@ class modalGainOpt : public MagAOXApp<true>,
     float m_gainLeak{ 0.9 };           ///< The leak factor used for SI gain integration. Default is 0.9.
     processPsdProcessorT::processModelConfig m_extrapConfig; ///< Configuration of the OL PSD extrapolation model.
 
-    uint32_t m_maxNCoeff{ 1000 }; ///< Maximum number of predictor coefficients accepted.
+    uint32_t m_maxNCoeff{ modalPredictor::maxTaps }; ///< Maximum number of predictor coefficients accepted.
 
     uint32_t m_defaultNCoeff{ 25 }; ///< Default number of predictor coefficients.
 
@@ -990,7 +934,7 @@ class modalGainOpt : public MagAOXApp<true>,
 
     float m_pcGain{ 0 }; ///< Requested predictive-control gain scale.
 
-    float m_pcMult{ 0 }; ///< Applied predictive-control multiplier.
+    float m_pcMult{ 1 }; ///< Applied predictive-control multiplier.
 
     bool m_pcOn{ false }; ///< Whether the predictive controller is active.
 
@@ -998,21 +942,11 @@ class modalGainOpt : public MagAOXApp<true>,
 
     std::vector<float> m_multFacts; ///< Applied SI multiplier factors by mode.
 
-    std::vector<float> m_pcGainFacts; ///< Applied predictive gain factors by mode.
-
     std::vector<float> m_pcMultFacts; ///< Applied predictive multiplier factors by mode.
 
     std::vector<uint32_t> m_Na; ///< Requested IIR coefficient counts by mode.
 
-    std::vector<uint32_t> m_NaCurrent; ///< Applied IIR coefficient counts by mode.
-
     std::vector<uint32_t> m_Nb; ///< Requested FIR coefficient counts by mode.
-
-    std::vector<uint32_t> m_NbCurrent; ///< Applied FIR coefficient counts by mode.
-
-    eigenImage<float> m_as; ///< Applied IIR coefficient matrix.
-
-    eigenImage<float> m_bs; ///< Applied FIR coefficient matrix.
 
     int m_nRegCycles{ 60 };        ///< How often to regularize each mode
 
@@ -1126,6 +1060,19 @@ class modalGainOpt : public MagAOXApp<true>,
     IMAGE *m_modevarStream{ nullptr };       ///< The ImageStreamIO shared memory buffer
                                              ///< to publish the mode variances
 
+    IMAGE                        *m_predictorStream{ nullptr }; ///< Coherent gain and tap output for modalFilter.
+    mx::improc::eigenImage<float> m_predictorFrame;             ///< Most recently published native predictor.
+    mx::improc::eigenImage<float> m_predictorStaging;           ///< Private working buffer for predictor publication.
+
+    /// Assemble the native predictor frame from the accepted modes.
+    void stagePredictorFrame( bool blend /**< [in] Smooth the target gain from the prior command. */ );
+
+    /// Publish the usable predictive modes together in one shared-memory frame.
+    void publishPredictorFrame( bool blend /**< [in] Smooth the target gain from the prior command. */ );
+
+    /// Determine whether the applied controller uses a predictor on this mode.
+    bool currentModeUsesPredictor( size_t mode /**< [in] Mode index. */ ) const;
+
     /// Destroy an owned ImageStreamIO output stream and clear its pointer.
     void destroyImageStream( IMAGE *&stream /**< [in,out] stream pointer to destroy and clear */ );
 
@@ -1150,32 +1097,16 @@ class modalGainOpt : public MagAOXApp<true>,
                                    float *modeVarData  /**< [out] mode-variance buffer, laid out as 3 x N */
     );
 
-    /// Populate the published predictive-control gain and coefficient arrays.
-    void writePublishedPredictorArrays( float   *pcGainData, /**< [in,out] PC gain-factor stream buffer */
-                                        float   *aCoeffData, /**< [in,out] predictor a-coefficient stream buffer */
-                                        uint32_t aWidth,     /**< [in] entries stored per mode in aCoeffData */
-                                        float   *bCoeffData, /**< [in,out] predictor b-coefficient stream buffer */
-                                        uint32_t bWidth,     /**< [in] entries stored per mode in bCoeffData */
-                                        bool     blend       /**< [in] when true, blend against existing values */
-    );
-
     /// Count how many modes are enabled by a gain-factor vector.
     int countEnabledGainFactors( const std::vector<float> &gainFacts /**< [in] gain factors to inspect */ ) const;
 
-    /// Update `m_modesOn` when a changed gain-factor stream matches the active
-    /// control path.
-    void updateAppliedModeCount( const std::vector<float> &gainFacts, /**< [in] gain factors from the changed stream */
-                                 bool predictorPath /**< [in] true when the values came from the predictor
-                                                       path */
-    );
+    /// Update the mode count using each mode's applied controller.
+    void updateAppliedModeCount( const std::vector<float> &gainFacts /**< [in] Applied SI gain factors. */ );
 
-    /// Apply an incoming gain-factor frame to one of the stored gain vectors.
-    bool applyGainFactorUpdate( std::vector<float> &gainFacts, /**< [in,out] stored gain factors to resize and update */
-                                const float        *incoming,  /**< [in] incoming gain-factor frame */
-                                uint32_t            width,     /**< [in] number of gain factors in `incoming` */
-                                bool                predictorPath /**< [in] true when the values came from the predictor
-                                                                     path */
-    );
+    /// Apply an incoming SI gain-factor frame.
+    bool applyGainFactorUpdate( std::vector<float> &gainFacts /**< [in,out] SI gains to resize and update. */,
+                                const float        *incoming /**< [in] Incoming SI gain factors. */,
+                                uint32_t            width /**< [in] Number of incoming gain factors. */ );
 
     /// Apply an incoming multiplier frame to one of the stored multiplier
     /// vectors.
@@ -1323,15 +1254,6 @@ class modalGainOpt : public MagAOXApp<true>,
                       const multFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
     );
 
-    /// Allocate monitor storage for the pcGainFact input.
-    int allocate( const pcGainFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    /// Process one frame from a monitored shared-memory input.
-    int processImage( void *curr_src,          ///< [in] pointer to the start of the current frame
-                      const pcGainFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
     /// Allocate monitor storage for the pcMultFact input.
     int allocate( const pcMultFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
     );
@@ -1348,24 +1270,6 @@ class modalGainOpt : public MagAOXApp<true>,
     /// Process one frame from a monitored shared-memory input.
     int processImage( void *curr_src,          ///< [in] pointer to the start of the current frame
                       const numpccoeffShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    /// Allocate monitor storage for the acoeff input.
-    int allocate( const acoeffShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    /// Process one frame from a monitored shared-memory input.
-    int processImage( void *curr_src,      ///< [in] pointer to the start of the current frame
-                      const acoeffShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    /// Allocate monitor storage for the bcoeff input.
-    int allocate( const bcoeffShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    /// Process one frame from a monitored shared-memory input.
-    int processImage( void *curr_src,      ///< [in] pointer to the start of the current frame
-                      const bcoeffShmimT & ///< [in] tag to differentiate shmimMonitor parents.
     );
 
     /// Allocate monitor storage for the gainCal input.
@@ -1707,11 +1611,8 @@ modalGainOpt::modalGainOpt() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIF
     freqShmimMonitorT::m_getExistingFirst = true;
     gainFactShmimMonitorT::m_getExistingFirst = true;
     multFactShmimMonitorT::m_getExistingFirst = true;
-    pcGainFactShmimMonitorT::m_getExistingFirst = true;
     pcMultFactShmimMonitorT::m_getExistingFirst = true;
     numpccoeffShmimMonitorT::m_getExistingFirst = true;
-    acoeffShmimMonitorT::m_getExistingFirst = true;
-    bcoeffShmimMonitorT::m_getExistingFirst = true;
     gainCalShmimMonitorT::m_getExistingFirst = true;
     gainCalFactShmimMonitorT::m_getExistingFirst = true;
     tauShmimMonitorT::m_getExistingFirst = true;
@@ -2213,11 +2114,8 @@ void modalGainOpt::setupConfig()
     SHMIMMONITORT_SETUP_CONFIG( freqShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( gainFactShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( multFactShmimMonitorT, config );
-    SHMIMMONITORT_SETUP_CONFIG( pcGainFactShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( pcMultFactShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( numpccoeffShmimMonitorT, config );
-    SHMIMMONITORT_SETUP_CONFIG( acoeffShmimMonitorT, config );
-    SHMIMMONITORT_SETUP_CONFIG( bcoeffShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( gainCalShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( gainCalFactShmimMonitorT, config );
     SHMIMMONITORT_SETUP_CONFIG( tauShmimMonitorT, config );
@@ -2331,10 +2229,6 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     multFactShmimMonitorT::m_shmimName = shmim;
     SHMIMMONITORT_LOAD_CONFIG( multFactShmimMonitorT, _config );
 
-    snprintf( shmim, sizeof( shmim ), "aol%d_mpcgainfact", m_loopNum );
-    pcGainFactShmimMonitorT::m_shmimName = shmim;
-    SHMIMMONITORT_LOAD_CONFIG( pcGainFactShmimMonitorT, _config );
-
     snprintf( shmim, sizeof( shmim ), "aol%d_mpcmultfact", m_loopNum );
     pcMultFactShmimMonitorT::m_shmimName = shmim;
     SHMIMMONITORT_LOAD_CONFIG( pcMultFactShmimMonitorT, _config );
@@ -2342,14 +2236,6 @@ int modalGainOpt::loadConfigImpl( mx::app::appConfigurator &_config )
     snprintf( shmim, sizeof( shmim ), "aol%d_numpccoeff", m_loopNum );
     numpccoeffShmimMonitorT::m_shmimName = shmim;
     SHMIMMONITORT_LOAD_CONFIG( numpccoeffShmimMonitorT, _config );
-
-    snprintf( shmim, sizeof( shmim ), "aol%d_acoeff", m_loopNum );
-    acoeffShmimMonitorT::m_shmimName = shmim;
-    SHMIMMONITORT_LOAD_CONFIG( acoeffShmimMonitorT, _config );
-
-    snprintf( shmim, sizeof( shmim ), "aol%d_bcoeff", m_loopNum );
-    bcoeffShmimMonitorT::m_shmimName = shmim;
-    SHMIMMONITORT_LOAD_CONFIG( bcoeffShmimMonitorT, _config );
 
     snprintf( shmim, sizeof( shmim ), "aol%d_mgaincal", m_loopNum );
     gainCalShmimMonitorT::m_shmimName = shmim;
@@ -2451,11 +2337,8 @@ int modalGainOpt::appStartup()
     SHMIMMONITORT_APP_STARTUP( freqShmimMonitorT );
     SHMIMMONITORT_APP_STARTUP( gainFactShmimMonitorT );
     SHMIMMONITORT_APP_STARTUP( multFactShmimMonitorT );
-    SHMIMMONITORT_APP_STARTUP( pcGainFactShmimMonitorT );
     SHMIMMONITORT_APP_STARTUP( pcMultFactShmimMonitorT );
     SHMIMMONITORT_APP_STARTUP( numpccoeffShmimMonitorT );
-    SHMIMMONITORT_APP_STARTUP( acoeffShmimMonitorT );
-    SHMIMMONITORT_APP_STARTUP( bcoeffShmimMonitorT );
     SHMIMMONITORT_APP_STARTUP( gainCalShmimMonitorT );
     SHMIMMONITORT_APP_STARTUP( gainCalFactShmimMonitorT );
     SHMIMMONITORT_APP_STARTUP( tauShmimMonitorT );
@@ -2813,11 +2696,8 @@ int modalGainOpt::appLogic()
     SHMIMMONITORT_APP_LOGIC( freqShmimMonitorT );
     SHMIMMONITORT_APP_LOGIC( gainFactShmimMonitorT );
     SHMIMMONITORT_APP_LOGIC( multFactShmimMonitorT );
-    SHMIMMONITORT_APP_LOGIC( pcGainFactShmimMonitorT );
     SHMIMMONITORT_APP_LOGIC( pcMultFactShmimMonitorT );
     SHMIMMONITORT_APP_LOGIC( numpccoeffShmimMonitorT );
-    SHMIMMONITORT_APP_LOGIC( acoeffShmimMonitorT );
-    SHMIMMONITORT_APP_LOGIC( bcoeffShmimMonitorT );
     SHMIMMONITORT_APP_LOGIC( gainCalShmimMonitorT );
     SHMIMMONITORT_APP_LOGIC( gainCalFactShmimMonitorT );
     SHMIMMONITORT_APP_LOGIC( tauShmimMonitorT );
@@ -2831,11 +2711,8 @@ int modalGainOpt::appLogic()
     SHMIMMONITORT_UPDATE_INDI( freqShmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( gainFactShmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( multFactShmimMonitorT );
-    SHMIMMONITORT_UPDATE_INDI( pcGainFactShmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( pcMultFactShmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( numpccoeffShmimMonitorT );
-    SHMIMMONITORT_UPDATE_INDI( acoeffShmimMonitorT );
-    SHMIMMONITORT_UPDATE_INDI( bcoeffShmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( gainCalShmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( gainCalFactShmimMonitorT );
     SHMIMMONITORT_UPDATE_INDI( tauShmimMonitorT );
@@ -3045,11 +2922,8 @@ int modalGainOpt::appShutdown()
     SHMIMMONITORT_APP_SHUTDOWN( freqShmimMonitorT );
     SHMIMMONITORT_APP_SHUTDOWN( gainFactShmimMonitorT );
     SHMIMMONITORT_APP_SHUTDOWN( multFactShmimMonitorT );
-    SHMIMMONITORT_APP_SHUTDOWN( pcGainFactShmimMonitorT );
     SHMIMMONITORT_APP_SHUTDOWN( pcMultFactShmimMonitorT );
     SHMIMMONITORT_APP_SHUTDOWN( numpccoeffShmimMonitorT );
-    SHMIMMONITORT_APP_SHUTDOWN( acoeffShmimMonitorT );
-    SHMIMMONITORT_APP_SHUTDOWN( bcoeffShmimMonitorT );
     SHMIMMONITORT_APP_SHUTDOWN( gainCalShmimMonitorT );
     SHMIMMONITORT_APP_SHUTDOWN( gainCalFactShmimMonitorT );
     SHMIMMONITORT_APP_SHUTDOWN( tauShmimMonitorT );
@@ -3061,6 +2935,7 @@ int modalGainOpt::appShutdown()
     destroyImageStream( m_rawOlPSDStream );
     destroyImageStream( m_smoothOlPSDStream );
     destroyImageStream( m_noisePSDStream );
+    destroyImageStream( m_predictorStream );
     destroyImageStream( m_noiseComparisonStream );
     destroyImageStream( m_gainLimitsStream );
     destroyImageStream( m_clXferCurrentStream );
@@ -3225,68 +3100,89 @@ void modalGainOpt::writePublishedGainArrays( float *currentData,
     }
 }
 
-void modalGainOpt::writePublishedPredictorArrays(
-    float *pcGainData, float *aCoeffData, uint32_t aWidth, float *bCoeffData, uint32_t bWidth, bool blend )
+bool modalGainOpt::currentModeUsesPredictor( size_t mode ) const
 {
-    for( size_t n = 0; n < m_optGainLP.size(); ++n )
+    return m_pcOn && m_predictorFrame.cols() == m_nModes && m_predictorFrame( 2, mode ) > 0;
+}
+
+void modalGainOpt::stagePredictorFrame( bool blend )
+{
+    size_t capacity = 0;
+    for( size_t n = 0; n < m_nModes; ++n )
     {
-        const float targetGain = commandedGain( n, m_optGainLP[n] );
-        const float ceiling    = modalNoise::ceilingForMode( m_gainCeilings, n );
+        capacity = std::max( { capacity, static_cast<size_t>( m_Na[n] ), static_cast<size_t>( m_Nb[n] ) } );
+    }
 
-        if( blend )
-        {
-            pcGainData[n] += m_gainGain * ( targetGain - pcGainData[n] );
+    const size_t width = modalPredictor::width( std::min( capacity, modalPredictor::maxTaps ) );
+    m_predictorStaging.setZero( width, m_nModes );
 
-            if( mx::math::isFinite( ceiling ) )
-            {
-                const float bound = std::min( ceiling, m_gmaxLP[n] * m_goptLP[n].m_minFindMaxFact );
-                pcGainData[n]     = std::min( pcGainData[n], bound / ( m_gainCals[n] * m_opticalGain ) );
-            }
-        }
-        else
+    for( size_t n = 0; n < m_nModes; ++n )
+    {
+        if( m_timesOnLP[n] <= 5 || !( m_optGainLP[n] > 0 ) )
         {
-            pcGainData[n] = targetGain;
+            continue;
         }
 
-        const size_t aBase = n * aWidth;
-        const size_t bBase = n * bWidth;
+        auto        &optimizer    = m_goptLP[n];
+        const auto  &a            = optimizer.a();
+        const auto  &b            = optimizer.b();
+        const size_t taps         = ( width - modalPredictor::headerSize ) / 2;
+        const float  commandBound = m_gmaxLP[n] * optimizer.m_minFindMaxFact / ( m_gainCals[n] * m_opticalGain );
 
-        aCoeffData[aBase] = m_Na[n];
-        bCoeffData[bBase] = m_Nb[n];
-
-        for( uint32_t k = 0; k < m_Na[n]; ++k )
+        if( a.empty() || b.empty() || a.size() > taps || b.size() > taps || !mx::math::isFinite( commandBound ) ||
+            commandBound <= 0 )
         {
-            if( blend )
-            {
-                aCoeffData[aBase + 1 + k] =
-                    aCoeffData[aBase + 1 + k] + m_gainGain * ( m_goptLP[n].a()[k] - aCoeffData[aBase + 1 + k] );
-            }
-            else
-            {
-                aCoeffData[aBase + 1 + k] = m_goptLP[n].a()[k];
-            }
-        }
-        for( uint32_t k = m_Na[n]; k < aWidth - 1; ++k )
-        {
-            aCoeffData[aBase + 1 + k] = 0;
+            continue;
         }
 
-        for( uint32_t k = 0; k < m_Nb[n]; ++k )
+        const float target   = commandedGain( n, m_optGainLP[n] );
+        float       previous = m_pcGain > 0 ? m_gain * m_gainFacts[n] / m_pcGain : target;
+        if( m_predictorFrame.cols() == m_nModes && m_predictorFrame( 2, n ) > 0 )
         {
-            if( blend )
-            {
-                bCoeffData[bBase + 1 + k] =
-                    bCoeffData[bBase + 1 + k] + m_gainGain * ( m_goptLP[n].b()[k] - bCoeffData[bBase + 1 + k] );
-            }
-            else
-            {
-                bCoeffData[bBase + 1 + k] = m_goptLP[n].b()[k];
-            }
+            previous = m_predictorFrame( 0, n );
         }
-        for( uint32_t k = m_Nb[n]; k < bWidth - 1; ++k )
+
+        const float gain = blend ? previous + m_gainGain * ( target - previous ) : target;
+        auto        mode = m_predictorStaging.col( n );
+        mode[0]          = std::min( gain, commandBound );
+        mode[1]          = m_pcMultFacts[n];
+        mode[2]          = a.size();
+        mode[3]          = b.size();
+        std::copy( a.begin(), a.end(), mode.data() + modalPredictor::headerSize );
+        std::copy( b.begin(), b.end(), mode.data() + modalPredictor::headerSize + taps );
+
+        modalPredictor::Mode checked;
+        if( !modalPredictor::decode( checked, { mode.data(), width } ) )
         {
-            bCoeffData[bBase + 1 + k] = 0;
+            mode.setZero();
         }
+    }
+}
+
+void modalGainOpt::publishPredictorFrame( bool blend )
+{
+    stagePredictorFrame( blend );
+    const auto width = m_predictorStaging.rows();
+
+    if( m_predictorStream == nullptr || m_predictorStream->md->size[0] != width ||
+        m_predictorStream->md->size[1] != m_nModes )
+    {
+        const std::string name = "aol" + std::to_string( m_loopNum ) + "_modalPredictor";
+        if( createImageStream( m_predictorStream, name, width, m_nModes, 1, _DATATYPE_FLOAT ) < 0 )
+        {
+            return;
+        }
+    }
+
+    m_predictorStream->md->write = 1;
+    MagAOX::streamCopy( m_predictorStream->array.F, m_predictorStaging.data(), width * m_nModes * sizeof( float ) );
+    ImageStreamIO_UpdateIm( m_predictorStream );
+    m_predictorFrame.swap( m_predictorStaging );
+    m_pcgoptUpdated = true;
+    updateAppliedModeCount( m_gainFacts );
+    if( m_pcOn && m_loop )
+    {
+        m_sinceChange = -1;
     }
 }
 
@@ -3305,20 +3201,23 @@ int modalGainOpt::countEnabledGainFactors( const std::vector<float> &gainFacts )
     return modesOn;
 }
 
-void modalGainOpt::updateAppliedModeCount( const std::vector<float> &gainFacts, bool predictorPath )
+void modalGainOpt::updateAppliedModeCount( const std::vector<float> &gainFacts )
 {
-    if( predictorPath != m_pcOn )
+    if( !m_pcOn || m_predictorFrame.cols() != static_cast<Eigen::Index>( gainFacts.size() ) )
     {
+        m_modesOn = countEnabledGainFactors( gainFacts );
         return;
     }
 
-    m_modesOn = countEnabledGainFactors( gainFacts );
+    m_modesOn = 0;
+    for( size_t mode = 0; mode < gainFacts.size(); ++mode )
+    {
+        const float gain = currentModeUsesPredictor( mode ) ? m_predictorFrame( 0, mode ) : gainFacts[mode];
+        m_modesOn += gain > 0;
+    }
 }
 
-bool modalGainOpt::applyGainFactorUpdate( std::vector<float> &gainFacts,
-                                          const float *incoming,
-                                          uint32_t width,
-                                          bool predictorPath )
+bool modalGainOpt::applyGainFactorUpdate( std::vector<float> &gainFacts, const float *incoming, uint32_t width )
 {
     bool change = false;
 
@@ -3347,12 +3246,8 @@ bool modalGainOpt::applyGainFactorUpdate( std::vector<float> &gainFacts,
         m_sinceChange = -1;
     }
 
-    if( !predictorPath )
-    {
-        m_siGainStateNeedsSync = true;
-    }
-
-    updateAppliedModeCount( gainFacts, predictorPath );
+    m_siGainStateNeedsSync = true;
+    updateAppliedModeCount( gainFacts );
 
     return true;
 }
@@ -3466,27 +3361,20 @@ bool modalGainOpt::refreshGoptStructures()
         m_goptLP[n].Ti( 1.0 / controllerFps );
         m_goptLP[n].tau( m_taus[n] );
 
-        if( !m_pcOn )
+        if( !currentModeUsesPredictor( n ) )
         {
             m_goptCurrent[n].setLeakyIntegrator( m_mult * m_multFacts[n] );
         }
         else
         {
-            std::vector<float> ta( m_NaCurrent[n] );
-            for( size_t m = 0; m < ta.size(); ++m )
+            const auto           column = m_predictorFrame.col( n );
+            modalPredictor::Mode mode;
+            if( modalPredictor::decode( mode, { column.data(), static_cast<size_t>( column.size() ) } ) )
             {
-                ta[m] = m_as( m, n );
+                m_goptCurrent[n].a( std::vector<float>( mode.a.begin(), mode.a.end() ) );
+                m_goptCurrent[n].b( std::vector<float>( mode.b.begin(), mode.b.end() ) );
+                m_goptCurrent[n].remember( m_pcMult * mode.mult );
             }
-            m_goptCurrent[n].a( ta );
-
-            std::vector<float> tb( m_NbCurrent[n] );
-            for( size_t m = 0; m < tb.size(); ++m )
-            {
-                tb[m] = m_bs( m, n );
-            }
-            m_goptCurrent[n].b( tb );
-
-            m_goptCurrent[n].remember( m_pcMult * m_pcMultFacts[n] );
         }
 
         m_goptSI[n].setLeakyIntegrator( m_mult * m_multFacts[n] );
@@ -3579,43 +3467,11 @@ int modalGainOpt::allocatePCShmims()
         std::cerr << "created numppccoeff shmim\n";
     }
 
-    if( acoeffShmimMonitorT::m_smState != dev::shmimMonitorState::connected ||
-        acoeffShmimMonitorT::m_width != m_maxNCoeff + 1 || acoeffShmimMonitorT::m_height != m_nModes )
-    {
-        if( acoeffShmimMonitorT::create( m_maxNCoeff + 1, m_nModes, 1, _DATATYPE_FLOAT ) != 0 )
-        {
-            return log<software_error, -1>( { "error creating acoeffShmim" } );
-        }
-
-        std::cerr << "created acoeff shmim\n";
-    }
-
-    if( bcoeffShmimMonitorT::m_smState != dev::shmimMonitorState::connected ||
-        bcoeffShmimMonitorT::m_width != m_maxNCoeff || bcoeffShmimMonitorT::m_height != m_nModes )
-    {
-        if( bcoeffShmimMonitorT::create( m_maxNCoeff + 1, m_nModes, 1, _DATATYPE_FLOAT ) != 0 )
-        {
-            return log<software_error, -1>( { "error creating bcoeffShmim" } );
-        }
-
-        std::cerr << "created bcoeff shmim\n";
-    }
-
-    if( pcGainFactShmimMonitorT::m_smState != dev::shmimMonitorState::connected ||
-        pcGainFactShmimMonitorT::m_width != m_nModes || pcGainFactShmimMonitorT::m_height != 1 )
-    {
-        if( pcGainFactShmimMonitorT::create( m_nModes, 1, 1, _DATATYPE_FLOAT ) != 0 )
-        {
-            return log<software_error, -1>( { "error creating pcGainFactShmim" } );
-        }
-
-        std::cerr << "created pcGainFact shmim\n";
-    }
-
     if( pcMultFactShmimMonitorT::m_smState != dev::shmimMonitorState::connected ||
         pcMultFactShmimMonitorT::m_width != m_nModes || pcMultFactShmimMonitorT::m_height != 1 )
     {
-        if( pcMultFactShmimMonitorT::create( m_nModes, 1, 1, _DATATYPE_FLOAT ) != 0 )
+        std::vector<float> initial( m_nModes, 1 );
+        if( pcMultFactShmimMonitorT::create( m_nModes, 1, 1, _DATATYPE_FLOAT, initial.data() ) != 0 )
         {
             return log<software_error, -1>( { "error creating pcMultFactShmim" } );
         }
@@ -4064,7 +3920,7 @@ int modalGainOpt::processImage( void *curr_src, const gainFactShmimT &dummy )
         m_updating = true; // Make sure it didn't get set to false by thread that
                            // had the lock
 
-        if( applyGainFactorUpdate( m_gainFacts, g, w, false ) )
+        if( applyGainFactorUpdate( m_gainFacts, g, w ) )
         {
             m_updating = false;
             std::cerr << "got gains: " << m_gainFacts.size() << "\n";
@@ -4127,65 +3983,6 @@ int modalGainOpt::processImage( void *curr_src, const multFactShmimT &dummy )
         {
             m_updating = false;
             std::cerr << "got mcs: " << m_multFacts.size() << " " << w << "\n";
-
-            lock.unlock();
-        }
-        else
-        {
-            m_updating = false;
-        }
-    }
-
-    return 0;
-}
-
-int modalGainOpt::allocate( const pcGainFactShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    if( pcGainFactShmimMonitorT::m_height != 1 )
-    {
-        return log<software_error, -1>( { "got pc gains with height not 1" } );
-    }
-
-    return 0;
-}
-
-int modalGainOpt::processImage( void *curr_src, const pcGainFactShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    uint32_t w = pcGainFactShmimMonitorT::m_width;
-    float *g = static_cast<float *>( curr_src );
-
-    std::unique_lock<std::mutex> lock( m_goptMutex, std::defer_lock );
-
-    bool sizeChange = ( w != m_pcGainFacts.size() );
-    bool dataChange = false;
-
-    if( !sizeChange )
-    {
-        for( uint32_t n = 0; n < w; ++n )
-        {
-            if( m_pcGainFacts[n] != g[n] )
-            {
-                dataChange = true;
-                break;
-            }
-        }
-    }
-
-    if( sizeChange || dataChange )
-    {
-        m_updating = true;
-        lock.lock();
-        m_updating = true; // Make sure it didn't get set to false by thread that
-                           // had the lock
-
-        if( applyGainFactorUpdate( m_pcGainFacts, g, w, true ) )
-        {
-            m_updating = false;
-            std::cerr << "got pc gains: " << m_pcGainFacts.size() << "\n";
 
             lock.unlock();
         }
@@ -4315,7 +4112,9 @@ int modalGainOpt::processImage( void *curr_src, const numpccoeffShmimT &dummy )
 
     for( uint32_t n = 0; n < w; ++n )
     {
-        if( change || m_Na[n] != Npc( n, 0 ) || m_Nb[n] != Npc( n, 1 ) )
+        const uint32_t na = std::min( m_maxNCoeff, Npc( n, 0 ) );
+        const uint32_t nb = std::min( m_maxNCoeff, Npc( n, 1 ) );
+        if( change || m_Na[n] != na || m_Nb[n] != nb )
         {
             if( !change )
             {
@@ -4327,8 +4126,9 @@ int modalGainOpt::processImage( void *curr_src, const numpccoeffShmimT &dummy )
                 change = true;
             }
 
-            m_Na[n] = Npc( n, 0 );
-            m_Nb[n] = Npc( n, 1 );
+            m_Na[n]       = na;
+            m_Nb[n]       = nb;
+            m_regScale[n] = -999;
         }
     }
 
@@ -4344,180 +4144,6 @@ int modalGainOpt::processImage( void *curr_src, const numpccoeffShmimT &dummy )
 
         lock.unlock();
         std::cerr << "got num pc coeffs: " << m_Na.size() << "\n";
-    }
-
-    return 0;
-}
-
-int modalGainOpt::allocate( const acoeffShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    return 0;
-}
-
-int modalGainOpt::processImage( void *curr_src, const acoeffShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    bool change = false;
-
-    std::unique_lock<std::mutex> lock( m_goptMutex, std::defer_lock );
-
-    uint32_t w = acoeffShmimMonitorT::m_width;
-    uint32_t h = acoeffShmimMonitorT::m_height;
-
-    // If there's a size change we lock
-    if( w - 1 != m_as.rows() || h != m_as.cols() || h != m_NaCurrent.size() )
-    {
-        m_updating = true;
-        lock.lock();
-        m_updating = true; // Make sure it didn't get set to false by thread that
-                           // had the lock
-
-        change = true;
-        m_NaCurrent.resize( h );
-        m_as.resize( w - 1, h );
-    }
-
-    eigenMap<float> ac( reinterpret_cast<float *>( curr_src ), w, h );
-
-    for( uint32_t cc = 0; cc < h; ++cc )
-    {
-        if( change || m_NaCurrent[cc] != ac( 0, cc ) )
-        {
-            if( !change )
-            {
-                m_updating = true;
-                lock.lock();
-                m_updating = true; // Make sure it didn't get set to false by thread
-                                   // that had the lock
-
-                change = true;
-            }
-
-            m_NaCurrent[cc] = ac( 0, cc );
-        }
-
-        for( uint32_t rr = 1; rr < w; ++rr )
-        {
-            if( change || m_as( rr - 1, cc ) != ac( rr, cc ) )
-            {
-                if( !change )
-                {
-                    m_updating = true;
-                    lock.lock();
-                    m_updating = true; // Make sure it didn't get set to false by thread
-                                       // that had the lock
-
-                    change = true;
-                }
-
-                m_as( rr - 1, cc ) = ac( rr, cc );
-            }
-        }
-    }
-
-    if( change )
-    {
-        if( m_loop && m_pcOn )
-        {
-            m_sinceChange = -1;
-        }
-
-        m_updating = false;
-        m_pcgoptUpdated = true;
-
-        lock.unlock();
-        std::cerr << "got a coeffs: " << w << ' ' << h << ' ' << m_NaCurrent.size() << "\n";
-    }
-
-    return 0;
-}
-
-int modalGainOpt::allocate( const bcoeffShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    return 0;
-}
-
-int modalGainOpt::processImage( void *curr_src, const bcoeffShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    bool change = false;
-
-    std::unique_lock<std::mutex> lock( m_goptMutex, std::defer_lock );
-
-    uint32_t w = bcoeffShmimMonitorT::m_width;
-    uint32_t h = bcoeffShmimMonitorT::m_height;
-
-    // If there's a size change we lock
-    if( w - 1 != m_bs.rows() || h != m_bs.cols() || h != m_NbCurrent.size() )
-    {
-        m_updating = true;
-        lock.lock();
-        m_updating = true; // Make sure it didn't get set to false by thread that
-                           // had the lock
-
-        change = true;
-
-        m_NbCurrent.resize( h );
-        m_bs.resize( w - 1, h );
-    }
-
-    eigenMap<float> bc( reinterpret_cast<float *>( curr_src ), w, h );
-
-    for( uint32_t cc = 0; cc < h; ++cc )
-    {
-        if( change || m_NbCurrent[cc] != bc( 0, cc ) )
-        {
-            if( !change )
-            {
-                m_updating = true;
-                lock.lock();
-                m_updating = true; // Make sure it didn't get set to false by thread
-                                   // that had the lock
-
-                change = true;
-            }
-
-            m_NbCurrent[cc] = bc( 0, cc );
-        }
-
-        for( uint32_t rr = 1; rr < w; ++rr )
-        {
-            if( change || m_bs( rr - 1, cc ) != bc( rr, cc ) )
-            {
-                if( !change )
-                {
-                    m_updating = true;
-                    lock.lock();
-                    m_updating = true; // Make sure it didn't get set to false by thread
-                                       // that had the lock
-
-                    change = true;
-                }
-
-                m_bs( rr - 1, cc ) = bc( rr, cc );
-            }
-        }
-    }
-
-    if( change )
-    {
-        if( m_loop && m_pcOn )
-        {
-            m_sinceChange = -1;
-        }
-
-        m_updating = false;
-        m_pcgoptUpdated = true;
-
-        std::cerr << "got b coeffs: " << w << ' ' << h << ' ' << m_NbCurrent.size() << "\n";
-
-        lock.unlock();
     }
 
     return 0;
@@ -5105,10 +4731,8 @@ int modalGainOpt::checkSizes()
     }
     logged[L++] = false;
 
-    // Check the PC shmims that we don't automatically create
-    if( m_Na.size() != m_nModes || m_NaCurrent.size() != m_nModes || (size_t)m_as.cols() != m_nModes ||
-        m_Nb.size() != m_nModes || m_NbCurrent.size() != m_nModes || (size_t)m_bs.cols() != m_nModes ||
-        m_pcGainFacts.size() != m_nModes || m_pcMultFacts.size() != m_nModes )
+    // Check the predictor settings streams, creating their defaults as needed.
+    if( m_Na.size() != m_nModes || m_Nb.size() != m_nModes || m_pcMultFacts.size() != m_nModes )
     {
 
         if( allocatePCShmims() < 0 )
@@ -5116,9 +4740,7 @@ int modalGainOpt::checkSizes()
             log<software_error>( { "error allocating PC shmims" } );
         }
 
-        if( m_Na.size() != m_nModes || m_NaCurrent.size() != m_nModes || (size_t)m_as.cols() != m_nModes ||
-            m_Nb.size() != m_nModes || m_NbCurrent.size() != m_nModes || (size_t)m_bs.cols() != m_nModes ||
-            m_pcGainFacts.size() != m_nModes || m_pcMultFacts.size() != m_nModes )
+        if( m_Na.size() != m_nModes || m_Nb.size() != m_nModes || m_pcMultFacts.size() != m_nModes )
         {
 
             if( !logged[L] )
@@ -5520,7 +5142,7 @@ void modalGainOpt::goptThreadExec()
                     continue; // don't break b/c of omp
                 }
 
-                if( !m_pcOn )
+                if( !currentModeUsesPredictor( n ) )
                 {
                     MGO_BREADCRUMB;
                     float currGain = m_gain * m_gainFacts[n] * m_gainCals[n] * m_opticalGain;
@@ -5532,7 +5154,8 @@ void modalGainOpt::goptThreadExec()
                 }
                 else
                 {
-                    float currGain = m_pcGain * m_pcGainFacts[n] * m_gainCals[n] * m_opticalGain;
+                    const float factor   = m_predictorFrame( 0, n );
+                    float       currGain = m_pcGain * factor * m_gainCals[n] * m_opticalGain;
                     for( size_t f = 0; f < m_goptCurrent[n].f_size(); ++f )
                     {
                         m_goptCurrent[n].clTF2( m_clXferCurrent( f, n ), m_clNtfCurrent( f, n ), f, currGain );
@@ -6003,112 +5626,76 @@ void modalGainOpt::goptThreadExec()
                 if( m_doPCCalcs && !flagOff )
                 {
                     MGO_BREADCRUMB;
-                    if( m_regScale[n] == -999 || m_regCounter[n] >= m_nRegCycles )
+                    auto        &optimizer = m_goptLP[n];
+                    auto        &predictor = m_linPred[n];
+                    const size_t na        = m_Na[n];
+                    const size_t nb        = m_Nb[n];
+                    const size_t order     = std::max( na, nb );
+                    bool         valid     = false;
+
+                    optimizer.remember( m_pcMult * m_pcMultFacts[n] );
+                    if( na > 0 && nb > 0 )
                     {
-                        MGO_BREADCRUMB;
-                        float min_sc;
-                        float gmax_lp = 0;
-
-                        if( !!modalNoise::regularizeWithCeiling( gmax_lp,
-                                                                 m_optGainLP[n],
-                                                                 m_modeVarLP[n],
-                                                                 min_sc,
-                                                                 m_linPred[n],
-                                                                 m_goptLP[n],
-                                                                 lpProcessPsd,
-                                                                 m_olPSDs[n],
-                                                                 m_nPSDs[n],
-                                                                 m_Na[n],
-                                                                 ceiling ) )
+                        const bool search = m_regScale[n] == -999 || m_regCounter[n] >= m_nRegCycles;
+                        if( search )
                         {
-                            MGO_BREADCRUMB;
-
-                            m_optGainLP[n] = 0;
-                            m_modeVarLP[n] = m_modeVarOL[n];
-                            m_regScale[n]  = -999;
-                            m_gmaxLP[n]    = 0;
-
-                            ///\todo what to do about coeffs?
-                        }
-                        else
-                        {
-                            MGO_BREADCRUMB;
-
-                            if( m_regScale[n] == -999 )
+                            float scale = 0;
+                            valid       = !modalNoise::regularizeWithCeiling( m_gmaxLP[n],
+                                                                        m_optGainLP[n],
+                                                                        m_modeVarLP[n],
+                                                                        scale,
+                                                                        predictor,
+                                                                        optimizer,
+                                                                        lpProcessPsd,
+                                                                        m_olPSDs[n],
+                                                                        m_nPSDs[n],
+                                                                        order,
+                                                                        ceiling );
+                            if( valid )
                             {
-                                MGO_BREADCRUMB;
-                                m_regCounter[n] = n % m_nRegCycles;
+                                m_regCounter[n] = m_regScale[n] == -999 ? n % m_nRegCycles : 0;
+                                m_regScale[n]   = scale;
                             }
                             else
                             {
-                                MGO_BREADCRUMB;
-                                m_regCounter[n] = 0;
+                                m_regScale[n] = -999;
                             }
-
-                            m_regScale[n] = min_sc;
-                            m_gmaxLP[n]   = gmax_lp;
-                        }
-                    }
-                    else
-                    {
-                        MGO_BREADCRUMB;
-                        // use pre-regularized version
-                        float psdReg = lpProcessPsd[0];
-                        if( m_linPred[n].calcCoefficients(
-                                lpProcessPsd, m_nPSDs[n], psdReg * pow( 10, -m_regScale[n] / 10 ), m_Na[n] ) !=
-                            mx::error_t::noerror )
-                        {
-                            m_optGainLP[n] = 0;
-                            m_modeVarLP[n] = m_modeVarOL[n];
-
-                            ///\todo what to do about coeffs?
                         }
                         else
                         {
-                            m_goptLP[n].a( m_linPred[n].m_lp.m_c );
-                            m_goptLP[n].b( m_linPred[n].m_lp.m_c );
-
-                            // The coefficients can change while the regularization scale is cached.
-                            if( ( m_calibratedNoise || mx::math::isFinite( ceiling ) ) &&
-                                !!m_goptLP[n].maxStableGain( m_gmaxLP[n] ) )
-                            {
-                                m_gmaxLP[n] = 0;
-                            }
-
-                            if( !!modalNoise::optimizeWithCeiling( m_optGainLP[n],
-                                                                   m_modeVarLP[n],
-                                                                   m_goptLP[n],
-                                                                   m_olPSDs[n],
-                                                                   m_nPSDs[n],
-                                                                   m_gmaxLP[n],
-                                                                   ceiling ) )
-                            {
-                                m_optGainLP[n] = 0;
-                                m_modeVarLP[n] = m_modeVarOL[n];
-                            }
+                            const float reg = lpProcessPsd[0] * std::pow( 10, -m_regScale[n] / 10 );
+                            valid           = !predictor.calcCoefficients( lpProcessPsd, m_nPSDs[n], reg, order );
+                            ++m_regCounter[n];
                         }
-                        ++m_regCounter[n];
+
+                        if( valid && ( !search || na != nb ) )
+                        {
+                            const auto &taps = predictor.m_lp.m_c;
+                            optimizer.a( std::vector<float>( taps.begin(), taps.begin() + na ) );
+                            optimizer.b( std::vector<float>( taps.begin(), taps.begin() + nb ) );
+                            valid = !optimizer.maxStableGain( m_gmaxLP[n] ) &&
+                                    !modalNoise::optimizeWithCeiling( m_optGainLP[n],
+                                                                      m_modeVarLP[n],
+                                                                      optimizer,
+                                                                      m_olPSDs[n],
+                                                                      m_nPSDs[n],
+                                                                      m_gmaxLP[n],
+                                                                      ceiling );
+                        }
                     }
 
-                    MGO_BREADCRUMB;
-
-                    /*if( ( m_modeVarLP[n] - m_modeVarOL[n] ) / m_modeVarOL[n] > -0.001 )
+                    if( !valid )
                     {
                         m_optGainLP[n] = 0;
                         m_modeVarLP[n] = m_modeVarOL[n];
-
-                        for( size_t f = 0; f < m_goptCurrent[n].f_size(); ++f )
-                        {
-                            m_clXferLP( f, n ) = 1;
-                        }
-
-                        m_timesOnLP[n] = 0;
+                        m_gmaxLP[n]    = 0;
                     }
-                    else*/
+
                     const float lpBound   = std::min( ceiling, m_gmaxLP[n] * m_goptLP[n].m_minFindMaxFact );
                     gainLimits[4 * n + 1] = lpBound;
 
-                    if( ( m_modeVarLP[n] - m_modeVarSI[n] ) / m_modeVarSI[n] > -0.001 )
+                    if( !valid || m_optGainLP[n] <= 0 || m_modeVarSI[n] <= 0 ||
+                        ( m_modeVarLP[n] - m_modeVarSI[n] ) / m_modeVarSI[n] > -0.001 )
                     {
 #pragma omp critical
                         {
@@ -6250,24 +5837,7 @@ void modalGainOpt::goptThreadExec()
 
                 if( m_doPCCalcs )
                 {
-                    float *fpc = pcGainFactShmimMonitorT::m_imageStream.array.F;
-                    float *fa = acoeffShmimMonitorT::m_imageStream.array.F;
-                    float *fb = bcoeffShmimMonitorT::m_imageStream.array.F;
-
-                    pcGainFactShmimMonitorT::m_imageStream.md->write = 1;
-                    acoeffShmimMonitorT::m_imageStream.md->write = 1;
-                    bcoeffShmimMonitorT::m_imageStream.md->write = 1;
-
-                    writePublishedPredictorArrays( fpc,
-                                                   fa,
-                                                   acoeffShmimMonitorT::m_width,
-                                                   fb,
-                                                   bcoeffShmimMonitorT::m_width,
-                                                   !m_dump );
-
-                    ImageStreamIO_UpdateIm( &( pcGainFactShmimMonitorT::m_imageStream ) );
-                    ImageStreamIO_UpdateIm( &( acoeffShmimMonitorT::m_imageStream ) );
-                    ImageStreamIO_UpdateIm( &( bcoeffShmimMonitorT::m_imageStream ) );
+                    publishPredictorFrame( !m_dump );
                 }
 
                 if( m_dump )
@@ -7703,6 +7273,8 @@ INDI_SETCALLBACK_DEFN( modalGainOpt, m_indiP_pcOn )
             m_updating = true;
 
             m_pcOn = state;
+            m_pcgoptUpdated = true;
+            updateAppliedModeCount( m_gainFacts );
 
             m_sinceChange = -1;
             m_updating = false;

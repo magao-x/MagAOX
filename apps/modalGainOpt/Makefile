@@ -1,7 +1,6 @@
 
 allall: all
 
-OTHER_HEADERS=modalPsdProcessor.hpp modalNoiseModel.hpp
+OTHER_HEADERS=../../libMagAOX/app/dev/modalPredictorFrame.hpp modalPsdProcessor.hpp modalNoiseModel.hpp
 TARGET=modalGainOpt
 include ../../Make/magAOXApp.mk
-

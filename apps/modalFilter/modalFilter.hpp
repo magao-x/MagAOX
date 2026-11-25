@@ -1,430 +1,285 @@
 /** \file modalFilter.hpp
- * \brief The MagAO-X modal filter header file
- *
+ * \brief CACAO-compatible modal integration and per-mode predictive feedback.
  * \ingroup modalFilter_files
  */
 
 #ifndef modalFilter_hpp
 #define modalFilter_hpp
 
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <condition_variable>
 #include <mutex>
-#include <shared_mutex>
+#include <optional>
+#include <vector>
 
-#include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
+#include "../../libMagAOX/libMagAOX.hpp"
+#include "../../libMagAOX/app/dev/modalPredictorFrame.hpp"
 #include "../../magaox_git_version.h"
 
-#include <mx/sigproc/circularBuffer.hpp>
-
-/** \defgroup modalFilter
- * \brief The MagAO-X application to perform modal filtering
- *
- * <a href="../handbook/operating/software/apps/modalFilter.html">Application Documentation</a>
- *
+/** \defgroup modalFilter Modal filter
  * \ingroup apps
- *
  */
 
 /** \defgroup modalFilter_files
  * \ingroup modalFilter
  */
 
-namespace MagAOX
-{
-namespace app
+namespace MagAOX::app
 {
 
-struct gainFactShmimT
+/// Modal parameter and input stream roles.
+enum class ModalFilterStream
 {
-    static std::string configSection()
-    {
-        return "gainFactShmim";
-    };
-
-    static std::string indiPrefix()
-    {
-        return "gainFact";
-    };
+    gain,
+    mult,
+    limit,
+    zero,
+    feedback,
+    wfs,
+    predictor
 };
 
-struct multFactShmimT
+/// Name the stream monitor's config section and INDI group.
+template <ModalFilterStream stream>
+struct ModalFilterTag
 {
+    /// Return the application's configuration section for this stream.
     static std::string configSection()
     {
-        return "multFactShmim";
-    };
+        return indiPrefix() + "Shmim";
+    }
 
+    /// Return the monitor's INDI property prefix.
     static std::string indiPrefix()
     {
-        return "multFact";
-    };
+        constexpr std::array names{
+            "gainFact", "multFact", "limitFact", "zeroPoint", "dmFeedback", "modeval", "predictor" };
+        return names[static_cast<size_t>( stream )];
+    }
 };
 
-struct pcGainFactShmimT
-{
-    static std::string configSection()
-    {
-        return "pcGainFactShmim";
-    };
-
-    static std::string indiPrefix()
-    {
-        return "pcGainFact";
-    };
-};
-
-struct pcMultFactShmimT
-{
-    static std::string configSection()
-    {
-        return "pcMultFactShmim";
-    };
-
-    static std::string indiPrefix()
-    {
-        return "pcMultFact";
-    };
-};
-
-struct acoeffShmimT
-{
-    static std::string configSection()
-    {
-        return "acoeffShmim";
-    };
-
-    static std::string indiPrefix()
-    {
-        return "acoeff";
-    };
-};
-
-struct bcoeffShmimT
-{
-    static std::string configSection()
-    {
-        return "bcoeffShmim";
-    };
-
-    static std::string indiPrefix()
-    {
-        return "bcoeff";
-    };
-};
-
-struct modevalShmimT
-{
-    static std::string configSection()
-    {
-        return "modevalShmim";
-    };
-
-    static std::string indiPrefix()
-    {
-        return "modeval";
-    };
-};
-
-/// The MagAO-X modal filter
-/**
- * \ingroup modalFilter
- */
+/// Apply closed-loop modal correction and publish commands on the CACAO output stream.
 class modalFilter : public MagAOXApp<true>,
-                    dev::shmimMonitor<modalFilter, gainFactShmimT>,
-                    dev::shmimMonitor<modalFilter, multFactShmimT>,
-                    dev::shmimMonitor<modalFilter, pcGainFactShmimT>,
-                    dev::shmimMonitor<modalFilter, pcMultFactShmimT>,
-                    dev::shmimMonitor<modalFilter, acoeffShmimT>,
-                    dev::shmimMonitor<modalFilter, bcoeffShmimT>,
-                    dev::shmimMonitor<modalFilter, modevalShmimT>,
-                    dev::frameGrabber<modalFilter>,
-                    dev::telemeter<modalFilter>
+                    public dev::shmimMonitor<modalFilter, ModalFilterTag<ModalFilterStream::gain>>,
+                    public dev::shmimMonitor<modalFilter, ModalFilterTag<ModalFilterStream::mult>>,
+                    public dev::shmimMonitor<modalFilter, ModalFilterTag<ModalFilterStream::limit>>,
+                    public dev::shmimMonitor<modalFilter, ModalFilterTag<ModalFilterStream::zero>>,
+                    public dev::shmimMonitor<modalFilter, ModalFilterTag<ModalFilterStream::feedback>>,
+                    public dev::shmimMonitor<modalFilter, ModalFilterTag<ModalFilterStream::wfs>>,
+                    public dev::shmimMonitor<modalFilter, ModalFilterTag<ModalFilterStream::predictor>>,
+                    public dev::frameGrabber<modalFilter>,
+                    public dev::telemeter<modalFilter>
 {
-
-    // Give the test harness access.
     friend class modalFilter_test;
-
-    friend class dev::shmimMonitor<modalFilter, gainFactShmimT>;
-    friend class dev::shmimMonitor<modalFilter, multFactShmimT>;
-    friend class dev::shmimMonitor<modalFilter, pcGainFactShmimT>;
-    friend class dev::shmimMonitor<modalFilter, pcMultFactShmimT>;
-    friend class dev::shmimMonitor<modalFilter, acoeffShmimT>;
-    friend class dev::shmimMonitor<modalFilter, bcoeffShmimT>;
-    friend class dev::shmimMonitor<modalFilter, modevalShmimT>;
+    template <class, class>
+    friend class dev::shmimMonitor;
     friend class dev::frameGrabber<modalFilter>;
     friend class dev::telemeter<modalFilter>;
 
-    typedef dev::shmimMonitor<modalFilter, gainFactShmimT>   gainFactShmimMonitorT;
-    typedef dev::shmimMonitor<modalFilter, multFactShmimT>   multFactShmimMonitorT;
-    typedef dev::shmimMonitor<modalFilter, pcGainFactShmimT> pcGainFactShmimMonitorT;
-    typedef dev::shmimMonitor<modalFilter, pcMultFactShmimT> pcMultFactShmimMonitorT;
-    typedef dev::shmimMonitor<modalFilter, acoeffShmimT>     acoeffShmimMonitorT;
-    typedef dev::shmimMonitor<modalFilter, bcoeffShmimT>     bcoeffShmimMonitorT;
-    typedef dev::shmimMonitor<modalFilter, modevalShmimT>    modevalShmimMonitorT;
-    typedef dev::frameGrabber<modalFilter>                   frameGrabberT;
-    typedef dev::telemeter<modalFilter>                      telemeterT;
+    using Stream = ModalFilterStream;
+    template <Stream stream>
+    using Tag = ModalFilterTag<stream>;
+    template <Stream stream>
+    using Monitor       = dev::shmimMonitor<modalFilter, Tag<stream>>;
+    using Gain          = Monitor<Stream::gain>;
+    using Mult          = Monitor<Stream::mult>;
+    using Limit         = Monitor<Stream::limit>;
+    using Zero          = Monitor<Stream::zero>;
+    using Feedback      = Monitor<Stream::feedback>;
+    using Wfs           = Monitor<Stream::wfs>;
+    using Predictor     = Monitor<Stream::predictor>;
+    using frameGrabberT = dev::frameGrabber<modalFilter>;
+    using telemeterT    = dev::telemeter<modalFilter>;
 
-    static constexpr bool c_frameGrabber_flippable = false; /**< app:dev config to tell framegrabber these images
-                                                                 can not be flipped*/
+    static constexpr bool   c_frameGrabber_flippable = false; ///< Modal order must be preserved.
+    static constexpr size_t c_pendingFrames          = 32;    ///< Bound the backlog of unprocessed WFS frames.
 
   protected:
-    /** \name Configurable Parameters
-     *@{
+    /** \name Configuration - Data
+     * @{
      */
-
-    std::string m_fpsDevice;               ///< Device name for getting fps to set circular buffer length.
-    std::string m_fpsProperty{ "fps" };    ///< Property name for getting fps to set circular buffer length.
-    std::string m_fpsElement{ "current" }; ///< Element name for getting fps to set circular buffer length.
-
-    float m_fpsTol{ 0 }; ///< The tolerance for detecting a change in FPS.
-
-    int m_loopNum{ 1 }; ///< The number of the loop. Used to set shmim names, as in aolN_mgainfact.  Default is 1.
-
-    std::string m_loopName{ "ho" }; ///< The name of the loop control INDI device name. Defalt is "ho".
-
-    int32_t m_modevalCBLength{ 1000 }; ///< The length of the modeval circular buffers.  Default is 1000 entries.
-
+    std::string m_fpsDevice;               ///< INDI device reporting the WFS sample rate.
+    std::string m_fpsProperty{ "fps" };    ///< Sample-rate property.
+    std::string m_fpsElement{ "current" }; ///< Sample-rate element.
+    float       m_fpsTol{ 0 };             ///< Minimum change in Hz that triggers reconfiguration.
+    int         m_loopNum{ 1 };            ///< CACAO loop number used to name the streams.
     ///@}
 
-    float m_fps{ 0 };
+    std::atomic<float>      m_fps{ 0 };  ///< Latest configured WFS sampling rate in Hz.
+    std::mutex              m_filtMutex; ///< Guards commands, control snapshots, and queued frames.
+    std::condition_variable m_ready;     ///< Signals new WFS input, a shape change, or a zero request.
 
-    bool m_loop{ false };
+    bool  m_loop{ false };            ///< Whether closed-loop commands may be published.
+    bool  m_zeroRequested{ false };   ///< Pending explicit zero request, including while open.
+    bool  m_feedbackPending{ false }; ///< Whether an external filtered command must seed the integrator.
+    bool  m_pcRequested{ false };     ///< Operator's predictive-control request.
+    bool  m_pcActive{ false };        ///< Whether the last processed command used a ready predictor.
+    float m_gain{ 0 };                ///< SI global gain.
+    float m_mult{ 1 };                ///< SI global command multiplier.
+    float m_limit{ 1 };               ///< Global modal command limit.
+    float m_pcGain{ 1 };              ///< PC global gain.
+    float m_pcMult{ 1 };              ///< PC global command multiplier.
 
-    float m_gain{ 0 };
+    /// CACAO factors, zero point, and external feedback in stream-role order.
+    std::array<std::vector<float>, static_cast<size_t>( Stream::wfs )> m_parameters;
+    std::optional<uint64_t>           m_feedbackCount;  ///< Last received filtered DM vector counter.
+    std::vector<float>                m_predictorData;  ///< Owned coherent gain and tap frame.
+    std::vector<modalPredictor::Mode> m_predictorModes; ///< Validated views into the owned frame.
+    size_t m_historyNeeded{ 0 }; ///< Number of past samples required by the longest enabled predictor.
 
-    float m_mc{ 1 };
+    /// Copy of one pending WFS sample and its original stream metadata.
+    struct Sample
+    {
+        std::vector<float> modes;      ///< Modal values in native stream order.
+        timespec           atime{};    ///< Acquisition timestamp to propagate to the command.
+        uint64_t           count{ 0 }; ///< Source frame counter, used to detect a discontinuity.
+    };
 
-    bool m_pcOn{ false };
+    Sample                              m_input;     ///< Preallocated scratch row, owned by the WFS monitor thread.
+    std::array<Sample, c_pendingFrames> m_pending;   ///< Preallocated WFS queue in acquisition order.
+    size_t                              m_head{ 0 }; ///< Oldest pending sample.
+    size_t                              m_pendingCount{ 0 }; ///< Number of samples waiting for the command thread.
+    uint64_t                            m_lastCount{ 0 }; ///< Counter of the last sample processed by the controller.
+    bool                                m_haveCount{ false }; ///< Whether m_lastCount is valid.
+    bool                                m_queueGap{ false };  ///< Set when queue overflow discarded a sample.
 
-    float m_pcGain{ 0 };
+    size_t             m_modevalSz{ 0 };    ///< Active WFS modal dimension.
+    std::vector<float> m_command;           ///< Last command, retained while the loop is open.
+    std::vector<float> m_output;            ///< Framegrabber-owned publication snapshot.
+    eigenImage<float>  m_wfsHistory;        ///< Past WFS errors, one frame per column.
+    eigenImage<float>  m_dmHistory;         ///< Past clipped DM commands, one frame per column.
+    size_t             m_historyNext{ 0 };  ///< Next history column to write.
+    size_t             m_historyCount{ 0 }; ///< Number of consecutive past samples available.
 
-    float m_pcMc{ 1 };
-
-    std::vector<float> m_gainfacts;
-
-    std::vector<float> m_multfacts;
-
-    std::vector<float> m_pcGainfacts;
-
-    std::vector<float> m_pcMultfacts;
-
-    std::vector<int> m_Na;
-
-    std::vector<int> m_Nb;
-
-    eigenImage<float> m_as;
-
-    eigenImage<float> m_bs;
-
-    uint32_t m_modevalSz{ 0 };
-
-    mx::sigproc::circularBufferIndex<std::vector<float>, int32_t> m_modevalWFS;
-
-    mx::sigproc::circularBufferIndex<std::vector<float>, int32_t> m_modevalDM;
-
-    sem_t m_filtSem; ///< Semaphore used to signal that fresh modevals are waiting to be filtered
-
-    bool m_sizesMatch{ false }; ///< Flag indicating that all sizes are consistent
-
-    bool m_pcSizesMatch{ false }; ///< Flag indicating that all sizes are consistent
-
-    std::shared_mutex m_filtMutex; ///< Mutex for locking access to filter parameters
-
-    timespec m_atime; ///< The acq time of the WFS modevals
   public:
-    /// Default c'tor.
+    /// Configure monitors to read the current parameter and predictor frames on attach.
     modalFilter();
 
-    /// D'tor, declared and defined for noexcept.
-    ~modalFilter() noexcept
-    {
-    }
+    /// Release filter storage after the framework has stopped the workers.
+    ~modalFilter() noexcept override = default;
 
-    virtual void setupConfig();
+    /// Register the loop and stream configuration.
+    void setupConfig() override;
 
-    /// Implementation of loadConfig logic, separated for testing.
-    /** This is called by loadConfig().
-     */
-    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] an application configuration
-                                                                    from which to load values*/ );
+    /// Load configuration and assign CACAO stream names.
+    void loadConfig() override;
 
-    virtual void loadConfig();
+    /// Load stream configuration with the framework's error-returning helpers.
+    int loadConfigImpl( mx::app::appConfigurator &settings /**< [in] App configuration. */ );
 
-    /// Startup function
-    /**
-     *
-     */
-    virtual int appStartup();
+    /// Start stream monitors, the framegrabber and INDI controls.
+    int appStartup() override;
 
-    /// Implementation of the FSM for modalFilter.
-    /**
-     * \returns 0 on no critical error
-     * \returns -1 on an error requiring shutdown
-     */
-    virtual int appLogic();
+    /// Service the monitors and publish loop status.
+    int appLogic() override;
 
-    /// Shutdown the app.
-    /**
-     *
-     */
-    virtual int appShutdown();
+    /// Stop the worker threads.
+    int appShutdown() override;
 
-    int allocate( const gainFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
+    /// Validate an input stream and initialize WFS storage on attachment.
+    template <Stream stream>
+    int allocate( Tag<stream> /**< [in] Monitor role. */ );
 
-    int processImage( void *curr_src,        ///< [in] pointer to the start of the current frame
-                      const gainFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
+    /// Copy a stable input frame into the queue or install a parameter snapshot.
+    template <Stream stream>
+    int processImage( void *source /**< [in] Selected shared-memory frame. */, Tag<stream> /**< [in] Monitor role. */ );
 
-    int allocate( const multFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int processImage( void *curr_src,        ///< [in] pointer to the start of the current frame
-                      const multFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int allocate( const pcGainFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int processImage( void *curr_src,          ///< [in] pointer to the start of the current frame
-                      const pcGainFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int allocate( const pcMultFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int processImage( void *curr_src,          ///< [in] pointer to the start of the current frame
-                      const pcMultFactShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int allocate( const acoeffShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int processImage( void *curr_src,      ///< [in] pointer to the start of the current frame
-                      const acoeffShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int allocate( const bcoeffShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int processImage( void *curr_src,      ///< [in] pointer to the start of the current frame
-                      const bcoeffShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int allocate( const modevalShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    int processImage( void *curr_src,       ///< [in] pointer to the start of the current frame
-                      const modevalShmimT & ///< [in] tag to differentiate shmimMonitor parents.
-    );
-
-    /** \name frameGrabber interface
-     * @{
-     */
-
-    /// Implementation of the framegrabber configureAcquisition interface
-    /**
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
+    /// Size the output to the active WFS mode vector.
     int configureAcquisition();
 
-    /// Implementation of the frameGrabber fps interface
-    /** Just returns the value of m_fps
-     */
+    /// Return the configured WFS frame rate.
     float fps();
 
-    /// Implementation of the framegrabber startAcquisition interface
-    /**
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
+    /// Confirm the framegrabber is ready to receive samples.
     int startAcquisition();
 
-    /// Implementation of the framegrabber acquireAndCheckValid interface
-    /**
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
+    /// Consume one queued sample or zero request and prepare its output.
     int acquireAndCheckValid();
 
-    /// Implementation of the framegrabber loadImageIntoStream interface
-    /**
-     *
-     * \returns 0 on success
-     * \returns -1 on error
-     */
-    int loadImageIntoStream( void *dest /**< [in] */ );
+    /// Copy the immutable command prepared by acquireAndCheckValid.
+    int loadImageIntoStream( void *dest /**< [out] Framegrabber output buffer. */ );
 
-    /// Implementation of the framegrabber reconfig interface
-    /**
-     * \returns 0 on success
-     * \returns -1 on error
-     */
+    /// Complete a framegrabber reconfiguration.
     int reconfig();
 
-    ///@}
-
-    void checkSizes();
-
-    /** \name Telemeter Interface
-     *
-     * @{
-     */
+    /// Check whether framegrabber timing telemetry is due.
     int checkRecordTimes();
 
-    int recordTelem( const telem_fgtimings * );
+    /// Record framegrabber timing telemetry.
+    int recordTelem( const telem_fgtimings * /**< [in] Timing record tag. */ );
 
-    ///@}
+  protected:
+    /// Allocate all sample buffers and clear history on a WFS stream attachment.
+    void configureModes( size_t modes /**< [in] Number of WFS modes. */ );
 
-    /** \name INDI
-     * @{
-     */
+    /// Transfer the already copied WFS sample into the bounded queue.
+    void enqueue( Sample &sample /**< [in,out] Sample to queue and scratch storage to recycle. */ );
 
-    pcf::IndiProperty m_indiP_fpsSource;
+    /// Retire past inputs and commands while holding m_filtMutex.
+    void resetHistory();
 
-    pcf::IndiProperty m_indiP_loop;
+    /// Perform one controller update while holding m_filtMutex.
+    void filter( const Sample &sample /**< [in] Next WFS sample in order. */ );
 
-    pcf::IndiProperty m_indiP_gain;
+    /// Validate and install a complete predictor snapshot.
+    bool installPredictor( std::vector<float> &data /**< [in,out] Complete mode-major frame. */,
+                           size_t              width /**< [in] Floats per mode. */,
+                           size_t              modes /**< [in] Number of mode columns. */ );
 
-    pcf::IndiProperty m_indiP_mult;
+    /// Fetch a parameter when its stream has the active modal dimension.
+    float parameter( Stream stream /**< [in] Parameter role. */,
+                     size_t mode /**< [in] Mode index. */,
+                     float  initial /**< [in] CACAO default before attachment. */ ) const;
 
-    pcf::IndiProperty m_indiP_pcGain;
+    pcf::IndiProperty m_indiP_fpsSource; ///< Subscription to the frame-rate source.
+    pcf::IndiProperty m_indiP_loop;      ///< Loop state control.
+    pcf::IndiProperty m_indiP_loopZero;  ///< Explicit zero request.
+    pcf::IndiProperty m_indiP_gain;      ///< Global SI gain control.
+    pcf::IndiProperty m_indiP_mult;      ///< Global SI multiplier control.
+    pcf::IndiProperty m_indiP_limit;     ///< Global modal limit control.
+    pcf::IndiProperty m_indiP_pcGain;    ///< Global PC gain control.
+    pcf::IndiProperty m_indiP_pcMult;    ///< Global PC multiplier control.
+    pcf::IndiProperty m_indiP_pcOn;      ///< Active predictive state and enable request.
 
-    pcf::IndiProperty m_indiP_pcMult;
-
-    pcf::IndiProperty m_indiP_pcOn;
-
+    /// Receive the WFS sample rate.
     INDI_SETCALLBACK_DECL( modalFilter, m_indiP_fpsSource );
 
+    /// Open or close the modal loop.
     INDI_NEWCALLBACK_DECL( modalFilter, m_indiP_loop );
 
+    /// Queue a zero command.
+    INDI_NEWCALLBACK_DECL( modalFilter, m_indiP_loopZero );
+
+    /// Update the global SI gain.
     INDI_NEWCALLBACK_DECL( modalFilter, m_indiP_gain );
 
+    /// Update the global SI multiplier.
     INDI_NEWCALLBACK_DECL( modalFilter, m_indiP_mult );
 
+    /// Update the global limit.
+    INDI_NEWCALLBACK_DECL( modalFilter, m_indiP_limit );
+
+    /// Update the global PC gain.
     INDI_NEWCALLBACK_DECL( modalFilter, m_indiP_pcGain );
 
+    /// Update the global PC multiplier.
     INDI_NEWCALLBACK_DECL( modalFilter, m_indiP_pcMult );
 
+    /// Enable or disable the predictor.
     INDI_NEWCALLBACK_DECL( modalFilter, m_indiP_pcOn );
-
-    ///@}
 };
 
 modalFilter::modalFilter() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 {
-
-    gainFactShmimMonitorT::m_getExistingFirst   = true;
-    multFactShmimMonitorT::m_getExistingFirst   = true;
-    pcGainFactShmimMonitorT::m_getExistingFirst = true;
-    pcMultFactShmimMonitorT::m_getExistingFirst = true;
-    acoeffShmimMonitorT::m_getExistingFirst     = true;
-    bcoeffShmimMonitorT::m_getExistingFirst     = true;
-    modevalShmimMonitorT::m_getExistingFirst    = true;
-    return;
+    Gain::m_getExistingFirst      = true;
+    Mult::m_getExistingFirst      = true;
+    Limit::m_getExistingFirst     = true;
+    Zero::m_getExistingFirst      = true;
+    Feedback::m_getExistingFirst  = true;
+    Predictor::m_getExistingFirst = true;
+    frameGrabberT::m_staged       = true;
 }
 
 void modalFilter::setupConfig()
@@ -437,7 +292,7 @@ void modalFilter::setupConfig()
                 "fpsDevice",
                 false,
                 "string",
-                "Device name for getting fps to set circular buffer length." );
+                "INDI device reporting the WFS frame rate." );
     config.add( "circBuff.fpsProperty",
                 "",
                 "circBuff.fpsProperty",
@@ -446,7 +301,7 @@ void modalFilter::setupConfig()
                 "fpsProperty",
                 false,
                 "string",
-                "Property name for getting fps to set circular buffer length. Default is 'fps'." );
+                "Frame-rate property." );
     config.add( "circBuff.fpsElement",
                 "",
                 "circBuff.fpsElement",
@@ -455,7 +310,7 @@ void modalFilter::setupConfig()
                 "fpsElement",
                 false,
                 "string",
-                "Property name for getting fps to set circular buffer length. Default is 'current'." );
+                "Frame-rate element." );
     config.add( "circBuff.fpsTol",
                 "",
                 "circBuff.fpsTol",
@@ -464,8 +319,7 @@ void modalFilter::setupConfig()
                 "fpsTol",
                 false,
                 "float",
-                "Tolerance for detecting a change in FPS.  Default is 0." );
-
+                "Tolerance for frame-rate changes in Hz." );
     config.add( "loop.number",
                 "",
                 "loop.number",
@@ -474,75 +328,46 @@ void modalFilter::setupConfig()
                 "number",
                 false,
                 "int",
-                "The number of the loop. Used to set shmim names, as in aolN_mgainfact.  Default is 1." );
+                "CACAO loop number used to name the streams." );
 
-    config.add( "loop.name",
-                "",
-                "loop.name",
-                argType::Required,
-                "loop",
-                "name",
-                false,
-                "string",
-                "The name of the loop control INDI device name. Default is \"ho\"." );
-
-    SHMIMMONITORT_SETUP_CONFIG( gainFactShmimMonitorT, config );
-    SHMIMMONITORT_SETUP_CONFIG( multFactShmimMonitorT, config );
-    SHMIMMONITORT_SETUP_CONFIG( pcGainFactShmimMonitorT, config );
-    SHMIMMONITORT_SETUP_CONFIG( pcMultFactShmimMonitorT, config );
-    SHMIMMONITORT_SETUP_CONFIG( acoeffShmimMonitorT, config );
-    SHMIMMONITORT_SETUP_CONFIG( bcoeffShmimMonitorT, config );
-    SHMIMMONITORT_SETUP_CONFIG( modevalShmimMonitorT, config );
+    SHMIMMONITORT_SETUP_CONFIG( Gain, config );
+    SHMIMMONITORT_SETUP_CONFIG( Mult, config );
+    SHMIMMONITORT_SETUP_CONFIG( Limit, config );
+    SHMIMMONITORT_SETUP_CONFIG( Zero, config );
+    SHMIMMONITORT_SETUP_CONFIG( Feedback, config );
+    SHMIMMONITORT_SETUP_CONFIG( Wfs, config );
+    SHMIMMONITORT_SETUP_CONFIG( Predictor, config );
     FRAMEGRABBER_SETUP_CONFIG( config );
     TELEMETER_SETUP_CONFIG( config );
 }
 
-int modalFilter::loadConfigImpl( mx::app::appConfigurator &_config )
+int modalFilter::loadConfigImpl( mx::app::appConfigurator &settings )
 {
-    _config( m_fpsDevice, "circBuff.fpsDevice" );
-    _config( m_fpsProperty, "circBuff.fpsProperty" );
-    _config( m_fpsElement, "circBuff.fpsElement" );
-    _config( m_fpsTol, "circBuff.fpsTol" );
+    settings( m_fpsDevice, "circBuff.fpsDevice" );
+    settings( m_fpsProperty, "circBuff.fpsProperty" );
+    settings( m_fpsElement, "circBuff.fpsElement" );
+    settings( m_fpsTol, "circBuff.fpsTol" );
+    settings( m_loopNum, "loop.number" );
 
-    _config( m_loopNum, "loop.number" );
-    _config( m_loopName, "loop.name" );
+    const std::string prefix   = "aol" + std::to_string( m_loopNum ) + "_";
+    Gain::m_shmimName          = prefix + "mgainfact";
+    Mult::m_shmimName          = prefix + "mmultfact";
+    Limit::m_shmimName         = prefix + "mlimitfact";
+    Zero::m_shmimName          = prefix + "mzeropoint";
+    Feedback::m_shmimName      = prefix + "modevalDMf";
+    Wfs::m_shmimName           = prefix + "modevalWFS";
+    Predictor::m_shmimName     = prefix + "modalPredictor";
+    frameGrabberT::m_shmimName = prefix + "modevalDM";
 
-    char shmim[1024];
-
-    snprintf( shmim, sizeof( shmim ), "aol%d_mgainfact", m_loopNum );
-    gainFactShmimMonitorT::m_shmimName = shmim;
-    SHMIMMONITORT_LOAD_CONFIG( gainFactShmimMonitorT, _config );
-
-    snprintf( shmim, sizeof( shmim ), "aol%d_mmultfact", m_loopNum );
-    multFactShmimMonitorT::m_shmimName = shmim;
-    SHMIMMONITORT_LOAD_CONFIG( multFactShmimMonitorT, _config );
-
-    snprintf( shmim, sizeof( shmim ), "aol%d_mpcgainfact", m_loopNum );
-    pcGainFactShmimMonitorT::m_shmimName = shmim;
-    SHMIMMONITORT_LOAD_CONFIG( pcGainFactShmimMonitorT, _config );
-
-    snprintf( shmim, sizeof( shmim ), "aol%d_mpcmultfact", m_loopNum );
-    pcMultFactShmimMonitorT::m_shmimName = shmim;
-    SHMIMMONITORT_LOAD_CONFIG( pcMultFactShmimMonitorT, _config );
-
-    snprintf( shmim, sizeof( shmim ), "aol%d_acoeff", m_loopNum );
-    acoeffShmimMonitorT::m_shmimName = shmim;
-    SHMIMMONITORT_LOAD_CONFIG( acoeffShmimMonitorT, _config );
-
-    snprintf( shmim, sizeof( shmim ), "aol%d_bcoeff", m_loopNum );
-    bcoeffShmimMonitorT::m_shmimName = shmim;
-    SHMIMMONITORT_LOAD_CONFIG( bcoeffShmimMonitorT, _config );
-
-    snprintf( shmim, sizeof( shmim ), "aol%d_modevalWFS", m_loopNum );
-    modevalShmimMonitorT::m_shmimName = shmim;
-    SHMIMMONITORT_LOAD_CONFIG( modevalShmimMonitorT, _config );
-
-    snprintf( shmim, sizeof( shmim ), "aol%d_modevalDM", m_loopNum );
-    frameGrabberT::m_shmimName = shmim;
-    FRAMEGRABBER_LOAD_CONFIG( _config );
-
-    TELEMETER_LOAD_CONFIG( _config );
-
+    SHMIMMONITORT_LOAD_CONFIG( Gain, settings );
+    SHMIMMONITORT_LOAD_CONFIG( Mult, settings );
+    SHMIMMONITORT_LOAD_CONFIG( Limit, settings );
+    SHMIMMONITORT_LOAD_CONFIG( Zero, settings );
+    SHMIMMONITORT_LOAD_CONFIG( Feedback, settings );
+    SHMIMMONITORT_LOAD_CONFIG( Wfs, settings );
+    SHMIMMONITORT_LOAD_CONFIG( Predictor, settings );
+    FRAMEGRABBER_LOAD_CONFIG( settings );
+    TELEMETER_LOAD_CONFIG( settings );
     return 0;
 }
 
@@ -553,395 +378,403 @@ void modalFilter::loadConfig()
 
 int modalFilter::appStartup()
 {
-
-    if( sem_init( &m_filtSem, 0, 0 ) < 0 )
+    if( m_fpsDevice.empty() )
     {
-        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "Initializing filter semaphore" } );
+        return log<software_critical, -1>( { "Configure circBuff.fpsDevice for the WFS sample rate." } );
     }
 
-    SHMIMMONITORT_APP_STARTUP( gainFactShmimMonitorT );
-    SHMIMMONITORT_APP_STARTUP( multFactShmimMonitorT );
-    SHMIMMONITORT_APP_STARTUP( pcGainFactShmimMonitorT );
-    SHMIMMONITORT_APP_STARTUP( pcMultFactShmimMonitorT );
-    SHMIMMONITORT_APP_STARTUP( acoeffShmimMonitorT );
-    SHMIMMONITORT_APP_STARTUP( bcoeffShmimMonitorT );
-    SHMIMMONITORT_APP_STARTUP( modevalShmimMonitorT );
+    SHMIMMONITORT_APP_STARTUP( Gain );
+    SHMIMMONITORT_APP_STARTUP( Mult );
+    SHMIMMONITORT_APP_STARTUP( Limit );
+    SHMIMMONITORT_APP_STARTUP( Zero );
+    SHMIMMONITORT_APP_STARTUP( Feedback );
+    SHMIMMONITORT_APP_STARTUP( Wfs );
+    SHMIMMONITORT_APP_STARTUP( Predictor );
     FRAMEGRABBER_APP_STARTUP;
     TELEMETER_APP_STARTUP;
-
-    if( m_fpsDevice == "" )
-    {
-        return log<software_critical, -1>(
-            { __FILE__, __LINE__, "FPS source is not configurated (circBuff.fpsDevice)" } );
-    }
 
     REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsDevice, m_fpsProperty );
 
     CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_loop, "loop_state" );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_gain, "loop_gain", 0, 1, 0.01, "%0.01f", "Gain", "Loop" );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_mult, "loop_multcoeff", 0, 1, 0.01, "%0.01f", "Mult. Coeff.", "Loop" );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_pcGain, "loop_pcgain", 0, 1, 0.01, "%0.01f", "PC Gain", "Loop" );
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_pcMult, "loop_pcmultcoeff", 0, 1, 0.01, "%0.01f", "PC Mult. Coeff.", "Loop" );
+    createStandardIndiRequestSw( m_indiP_loopZero, "loop_zero", "Loop Zero", "Loop" );
+    if( registerIndiPropertyNew( m_indiP_loopZero, INDI_NEWCALLBACK( m_indiP_loopZero ) ) < 0 )
+    {
+        return -1;
+    }
 
-    CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_pcOn, "loop_pcon" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_gain, "loop_gain", 0, 10, 0.01, "%0.03f", "Gain", "Loop" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_mult, "loop_multcoeff", 0, 1, 0.01, "%0.03f", "Mult. Coeff.", "Loop" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_limit, "loop_max_limit", 0, 10, 0.01, "%0.03f", "Limit", "Loop" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_pcGain, "loop_pcgain", 0, 1, 0.01, "%0.03f", "PC Gain", "Loop" );
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_pcMult, "loop_pcmultcoeff", 0, 1, 0.01, "%0.03f", "PC Mult. Coeff.", "Loop" );
+    CREATE_REG_INDI_NEW_TOGGLESWITCH( m_indiP_pcOn, "loop_pcOn" );
 
     state( stateCodes::OPERATING );
-
     return 0;
 }
 
 int modalFilter::appLogic()
 {
-    SHMIMMONITORT_APP_LOGIC( gainFactShmimMonitorT );
-    SHMIMMONITORT_APP_LOGIC( multFactShmimMonitorT );
-    SHMIMMONITORT_APP_LOGIC( pcGainFactShmimMonitorT );
-    SHMIMMONITORT_APP_LOGIC( pcMultFactShmimMonitorT );
-    SHMIMMONITORT_APP_LOGIC( acoeffShmimMonitorT );
-    SHMIMMONITORT_APP_LOGIC( bcoeffShmimMonitorT );
-    SHMIMMONITORT_APP_LOGIC( modevalShmimMonitorT );
+    SHMIMMONITORT_APP_LOGIC( Gain );
+    SHMIMMONITORT_APP_LOGIC( Mult );
+    SHMIMMONITORT_APP_LOGIC( Limit );
+    SHMIMMONITORT_APP_LOGIC( Zero );
+    SHMIMMONITORT_APP_LOGIC( Feedback );
+    SHMIMMONITORT_APP_LOGIC( Wfs );
+    SHMIMMONITORT_APP_LOGIC( Predictor );
     FRAMEGRABBER_APP_LOGIC;
     TELEMETER_APP_LOGIC;
 
-    SHMIMMONITORT_UPDATE_INDI( gainFactShmimMonitorT );
-    SHMIMMONITORT_UPDATE_INDI( multFactShmimMonitorT );
-    SHMIMMONITORT_UPDATE_INDI( pcGainFactShmimMonitorT );
-    SHMIMMONITORT_UPDATE_INDI( pcMultFactShmimMonitorT );
-    SHMIMMONITORT_UPDATE_INDI( acoeffShmimMonitorT );
-    SHMIMMONITORT_UPDATE_INDI( bcoeffShmimMonitorT );
-    SHMIMMONITORT_UPDATE_INDI( modevalShmimMonitorT );
+    SHMIMMONITORT_UPDATE_INDI( Gain );
+    SHMIMMONITORT_UPDATE_INDI( Mult );
+    SHMIMMONITORT_UPDATE_INDI( Limit );
+    SHMIMMONITORT_UPDATE_INDI( Zero );
+    SHMIMMONITORT_UPDATE_INDI( Feedback );
+    SHMIMMONITORT_UPDATE_INDI( Wfs );
+    SHMIMMONITORT_UPDATE_INDI( Predictor );
     FRAMEGRABBER_UPDATE_INDI;
 
-    if( m_loop )
-    {
-        updateSwitchIfChanged( m_indiP_loop, "toggle", pcf::IndiElement::On, INDI_OK );
-    }
-    else
-    {
-        updateSwitchIfChanged( m_indiP_loop, "toggle", pcf::IndiElement::Off, INDI_IDLE );
-    }
-
-    if( m_pcOn )
-    {
-        updateSwitchIfChanged( m_indiP_pcOn, "toggle", pcf::IndiElement::On, INDI_OK );
-    }
-    else
-    {
-        updateSwitchIfChanged( m_indiP_pcOn, "toggle", pcf::IndiElement::Off, INDI_IDLE );
+    bool  loop, pcActive, pcRequested, zeroPending;
+    float gain, mult, limit, pcGain, pcMult;
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_filtMutex );
+        loop        = m_loop;
+        pcActive    = m_pcActive;
+        pcRequested = m_pcRequested;
+        zeroPending = m_zeroRequested;
+        gain        = m_gain;
+        mult        = m_mult;
+        limit       = m_limit;
+        pcGain      = m_pcGain;
+        pcMult      = m_pcMult;
     }
 
-    updatesIfChanged<float>( m_indiP_gain, { "current", "target" }, { m_gain, m_gain } );
-    updatesIfChanged<float>( m_indiP_mult, { "current", "target" }, { m_mc, m_mc } );
-
-    updatesIfChanged<float>( m_indiP_pcGain, { "current", "target" }, { m_pcGain, m_pcGain } );
-    updatesIfChanged<float>( m_indiP_pcMult, { "current", "target" }, { m_pcMc, m_pcMc } );
-
+    updateSwitchIfChanged(
+        m_indiP_loop, "toggle", loop ? pcf::IndiElement::On : pcf::IndiElement::Off, loop ? INDI_OK : INDI_IDLE );
+    updateSwitchIfChanged( m_indiP_pcOn,
+                           "toggle",
+                           pcActive ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           pcActive ? INDI_OK : ( pcRequested ? INDI_BUSY : INDI_IDLE ) );
+    updateSwitchIfChanged( m_indiP_loopZero, "request", pcf::IndiElement::Off, zeroPending ? INDI_BUSY : INDI_IDLE );
+    updatesIfChanged<float>( m_indiP_gain, { "current", "target" }, { gain, gain } );
+    updatesIfChanged<float>( m_indiP_mult, { "current", "target" }, { mult, mult } );
+    updatesIfChanged<float>( m_indiP_limit, { "current", "target" }, { limit, limit } );
+    updatesIfChanged<float>( m_indiP_pcGain, { "current", "target" }, { pcGain, pcGain } );
+    updatesIfChanged<float>( m_indiP_pcMult, { "current", "target" }, { pcMult, pcMult } );
     return 0;
 }
 
 int modalFilter::appShutdown()
 {
-    SHMIMMONITORT_APP_SHUTDOWN( gainFactShmimMonitorT );
-    SHMIMMONITORT_APP_SHUTDOWN( multFactShmimMonitorT );
-    SHMIMMONITORT_APP_SHUTDOWN( pcGainFactShmimMonitorT );
-    SHMIMMONITORT_APP_SHUTDOWN( pcMultFactShmimMonitorT );
-    SHMIMMONITORT_APP_SHUTDOWN( acoeffShmimMonitorT );
-    SHMIMMONITORT_APP_SHUTDOWN( bcoeffShmimMonitorT );
-    SHMIMMONITORT_APP_SHUTDOWN( modevalShmimMonitorT );
+    m_ready.notify_all();
+    SHMIMMONITORT_APP_SHUTDOWN( Gain );
+    SHMIMMONITORT_APP_SHUTDOWN( Mult );
+    SHMIMMONITORT_APP_SHUTDOWN( Limit );
+    SHMIMMONITORT_APP_SHUTDOWN( Zero );
+    SHMIMMONITORT_APP_SHUTDOWN( Feedback );
+    SHMIMMONITORT_APP_SHUTDOWN( Wfs );
+    SHMIMMONITORT_APP_SHUTDOWN( Predictor );
     FRAMEGRABBER_APP_SHUTDOWN;
     TELEMETER_APP_SHUTDOWN;
-
     return 0;
 }
 
-int modalFilter::allocate( const gainFactShmimT &dummy )
+template <modalFilter::Stream stream>
+int modalFilter::allocate( Tag<stream> )
 {
-    static_cast<void>( dummy );
 
-    if( gainFactShmimMonitorT::m_height != 1 )
+    if( Monitor<stream>::m_dataType != _DATATYPE_FLOAT ||
+        ( stream != Stream::predictor && ( Monitor<stream>::m_height != 1 || Monitor<stream>::m_width == 0 ) ) ||
+        ( stream == Stream::predictor && !modalPredictor::validWidth( Monitor<stream>::m_width ) ) )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got gainFacts with height not 1" } );
+        return log<software_error, -1>( { "Invalid shape or datatype for " + Monitor<stream>::m_shmimName } );
     }
 
-    // If there's a size change we have to lock
-    if( gainFactShmimMonitorT::m_width != m_gainfacts.size() )
+    if constexpr( stream == Stream::wfs )
     {
-        std::shared_lock<std::shared_mutex> lock( m_filtMutex );
-
-        m_gainfacts.resize( gainFactShmimMonitorT::m_width );
-
-        checkSizes();
+        configureModes( Monitor<stream>::m_width );
     }
-
-    return 0;
-}
-
-int modalFilter::processImage( void *curr_src, const gainFactShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    // We just update without a lock.  Size change handled in allocate.
-    for( uint32_t n = 0; n < gainFactShmimMonitorT::m_width; ++n )
+    else if constexpr( stream == Stream::feedback )
     {
-        m_gainfacts[n] = reinterpret_cast<float *>( curr_src )[n];
+        std::lock_guard<std::mutex> lock( m_filtMutex );
+        m_feedbackCount.reset();
+        m_feedbackPending = false;
     }
 
     return 0;
 }
 
-int modalFilter::allocate( const multFactShmimT &dummy )
+template <modalFilter::Stream stream>
+int modalFilter::processImage( void *source, Tag<stream> )
 {
-    static_cast<void>( dummy );
+    const auto *md = Monitor<stream>::m_imageStream.md;
 
-    if( multFactShmimMonitorT::m_height != 1 )
+    if( __atomic_load_n( &md->write, __ATOMIC_ACQUIRE ) != 0 )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got multFacts with height not 1" } );
+        return 0;
     }
 
-    // If there's a size change we have to lock
-    if( multFactShmimMonitorT::m_width != m_multfacts.size() )
+    const uint64_t     count = Monitor<stream>::currCnt0();
+    const timespec     atime = Monitor<stream>::currAtime();
+    const size_t       size  = static_cast<size_t>( Monitor<stream>::m_width ) * Monitor<stream>::m_height;
+    const float       *data  = static_cast<const float *>( source );
+    std::vector<float> snapshot;
+
+    if constexpr( stream == Stream::wfs )
     {
-        std::shared_lock<std::shared_mutex> lock( m_filtMutex );
-
-        m_multfacts.resize( multFactShmimMonitorT::m_width );
-
-        checkSizes();
+        std::copy_n( data, size, m_input.modes.begin() );
+        m_input.count = count;
+        m_input.atime = atime;
+    }
+    else
+    {
+        snapshot.assign( data, data + size );
     }
 
-    return 0;
-}
-
-int modalFilter::processImage( void *curr_src, const multFactShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    // We just update without a lock.  Size change handled in allocate.
-    for( uint32_t n = 0; n < multFactShmimMonitorT::m_width; ++n )
+    std::atomic_thread_fence( std::memory_order_acquire );
+    if( __atomic_load_n( &md->write, __ATOMIC_ACQUIRE ) != 0 || Monitor<stream>::currCnt0() != count )
     {
-        m_multfacts[n] = reinterpret_cast<float *>( curr_src )[n];
+        return 0;
     }
 
-    return 0;
-}
-
-int modalFilter::allocate( const pcGainFactShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    if( pcGainFactShmimMonitorT::m_height != 1 )
+    if constexpr( stream == Stream::wfs )
     {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got pcGainFacts with height not 1" } );
+        enqueue( m_input );
     }
-
-    // If there's a size change we have to lock
-    if( pcGainFactShmimMonitorT::m_width != m_pcGainfacts.size() )
+    else if constexpr( stream == Stream::predictor )
     {
-        std::shared_lock<std::shared_mutex> lock( m_filtMutex );
-
-        m_pcGainfacts.resize( pcGainFactShmimMonitorT::m_width );
-
-        checkSizes();
-    }
-
-    return 0;
-}
-
-int modalFilter::processImage( void *curr_src, const pcGainFactShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    // We just update without a lock.  Size change handled in allocate.
-    for( uint32_t n = 0; n < pcGainFactShmimMonitorT::m_width; ++n )
-    {
-        m_pcGainfacts[n] = reinterpret_cast<float *>( curr_src )[n];
-    }
-
-    return 0;
-}
-
-int modalFilter::allocate( const pcMultFactShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    if( pcMultFactShmimMonitorT::m_height != 1 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got pcMultFacts with height not 1" } );
-    }
-
-    // If there's a size change we have to lock
-    if( pcMultFactShmimMonitorT::m_width != m_pcMultfacts.size() )
-    {
-        std::shared_lock<std::shared_mutex> lock( m_filtMutex );
-
-        m_pcMultfacts.resize( pcMultFactShmimMonitorT::m_width );
-
-        checkSizes();
-    }
-
-    return 0;
-}
-
-int modalFilter::processImage( void *curr_src, const pcMultFactShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    // We just update without a lock.  Size change handled in allocate.
-    for( uint32_t n = 0; n < pcMultFactShmimMonitorT::m_width; ++n )
-    {
-        m_pcMultfacts[n] = reinterpret_cast<float *>( curr_src )[n];
-    }
-
-    return 0;
-}
-
-int modalFilter::allocate( const acoeffShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    uint32_t w = acoeffShmimMonitorT::m_width;
-    uint32_t h = acoeffShmimMonitorT::m_height;
-
-    // If there's a size change we lock
-    if( w - 1 != m_as.rows() || h != m_as.cols() || h != m_Na.size() )
-    {
-        std::shared_lock<std::shared_mutex> lock( m_filtMutex );
-
-        m_Na.resize( h );
-        m_as.resize( w - 1, h );
-
-        checkSizes();
-    }
-
-    return 0;
-}
-
-int modalFilter::processImage( void *curr_src, const acoeffShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    uint32_t w = acoeffShmimMonitorT::m_width;
-    uint32_t h = acoeffShmimMonitorT::m_height;
-
-    eigenMap<float> ac( reinterpret_cast<float *>( curr_src ), w, h );
-
-    for( uint32_t cc = 0; cc < h; ++cc )
-    {
-        m_Na[cc] = ac( 0, cc );
-        for( uint32_t rr = 1; rr < w; ++rr )
+        if( count > 0 )
         {
-            m_as( rr - 1, cc ) = ac( rr, cc );
+            installPredictor( snapshot, Monitor<stream>::m_width, Monitor<stream>::m_height );
+        }
+    }
+    else
+    {
+        for( float value : snapshot )
+        {
+            if( !mx::math::isFinite( value ) || ( stream == Stream::limit && value < 0 ) )
+            {
+                return 0;
+            }
+        }
+
+        std::lock_guard<std::mutex> lock( m_filtMutex );
+        if constexpr( stream == Stream::feedback )
+        {
+            if( count == 0 || m_feedbackCount == count )
+            {
+                return 0;
+            }
+
+            m_feedbackCount   = count;
+            m_feedbackPending = true;
+        }
+
+        m_parameters[static_cast<size_t>( stream )].swap( snapshot );
+
+        if constexpr( stream == Stream::zero )
+        {
+            if( m_parameters[static_cast<size_t>( stream )] != snapshot )
+            {
+                resetHistory();
+            }
         }
     }
 
-    std::cerr << "Got pc a-coeffs.  Mode 0 has " << m_Na[0] << '\n';
-
     return 0;
 }
 
-int modalFilter::allocate( const bcoeffShmimT &dummy )
+void modalFilter::configureModes( size_t modes )
 {
-    static_cast<void>( dummy );
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_filtMutex );
+        if( modes != m_modevalSz )
+        {
+            m_modevalSz = modes;
+            m_command.assign( modes, 0 );
+            m_input.modes.resize( modes );
+            for( auto &sample : m_pending )
+            {
+                sample.modes.resize( modes );
+            }
 
-    uint32_t w = bcoeffShmimMonitorT::m_width;
-    uint32_t h = bcoeffShmimMonitorT::m_height;
+            m_wfsHistory.resize( modes, modalPredictor::maxTaps );
+            m_dmHistory.resize( modes, modalPredictor::maxTaps );
+            frameGrabberT::m_reconfig = true;
+        }
 
-    // If there's a size change we lock
-    if( w - 1 != m_bs.rows() || h != m_bs.cols() || h != m_Nb.size() )
+        m_head         = 0;
+        m_pendingCount = 0;
+        m_queueGap     = false;
+        resetHistory();
+    }
+    m_ready.notify_all();
+}
+
+void modalFilter::enqueue( Sample &sample )
+{
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_filtMutex );
+        if( !m_loop || sample.modes.size() != m_modevalSz )
+        {
+            return;
+        }
+
+        if( m_pendingCount == m_pending.size() )
+        {
+            m_head = ( m_head + 1 ) % m_pending.size();
+            --m_pendingCount;
+            m_queueGap = true;
+        }
+
+        auto &pending = m_pending[( m_head + m_pendingCount ) % m_pending.size()];
+        std::swap( pending, sample );
+        ++m_pendingCount;
+    }
+    m_ready.notify_one();
+}
+
+void modalFilter::resetHistory()
+{
+    m_historyNext  = 0;
+    m_historyCount = 0;
+    m_haveCount    = false;
+    m_pcActive     = false;
+}
+
+bool modalFilter::installPredictor( std::vector<float> &data, size_t width, size_t modes )
+{
+    if( !modalPredictor::validWidth( width ) || data.size() / width != modes || data.size() % width != 0 )
     {
-        std::shared_lock<std::shared_mutex> lock( m_filtMutex );
-
-        m_Nb.resize( h );
-        m_bs.resize( w - 1, h );
-
-        checkSizes();
+        return false;
     }
 
-    std::cerr << "Got pc b-coeffs.  Mode 0 has " << m_Nb[0] << '\n';
+    std::vector<modalPredictor::Mode> decoded( modes );
+    size_t                            needed = 0;
 
-    return 0;
-}
-
-int modalFilter::processImage( void *curr_src, const bcoeffShmimT &dummy )
-{
-    static_cast<void>( dummy );
-
-    uint32_t w = bcoeffShmimMonitorT::m_width;
-    uint32_t h = bcoeffShmimMonitorT::m_height;
-
-    eigenMap<float> bc( reinterpret_cast<float *>( curr_src ), w, h );
-
-    for( uint32_t cc = 0; cc < h; ++cc )
+    for( size_t n = 0; n < modes; ++n )
     {
-        m_Nb[cc] = bc( 0, cc );
-        for( uint32_t rr = 1; rr < w; ++rr )
+        auto &mode = decoded[n];
+        if( !modalPredictor::decode( mode, { data.data() + n * width, width } ) )
         {
-            m_bs( rr - 1, cc ) = bc( rr, cc );
+            return false;
+        }
+
+        if( mode.enabled() )
+        {
+            needed = std::max( { needed, mode.a.size(), mode.b.size() - 1 } );
         }
     }
-    return 0;
+
+    std::lock_guard<std::mutex> lock( m_filtMutex );
+    m_predictorData.swap( data );
+    m_predictorModes.swap( decoded );
+    m_historyNeeded = needed;
+    return true;
 }
 
-int modalFilter::allocate( const modevalShmimT &dummy )
+float modalFilter::parameter( Stream stream, size_t mode, float initial ) const
 {
-    static_cast<void>( dummy );
-
-    if( modevalShmimMonitorT::m_height != 1 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__, "got modevals with height not 1" } );
-    }
-
-    if( modevalShmimMonitorT::m_width != m_modevalSz ) // This invalidates the whole c.b.
-    {
-        std::shared_lock<std::shared_mutex> lock( m_filtMutex );
-
-        m_modevalSz = modevalShmimMonitorT::m_width;
-        m_modevalWFS.maxEntries( m_modevalCBLength );
-        m_modevalDM.maxEntries( m_modevalCBLength );
-
-        checkSizes();
-    }
-
-    std::cerr << "Allocated modevals: " << modevalShmimMonitorT::m_width << " x " << modevalShmimMonitorT::m_height
-              << '\n';
-    return 0;
+    const auto &values = m_parameters[static_cast<size_t>( stream )];
+    return values.size() == m_modevalSz ? values[mode] : initial;
 }
 
-int modalFilter::processImage( void *curr_src, const modevalShmimT &dummy )
+void modalFilter::filter( const Sample &sample )
 {
-    static_cast<void>( dummy );
-
-    clock_gettime( CLOCK_ISIO, &m_atime );
-
-    float *F = reinterpret_cast<float *>( curr_src );
-
-    m_modevalWFS.nextEntry( std::vector<float>( F, F + m_modevalSz ) );
-
-    // Now tell the writer to get going
-    if( sem_post( &m_filtSem ) < 0 )
+    if( m_queueGap || ( m_haveCount && sample.count != m_lastCount + 1 ) )
     {
-        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "Error posting to filter semaphore" } );
+        resetHistory();
+        m_queueGap = false;
     }
 
-    return 0;
+    m_lastCount = sample.count;
+    m_haveCount = true;
+
+    if( m_feedbackPending )
+    {
+        const auto &feedback = m_parameters[static_cast<size_t>( Stream::feedback )];
+        if( feedback.size() == m_modevalSz )
+        {
+            std::copy( feedback.begin(), feedback.end(), m_command.begin() );
+            m_historyCount = 0;
+        }
+
+        m_feedbackPending = false;
+    }
+
+    constexpr size_t length = modalPredictor::maxTaps;
+    m_pcActive              = m_pcRequested && m_historyNeeded != 0 && m_historyCount >= m_historyNeeded &&
+                 m_predictorModes.size() == m_modevalSz;
+    const size_t current = m_historyNext;
+
+    for( size_t n = 0; n < m_modevalSz; ++n )
+    {
+        const double error         = static_cast<double>( parameter( Stream::zero, n, 0 ) ) - sample.modes[n];
+        const float  gain          = m_gain * parameter( Stream::gain, n, 1 );
+        const float  mult          = m_mult * parameter( Stream::mult, n, 1 );
+        const float  bound         = m_limit * parameter( Stream::limit, n, 1 );
+        const float  command       = error * gain + m_command[n] * mult;
+        m_command[n]               = std::clamp( command, -bound, bound );
+        m_wfsHistory( n, current ) = error;
+    }
+
+    if( m_pcActive )
+    {
+        for( size_t n = 0; n < m_modevalSz; ++n )
+        {
+            const auto &mode = m_predictorModes[n];
+            if( !mode.enabled() )
+            {
+                continue;
+            }
+
+            float wfs = mode.b[0] * m_wfsHistory( n, current );
+            float dm  = 0;
+
+            for( size_t tap = 1; tap < mode.b.size(); ++tap )
+            {
+                wfs += mode.b[tap] * m_wfsHistory( n, ( current + length - tap ) % length );
+            }
+
+            for( size_t tap = 0; tap < mode.a.size(); ++tap )
+            {
+                dm += mode.a[tap] * m_dmHistory( n, ( current + length - 1 - tap ) % length );
+            }
+
+            const float command = m_pcGain * mode.gain * wfs + m_pcMult * mode.mult * dm;
+            const float bound   = m_limit * parameter( Stream::limit, n, 1 );
+            m_command[n]        = std::clamp( command, -bound, bound );
+        }
+    }
+
+    std::copy( m_command.begin(), m_command.end(), m_dmHistory.col( current ).data() );
+    m_historyNext  = ( current + 1 ) % length;
+    m_historyCount = std::min( m_historyCount + 1, length );
 }
 
 int modalFilter::configureAcquisition()
 {
-
-    while( ( modevalShmimMonitorT::m_width < 1 || modevalShmimMonitorT::m_height != 1 ) && !m_shutdown )
+    std::unique_lock<std::mutex> lock( m_filtMutex );
+    while( m_modevalSz == 0 && !shutdown() )
     {
-        sleep( 1 );
+        m_ready.wait_for( lock, std::chrono::seconds( 1 ) );
     }
 
-    frameGrabberT::m_width    = modevalShmimMonitorT::m_width;
-    frameGrabberT::m_height   = modevalShmimMonitorT::m_height;
-    frameGrabberT::m_dataType = _DATATYPE_FLOAT;
+    if( shutdown() )
+    {
+        return -1;
+    }
 
+    frameGrabberT::m_width    = m_modevalSz;
+    frameGrabberT::m_height   = 1;
+    frameGrabberT::m_dataType = _DATATYPE_FLOAT;
+    m_output.resize( m_modevalSz );
     return 0;
 }
 
 float modalFilter::fps()
 {
-    return m_fps;
+    return m_fps.load();
 }
 
 int modalFilter::startAcquisition()
@@ -951,130 +784,60 @@ int modalFilter::startAcquisition()
 
 int modalFilter::acquireAndCheckValid()
 {
-    timespec ts;
+    std::unique_lock<std::mutex> lock( m_filtMutex );
+    m_ready.wait_for( lock,
+                      std::chrono::seconds( 1 ),
+                      [&]
+                      {
+                          return m_pendingCount > 0 || m_zeroRequested || shutdown() || frameGrabberT::m_reconfig;
+                      } );
 
-    XWC_SEM_WAIT_TS( ts, 1, 0 );
-
-    if( sem_timedwait( &m_filtSem, &ts ) != 0 )
+    if( shutdown() || frameGrabberT::m_reconfig || m_modevalSz == 0 || m_output.size() != m_modevalSz )
     {
-        /* Check for why we timed out */
-        /* EINTER probably indicates time to shutdown, loop will exit if m_shutdown is set */
-        /* ETIMEDOUT just means keep waiting */
-        if( errno == EINTR || errno == ETIMEDOUT )
-        {
-            return 1;
-        }
+        return 1;
+    }
 
-        /*Otherwise, report an error.*/
-        return log<software_error, -1>( { __FILE__, __LINE__, errno, "sem_timedwait" } );
+    if( m_zeroRequested )
+    {
+        m_zeroRequested   = false;
+        m_feedbackPending = false;
+        resetHistory();
+        std::fill( m_command.begin(), m_command.end(), 0 );
+        clock_gettime( CLOCK_ISIO, &this->m_currImageTimestamp );
     }
     else
     {
-        std::unique_lock<std::shared_mutex> lock( m_filtMutex ); // gotta be the only one
-
-        if( !m_sizesMatch )
+        if( !m_loop || m_pendingCount == 0 )
         {
             return 1;
         }
 
-        m_modevalDM.nextEntry();               // move to the next entry without modifying what is there
-        m_modevalDM[-1].resize( m_modevalSz ); // needed while growing, no-op once grown
-        if( !m_loop )
+        const auto &sample = m_pending[m_head];
+        m_head             = ( m_head + 1 ) % m_pending.size();
+        --m_pendingCount;
+
+        if( m_haveCount && sample.count == m_lastCount )
         {
-            for( uint32_t mode = 0; mode < m_modevalSz; ++mode )
-            {
-                m_modevalDM[-1][mode] = 0;
-            }
-            return 1; // we update the cbuff but we don't push to the DM
+            return 1;
         }
-        else
-        {
-            if( !m_pcOn )
-            {
-                for( uint32_t mode = 0; mode < m_modevalSz; ++mode )
-                {
-                    // index [0] is 1the latest entry in the circular buffer
-                    m_modevalDM[-1][mode] = -1.0 * m_gain * m_gainfacts[mode] * m_modevalWFS[-1][mode] +
-                                            m_mc * m_multfacts[mode] * m_modevalDM[-2][mode];
-                }
-            }
-            else
-            {
-                for( uint32_t mode = 0; mode < m_modevalSz; ++mode )
-                {
-                    float a = 0;
-                    float b = 0;
-                    for(int c = 0; c < m_Na[mode]; ++c)
-                    {
-                        a += m_as(c,mode)*m_modevalWFS[-1-c][mode];
-                    }
 
-                    for(int c = 0; c < m_Nb[mode]; ++c)
-                    {
-                        b += m_bs(c,mode)*m_modevalDM[-2-c][mode];
-                    }
-
-                    a = m_modevalWFS[-1][mode];
-                    b = m_modevalDM[-2][mode];
-                    m_modevalDM[-1][mode] = -1.0 * m_pcGain * m_pcGainfacts[mode] * a +
-                                            m_pcMc * m_pcMultfacts[mode] * b;
-                }
-            }
-
-            frameGrabberT::m_currImageTimestamp = m_atime;
-        }
+        filter( sample );
+        frameGrabberT::m_currImageTimestamp = sample.atime;
     }
 
+    std::copy( m_command.begin(), m_command.end(), m_output.begin() );
     return 0;
 }
 
 int modalFilter::loadImageIntoStream( void *dest )
 {
-
-    memcpy( dest, m_modevalDM[-1].data(), m_modevalDM[-1].size() * sizeof( float ) );
-
+    std::memcpy( dest, m_output.data(), m_output.size() * sizeof( float ) );
     return 0;
 }
 
 int modalFilter::reconfig()
 {
     return 0;
-}
-
-void modalFilter::checkSizes()
-{
-    m_sizesMatch   = true;
-    m_pcSizesMatch = true;
-
-    if( m_gainfacts.size() != m_modevalSz )
-    {
-        m_sizesMatch = false;
-    }
-
-    if( m_multfacts.size() != m_modevalSz )
-    {
-        m_sizesMatch = false;
-    }
-
-    if( static_cast<size_t>( m_as.cols() ) != m_modevalSz )
-    {
-        m_pcSizesMatch = false;
-    }
-
-    if( static_cast<size_t>( m_bs.cols() ) != m_modevalSz )
-    {
-        m_pcSizesMatch = false;
-    }
-
-    if( m_modevalWFS.size() != m_modevalCBLength )
-    {
-        m_pcSizesMatch = false;
-    }
-
-    if( m_modevalDM.size() != m_modevalCBLength )
-    {
-        m_pcSizesMatch = false;
-    }
 }
 
 int modalFilter::checkRecordTimes()
@@ -1091,26 +854,23 @@ INDI_SETCALLBACK_DEFN( modalFilter, m_indiP_fpsSource )( const pcf::IndiProperty
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_fpsSource, ipRecv );
 
-    if( ipRecv.find( m_fpsElement ) != true ) // this isn't valid
+    if( ipRecv.find( m_fpsElement ) )
     {
-        log<software_error>( { __FILE__, __LINE__, "No current property in fps source." } );
-        return 0;
-    }
-
-    std::lock_guard<std::mutex> guard( m_indiMutex );
-
-    float fps = ipRecv[m_fpsElement].get<float>();
-
-    if( fabs( fps - m_fps ) > m_fpsTol )
-    {
-        m_fps = fps;
-        log<text_log>( "set fps to " + std::to_string( m_fps ), logPrio::LOG_NOTICE );
-        frameGrabberT::m_reconfig = true;
+        const float received = ipRecv[m_fpsElement].get<float>();
+        if( mx::math::isFinite( received ) && received > 0 && std::abs( received - m_fps.load() ) > m_fpsTol )
+        {
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( m_filtMutex );
+                m_fps = received;
+                resetHistory();
+                frameGrabberT::m_reconfig = true;
+            }
+            m_ready.notify_all();
+        }
     }
 
     return 0;
-
-} // INDI_SETCALLBACK_DEFN(modalFilter, m_indiP_fpsSource)
+}
 
 INDI_NEWCALLBACK_DEFN( modalFilter, m_indiP_loop )( const pcf::IndiProperty &ipRecv )
 {
@@ -1118,22 +878,39 @@ INDI_NEWCALLBACK_DEFN( modalFilter, m_indiP_loop )( const pcf::IndiProperty &ipR
 
     if( ipRecv.find( "toggle" ) )
     {
-        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+        const bool                  close = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+        std::lock_guard<std::mutex> lock( m_filtMutex );
+        if( close != m_loop )
         {
-            if( !m_loop )
+            m_loop         = close;
+            m_pendingCount = 0;
+            m_queueGap     = false;
+            resetHistory();
+            if( close )
             {
                 log<loop_closed>();
             }
-            m_loop = true;
-        }
-        else
-        {
-            if( m_loop )
+            else
             {
                 log<loop_open>();
             }
-            m_loop = false;
         }
+    }
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( modalFilter, m_indiP_loopZero )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loopZero, ipRecv );
+
+    if( ipRecv.find( "request" ) && ipRecv["request"].getSwitchState() == pcf::IndiElement::On )
+    {
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_filtMutex );
+            m_zeroRequested = true;
+        }
+        m_ready.notify_one();
     }
 
     return 0;
@@ -1142,71 +919,72 @@ INDI_NEWCALLBACK_DEFN( modalFilter, m_indiP_loop )( const pcf::IndiProperty &ipR
 INDI_NEWCALLBACK_DEFN( modalFilter, m_indiP_gain )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_gain, ipRecv );
-
-    float target;
-    if( indiTargetUpdate( m_indiP_gain, target, ipRecv, true ) < 0 )
+    float target = 0;
+    if( indiTargetUpdate( m_indiP_gain, target, ipRecv, true ) < 0 || !mx::math::isFinite( target ) || target < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
         return -1;
     }
 
+    std::lock_guard<std::mutex> lock( m_filtMutex );
     m_gain = target;
-
-    std::cerr << "Got global gain: " << m_gain << '\n';
-
     return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( modalFilter, m_indiP_mult )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_mult, ipRecv );
-
-    float target;
-    if( indiTargetUpdate( m_indiP_mult, target, ipRecv, true ) < 0 )
+    float target = 0;
+    if( indiTargetUpdate( m_indiP_mult, target, ipRecv, true ) < 0 || !mx::math::isFinite( target ) || target < 0 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
         return -1;
     }
 
-    m_mc = target;
+    std::lock_guard<std::mutex> lock( m_filtMutex );
+    m_mult = target;
+    return 0;
+}
 
-    std::cerr << "Got global mc: " << m_mc << '\n';
+INDI_NEWCALLBACK_DEFN( modalFilter, m_indiP_limit )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_limit, ipRecv );
+    float target = 0;
+    if( indiTargetUpdate( m_indiP_limit, target, ipRecv, true ) < 0 || !mx::math::isFinite( target ) || target < 0 )
+    {
+        return -1;
+    }
 
+    std::lock_guard<std::mutex> lock( m_filtMutex );
+    m_limit = target;
     return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( modalFilter, m_indiP_pcGain )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_pcGain, ipRecv );
-
-    float target;
-    if( indiTargetUpdate( m_indiP_pcGain, target, ipRecv, true ) < 0 )
+    float target = 0;
+    if( indiTargetUpdate( m_indiP_pcGain, target, ipRecv, true ) < 0 || !mx::math::isFinite( target ) || target < 0 ||
+        target > 1 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
         return -1;
     }
 
+    std::lock_guard<std::mutex> lock( m_filtMutex );
     m_pcGain = target;
-
-    std::cerr << "Got global pc gain: " << m_pcGain << '\n';
     return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( modalFilter, m_indiP_pcMult )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_pcMult, ipRecv );
-
-    float target;
-    if( indiTargetUpdate( m_indiP_pcMult, target, ipRecv, true ) < 0 )
+    float target = 0;
+    if( indiTargetUpdate( m_indiP_pcMult, target, ipRecv, true ) < 0 || !mx::math::isFinite( target ) || target < 0 ||
+        target > 1 )
     {
-        log<software_error>( { __FILE__, __LINE__ } );
         return -1;
     }
 
-    m_pcMc = target;
-
-    std::cerr << "Got global pc mc: " << m_mc << '\n';
-
+    std::lock_guard<std::mutex> lock( m_filtMutex );
+    m_pcMult = target;
     return 0;
 }
 
@@ -1216,21 +994,17 @@ INDI_NEWCALLBACK_DEFN( modalFilter, m_indiP_pcOn )( const pcf::IndiProperty &ipR
 
     if( ipRecv.find( "toggle" ) )
     {
-        if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
+        std::lock_guard<std::mutex> lock( m_filtMutex );
+        m_pcRequested = ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On;
+        if( !m_pcRequested )
         {
-
-            m_pcOn = true;
-        }
-        else
-        {
-            m_pcOn = false;
+            m_pcActive = false;
         }
     }
 
     return 0;
 }
 
-} // namespace app
-} // namespace MagAOX
+} // namespace MagAOX::app
 
 #endif // modalFilter_hpp
