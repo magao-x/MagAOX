@@ -111,6 +111,10 @@ struct ddspcLimitFactShmimT
  * Main-loop route (ddspc_mode main_loop; agents/plans/2026-11/ddspc-main-loop-route.md), as the original loPredCtrl:
  * the standard fit at the WFS rate, whose delta replaces modes 0 and 1 of the modal output after each decision, so the
  * main loop's mfilt integrates it. The own DM channel is never requested, and the fit trains on the published deltas.
+ *
+ * mfilt copy (ddspc_mode mfilt_copy; agents/plans/2026-11/ddspc-mfilt-copy.md): no DDSPC. While predict is on, the main
+ * loop's tip/tilt integrator is reproduced with its own parameters, s = clamp(mult*s - gain*y, +/-limit), and written
+ * to the own DM channel like a standard command, while modes 0 and 1 of the modal output are zero. Nothing learns.
  */
 class loPredCtrlAcc_operational : public MagAOXApp<true>,
                                   public dev::shmimMonitor<loPredCtrlAcc_operational>,
@@ -498,6 +502,11 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
     /// A main-loop route decision was not finite while predicting; appLogic stops prediction and logs it.
     std::atomic<bool> m_mainLoopFault{ false };
+
+    /// ddspc_mode mfilt_copy: no DDSPC; the main loop's tip/tilt integrator runs on the WFS measurement and its state
+    /// is written to the own DM channel while modes 0 and 1 of this output are zero. Changed only while the own
+    /// channel's removal is confirmed, under m_indiMutex and m_modelMutex.
+    std::atomic<bool> m_mfiltCopy{ false };
     /// @}
 
     /// Load the existing calibration or selected finite masked cube planes; derive the request projection by QR.
@@ -1137,7 +1146,7 @@ inline void loPredCtrlAcc_operational::applyTraining()
 {
     const bool assisted = m_mode.load() == DDSPC::ShadowMode::AccelAssisted;
     const bool learning = m_learning && m_fillHoldoff == 0; // Never learn from examples containing filled values.
-    m_models->training( DDSPC::ShadowMode::Standard, learning && !assisted );
+    m_models->training( DDSPC::ShadowMode::Standard, learning && !assisted && !m_mfiltCopy.load() ); // Copy: no fit.
     m_models->training( DDSPC::ShadowMode::AccelAssisted, false );
     m_multirate->training( learning && assisted );
 }
@@ -1677,7 +1686,8 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
         m_pending.m_appliedCommand = input;
     }
 
-    const bool mainLoop = m_mainLoop.load();
+    const bool mainLoop  = m_mainLoop.load();
+    const bool mfiltCopy = m_mfiltCopy.load();
     if( mainLoop )
     {
         mainLoopInput(); // The tip/tilt the main loop received, not the own channel's copies.
@@ -1690,7 +1700,7 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
     {
         return stepAssisted( measurement, counter, features, assistedValid, slots, ordinal, now );
     }
-    const bool probing = m_predicting && m_learning && !m_exploration.empty() &&
+    const bool probing = !mfiltCopy && m_predicting && m_learning && !m_exploration.empty() &&
                          ( selected == DDSPC::ShadowMode::Standard || assistedValid );
     if( probing )
         m_models->regularization( m_exploration.front().m_lambda );
@@ -1752,6 +1762,11 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
             }
         }
     }
+    if( mfiltCopy )
+    {
+        plan = measurement.replicate( 1, plan.cols() ); // mfilt's own input: the WFS measurement, no DDSPC.
+    }
+
     if( mainLoop )
     {
         // Main-loop route, as loPredCtrl: this frame's delta replaces modes 0 and 1 of the modal output and mfilt
@@ -1767,12 +1782,12 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
         plan.setZero();
         m_intState.setZero();
     }
-    else if( !m_predicting || numericalFault )
+    else if( !m_predicting || ( numericalFault && !mfiltCopy ) )
     {
         plan.setZero();
         m_intState.setZero(); // Prediction always restarts from the confirmed own-channel zero.
     }
-    else if( m_integrate && plan.allFinite() )
+    else if( ( m_integrate || mfiltCopy ) && plan.allFinite() )
     {
         // mfilt with the main loop's parameters: the first column is this frame's delta, and the state is held on
         // every slot until the next decision. Without the parameters the output is inhibited (outputValid).
@@ -1803,8 +1818,9 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
             m_planBase = ordinal;
         }
         m_assistedValid.store( assistedValid );
-        m_candidateValid.store( finite && !numericalFault &&
-                                ( !m_predicting || selectedReady || probing || ( m_learning && m_gain != 0 ) ) );
+        m_candidateValid.store(
+            finite && ( !numericalFault || mfiltCopy ) &&
+            ( !m_predicting || selectedReady || probing || ( m_learning && m_gain != 0 ) || mfiltCopy ) );
         m_wfsReceipt.store( now );
         m_inputValid.store( true );
     }
@@ -1915,7 +1931,7 @@ inline bool loPredCtrlAcc_operational::outputValid() const
     const bool assisted = m_mode != DDSPC::ShadowMode::Standard;
 
     const char *reason = !m_inputValid.load()                                          ? "wfs_invalid"
-                         : m_integrate && !m_integratorReady.load()                    ? "integrator_parameters"
+                         : ( m_integrate || m_mfiltCopy ) && !m_integratorReady.load() ? "integrator_parameters"
                          : !m_candidateValid.load()                                    ? "command_invalid"
                          : last < 0 || now < last || now - last > m_inputTimeout * 1e9 ? "wfs_stale"
                          : assisted && !m_assistedValid.load()                         ? "acc_window"
@@ -2531,7 +2547,7 @@ inline int loPredCtrlAcc_operational::setupINDI()
         return -1;
     }
     createStandardIndiSelectionSw(
-        m_indiP_mode, "ddspc_mode", { "standard", "accel_assisted", "main_loop" }, "Mode", "DDSPC" );
+        m_indiP_mode, "ddspc_mode", { "standard", "accel_assisted", "main_loop", "mfilt_copy" }, "Mode", "DDSPC" );
     m_indiP_mode["standard"].setSwitchState( pcf::IndiElement::On );
     if( registerIndiPropertyNew( m_indiP_mode, INDI_NEWCALLBACK( m_indiP_mode ) ) < 0 )
         return -1;
@@ -2815,6 +2831,7 @@ inline int loPredCtrlAcc_operational::appLogic()
     const bool selected      = m_mode.load() == DDSPC::ShadowMode::Standard;
     const bool selectedReady = selected ? standard.m_ready : assisted.m_ready;
     const bool mainLoop      = m_mainLoop.load();
+    const bool mfiltCopy     = m_mfiltCopy.load();
     const bool locked = m_syncLocked.load(), samples = m_assistedValid.load();
     // Every failing assisted-mode condition, in dependence order; the first is reported as assisted_state.
     std::string blockers;
@@ -2865,18 +2882,19 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      "standard_state",
                                      "assisted_state",
                                      "main_loop_tt" },
-                                   { mainLoop   ? "main_loop"
-                                     : selected ? "standard"
-                                                : "accel_assisted",
+                                   { mainLoop    ? "main_loop"
+                                     : mfiltCopy ? "mfilt_copy"
+                                     : selected  ? "standard"
+                                                 : "accel_assisted",
                                      standard.m_ready && fresh ? "true" : "false",
                                      assisted.m_ready && fresh && samples && locked ? "true" : "false",
                                      learning ? "true" : "false",
-                                     !predicting             ? "off"
-                                     : mainLoop              ? ( selectedReady ? "active" : "warming" )
-                                     : !valid                ? "inhibited"
-                                     : !selectedReady        ? "warming"
-                                     : output.m_acknowledged ? "active"
-                                                             : "awaiting_copy",
+                                     !predicting                    ? "off"
+                                     : mainLoop                     ? ( selectedReady ? "active" : "warming" )
+                                     : !valid                       ? "inhibited"
+                                     : !selectedReady && !mfiltCopy ? "warming"
+                                     : output.m_acknowledged        ? "active"
+                                                                    : "awaiting_copy",
                                      locked ? "true" : "false",
                                      !fresh             ? "awaiting_wfs"
                                      : standard.m_ready ? "ready"
@@ -3068,7 +3086,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
     const bool                  enabled = value == pcf::IndiElement::On;
     std::lock_guard<std::mutex> indiLock( m_indiMutex );
     std::lock_guard<std::mutex> modelLock( m_modelMutex );
-    const bool                  mainLoop = m_mainLoop.load();
+    const bool                  mainLoop = m_mainLoop.load(), mfiltCopy = m_mfiltCopy.load();
     if( enabled && !m_predicting )
     { //mutex scope
         std::lock_guard<std::mutex> commandLock( m_commandMutex );
@@ -3082,11 +3100,11 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
     {
         refused = "the assisted fit learned without upstream lock; reset the models";
     }
-    else if( enabled && m_integrate && !mainLoop && !m_integratorReady.load() )
+    else if( enabled && ( m_integrate || mfiltCopy ) && !mainLoop && !m_integratorReady.load() )
     {
         refused = "the main loop's integrator parameters have not been received";
     }
-    else if( enabled && !selectedReady() && !( m_learning && ( m_gain != 0 || !m_exploration.empty() ) ) )
+    else if( enabled && !mfiltCopy && !selectedReady() && !( m_learning && ( m_gain != 0 || !m_exploration.empty() ) ) )
     {
         refused = "the selected model is not ready, and learning is off or has neither gain nor exploration";
     }
@@ -3144,7 +3162,11 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_learnStd )( con
     }
     const bool  mainLoop = m_mainLoop.load();
     std::string refused;
-    if( enabled && m_integrate && !mainLoop && !m_integratorReady.load() )
+    if( enabled && m_mfiltCopy.load() )
+    {
+        refused = "mfilt_copy runs no DDSPC model";
+    }
+    else if( enabled && m_integrate && !mainLoop && !m_integratorReady.load() )
     {
         refused = "the main loop's integrator parameters have not been received";
     }
@@ -3256,12 +3278,14 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
     {
         return -1;
     }
-    unsigned          selected = 0;
-    DDSPC::ShadowMode mode     = DDSPC::ShadowMode::Standard;
-    bool              mainLoop = false; // main_loop is the standard fit, delivered through the main loop's mfilt.
+    unsigned          selected  = 0;
+    DDSPC::ShadowMode mode      = DDSPC::ShadowMode::Standard;
+    bool              mainLoop  = false; // main_loop is the standard fit, delivered through the main loop's mfilt.
+    bool              mfiltCopy = false; // mfilt_copy runs the main loop's tip/tilt integrator on the own channel.
     for( const auto &entry : ipRecv.getElements() )
     {
-        if( entry.first != "standard" && entry.first != "accel_assisted" && entry.first != "main_loop" )
+        if( entry.first != "standard" && entry.first != "accel_assisted" && entry.first != "main_loop" &&
+            entry.first != "mfilt_copy" )
         {
             return -1;
         }
@@ -3270,6 +3294,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
             ++selected;
             mode     = entry.first == "accel_assisted" ? DDSPC::ShadowMode::AccelAssisted : DDSPC::ShadowMode::Standard;
             mainLoop = entry.first == "main_loop";
+            mfiltCopy = entry.first == "mfilt_copy";
         }
         else if( entry.second.getSwitchState() != pcf::IndiElement::Off )
         {
@@ -3288,13 +3313,14 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
 
     m_mode.store( mode );
     m_mainLoop.store( mainLoop );
+    m_mfiltCopy.store( mfiltCopy );
     m_mainLoopKnown = false;
     m_predicting    = false;
     applyTraining();
     updateSwitchIfChanged( m_indiP_mode,
                            "standard",
-                           mode == DDSPC::ShadowMode::Standard && !mainLoop ? pcf::IndiElement::On
-                                                                            : pcf::IndiElement::Off,
+                           mode == DDSPC::ShadowMode::Standard && !mainLoop && !mfiltCopy ? pcf::IndiElement::On
+                                                                                          : pcf::IndiElement::Off,
                            INDI_OK );
     updateSwitchIfChanged( m_indiP_mode,
                            "accel_assisted",
@@ -3302,6 +3328,8 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
                            INDI_OK );
     updateSwitchIfChanged(
         m_indiP_mode, "main_loop", mainLoop ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
+    updateSwitchIfChanged(
+        m_indiP_mode, "mfilt_copy", mfiltCopy ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
     return 0;
 }
 
