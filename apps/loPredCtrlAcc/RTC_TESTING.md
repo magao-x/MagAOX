@@ -158,10 +158,10 @@ setINDI -s 'loPredCtrlAcc.predict.toggle=On'
 getINDI 'loPredCtrlAcc.ddspc_control.*' 'loPredCtrlAcc.ddspc_performance.*' 'loPredCtrlAcc.safety.*'
 ```
 
-The triples are loPredCtrl's original sequence: WFS frames, Gaussian standard deviation in modal command units, and regularization. Use the middle value that matches the deployed modal scale. `setINDI -s 'loPredCtrlAcc.learn_std.toggle=On'` installs `1000,0.05,100,1000,0.05,3,1000,0.05,0.1` and enables learning and prediction together. During the 3,000-frame sequence (1.5 s), `prediction=warming` shows probe or feedback commands. Learning continues after the sequence ends, and the final stage's regularization (0.1) stays in use until `reset_model`. When `standard_ready=true`, freeze the fit and measure:
+The triples are loPredCtrl's original sequence: WFS frames, Gaussian standard deviation in modal command units, and regularization. Use the middle value that matches the deployed modal scale. `setINDI -s 'loPredCtrlAcc.learn_std.toggle=On'` installs `1000,0.05,100,1000,0.05,3,1000,0.05,0.1,1000,0,0.1` and enables learning and prediction together: loPredCtrl's three stages, then 1000 frames of learning without probes. During the 4,000-frame sequence (2 s), `prediction=warming` shows probe or feedback commands. When the last stage ends, `learn` and `learn_std` turn off by themselves and prediction continues with the frozen fit; the log notes "DDSPC standard learning sequence finished". The final regularization (0.1) stays in use until `reset_model`. Learning turned on by hand (`learn`) is never stopped by an exploration sequence. Check that learning has stopped and the fit is ready, then measure:
 
 ```bash
-setINDI -s 'loPredCtrlAcc.learn.toggle=Off'
+getINDI 'loPredCtrlAcc.ddspc_control.*'   # learning=false, standard_ready=true
 # measure 60 s with the standard correction applied
 setINDI -s 'loPredCtrlAcc.predict.toggle=Off'
 getINDI 'loPredCtrlAcc.safety.*'   # wait for zero_confirmed=true before changing mode
