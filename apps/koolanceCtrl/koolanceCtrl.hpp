@@ -8,6 +8,11 @@
 #define koolanceCtrl_hpp
 
 
+#include <charconv>
+#include <chrono>
+#include <deque>
+#include <utility>
+
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -48,13 +53,23 @@ protected:
      *@{
      */
 
-   //here add parameters which will be config-able at runtime
+   /// Length in seconds of the rolling INDI flow average. Zero publishes each reading directly.
+   int m_flowAverageSeconds{60};
 
    ///@}
 
    size_t m_protocolChars {0}; ///< Will be set to 43 if protocol 1, and set to 51 if protocol 2.
 
    bool m_indiSetup {false}; ///< Whether or not INDI has been set up after initial protocol determination.
+
+   /// Timestamped raw flow readings in tenths of a liter per minute, ordered oldest first.
+   std::deque<std::pair<std::chrono::steady_clock::time_point, int>> m_flowHistory;
+
+   /// Sum of the flow readings currently in the window, in tenths of a liter per minute.
+   double m_flowSum{ 0 };
+
+   /// Whether the status property has been registered with its first valid reading.
+   bool m_statusRegistered{ false };
 
    float m_liqTemp {0}; ///< The liquid temperature
    float m_flowRate {0}; ///< The flow rate
@@ -70,8 +85,7 @@ public:
    koolanceCtrl();
 
    /// D'tor, declared and defined for noexcept.
-   ~koolanceCtrl() noexcept
-   {}
+   ~koolanceCtrl() noexcept = default;
 
    virtual void setupConfig();
 
@@ -150,6 +164,14 @@ protected:
    pcf::IndiProperty m_indiP_pumplvl;
    pcf::IndiProperty m_indiP_fanlvl;
 
+   /// Add a valid sample and return the mean flow rate in liters per minute over the current window.
+   double updateFlowAverage( int flowTenths /**< [in] flow rate in tenths of a liter per minute */,
+                             std::chrono::steady_clock::time_point now /**< [in] receipt time for the sample */ );
+
+   /// Publish the latest cooler status with both raw and averaged flow readings.
+   int publishStatus( double rawFlowRate /**< [in] latest flow rate in liters per minute */,
+                      double flowRateAverage /**< [in] averaged flow rate in liters per minute */ );
+
 public:
    INDI_NEWCALLBACK_DECL(koolanceCtrl, m_indiP_pumplvl);
    INDI_NEWCALLBACK_DECL(koolanceCtrl, m_indiP_fanlvl);
@@ -178,55 +200,78 @@ koolanceCtrl::koolanceCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFI
 
 void koolanceCtrl::setupConfig()
 {
-   tty::usbDevice::setupConfig(config);
+    config.add( "flow.averageSeconds",
+                "",
+                "flow.averageSeconds",
+                argType::Required,
+                "flow",
+                "averageSeconds",
+                false,
+                "int",
+                "Rolling window for INDI flow averaging in seconds. Default is 60. Use 0 for raw readings." );
 
-   dev::telemeter<koolanceCtrl>::setupConfig(config);
+    tty::usbDevice::setupConfig( config );
 
+    dev::telemeter<koolanceCtrl>::setupConfig( config );
 }
 
-int koolanceCtrl::loadConfigImpl( mx::app::appConfigurator & _config )
+int koolanceCtrl::loadConfigImpl( mx::app::appConfigurator &_config )
 {
-   this->m_baudRate = B9600; //default for a Koolance controller.  Will be overridden by any config setting.
+    if( _config.isSet( "flow.averageSeconds" ) )
+    {
+        std::string value;
+        _config( value, "flow.averageSeconds" );
+        const char *end     = value.data() + value.size();
+        int         seconds = 0;
+        const auto  parsed  = std::from_chars( value.data(), end, seconds );
 
-   int rv = tty::usbDevice::loadConfig(_config);
+        if( parsed.ec != std::errc{} || parsed.ptr != end || seconds < 0 )
+        {
+            return log<software_error, -1>(
+                { __FILE__, __LINE__, "flow.averageSeconds must be a nonnegative integer" } );
+        }
 
-   if(rv != 0 && rv != TTY_E_NODEVNAMES && rv != TTY_E_DEVNOTFOUND) //Ignore error if not plugged in
-   {
-      log<software_error>( {__FILE__, __LINE__, rv, tty::ttyErrorString(rv)});
-   }
+        m_flowAverageSeconds = seconds;
+    }
 
-   return 0;
+    this->m_baudRate = B9600; //default for a Koolance controller.  Will be overridden by any config setting.
+
+    int rv = tty::usbDevice::loadConfig( _config );
+
+    if( rv != 0 && rv != TTY_E_NODEVNAMES && rv != TTY_E_DEVNOTFOUND ) //Ignore error if not plugged in
+    {
+        log<software_error>( { __FILE__, __LINE__, rv, tty::ttyErrorString( rv ) } );
+    }
+
+    return 0;
 }
 
 void koolanceCtrl::loadConfig()
 {
-   loadConfigImpl(config);
+    if( loadConfigImpl( config ) < 0 )
+    {
+        m_shutdown = true;
+        return;
+    }
 
-   dev::telemeter<koolanceCtrl>::loadConfig(config);
+    dev::telemeter<koolanceCtrl>::loadConfig( config );
 }
 
 int koolanceCtrl::appStartup()
 {
-   if( state() == stateCodes::UNINITIALIZED )
-   {
-      log<text_log>( "In appStartup but in state UNINITIALIZED.", logPrio::LOG_CRITICAL );
-      return -1;
-   }
+    if( state() == stateCodes::UNINITIALIZED )
+    {
+        log<text_log>( "In appStartup but in state UNINITIALIZED.", logPrio::LOG_CRITICAL );
+        return -1;
+    }
 
-   // set up the  INDI properties
-   REG_INDI_NEWPROP_NOCB(m_indiP_status, "status", pcf::IndiProperty::Number);
-   m_indiP_status.add(pcf::IndiElement("liquid_temp"));
-   m_indiP_status.add(pcf::IndiElement("flow_rate"));
-   m_indiP_status.add(pcf::IndiElement("pump_rpm"));
-   m_indiP_status.add(pcf::IndiElement("fan_rpm"));
+    if( dev::telemeter<koolanceCtrl>::appStartup() < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
 
-   if(dev::telemeter<koolanceCtrl>::appStartup() < 0)
-   {
-      return log<software_error,-1>({__FILE__,__LINE__});
-   }
-
-   state(stateCodes::NODEVICE);
-   return 0;
+    state( stateCodes::NODEVICE );
+    return 0;
 }
 
 int koolanceCtrl::appLogic()
@@ -446,76 +491,126 @@ int koolanceCtrl::initialConnect()
 
 int koolanceCtrl::getStatus()
 {
-   int rv;
+    int rv;
 
-   std::vector<unsigned char> com;
-   com.resize(3, '\0');
-   com[0] = 0xCF;
-   com[1] = 0x01;
-   com[2] = 0x08;
+    std::vector<unsigned char> com;
+    com.resize( 3, '\0' );
+    com[0] = 0xCF;
+    com[1] = 0x01;
+    com[2] = 0x08;
 
-   rv = write(m_fileDescrip, com.data(), com.size());
+    rv = write( m_fileDescrip, com.data(), com.size() );
 
-   if(rv < 0)
-   {
-      log<software_error>({__FILE__,__LINE__, errno, "error from write"});
-      ::close(m_fileDescrip);
-      m_fileDescrip = 0;
-      state(stateCodes::NOTCONNECTED);
+    if( rv < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, errno, "error from write" } );
+        ::close( m_fileDescrip );
+        m_fileDescrip = 0;
+        state( stateCodes::NOTCONNECTED );
 
-      return -1;
-   }
+        return -1;
+    }
 
-   std::string resp;
+    std::string resp;
 
-   rv = tty::ttyRead(resp, m_protocolChars, m_fileDescrip, 1000); ///\todo needs to be iodevice
+    rv = tty::ttyRead( resp, m_protocolChars, m_fileDescrip, 1000 ); ///\todo needs to be iodevice
 
-   if(rv < 0)
-   {
-      log<software_error>({__FILE__,__LINE__, errno, "error from read"});
-      ::close(m_fileDescrip);
-      m_fileDescrip = 0;
-      state(stateCodes::NOTCONNECTED);
+    if( rv < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, errno, "error from read" } );
+        ::close( m_fileDescrip );
+        m_fileDescrip = 0;
+        state( stateCodes::NOTCONNECTED );
 
-      return -1;
-   }
+        return -1;
+    }
 
-   if(resp.size() == m_protocolChars)
-   {
-      m_liqTemp = ((float) (( (unsigned char)resp[2] << 8) + (unsigned char)resp[3]-2000)) / 10.0;
-      m_flowRate = ( (float) ((unsigned char)resp[12] << 8) + (unsigned char)resp[13])  / 10.0;
-      m_fanRPM = ((unsigned char)resp[8] << 8) + (unsigned char)resp[9];
-      m_pumpRPM = ((unsigned char)resp[10] << 8) + (unsigned char)resp[11];
-      m_fanLvl = (unsigned char)resp[15];
-      m_pumpLvl = (unsigned char)resp[17];
+    if( resp.size() != m_protocolChars )
+    {
+        log<software_error>(
+            { __FILE__,
+              __LINE__,
+              std::string( "wrong response size (" ) + std::to_string( resp.size() ) + ") returned" } );
+        ::close( m_fileDescrip );
+        m_fileDescrip = 0;
+        state( stateCodes::NOTCONNECTED );
 
-      recordCooler();
-//       std::cout << std::dec;
-//       std::cout << "liq. temp: " << m_liqTemp << " C\n";
-//       std::cout << "flow rate: " << m_flowRate << " LPM\n";
-//       std::cout << "pump lvl:  " << m_pumpLvl << "\n";
-//       std::cout << "pump speed:" << m_pumpRPM << " RPM\n";
-//       std::cout << "fan lvl:  " << m_fanLvl << "\n";
-//       std::cout << "fan speed:" << m_fanRPM << " RPM\n";
+        return -1;
+    }
 
-      updateIfChanged(m_indiP_status, "liquid_temp", m_liqTemp);
-      updateIfChanged(m_indiP_status, "flow_rate", m_flowRate);
-      updateIfChanged(m_indiP_status, "pump_rpm", m_pumpRPM);
-      updateIfChanged(m_indiP_status, "fan_rpm", m_fanRPM);
-      updateIfChanged(m_indiP_pumplvl, "current", m_pumpLvl);
-      updateIfChanged(m_indiP_fanlvl, "current", m_fanLvl);
+    const int    flowTenths  = ( static_cast<unsigned char>( resp[12] ) << 8 ) + static_cast<unsigned char>( resp[13] );
+    const double rawFlowRate = flowTenths / 10.0;
+    const double flowRateAverage = updateFlowAverage( flowTenths, std::chrono::steady_clock::now() );
 
-      return 0;
-   }
-   else
-   {
-      log<software_error>({__FILE__,__LINE__, std::string("wrong response size (") + std::to_string(resp.size()) + ") returned"});
-      ::close(m_fileDescrip);
-      m_fileDescrip = 0;
-      state(stateCodes::NOTCONNECTED);
+    m_liqTemp  = ( ( (unsigned char)resp[2] << 8 ) + (unsigned char)resp[3] - 2000 ) / 10.0;
+    m_flowRate = rawFlowRate;
+    m_fanRPM   = ( (unsigned char)resp[8] << 8 ) + (unsigned char)resp[9];
+    m_pumpRPM  = ( (unsigned char)resp[10] << 8 ) + (unsigned char)resp[11];
+    m_fanLvl   = (unsigned char)resp[15];
+    m_pumpLvl  = (unsigned char)resp[17];
 
-      return -1;
-   }
+    recordCooler();
+
+    updateIfChanged( m_indiP_pumplvl, "current", m_pumpLvl );
+    updateIfChanged( m_indiP_fanlvl, "current", m_fanLvl );
+
+    return publishStatus( rawFlowRate, flowRateAverage );
+}
+
+inline double koolanceCtrl::updateFlowAverage( int flowTenths, std::chrono::steady_clock::time_point now )
+{
+    const auto oldest = now - std::chrono::seconds( m_flowAverageSeconds );
+
+    while( !m_flowHistory.empty() && m_flowHistory.front().first <= oldest )
+    {
+        m_flowSum -= m_flowHistory.front().second;
+        m_flowHistory.pop_front();
+    }
+
+    m_flowHistory.emplace_back( now, flowTenths );
+    m_flowSum += flowTenths;
+
+    return m_flowSum / ( 10.0 * m_flowHistory.size() );
+}
+
+inline int koolanceCtrl::publishStatus( double rawFlowRate, double flowRateAverage )
+{
+    static const std::vector<std::string> elements{
+        "liquid_temp", "flow_rate", "flow_rate_raw", "pump_rpm", "fan_rpm" };
+    const std::vector<double> values{
+        m_liqTemp, flowRateAverage, rawFlowRate, static_cast<double>( m_pumpRPM ), static_cast<double>( m_fanRPM ) };
+
+    if( !m_statusRegistered )
+    {
+        // Register only after initializing every element so subscribers get a complete first status.
+        createROIndiNumber( m_indiP_status, "status" );
+        m_indiP_status.setState( INDI_OK );
+
+        for( size_t n = 0; n < elements.size(); ++n )
+        {
+            pcf::IndiElement element( elements[n] );
+            element.set( values[n] );
+            m_indiP_status.add( element );
+        }
+
+        if( registerIndiPropertyReadOnly( m_indiP_status ) < 0 )
+        {
+            return -1;
+        }
+
+        m_statusRegistered = true;
+
+        if( m_indiDriver )
+        {
+            m_indiDriver->sendDefProperty( m_indiP_status );
+        }
+    }
+    else
+    {
+        updateIfChanged( m_indiP_status, elements, values );
+    }
+
+    return 0;
 }
 
 int koolanceCtrl::setPumpLvl( int lvl )
