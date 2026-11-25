@@ -307,6 +307,14 @@ class rootScope
 };
 
 /// Whether the file at path holds exactly content
+/// The directives of a unit file or drop-in, for comparing two of them
+/** Comments and section headers are skipped.  A directive set more than once, e.g. After, has its values joined
+ * with ", ", leaving out the empty assignments that reset it, e.g. the `ExecStart=` before a drop-in's command.
+ *
+ * \returns directive: value
+ */
+directiveMap unitDirectives( const std::string &content /**< [in] the unit file's text */ );
+
 bool sameContent( const std::string &path, /**< [in] the file */
                   const std::string &content /**< [in] the expected contents */ );
 
@@ -344,6 +352,8 @@ struct settingsState
     bool                     runStale{ false };  ///< running since before its registered settings last changed
     std::string              wdHave;             ///< the watchdog of the run, as systemd shows it, if it differs
     double                   wdWant{ -1 };       ///< the configured watchdog, seconds
+    std::vector<std::string> changes; ///< if fileStale, each directive that differs from the drop-in, where from, why
+    std::vector<std::string> ignored; ///< the app's [systemd] settings that are ignored, and why
 };
 
 /// How an app's state is reported
@@ -633,6 +643,17 @@ class xCtrl
     /// The role's INDI server and ssh tunnels among the registered apps, which order every drop-in
     void registeredOrdering( std::string              &server, /**< [out] the INDI server, "" if none */
                              std::vector<std::string> &tunnels /**< [out] the ssh tunnel apps */ );
+
+    /// What differs, directive by directive, between an app's synced drop-in and what sync would write now
+    /** Each change names where the new value comes from (magaox.conf, the app's .conf, the proclist), and, for a
+     * setting that is now ignored, why: not in the allow list, or a value systemd does not accept.
+     *
+     * \returns one message per directive that differs, without the app name unless it is in the source
+     */
+    std::vector<std::string> settingsChanges( const appEntry    &app,     /**< [in] the app */
+                                              const std::string &synced,  /**< [in] its drop-in on disk */
+                                              const std::string &content, /**< [in] the drop-in sync would write */
+                                              const allowList   &allow /**< [in] the directives that may be set */ );
 
     /// Compare an app's drop-in, what systemd has loaded, and what it runs with, against its .conf
     /**
@@ -1339,6 +1360,23 @@ inline rootScope::~rootScope()
         std::cerr << "xctrl: could not give up root again: " << strerror( errno ) << "\n";
         std::abort();
     }
+}
+
+inline directiveMap unitDirectives( const std::string &content )
+{
+    directiveMap       dirs;
+    std::istringstream in( content );
+    for( std::string l; std::getline( in, l ); )
+    {
+        size_t eq = l.find( '=' );
+        if( l.empty() || l[0] == '#' || l[0] == '[' || eq == std::string::npos || eq + 1 == l.size() )
+        {
+            continue;
+        }
+        std::string &v = dirs[l.substr( 0, eq )];
+        v += ( v.empty() ? "" : ", " ) + l.substr( eq + 1 );
+    }
+    return dirs;
 }
 
 inline bool sameContent( const std::string &path, const std::string &content )
@@ -2690,23 +2728,131 @@ inline void xCtrl::registeredOrdering( std::string &server, std::vector<std::str
     serverAndTunnels( all, server, tunnels );
 }
 
+inline std::vector<std::string> xCtrl::settingsChanges( const appEntry    &app,
+                                                        const std::string &synced,
+                                                        const std::string &content,
+                                                        const allowList   &allow )
+{
+    directiveMap have = unitDirectives( synced ), want = unitDirectives( content );
+
+    // the settings of magaox.conf and of the app's .conf, and why any of them is ignored
+    std::string              cfgDir = m_top + "/" + MAGAOX_configRelPath, conf = app.name + ".conf";
+    confMap                  gconf, aconf;
+    directiveMap             role, own;
+    std::vector<std::string> why;
+    readConf( gconf, cfgDir + "/" + MAGAOX_globalConfig );
+    readConf( aconf, cfgDir + "/" + conf );
+    systemdSettings( role, why, gconf, MAGAOX_globalConfig, allow );
+    dropBadValues( role, MAGAOX_globalConfig, why );
+    systemdSettings( own, why, aconf, app.name, allow );
+    dropBadValues( own, app.name, why );
+
+    // where a directive's value now comes from
+    auto source = [&]( const std::string &d ) -> std::string
+    {
+        if( d == "ExecStart" )
+        {
+            return "the proclist";
+        }
+        if( d == "After" )
+        {
+            return "the role's INDI server and tunnels";
+        }
+        if( !app.notifies() && ( d == "Type" || d == "WatchdogSec" ) )
+        {
+            return "the proclist - prefix";
+        }
+        return own.count( d ) ? conf : MAGAOX_globalConfig;
+    };
+    // why a setting of d in either file is ignored, from the warnings of systemdSettings() and dropBadValues()
+    auto ignored = [&]( const std::string &d )
+    {
+        std::string notes;
+        for( const auto *c : { &aconf, &gconf } )
+        {
+            for( const auto &kv : *c )
+            {
+                std::string key = kv.first.compare( 0, 8, "systemd." ) == 0 ? kv.first.substr( 8 ) : "";
+                if( key.empty() || lower( key ) != lower( d ) )
+                {
+                    continue;
+                }
+                // the warning for it: "[systemd] KEY ... for SOURCE REASON; ignoring directive", for the key or,
+                // for a value systemd rejects, "[systemd] Directive = VALUE for SOURCE REASON; ..."
+                std::string src = c == &aconf ? app.name : MAGAOX_globalConfig, tail = "; ignoring directive";
+                for( const auto &w : why )
+                {
+                    size_t f = w.find( " for " + src + " " ), e = w.rfind( tail );
+                    if( f == std::string::npos || e == std::string::npos ||
+                        ( w.compare( 0, 11 + key.size(), "[systemd] " + key + " " ) != 0 &&
+                          w.compare( 0, 13 + d.size(), "[systemd] " + d + " = " ) != 0 ) )
+                    {
+                        continue;
+                    }
+                    size_t      r      = f + 6 + src.size();
+                    std::string reason = w.substr( r, e - r );
+                    reason             = reason.compare( 0, 3, "is " ) == 0 ? reason.substr( 3 ) : reason;
+                    notes += ( notes.empty() ? "" : "; " ) +
+                             ( c == &aconf ? conf : std::string( MAGAOX_globalConfig ) ) + "'s " + key + " = " +
+                             kv.second + " is ignored now: " + reason;
+                    break;
+                }
+            }
+        }
+        return notes;
+    };
+
+    auto note = [&]( const std::string &d )
+    {
+        std::string n = ignored( d );
+        return n.empty() ? n : "; " + n;
+    };
+
+    std::vector<std::string> changes;
+    for( const auto &kv : want )
+    {
+        auto h = have.find( kv.first );
+        if( h == have.end() )
+        {
+            changes.push_back( kv.first + "=" + kv.second + " from " + source( kv.first ) + " is not synced yet" +
+                               note( kv.first ) );
+        }
+        else if( h->second != kv.second )
+        {
+            changes.push_back( kv.first + "=" + kv.second + " from " + source( kv.first ) +
+                               " is not synced yet (synced: " + h->second + ")" + note( kv.first ) );
+        }
+    }
+    for( const auto &kv : have )
+    {
+        if( !want.count( kv.first ) )
+        {
+            std::string notes = ignored( kv.first );
+            changes.push_back( kv.first + "=" + kv.second + " is synced, but " +
+                               ( notes.empty()
+                                     ? "no longer set in " + std::string( MAGAOX_globalConfig ) + " or the app's .conf"
+                                     : notes ) );
+        }
+    }
+    return changes;
+}
+
 inline settingsState xCtrl::checkSettings( const appEntry                     &app,
                                            const directiveMap                 &role,
                                            const std::string                  &server,
                                            const std::vector<std::string>     &tunnels,
                                            std::map<std::string, std::string> &p )
 {
-    unitNames                u( m_role );
-    settingsState            st;
-    directiveMap             dirs;
-    std::vector<std::string> ignored; // reported by sync, not again here
-    const allowList         *allow = allowedDirectives();
+    unitNames        u( m_role );
+    settingsState    st;
+    directiveMap     dirs;
+    const allowList *allow = allowedDirectives();
     if( !allow )
     {
         st.errors.push_back( m_allowError );
         return st;
     }
-    if( !prepareApp( app, dirs, st.errors, ignored, *allow, role ) )
+    if( !prepareApp( app, dirs, st.errors, st.ignored, *allow, role ) )
     {
         return st;
     }
@@ -2715,6 +2861,13 @@ inline settingsState xCtrl::checkSettings( const appEntry                     &a
     st.content = dropIn( u, app, m_top + "/bin", dirs, server, tunnels );
 
     st.fileStale = !sameContent( st.path, st.content );
+    if( st.fileStale )
+    {
+        std::ifstream      f( st.path );
+        std::ostringstream synced;
+        synced << f.rdbuf();
+        st.changes = settingsChanges( app, synced.str(), st.content, *allow );
+    }
     st.loadStale = p["NeedDaemonReload"] == "yes";
     st.running   = p["ActiveState"] == "active" || p["ActiveState"] == "activating" || p["ActiveState"] == "reloading";
     st.wdWant    = dirs.count( "WatchdogSec" ) ? timespanSeconds( dirs["WatchdogSec"] ) : 0; // systemd's default
@@ -2759,6 +2912,20 @@ inline void xCtrl::warnOutdatedRunning( const std::vector<std::string>          
     directiveMap role = roleDirectives( ignored, *allow );
     registeredOrdering( server, tunnels );
 
+    // each change once, with the running apps it affects, in the order first seen; the ignored settings once each
+    std::vector<std::string>                        order;
+    std::map<std::string, std::vector<std::string>> affected;
+    std::set<std::string>                           said;
+    auto                                            sayIgnored = [&]( const std::vector<std::string> &ws )
+    {
+        for( const auto &w : ws )
+        {
+            if( said.insert( w ).second )
+            {
+                say( msgLevel::warning ) << w;
+            }
+        }
+    };
     for( const auto &n : names )
     {
         appEntry a;
@@ -2771,6 +2938,8 @@ inline void xCtrl::warnOutdatedRunning( const std::vector<std::string>          
         {
             continue; // a stopped app starts with whatever is registered then
         }
+        sayIgnored( ignored );
+        sayIgnored( st.ignored );
         if( !st.ok )
         {
             for( const auto &e : st.errors )
@@ -2778,11 +2947,27 @@ inline void xCtrl::warnOutdatedRunning( const std::vector<std::string>          
                 say( msgLevel::warning ) << e;
             }
         }
-        else if( st.fileStale || st.loadStale )
+        else if( st.fileStale && !st.changes.empty() )
         {
-            say( msgLevel::warning ) << n << ": running with magaox.conf defaults or old [systemd] settings in " << n
-                                     << ".conf; " << m_prog << " sync, then " << m_prog << " restart " << n
-                                     << ", applies them";
+            for( const auto &c : st.changes )
+            {
+                if( affected[c].empty() )
+                {
+                    order.push_back( c );
+                }
+                affected[c].push_back( n );
+            }
+        }
+        else if( st.fileStale )
+        {
+            say( msgLevel::warning ) << n << ": running with a drop-in that differs from what " << m_prog
+                                     << " sync writes now; " << m_prog << " sync, then " << m_prog << " restart " << n
+                                     << ", applies it";
+        }
+        else if( st.loadStale )
+        {
+            say( msgLevel::warning ) << n << ": systemd has not loaded its synced drop-in; " << m_prog << " sync, then "
+                                     << m_prog << " restart " << n << ", applies it";
         }
         else if( st.runStale )
         {
@@ -2794,6 +2979,16 @@ inline void xCtrl::warnOutdatedRunning( const std::vector<std::string>          
             say( msgLevel::warning ) << n << ": runs with settings registered before it started" << wd << "; " << m_prog
                                      << " restart " << n << " applies the new ones";
         }
+    }
+    for( const auto &c : order )
+    {
+        std::string apps;
+        for( const auto &n : affected[c] )
+        {
+            apps += " " + n;
+        }
+        say( msgLevel::warning ) << c << "; running with the synced settings:" << apps << "; " << m_prog
+                                 << " sync, then " << m_prog << " restart" << apps << ", applies it";
     }
 }
 
@@ -2830,10 +3025,14 @@ inline int xCtrl::refreshApps( const std::vector<appEntry> &apps )
         }
         else if( st.fileStale || st.loadStale )
         {
-            say( msgLevel::warning ) << a.name << ": " << a.name
-                                     << ".conf or magaox.conf changed since the last sync; it "
-                                     << "starts with the synced settings. " << m_prog
-                                     << " sync, by a user who can edit the proclist, applies them";
+            std::string what;
+            for( const auto &c : st.changes )
+            {
+                what += "; " + c;
+            }
+            say( msgLevel::warning ) << a.name << " starts with its synced settings"
+                                     << ( what.empty() ? ", which differ from what sync writes now" : what ) << "; "
+                                     << m_prog << " sync, by a user who can edit the proclist, applies them";
         }
         else if( st.running && !st.wdHave.empty() )
         {

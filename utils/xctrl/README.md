@@ -273,19 +273,25 @@ An operator's `start`, `startup` or `restart`, e.g. by `xsup`, starts an app wit
 editor's `start` and `startup` sync first, so the app starts with the new settings:
 
 ```
-warning: maths_CO4: maths_CO4.conf or magaox.conf changed since the last sync; it starts with the synced settings. xctrl sync, by a user who can edit the proclist, applies them
+warning: maths_CO4 starts with its synced settings; WatchdogSec=20 from maths_CO4.conf is not synced yet (synced: 10); xctrl sync, by a user who can edit the proclist, applies them
 ```
 
-`status` also warns about running apps whose settings differ from their `.conf`'s, ignoring apps that are not
-running, which get the registered settings when they start:
+`status` also warns about running apps whose settings differ from what `sync` would write now, directive by
+directive, naming where each comes from and, for a setting that is ignored now, why. Each difference is shown once,
+with every running app it affects; apps that are not running get the synced settings when they start. `status`
+also shows the `[systemd]` settings of running apps that are ignored, as `sync` does:
 
 ```
-warning: maths_CO4: running with magaox.conf defaults or old [systemd] settings in maths_CO4.conf; xctrl sync, then xctrl restart maths_CO4, applies them
+warning: MemoryMax=1G from magaox.conf is not synced yet; running with the synced settings: isCO2 maths_a; xctrl sync, then xctrl restart isCO2 maths_a, applies it
+warning: WatchdogSec=20 from maths_a.conf is not synced yet (synced: 10); running with the synced settings: maths_a; xctrl sync, then xctrl restart maths_a, applies it
+warning: MemoryMax=1G is synced, but no longer set in magaox.conf or the app's .conf; running with the synced settings: isCO2 maths_a; xctrl sync, then xctrl restart isCO2 maths_a, applies it
+warning: [systemd] MemoryMax directive for magaox.conf not in systemd-directives allow list; ignoring directive
+warning: MemoryMax=1G is synced, but magaox.conf's MemoryMax = 1G is ignored now: not in systemd-directives allow list; running with the synced settings: isCO2 maths_a; xctrl sync, then xctrl restart isCO2 maths_a, applies it
 warning: maths_CO4: runs with settings registered before it started (watchdog 2s, now 0.5s); xctrl restart maths_CO4 applies the new ones
 ```
 
-The first is a `.conf` edited since the last sync; the second an app synced again while it kept running: systemd
-fixes the watchdog when an app starts, so only a restart applies it.
+The last is an app synced again while it kept running: systemd fixes the settings when an app starts, so only a
+restart applies them.
 
 The generated files under `/etc/systemd/system` are readable by everyone (files 0644, directories 0755, whatever the
 caller's umask), so any user can compare them.
