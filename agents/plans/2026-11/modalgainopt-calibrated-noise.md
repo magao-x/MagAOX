@@ -172,3 +172,11 @@ The frame-counter regression passed all 22 assertions. The full optimizer suite 
 Noise-source transitions use the next PSD and selected noise prediction as inputs to the existing gain update. The SI integrator continues from its previous recommendation. The predictor keeps its regularization scale and per-mode schedule during fallback and recovery. With calibrated noise enabled, the predictor checks the stability bound for the current coefficients even when it reuses the regularization scale. The raw SI output shows the result from each PSD before integration.
 
 The focused source selection, SI integration, and predictor bounds tests passed. The full suite passed 49 of 51 tests with the same two baseline failures.
+
+## Reconstructor latency during testing
+
+Set `[loop] computeTauReference` in `hogopt.conf` to the compute latency included in the loaded looptau calibration, in seconds. The default is `0.000139`. Enter the new total in `hogopt.computeTau.target` using the `loop_timing.mean` from the same timing setup. For example, entering `0.000185` with the default reference adds 46 µs to every loaded per-mode delay. The optimizer uses the adjusted delay for the active controller, SI, and LP. It refreshes the delay-dependent stability and predictor regularization calculations for the new setting.
+
+`computeTau.current` reports the selected total compute latency. Startup and `computeTauReset.request=On` restore the configured reference and remove the correction. INDI changes to `computeTau` are runtime-only. Reloading looptau changes the baseline per-mode delays and keeps the selected compute-time correction.
+
+The configuration and delay regressions passed 86 assertions, including positive and negative offsets in all three controller models and reset to a nondefault reference. The full optimizer suite passed 50 of 52 tests with the same two baseline failures.
