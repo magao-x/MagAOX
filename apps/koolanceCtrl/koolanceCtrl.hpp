@@ -1,12 +1,11 @@
 /** \file koolanceCtrl.hpp
-  * \brief The MagAO-X Koolance Controller header file
-  *
-  * \ingroup koolanceCtrl_files
-  */
+ * \brief The MagAO-X Koolance Controller header file
+ *
+ * \ingroup koolanceCtrl_files
+ */
 
 #ifndef koolanceCtrl_hpp
 #define koolanceCtrl_hpp
-
 
 #include <charconv>
 #include <chrono>
@@ -17,17 +16,17 @@
 #include "../../magaox_git_version.h"
 
 /** \defgroup koolanceCtrl
-  * \brief The MagAO-X application to monitor and control a Koolance cooler
-  *
-  * <a href="../handbook/operating/software/apps/koolanceCtrl.html">Application Documentation</a>
-  *
-  * \ingroup apps
-  *
-  */
+ * \brief The MagAO-X application to monitor and control a Koolance cooler
+ *
+ * <a href="../handbook/operating/software/apps/koolanceCtrl.html">Application Documentation</a>
+ *
+ * \ingroup apps
+ *
+ */
 
 /** \defgroup koolanceCtrl_files
-  * \ingroup koolanceCtrl
-  */
+ * \ingroup koolanceCtrl
+ */
 
 namespace MagAOX
 {
@@ -36,87 +35,100 @@ namespace app
 
 /// The MagAO-X Koolance Controller
 /** This application will monitor a Koolance v1 or v2 protocol controller.  If v2, will also allow
-  * changing of pump and fan settings via INDI.
-  *
-  * \ingroup koolanceCtrl
-  */
+ * changing of pump and fan settings via INDI.
+ *
+ * The INDI status property publishes the rolling mean in `flow_rate` and the latest measurement
+ * in `flow_rate_raw`, both in liters per minute. The mean uses valid replies received within
+ * `flow.averageSeconds`, with the available samples used during startup. Telemetry records raw flow.
+ *
+ * \ingroup koolanceCtrl
+ */
 class koolanceCtrl : public MagAOXApp<true>, public tty::usbDevice, public dev::telemeter<koolanceCtrl>
 {
 
-   //Give the test harness access.
-   friend class koolanceCtrl_test;
+    //Give the test harness access.
+    friend class koolanceCtrl_test;
 
-   friend class dev::telemeter<koolanceCtrl>;
-protected:
+    friend class dev::telemeter<koolanceCtrl>;
 
-   /** \name Configurable Parameters
+  protected:
+    /** \name Configurable Parameters - Data
      *@{
      */
 
-   /// Length in seconds of the rolling INDI flow average. Zero publishes each reading directly.
-   int m_flowAverageSeconds{60};
+    /// Length in seconds of the rolling INDI flow average. Zero publishes each reading directly.
+    int m_flowAverageSeconds{ 60 };
 
-   ///@}
+    ///@}
 
-   size_t m_protocolChars {0}; ///< Will be set to 43 if protocol 1, and set to 51 if protocol 2.
+    /// Expected reply length in bytes, 43 for protocol 1 or 51 for protocol 2.
+    size_t m_protocolChars{ 0 };
 
-   bool m_indiSetup {false}; ///< Whether or not INDI has been set up after initial protocol determination.
+    /// Whether the pump and fan level properties have been registered.
+    bool m_indiSetup{ false };
 
-   /// Timestamped raw flow readings in tenths of a liter per minute, ordered oldest first.
-   std::deque<std::pair<std::chrono::steady_clock::time_point, int>> m_flowHistory;
+    /// Timestamped raw flow readings in tenths of a liter per minute, ordered oldest first.
+    std::deque<std::pair<std::chrono::steady_clock::time_point, int>> m_flowHistory;
 
-   /// Sum of the flow readings currently in the window, in tenths of a liter per minute.
-   double m_flowSum{ 0 };
+    /// Sum of the flow readings currently in the window, in tenths of a liter per minute.
+    double m_flowSum{ 0 };
 
-   /// Whether the status property has been registered with its first valid reading.
-   bool m_statusRegistered{ false };
+    /// Whether the status property has been registered with its first valid reading.
+    bool m_statusRegistered{ false };
 
-   float m_liqTemp {0}; ///< The liquid temperature
-   float m_flowRate {0}; ///< The flow rate
-   int m_pumpLvl {0}; ///< The pump power level, 1-10
-   int m_pumpRPM {0}; ///< The pump RPM
-   int m_fanRPM {0}; ///< The fan RPM
-   int m_fanLvl {0}; ///< The fan power level, 0-100
+    /// Most recent liquid temperature in degrees Celsius.
+    float m_liqTemp{ 0 };
 
+    /// Most recent raw flow reading in liters per minute, used for telemetry.
+    float m_flowRate{ 0 };
 
+    /// Most recent pump power level, 1 through 10.
+    int m_pumpLvl{ 0 };
 
-public:
-   /// Default c'tor.
-   koolanceCtrl();
+    /// Most recent pump speed in revolutions per minute.
+    int m_pumpRPM{ 0 };
 
-   /// D'tor, declared and defined for noexcept.
-   ~koolanceCtrl() noexcept = default;
+    /// Most recent fan speed in revolutions per minute.
+    int m_fanRPM{ 0 };
 
-   virtual void setupConfig();
+    /// Most recent fan power level, 0 through 100.
+    int m_fanLvl{ 0 };
 
-   /// Implementation of loadConfig logic, separated for testing.
-   /** This is called by loadConfig().
+  public:
+    /// Construct the controller application.
+    koolanceCtrl();
+
+    /// Destroy the controller application.
+    ~koolanceCtrl() noexcept = default;
+
+    /// Register the controller, USB, and telemetry configuration options.
+    virtual void setupConfig();
+
+    /// Load the controller and USB settings from the supplied configuration.
+    /** This is called by loadConfig().
+     * \returns 0 on success
+     * \returns -1 on an invalid flow averaging window
      */
-   int loadConfigImpl( mx::app::appConfigurator & _config /**< [in] an application configuration from which to load values*/);
+    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] application configuration to load */ );
 
-   virtual void loadConfig();
+    /// Load the application and telemetry configuration.
+    virtual void loadConfig();
 
-   /// Startup function
-   /**
-     *
-     */
-   virtual int appStartup();
+    /// Start telemetry and enter the device discovery state.
+    virtual int appStartup();
 
-   /// Implementation of the FSM for koolanceCtrl.
-   /**
+    /// Implementation of the FSM for koolanceCtrl.
+    /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
-   virtual int appLogic();
+    virtual int appLogic();
 
-   /// Shutdown the app.
-   /**
-     *
-     */
-   virtual int appShutdown();
+    /// Shutdown the app.
+    virtual int appShutdown();
 
-   /// Initial connection to controller
-   /** Determine protocol in use based on number of characters in response
+    /// Initial connection to controller
+    /** Determine protocol in use based on number of characters in response
      * and sets up INDI appropriately.
      *
      * Calls to this function should be mutexed.
@@ -124,73 +136,89 @@ public:
      * \returns 0 on success
      * \returns -1 on an error
      */
-   int initialConnect();
+    int initialConnect();
 
-   /// Get status from controller and updated INDI.
-   /**
+    /// Read a controller status reply and update telemetry and INDI.
+    /**
      *
      * Calls to this function should be mutexed.
      *
      * \returns 0 on success
      * \returns -1 on an error
      */
-   int getStatus();
+    int getStatus();
 
-   /// Set the pump level
-   /**
+    /// Set the pump level
+    /**
      * Calls to this function should be mutexed.
      *
      * \returns 0 on success
      * \returns -1 on an error
      */
-   int setPumpLvl(int lvl /**< [in] the new level */);
+    int setPumpLvl( int lvl /**< [in] the new level */ );
 
-   /// Set the fan level
-   /**
+    /// Set the fan level
+    /**
      * Calls to this function should be mutexed.
      *
      * \returns 0 on success
      * \returns -1 on an error
      */
-   int setFanLvl(int lvl /**< [in] the new level */);
+    int setFanLvl( int lvl /**< [in] the new level */ );
 
-   /** \name INDI
+    /** \name INDI - Data
      *
      *@{
      */
-protected:
-   //declare our properties
-   pcf::IndiProperty m_indiP_status;
-   pcf::IndiProperty m_indiP_pumplvl;
-   pcf::IndiProperty m_indiP_fanlvl;
+  protected:
+    /// Read-only liquid temperature, raw and averaged flow rates, and pump and fan speeds.
+    pcf::IndiProperty m_indiP_status;
 
-   /// Add a valid sample and return the mean flow rate in liters per minute over the current window.
-   double updateFlowAverage( int flowTenths /**< [in] flow rate in tenths of a liter per minute */,
-                             std::chrono::steady_clock::time_point now /**< [in] receipt time for the sample */ );
+    /// Pump level readback and, on protocol 2, command target.
+    pcf::IndiProperty m_indiP_pumplvl;
 
-   /// Publish the latest cooler status with both raw and averaged flow readings.
-   int publishStatus( double rawFlowRate /**< [in] latest flow rate in liters per minute */,
-                      double flowRateAverage /**< [in] averaged flow rate in liters per minute */ );
+    /// Fan level readback and, on protocol 2, command target.
+    pcf::IndiProperty m_indiP_fanlvl;
 
-public:
-   INDI_NEWCALLBACK_DECL(koolanceCtrl, m_indiP_pumplvl);
-   INDI_NEWCALLBACK_DECL(koolanceCtrl, m_indiP_fanlvl);
+    ///@}
 
-   ///@}
+    /// Add a valid sample and return the mean flow rate in liters per minute over the current window.
+    double updateFlowAverage( int flowTenths /**< [in] flow rate in tenths of a liter per minute */,
+                              std::chrono::steady_clock::time_point now /**< [in] receipt time for the sample */ );
 
-   /** \name Telemeter Interface
+    /// Publish the latest cooler status with both raw and averaged flow readings.
+    int publishStatus( double rawFlowRate /**< [in] latest flow rate in liters per minute */,
+                       double flowRateAverage /**< [in] averaged flow rate in liters per minute */ );
+
+  public:
+    /** \name INDI
+     *@{
+     */
+
+    /// Validate and handle a new pump level request.
+    /** \param ipRecv [in] requested pump level property */
+    INDI_NEWCALLBACK_DECL( koolanceCtrl, m_indiP_pumplvl );
+
+    /// Validate and handle a new fan level request.
+    /** \param ipRecv [in] requested fan level property */
+    INDI_NEWCALLBACK_DECL( koolanceCtrl, m_indiP_fanlvl );
+
+    ///@}
+
+    /** \name Telemeter Interface
      *
      * @{
      */
-   int checkRecordTimes();
+    /// Check whether a periodic telemetry record is due.
+    int checkRecordTimes();
 
-   int recordTelem( const telem_cooler * );
+    /// Record cooler telemetry on request from the telemeter.
+    int recordTelem( const telem_cooler * /**< [in] telemetry type tag */ );
 
-   int recordCooler(bool force = false);
+    /// Record the current raw cooler readings when they change.
+    int recordCooler( bool force = false /**< [in] record even when readings are unchanged */ );
 
-   ///@}
-
-
+    ///@}
 };
 
 koolanceCtrl::koolanceCtrl() : MagAOXApp(MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED)
