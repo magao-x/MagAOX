@@ -206,6 +206,21 @@ setINDI -s 'loPredCtrlAcc.predict.toggle=Off'
 
 For an A/B comparison, train each mode while it is selected, keep the disturbance unchanged, then alternate the frozen fits. Switch modes only after `zero_confirmed=true`. No reset is needed. `standard_rmse` is the standard fit's origin forecast RMSE; `rmse_phase0..3` are the assisted phase predictors' a priori future-WFS RMSE (k = 0..3 new ACC samples) and should decrease with k when the ACC is informative. Optical correction is judged from the WFS residual with prediction off and on.
 
+## Train and test ACC-assisted 2 kHz
+
+`ddspc_mode.accel_assisted_2k` is standard DDSPC with the ACC in the math: one command per WFS frame, from a per-frame DDSPC fit whose regressor adds the ACC window (the newest `acc_ratio × accel_history` samples) to the WFS and command histories. The frame's command is written on every DM slot of the frame, so the DM changes at the WFS rate, and it is integrated once per frame with the main loop's gain, exactly as standard. It does not use the per-slot fit of `accel_assisted`, so `dm_slots` need not match the scheduler, and it suits a slow ACC (2 kHz gives `acc_ratio` 1). Probes are held for the frame, as in standard.
+
+```bash
+setINDI -s 'loPredCtrlAcc.ddspc_mode.standard=Off;accel_assisted=Off;accel_assisted_2k=On'
+setINDI -x 'loPredCtrlAcc.exploration_sequence.target=1000,0.1,100,1000,0.1,3,1000,0.1,0.1'
+setINDI -s 'loPredCtrlAcc.learn.toggle=On'
+setINDI -s 'loPredCtrlAcc.predict.toggle=On'
+getINDI 'loPredCtrlAcc.ddspc_control.*'   # requested_mode=accel_assisted_2k; wait for assisted_ready=true
+setINDI -s 'loPredCtrlAcc.learn.toggle=Off'
+```
+
+It trains its own fit, separate from both the standard and the per-slot assisted fits; `assisted_qualification.model` reads `2k <state>`. In an offline simulation with an informative ACC it halved standard's residual. Design: `agents/plans/2026-11/ddspc-assisted-2k.md`.
+
 ## 60 s publication check
 
 Take `getINDI 'loPredCtrlAcc.ddspc_performance.*'` and `getINDI 'dmtweeter-synco.production.*'` 60 s apart with prediction active. Expect:
