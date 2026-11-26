@@ -71,22 +71,21 @@ getINDI 'loPredCtrlAcc.integrator.*' 'holoop.loop_gain.current' 'holoop.loop_mul
 
 The feedback sign matches mfilt only if `dm.modeCube` planes 0 and 1 use mfilt's DM mode sign. It is a startup setting; the restart that changes it also discards the fits, which would not apply in the other form. The design is in `agents/plans/2026-11/ddspc-standard-integrator.md`.
 
-### Missed frames
+### Missed and late frames
 
-Missed WFS or ACC frames do not stop prediction, up to `parameters.max_fill` consecutive frames (default 5, i.e. 2.5 ms at 2 kHz; range 0–20). The copied-slot ring is sized to hold the commands of such a gap:
+The WFS and ACC histories are the newest measurements received, in arrival order. A missed or late frame neither breaks nor fills them:
 
-- **Missed WFS frame:** the DM keeps its command (standard: the held or planned slot; assisted: the last slot). At the next frame both fits' histories are advanced over the gap with the previous measurement and the slots actually copied, so the fits stay ready and the output stays qualified.
-- **Missed ACC samples:** a missing sample inside the window holds the sample before it; a WFS frame with no new samples gets a window one frame after the previous one, holding the newest sample. `assisted_qualification.acc_window` reads `ok_filled`.
-- **ACC reader segment breaks** (a counter gap from frames lost in transfer, a rejected sample, or an interval over `adc.max_interval_us`) keep the ACC history: the window continues and the missing samples are held as above, instead of the history restarting and reporting `history_filling`. Only a new source generation (the acc000 stream recreated, so its counters restart) starts a new history.
-- **Learning** pauses for `max(history, accel_history) + future + 1` frames after a fill, so no fit ever learns from a filled value. Prediction continues.
+- **WFS:** each frame received is the next history entry, whatever source frames were missed or how late it arrived. Both fits stay ready and the output stays qualified; learning continues.
+- **ACC:** the window is the newest `4 × accel_history` samples received (each numbered on arrival). A late sample takes its place when it arrives; a sample the source never delivered (lost in transfer, skipped by acc000) simply does not occur; a frame with no new samples reuses the newest ones. `assisted_qualification.acc_window` reads `ok`, or `ok_unlocked` while the upstream lock is down.
+- **Upstream lock:** prediction uses the ACC window with or without the lock; the assisted fit learns, and exploration probes run, only under the lock (or in the diagnostic mode).
 
-`ddspc_performance.wfs_filled` and `acc_filled` count filled WFS frames and ACC samples. Longer gaps still break the histories (standard then stops qualifying until the history refills; assisted holds), and `max_fill=0` restores stopping on any gap.
+`parameters.max_fill` is still accepted and only sizes the copied-slot ring. The window fails only before it first fills (`history_filling`) or when the ACC stream stops for longer than `adc.max_age_us` (`stale_sample`).
 
 ### Holding through lost input
 
-A WFS or command condition that would otherwise stop prediction at once (`wfs_stale`, `wfs_invalid`, `command_invalid` while a history refills) is held for up to `parameters.hold_timeout` seconds (default 1): no slot is rendered, so synco keeps the DM at its last command, and prediction continues by itself when the condition clears. Only a failure lasting longer stops prediction, with the condition that started it in `safety.output_state`. A request made while the input has never qualified is still refused at once. `ddspc_performance.input_holds` counts the holds; `hold_timeout=0` stops at once, as before.
+A condition that would otherwise stop prediction at once (`wfs_stale`, `wfs_invalid`, `command_invalid`, and in assisted mode `acc_window`: the ACC stream silent for longer than `adc.max_age_us`) is held for up to `parameters.hold_timeout` seconds (default 1): no slot is rendered, so synco keeps the DM at its last command, and prediction continues by itself when the condition clears. Only a failure lasting longer stops prediction, with the condition that started it in `safety.output_state`. A request made while the input has never qualified is still refused at once. `ddspc_performance.input_holds` counts the holds; `hold_timeout=0` stops at once, as before.
 
-ACC problems never stop prediction or hold the DM. An assisted slot whose frame has no ACC origin (an incomplete ACC window, the upstream lock lost, or the assisted history refilling after a gap), or rendered while the lock is down, carries the frame's WFS feedback (`gain*y`, integrated as usual) without the ACC prediction; the prediction resumes with the ACC. `ddspc_performance.fast_wfs_only` counts those slots, and `assisted_qualification` still reports the cause.
+A lost upstream lock never holds or stops assisted prediction; it only pauses learning.
 
 ## Before installation (operator, on the RTC)
 
@@ -152,7 +151,7 @@ With accelSim, `delay_lock=0` while `delay_phase_error_us=0` means late acquisit
 
 ### Diagnostic mode (default off)
 
-`parameters.assisted_diagnostic=true` lets the assisted learner append, learn and score complete ACC windows while the upstream lock is down, so the ACC model can be evaluated during commissioning. It never publishes an ACC prediction: without the lock assisted slots carry the WFS feedback only, and nothing about the DM transport changes.
+`parameters.assisted_diagnostic=true` lets the assisted learner append, learn and score complete ACC windows while the upstream lock is down, so the ACC model can be evaluated during commissioning. Without it the fit learns only under lock (prediction uses the ACC window either way), and nothing about the DM transport changes.
 
 - To evaluate an assisted fit trained with lock, keep learning off and read `rmse_phase0..3`.
 - With learning on, the fit learns without lock. `diagnostic_mode` then reads `on_learned_without_lock`, and prediction is refused until `reset_model`.
@@ -367,10 +366,10 @@ Neither touches the main loop's own integrator. A tip/tilt command the main loop
 Prediction turns off and own-channel zero is requested when any of these occur:
 
 - the DM scheduler discarding 1000 consecutive commands (a dead route); a single discarded command (late for its slot, or stale after a scheduler resynchronization) only keeps the scheduler's previous copy, like a skipped slot, and is counted in `ddspc_performance.transport_discarded`; a discarded zero is sent again;
-- a stale or invalid WFS stream, or a model refilling its history after a WFS gap longer than `parameters.max_fill` frames, lasting longer than `parameters.hold_timeout` (see "Holding through lost input");
+- a stale or invalid WFS stream, or in assisted mode an ACC stream silent for longer than `adc.max_age_us`, lasting longer than `parameters.hold_timeout` (see "Holding through lost input");
 - a numerical fault.
 
-`safety.output_state` gives the reason, and keeps it in parentheses after the zero is acknowledged, for example `fault_zero_acknowledged (input_or_model_qualification_lost: wfs_stale)`. Each fault is also logged as "DDSPC output fault, prediction stopped". A lost qualification names the first failed condition: `wfs_invalid`, `integrator_parameters` (the main loop's parameters are missing), `command_invalid`, or `wfs_stale` (no WFS frame within `input_timeout`). ACC conditions never stop prediction. After confirmed removal, prediction can be re-enabled, or the models reset and retrained (`setINDI -s 'loPredCtrlAcc.reset_model.request=On'`). A normal exit also attempts an acknowledged own-channel removal.
+`safety.output_state` gives the reason, and keeps it in parentheses after the zero is acknowledged, for example `fault_zero_acknowledged (input_or_model_qualification_lost: wfs_stale)`. Each fault is also logged as "DDSPC output fault, prediction stopped". A lost qualification names the first failed condition: `wfs_invalid`, `integrator_parameters` (the main loop's parameters are missing), `command_invalid`, `wfs_stale` (no WFS frame within `input_timeout`), or `acc_window` with the ACC window reason. After confirmed removal, prediction can be re-enabled, or the models reset and retrained (`setINDI -s 'loPredCtrlAcc.reset_model.request=On'`). A normal exit also attempts an acknowledged own-channel removal.
 
 Every stop of prediction and every refused request is also logged as a note, with its reason: `DDSPC prediction stopped: <reason>` (turned off by request, Zero DDSPC DM requested, or tip/tilt returned to the main loop), `DDSPC prediction request refused: <reason>` and `DDSPC standard learning sequence refused: <reason>`. Faults keep their warning entry. To list them all:
 
