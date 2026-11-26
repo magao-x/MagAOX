@@ -97,6 +97,7 @@ class loPredCtrlAccPanel : public xWidget
 
     QPushButton *m_standard{ nullptr };  ///< ddspc_mode.standard selector.
     QPushButton *m_assisted{ nullptr };  ///< ddspc_mode.accel_assisted selector.
+    QPushButton *m_assisted2k{ nullptr }; ///< ddspc_mode.accel_assisted_2k: ACC-assisted, one command per WFS frame.
     QPushButton *m_mainLoop{ nullptr };  ///< ddspc_mode.main_loop selector: standard DDSPC through the main loop.
     QPushButton *m_copy8k{ nullptr };    ///< ddspc_mode.mfilt_copy_8k: the main loop's integrator, every DM slot.
     QPushButton *m_copy2k{ nullptr };    ///< ddspc_mode.mfilt_copy_2k: the main loop's integrator, once per frame.

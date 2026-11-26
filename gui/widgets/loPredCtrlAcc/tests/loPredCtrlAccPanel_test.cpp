@@ -788,6 +788,45 @@ TEST_CASE( "loPredCtrlAccGUI shows DM write failures and detected rates", "[loPr
     CHECK( warnings().contains(
         "Prediction request refused: dm_slots and acc_ratio are still being detected from the running rates" ) );
 }
+/** \brief The ACC Assisted 2 kHz button is offered only by a controller with accel_assisted_2k, sends it with every
+ * other element off, follows the readback, and the banner names it while active.
+ */
+TEST_CASE( "loPredCtrlAccGUI selects ACC-assisted 2 kHz", "[loPredCtrlAccGUI]" )
+{
+    Fixture fixture;
+    fixture.defineAll();
+    auto *assisted2k = fixture.widget<QPushButton>( "ddspc_mode.accel_assisted_2k" );
+    CHECK_FALSE( assisted2k->isEnabled() ); // An older controller without the element.
+
+    pcf::IndiProperty mode( pcf::IndiProperty::Switch, "loPredCtrlAcc", "ddspc_mode" );
+    for( const char *element : { "standard", "accel_assisted", "accel_assisted_2k" } )
+    {
+        mode.add( pcf::IndiElement(
+            element, std::strcmp( element, "standard" ) ? pcf::IndiElement::Off : pcf::IndiElement::On ) );
+    }
+    fixture.publish( mode, true );
+    REQUIRE( assisted2k->isEnabled() );
+    assisted2k->click();
+    QApplication::processEvents();
+    REQUIRE( fixture.m_publisher.m_commands.size() == 1 );
+    const auto &sent = fixture.m_publisher.m_commands[0];
+    CHECK( sent.getElements().size() == 3 );
+    CHECK( sent["accel_assisted_2k"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( sent["accel_assisted"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( sent["standard"].getSwitchState() == pcf::IndiElement::Off );
+
+    fixture.publishSwitch( "ddspc_mode", "standard", pcf::IndiElement::Off );
+    fixture.publishSwitch( "ddspc_mode", "accel_assisted_2k", pcf::IndiElement::On );
+    CHECK( assisted2k->isChecked() );
+    CHECK_FALSE( fixture.widget<QPushButton>( "ddspc_mode.accel_assisted" )->isChecked() );
+
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::On );
+    fixture.publishText( "ddspc_control", "requested_mode", "accel_assisted_2k" );
+    fixture.publishText( "ddspc_control", "prediction", "active" );
+    fixture.publishText( "ddspc_control", "main_loop_tt", "zeroed" );
+    CHECK( fixture.widget<QLabel>( "prediction.banner" )->text() ==
+           "PREDICTION ACTIVE: ACC-assisted DDSPC, one command per WFS frame" );
+}
 } // namespace loPredCtrlAccGUITest
 } // namespace libXWCTest
 

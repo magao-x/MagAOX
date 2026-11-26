@@ -182,6 +182,7 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
     auto *modeRow    = new QHBoxLayout;
     m_standard       = new QPushButton( QStringLiteral( "Standard" ), modeBox );
     m_assisted       = new QPushButton( QStringLiteral( "ACC Assisted" ), modeBox );
+    m_assisted2k     = new QPushButton( QStringLiteral( "ACC Assisted 2 kHz" ), modeBox );
     m_mainLoop       = new QPushButton( QStringLiteral( "Main Loop" ), modeBox );
     m_copy8k         = new QPushButton( QStringLiteral( "mfilt Copy 8 kHz" ), modeBox );
     m_copy2k         = new QPushButton( QStringLiteral( "mfilt Copy 2 kHz" ), modeBox );
@@ -189,6 +190,10 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
     m_clone2k        = new QPushButton( QStringLiteral( "mfilt Clone 2 kHz" ), modeBox );
     m_standard->setObjectName( QStringLiteral( "ddspc_mode.standard" ) );
     m_assisted->setObjectName( QStringLiteral( "ddspc_mode.accel_assisted" ) );
+    m_assisted2k->setObjectName( QStringLiteral( "ddspc_mode.accel_assisted_2k" ) );
+    m_assisted2k->setWhatsThis(
+        QStringLiteral( "Standard DDSPC with the ACC in the math: one command per WFS frame from a per-frame fit "
+                        "whose regressor includes the newest ACC samples, written on every DM slot of the frame." ) );
     m_mainLoop->setObjectName( QStringLiteral( "ddspc_mode.main_loop" ) );
     m_copy8k->setObjectName( QStringLiteral( "ddspc_mode.mfilt_copy_8k" ) );
     m_copy2k->setObjectName( QStringLiteral( "ddspc_mode.mfilt_copy_2k" ) );
@@ -212,7 +217,7 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
     auto *copyRow  = new QHBoxLayout; // The mfilt copies, below the controller modes.
     auto *cloneRow = new QHBoxLayout; // The mfilt clones, below the copies.
 
-    for( auto *button : { m_standard, m_assisted, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
+    for( auto *button : { m_standard, m_assisted, m_assisted2k, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
     {
         button->setCheckable( true );
         setXwFont( button );
@@ -235,6 +240,13 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
              [this]()
              {
                  sendMode( "accel_assisted" );
+             } );
+    connect( m_assisted2k,
+             &QPushButton::clicked,
+             this,
+             [this]()
+             {
+                 sendMode( "accel_assisted_2k" );
              } );
     connect( m_mainLoop,
              &QPushButton::clicked,
@@ -857,6 +869,7 @@ void loPredCtrlAccPanel::sendMode( const char *selected )
 
         for( const char *element : { "standard",
                                      "accel_assisted",
+                                     "accel_assisted_2k",
                                      "main_loop",
                                      "mfilt_copy_8k",
                                      "mfilt_copy_2k",
@@ -865,7 +878,7 @@ void loPredCtrlAccPanel::sendMode( const char *selected )
         {
             if( switchState( "ddspc_mode", element ) == pcf::IndiElement::UnknownSwitchState )
             {
-                continue; // An older controller without the main_loop, mfilt_copy_* or mfilt_clone_* elements.
+                continue; // An older controller without some of the elements.
             }
 
             request.add( pcf::IndiElement(
@@ -918,19 +931,20 @@ void loPredCtrlAccPanel::refresh()
     m_interlock->setText( blocked.isEmpty() ? QStringLiteral( "Mode change and reset available." ) : blocked );
     m_standard->setChecked( switchState( "ddspc_mode", "standard" ) == pcf::IndiElement::On );
     m_assisted->setChecked( switchState( "ddspc_mode", "accel_assisted" ) == pcf::IndiElement::On );
+    m_assisted2k->setChecked( switchState( "ddspc_mode", "accel_assisted_2k" ) == pcf::IndiElement::On );
     m_mainLoop->setChecked( switchState( "ddspc_mode", "main_loop" ) == pcf::IndiElement::On );
     m_copy8k->setChecked( switchState( "ddspc_mode", "mfilt_copy_8k" ) == pcf::IndiElement::On );
     m_copy2k->setChecked( switchState( "ddspc_mode", "mfilt_copy_2k" ) == pcf::IndiElement::On );
     m_clone8k->setChecked( switchState( "ddspc_mode", "mfilt_clone_8k" ) == pcf::IndiElement::On );
     m_clone2k->setChecked( switchState( "ddspc_mode", "mfilt_clone_2k" ) == pcf::IndiElement::On );
 
-    for( auto *button : { m_standard, m_assisted, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
+    for( auto *button : { m_standard, m_assisted, m_assisted2k, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
     {
         button->setEnabled( blocked.isEmpty() );
         button->setToolTip( blocked.isEmpty() ? button->whatsThis() : blocked );
     }
 
-    for( auto *button : { m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
+    for( auto *button : { m_assisted2k, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
     {
         const auto element = button->objectName().toStdString().substr( std::strlen( "ddspc_mode." ) );
 
@@ -975,6 +989,11 @@ void loPredCtrlAccPanel::refresh()
         else if( prediction == "active" && value( "ddspc_control", "main_loop_tt" ) == "predicted" )
         {
             banner = QStringLiteral( "PREDICTION ACTIVE: DDSPC tip/tilt through the main loop" );
+            style  = QStringLiteral( "background: #1e7b34; color: white;" );
+        }
+        else if( prediction == "active" && mode == "accel_assisted_2k" )
+        {
+            banner = QStringLiteral( "PREDICTION ACTIVE: ACC-assisted DDSPC, one command per WFS frame" );
             style  = QStringLiteral( "background: #1e7b34; color: white;" );
         }
         else if( prediction == "active" )
