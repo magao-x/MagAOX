@@ -366,12 +366,11 @@ Neither touches the main loop's own integrator. A tip/tilt command the main loop
 
 Prediction turns off and own-channel zero is requested when any of these occur:
 
-- a discarded receipt;
-- a stale WFS stream (no frame within `input_timeout`), or a WFS gap longer than `parameters.max_fill` frames, which breaks the model history;
-- invalid selected sensor data;
+- the DM scheduler discarding 1000 consecutive commands (a dead route); a single discarded command (late for its slot, or stale after a scheduler resynchronization) only keeps the scheduler's previous copy, like a skipped slot, and is counted in `ddspc_performance.transport_discarded`; a discarded zero is sent again;
+- a stale or invalid WFS stream, or a model refilling its history after a WFS gap longer than `parameters.max_fill` frames, lasting longer than `parameters.hold_timeout` (see "Holding through lost input");
 - a numerical fault.
 
-`safety.output_state` gives the reason, and keeps it in parentheses after the zero is acknowledged, for example `fault_zero_acknowledged (input_or_model_qualification_lost: acc_window stale_sample)`. Each fault is also logged as "DDSPC output fault, prediction stopped". A lost qualification names the first failed condition: `wfs_invalid`, `integrator_parameters` (the main loop's parameters are missing), `command_invalid`, `wfs_stale` (no WFS frame within `input_timeout`), `acc_window` with the ACC window reason, or `upstream_unlocked`. After confirmed removal, prediction can be re-enabled, or the models reset and retrained (`setINDI -s 'loPredCtrlAcc.reset_model.request=On'`). A normal exit also attempts an acknowledged own-channel removal.
+`safety.output_state` gives the reason, and keeps it in parentheses after the zero is acknowledged, for example `fault_zero_acknowledged (input_or_model_qualification_lost: wfs_stale)`. Each fault is also logged as "DDSPC output fault, prediction stopped". A lost qualification names the first failed condition: `wfs_invalid`, `integrator_parameters` (the main loop's parameters are missing), `command_invalid`, or `wfs_stale` (no WFS frame within `input_timeout`). ACC conditions never stop prediction. After confirmed removal, prediction can be re-enabled, or the models reset and retrained (`setINDI -s 'loPredCtrlAcc.reset_model.request=On'`). A normal exit also attempts an acknowledged own-channel removal.
 
 Every stop of prediction and every refused request is also logged as a note, with its reason: `DDSPC prediction stopped: <reason>` (turned off by request, Zero DDSPC DM requested, or tip/tilt returned to the main loop), `DDSPC prediction request refused: <reason>` and `DDSPC standard learning sequence refused: <reason>`. Faults keep their warning entry. To list them all:
 
