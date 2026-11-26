@@ -1253,7 +1253,7 @@ The INDI `ke_setpoint` range widens to ±180, since m (a difference or sum of tw
 
 ## Co-Rotation Correction (planning, 2026-11-25)
 
-_Status: **plan only, awaiting user answers and "implement".** Branch `ktwitchell/adcCtrl-v2`. Standard (non-knife-edge) mode only._
+_Status: **implemented 2026-11-25 (see Implementation Log below); build-machine pytest and on-instrument checks pending.** Branch `ktwitchell/adcCtrl-v2`. Standard (non-knife-edge) mode only._
 
 ### Prompt (verbatim, for the record)
 > we need to add a new feature to the adcCtrl app code again (see agents/adcCtrl-revamp.md for what we've done so far). The ADCs are only meant to do shearing correction because the pupil has been de-rotated, keeping the direction of atmospheric dispersion consistent across an observation. However, we are still seeing some amount of dispersion along the axis perpendicular to the dipserion axis. This speaks to a need to co-rotate the ADCs in order to change the dispersion axis to match what we are currently seeing in an image. We need to add a mode into the app that, when adcLoop is enabled, will send co-rotation corrections on top of the current counter-rotation corrections. For now, this only needs to work in the "classic" coronagraph mode, not the knife-edge.
@@ -1388,6 +1388,47 @@ The loop controls only counter-rotation (`delta_1`), which changes how much disp
   - If equal offsets turn out to be co-rotation, the fix is a swap in `send_command` (`deltaADC1 = δ1 + δ2`, `deltaADC2 = −δ1 + δ2`, with `offset` going on the counter-rotation pattern or staying common, Q7b), and `ctrl_mtx` and `ke_gain` stay as calibrated **only if** the calibration sweeps used the same pattern.
   - *Side note:* the table also has a small zd-dependent common (co-rotation) part. Above adctrack's minZD of 5.1° it is 1.4° at zd 5, 0.66° at 10, 0.43° at 15, and under 0.1° above 40. The co-rotation loop would absorb it.
 - **Q8. ✅ Resolved (user, 2026-11-25): keep a 15° runaway guard (`corot_max_deg = 15`) in addition to the 1° per-step limit.** *Original question:* Keep `corot_max_deg = 10` as a runaway guard, or drop it (the per-step limit only)?
+
+### Implementation Log (co-rotation, 2026-11-25)
+
+**Commits.** The plan commit (f662250a), the functional commit (a5472681: `app.py` and tests), then this documentation commit (module docstring and this log). No formatting commit was needed.
+
+**What was built** (`apps/adcCtrl/xapp/adcCtrl/app.py`):
+- **Config.** `corotation` (default False), `ctrl_mtx_corot` (default [0, 0]) and `corot_max_deg` (default 15).
+- **State.** `_corot_mtx` is kept as a separate 1×2 row beside `_control_mtx`, rather than one 2×2 matrix as first planned, so the existing `ctrl_mtx` config and tests are unchanged. Also `_corotation` and `_warned_corot_uncalibrated`.
+- **INDI.**
+  - `ctrl_mtx` gains `m10`/`m11`.
+  - A new `corotation` switch (`off`/`on`); turning it off holds `delta_2`.
+  - `measurement.error2`, `command.step2` and `command.delta2`.
+- **Measurement.** `measure_dispersion` computes `error2 = _corot_mtx · pairs` per frame and averages it over the inliers chosen on `error`. The knife-edge batch has no `error2`, and 0 is published.
+- **Control** (`run_cycle`):
+  - `corotation_step` uses `compute_step` with the shared gain, `loop_sign` and `step_limit_deg`, and also rejects a step that would take |δ2| past `corot_max_deg`.
+  - `corotation_active` requires the switch on, standard mode and a non-zero row; a zero row gives one WARNING.
+  - The two channels are accepted independently. Status is `sent`, `sent (co-rotation rejected)`, `sent (counter-rotation rejected)` or `rejected`.
+  - Measure-only logs and publishes `error2` and `step2` with the switch off (A5).
+- **Knife-edge.** Entering knife-edge mode with the switch on, or turning the switch on while in it, logs at INFO that δ2 is held.
+- **Logging and telemetry.** The `adcctrl_cycle` record gains `corotation`, `error2`, `step2` and `accepted2`. The DEBUG cycle line and the INFO "delta command" line include co-rotation.
+- **Unchanged.** `send_command` (already `δ1 ± δ2 + offset`), reset (already zeroes both) and the stage-move check.
+
+**Tests (8 new, 66 total, all pass locally** with the stand-in xconf/purepyindi2/magaox packages):
+- `test_corotation_pair_offsets_respond_perpendicular`: at the 45° pattern, vertical dispersion gives pair slopes of the same sign (35.6, 35.6 per λ/D) and horizontal dispersion opposite signs (−35.6, +35.6). The inverse-slope rows cross-couple by less than 0.1 against a diagonal of 2.
+- `test_corotation_defaults_and_handlers`.
+- `test_corotation_loop_converges`: δ1 and δ2 both converge from (0.8, 0.5) to (0.3, −0.2) with the shared negative `loop_sign`, and the writes are `δ1 ± δ2`. With the switch off, δ2 is held, `step2` is still published, and δ1 still converges, because the rows don't couple.
+- `test_corotation_steps_accepted_independently`: step limit, cap, and either channel sent alone.
+- `test_corotation_measure_only_publishes_with_switch_off`.
+- `test_corotation_uncalibrated_row_warns_once`.
+- `test_corotation_held_in_knife_edge_mode`.
+- `test_reset_and_writes_include_delta2`.
+
+**Mutation checks.** Swapping the δ2 sign in the writes fails the convergence test; removing the cap fails the independent-acceptance test.
+
+**Still to do.**
+- Build-machine pytest (expect 66 passed).
+- On the instrument:
+  - hand-calibrate m10/m11 with a co-rotation sweep (`deltaADC1 = +d, deltaADC2 = −d`) away from the null;
+  - check `error2` in measure-only;
+  - close the loop with `corotation` on and confirm δ2 converges with the shared `loop_sign`.
+- If the deployed `adcCtrl.conf` should start with co-rotation on, add `corotation = true` and `ctrl_mtx_corot` there after calibrating.
 
 
 ### References

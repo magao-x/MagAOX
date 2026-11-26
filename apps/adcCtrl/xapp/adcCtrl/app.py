@@ -1,7 +1,7 @@
 """Closed-loop ADC control from satellite spot pointing angles.
 
 adcCtrl measures residual atmospheric dispersion in science camera images and
-corrects it by sending counter-rotation offsets to the ADC tracker
+corrects it by sending counter-rotation (and optionally co-rotation) offsets to the ADC tracker
 (``adctrack.deltaADC1/2``), on top of adcTracker's model-based tracking.
 
 Author: Katie Twitchell (twitchell@arizona.edu)
@@ -29,7 +29,28 @@ rejecting failed measurements and outliers. The step ``loop_sign * gain *
 error`` is added to the integrator ``delta_1`` unless it exceeds
 ``step_limit_deg``, in which case it is rejected. Offsets are sent as
 ``deltaADC1 = delta_1 + delta_2 + offset`` and
-``deltaADC2 = delta_1 - delta_2 + offset``; ``delta_2`` stays 0.
+``deltaADC2 = delta_1 - delta_2 + offset``. Equal offsets counter-rotate the
+prisms (stageadc2 faces backwards), so ``delta_1`` is counter-rotation and
+``delta_2`` co-rotation.
+
+Co-rotation
+-----------
+With the pupil de-rotated, the atmospheric dispersion keeps one direction
+(vertical in the image) and counter-rotation corrects its strength. A
+residual across that direction (from an ADC clocking error or fixed
+instrumental dispersion) is corrected by co-rotating the prisms, which
+turns the ADC's dispersion. The pair offsets measure both components: with
+the 45 degree sparkle pattern, vertical dispersion moves pair02 and pair13
+the same way and horizontal dispersion moves them oppositely. The
+co-rotation error is ``[m10, m11] . pairs`` and its step ``loop_sign * gain
+* error2`` goes into ``delta_2``, with the same step limit, and is also
+rejected if it would take ``|delta_2|`` past ``corot_max_deg`` (15 degrees).
+Each step is accepted or rejected on its own. It is only sent with the
+``corotation`` switch on, in standard mode and with a non-zero row, but it
+is measured and published every cycle. ``delta_2`` is held when the switch
+is off and in knife-edge mode. The needed co-rotation can change with
+elevation (fixed instrumental dispersion needs more of it when the
+atmospheric dispersion is small), which the loop follows on its own.
 
 adctrack accepts a new offset at once but only moves the stages at its next
 tracking update (``tracking.updateInterval``, 5 s), and the stage controllers
@@ -100,7 +121,8 @@ n_avg            number    frames averaged per image
 no_measurements  number    images per command
 gain             number    loop gain
 offset           number    common offset added to both ADCs [deg]
-ctrl_mtx         number    m00, m01: pair offsets -> dispersion error
+ctrl_mtx         number    m00, m01: pair offsets -> dispersion error; m10, m11: -> co-rotation error
+corotation       switch    off / on: send co-rotation corrections (delta_2), standard mode only
 loop_sign        switch    positive / negative feedback polarity (platform dependent)
 coronagraph      switch    standard / knife_edge_top / knife_edge_bottom / knife_edge_left /
                            knife_edge_right; idle only
@@ -112,9 +134,10 @@ ke_capture_setpoint switch request: set ke_setpoint to one batch's mean m (idle 
 satellite_spots  switch    sparkles / dm_spots
 camera           switch    science camera (and its filter wheel); idle only
 reset_deltaADCs  switch    request: zero the ADC offsets
-measurement      number    (read-only) angles, deviations, pair offsets, error, n_valid, n_total;
-                           knife-edge m, residual, star position, separation, angle, mask margin
-command          number    (read-only) last step, total delta1
+measurement      number    (read-only) angles, deviations, pair offsets, error, error2 (co-rotation),
+                           n_valid, n_total; knife-edge m, residual, star position, separation, angle,
+                           mask margin
+command          number    (read-only) last step, total delta1, last co-rotation step, total delta2
 status           text      (read-only) last command outcome and last error
 
 Operator procedure
@@ -126,6 +149,16 @@ Operator procedure
 3. Run oneshot to confirm the correction reduces the error. If it grows,
    flip loop_sign.
 4. Run adcLoop.
+
+Co-rotation procedure:
+
+1. Calibrate m10/m11 by hand like ctrl_mtx, in measure-only: co-rotate the
+   ADCs by known offsets (deltaADC1 = +d, deltaADC2 = -d), fit the pair
+   offset slopes and enter their inverses as m10/m11. Do this away from the
+   null (with dispersion present), where co-rotation has an effect.
+2. Check in measure-only that error2 tracks the perpendicular residual.
+3. Set corotation to on and run adcLoop; both corrections use gain and
+   loop_sign.
 
 Knife-edge procedure:
 
