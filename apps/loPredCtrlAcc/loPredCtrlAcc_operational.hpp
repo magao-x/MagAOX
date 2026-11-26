@@ -402,6 +402,7 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     {
         std::int64_t  m_ns{ -1 };
         std::uint64_t m_published{ 0 }, m_predictions{ 0 }, m_updates{ 0 }, m_refreshes{ 0 }, m_mismatch{ 0 };
+        bool          m_mismatchLogged{ false }; ///< The current dm_slots mismatch is logged.
     };
     Rates m_rates;
 
@@ -3081,6 +3082,7 @@ inline int loPredCtrlAcc_operational::appLogic()
     bool                   learning, predicting;
     std::uint64_t          shifts, overruns, needed;
     int                    slots, ratio;
+    std::int64_t           steps;
     Latency                learn;
     FastStats              fast;
     CloneStats             clone;
@@ -3126,6 +3128,7 @@ inline int loPredCtrlAcc_operational::appLogic()
     { //mutex scope
         std::lock_guard<std::mutex> commandLock( m_commandMutex );
         shifts = m_slotShifts;
+        steps                 = m_steps;
         fast   = m_fastStats;
         clone                 = m_cloneStats;
         m_cloneStats.m_margin = {};
@@ -3208,9 +3211,32 @@ inline int loPredCtrlAcc_operational::appLogic()
     if( !assisted.m_ready )
         block( std::string( assisted.m_training ? "model_warming_" : "model_untrained_" ) +
                std::to_string( assisted.m_updates ) + "_of_" + std::to_string( needed ) + "_updates" );
-    if( fast.m_mismatch > m_rates.m_mismatch )
+    // Assisted slots are not written while the scheduler's steps differ from dm_slots: say so, once in the log.
+    const bool mismatched = fast.m_mismatch > m_rates.m_mismatch;
+    if( mismatched )
+    {
         block( "scheduler_steps_differ_from_dm_slots" );
-    m_rates.m_mismatch = fast.m_mismatch;
+    }
+    if( mismatched && !m_rates.m_mismatchLogged )
+    {
+        log<text_log>( "DDSPC assisted slots not written: the DM scheduler has " + std::to_string( steps ) +
+                           " steps per cycle, dm_slots is " + std::to_string( slots ) +
+                           " (set parameters.dm_slots = 0 to detect it)",
+                       logPrio::LOG_WARNING );
+    }
+    m_rates.m_mismatchLogged = mismatched;
+    m_rates.m_mismatch       = fast.m_mismatch;
+
+    // Why an accepted prediction is not writing: a dm_slots mismatch or a hold on lost input, else awaiting a copy.
+    const std::string prediction =
+        !predicting                    ? std::string( "off" )
+        : mainLoop                     ? std::string( selectedReady ? "active" : "warming" )
+        : !valid                       ? std::string( "inhibited" )
+        : !selectedReady && !mfiltCopy ? std::string( "warming" )
+        : mismatched ? "dm_slots_" + std::to_string( slots ) + "_differ_from_scheduler_steps_" + std::to_string( steps )
+        : m_invalidSinceNs.load() >= 0 ? std::string( "holding_" ) + m_invalidReason.load()
+        : output.m_acknowledged        ? std::string( "active" )
+                                       : std::string( "awaiting_copy" );
     auto format        = []( double value )
     {
         char text[32];
@@ -3237,12 +3263,7 @@ inline int loPredCtrlAcc_operational::appLogic()
           standard.m_ready && fresh ? "true" : "false",
           assisted.m_ready && fresh && samples && locked ? "true" : "false",
           learning ? "true" : "false",
-          !predicting                    ? "off"
-          : mainLoop                     ? ( selectedReady ? "active" : "warming" )
-          : !valid                       ? "inhibited"
-          : !selectedReady && !mfiltCopy ? "warming"
-          : output.m_acknowledged        ? "active"
-                                         : "awaiting_copy",
+          prediction,
           locked ? "true" : "false",
           !fresh             ? "awaiting_wfs"
           : !slotsKnown      ? ( m_targetSlots.load() ? "dm_slots_pending" : "dm_slots_detecting" )
