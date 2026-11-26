@@ -75,15 +75,16 @@ struct residualShmimT
  * For each scheduler slot the published command is `-(A + sum_k gain_k * delta_k * ramp(target - t0_k))`, where
  * gain_k is the gain when offload k arrived, completed ramps are folded into the accumulator `A`, which is multiplied
  * by `(1 - leak)` after every successful publication, and `A` and the command are clipped to +/- maxCommand.  A gain
- * change therefore affects only new offloads.  Disabling stops accepting new offloads and requests a zero, so the contribution is
- * cleared at the next slot.
+ * change therefore affects only new offloads.  Disabling stops accepting new offloads and requests a zero, so the
+ * contribution is cleared at the next slot.
  *
  * Calibrate mode drives repeatable offloads by stepping one woofer mode (wooferModes) and reads the per-frame modal
  * residual.  For each step it matches the onset to the response to the step alone (measured with the offloader paused),
- * subtracts that response, aligns on the first offload after the step, and averages over the steps.  The figure of merit is the energy left, summed over
- * the offloaded modes, as a ratio to a gain-0 baseline interpolated in time.  It estimates the noise from replicates,
- * sweeps rampStartUs, gain and rampDurationUs, then rampStartUs and gain again, choosing each from a quadratic fit and
- * moving only for an improvement beyond the noise, and applies the result if replicates confirm it.
+ * subtracts that response, aligns on the first offload after the step, and averages over the steps.  The figure of
+ * merit is the energy left, summed over the offloaded modes, as a ratio to a gain-0 baseline interpolated in time.  It
+ * estimates the noise from replicates, sweeps rampStartUs, gain and rampDurationUs, then rampStartUs and gain again,
+ * choosing each from a quadratic fit and moving only for an improvement beyond the noise, and applies the result if
+ * replicates confirm it.
  *
  * Telemetry (telem_counteroffload) is written every telemeter.maxInterval, and at once when the app is enabled or
  * disabled, a calibration starts or ends, or gain, leak, rampStartUs or rampDurationUs changes.
@@ -550,7 +551,8 @@ class counterOffload : public MagAOXApp<true>,
 
     bool m_leadLogged{ false }; ///< Whether the slot lead has been logged.  Producer thread only.
 
-    std::mutex m_telemMutex; ///< Serializes telemetry records, which are made from the INDI, appLogic and calibration threads.
+    std::mutex
+        m_telemMutex; ///< Serializes telemetry records, which are made from the INDI, appLogic and calibration threads.
 
     telemSettingsT m_telemLast; ///< The settings in the last telemetry record.  m_telemMutex.
 
@@ -813,8 +815,8 @@ class counterOffload : public MagAOXApp<true>,
     static size_t alignSteps( const stepDataT           &d /**< [in] the collected series */,
                               std::vector<stepT>        &steps /**< [in,out] the steps, from findSteps() */,
                               const std::vector<double> &stepOnly /**< [in] the step-only response */,
-                              size_t                     matchFrames /**< [in] most frames matched, beyond the shift range */,
-                              size_t                     maxShift /**< [in] largest onset change, frames */ );
+                              size_t matchFrames /**< [in] most frames matched, beyond the shift range */,
+                              size_t maxShift /**< [in] largest onset change, frames */ );
 
     /// Mean and standard deviation of the onset delay (onset - command) of the steps found, in frames.
     static void onsetDelayStats( const std::vector<stepT> &steps /**< [in] the steps */,
@@ -845,12 +847,13 @@ class counterOffload : public MagAOXApp<true>,
      *
      * \returns the figure of merit; used is 0 if fewer than 2 steps could be used
      */
-    static stepFomT stepFom( const stepDataT           &d /**< [in] the collected series */,
-                             const std::vector<stepT>  &steps /**< [in] the steps, from findSteps() */,
-                             const std::vector<double> &stepOnly /**< [in] the step-only response, see stepOnlyResponse() */,
-                             const std::vector<double> &stepOnlyNoise /**< [in] its noise variance at each lag */,
-                             size_t                     lags /**< [in] lags summed into the figure of merit */,
-                             size_t                     totalLags /**< [in] lags in lagEnergy, at least lags */ );
+    static stepFomT
+    stepFom( const stepDataT           &d /**< [in] the collected series */,
+             const std::vector<stepT>  &steps /**< [in] the steps, from findSteps() */,
+             const std::vector<double> &stepOnly /**< [in] the step-only response, see stepOnlyResponse() */,
+             const std::vector<double> &stepOnlyNoise /**< [in] its noise variance at each lag */,
+             size_t                     lags /**< [in] lags summed into the figure of merit */,
+             size_t                     totalLags /**< [in] lags in lagEnergy, at least lags */ );
 
     /// Baseline at a time, linearly interpolated between baselines and constant beyond the first and last.
     /**
@@ -1112,8 +1115,8 @@ class counterOffload : public MagAOXApp<true>,
      * \returns false on failure, or if the ratio to the latest baseline exceeds m_abortRatio
      */
     bool measurePoint( const calibParamsT &p /**< [in] parameters */,
-                      int                 stage /**< [in] stage index */,
-                      double             &fom /**< [out] the step figure of merit */ );
+                       int                 stage /**< [in] stage index */,
+                       double             &fom /**< [out] the step figure of merit */ );
 
     /// Measure parameters n times, each between baselines, and return their interpolated ratios.
     /**
@@ -1385,16 +1388,17 @@ inline void counterOffload::setupConfig()
                 "real",
                 "Scale applied to each new offload when it arrives, 0 to 2.  Default is 0.5." );
 
-    config.add( "counterOffload.maxCommand",
-                "",
-                "counterOffload.maxCommand",
-                argType::Required,
-                "counterOffload",
-                "maxCommand",
-                false,
-                "real",
-                "Largest magnitude of any pixel of the command and of the held contribution; larger values are clipped.  "
-                "Default is 1.0." );
+    config.add(
+        "counterOffload.maxCommand",
+        "",
+        "counterOffload.maxCommand",
+        argType::Required,
+        "counterOffload",
+        "maxCommand",
+        false,
+        "real",
+        "Largest magnitude of any pixel of the command and of the held contribution; larger values are clipped.  "
+        "Default is 1.0." );
 
     config.add( "counterOffload.computeLeadUs",
                 "",
@@ -1568,7 +1572,12 @@ inline int counterOffload::appStartup()
         { m_indiP_gain, "gain", 0, 2, m_gain, INDI_NEWCALLBACK( m_indiP_gain ) },
         { m_indiP_leak, "leak", 0, 1, m_leak, INDI_NEWCALLBACK( m_indiP_leak ) },
         { m_indiP_rampStart, "rampStartUs", 0, 1e6, m_rampStartUs, INDI_NEWCALLBACK( m_indiP_rampStart ) },
-        { m_indiP_rampDuration, "rampDurationUs", 1, 1e6, m_rampDurationUs, INDI_NEWCALLBACK( m_indiP_rampDuration ) } };
+        { m_indiP_rampDuration,
+          "rampDurationUs",
+          1,
+          1e6,
+          m_rampDurationUs,
+          INDI_NEWCALLBACK( m_indiP_rampDuration ) } };
 
     for( auto &n : numbers )
     {
@@ -1584,10 +1593,9 @@ inline int counterOffload::appStartup()
 
     if( registerGrid( m_indiP_startGrid, "calibStartGridUs", m_startGridUs, INDI_NEWCALLBACK( m_indiP_startGrid ) ) <
             0 ||
-        registerGrid( m_indiP_durationGrid,
-                      "calibDurationGridUs",
-                      m_durationGridUs,
-                      INDI_NEWCALLBACK( m_indiP_durationGrid ) ) < 0 ||
+        registerGrid(
+            m_indiP_durationGrid, "calibDurationGridUs", m_durationGridUs, INDI_NEWCALLBACK( m_indiP_durationGrid ) ) <
+            0 ||
         registerGrid( m_indiP_gainGrid, "calibGainGrid", m_gainGrid, INDI_NEWCALLBACK( m_indiP_gainGrid ) ) < 0 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__ } );
@@ -1811,16 +1819,11 @@ inline int counterOffload::appLogic()
                   m_confirmRatio };
     }
 
-    updateIfChanged( m_indiP_calibration,
-                     std::vector<std::string>{ "stage",
-                                               "point",
-                                               "ratio",
-                                               "bestStartUs",
-                                               "bestDurationUs",
-                                               "bestGain",
-                                               "bestRatio",
-                                               "confirmRatio" },
-                     calib );
+    updateIfChanged(
+        m_indiP_calibration,
+        std::vector<std::string>{
+            "stage", "point", "ratio", "bestStartUs", "bestDurationUs", "bestGain", "bestRatio", "confirmRatio" },
+        calib );
 
     updateSwitchIfChanged( m_indiP_calibrate,
                            "toggle",
@@ -1996,8 +1999,8 @@ inline counterOffload::rampT *counterOffload::addRamp( const realT *delta, int64
 
     slot->delta = static_cast<realT>( m_gain ) *
                   Eigen::Map<const mx::improc::eigenImage<realT>>( delta, m_accum.rows(), m_accum.cols() );
-    slot->t0Ns  = t0Ns;
-    slot->used  = true;
+    slot->t0Ns = t0Ns;
+    slot->used = true;
 
     slot->wakeNs         = 0;
     slot->handoffNs      = -1;
@@ -2371,7 +2374,7 @@ inline size_t counterOffload::alignSteps( const stepDataT           &d,
 
         const auto   next = std::lower_bound( st.offloads.begin(), st.offloads.end(), lo );
         const size_t q    = ( next != st.offloads.end() ) ? *next : st.end;
-        const size_t hi   = std::min( { st.end, std::max( q, lo + m_minMatchFrames ), lo + matchFrames + 2 * maxShift } );
+        const size_t hi = std::min( { st.end, std::max( q, lo + m_minMatchFrames ), lo + matchFrames + 2 * maxShift } );
 
         if( hi <= lo )
         {
@@ -2424,7 +2427,7 @@ inline size_t counterOffload::alignSteps( const stepDataT           &d,
 inline void counterOffload::onsetDelayStats( const std::vector<stepT> &steps, double &mean, double &sd )
 {
     double sum = 0, sum2 = 0;
-    size_t n   = 0;
+    size_t n = 0;
 
     for( const stepT &st : steps )
     {
@@ -2565,8 +2568,8 @@ inline counterOffload::stepFomT counterOffload::stepFom( const stepDataT        
         {
             for( size_t m = 0; m < M; ++m )
             {
-                const double e = d.signs[k] * ( d.frames[( off + l ) * M + m] - st.preMean[m] ) -
-                                 stepOnly[( phase + l ) * M + m];
+                const double e =
+                    d.signs[k] * ( d.frames[( off + l ) * M + m] - st.preMean[m] ) - stepOnly[( phase + l ) * M + m];
 
                 for( int h : { 0, half } )
                 {
@@ -2676,9 +2679,8 @@ inline counterOffload::stepFomT counterOffload::stepFom( const stepDataT        
     return out;
 }
 
-inline double counterOffload::interpBaseline( int64_t                     tNs,
-                                              const std::vector<int64_t> &offTimes,
-                                              const std::vector<double>  &offFoms )
+inline double
+counterOffload::interpBaseline( int64_t tNs, const std::vector<int64_t> &offTimes, const std::vector<double> &offFoms )
 {
     if( offTimes.empty() )
     {
@@ -2777,7 +2779,8 @@ inline counterOffload::quadFitT counterOffload::fitQuadratic( const std::vector<
 
     auto det3 = []( const mat3T &m )
     {
-        return m[0][0] * ( m[1][1] * m[2][2] - m[1][2] * m[2][1] ) - m[0][1] * ( m[1][0] * m[2][2] - m[1][2] * m[2][0] ) +
+        return m[0][0] * ( m[1][1] * m[2][2] - m[1][2] * m[2][1] ) -
+               m[0][1] * ( m[1][0] * m[2][2] - m[1][2] * m[2][0] ) +
                m[0][2] * ( m[1][0] * m[2][1] - m[1][1] * m[2][0] );
     };
 
@@ -2815,11 +2818,8 @@ inline counterOffload::quadFitT counterOffload::fitQuadratic( const std::vector<
     return fit;
 }
 
-inline counterOffload::choiceT counterOffload::chooseValue( const std::vector<double> &xs,
-                                                            const std::vector<double> &rs,
-                                                            double                     current,
-                                                            double                     sigma,
-                                                            double                     moveSigma )
+inline counterOffload::choiceT counterOffload::chooseValue(
+    const std::vector<double> &xs, const std::vector<double> &rs, double current, double sigma, double moveSigma )
 {
     choiceT      ch;
     const size_t n = xs.size();
@@ -2833,7 +2833,12 @@ inline counterOffload::choiceT counterOffload::chooseValue( const std::vector<do
 
     std::vector<size_t> idx( n );
     std::iota( idx.begin(), idx.end(), 0 );
-    std::sort( idx.begin(), idx.end(), [&xs]( size_t a, size_t b ) { return xs[a] < xs[b]; } );
+    std::sort( idx.begin(),
+               idx.end(),
+               [&xs]( size_t a, size_t b )
+               {
+                   return xs[a] < xs[b];
+               } );
 
     const double lo = xs[idx.front()];
     const double hi = xs[idx.back()];
@@ -2951,8 +2956,17 @@ inline void counterOffload::setCalibParams( const calibParamsT &p )
 
 inline const char *counterOffload::calibStageName( int stage )
 {
-    static const char *names[] = { "off",       "initial",      "start",    "duration", "gain",    "confirm",
-                                   "clipped",   "fit start",    "fit duration", "fit gain", "step only" };
+    static const char *names[] = { "off",
+                                   "initial",
+                                   "start",
+                                   "duration",
+                                   "gain",
+                                   "confirm",
+                                   "clipped",
+                                   "fit start",
+                                   "fit duration",
+                                   "fit gain",
+                                   "step only" };
 
     return ( stage >= stageOff && stage <= stageStepOnly ) ? names[stage] : "unknown";
 }
@@ -2964,8 +2978,15 @@ inline double counterOffload::clipFraction( uint64_t clipped, uint64_t published
 
 inline const std::vector<std::string> &counterOffload::latencyElements()
 {
-    static const std::vector<std::string> names{ "pipelineUs", "pipelineRmsUs", "slotUs",       "handoffUs", "slotWaitUs",
-                                                 "computeUs",  "writeUs",       "computeMaxUs", "missed" };
+    static const std::vector<std::string> names{ "pipelineUs",
+                                                 "pipelineRmsUs",
+                                                 "slotUs",
+                                                 "handoffUs",
+                                                 "slotWaitUs",
+                                                 "computeUs",
+                                                 "writeUs",
+                                                 "computeMaxUs",
+                                                 "missed" };
 
     return names;
 }
@@ -3210,9 +3231,8 @@ inline std::string counterOffload::calibSettingsString()
         out << ' ' << k.key << '=' << calibKeyValue( k );
     }
 
-    const std::pair<const char *, const std::vector<double> *> grids[] = { { "startGridUs", &m_startGridUs },
-                                                                           { "durationGridUs", &m_durationGridUs },
-                                                                           { "gainGrid", &m_gainGrid } };
+    const std::pair<const char *, const std::vector<double> *> grids[] = {
+        { "startGridUs", &m_startGridUs }, { "durationGridUs", &m_durationGridUs }, { "gainGrid", &m_gainGrid } };
 
     for( const auto &[name, grid] : grids )
     {
@@ -3303,8 +3323,8 @@ inline void counterOffload::runCalibration()
     const int    points   = estimatePoints();
     const double minutes  = ( points * perPoint + 2 * ( perPoint + ( m_stepCount + 3 ) * m_stepPeriodS ) ) / 60;
 
-    log<text_log>( "calibration: about " + std::to_string( points ) + " measurements, " +
-                       std::to_string( minutes ) + " min",
+    log<text_log>( "calibration: about " + std::to_string( points ) + " measurements, " + std::to_string( minutes ) +
+                       " min",
                    ( minutes > m_maxRunMin ) ? logPrio::LOG_WARNING : logPrio::LOG_INFO );
 
     calibParamsT        cur       = original;
@@ -3397,8 +3417,8 @@ inline void counterOffload::runCalibration()
         log<text_log>( "calibration could not turn " + m_offloadDevice + " offload back on", logPrio::LOG_ERROR );
     }
 
-    const std::string params = "rampStartUs=" + std::to_string( cur[0] ) + " rampDurationUs=" +
-                               std::to_string( cur[1] ) + " gain=" + std::to_string( cur[2] );
+    const std::string params = "rampStartUs=" + std::to_string( cur[0] ) +
+                               " rampDurationUs=" + std::to_string( cur[1] ) + " gain=" + std::to_string( cur[2] );
 
     if( ok && confirm < 1 )
     {
@@ -3421,9 +3441,8 @@ inline void counterOffload::runCalibration()
         setCalibParams( original );
 
         log<text_log>( std::string( ok ? "calibration found no confirmed improvement" : "calibration aborted" ) +
-                           ", restored rampStartUs=" + std::to_string( original[0] ) +
-                           " rampDurationUs=" + std::to_string( original[1] ) +
-                           " gain=" + std::to_string( original[2] ),
+                           ", restored rampStartUs=" + std::to_string( original[0] ) + " rampDurationUs=" +
+                           std::to_string( original[1] ) + " gain=" + std::to_string( original[2] ),
                        logPrio::LOG_WARNING );
     }
 
@@ -3834,7 +3853,8 @@ inline bool counterOffload::measureStepOnly( bool &offloadOff )
         std::lock_guard<std::mutex> lock( m_calibMutex );
 
         writeCsvPrefix( wall, stageStepOnly, p );
-        m_csv << "," << energy << ",,,,,,,,,,,,," << "," << delay << "," << delaySd << ",,\n";
+        m_csv << "," << energy << ",,,,,,,,,,,,,"
+              << "," << delay << "," << delaySd << ",,\n";
         m_csv.flush();
     }
 
@@ -3861,13 +3881,13 @@ inline bool counterOffload::measure( const calibParamsT &p, stepFomT &f, uint64_
 
     // The window in frames, from the mean frame interval.
     const size_t nFrames = d.frameNs.size();
-    const double frameNs =
-        ( nFrames > 1 ) ? double( d.frameNs.back() - d.frameNs.front() ) / ( nFrames - 1 ) : 0;
+    const double frameNs = ( nFrames > 1 ) ? double( d.frameNs.back() - d.frameNs.front() ) / ( nFrames - 1 ) : 0;
     const size_t window =
         ( frameNs > 0 ) ? static_cast<size_t>( std::lround( m_fomWindowMs * 1e6 / frameNs ) ) : m_lagFrames;
     const size_t lags = std::min( m_lagFrames, std::max<size_t>( 1, window ) );
 
-    f = stepFom( d, steps, m_stepOnly, m_stepOnlyNoise, lags, std::min( m_lagFrames, std::max( lags, m_profileLags ) ) );
+    f = stepFom(
+        d, steps, m_stepOnly, m_stepOnlyNoise, lags, std::min( m_lagFrames, std::max( lags, m_profileLags ) ) );
 
     const size_t need = std::max<size_t>( 2, m_stepCount / 2 );
 
@@ -4084,8 +4104,8 @@ inline bool counterOffload::sweep( int axis, calibParamsT &cur, double &curRatio
     else
     {
         log<text_log>( std::string( "calibration: " ) + axisName[axis] + " candidate " +
-                           std::to_string( ch.candidate ) + " (ratio " + std::to_string( ch.rCandidate ) + "), current " +
-                           std::to_string( cur[axis] ) +
+                           std::to_string( ch.candidate ) + " (ratio " + std::to_string( ch.rCandidate ) +
+                           "), current " + std::to_string( cur[axis] ) +
                            ( ch.outside ? " outside the sweep" : " (ratio " + std::to_string( ch.rCurrent ) + ")" ) +
                            ", threshold " + std::to_string( ch.threshold ) + ": " + ( ch.move ? "moved" : "kept" ),
                        logPrio::LOG_INFO );
@@ -4144,8 +4164,8 @@ counterOffload::addRow( int stage, const calibParamsT &p, const stepFomT &f, uin
     {
         ++m_clippedRows;
 
-        log<text_log>( std::string( "calibration: " ) + calibStageName( stage ) + " rampStartUs=" +
-                           std::to_string( p[0] ) + " rampDurationUs=" + std::to_string( p[1] ) +
+        log<text_log>( std::string( "calibration: " ) + calibStageName( stage ) +
+                           " rampStartUs=" + std::to_string( p[0] ) + " rampDurationUs=" + std::to_string( p[1] ) +
                            " gain=" + std::to_string( p[2] ) + " clipped in " + std::to_string( clipped ) + " of " +
                            std::to_string( published ) + " slots (" +
                            std::to_string( clipFraction( clipped, published ) ) + "), kept",
@@ -4180,15 +4200,15 @@ inline void counterOffload::writeCsvPrefix( const timespec &wall, int stage, con
 }
 
 inline void counterOffload::writeLagRow( const timespec            &wall,
-                                        int                        stage,
-                                        const calibParamsT        &p,
-                                        const std::vector<double> &lagEnergy )
+                                         int                        stage,
+                                         const calibParamsT        &p,
+                                         const std::vector<double> &lagEnergy )
 {
     const size_t n = std::min( lagEnergy.size(), m_profileLags );
 
     m_lagCsv << std::fixed << wall.tv_sec << "." << std::setw( 9 ) << std::setfill( '0' ) << wall.tv_nsec
-             << std::setfill( ' ' ) << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << ","
-             << p[1] << "," << p[2] << "," << n;
+             << std::setfill( ' ' ) << std::defaultfloat << "," << calibStageName( stage ) << "," << p[0] << "," << p[1]
+             << "," << p[2] << "," << n;
 
     for( size_t l = 0; l < n; ++l )
     {
@@ -4267,12 +4287,12 @@ inline void counterOffload::coThreadExec()
 
         if( !m_leadLogged )
         {
-            log<text_log>( "slot lead: computeLeadUs " + std::to_string( m_computeLeadUs ) + " + writeLeadUs " +
-                           std::to_string( m_writeLeadUs ) + " + synco readyLeadUs " +
-                           std::to_string( ( request.targetNs - request.cutoffNs ) / 1000.0 ) + " = " +
-                           std::to_string( ( request.targetNs - request.cutoffNs ) / 1000.0 + m_writeLeadUs +
-                                           m_computeLeadUs ) +
-                           " us" );
+            log<text_log>(
+                "slot lead: computeLeadUs " + std::to_string( m_computeLeadUs ) + " + writeLeadUs " +
+                std::to_string( m_writeLeadUs ) + " + synco readyLeadUs " +
+                std::to_string( ( request.targetNs - request.cutoffNs ) / 1000.0 ) + " = " +
+                std::to_string( ( request.targetNs - request.cutoffNs ) / 1000.0 + m_writeLeadUs + m_computeLeadUs ) +
+                " us" );
             m_leadLogged = true;
         }
 
@@ -4314,8 +4334,7 @@ inline void counterOffload::coThreadExec()
         }
 
         // syncopationPublish waits until its publish lead before copying, so the write starts at the later of the two.
-        const int64_t publishAt =
-            request.cutoffNs - static_cast<int64_t>( std::ceil( m_writeLeadUs * 1000 ) );
+        const int64_t publishAt    = request.cutoffNs - static_cast<int64_t>( std::ceil( m_writeLeadUs * 1000 ) );
         const int64_t writeStartNs = std::max( synco::monotonicNs(), publishAt );
 
         const bool published = dmSyncopationProducerT::syncopationPublish( m_command.data(), request, m_auxStream );
