@@ -1,11 +1,13 @@
 /** \file camera_test.cpp
- * \brief Offline discovery, lifecycle, and command tests for the camera EM-gain-off button.
+ * \brief Offline discovery, lifecycle, and command tests for camera controls.
  * \ingroup cameraGUI_unit_test
  */
 #define CATCH_CONFIG_RUNNER
 #include "../../../../tests/testXWC.hpp"
 
 #include <QApplication>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include "../../../lib/tests/offlineIndiPublisher.hpp"
 #include "../camera.hpp"
 
@@ -52,7 +54,9 @@ class Widget
 void events()
 {
     for( int depth = 0; depth < 4; ++depth )
+    {
         QApplication::processEvents();
+    }
 }
 
 Widget::Widget() : m_widget( m_device )
@@ -222,6 +226,56 @@ TEST_CASE( "Camera EM-gain-off readiness and reconnect", "[cameraGUI]" )
     REQUIRE( widget.m_publisher.m_commands.size() == 1 );
 }
 
+/// Pressing Return in Avg. Time sends a numeric target to the camera's averager.
+/** \ingroup cameraGUI_unit_test */
+TEST_CASE( "Camera averaging time sends a numeric target", "[cameraGUI]" )
+{
+    // clang-format off
+    #ifdef CAMERA_GUI_TEST_DOXYGEN_REF
+    xqt::camera::setup_avgTime;
+    xqt::statusEntry::handleSetProperty;
+    xqt::statusEntry::on_value_returnPressed;
+    #endif
+    // clang-format on
+    Widget widget;
+    widget.ready();
+
+    pcf::IndiProperty average( pcf::IndiProperty::Number, widget.m_device + "-avg", "avgTime" );
+    average.add( pcf::IndiElement( "current", 1.0 ) );
+    average.add( pcf::IndiElement( "target", 1.0 ) );
+    widget.publish( average );
+
+    auto *entry = widget.m_widget.findChild<xqt::statusEntry *>( "avgTime" );
+    REQUIRE( entry != nullptr );
+
+    // The entry subscribes when created. Deliver the averager's reply to that subscription.
+    widget.publish( average );
+    REQUIRE( entry->formattedValue().toDouble() == 1.0 );
+    REQUIRE( entry->isEnabled() );
+    REQUIRE_FALSE( entry->readOnly() );
+
+    auto *editor = entry->findChild<QLineEdit *>( "value" );
+    REQUIRE( editor != nullptr );
+    editor->setFocus();
+    entry->setEditText( "2.75" );
+    QKeyEvent submit( QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier );
+    QApplication::sendEvent( editor, &submit );
+
+    REQUIRE( widget.m_publisher.m_commands.size() == 1 );
+    const auto &command = widget.m_publisher.m_commands.back();
+    CHECK( command.getDevice() == average.getDevice() );
+    CHECK( command.getName() == average.getName() );
+    CHECK( command.getType() == pcf::IndiProperty::Number );
+    REQUIRE( command.getNumElements() == 1 );
+    CHECK( command["target"].get<double>() == 2.75 );
+
+    average["current"].set( 2.75 );
+    average["target"].set( 2.75 );
+    widget.m_publisher.handleSetProperty( average );
+    events();
+    CHECK( entry->inputText().toDouble() == 2.75 );
+}
+
 /// The optional command occupies its own row beside the existing gain, synchronization, and averaging controls.
 /** \ingroup cameraGUI_unit_test */
 TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
@@ -234,6 +288,7 @@ TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
     // clang-format on
     Widget widget;
     widget.ready();
+
     for( const auto *name : { "temp_ccd", "emgain" } )
     {
         pcf::IndiProperty number( pcf::IndiProperty::Number, widget.m_device, name );
@@ -242,6 +297,7 @@ TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
         number.add( pcf::IndiElement( "target", value ) );
         widget.publish( number );
     }
+
     widget.support();
     pcf::IndiProperty synchro( pcf::IndiProperty::Switch, widget.m_device, "synchro" );
     synchro.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
@@ -259,13 +315,21 @@ TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
         auto *control = widget.m_widget.findChild<QWidget *>( name );
         REQUIRE( control != nullptr );
         REQUIRE( control->isVisible() );
+
         for( auto *previous : controls )
+        {
             REQUIRE_FALSE( previous->geometry().intersects( control->geometry() ) );
+        }
+
         controls.push_back( control );
     }
+
     const QString screenshot = qEnvironmentVariable( "CAMERA_GUI_SCREENSHOT" );
+
     if( !screenshot.isEmpty() )
+    {
         REQUIRE( widget.m_widget.grab().save( screenshot ) );
+    }
 }
 
 } // namespace cameraGUITest
