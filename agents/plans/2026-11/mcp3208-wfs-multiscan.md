@@ -124,6 +124,17 @@ lowered to what `ceil(period / (service + guard)) - 1` fits: with a 20 us guard,
 up, so the count is now always the rate-limit multiple (4) and the phase is the requested one; neither depends on the
 read-time estimate. The service fit, its refusal and the phase cap remain for `completeScans=false`.
 
+## One SPI message per scan
+
+Counting over 9.1 s of a dip on the Pi: 72,883 frames published against 4 x 18,250 WFS frames, 117 short, with
+`skipped_scans` +119, so every lost scan is a backlog overflow. The read takes about 92 us typically and averages
+110 us (`delay_aw` 91.6 us, so publication adds little): 4 scans use 440 of each 500 us, leaving about 15 us per slot to
+absorb stalls, and repeated stalls overflow the one-period backlog. Each channel was a separate lgpio `lgSpiXfer`
+system call; the 24-bit transfer is only about 18 us at 1.35 MHz. `MCP3208::read( channels, values, count )` now sends
+all channels as one `SPI_IOC_MESSAGE` on `/dev/spidevD.C` (chip select raised between conversions via `cs_change`; the
+kernel adds its default deselect delay), with unchanged command bytes, and mcp3208Ctrl reads each scan with one call
+(`readScan`). lgpio is no longer linked.
+
 ## Verification
 
 - `wfsClock_test` (ad7689Ctrl's clock tests, without its continuous schedule): passed on the Mac (6 cases). A
@@ -147,7 +158,7 @@ read-time estimate. The service fit, its refusal and the phase cap remain for `c
 - The MCP3208 read (about 50 us per channel, mostly per-transfer overhead: 24 bits at 1.35 MHz is 18 us) limits the
   rate. Reading all channels in one spidev ioctl, or a faster SPI clock within the MCP3208's rating for its supply,
   would leave margin for 4 scans at 2 kHz.
-- `MCP3208::read` sends the start byte `0x06` (start, single-ended, D2 = 0) and then `mode << 7 | channel << 4`, the
+- (Still open; the user expects distinct X and Y values.) `MCP3208::read` sends the start byte `0x06` (start, single-ended, D2 = 0) and then `mode << 7 | channel << 4`, the
   MCP3008 layout, so D1 is always 1 and channels 0 and 1 both select CH2. Check whether acc000's two values are
   identical before relying on the second axis.
 

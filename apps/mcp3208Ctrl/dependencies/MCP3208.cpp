@@ -1,9 +1,32 @@
 #include "MCP3208.h"
 #include <cstdint>
-#include "lgpio.h"
+#include <fcntl.h>
+#include <linux/spi/spidev.h>
 #include <stdexcept>
+#include <string>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 namespace MCP3208Lib {
+
+namespace {
+
+// Control bits for MCP3208 (12-bit ADC): the first byte holds 3 leading zeros and the start bit, the second the
+// sgl/diff (mode) bit, the channel selection and 4 "don't care" bits; the third is padding.
+void command(const std::uint8_t channel, const Mode m, std::uint8_t (&txData)[3]) {
+    txData[0] = 0b00000110;
+    txData[1] = (static_cast<std::uint8_t>(m) << 7) | static_cast<std::uint8_t>((channel & 0b00000111) << 4);
+    txData[2] = 0b00000000;
+}
+
+// The result is a 12-bit number: the first 4 bits from the second byte and 8 bits from the third byte.
+unsigned short decode(const std::uint8_t (&rxData)[3]) {
+    return
+        ((static_cast<unsigned short>(rxData[1]) & 0x0F) << 8) |
+        (static_cast<unsigned short>(rxData[2]) & 0xFF);
+}
+
+}
 
 MCP3208::MCP3208(
     const int dev,
@@ -34,14 +57,22 @@ void MCP3208::connect() {
         return;
     }
 
-    const auto handle = ::lgSpiOpen(
-        this->_dev,
-        this->_channel,
-        this->_baud,
-        this->_flags);
+    // The kernel spidev device, so several conversions can share one SPI message (one system call).
+    const std::string path = "/dev/spidev" + std::to_string(this->_dev) + "." + std::to_string(this->_channel);
+    const int handle = ::open(path.c_str(), O_RDWR);
 
     if (handle < 0) {
-        throw std::runtime_error("failed to connect spi device");
+        throw std::runtime_error("failed to connect spi device " + path);
+    }
+
+    std::uint8_t mode = static_cast<std::uint8_t>(this->_flags & 0b11);
+    std::uint8_t bits = 8;
+    std::uint32_t speed = static_cast<std::uint32_t>(this->_baud);
+
+    if (::ioctl(handle, SPI_IOC_WR_MODE, &mode) < 0 || ::ioctl(handle, SPI_IOC_WR_BITS_PER_WORD, &bits) < 0 ||
+        ::ioctl(handle, SPI_IOC_WR_MAX_SPEED_HZ, &speed) < 0) {
+        ::close(handle);
+        throw std::runtime_error("failed to configure spi device " + path);
     }
 
     this->_handle = handle;
@@ -52,7 +83,7 @@ void MCP3208::disconnect() {
         return;
     }
 
-    if (::lgSpiClose(this->_handle) != 0) {
+    if (::close(this->_handle) != 0) {
         throw std::runtime_error("failed to disconnect spi device");
     }
 
@@ -60,41 +91,41 @@ void MCP3208::disconnect() {
 }
 
 unsigned short MCP3208::read(const std::uint8_t channel, const Mode m) const {
+    unsigned short value = 0;
+    this->read(&channel, &value, 1, m);
+    return value;
+}
 
-    // Control bits for MCP3208 (12-bit ADC)
-    // First bit is single or differential mode
-    // Next three bits are channel selection (0 to 7)
-    // The last four bits are padding
-    const std::uint8_t ctrl =
-        (static_cast<std::uint8_t>(m) << 7) |
-        static_cast<std::uint8_t>((channel & 0b00000111) << 4)
-        ;
+void MCP3208::read(const std::uint8_t *channels, unsigned short *values, const int count, const Mode m) const {
 
-    const std::uint8_t byteCount = 3;
+    if (count < 1 || count > MAX_CHANNELS) {
+        throw std::runtime_error("invalid MCP3208 channel count");
+    }
 
-    // MCP3208 uses a 3-byte message (start bit + control + padding)
-    const std::uint8_t txData[byteCount] = {
-        0b00000110, // 3 leading zeros and start bit for MCP3208
-        ctrl,       // sgl/diff (mode), d2, d1, d0, 4x "don't care" bits
-        0b00000000  // Padding bits (don't care)
-    };
+    std::uint8_t txData[MAX_CHANNELS][3];
+    std::uint8_t rxData[MAX_CHANNELS][3]{};
+    spi_ioc_transfer transfers[MAX_CHANNELS]{};
 
-    std::uint8_t rxData[byteCount]{0};
+    for (int i = 0; i < count; ++i) {
+        command(channels[i], m, txData[i]);
+        transfers[i].tx_buf = reinterpret_cast<std::uintptr_t>(txData[i]);
+        transfers[i].rx_buf = reinterpret_cast<std::uintptr_t>(rxData[i]);
+        transfers[i].len = 3;
+        transfers[i].speed_hz = static_cast<std::uint32_t>(this->_baud);
+        transfers[i].bits_per_word = 8;
+        // Each conversion ends with chip select raised, as for separate transfers.
+        transfers[i].cs_change = i + 1 < count;
+    }
 
-    const auto bytesTransferred = ::lgSpiXfer(
-        this->_handle,
-        reinterpret_cast<const char*>(txData),
-        reinterpret_cast<char*>(rxData), byteCount);
+    const unsigned long request = _IOC(_IOC_WRITE, SPI_IOC_MAGIC, 0, count * sizeof(spi_ioc_transfer));
 
-    if (bytesTransferred != byteCount) {
+    if (::ioctl(this->_handle, request, transfers) < 0) {
         throw std::runtime_error("SPI transfer failed");
     }
 
-    // For MCP3208, the result is a 12-bit number:
-    // First 4 bits from the second byte and 8 bits from the third byte.
-    return
-        ((static_cast<unsigned short>(rxData[1]) & 0x0F) << 8) | // Top 4 bits from second byte
-        (static_cast<unsigned short>(rxData[2]) & 0xFF);         // Bottom 8 bits from third byte
+    for (int i = 0; i < count; ++i) {
+        values[i] = decode(rxData[i]);
+    }
 }
 
 };  // End of namespace MCP3208Lib

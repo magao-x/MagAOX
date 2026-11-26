@@ -406,13 +406,12 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /// Convert nanoseconds to a normalized timespec value.
     static inline timespec nsToTimespec( double ns /**< [in] the nanosecond value to convert */ );
 
-    /// Read one MCP3208 channel value.
+    /// Read channels 0 to m_numChannels - 1 into m_values in one SPI message.
     /**
      * \returns 0 on success.
      * \returns -1 on error.
      */
-    int readChannelValue( int       channel /**< [in] the MCP3208 channel index to read */,
-                          uint16_t &value /**< [out] the sampled channel value */ );
+    int readScan();
 
     /// Update synchronized trigger timing from the current semaphore arrival.
     /** Without a fitted period, the period is an EMA of semaphore intervals, starting from the first.
@@ -1854,12 +1853,9 @@ int mcp3208Ctrl::acquireTimerAndCheckValid()
             }
 
             const auto readStart = std::chrono::high_resolution_clock::now();
-            for( int i = 0; i < m_numChannels; ++i )
+            if( readScan() < 0 )
             {
-                if( readChannelValue( i, m_values[i] ) < 0 )
-                {
-                    return 1;
-                }
+                return 1;
             }
             const auto readEnd = std::chrono::high_resolution_clock::now();
             m_channelReadoutTime_ns = static_cast<double>(
@@ -2166,13 +2162,10 @@ int mcp3208Ctrl::acquireScan( int64_t now )
     }
 
     const int64_t start = monotonicNow();
-    for( int i = 0; i < m_numChannels; ++i )
+    if( readScan() < 0 )
     {
-        if( readChannelValue( i, m_values[i] ) < 0 )
-        {
-            m_reconfig = true;
-            return 1;
-        }
+        m_reconfig = true;
+        return 1;
     }
     const int64_t finished = monotonicNow();
 
@@ -2255,9 +2248,29 @@ int mcp3208Ctrl::getRealtime( timespec &ts )
     return clock_gettime( CLOCK_REALTIME, &ts );
 }
 
-int mcp3208Ctrl::readChannelValue( int channel, uint16_t &value )
+int mcp3208Ctrl::readScan()
 {
-    value = m_adc.read( channel );
+    static constexpr uint8_t c_channels[MCP3208Lib::MCP3208::MAX_CHANNELS] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+
+    if( m_numChannels <= 0 )
+    {
+        return 0;
+    }
+
+    if( m_numChannels > MCP3208Lib::MCP3208::MAX_CHANNELS || m_values.size() < static_cast<size_t>( m_numChannels ) )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "invalid MCP3208 channel count" } );
+    }
+
+    try
+    {
+        m_adc.read( c_channels, m_values.data(), m_numChannels );
+    }
+    catch( const std::exception &error )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, error.what() } );
+    }
+
     return 0;
 }
 
