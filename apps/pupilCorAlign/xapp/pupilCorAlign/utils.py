@@ -29,45 +29,61 @@ def wait_for_ready(client, device, timeout=0.1):
     while client[device + '.fsm.state'] != 'READY':
         time.sleep(timeout)
 
-def make_horizontal_probe(grid, direction='left'):
+def make_horizontal_probe(grid, direction='left', offset_y_axis=0):
+    ''' Makes a horizontal probe pattern for the ncpcdm alignment.
+    '''
     probe = grid.zeros()
     probe = probe.shaped
-
+    
     width = 4
     height = 4
     x = (-1.0)**(np.arange(width) - width//2)
     y = (-1.0)**(np.arange(height) - height//2)
-
+    
     # 34 - 15 16 17 18 19 20
-    probe[15:19, 6:10] = np.outer(x, y)
-    probe[15:19, 6:10] = np.outer(y, x)
+    probe[(15 + offset_y_axis):(19 + offset_y_axis), 6:10] = np.outer(x, y)
+    probe[(15 + offset_y_axis):(19 + offset_y_axis), 6:10] = np.outer(y, x)
     if direction == 'right':
         probe = probe[:,::-1]
-
+    
     return probe.ravel()
 
-def make_vertical_probe(grid, direction='down'):
+def make_vertical_probe(grid, direction='down', offset_y_axis=0):
+    ''' Makes a vertical probe pattern for the ncpcdm alignment.
+    '''
     probe = grid.zeros()
     probe = probe.shaped
-
+    
     width = 4
     height = 4
     x = (-1.0)**(np.arange(width) - width//2)
     y = (-1.0)**(np.arange(height) - height//2)
 
     # 34 - 15 16 17 18 19 20
-    probe[8:12, 15:19] = np.outer(y, x)
-    probe[8:12, 15:19] = np.outer(x, y)
+    probe[(8 + offset_y_axis):(12 + offset_y_axis), 15:19] = np.outer(y, x)
+    probe[(8 + offset_y_axis):(12 + offset_y_axis), 15:19] = np.outer(x, y)
     probe = np.sign(probe)
     if direction == 'up':
         probe = probe[::-1,:]
-
+    
     return probe.ravel()
 
-def make_ncpc_alignment_poke_pattern():
+def make_ncpc_alignment_poke_pattern(offset_y_axis=0):
+    '''The function to make the ncpcdm probe pattern. 
+
+    Parameters
+    --------------
+    offset_y_axis : array_like
+        An offset to the y position of the probes that is  neccessary to accomodate the cold and warm TTMPERI positions.
+
+    Returns
+    -------------
+    probe : Field
+        The probe pattern.
+    '''
     ncpc_act_grid = hp.make_pupil_grid(34, 34/30.0 * np.array([1.0, np.sqrt(2)]))
-    probe = make_vertical_probe(ncpc_act_grid) + make_vertical_probe(ncpc_act_grid, 'up')
-    probe += make_horizontal_probe(ncpc_act_grid) + make_horizontal_probe(ncpc_act_grid, 'right')
+    probe = make_vertical_probe(ncpc_act_grid, 'down', offset_y_axis) + make_vertical_probe(ncpc_act_grid, 'up', offset_y_axis)
+    probe += make_horizontal_probe(ncpc_act_grid, 'left', offset_y_axis) + make_horizontal_probe(ncpc_act_grid, 'right', offset_y_axis)
     return probe
 
 
@@ -122,7 +138,8 @@ class XCorrShift():
         self._filter_size = filter_size
         if filter_size is not None:
             # Change this to a super gaussian filter to remove ringing.
-            self._spatial_filter = hp.make_circular_aperture(self._filter_size)(self._fft.output_grid)
+            #self._spatial_filter = hp.make_circular_aperture(self._filter_size)(self._fft.output_grid)
+            self._spatial_filter = hp.make_super_gaussian_aperture(self._filter_size, 10.0)(self._fft.output_grid)
         else:
             self._spatial_filter = 1
 
@@ -186,7 +203,7 @@ class XCorrShift():
             y_center + dy * self._xgrid.delta[1]
         ])
 
-    def measure(self, image, local_reference_point=np.array([0,0]), subpixel=True):
+    def measure(self, image, local_reference_point=np.array([0,0]), subpixel=False):
         xcorr = self.cross_correlate(image, local_reference_point)
 
         if subpixel:
