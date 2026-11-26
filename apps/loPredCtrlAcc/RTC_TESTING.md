@@ -22,11 +22,17 @@ Each model trains only while its mode is selected, so the standard and assisted 
 | `dm.cpuset` | `spare29` | Dedicated development core (CPU 29). acc000 uses `spare30` and `spare31`. |
 | `shmimMonitor.cpuset` | `spare28` | Runs the WFS decisions and all learning. Assisted learning takes about 160 µs per 500 µs frame on a development Mac (one 212-column QR update, four phase solutions, 16 slot gains). |
 | `dm.renderLeadUs` | `40` | Each slot is rendered at `cutoff - renderLeadUs` from the newest WFS decision (assisted: and the newest ACC sample); the calculation takes about 1 µs. Before this, standard and mfilt copy slots were rendered when selected, up to a slot (125 µs) before their cutoff, so a decision completed in between reached the DM a slot late. |
+| `dm.receiptTimeoutMs` | `100` | A commit with no scheduler receipt after this long counts as a failed DM write, and the next slot is written. |
 | `syncopation.writeLeadUs` | `125` | Publishes as soon as a slot is rendered. |
 | `parameters.dm_slots`, `acc_ratio` | `4`, `4` | DM slots and ACC samples per WFS frame. Other integer ratios are supported (1–16) when the scheduler and upstream sampling provide them. |
 | `parameters.ripple` | `10` | Assisted only; see below. |
 
 The worker polls every 10 µs and checks the next slot immediately after a commit. A slot that cannot be committed by its cutoff is counted in `ddspc_performance.transport_skipped`; synco then keeps the last copied contribution. Such a slot no longer latches output off.
+
+A failed DM write never stops prediction either. The output stays on, keeps predicting, and writes the next slot; synco keeps the last copied contribution meanwhile. Failed writes are:
+
+- a command the scheduler discards (late for its slot, or stale after a resynchronization), counted in `ddspc_performance.transport_discarded`; a discarded zero is sent again;
+- a scheduler reset or restart while a commit is pending, the scheduler streams unavailable or owned by another producer, the own `_aux` channel unavailable, or no receipt within `dm.receiptTimeoutMs`. These count in `ddspc_performance.dm_write_failures` (an outage counts once), `safety.output_state` shows the latest as `write_failed_<reason>` until the next receipt, and the log notes "DDSPC DM write failed N time(s) (latest: ...); output continues" at most once per second.
 
 ### Slot mapping
 
@@ -365,9 +371,11 @@ Neither touches the main loop's own integrator. A tip/tilt command the main loop
 
 Prediction turns off and own-channel zero is requested when any of these occur:
 
-- the DM scheduler discarding 1000 consecutive commands (a dead route); a single discarded command (late for its slot, or stale after a scheduler resynchronization) only keeps the scheduler's previous copy, like a skipped slot, and is counted in `ddspc_performance.transport_discarded`; a discarded zero is sent again;
 - a stale or invalid WFS stream, or in assisted mode an ACC stream silent for longer than `adc.max_age_us`, lasting longer than `parameters.hold_timeout` (see "Holding through lost input");
-- a numerical fault.
+- a numerical fault;
+- a non-finite command, or an exception while rendering or after a copy.
+
+Failed DM writes are not on this list (see "DM channel, worker and timing"). A wrong `_aux` geometry is a configuration error and still stops the output.
 
 `safety.output_state` gives the reason, and keeps it in parentheses after the zero is acknowledged, for example `fault_zero_acknowledged (input_or_model_qualification_lost: wfs_stale)`. Each fault is also logged as "DDSPC output fault, prediction stopped". A lost qualification names the first failed condition: `wfs_invalid`, `integrator_parameters` (the main loop's parameters are missing), `command_invalid`, `wfs_stale` (no WFS frame within `input_timeout`), or `acc_window` with the ACC window reason. After confirmed removal, prediction can be re-enabled, or the models reset and retrained (`setINDI -s 'loPredCtrlAcc.reset_model.request=On'`). A normal exit also attempts an acknowledged own-channel removal.
 
