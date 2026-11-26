@@ -325,7 +325,6 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     XWCTEST_DOXYGEN_REF( app.acquireScan( 0 ) );
     XWCTEST_DOXYGEN_REF( app.waitForSync( 0 ) );
     XWCTEST_DOXYGEN_REF( app.monotonicNow() );
-    XWCTEST_DOXYGEN_REF( app.updateSynchroDelayController( 0.0 ) );
     XWCTEST_DOXYGEN_REF( app.timespecToNs( timespec{} ) );
     XWCTEST_DOXYGEN_REF( app.nsToTimespec( 0.0 ) );
 
@@ -584,16 +583,16 @@ TEST_CASE( "mcp3208Ctrl synchroDelay callback updates signed offsets", "[mcp3208
 
     REQUIRE( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( 25.0 ) ) == 0 );
     REQUIRE( app.m_synchroPostDelay == 25 );
-    REQUIRE( app.m_synchroDelayTarget == Approx( 145000.0f ) );
-    REQUIRE( app.m_synchroDelay == Approx( 145000.0f ) );
-    REQUIRE( app.m_delayApplied_ns == Approx( 145000.0 ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 25000.0f ) );
+    REQUIRE( app.m_synchroDelay == Approx( 25000.0f ) );
+    REQUIRE( app.m_delayApplied_ns == Approx( 25000.0 ) );
     REQUIRE( app.m_delayModel_ns == Approx( 120000.0 ) );
 
     REQUIRE( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( -5.0 ) ) == 0 );
     REQUIRE( app.m_synchroPostDelay == -5 );
-    REQUIRE( app.m_synchroDelayTarget == Approx( 115000.0f ) );
-    REQUIRE( app.m_synchroDelay == Approx( 115000.0f ) );
-    REQUIRE( app.m_delayApplied_ns == Approx( 115000.0 ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 995000.0f ) );
+    REQUIRE( app.m_synchroDelay == Approx( 995000.0f ) );
+    REQUIRE( app.m_delayApplied_ns == Approx( 995000.0 ) );
     REQUIRE( app.m_delayModel_ns == Approx( 120000.0 ) );
 }
 
@@ -655,6 +654,7 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics publish synchronized loop metrics", "
     app.m_syncProducerFrameId   = 123456;
     app.m_syncProducerFrameDelta = 3;
     app.m_syncProducerFrameValid = true;
+    app.qualifyClock( 1000000000, 100 );
 
     app.updateTimingDiagnosticsIndi();
 
@@ -739,10 +739,11 @@ TEST_CASE( "mcp3208Ctrl timing diagnostics compute wrapped phase error and lock 
     app.m_timingSource            = mcp3208Ctrl::TimingSource::Semaphore;
     app.m_effectiveTimingSource   = mcp3208Ctrl::TimingSource::Semaphore;
     app.m_delayApplied_ns         = 50.0;
-    app.m_delayModel_ns           = 900.0;
+    app.m_synchroDelayTarget       = 900.0f;
     app.m_wfsPeriodMeasured_ns    = 1000.0;
     app.m_delayLockAbsThreshold_ns = 200.0;
     app.m_delayLockFracThreshold   = 0.1;
+    app.qualifyClock( 1000000000, 100 );
 
     app.updateTimingDiagnosticsIndi();
 
@@ -804,9 +805,9 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses measured semaphore period for d
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
     REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( expectedMeasuredDeltaT_ns ) );
     REQUIRE( app.m_delayModel_ns == Approx( expectedDelayMeasured_ns ) );
-    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedDelayMeasured_ns ) ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) ); // No built-in delay: the model is reported only.
     REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
-    REQUIRE( measuredDelay_ns == Approx( expectedDelayMeasured_ns ) );
+    REQUIRE( measuredDelay_ns == Approx( 0.0 ).margin( 1.0 ) );
     REQUIRE( expectedDelayMeasured_ns != Approx( expectedDelayBlended_ns ) );
     REQUIRE( measuredDelay_ns >= 0.0 );
     REQUIRE( measuredDelay_ns < expectedMeasuredDeltaT_ns );
@@ -832,7 +833,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming applies positive synchroDelay offset
     const double expectedPeriod_ns  = 1000000.0;
     const double rawModelDelay_ns   = 0.5 * expectedPeriod_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
     const double expectedModel_ns   = wrapDelay( rawModelDelay_ns, expectedPeriod_ns );
-    const double expectedTarget_ns  = wrapDelay( expectedModel_ns + 100000.0, expectedPeriod_ns );
+    const double expectedTarget_ns  = 100000.0;
     const double measuredTrigger_ns = mcp3208Ctrl::timespecToNs( app.m_triggerTime );
     const double measuredDelay_ns   = measuredTrigger_ns - mcp3208Ctrl::timespecToNs( secondArrival );
 
@@ -862,7 +863,7 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming applies negative synchroDelay offset
     const double expectedPeriod_ns  = 1000000.0;
     const double rawModelDelay_ns   = 0.5 * expectedPeriod_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
     const double expectedModel_ns   = wrapDelay( rawModelDelay_ns, expectedPeriod_ns );
-    const double expectedTarget_ns  = wrapDelay( expectedModel_ns - 300000.0, expectedPeriod_ns );
+    const double expectedTarget_ns  = wrapDelay( -300000.0, expectedPeriod_ns );
     const double measuredTrigger_ns = mcp3208Ctrl::timespecToNs( app.m_triggerTime );
     const double measuredDelay_ns   = measuredTrigger_ns - mcp3208Ctrl::timespecToNs( secondArrival );
 
@@ -893,13 +894,14 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming falls back to EMA period when fps is
     const double expectedAvg_ns       = alpha * 2000000.0 + ( 1.0 - alpha ) * 1000000.0;
     const double rawDelay_ns          = 0.5 * expectedAvg_ns - ( 3000.0 + 51500.0 + 10000.0 + 276100.0 );
     const double expectedDelay_ns     = wrapDelay( rawDelay_ns, expectedAvg_ns );
-    const double expectedTrigger_ns   = mcp3208Ctrl::timespecToNs( nextArrival ) + expectedDelay_ns;
+    const double expectedTrigger_ns   = mcp3208Ctrl::timespecToNs( nextArrival );
     const double measuredTrigger_ns   = mcp3208Ctrl::timespecToNs( app.m_triggerTime );
     const double measuredDelay_ns     = measuredTrigger_ns - mcp3208Ctrl::timespecToNs( nextArrival );
 
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
     REQUIRE( measuredTrigger_ns == Approx( expectedTrigger_ns ) );
-    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedDelay_ns ) ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
+    REQUIRE( app.m_delayModel_ns == Approx( expectedDelay_ns ) );
     REQUIRE( measuredDelay_ns >= 0.0 );
     REQUIRE( measuredDelay_ns < expectedAvg_ns );
 }
@@ -928,8 +930,9 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming wraps delay with modulo period", "[m
 
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
     REQUIRE( rawDelay_ns < 0.0 );
-    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedDelay_ns ) ) );
-    REQUIRE( measuredDelay_ns == Approx( expectedDelay_ns ) );
+    REQUIRE( app.m_delayModel_ns == Approx( expectedDelay_ns ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
+    REQUIRE( measuredDelay_ns == Approx( 0.0 ).margin( 1.0 ) );
     REQUIRE( measuredDelay_ns >= 0.0 );
     REQUIRE( measuredDelay_ns < expectedDeltaT_ns );
 }
@@ -958,8 +961,8 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming preserves positive raw delay", "[mcp
     REQUIRE( rawDelay_ns > 0.0 );
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
     REQUIRE( app.m_delayModel_ns == Approx( rawDelay_ns ) );
-    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( rawDelay_ns ) ) );
-    REQUIRE( measuredDelay_ns == Approx( rawDelay_ns ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
+    REQUIRE( measuredDelay_ns == Approx( 0.0 ).margin( 1.0 ) );
 }
 
 /// Verify synchronized timing constants directly control the modeled delay target.
@@ -991,8 +994,8 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming uses configurable timing constants",
 
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( expectedAvg_ns ) );
     REQUIRE( app.m_delayModel_ns == Approx( expectedDelayCustom_ns ) );
-    REQUIRE( app.m_synchroDelayTarget == Approx( static_cast<float>( expectedDelayCustom_ns ) ) );
-    REQUIRE( measuredDelay_ns == Approx( expectedDelayCustom_ns ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
+    REQUIRE( measuredDelay_ns == Approx( 0.0 ).margin( 1.0 ) );
     REQUIRE( expectedDelayCustom_ns != Approx( wrapDelay( rawDelayDefault_ns, expectedAvg_ns ) ) );
 }
 
@@ -1193,11 +1196,11 @@ TEST_CASE( "mcp3208Ctrl loadImageIntoStream updates frame mapping counters", "[m
     REQUIRE( app.m_syncFramesWritten == 1 );
 }
 
-/// Verify a WFS reference arms `floor(fps * period)` scans with the grid aligned to the modelled phase.
+/// Verify a WFS reference arms `floor(fps * period)` scans from the fitted arrival, with no built-in delay.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
-TEST_CASE( "mcp3208Ctrl synchronized reference arms scans at the modelled phase", "[mcp3208Ctrl]" )
+TEST_CASE( "mcp3208Ctrl synchronized reference arms scans at the fitted arrival", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
 
@@ -1210,22 +1213,30 @@ TEST_CASE( "mcp3208Ctrl synchronized reference arms scans at the modelled phase"
     const int64_t arrival = 1000000000;
     app.qualifyClock( arrival, 101 );
 
-    // 0.5 * 500 us - 340.6 us wraps to 409.4 us; the four 125-us scans start at 409.4 mod 125 = 34.4 us.
+    // No built-in delay: the four 125-us scans start at the fitted arrival. The model (409.4 us) is reported only.
     REQUIRE( app.processSyncReference( arrival ) == 0 );
-    REQUIRE( app.m_synchroDelayTarget == Approx( 409400.0f ) );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
+    REQUIRE( app.m_delayModel_ns == Approx( 409400.0 ) );
     REQUIRE( app.m_syncSchedule.m_count == 4 );
     REQUIRE( app.m_syncSchedule.m_interval == Approx( 125000.0 ) );
-    REQUIRE( app.m_syncSchedule.m_phase == Approx( 34400.0 ).margin( 1.0 ) );
-    REQUIRE( app.m_syncSchedule.deadline() == arrival + 34400 );
+    REQUIRE( app.m_syncSchedule.m_phase == Approx( 0.0 ) );
+    REQUIRE( app.m_syncSchedule.deadline() == arrival );
     REQUIRE( app.m_syncSchedule.fps() == Approx( 8000.0 ) );
     REQUIRE( app.m_delayCapped == Approx( 0.0 ) );
     REQUIRE( app.m_syncFramesReceived == 101 );
 
-    // Requesting the WFS rate keeps one scan per period, at the full modelled delay.
-    app.m_fps = 2000;
+    // A synchroDelay offset shifts the scans.
+    app.m_synchroPostDelay = 10;
     REQUIRE( app.processSyncReference( arrival + 500000 ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_phase == Approx( 10000.0 ) );
+    REQUIRE( app.m_syncSchedule.deadline() == arrival + 510000 );
+
+    // Requesting the WFS rate keeps one scan per period.
+    app.m_synchroPostDelay = 0;
+    app.m_fps              = 2000;
+    REQUIRE( app.processSyncReference( arrival + 1000000 ) == 0 );
     REQUIRE( app.m_syncSchedule.m_count == 1 );
-    REQUIRE( app.m_syncSchedule.m_phase == Approx( 409400.0 ).margin( 1.0 ) );
+    REQUIRE( app.m_syncSchedule.m_phase == Approx( 0.0 ) );
 
     // Before the rolling clock qualifies, a reference arms nothing and is not counted as a failure.
     mcp3208Ctrl_test fresh;
@@ -1441,7 +1452,7 @@ TEST_CASE( "mcp3208Ctrl synchronized mode reads four scans per WFS semaphore", "
     {
         REQUIRE( app.acquireAndCheckValid() == 0 );
         REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Semaphore );
-        REQUIRE( app.m_delayApplied_ns == Approx( 34400.0 + 125000.0 * scan ).margin( 1.0 ) );
+        REQUIRE( app.m_delayApplied_ns == Approx( 125000.0 * scan ).margin( 1.0 ) );
     }
 
     REQUIRE( app.m_values == std::vector<uint16_t>( { 101, 202, 303 } ) );
@@ -1685,11 +1696,11 @@ TEST_CASE( "mcp3208Ctrl synchronized non-delay service EMA uses global alpha", "
     REQUIRE( app.m_avgNonDelayService_ns == Approx( alpha * nonDelay1_ns + ( 1.0 - alpha ) * nonDelay0_ns ) );
 }
 
-/// Verify the delay controller integrates the read-latency error and the next reference keeps its correction.
+/// Verify the read latency is reported but not fed back: the scan offset stays at the requested one.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
-TEST_CASE( "mcp3208Ctrl synchronized delay controller uses read latency EMA", "[mcp3208Ctrl]" )
+TEST_CASE( "mcp3208Ctrl synchronized read latency is reported, not fed back", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
 
@@ -1698,78 +1709,23 @@ TEST_CASE( "mcp3208Ctrl synchronized delay controller uses read latency EMA", "[
 
     app.m_numChannels = 1;
     app.m_values.assign( 1, 0 );
-    app.m_gain               = 1.0f;
+    app.m_fps                = 8000;
     app.m_alpha              = 0.2f;
-    app.m_synchroDelayTarget = 409400.0f;
-    app.m_synchroDelay       = 409400.0f;
-    app.m_firstReadLatency   = false;
-    app.m_avgReadLatency_ns  = 409400.0;
+    app.m_syncFramesReceived = 100;
+    app.qualifyClock( 1000000000, 101 );
 
-    const int64_t anchor = 1000000000;
-    REQUIRE( app.m_syncSchedule.arm( anchor, 500000, 8000, 409400, 40000, 20000 ) );
+    REQUIRE( app.processSyncReference( 1000000000 ) == 0 );
 
-    // Slot 3 starts 10 us late: the latency EMA moves 2 us and the delay command 2 us earlier.
-    REQUIRE( app.acquireScan( anchor + 409400 + 10000 ) == 0 );
-    REQUIRE( app.m_avgReadLatency_ns == Approx( 411400.0 ) );
-    REQUIRE( app.m_synchroDelay == Approx( 407400.0f ) );
+    // Slot 0 starts 10 us late: reported as the read latency, while the scans stay at the fitted arrival.
+    REQUIRE( app.acquireScan( 1000010000 ) == 0 );
+    REQUIRE( app.m_avgReadLatency_ns == Approx( 10000.0 ) );
+    REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
     REQUIRE( app.m_values[0] == 99 );
 
-    // The next reference re-arms at the corrected phase.
-    app.m_syncFramesReceived = 100;
-    app.qualifyClock( anchor + 500000, 101 );
-    REQUIRE( app.processSyncReference( anchor + 500000 ) == 0 );
-    REQUIRE( app.m_synchroDelay == Approx( 407400.0f ) );
-    REQUIRE( app.m_syncSchedule.m_phase == Approx( 32400.0 ).margin( 1.0 ) );
-}
-
-/// Verify synchronized delay control clamps at zero when the control step overshoots.
-/**
- * \ingroup mcp3208Ctrl_unit_test
- */
-TEST_CASE( "mcp3208Ctrl synchronized delay controller clamps to zero", "[mcp3208Ctrl]" )
-{
-    mcp3208Ctrl_test app;
-
-    resetStubState();
-    stubState().m_channelValues = { 11 };
-
-    app.m_numChannels = 1;
-    app.m_values.assign( 1, 0 );
-    app.m_synchroDelayTarget = 0.0f;
-    app.m_synchroDelay       = 1000.0f;
-    app.m_gain               = 1.0f;
-
-    const int64_t anchor = 1000000000;
-    REQUIRE( app.m_syncSchedule.arm( anchor, 500000, 8000, 1000, 40000, 20000 ) );
-
-    REQUIRE( app.acquireScan( anchor + 6000 ) == 0 );
+    app.m_syncSchedule.m_slot = 4;
+    REQUIRE( app.processSyncReference( 1000500000 ) == 0 );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
-    REQUIRE( app.m_values[0] == 11 );
-}
-
-/// Verify synchronized delay control blocks integrator windup while cadence capping is active.
-/**
- * \ingroup mcp3208Ctrl_unit_test
- */
-TEST_CASE( "mcp3208Ctrl synchronized delay controller applies anti-windup at cap", "[mcp3208Ctrl]" )
-{
-    mcp3208Ctrl_test app;
-
-    app.m_gain               = 1.0f;
-    app.m_synchroDelayTarget = 300000.0f;
-    app.m_wfsPeriodMeasured_ns = 500000.0;
-    app.m_delayBudget_ns       = 100000.0;
-    app.m_delayApplied_ns      = 100000.0;
-
-    // While capped high, negative error would normally increase command; anti-windup should hold at the cap.
-    app.m_avgReadLatency_ns = 100000.0;
-    app.updateSynchroDelayController( 500000.0 );
-    REQUIRE( app.m_synchroDelay == Approx( 100000.0f ) );
-
-    // If the controller correction reduces delay, allow command to move down below the cap.
-    app.m_avgReadLatency_ns = 350000.0;
-    app.updateSynchroDelayController( 110000.0 );
-    REQUIRE( app.m_synchroDelay == Approx( 60000.0f ) );
+    REQUIRE( app.m_syncSchedule.m_phase == Approx( 0.0 ) );
 }
 
 /// Verify unavailable semaphore timing falls back to internal timer acquisition.

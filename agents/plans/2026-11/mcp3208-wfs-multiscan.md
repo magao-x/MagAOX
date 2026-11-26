@@ -93,6 +93,19 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
 - New INDI `syncTiming`: `scans_per_wfs`, `scheduled_fps`, `scan_period_us`, `phase_us`, `skipped_scans`, `late_scans`,
   `max_lateness_us`, `coalesced_wakes`, `duplicate_references`, `schedule_failures`.
 
+## No built-in delay
+
+At the user's request the scans no longer use the WFS delay model. Each WFS frame's scans are at the fitted
+(ten-second) arrival plus 0, 125, 250 and 375 us at 2 kHz / 8 kHz, re-anchored on every semaphore; `synchroDelay`
+(`synchro.postDelay`) remains an optional signed offset, default 0. The read-latency controller is removed: the read
+latency (first scan start after the fitted arrival) is still reported, not fed back. The model (`dtTransfer_ns`,
+`wfsProcess_ns`, `dtF_ns`, `wfsRead_ns`; WFS mid-exposure) is still computed and reported as
+`timingDiag.delay_model_us`, and its config keys are still accepted, since MagAO-X stops an app on an unrecognized
+config key. `delay_phase_error_us` is now the applied offset minus the requested one, and `delay_lock` also requires a
+qualified WFS clock, so loPredCtrlAcc's lock check keeps a meaning. With offset 0 the last scan (375 us plus the read)
+ends before the next semaphore, so the phase cap is not reached and a semaphore is not detected late behind a read.
+Earlier sections describing the delay target and controller are superseded.
+
 ## Verification
 
 - `wfsClock_test` (ad7689Ctrl's clock tests, without its continuous schedule): passed on the Mac (6 cases). A

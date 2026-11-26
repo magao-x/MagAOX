@@ -41,10 +41,12 @@ namespace app
  * ImageStreamIO semaphore. Synchronized, `fps` (`accel.fps`, INDI `fps`) is an upper limit: each WFS
  * semaphore arms the highest integer number of scans whose rate does not exceed it (8 kHz at a 2 kHz or
  * 500 Hz WFS, 7.7 kHz at 700 Hz, for an 8 kHz limit), uniformly spaced across that WFS period, with the
- * scan grid aligned to the WFS phase model (`wfsScan::syncSchedule`). The WFS period and each frame's
+ * first scan at the fitted WFS arrival plus the optional signed `synchroDelay` offset (no built-in delay;
+ * `wfsScan::syncSchedule`). The WFS period and each frame's
  * scan anchor come from a ten-second least-squares fit of semaphore arrivals on WFS frame IDs
  * (`wfsScan::rollingWfsClock`), so semaphore jitter moves neither; the fit restarts after a persistent
- * WFS rate change. Scans are never free-running: a period without a new semaphore produces no further scans.
+ * WFS rate change. Scans are never free-running: without new semaphores at most one period's carried-over
+ * scans follow.
  *
  * \ingroup mcp3208Ctrl
  */
@@ -95,15 +97,15 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     float m_numChannelsTol{ 0 }; ///< The tolerance for detecting a change in numChannels.
 
     std::string m_synchroShmimName; ///< The synchronization ImageStreamIO stream name used when semaphore timing is selected.
-    int m_synchroPostDelay{ 0 }; ///< Signed microsecond phase offset added to synchronized delay-model predictions.
+    int m_synchroPostDelay{ 0 }; ///< Signed microsecond offset of the synchronized scans from the fitted WFS arrival.
 
-    double m_synchroDtTransfer_ns{ 3e3 }; ///< Transfer-latency term in the synchronized delay model.
+    double m_synchroDtTransfer_ns{ 3e3 }; ///< Transfer-latency term of the reported WFS delay model.
 
-    double m_synchroWfsProcess_ns{ 51.5e3 }; ///< WFS processing-latency term in the synchronized delay model.
+    double m_synchroWfsProcess_ns{ 51.5e3 }; ///< WFS processing-latency term of the reported WFS delay model.
 
-    double m_synchroDtF_ns{ 10e3 }; ///< Filter/transport-latency term in the synchronized delay model.
+    double m_synchroDtF_ns{ 10e3 }; ///< Filter/transport-latency term of the reported WFS delay model.
 
-    double m_synchroWfsRead_ns{ 276.1e3 }; ///< WFS read-latency term in the synchronized delay model.
+    double m_synchroWfsRead_ns{ 276.1e3 }; ///< WFS read-latency term of the reported WFS delay model.
 
     double m_delayLockAbsThreshold_ns{ 50e3 }; ///< Absolute phase-error threshold for declaring delay lock.
 
@@ -185,9 +187,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     pcf::IndiProperty m_indiP_syncTiming;
 
     float m_trigger{ 1e9f / m_fps };       ///< The timer-mode read interval in nanoseconds.
-    float m_gain{ .1 };                    ///< The simple integrator gain used for timer and synchro delay control.
+    float m_gain{ .1 };                    ///< The simple integrator gain used for the timer-mode read interval.
     float nano_sec_target{ 1e9f / m_fps }; ///< The timer-mode target interval in nanoseconds.
-    float m_synchroDelay{ 0 };             ///< The commanded pre-read delay in synchronized mode, in nanoseconds.
+    float m_synchroDelay{ 0 };             ///< The scans' offset from the fitted WFS arrival, in nanoseconds.
     float m_synchroDelayTarget{ 0 };       ///< The synchronized-mode effective delay target in nanoseconds after applying signed offset and wrap.
     TimingSource m_timingSource{ TimingSource::Integrator }; ///< Operator-selected timing source requested through INDI.
     TimingSource m_effectiveTimingSource{ TimingSource::Integrator }; ///< Currently active timing source after fallback handling.
@@ -252,7 +254,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     double m_wfs_fps{ 0.0 }; ///< WFS frame rate estimate used for timing prediction; initialized from configured fps before callbacks.
 
-    double m_delayModel_ns{ 0.0 }; ///< Current modulo-wrapped delay predicted by the synchronized phase model.
+    double m_delayModel_ns{ 0.0 }; ///< WFS mid-exposure delay from the model, reported only; scans do not use it.
 
     double m_delayApplied_ns{ 0.0 }; ///< Delay applied to the most recent synchronized ADC read.
 
@@ -411,9 +413,6 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      */
     int readChannelValue( int       channel /**< [in] the MCP3208 channel index to read */,
                           uint16_t &value /**< [out] the sampled channel value */ );
-
-    /// Update the synchronized delay command with anti-windup and physical bounds.
-    void updateSynchroDelayController( double desiredDelay_ns /**< [in] the unconstrained synchronized-delay command */ );
 
     /// Update synchronized trigger timing from the current semaphore arrival.
     /** Without a fitted period, the period is an EMA of semaphore intervals, starting from the first.
@@ -635,8 +634,9 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime, double fittedPerio
         t_delay_model_ns += deltaT_wfs_ns;
     }
 
+    // No built-in delay: the scans are at the WFS arrival plus the signed user offset. The model is reported only.
     const double delayOffset_ns = 1e3 * static_cast<double>( m_synchroPostDelay );
-    double       t_delay_ns     = std::fmod( t_delay_model_ns + delayOffset_ns, deltaT_wfs_ns );
+    double       t_delay_ns     = std::fmod( delayOffset_ns, deltaT_wfs_ns );
     if( t_delay_ns < 0.0 )
     {
         t_delay_ns += deltaT_wfs_ns;
@@ -728,7 +728,8 @@ void mcp3208Ctrl::setupConfig()
                 "postDelay",
                 false,
                 "int",
-                "Signed phase offset in microseconds added to synchronized delay-model predictions. Default is 0." );
+                "Signed offset in microseconds of the synchronized scans from the fitted WFS arrival; there is no "
+                "built-in delay. Also INDI synchroDelay. Default is 0." );
 
     config.add( "synchro.dtTransfer_ns",
                 "",
@@ -738,7 +739,8 @@ void mcp3208Ctrl::setupConfig()
                 "dtTransfer_ns",
                 false,
                 "double",
-                "Transfer-latency term in nanoseconds for synchronized delay modeling. Default is 3000." );
+                "Transfer-latency term in nanoseconds of the WFS delay model, reported as timingDiag.delay_model_us "
+                "and not applied to the scans. Default is 3000." );
 
     config.add( "synchro.wfsProcess_ns",
                 "",
@@ -748,7 +750,7 @@ void mcp3208Ctrl::setupConfig()
                 "wfsProcess_ns",
                 false,
                 "double",
-                "WFS processing-latency term in nanoseconds for synchronized delay modeling. Default is 51500." );
+                "WFS processing-latency term in nanoseconds of the reported WFS delay model. Default is 51500." );
 
     config.add( "synchro.dtF_ns",
                 "",
@@ -758,7 +760,7 @@ void mcp3208Ctrl::setupConfig()
                 "dtF_ns",
                 false,
                 "double",
-                "Filter/transport-latency term in nanoseconds for synchronized delay modeling. Default is 10000." );
+                "Filter/transport-latency term in nanoseconds of the reported WFS delay model. Default is 10000." );
 
     config.add( "synchro.wfsRead_ns",
                 "",
@@ -768,7 +770,7 @@ void mcp3208Ctrl::setupConfig()
                 "wfsRead_ns",
                 false,
                 "double",
-                "WFS read-latency term in nanoseconds for synchronized delay modeling. Default is 276100." );
+                "WFS read-latency term in nanoseconds of the reported WFS delay model. Default is 276100." );
 
     config.add( "synchro.delayLockAbsThreshold_ns",
                 "",
@@ -1250,7 +1252,8 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     double delayPhaseError_ns = 0.0;
     double delayLock          = 0.0;
 
-    if( synchroMode && wfsPeriodMeasured_ns > 0.0 )
+    // Locked: the WFS clock fit is qualified and the scans are at the requested offset.
+    if( synchroMode && wfsPeriodMeasured_ns > 0.0 && m_wfsClock.valid() )
     {
         // Scans an interval apart are equivalent phases; the lock thresholds stay fractions of the WFS period.
         const double wfsPeriod_ns = m_syncSchedule.m_count ? m_syncSchedule.m_interval : wfsPeriodMeasured_ns;
@@ -1261,13 +1264,13 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
             delayAppliedWrapped_ns += wfsPeriod_ns;
         }
 
-        double delayModelWrapped_ns = std::fmod( delayModelDiag_ns, wfsPeriod_ns );
-        if( delayModelWrapped_ns < 0.0 )
+        double delayTargetWrapped_ns = std::fmod( static_cast<double>( m_synchroDelayTarget ), wfsPeriod_ns );
+        if( delayTargetWrapped_ns < 0.0 )
         {
-            delayModelWrapped_ns += wfsPeriod_ns;
+            delayTargetWrapped_ns += wfsPeriod_ns;
         }
 
-        delayPhaseError_ns = delayAppliedWrapped_ns - delayModelWrapped_ns;
+        delayPhaseError_ns = delayAppliedWrapped_ns - delayTargetWrapped_ns;
         if( delayPhaseError_ns <= -0.5 * wfsPeriod_ns )
         {
             delayPhaseError_ns += wfsPeriod_ns;
@@ -2066,10 +2069,6 @@ int mcp3208Ctrl::processSyncReference( int64_t arrival )
     m_wfsClockSpan_s  = m_wfsClock.span();
     const bool fitted = m_wfsClock.valid();
 
-    // Carry the controller's correction across changes of the modelled target.
-    const double correction =
-        m_firstReadLatency ? 0.0 : static_cast<double>( m_synchroDelay ) - static_cast<double>( m_synchroDelayTarget );
-
     updateTriggerTiming( m_atime, fitted ? m_wfsClock.m_period : 0.0 );
 
     if( !fitted )
@@ -2079,7 +2078,7 @@ int mcp3208Ctrl::processSyncReference( int64_t arrival )
 
     const double service = std::max( m_avgNonDelayService_ns, m_numChannels * c_channelReadNominal_ns );
     m_delayBudget_ns     = std::max( 0.0, m_wfsPeriodMeasured_ns - service - m_cadenceGuard_ns );
-    m_synchroDelay       = static_cast<float>( static_cast<double>( m_synchroDelayTarget ) + correction );
+    m_synchroDelay       = m_synchroDelayTarget;
 
     m_syncSchedule.m_complete = m_completeScans;
 
@@ -2180,7 +2179,8 @@ int mcp3208Ctrl::acquireScan( int64_t now )
 
     const double alpha = static_cast<double>( m_alpha );
 
-    // Update the read-latency controller once per WFS period, at the scan nearest the model phase.
+    // Report the read latency (scan start after the fitted WFS arrival) once per WFS period, at the scan nearest the
+    // requested offset. It is not fed back.
     const unsigned referenceSlot = static_cast<unsigned>(
         std::clamp( std::floor( ( static_cast<double>( m_synchroDelayTarget ) - m_syncSchedule.m_phase ) /
                                     m_syncSchedule.m_interval +
@@ -2193,7 +2193,6 @@ int mcp3208Ctrl::acquireScan( int64_t now )
         const double latency = static_cast<double>( now - m_syncSchedule.m_anchor );
         m_avgReadLatency_ns  = m_firstReadLatency ? latency : alpha * latency + ( 1.0 - alpha ) * m_avgReadLatency_ns;
         m_firstReadLatency   = false;
-        updateSynchroDelayController( static_cast<double>( m_synchroDelay ) );
     }
 
     m_nonDelayService_ns    = m_channelReadoutTime_ns;
@@ -2259,36 +2258,6 @@ int mcp3208Ctrl::readChannelValue( int channel, uint16_t &value )
 {
     value = m_adc.read( channel );
     return 0;
-}
-
-void mcp3208Ctrl::updateSynchroDelayController( double desiredDelay_ns )
-{
-    constexpr double c_satEpsilon_ns = 1e-6;
-
-    const double controlStep_ns =
-        static_cast<double>( m_gain ) * ( m_avgReadLatency_ns - static_cast<double>( m_synchroDelayTarget ) );
-    double updatedDelay_ns = desiredDelay_ns - controlStep_ns;
-
-    if( updatedDelay_ns < 0.0 )
-    {
-        updatedDelay_ns = 0.0;
-    }
-
-    const bool upperSaturated =
-        ( m_wfsPeriodMeasured_ns > 0.0 ) && ( m_delayApplied_ns + c_satEpsilon_ns < desiredDelay_ns );
-    const bool pushesFurtherIntoSaturation = ( updatedDelay_ns > desiredDelay_ns );
-
-    if( upperSaturated && pushesFurtherIntoSaturation )
-    {
-        updatedDelay_ns = m_delayApplied_ns;
-    }
-
-    if( m_wfsPeriodMeasured_ns > 0.0 && updatedDelay_ns > m_delayBudget_ns )
-    {
-        updatedDelay_ns = m_delayBudget_ns;
-    }
-
-    m_synchroDelay = static_cast<float>( updatedDelay_ns );
 }
 
 int mcp3208Ctrl::checkRecordTimes()
@@ -2377,7 +2346,7 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_synchroDelay )( const pcf::IndiPrope
     m_synchroPostDelay   = target;
     if( m_wfsPeriodMeasured_ns > 0.0 )
     {
-        double t_delay_ns = std::fmod( m_delayModel_ns + 1e3 * static_cast<double>( m_synchroPostDelay ), m_wfsPeriodMeasured_ns );
+        double t_delay_ns = std::fmod( 1e3 * static_cast<double>( m_synchroPostDelay ), m_wfsPeriodMeasured_ns );
         if( t_delay_ns < 0.0 )
         {
             t_delay_ns += m_wfsPeriodMeasured_ns;
