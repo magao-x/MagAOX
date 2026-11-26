@@ -1370,3 +1370,224 @@ def test_same_loop_sign_converges_in_both_modes():
     assert cycle["angles"][2] is None and cycle["angles"][1] is not None
     frame = make_ke_frame(mask="right")
     assert np.hypot(*(np.array(cycle["star"]) - to_pixels(frame, (2.0, -3.0)))) * PIXEL_SCALE < 0.5
+
+
+# --------------------------------------------------------------------------
+# Co-rotation
+# --------------------------------------------------------------------------
+
+def corot_client(angle=45.0, **kwargs):
+    """adc_client with tweeterSpeck sparkles at `angle`, the 45 degree pattern used for the instrument calibration."""
+    client = adc_client(**kwargs)
+    dict.__setitem__(client, "tweeterSpeck.angle.current", angle)
+    return client
+
+
+def corot_frame(dispersion):
+    """make_frame with sparkles at 15 l/D and 45 degrees."""
+    return make_frame(angle=45.0, dispersion=dispersion)
+
+
+class CoRotationCamera(DispersionCamera):
+    """DispersionCamera in which co-rotation (delta_2) moves the dispersion horizontally.
+
+    The dispersion is `scale * (delta_2 - delta2_star)` across and
+    `scale * (delta_1 - delta_star)` along the (vertical) atmospheric axis,
+    as for the ADCs with the pupil de-rotated.
+    """
+
+    def __init__(self, dev, make, delta_star=0.3, delta2_star=-0.2, scale=1.0):
+        super().__init__(dev, make, delta_star=delta_star, scale=scale)
+        self.delta2_star = delta2_star
+
+    def dispersion2(self, delta_1, delta_2):
+        return (self.scale * (delta_2 - self.delta2_star), self.scale * (delta_1 - self.delta_star))
+
+    def grab_stack(self, num_images, subtract_dark=True):
+        self.calls.append((num_images, subtract_dark))
+        return self.make(dispersion=self.dispersion2(self.dev.delta_1, self.dev.delta_2))
+
+
+def corot_slopes():
+    """Pair offset slopes [S02, S13] of CoRotationCamera frames versus delta_1 and versus delta_2."""
+    geometry = SpotGeometry(15.0, 45.0, 20, 10.0, 5.0)
+    probe = CoRotationCamera(None, None)
+    deltas = np.array([-0.2, 0.3, 0.8])
+
+    def slopes(dispersion):
+        pairs = np.array([pair_offsets(measure_spot_angles(corot_frame(dispersion(d)), geometry, PIXEL_SCALE)[1])
+                          for d in deltas])
+        return np.array([np.polyfit(deltas, pairs[:, i], 1)[0] for i in range(2)])
+
+    return (slopes(lambda d: probe.dispersion2(d, probe.delta2_star)),
+            slopes(lambda d: probe.dispersion2(probe.delta_star, d)))
+
+
+def oneshot_with(dev, error, error2):
+    """Run one oneshot cycle on `dev` with a fixed batch result (errors in degrees of delta)."""
+    dev.measure_dispersion = lambda: {
+        "raw": np.zeros(4), "dev": np.zeros(4), "pairs": np.zeros(2),
+        "error": error, "error2": error2, "n_valid": 1, "n_total": 1,
+    }
+    send(dev, "state", oneshot=ON)
+    dev.loop()
+
+
+def test_corotation_pair_offsets_respond_perpendicular():
+    """With the 45 degree pattern, counter-rotation moves both pairs the same way and co-rotation oppositely.
+
+    So inverse-slope rows (ctrl_mtx and m10/m11) separate the two degrees
+    of freedom, as assumed for the hand calibration.
+    """
+    counter, co = corot_slopes()
+    assert np.all(np.abs(counter) > 1.0) and np.all(np.abs(co) > 1.0), (counter, co)
+    assert np.sign(counter[0]) == np.sign(counter[1])
+    assert np.sign(co[0]) == -np.sign(co[1])
+    row1, row2 = 1.0 / counter, 1.0 / co
+    assert abs(row1 @ counter - 2.0) < 1e-9 and abs(row2 @ co - 2.0) < 1e-9
+    assert abs(row1 @ co) < 0.1 and abs(row2 @ counter) < 0.1, (row1 @ co, row2 @ counter)
+
+
+def test_corotation_defaults_and_handlers():
+    """Co-rotation is off with a zero row by default; the switch and m10/m11 update it, and off holds delta_2."""
+    config = AdcCtrlConfig()
+    assert config.corotation is False and config.ctrl_mtx_corot == [0.0, 0.0] and config.corot_max_deg == 15.0
+    dev = make_device()
+    assert dev._corotation is False
+    assert dev.properties["corotation"]["off"] == ON and dev.properties["corotation"]["on"] == OFF
+    assert dev.properties["ctrl_mtx"]["m10"] == 0.0 and dev.properties["ctrl_mtx"]["m11"] == 0.0
+
+    send(dev, "ctrl_mtx", m10=0.5, m11=-0.25)
+    np.testing.assert_allclose(dev._corot_mtx, [0.5, -0.25])
+    np.testing.assert_allclose(dev._control_mtx, [-0.1238, -0.1344])
+    assert dev.properties["ctrl_mtx"]["m11"] == -0.25
+
+    send(dev, "corotation", on=ON)
+    assert dev._corotation is True and dev.properties["corotation"]["on"] == ON
+    dev.set_command(0.1, 0.4)
+    send(dev, "corotation", off=ON)
+    assert dev._corotation is False and dev.properties["corotation"]["off"] == ON
+    assert dev.delta_2 == 0.4
+
+    dev = make_device(corotation=True, ctrl_mtx_corot=[1.0, -2.0])
+    assert dev._corotation is True and dev.properties["corotation"]["on"] == ON
+    np.testing.assert_allclose(dev._corot_mtx, [1.0, -2.0])
+
+
+def test_corotation_loop_converges():
+    """With both rows as inverse slopes and the shared gain and loop_sign, delta_1 and delta_2 both converge.
+
+    The offsets go out as deltaADC1 = delta_1 + delta_2 and deltaADC2 =
+    delta_1 - delta_2. With the switch off, delta_2 is held but its step is
+    still published.
+    """
+    counter, co = corot_slopes()
+    for on in (True, False):
+        dev = make_device(client=corot_client(), gain=0.3, ctrl_mtx=list(1.0 / counter),
+                          ctrl_mtx_corot=list(1.0 / co), corotation=on)
+        assert dev._loop_sign == -1.0
+        dev.camera = CoRotationCamera(dev, corot_frame)
+        dev.set_command(0.8, 0.5)
+        send(dev, "state", adcLoop=ON)
+        for _ in range(15):
+            dev.loop()
+        assert dev._state == States.CLOSED_LOOP
+        assert abs(dev.delta_1 - 0.3) < 0.05, (on, dev.delta_1)
+        cycle = dev.telem_records[-1][1]
+        assert cycle["corotation"] is on
+        if on:
+            assert abs(dev.delta_2 + 0.2) < 0.05, dev.delta_2
+            assert cycle["accepted2"] and abs(cycle["error2"]) < 0.1
+            writes = dict(dev.client.adc_writes())
+            assert abs(writes["adctrack.deltaADC1.target"] - (dev.delta_1 + dev.delta_2)) < 1e-12
+            assert abs(writes["adctrack.deltaADC2.target"] - (dev.delta_1 - dev.delta_2)) < 1e-12
+            assert dev.properties["command"]["delta2"] == dev.delta_2
+        else:
+            assert dev.delta_2 == 0.5
+            assert abs(dev.properties["command"]["step2"]) > 0.1  # the residual 0.7 would be corrected
+            assert abs(cycle["error2"] - 1.4) < 0.2, cycle["error2"]
+
+
+def test_corotation_steps_accepted_independently():
+    """Each channel has the 1 degree step limit, co-rotation also the 15 degree cap, and either can be sent alone."""
+    dev = make_device(ctrl_mtx_corot=[1.0, 1.0], corotation=True, gain=1.0, loop_sign="positive",
+                      camera=FakeCamera(make_frame()))
+
+    oneshot_with(dev, 0.5, 2.0)
+    assert (dev.delta_1, dev.delta_2) == (0.5, 0.0)
+    assert dev.properties["status"]["last_command"] == "sent (co-rotation rejected)"
+
+    oneshot_with(dev, 2.0, 0.5)
+    assert (dev.delta_1, dev.delta_2) == (0.5, 0.5)
+    assert dev.properties["status"]["last_command"] == "sent (counter-rotation rejected)"
+    assert dev.client.adc_writes()[-2:] == [("adctrack.deltaADC1.target", 1.0), ("adctrack.deltaADC2.target", 0.0)]
+
+    n_writes = len(dev.client.adc_writes())
+    oneshot_with(dev, 2.0, -3.0)
+    assert len(dev.client.adc_writes()) == n_writes
+    assert dev.properties["status"]["last_command"] == "rejected"
+
+    dev.set_command(0.0, 14.8)
+    oneshot_with(dev, 0.0, 0.5)
+    assert dev.delta_2 == 14.8  # would pass the cap
+    dev.set_command(0.0, -14.8)
+    oneshot_with(dev, 0.0, 0.5)
+    assert abs(dev.delta_2 + 14.3) < 1e-12  # toward zero is fine
+    assert compute_step(0.5, 1.0, 1.0, 1.0) == (0.5, True)
+
+
+def test_corotation_measure_only_publishes_with_switch_off():
+    """Measure-only publishes the co-rotation error and step with the switch off, and writes nothing."""
+    counter, co = corot_slopes()
+    dev = make_device(client=corot_client(), ctrl_mtx=list(1.0 / counter), ctrl_mtx_corot=list(1.0 / co))
+    dev.camera = CoRotationCamera(dev, corot_frame)
+    dev.set_command(0.3, 0.3)  # 0.5 of horizontal residual
+    send(dev, "state", **{"measure-only": ON})
+    dev.loop()
+    assert dev.client.adc_writes() == []
+    assert abs(dev.properties["measurement"]["error2"] - 1.0) < 0.15, dev.properties["measurement"]["error2"]
+    assert abs(dev.properties["command"]["step2"] + 0.1) < 0.015  # -gain * error2
+    assert dev.telem_records[-1][1]["corotation"] is False
+
+
+def test_corotation_uncalibrated_row_warns_once():
+    """With the switch on and m10 = m11 = 0, one warning is logged and delta_2 never moves."""
+    dev, handler = recording_device("adcCtrl-test-corot-uncal", corotation=True,
+                                    camera=FakeCamera(make_frame(dispersion=(0.02, 0.0))))
+    send(dev, "state", adcLoop=ON)
+    for _ in range(3):
+        dev.loop()
+    assert len(messages(handler, logging.WARNING, "(m10, m11) is zero")) == 1
+    assert dev.delta_2 == 0.0 and dev.delta_1 != 0.0
+
+
+def test_corotation_held_in_knife_edge_mode():
+    """In knife-edge mode co-rotation is not measured and delta_2 is held, with one INFO message on entering."""
+    dev, handler = recording_device("adcCtrl-test-corot-ke", client=ke_client(), corotation=True,
+                                    ctrl_mtx_corot=[1.0, 1.0])
+    dev.camera = DispersionCamera(dev, make_ke_frame)
+    send(dev, "coronagraph", knife_edge_top=ON)
+    assert len(messages(handler, logging.INFO, "co-rotation is held in knife-edge mode")) == 1
+    dev.set_command(0.8, 0.7)
+    send(dev, "state", adcLoop=ON)
+    for _ in range(3):
+        dev.loop()
+    assert dev.delta_2 == 0.7 and dev.delta_1 != 0.8
+    cycle = dev.telem_records[-1][1]
+    assert cycle["corotation"] is False and cycle["error2"] is None and cycle["step2"] is None
+    assert dev.properties["measurement"]["error2"] == 0.0
+
+
+def test_reset_and_writes_include_delta2():
+    """Offsets are written as delta_1 +- delta_2 + offset, and a reset zeroes both."""
+    dev = make_device()
+    dev.set_command(0.4, 0.1)
+    assert dev.send_command() is True
+    writes = dict(dev.client.adc_writes())
+    assert abs(writes["adctrack.deltaADC1.target"] - 0.5) < 1e-12
+    assert abs(writes["adctrack.deltaADC2.target"] - 0.3) < 1e-12
+    send(dev, "reset_deltaADCs", request=ON)
+    dev.loop()
+    assert (dev.delta_1, dev.delta_2) == (0.0, 0.0)
+    assert dev.client.adc_writes()[-2:] == [("adctrack.deltaADC1.target", 0.0), ("adctrack.deltaADC2.target", 0.0)]
+    assert dev.properties["command"]["delta2"] == 0.0

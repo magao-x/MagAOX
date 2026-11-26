@@ -1047,6 +1047,9 @@ class AdcCtrlConfig(BaseConfig):
     ke_track_box : float = xconf.field(default=3.0, help="Knife-edge mode: half-width of the box searched around each locked spot [lambda/D]")
     ke_highpass : float = xconf.field(default=2.0, help="Knife-edge mode: sigma of the smoothed copy subtracted before the spot search [lambda/D]")
     ke_hint_tolerance : float = xconf.field(default=5.0, help="Knife-edge mode: half-width of the box searched around a spot predicted from ke_star_hint [lambda/D]")
+    corotation : bool = xconf.field(default=False, help="Co-rotation correction (delta_2) on at startup; standard coronagraph mode only")
+    ctrl_mtx_corot : list[float] = xconf.field(default_factory=lambda: [0.0, 0.0], help="Initial co-rotation control matrix row [m10, m11]: pair offsets -> co-rotation error, entered as inverse slopes like ctrl_mtx; all zero means not calibrated and nothing is sent")
+    corot_max_deg : float = xconf.field(default=15.0, help="Co-rotation steps that would take |delta_2| past this [deg] are rejected (runaway guard)")
 
 
 class States(Enum):
@@ -1067,6 +1070,9 @@ STATE_ELEMENTS = {
 
 # INDI `loop_sign` switch element name -> multiplier applied to each step
 LOOP_SIGNS = {"positive": 1.0, "negative": -1.0}
+
+# INDI `corotation` switch element name -> whether co-rotation corrections are sent
+CO_ROTATION = {"off": False, "on": True}
 
 # INDI `coronagraph` switch element name -> knife-edge mask (transmitted half), None for standard mode
 CORONAGRAPHS = {"standard": None, **{f"knife_edge_{mask}": mask for mask in KE_MASKS}}
@@ -1140,7 +1146,13 @@ class adcCtrl(XDevice):
         self._offset = 0.0
         # 1x2 control matrix mapping pair offsets to the dispersion error
         self._control_mtx = np.array(self.config.ctrl_mtx, dtype=float)
-        self.log.debug(f"control matrix at startup: {self._control_mtx.tolist()}")
+        # 1x2 co-rotation row mapping pair offsets to the co-rotation error; all zero until calibrated
+        self._corot_mtx = np.array(self.config.ctrl_mtx_corot, dtype=float)
+        self.log.debug(f"control matrix at startup: {self._control_mtx.tolist()}, co-rotation row: {self._corot_mtx.tolist()}")
+        # True while co-rotation corrections (delta_2) are sent, changed through the `corotation` switch
+        self._corotation = bool(self.config.corotation)
+        # True once the uncalibrated (all-zero) co-rotation row has been reported
+        self._warned_corot_uncalibrated = False
         # True for active sparkles, False for passive DM spots
         self._use_sparkles = True
         # Selected camera (key of config.cameras) and its XCam, None until opened
@@ -1165,7 +1177,7 @@ class adcCtrl(XDevice):
         # (stage positions before the last write, expected move sizes) until the stages are
         # seen to make that move (stages_settled); None when there is nothing to wait for
         self._stage_check = None
-        # Integrated ADC offsets [deg]; delta_2 is currently always 0
+        # Integrated ADC offsets [deg]: delta_1 counter-rotation, delta_2 co-rotation (see send_command)
         self.delta_1 = 0.0
         self.delta_2 = 0.0
         # Filter center wavelength / reference wavelength
@@ -1269,7 +1281,27 @@ class adcCtrl(XDevice):
             name="m01", label="m01", format="%.5f",
             min=-10.00, max=10.00, step=0.0001, _value=float(self._control_mtx[1])
         ))
+        nv.add_element(DefNumber(
+            name="m10", label="m10 (co-rotation)", format="%.5f",
+            min=-10.00, max=10.00, step=0.0001, _value=float(self._corot_mtx[0])
+        ))
+        nv.add_element(DefNumber(
+            name="m11", label="m11 (co-rotation)", format="%.5f",
+            min=-10.00, max=10.00, step=0.0001, _value=float(self._corot_mtx[1])
+        ))
         self.add_property(nv, callback=self.handle_ctrl_mtx)
+
+        sv = properties.SwitchVector(
+            name="corotation",
+            rule=constants.SwitchRule.ONE_OF_MANY,
+            perm=constants.PropertyPerm.READ_WRITE,
+        )
+        for name in CO_ROTATION:
+            sv.add_element(DefSwitch(
+                name=name,
+                _value=constants.SwitchState.ON if CO_ROTATION[name] == self._corotation else constants.SwitchState.OFF,
+            ))
+        self.add_property(sv, callback=self.handle_corotation)
 
         sv = properties.SwitchVector(
             name="loop_sign",
@@ -1365,7 +1397,7 @@ class adcCtrl(XDevice):
 
         nv = properties.NumberVector(name="measurement", perm=constants.PropertyPerm.READ_ONLY)
         for name in ["angle0", "angle1", "angle2", "angle3", "dev0", "dev1", "dev2", "dev3", "pair02", "pair13", "error",
-                     *KE_MEASUREMENT_ELEMENTS]:
+                     "error2", *KE_MEASUREMENT_ELEMENTS]:
             nv.add_element(DefNumber(name=name, label=name, format="%.3f", min=-1e6, max=1e6, step=0, _value=0.0))
         nv.add_element(DefNumber(name="n_valid", label="n_valid", format="%i", min=0, max=1000, step=1, _value=0))
         nv.add_element(DefNumber(name="n_total", label="n_total", format="%i", min=0, max=1000, step=1, _value=0))
@@ -1374,6 +1406,8 @@ class adcCtrl(XDevice):
         nv = properties.NumberVector(name="command", perm=constants.PropertyPerm.READ_ONLY)
         nv.add_element(DefNumber(name="step", label="last step", format="%.3f", min=-1e6, max=1e6, step=0, _value=0.0))
         nv.add_element(DefNumber(name="delta1", label="total delta1", format="%.3f", min=-1e6, max=1e6, step=0, _value=0.0))
+        nv.add_element(DefNumber(name="step2", label="last co-rotation step", format="%.3f", min=-1e6, max=1e6, step=0, _value=0.0))
+        nv.add_element(DefNumber(name="delta2", label="total delta2", format="%.3f", min=-1e6, max=1e6, step=0, _value=0.0))
         self.add_property(nv)
 
         tv = properties.TextVector(name="status", perm=constants.PropertyPerm.READ_ONLY)
@@ -1579,6 +1613,7 @@ class adcCtrl(XDevice):
                 if self._knife_edge:
                     self.check_indi_props()
                     self.ke_mode_checks()
+                    self.corotation_mode_check()
         self.update_property(existing_property)
 
     def set_ke_mask(self, mask):
@@ -1747,16 +1782,64 @@ class adcCtrl(XDevice):
         self.update_property(existing_property)
 
     def handle_ctrl_mtx(self, existing_property, new_message):
-        """INDI callback for `ctrl_mtx` (m00, m01)."""
+        """INDI callback for `ctrl_mtx`: m00, m01 (counter-rotation) and m10, m11 (co-rotation)."""
         changed = False
-        for index, key in enumerate(["m00", "m01"]):
-            if key in new_message and new_message[key] != existing_property[key]:
-                self._control_mtx[index] = float(new_message[key])
-                existing_property[key] = self._control_mtx[index]
-                changed = True
+        for row, keys in [(self._control_mtx, ["m00", "m01"]), (self._corot_mtx, ["m10", "m11"])]:
+            for index, key in enumerate(keys):
+                if key in new_message and new_message[key] != existing_property[key]:
+                    row[index] = float(new_message[key])
+                    existing_property[key] = row[index]
+                    changed = True
         if changed:
-            self.log.debug(f"control matrix changed to {self._control_mtx.tolist()}")
+            self._warned_corot_uncalibrated = False
+            self.log.debug(f"control matrix changed to {self._control_mtx.tolist()}, co-rotation row {self._corot_mtx.tolist()}")
         self.update_property(existing_property)
+
+    def handle_corotation(self, existing_property, new_message):
+        """INDI callback for `corotation`: turn co-rotation corrections on or off.
+
+        Turning it off holds delta_2 where it is; it is not reset.
+        """
+        target = requested_switch(new_message, CO_ROTATION)
+        if target is not None:
+            for key in CO_ROTATION:
+                existing_property[key] = constants.SwitchState.ON if key == target else constants.SwitchState.OFF
+            if CO_ROTATION[target] != self._corotation:
+                self._corotation = CO_ROTATION[target]
+                self._warned_corot_uncalibrated = False
+                self.log.info(f"co-rotation correction {target} (delta_2 = {self.delta_2:.4f} deg)")
+                self.corotation_mode_check()
+        self.update_property(existing_property)
+
+    def corotation_mode_check(self):
+        """Report (at INFO) that co-rotation is held while it is on in knife-edge mode."""
+        if self._corotation and self._knife_edge:
+            self.log.info(f"co-rotation is held in knife-edge mode (delta_2 = {self.delta_2:.4f} deg)")
+
+    def corotation_active(self):
+        """True if co-rotation corrections are sent: switch on, standard mode and a calibrated row.
+
+        An uncalibrated (all-zero) row is reported once at WARNING.
+        """
+        if not self._corotation or self._knife_edge:
+            return False
+        if not np.any(self._corot_mtx):
+            if not self._warned_corot_uncalibrated:
+                self._warned_corot_uncalibrated = True
+                self.log.warning("co-rotation is on but its control matrix row (m10, m11) is zero: nothing is sent")
+            return False
+        return True
+
+    def corotation_step(self, error2):
+        """Co-rotation step for `error2`: return `(step2, accepted)`.
+
+        The same gain, loop_sign and step limit as counter-rotation, and also
+        rejected if it would take |delta_2| past `corot_max_deg`.
+        """
+        step2, accepted = compute_step(error2, self._gain, self._loop_sign, self.config.step_limit_deg)
+        if accepted and abs(self.delta_2 + step2) > self.config.corot_max_deg:
+            accepted = False
+        return step2, accepted
 
     def set_command(self, d1, d2):
         """Set the integrated offsets (not sent until send_command)."""
@@ -1789,6 +1872,7 @@ class adcCtrl(XDevice):
 
         self._last_send = time.monotonic()
         self.properties["command"]["delta1"] = self.delta_1
+        self.properties["command"]["delta2"] = self.delta_2
         self.update_property(self.properties["command"])
 
         # adctrack sets deltaADC1/2.current as soon as it accepts the target, and
@@ -1899,7 +1983,7 @@ class adcCtrl(XDevice):
         start_state = self._state
         geometry = self.spot_geometry()
         n_total = self._no_measurements
-        raws, devs, pairs, errors = [], [], [], []
+        raws, devs, pairs, errors, errors2 = [], [], [], [], []
 
         for k in range(n_total):
             if self._state != start_state:
@@ -1913,16 +1997,18 @@ class adcCtrl(XDevice):
                 )
                 pair = pair_offsets(dev)
                 error = float(self._control_mtx @ pair)
-                if not np.isfinite(error):
+                error2 = float(self._corot_mtx @ pair)
+                if not (np.isfinite(error) and np.isfinite(error2)):
                     raise ValueError("non-finite dispersion measurement")
             except Exception as e:
                 self.log.warning(f"measurement {k + 1}/{n_total} failed: {e}")
                 continue
-            self.log.debug(f"measured speckle angles: {raw}, deviations: {dev}, error: {error}")
+            self.log.debug(f"measured speckle angles: {raw}, deviations: {dev}, error: {error}, co-rotation error: {error2}")
             raws.append(raw)
             devs.append(dev)
             pairs.append(pair)
             errors.append(error)
+            errors2.append(error2)
 
         mask = inlier_mask(errors, self.config.outlier_k) if errors else np.zeros(0, dtype=bool)
         n_valid = int(np.sum(mask))
@@ -1935,6 +2021,8 @@ class adcCtrl(XDevice):
             "dev": np.mean(np.array(devs)[mask], axis=0),
             "pairs": np.mean(np.array(pairs)[mask], axis=0),
             "error": float(np.mean(np.array(errors)[mask])),
+            # co-rotation error, averaged over the same measurements (outliers are rejected on `error`)
+            "error2": float(np.mean(np.array(errors2)[mask])),
             "n_valid": n_valid,
             "n_total": n_total,
         }
@@ -1945,7 +2033,8 @@ class adcCtrl(XDevice):
         """Show a measurement result in the measurement property.
 
         Spots not measured (NaN, in knife-edge mode) are shown as 0. The
-        knife-edge elements are 0 in standard mode.
+        knife-edge elements are 0 in standard mode, and the co-rotation error
+        is 0 in knife-edge mode.
         """
         def finite(value):
             """`value` as a float, or 0.0 if it is not finite."""
@@ -1959,6 +2048,7 @@ class adcCtrl(XDevice):
         prop["pair02"] = float(result["pairs"][0])
         prop["pair13"] = float(result["pairs"][1])
         prop["error"] = result["error"]
+        prop["error2"] = finite(result.get("error2", 0.0))
         star = result.get("star", (0.0, 0.0))
         values = {**result, "star_x": star[0], "star_y": star[1]}
         for name, key in KE_MEASUREMENT_ELEMENTS.items():
@@ -2111,8 +2201,11 @@ class adcCtrl(XDevice):
             self.log.error(f"{self._consecutive_failures} consecutive failed cycles, going idle")
             self.transition_to_idle()
 
-    def log_cycle(self, state, result, step):
-        """One DEBUG entry per cycle: settings used, the four averaged spot angles, the error and the step."""
+    def log_cycle(self, state, result, step, step2=None):
+        """One DEBUG entry per cycle: settings used, the four averaged spot angles, the errors and the steps.
+
+        `step2` is the co-rotation step, None in knife-edge mode.
+        """
         names = {s: name for name, s in STATE_ELEMENTS.items()}
         message = (
             f"cycle {names[state]} ({self.coronagraph_name()}): gain {self._gain}, n_avg {self._n_avg}, "
@@ -2120,6 +2213,11 @@ class adcCtrl(XDevice):
             f"spot angles {np.round(result['raw'], 3).tolist()} deg, "
             f"deviations {np.round(result['dev'], 3).tolist()} deg, error {result['error']:.4f}, step {step:.4f}"
         )
+        if step2 is not None:
+            message += (
+                f", co-rotation {'on' if self._corotation else 'off'}, row {self._corot_mtx.tolist()}, "
+                f"error2 {result['error2']:.4f}, step2 {step2:.4f}"
+            )
         if self._knife_edge:
             message += f", ke_gain {self._ke_gain}, m {result['m']:.4f}, set point {result['setpoint']:.4f}"
         self.log.debug(message)
@@ -2139,8 +2237,14 @@ class adcCtrl(XDevice):
         error = result["error"]
         step, accepted = compute_step(error, self._gain, self._loop_sign, self.config.step_limit_deg)
         self.properties["command"]["step"] = step
+        # Co-rotation is measured in standard mode whether or not it is sent
+        error2 = result.get("error2")
+        step2, accepted2 = (None, False) if error2 is None else self.corotation_step(error2)
+        corotate = self.corotation_active()
+        if step2 is not None:
+            self.properties["command"]["step2"] = step2
         self.update_property(self.properties["command"])
-        self.log_cycle(state, result, step)
+        self.log_cycle(state, result, step, step2)
         record = {
             "state": state.name,
             "mode": self.coronagraph_name(),
@@ -2150,6 +2254,10 @@ class adcCtrl(XDevice):
             "error": error,
             "step": step,
             "accepted": accepted,
+            "corotation": corotate,
+            "error2": error2,
+            "step2": step2,
+            "accepted2": accepted2,
             "n_valid": result["n_valid"],
             "n_total": result["n_total"],
         }
@@ -2173,19 +2281,38 @@ class adcCtrl(XDevice):
                     f"step {step:.4f} (measured, not sent)"
                 )
             else:
-                self.log.info(f"measured error {error:.4f}, step {step:.4f} (measured, not sent)")
+                self.log.info(
+                    f"measured error {error:.4f}, step {step:.4f}, co-rotation error {error2:.4f}, "
+                    f"step2 {step2:.4f} (measured, not sent)"
+                )
             self.set_status(last_command="measure-only")
             return
 
+        # Each channel is accepted or rejected on its own
+        send_2 = corotate and accepted2
         if not accepted:
             self.log.info(f"ADC step {step:.4f} exceeds acceptable threshold and was not sent")
+        if corotate and not accepted2:
+            self.log.info(
+                f"co-rotation step {step2:.4f} was not sent: it reaches the {self.config.step_limit_deg} deg step "
+                f"limit or would take delta_2 ({self.delta_2:.4f}) past {self.config.corot_max_deg} deg"
+            )
+        if not (accepted or send_2):
             self.set_status(last_command="rejected")
             return
 
-        self.add_command(step, 0)
+        self.add_command(step if accepted else 0.0, step2 if send_2 else 0.0)
         sent = self.send_command()
-        self.log.info(f"delta command: {step:.4f}, total command: {self.delta_1:.4f}")
-        self.set_status(last_command="sent" if sent else "send failed")
+        message = f"delta command: {step if accepted else 0.0:.4f}, total command: {self.delta_1:.4f}"
+        if corotate:
+            message += f"; co-rotation command: {step2 if send_2 else 0.0:.4f}, total: {self.delta_2:.4f}"
+        self.log.info(message)
+        status = "sent" if sent else "send failed"
+        if not accepted:
+            status += " (counter-rotation rejected)"
+        elif corotate and not accepted2:
+            status += " (co-rotation rejected)"
+        self.set_status(last_command=status)
 
     def loop(self):
         """Main loop body: apply queued ADC writes, then run a cycle unless idle.
