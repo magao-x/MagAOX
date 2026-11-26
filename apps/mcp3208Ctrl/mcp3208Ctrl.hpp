@@ -115,6 +115,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     double m_cadenceGuard_ns{ 20e3 }; ///< Reserved per-frame margin protecting synchronized cadence from overruns.
 
+    double m_spinLead_ns{ 50e3 }; ///< Synchronized: poll instead of sleeping this long before each scan deadline.
+
     float m_alpha{ 0.01f }; ///< Global exponential moving-average coefficient applied to timing smoothers.
 
     ///@}
@@ -782,6 +784,18 @@ void mcp3208Ctrl::setupConfig()
                 "double",
                 "Reserved nanoseconds in each synchronized cycle for non-delay work. Default is 20000." );
 
+    config.add(
+        "synchro.spinLead_ns",
+        "",
+        "synchro.spinLead_ns",
+        argType::Required,
+        "synchro",
+        "spinLead_ns",
+        false,
+        "double",
+        "Nanoseconds before each synchronized scan deadline to stop sleeping and poll, so the core is awake when "
+        "the read starts (a read after sleeping is slower). 0 sleeps to the deadline. Default is 50000." );
+
     config.add( "synchro.alpha",
                 "",
                 "synchro.alpha",
@@ -874,6 +888,7 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_delayLockAbsThreshold_ns, "synchro.delayLockAbsThreshold_ns" );
     _config( m_delayLockFracThreshold, "synchro.delayLockFracThreshold" );
     _config( m_cadenceGuard_ns, "synchro.cadenceGuard_ns" );
+    _config( m_spinLead_ns, "synchro.spinLead_ns" );
     _config( m_alpha, "synchro.alpha" );
 
     _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
@@ -931,6 +946,11 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     if( m_cadenceGuard_ns < 0.0 )
     {
         m_cadenceGuard_ns = 0.0;
+    }
+
+    if( m_spinLead_ns < 0.0 )
+    {
+        m_spinLead_ns = 0.0;
     }
 
     if( m_alpha < 0.0f )
@@ -1794,8 +1814,18 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
             return 1;
         }
 
-        const int64_t until =
-            m_syncSchedule.m_slot < m_syncSchedule.m_count ? std::min( m_syncSchedule.deadline(), timeout ) : timeout;
+        int64_t until = timeout;
+
+        // Sleep only until spinLead_ns before the next scan, then poll: a read on a core woken from sleep is slower.
+        if( m_syncSchedule.m_slot < m_syncSchedule.m_count )
+        {
+            until = std::min( m_syncSchedule.deadline() - static_cast<int64_t>( m_spinLead_ns ), timeout );
+
+            if( now >= until )
+            {
+                continue;
+            }
+        }
 
         errno = 0;
         if( waitForSync( until ) == 0 )

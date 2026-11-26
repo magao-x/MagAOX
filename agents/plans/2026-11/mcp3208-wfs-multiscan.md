@@ -20,7 +20,12 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
   (208 us worst seen); with the 20 us `cadenceGuard_ns` that does not fit 125 us, and since only scans update the
   service estimate, every later period was refused (`schedule_failures` 106989, no output). It now runs 3 scans
   (6 kHz) at those numbers; `cadenceGuard_ns=10000` fits 4. If not even one scan fits, mcp3208Ctrl restarts the
-  service estimate from the nominal SPI time so it is measured again. The first scan is at the requested phase modulo the scan
+  service estimate from the nominal SPI time so it is measured again.
+- The 106.5 us came from sleeping to each deadline: in timer mode, which polls every microsecond, the same read takes
+  about 89 us. A core woken from sleep (idle state, lower clock) reads slower. The loop now sleeps only until
+  `synchro.spinLead_ns` (default 50 us) before each scan deadline and polls from there, checking the WFS semaphore
+  too. At 8 kHz with 89 us reads that is polling nearly all the time, as timer mode does; the acc000 thread should
+  have a core without other real-time threads. The first scan is at the requested phase modulo the scan
   interval, capped to leave the scan service plus `cadenceGuard_ns` before the next slot. Late slots are skipped, never
   published as a catch-up burst; nothing is scanned after the period without a new semaphore.
 - `mcp3208Ctrl` semaphore mode:

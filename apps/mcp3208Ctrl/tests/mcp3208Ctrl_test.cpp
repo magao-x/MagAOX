@@ -344,6 +344,7 @@ TEST_CASE( "mcp3208Ctrl configuration defaults load synchronized settings", "[mc
     REQUIRE( app.m_delayLockAbsThreshold_ns == Approx( 50000.0 ) );
     REQUIRE( app.m_delayLockFracThreshold == Approx( 0.1 ) );
     REQUIRE( app.m_cadenceGuard_ns == Approx( 20000.0 ) );
+    REQUIRE( app.m_spinLead_ns == Approx( 50000.0 ) );
     REQUIRE( app.m_alpha == Approx( 0.01f ) );
     REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
@@ -364,33 +365,46 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
 
     app.setupConfig();
 
-    mx::app::writeConfigFile(
-        "/tmp/mcp3208Ctrl_test_override.conf",
-        { "synchro",
-          "synchro",
-          "synchro",
-          "synchro",
-          "synchro",
-          "synchro",
-          "synchro",
-          "synchro",
-          "synchro",
-          "synchro",
-          "accel",
-          "accel" },
-        { "shmimName",
-          "postDelay",
-          "dtTransfer_ns",
-          "wfsProcess_ns",
-          "dtF_ns",
-          "wfsRead_ns",
-          "delayLockAbsThreshold_ns",
-          "delayLockFracThreshold",
-          "cadenceGuard_ns",
-          "alpha",
-          "numChannels",
-          "fps" },
-        { "camwfs_sync", "17", "4000", "62000", "11000", "290000", "75000", "0.2", "15000", "0.25", "3", "6000" } );
+    mx::app::writeConfigFile( "/tmp/mcp3208Ctrl_test_override.conf",
+                              { "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "synchro",
+                                "accel",
+                                "accel" },
+                              { "shmimName",
+                                "postDelay",
+                                "dtTransfer_ns",
+                                "wfsProcess_ns",
+                                "dtF_ns",
+                                "wfsRead_ns",
+                                "delayLockAbsThreshold_ns",
+                                "delayLockFracThreshold",
+                                "cadenceGuard_ns",
+                                "alpha",
+                                "spinLead_ns",
+                                "numChannels",
+                                "fps" },
+                              { "camwfs_sync",
+                                "17",
+                                "4000",
+                                "62000",
+                                "11000",
+                                "290000",
+                                "75000",
+                                "0.2",
+                                "15000",
+                                "0.25",
+                                "30000",
+                                "3",
+                                "6000" } );
     app.config.readConfig( "/tmp/mcp3208Ctrl_test_override.conf" );
 
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
@@ -403,6 +417,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( app.m_delayLockAbsThreshold_ns == Approx( 75000.0 ) );
     REQUIRE( app.m_delayLockFracThreshold == Approx( 0.2 ) );
     REQUIRE( app.m_cadenceGuard_ns == Approx( 15000.0 ) );
+    REQUIRE( app.m_spinLead_ns == Approx( 30000.0 ) );
     REQUIRE( app.m_alpha == Approx( 0.25f ) );
     REQUIRE( app.m_numChannels == 3 );
     REQUIRE( app.m_fps == Approx( 6000.0f ) );
