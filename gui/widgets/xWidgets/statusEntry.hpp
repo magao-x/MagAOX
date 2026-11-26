@@ -105,12 +105,7 @@ public:
    /// Return the text shown by the editor, including an active edit.
    QString inputText() const;
 
-   /// Set the read only flag
-   /** If set to true, the widget will not accept focus and will not enter edit mode.
-     * The default is false.
-     *
-     * This sets m_readOnly
-     */
+   /// Disable input and discard staged text while keeping the live readout visible.
    void readOnly( bool ro /**< [in] Whether to disable editing. */ );
 
    /// Get the value of the read only flag
@@ -352,10 +347,10 @@ QString statusEntry::inputText() const
     return ui.value->text();
 }
 
-void statusEntry::readOnly(bool ro)
+void statusEntry::readOnly( bool ro )
 {
-   m_readOnly = ro;
-   ui.value->readOnly(ro);
+    m_readOnly = ro;
+    ui.value->readOnly( ro );
 }
 
 bool statusEntry::readOnly()
@@ -477,6 +472,11 @@ void statusEntry::clearFocus()
 
 void statusEntry::on_value_returnPressed()
 {
+    if( !isEnabled() || m_readOnly )
+    {
+        return;
+    }
+
     const std::string value = ui.value->text().toStdString();
     ui.value->clearFocus();
 

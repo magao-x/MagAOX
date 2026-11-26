@@ -807,12 +807,10 @@ void camera::setEnableDisable( bool tf, bool all )
     if( ui_avgTime )
         ui_avgTime->setEnabled( tf );
 
-    if( ui_stage.size() > 0 )
+    // Stage controllers provide their own readiness independently of the camera FSM.
+    for( auto *summary : ui_stage )
     {
-        for( size_t n = 0; n < ui_stage.size(); ++n )
-        {
-            ui_stage[n]->setEnabled( tf );
-        }
+        summary->setEnabled( m_connected );
     }
 
     if( ui_shutterStatus )

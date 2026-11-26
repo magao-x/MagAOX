@@ -1208,6 +1208,67 @@ TEST_CASE( "Pupil-guide camera lens guards paired preset availability", "[pupilG
     }
 }
 
+/** \brief Parked lens axes show current positions and the shared preset with motion controls disabled.
+ * \ingroup pupilGuideGUI_unit_test
+ */
+TEST_CASE( "Pupil-guide parked camera lens readouts survive power transitions", "[pupilGuideGUI][camlensPresets]" )
+{
+    // clang-format off
+#ifdef PUPILGUIDE_GUI_TEST_DOXYGEN_REF
+    xqt::pupilGuide::camlensSetEnabled; xqt::stagePairStatus::updateGUI;
+    xqt::statusEntry::readOnly; xqt::statusEntry::on_value_returnPressed;
+#endif
+    // clang-format on
+    Widget widget;
+    widget.onConnect();
+    for( const auto *device : { "stagecamlensx", "stagecamlensy" } )
+    {
+        widget.state( device, "READY" );
+        widget.number( device, "position", { { "current", 1.25 }, { "target", 1.25 } } );
+        widget.number( device, "parked", { { "current", 1 } } );
+        widget.presets( device, { { "nominal", true }, { "pol", false } } );
+    }
+
+    auto *presets  = widget.lensPresets();
+    auto *combo    = presets->findChild<QComboBox *>( "status" );
+    auto *position = widget.findChild<xqt::statusEntry *>( "camlensX_pos" );
+    REQUIRE( combo != nullptr );
+    REQUIRE( position != nullptr );
+    REQUIRE_FALSE( position->readOnly() );
+    REQUIRE( position->inputText() == "1.2500" );
+
+    widget.selectLensPreset( "pol" );
+    presets->on_buttonGo_pressed();
+    REQUIRE( widget.m_sent.size() == 2 );
+    widget.m_sent.clear();
+    position->setEditText( "42" );
+
+    for( const auto *state : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
+    {
+        CAPTURE( state );
+        widget.state( "stagecamlensx", state );
+        CHECK_FALSE( combo->isEnabled() );
+        CHECK( combo->placeholderText() == "nominal" );
+        CHECK( combo->currentIndex() == -1 );
+        CHECK( position->isEnabled() );
+        CHECK( position->readOnly() );
+        CHECK( position->inputText() == "1.2500" );
+        CHECK_FALSE( widget.control( "button_camlens_l" )->isEnabled() );
+        position->on_value_returnPressed();
+        presets->on_buttonGo_pressed();
+        CHECK( widget.m_sent.empty() );
+    }
+
+    widget.erase( "stagecamlensx", "parked" );
+    CHECK_FALSE( position->isEnabled() );
+    widget.state( "stagecamlensx", "READY" );
+    CHECK( combo->isEnabled() );
+    CHECK( position->isEnabled() );
+    CHECK_FALSE( position->readOnly() );
+    CHECK( position->inputText() == "1.2500" );
+    CHECK( widget.m_sent.empty() );
+}
+
 /** \brief Wrong property types and unknown preset switch states cannot retain stale command availability.
  * \ingroup pupilGuideGUI_unit_test
  */

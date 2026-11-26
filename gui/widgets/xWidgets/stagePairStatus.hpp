@@ -8,6 +8,7 @@
 #include <array>
 #include <map>
 
+#include "../stage/stagePowerState.hpp"
 #include "statusCombo.hpp"
 
 namespace xqt
@@ -269,7 +270,9 @@ void stagePairStatus::updateGUI()
         m_connected && m_stages[0].fsm == "READY" && m_stages[1].fsm == "READY" && ui.status->count() > 0;
     setEnabled( ready );
     m_showVal = true;
-    if( !ready && !m_statusCommandPending )
+    const bool powerTransition =
+        stageParkedPositionState( m_stages[0].fsm ) || stageParkedPositionState( m_stages[1].fsm );
+    if( !ready && ( !m_statusCommandPending || powerTransition ) )
     {
         clearSelection();
         ui.status->setPlaceholderText( formatValue() );

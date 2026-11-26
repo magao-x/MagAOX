@@ -17,6 +17,7 @@
 
 #include "ui_pupilGuide.h"
 
+#include "../stage/stagePowerState.hpp"
 #include "../xWidgets/statusEntry.hpp"
 #include "../xWidgets/xWidget.hpp"
 
@@ -225,6 +226,10 @@ class pupilGuide : public xWidget
     std::string m_camlensxFsmState; ///< Last observed camera-lens X-stage FSM state.
 
     std::string m_camlensyFsmState; ///< Last observed camera-lens Y-stage FSM state.
+
+    bool m_camlensxParked{ false }; ///< Last validated X-axis parked flag, usable while the property is available.
+
+    bool m_camlensyParked{ false }; ///< Last validated Y-axis parked flag, usable while the property is available.
 
     float m_camlensx_pos{ 0 }; ///< Last valid camera-lens X position used as the relative-motion baseline.
 
@@ -913,6 +918,8 @@ void pupilGuide::initializeProperties()
     add( "stagecamlensy", "fsm", pcf::IndiProperty::Text );
     add( "stagecamlensx", "position", pcf::IndiProperty::Number );
     add( "stagecamlensy", "position", pcf::IndiProperty::Number );
+    add( "stagecamlensx", "parked", pcf::IndiProperty::Number );
+    add( "stagecamlensy", "parked", pcf::IndiProperty::Number );
     add( "modwfs", "offset", pcf::IndiProperty::Number );
     add( "wooferModes", "target_amps", pcf::IndiProperty::Number );
     add( "tcsi", "pyrNudge", pcf::IndiProperty::Number );
@@ -1587,6 +1594,10 @@ void pupilGuide::receiveProperty( const pcf::IndiProperty &property, bool defini
                 m_camlensx_pos = ipRecv["current"].get<float>();
             }
         }
+        else if( ipRecv.getName() == "parked" && ipRecv.find( "current" ) )
+        {
+            m_camlensxParked = ipRecv["current"].get<double>() == 1;
+        }
     }
     else if( dev == "stagecamlensy" )
     {
@@ -1603,6 +1614,10 @@ void pupilGuide::receiveProperty( const pcf::IndiProperty &property, bool defini
             {
                 m_camlensy_pos = ipRecv["current"].get<float>();
             }
+        }
+        else if( ipRecv.getName() == "parked" && ipRecv.find( "current" ) )
+        {
+            m_camlensyParked = ipRecv["current"].get<double>() == 1;
         }
     }
     else if( dev == "dmtweeter" )
@@ -1872,16 +1887,22 @@ void pupilGuide::camlensSetEnabled( bool enabled, int whichcl )
 
     if( whichcl == CAMLENS_X || whichcl == CAMLENS_BOTH )
     {
-        ui.camlensX_fsm->setEnabled( enabled );
-        ui.camlensX_pos->setEnabled( enabled );
+        const bool parked = m_camlensxParked && stageParkedPositionState( m_camlensxFsmState ) &&
+                            propertyAvailable( "stagecamlensx", "parked", { "current" } );
+        ui.camlensX_fsm->setEnabled( enabled || parked );
+        ui.camlensX_pos->readOnly( !enabled );
+        ui.camlensX_pos->setEnabled( enabled || parked );
         ui.button_camlens_l->setEnabled( enabled );
         ui.button_camlens_r->setEnabled( enabled );
     }
 
     if( whichcl == CAMLENS_Y || whichcl == CAMLENS_BOTH )
     {
-        ui.camlensY_fsm->setEnabled( enabled );
-        ui.camlensY_pos->setEnabled( enabled );
+        const bool parked = m_camlensyParked && stageParkedPositionState( m_camlensyFsmState ) &&
+                            propertyAvailable( "stagecamlensy", "parked", { "current" } );
+        ui.camlensY_fsm->setEnabled( enabled || parked );
+        ui.camlensY_pos->readOnly( !enabled );
+        ui.camlensY_pos->setEnabled( enabled || parked );
         ui.button_camlens_u->setEnabled( enabled );
         ui.button_camlens_d->setEnabled( enabled );
     }

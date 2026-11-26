@@ -129,3 +129,11 @@ In `rtimv` `cameraStatus`, confirm:
 ## Open Question
 
 The one point to confirm during implementation is whether `zaberCtrl` should expose `parked` as a dedicated top-level property or fold it into an existing status property. A dedicated `parked` property is the cleaner choice because the existing GUI code already reasons about FSM state separately from displayability, and this avoids overloading the meaning of `POWEROFF`.
+
+## Power-cycle follow-up (2026-11-26)
+
+The controllers expose the dedicated `parked.current` property. A confirmed parked stage or wheel retains its preset or numeric position in the status fields through `POWEROFF` and the controller's startup states. The rtimv overlay and Qt widgets use the same display rule. The dedicated FSM field reports controller state.
+
+Disable the preset dropdown, Go, and motion inputs while power is off. Cancel staged edits and pending preset selections on a power transition so the readouts return to the controller-reported value. Keep the camera GUI's stage launcher available while the shared INDI connection is up, including camera power transitions. In pupilGuide, keep parked lens-axis positions visible and read-only and discard pending paired selections if either controller enters a power transition.
+
+The offline Camera, Coronagraph Alignment, Pupil Guide, and Polarimetry suites passed all 43 cases. New cases exercised startup while parked and off, subsequent power transitions, numeric fallback, restored readiness, and command rejection. Both `stageGUI` and `cameraGUI` and the rtimv `cameraStatus` plugin built locally. The new tests appear in Doxygen with links to the widget methods they exercise. Instrument verification remains pending.
