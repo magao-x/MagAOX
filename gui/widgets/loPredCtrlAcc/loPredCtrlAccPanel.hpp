@@ -4,6 +4,7 @@
 #ifndef loPredCtrlAccPanel_hpp
 #define loPredCtrlAccPanel_hpp
 
+#include <chrono>
 #include <functional>
 #include <map>
 #include <string>
@@ -78,6 +79,13 @@ class loPredCtrlAccPanel : public xWidget
         std::function<QString()> m_text;             ///< Text from the current readbacks, "---" when unavailable.
     };
 
+    /// A ddspc_performance count and when it last rose, so a warning shows while it is rising.
+    struct Trend
+    {
+        double                                m_last{ -1 }; ///< Latest count; negative before the first.
+        std::chrono::steady_clock::time_point m_rose;       ///< When the count last rose.
+    };
+
     std::string                     m_device;    ///< loPredCtrlAcc INDI device name.
     std::map<std::string, Readback> m_readbacks; ///< Controller properties by name.
 
@@ -107,6 +115,10 @@ class loPredCtrlAccPanel : public xWidget
 
     std::function<bool()> m_confirmReset; ///< Reset confirmation.
 
+    Trend m_writeFailures; ///< ddspc_performance.dm_write_failures: failed DM writes.
+    Trend m_discarded;     ///< ddspc_performance.transport_discarded: commands the DM scheduler discarded.
+    Trend m_mismatch;      ///< ddspc_performance.step_mismatch: assisted slots not written (dm_slots mismatch).
+
     /// Return an element value as text, or an empty string when unavailable.
     std::string value( const std::string &property, /**< [in] Controller property name. */
                        const std::string &element /**< [in] Element name. */ ) const;
@@ -129,6 +141,13 @@ class loPredCtrlAccPanel : public xWidget
 
     /// Return why a prediction request was refused, from the conditions the controller publishes.
     QString refusalReason() const;
+
+    /// Return the applied DM slots and ACC ratio with the measured scheduler steps and ACC samples per WFS frame.
+    QString ratesText() const;
+
+    /// Update a counter's trend from ddspc_performance and return whether it rose within the last 10 s.
+    bool rising( Trend      &trend, /**< [in,out] Counter trend. */
+                 const char *element /**< [in] ddspc_performance element. */ );
 
     /// Add a status row computed by text.
     void addRow( QGridLayout             *grid,  /**< [in,out] Grid receiving the row. */

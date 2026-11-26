@@ -36,6 +36,45 @@ bool finiteNumber( const std::string &text, double &number )
     return ok && std::isfinite( number );
 }
 
+/// Explain an outputValid() condition (the first input or model check that failed), or return an empty string.
+QString describeCondition( const std::string &condition /**< [in] Condition code, e.g. wfs_stale. */ );
+
+QString describeCondition( const std::string &condition )
+{
+    static const std::map<std::string, const char *> conditions{
+        { "wfs_invalid", "the WFS measurement was invalid (non-finite)" },
+        { "integrator_parameters",
+          "the main loop's integrator parameters (holoop gain, mc, limit, aol1_m*fact) were unavailable" },
+        { "command_invalid", "the selected model's command was not usable (a numerical fault, or no ready model)" },
+        { "wfs_stale", "no WFS frame arrived within input_timeout" },
+        { "acc_window", "the ACC window was unusable" } };
+    const auto found = conditions.find( condition );
+    return found == conditions.end() ? QString() : QString::fromLatin1( found->second );
+}
+
+/// Explain a failed or discarded DM write in safety.output_state, or return an empty string for any other state.
+/** A failed or discarded write never stops prediction: the DM keeps its last copied command and the next slot is
+ * written.
+ */
+QString describeWrite( const std::string &outputState /**< [in] safety.output_state. */ );
+
+QString describeWrite( const std::string &outputState )
+{
+    static const std::map<std::string, const char *> writes{
+        { "write_failed_scheduler_reset", "a DM write failed: the DM scheduler (dmtweeter-synco) restarted" },
+        { "write_failed_transport_unavailable", "a DM write failed: the DM scheduler was unavailable" },
+        { "write_failed_channel_unavailable", "a DM write failed: the DDSPC DM channel was unavailable" },
+        { "write_failed_receipt_timeout", "a DM write failed: the DM scheduler did not acknowledge it in time" },
+        { "command_discarded_previous_retained",
+          "the DM scheduler discarded a command; the DM keeps the previous one" },
+        { "zero_discarded_resending", "the DM scheduler discarded the zero; it is sent again" } };
+    const auto found = writes.find( outputState );
+
+    return found == writes.end() ? QString()
+                                 : QString::fromLatin1( found->second ) + QStringLiteral( " [" ) +
+                                       QString::fromStdString( outputState ) + QLatin1Char( ']' );
+}
+
 /// Explain a loPredCtrlAcc output fault, or return an empty string when the output state is not a fault.
 /** safety.output_state is the fault code, or fault_zero_acknowledged once its zero is copied, followed by
  * "(<fault>: <condition> [<ACC window reason>])" when loPredCtrlAcc knows the condition behind it. The raw code is kept
@@ -45,38 +84,18 @@ QString describeFault( const std::string &outputState /**< [in] safety.output_st
 
 QString describeFault( const std::string &outputState )
 {
+    // Failed DM writes are not faults (describeWrite()); these are the faults that still stop prediction.
     static const std::map<std::string, const char *> faults{
         { "input_or_model_qualification_lost", "the inputs or the model stopped qualifying" },
-        { "command_discarded_zero_pending", "the DM scheduler discarded a DDSPC command" },
-        { "scheduler_reset_zero_pending", "the DM scheduler (dmtweeter-synco) restarted" },
-        { "ack_timeout_zero_unconfirmed", "the DM scheduler did not acknowledge a command in time" },
         { "nonfinite_or_command_limit", "a DDSPC command was non-finite or beyond its limit" },
         { "candidate_exception_zero_pending", "an internal error occurred while preparing a DM command" },
         { "copy_callback_exception_zero_pending", "an internal error occurred while recording a DM command" },
-        { "auxiliary_unavailable", "the DDSPC DM channel was unavailable" },
-        { "auxiliary_geometry", "the DDSPC DM channel has the wrong geometry" },
-        { "syncopation_transport_unavailable", "the DM scheduler transport was unavailable" } };
-    static const std::map<std::string, const char *> conditions{
-        { "wfs_invalid", "the WFS measurement was invalid (non-finite)" },
-        { "integrator_parameters",
-          "the main loop's integrator parameters (holoop gain, mc, limit, aol1_m*fact) were "
-          "unavailable" },
-        { "command_invalid",
-          "the selected model stopped qualifying (a WFS gap longer than max_fill broke its "
-          "history, or a numerical fault)" },
-        { "wfs_stale", "no WFS frame arrived within input_timeout" },
-        { "acc_window", "the ACC window was unusable" },
-        { "upstream_unlocked", "the ACC upstream timing lock was lost" } };
-    static const std::map<std::string, const char *> windows{
-        { "adc_stream_invalid", "ACC stream invalid" },
-        { "awaiting_upstream_lock", "waiting for the upstream lock" },
-        { "reader_backlog", "ACC reader fell behind" },
-        { "history_filling", "ACC history still filling" },
-        { "stale_sample", "newest ACC sample too old" },
-        { "no_new_sample", "no new ACC samples for more than max_fill frames" },
-        { "counter_gap", "more ACC samples missing than max_fill allows" },
-        { "nonfinite_sample", "non-finite ACC sample" },
-        { "adc_disabled", "ACC disabled" } };
+        { "auxiliary_geometry", "the DDSPC DM channel has the wrong geometry" } };
+    static const std::map<std::string, const char *> windows{ { "adc_stream_invalid", "ACC stream invalid" },
+                                                              { "history_filling", "ACC history still filling" },
+                                                              { "stale_sample", "no ACC sample within adc.max_age_us" },
+                                                              { "nonfinite_sample", "non-finite ACC sample" },
+                                                              { "adc_disabled", "ACC disabled" } };
 
     // "<head> (<detail>)", or the bare fault code.
     std::string head = outputState, detail;
@@ -114,9 +133,9 @@ QString describeFault( const std::string &outputState )
     const auto found = faults.find( fault );
     QString    text  = found == faults.end() ? QString::fromStdString( fault ) : QString::fromLatin1( found->second );
 
-    if( const auto reason = conditions.find( condition ); reason != conditions.end() )
+    if( const QString reason = describeCondition( condition ); !reason.isEmpty() )
     {
-        text = QString::fromLatin1( reason->second );
+        text = reason;
     }
 
     if( !window.empty() )
@@ -377,7 +396,25 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
                 return QString::number( rate, 'f', 1 ) + ( ok ? QString() : QStringLiteral( " (invalid)" ) );
             } );
     addElementRow( statusGrid, "ACC sync", "ddspc_control", "accel_sync" );
-    addElementRow( statusGrid, "Aux DM output", "safety", "output_state" );
+    addRow( statusGrid,
+            "rates",
+            "DM slots / ACC ratio",
+            [this]()
+            {
+                return ratesText();
+            } );
+    addRow( statusGrid,
+            "safety.output_state",
+            "Aux DM output",
+            [this]()
+            {
+                const auto    state = value( "safety", "output_state" );
+                const QString write = describeWrite( state );
+
+                return !write.isEmpty() ? write : state.empty() ? c_missing : QString::fromStdString( state );
+            } );
+    addElementRow( statusGrid, "DM write failures", "ddspc_performance", "dm_write_failures" );
+    addElementRow( statusGrid, "Commands discarded", "ddspc_performance", "transport_discarded" );
     addRow( statusGrid,
             "stopReason",
             "Last stop",
@@ -505,7 +542,8 @@ void loPredCtrlAccPanel::subscribe()
                                   "safety",
                                   "adc_values",
                                   "integrator",
-                                  "mfilt_clone" } )
+                                  "mfilt_clone",
+                                  "rates" } )
     {
         m_parent->addSubscriberProperty( this, m_device, property );
     }
@@ -528,6 +566,7 @@ void loPredCtrlAccPanel::onDisconnect()
 {
     setWindowTitle( QString::fromStdString( m_device ) + QStringLiteral( " (disconnected)" ) );
     m_readbacks.clear();
+    m_writeFailures = m_discarded = m_mismatch = {};
 
     for( auto *slider : { m_learnStd, m_learn, m_predict } )
     {
@@ -722,6 +761,13 @@ QString loPredCtrlAccPanel::refusalReason() const
         return QStringLiteral( "the main loop's integrator parameters have not been received" );
     }
 
+    const auto rates = m_readbacks.find( "rates" );
+
+    if( !mainLoop && rates != m_readbacks.end() && rates->second.m_state == pcf::IndiProperty::Busy )
+    {
+        return QStringLiteral( "dm_slots and acc_ratio are still being detected from the running rates" );
+    }
+
     const bool        standard = mainLoop || switchState( "ddspc_mode", "standard" ) == pcf::IndiElement::On;
     const std::string mode     = standard ? "standard" : "assisted";
 
@@ -735,6 +781,59 @@ QString loPredCtrlAccPanel::refusalReason() const
 
     return QStringLiteral( "the DDSPC output was not available (%1)" )
         .arg( QString::fromStdString( value( "safety", "output_state" ) ) );
+}
+
+QString loPredCtrlAccPanel::ratesText() const
+{
+    const auto dmSlots = value( "rates", "dm_slots" ), accRatio = value( "rates", "acc_ratio" );
+
+    if( dmSlots.empty() || accRatio.empty() )
+    {
+        return c_missing; // A controller without detected rates.
+    }
+
+    double      steps = 0, perWfs = 0;
+    const auto  rates = m_readbacks.find( "rates" );
+    QString     text = QString::fromStdString( dmSlots ) + QStringLiteral( " / " ) + QString::fromStdString( accRatio );
+    QStringList measured;
+
+    if( finiteNumber( value( "rates", "scheduler_steps" ), steps ) && steps > 0 )
+    {
+        measured << QStringLiteral( "scheduler %1 steps" ).arg( steps );
+    }
+
+    if( finiteNumber( value( "rates", "acc_per_wfs" ), perWfs ) && perWfs > 0 )
+    {
+        measured << QStringLiteral( "%1 ACC per WFS" ).arg( perWfs, 0, 'f', 2 );
+    }
+
+    if( !measured.isEmpty() )
+    {
+        text += QStringLiteral( " (" ) + measured.join( QStringLiteral( ", " ) ) + QLatin1Char( ')' );
+    }
+
+    return rates->second.m_state == pcf::IndiProperty::Busy ? QStringLiteral( "detecting: " ) + text : text;
+}
+
+bool loPredCtrlAccPanel::rising( Trend &trend, const char *element )
+{
+    double     count;
+    const auto now = std::chrono::steady_clock::now();
+
+    if( !finiteNumber( value( "ddspc_performance", element ), count ) )
+    {
+        return false;
+    }
+
+    if( trend.m_last >= 0 && count > trend.m_last )
+    {
+        trend.m_rose = now;
+    }
+
+    const bool rose = trend.m_last >= 0 && trend.m_rose != std::chrono::steady_clock::time_point{};
+    trend.m_last    = count;
+
+    return rose && now - trend.m_rose < std::chrono::seconds( 10 );
 }
 
 void loPredCtrlAccPanel::merge( Readback &readback, const pcf::IndiProperty &property )
@@ -883,6 +982,23 @@ void loPredCtrlAccPanel::refresh()
             banner = QStringLiteral( "PREDICTION ACTIVE: DDSPC is correcting tip/tilt" );
             style  = QStringLiteral( "background: #1e7b34; color: white;" );
         }
+        else if( prediction.rfind( "dm_slots_", 0 ) == 0 )
+        {
+            // dm_slots_<q>_differ_from_scheduler_steps_<n>: the assisted slots are not written.
+            const auto words = QString::fromStdString( prediction ).split( QLatin1Char( '_' ) );
+            banner = QStringLiteral( "PREDICTION ON: ACC-assisted not writing: dm_slots %1 differs from the DM "
+                                     "scheduler's %2 steps (set dm_slots = 0)" )
+                         .arg( words.value( 2 ), words.value( words.size() - 1 ) );
+            style = QStringLiteral( "background: #9b2c2c; color: white;" );
+        }
+        else if( prediction.rfind( "holding_", 0 ) == 0 )
+        {
+            const auto    condition = prediction.substr( std::strlen( "holding_" ) );
+            const QString reason    = describeCondition( condition );
+            banner                  = QStringLiteral( "PREDICTION ON: holding the last DM command (%1)" )
+                         .arg( reason.isEmpty() ? QString::fromStdString( condition ) : reason );
+            style = QStringLiteral( "background: #8a6d1a; color: white;" );
+        }
         else if( prediction == "warming" || prediction == "awaiting_copy" )
         {
             banner = prediction == "warming" ? QStringLiteral( "PREDICTION ON: model warming (probes/feedback)" )
@@ -941,6 +1057,34 @@ void loPredCtrlAccPanel::refresh()
         const QString fault = faultReason();
         warnings << QStringLiteral( "Output fault: %1" )
                         .arg( fault.isEmpty() ? QString::fromStdString( value( "safety", "output_state" ) ) : fault );
+    }
+
+    // Failed or discarded DM writes never stop prediction: warn while they are rising.
+    if( rising( m_writeFailures, "dm_write_failures" ) )
+    {
+        warnings << QStringLiteral( "DM writes failing (%1 so far): the DM keeps its last command; prediction "
+                                    "continues" )
+                        .arg( QString::fromStdString( value( "ddspc_performance", "dm_write_failures" ) ) );
+    }
+
+    if( rising( m_discarded, "transport_discarded" ) )
+    {
+        warnings << QStringLiteral( "DM scheduler discarding DDSPC commands (%1 so far): the DM keeps the previous "
+                                    "command; prediction continues" )
+                        .arg( QString::fromStdString( value( "ddspc_performance", "transport_discarded" ) ) );
+    }
+
+    if( rising( m_mismatch, "step_mismatch" ) )
+    {
+        warnings << QStringLiteral( "ACC-assisted slots not written: dm_slots differs from the DM scheduler's steps "
+                                    "per cycle (set dm_slots = 0 to detect it)" );
+    }
+
+    if( const auto rates = m_readbacks.find( "rates" );
+        rates != m_readbacks.end() && rates->second.m_state == pcf::IndiProperty::Busy )
+    {
+        warnings << QStringLiteral( "DM slots / ACC ratio not yet confirmed: detecting from the running rates, or a "
+                                    "detected change waits for prediction off" );
     }
 
     const auto predict = m_readbacks.find( "predict" );

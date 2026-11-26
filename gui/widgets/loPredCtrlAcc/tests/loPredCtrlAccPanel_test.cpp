@@ -438,7 +438,7 @@ TEST_CASE( "loPredCtrlAccGUI explains why prediction stopped", "[loPredCtrlAccGU
     fixture.publishText( "ddspc_control", "main_loop_tt", "zeroed" );
     safety( "input_or_model_qualification_lost (input_or_model_qualification_lost: acc_window stale_sample)",
             pcf::IndiProperty::Alert );
-    const std::string acc = "the ACC window was unusable: newest ACC sample too old "
+    const std::string acc = "the ACC window was unusable: no ACC sample within adc.max_age_us "
                             "[input_or_model_qualification_lost: acc_window stale_sample]";
     CHECK( banner() == "PREDICTION STOPPED: " + acc );
     CHECK( fixture.status( "stopReason" ) == acc );
@@ -451,9 +451,9 @@ TEST_CASE( "loPredCtrlAccGUI explains why prediction stopped", "[loPredCtrlAccGU
     CHECK( banner() ==
            "PREDICTION STOPPED: no WFS frame arrived within input_timeout [input_or_model_qualification_lost: "
            "wfs_stale]" );
-    safety( "fault_zero_acknowledged (scheduler_reset_zero_pending)", pcf::IndiProperty::Alert );
+    safety( "fault_zero_acknowledged (nonfinite_or_command_limit)", pcf::IndiProperty::Alert );
     CHECK( fixture.status( "stopReason" ) ==
-           "the DM scheduler (dmtweeter-synco) restarted [scheduler_reset_zero_pending]" );
+           "a DDSPC command was non-finite or beyond its limit [nonfinite_or_command_limit]" );
     safety( "fault_zero_acknowledged", pcf::IndiProperty::Alert );
     CHECK( fixture.status( "stopReason" ).find( "does not report its reason" ) != std::string::npos );
 
@@ -700,6 +700,93 @@ TEST_CASE( "loPredCtrlAccGUI selects the mfilt clones", "[loPredCtrlAccGUI]" )
                ", missed " + missed );
     fixture.publishText( "ddspc_control", "requested_mode", "mfilt_clone_8k" );
     CHECK( fixture.widget<QLabel>( "prediction.banner" )->text().startsWith( "MFILT CLONE ACTIVE (8 kHz)" ) );
+}
+/** \brief Failed and discarded DM writes, which never stop prediction, are counted and warned about while they rise;
+ * the detected DM slots and ACC ratio are shown; a dm_slots mismatch or an input hold names why assisted is not
+ * writing.
+ */
+TEST_CASE( "loPredCtrlAccGUI shows DM write failures and detected rates", "[loPredCtrlAccGUI]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACCGUI_TEST_DOXYGEN_REF
+    xqt::loPredCtrlAccPanel::ratesText;
+    xqt::loPredCtrlAccPanel::rising;
+#endif
+    // clang-format on
+    Fixture fixture;
+    fixture.defineAll();
+    auto banner = [&]()
+    {
+        return fixture.widget<QLabel>( "prediction.banner" )->text().toStdString();
+    };
+    auto warnings = [&]()
+    {
+        return fixture.widget<QLabel>( "warnings" )->text();
+    };
+    auto performance = [&]( double failures, double discarded, double mismatch )
+    {
+        pcf::IndiProperty update( pcf::IndiProperty::Number, "loPredCtrlAcc", "ddspc_performance" );
+        update.add( pcf::IndiElement( "dm_write_failures", failures ) );
+        update.add( pcf::IndiElement( "transport_discarded", discarded ) );
+        update.add( pcf::IndiElement( "step_mismatch", mismatch ) );
+        fixture.publish( update );
+    };
+    auto rates = [&]( pcf::IndiProperty::PropertyStateType state )
+    {
+        pcf::IndiProperty update( pcf::IndiProperty::Number, "loPredCtrlAcc", "rates" );
+        update.add( pcf::IndiElement( "dm_slots", 4.0 ) );
+        update.add( pcf::IndiElement( "acc_ratio", 4.0 ) );
+        update.add( pcf::IndiElement( "scheduler_steps", 4.0 ) );
+        update.add( pcf::IndiElement( "acc_per_wfs", 3.99 ) );
+        update.setState( state );
+        fixture.publish( update, true );
+    };
+
+    // A controller without these readbacks.
+    CHECK( fixture.status( "rates" ) == "---" );
+    CHECK( fixture.status( "ddspc_performance.dm_write_failures" ) == "---" );
+
+    // The first counts are a baseline, not a rise.
+    performance( 2, 5, 0 );
+    CHECK( fixture.status( "ddspc_performance.dm_write_failures" ) == "2" );
+    CHECK( fixture.status( "ddspc_performance.transport_discarded" ) == "5" );
+    CHECK( warnings().isEmpty() );
+
+    // Rising counts warn; prediction continues, so nothing is a fault.
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::On );
+    fixture.publishText( "ddspc_control", "prediction", "active" );
+    fixture.publishText( "safety", "output_state", "write_failed_scheduler_reset" );
+    performance( 3, 9, 0 );
+    CHECK( warnings().contains( "DM writes failing (3 so far)" ) );
+    CHECK( warnings().contains( "DM scheduler discarding DDSPC commands (9 so far)" ) );
+    CHECK_FALSE( warnings().contains( "Output fault" ) );
+    CHECK( fixture.status( "safety.output_state" ) ==
+           "a DM write failed: the DM scheduler (dmtweeter-synco) restarted [write_failed_scheduler_reset]" );
+    CHECK( fixture.status( "stopReason" ) == "running" );
+    CHECK( banner() == "PREDICTION ACTIVE: DDSPC is correcting tip/tilt" );
+
+    // Detected rates, and the detection state.
+    rates( pcf::IndiProperty::Busy );
+    CHECK( fixture.status( "rates" ) == "detecting: 4 / 4 (scheduler 4 steps, 3.99 ACC per WFS)" );
+    CHECK( warnings().contains( "DM slots / ACC ratio not yet confirmed" ) );
+    rates( pcf::IndiProperty::Ok );
+    CHECK( fixture.status( "rates" ) == "4 / 4 (scheduler 4 steps, 3.99 ACC per WFS)" );
+    CHECK_FALSE( warnings().contains( "DM slots / ACC ratio" ) );
+
+    // Why accepted assisted prediction is not writing.
+    performance( 3, 9, 7 );
+    CHECK( warnings().contains( "ACC-assisted slots not written" ) );
+    fixture.publishText( "ddspc_control", "prediction", "dm_slots_4_differ_from_scheduler_steps_1" );
+    CHECK( banner() == "PREDICTION ON: ACC-assisted not writing: dm_slots 4 differs from the DM scheduler's 1 steps "
+                       "(set dm_slots = 0)" );
+    fixture.publishText( "ddspc_control", "prediction", "holding_acc_window" );
+    CHECK( banner() == "PREDICTION ON: holding the last DM command (the ACC window was unusable)" );
+
+    // A refused request while the rates are detected.
+    rates( pcf::IndiProperty::Busy );
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::Off, pcf::IndiProperty::Alert );
+    CHECK( warnings().contains(
+        "Prediction request refused: dm_slots and acc_ratio are still being detected from the running rates" ) );
 }
 } // namespace loPredCtrlAccGUITest
 } // namespace libXWCTest
