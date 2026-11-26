@@ -2303,6 +2303,13 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fps )( const pcf::IndiProperty &ipRe
         return -1;
     }
 
+    // As accel.fps: a rate outside (0, 10000] would stop the timer or overrun the reads; keep the current one.
+    if( !( target > 0 && target <= 10000 ) )
+    {
+        log<text_log>( "fps must be in (0, 10000]; keeping " + std::to_string( m_fps ), logPrio::LOG_WARNING );
+        return 0;
+    }
+
     m_fps           = target;
     m_wfs_fps       = m_fps;
     m_trigger       = 1e9f / m_fps; // Update trigger value based off new fps

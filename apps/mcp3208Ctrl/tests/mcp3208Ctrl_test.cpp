@@ -522,6 +522,14 @@ TEST_CASE( "mcp3208Ctrl fps callback updates trigger metadata", "[mcp3208Ctrl]" 
     REQUIRE( app.m_wfs_fps == Approx( 500.0 ) );
     REQUIRE( app.m_trigger == Approx( 1e9f / 500.0f ) );
     REQUIRE( app.nano_sec_target == Approx( 1e9f / 500.0f ) );
+
+    // A rate outside (0, 10000] keeps the current one.
+    for( const double rejected : { 0.0, -10.0, 20000.0 } )
+    {
+        REQUIRE( app.newCallBack_m_indiP_fps( app.makeFpsUpdate( rejected ) ) == 0 );
+        REQUIRE( app.m_fps == Approx( 500.0f ) );
+        REQUIRE( app.m_trigger == Approx( 1e9f / 500.0f ) );
+    }
 }
 
 /// Verify the external fps source callback still updates cadence metadata.
