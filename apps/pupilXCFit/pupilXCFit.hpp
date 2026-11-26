@@ -86,6 +86,16 @@ class pupilXCFit : public MagAOXApp<true>,
     /// The measurement stream has a fixed axis ordering.
     static constexpr bool c_frameGrabber_flippable{ false };
 
+    /// Marker for an unavailable correlation result or an invalid output sample.
+    static constexpr float c_invalid{ std::numeric_limits<float>::quiet_NaN() };
+
+    /// Correlation result before applying the peak and capture limits.
+    struct fitResult
+    {
+        shiftT m_shift{ c_invalid, c_invalid }; ///< Live-minus-reference displacement in pixels.
+        float  m_peak{ c_invalid };             ///< Correlation peak normalized by image size.
+    };
+
     /// A sample and the calibration generation against which it was measured.
     struct sample
     {
@@ -124,9 +134,6 @@ class pupilXCFit : public MagAOXApp<true>,
 
     /// FFT workspaces and the selected reference transform.
     mx::improc::imageXCorrFFT<imageT> m_xcorr;
-
-    /// Invalid sample marker shared with consumers of the two-float stream.
-    static constexpr float c_invalid{ std::numeric_limits<float>::quiet_NaN() };
 
     /// Incremented whenever a selected calibration is withdrawn or replaced.
     uint64_t m_generation{ 0 };
@@ -234,7 +241,7 @@ class pupilXCFit : public MagAOXApp<true>,
     bool prepareReference();
 
     /// Measure one private live image while holding m_indiMutex.
-    std::optional<shiftT> measure();
+    fitResult measure();
 
     /// Withdraw the selected calibration and replace any queued sample with an invalidation.
     void invalidateReference();
@@ -448,18 +455,34 @@ inline int pupilXCFit::allocate( const dev::shmimT & )
 
 inline int pupilXCFit::processImage( void *source, const dev::shmimT & )
 {
-    const timespec              acquired = shmimMonitorT::currAtime();
-    std::lock_guard<std::mutex> guard( m_indiMutex );
+    const uint64_t        frame    = shmimMonitorT::currCnt0();
+    const timespec        acquired = shmimMonitorT::currAtime();
+    fitResult             result;
+    std::optional<shiftT> accepted;
+    bool                  fitSelected;
 
-    if( !m_livePresent || !prepareReference() )
-    {
-        publish( {}, acquired );
-        return 0;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_indiMutex );
+        fitSelected = m_fitSelected;
+
+        if( m_livePresent && prepareReference() )
+        {
+            std::copy_n( static_cast<const float *>( source ), m_live.size(), m_live.data() );
+            result = measure();
+
+            if( mx::math::isFinite( result.m_peak ) && result.m_peak >= m_minPeak &&
+                std::abs( result.m_shift[0] ) <= m_maxShift && std::abs( result.m_shift[1] ) <= m_maxShift )
+            {
+                accepted = result.m_shift;
+            }
+        }
+
+        publish( accepted, acquired );
     }
 
-    std::copy_n( static_cast<const float *>( source ), m_live.size(), m_live.data() );
-    publish( measure(), acquired );
-    return 0;
+    const auto &reference = fitSelected ? fitRefMonitorT::m_shmimName : wfsRefMonitorT::m_shmimName;
+    return telem<telem_pupilxcfit>(
+        { frame, acquired, reference, accepted.has_value(), result.m_shift[0], result.m_shift[1], result.m_peak } );
 }
 
 template <bool fitT>
@@ -635,19 +658,18 @@ inline bool pupilXCFit::prepareReference()
     return m_referenceReady;
 }
 
-inline std::optional<pupilXCFit::shiftT> pupilXCFit::measure()
+inline pupilXCFit::fitResult pupilXCFit::measure()
 {
     if( !validSignal( m_live ) )
     {
         return {};
     }
 
-    shiftT shift{};
-    float  peak = 0;
+    fitResult result;
 
     try
     {
-        if( m_xcorr( shift[0], shift[1], peak, m_live ) != 0 )
+        if( m_xcorr( result.m_shift[0], result.m_shift[1], result.m_peak, m_live ) != 0 )
         {
             return {};
         }
@@ -658,13 +680,14 @@ inline std::optional<pupilXCFit::shiftT> pupilXCFit::measure()
         return {};
     }
 
-    if( !mx::math::isFinite( peak ) || !mx::math::isFinite( shift[0] ) || !mx::math::isFinite( shift[1] ) ||
-        peak / m_live.size() < m_minPeak || std::abs( shift[0] ) > m_maxShift || std::abs( shift[1] ) > m_maxShift )
+    if( !mx::math::isFinite( result.m_peak ) || !mx::math::isFinite( result.m_shift[0] ) ||
+        !mx::math::isFinite( result.m_shift[1] ) )
     {
         return {};
     }
 
-    return shift;
+    result.m_peak /= m_live.size();
+    return result;
 }
 
 inline void pupilXCFit::invalidateReference()

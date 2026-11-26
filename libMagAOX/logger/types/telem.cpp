@@ -44,6 +44,7 @@ timespec telem_pico::lastRecord           = { 0, 0 };
 timespec telem_position::lastRecord       = { 0, 0 };
 timespec telem_pupilfit::lastRecord       = { 0, 0 };
 timespec telem_pupilfit_state::lastRecord = { 0, 0 };
+timespec telem_pupilxcfit::lastRecord     = { 0, 0 };
 timespec telem_psfacq::lastRecord         = { 0, 0 };
 timespec telem_pokecenter::lastRecord     = { 0, 0 };
 timespec telem_pokeloop::lastRecord       = { 0, 0 };

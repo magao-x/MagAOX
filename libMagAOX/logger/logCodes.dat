@@ -63,6 +63,7 @@ telem_observer           20070    telem_observer
 telem_pupilfit           20071    telem_pupilfit
 telem_pupilfit_state     20072    telem_pupilfit_state
 telem_alignloop          20073    telem_alignloop
+telem_pupilxcfit         20074    telem_pupilxcfit
 
 telem_rhusb              20100    telem_rhusb
 

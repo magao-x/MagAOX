@@ -1,0 +1,32 @@
+/// \file telem_pupilxcfit.fbs
+/// \brief Cross-correlation pupil measurements and their reference.
+namespace MagAOX.logger;
+
+/// Finite correlation result before applying the acceptance thresholds.
+table PupilXCFitMeasurement
+{
+    /// Live-minus-reference x displacement in pixels.
+    dx:float;
+    /// Live-minus-reference y displacement in pixels.
+    dy:float;
+    /// Correlation peak divided by the input pixel count.
+    peak:float;
+}
+
+table Telem_pupilxcfit_fb
+{
+    /// Source stream frame counter.
+    frame:ulong;
+    /// Seconds of the source acquisition timestamp.
+    acq_sec:long;
+    /// Nanoseconds of the source acquisition timestamp.
+    acq_nsec:int;
+    /// Selected reference shared-memory stream name.
+    reference:string (required);
+    /// True if the fitter accepted this result for output.
+    valid:bool;
+    /// Correlation result, absent when no finite measurement was obtained.
+    measurement:PupilXCFitMeasurement;
+}
+
+root_type Telem_pupilxcfit_fb;
