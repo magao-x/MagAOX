@@ -106,6 +106,16 @@ qualified WFS clock, so loPredCtrlAcc's lock check keeps a meaning. With offset 
 ends before the next semaphore, so the phase cap is not reached and a semaphore is not detected late behind a read.
 Earlier sections describing the delay target and controller are superseded.
 
+## Scheduling through arrival bursts
+
+On the Pi (`dfa88de9`): `wfsClock.fps` 2000.00035 (target 8000.0014), `acq_fps` 7997.996, `jitter_us` 4.4,
+`rejected` 3982 of 672233, `resets` 0, `missed_frames` 1122 with `coalesced_wakes` 0 and `sync_frames_dropped` 0,
+`skipped_scans` 1607. `camwfs_sync` occasionally arrives more than the 50 us gate late, several frames in a row (TCP
+bursts). From the third consecutive rejected arrival the clock is checking for a rate change (`valid()` false), and
+those frames armed no scans; their owed scans overflowed the one-period backlog. The fit is unchanged unless a rate
+change is confirmed, so scans now follow the fit whenever one exists (`m_ready`), and `delay_lock` likewise, so it
+no longer drops during a burst.
+
 ## Verification
 
 - `wfsClock_test` (ad7689Ctrl's clock tests, without its continuous schedule): passed on the Mac (6 cases). A

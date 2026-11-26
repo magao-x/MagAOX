@@ -1252,8 +1252,8 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
     double delayPhaseError_ns = 0.0;
     double delayLock          = 0.0;
 
-    // Locked: the WFS clock fit is qualified and the scans are at the requested offset.
-    if( synchroMode && wfsPeriodMeasured_ns > 0.0 && m_wfsClock.valid() )
+    // Locked: the scans follow a WFS clock fit, at the requested offset.
+    if( synchroMode && wfsPeriodMeasured_ns > 0.0 && m_wfsClock.m_ready )
     {
         // Scans an interval apart are equivalent phases; the lock thresholds stay fractions of the WFS period.
         const double wfsPeriod_ns = m_syncSchedule.m_count ? m_syncSchedule.m_interval : wfsPeriodMeasured_ns;
@@ -2063,11 +2063,12 @@ int mcp3208Ctrl::processSyncReference( int64_t arrival )
     }
 
     // The scans use the ten-second fit: its period, and this frame's fitted arrival as their anchor, so semaphore
-    // jitter (e.g. over TCP) moves neither. A rejected outlier still uses the fit; none until it qualifies.
+    // jitter (e.g. over TCP) moves neither. Rejected arrivals still use the fit, also while consecutive ones are being
+    // checked for a WFS rate change: the fit only changes if they confirm one. None until the fit first qualifies.
     const uint64_t id = m_synchroStream.md != nullptr ? m_syncProducerFrameId : m_syncFramesReceived;
     m_wfsClock.observe( id, arrival );
     m_wfsClockSpan_s  = m_wfsClock.span();
-    const bool fitted = m_wfsClock.valid();
+    const bool fitted = m_wfsClock.m_ready;
 
     updateTriggerTiming( m_atime, fitted ? m_wfsClock.m_period : 0.0 );
 

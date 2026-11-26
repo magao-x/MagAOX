@@ -1263,13 +1263,13 @@ TEST_CASE( "mcp3208Ctrl synchronized scans follow a WFS rate change within the l
     REQUIRE( app.processSyncReference( arrival ) == 0 );
     REQUIRE( app.m_syncSchedule.m_count == 4 );
 
-    // 2 kHz to 700 Hz: the first two arrivals are outliers of the 2 kHz fit, which still anchors them; then no scans
-    // while 16 consistent arrivals confirm the new rate, which the last of them re-fits.
+    // 2 kHz to 700 Hz: the arrivals are outliers of the 2 kHz fit, which keeps scheduling them while 16 consistent
+    // arrivals confirm the new rate; the last of them re-fits.
     for( int frame = 1; frame <= 16; ++frame )
     {
         arrival += 1428571;
-        const int rv = app.processSyncReference( arrival );
-        REQUIRE( rv == ( frame < 3 || frame == 16 ? 0 : 1 ) );
+        REQUIRE( app.processSyncReference( arrival ) == 0 );
+        REQUIRE( app.m_wfsClock.m_resets == ( frame < 16 ? 0u : 1u ) );
     }
 
     REQUIRE( app.m_wfsClock.m_resets == 1 );
@@ -1286,6 +1286,46 @@ TEST_CASE( "mcp3208Ctrl synchronized scans follow a WFS rate change within the l
     app.m_fps = 6000;
     REQUIRE( app.m_syncSchedule.arm( 1000000000, 500000, app.m_fps, 0, 40000, 20000 ) );
     REQUIRE( app.m_syncSchedule.m_count == 3 );
+}
+
+/// Verify a burst of late arrivals (checked for a rate change, but none confirmed) still schedules every frame.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized scans continue through a burst of late arrivals", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_numChannels        = 2;
+    app.m_fps                = 8000;
+    app.m_syncFramesReceived = 100;
+
+    const int64_t start = 1000000000;
+    app.qualifyClock( start, 101 );
+    app.setupTimingDiagnosticsProperty();
+    app.m_timingSource          = mcp3208Ctrl::TimingSource::Semaphore;
+    app.m_effectiveTimingSource = mcp3208Ctrl::TimingSource::Semaphore;
+
+    // Frames 3 to 8 arrive 200 us late (as when TCP delivers a burst): rejected, the clock checks them for a rate
+    // change, but each frame is still scheduled at its fitted arrival, and the lock holds.
+    for( int frame = 0; frame < 12; ++frame )
+    {
+        const int64_t nominal = start + frame * 500000;
+        const int64_t late    = frame >= 3 && frame <= 8 ? 200000 : 0;
+
+        REQUIRE( app.processSyncReference( nominal + late ) == 0 );
+        REQUIRE( app.m_syncSchedule.m_anchor == nominal );
+        app.m_syncSchedule.m_slot = app.m_syncSchedule.m_count; // Scanned.
+
+        app.m_delayApplied_ns = 0.0;
+        app.updateTimingDiagnosticsIndi();
+        REQUIRE( app.m_indiP_timingDiag["delay_lock"].get<double>() == Approx( 1.0 ) );
+    }
+
+    REQUIRE( app.m_wfsClock.m_rejected == 6 );
+    REQUIRE( app.m_wfsClock.m_resets == 0 );
+    REQUIRE( app.m_missedFrames == 0 );
+    REQUIRE( app.m_syncSchedule.m_skipped == 0 );
 }
 
 /// Verify semaphore jitter moves neither the scans' period nor their anchor.
