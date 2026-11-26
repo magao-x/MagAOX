@@ -7,8 +7,11 @@ to its own aligned reference. The reported residual is tweeter displacement
 minus NCPC displacement, in detector pixels; aligned references define zero.
 A separate `closedLoopIndi` instance commands `ttmperi`.
 
-The operator establishes the optical setup and opens `holoop`. The sensor
-checks these conditions before poking. Setup stage motion, `ttmpupil`, and
+The operator establishes the optical setup and opens `holoop` and `loloop`.
+AutoJay requires both `loop_state.toggle` readbacks to be Off before capture
+or measurement and while either is running. A closed loop or unavailable
+state stops acquisition and clears the pokes. Existing reference bundles
+remain usable. Setup stage motion, `ttmpupil`, and
 `stagecamlensx/y` are handled separately. Camlens follow-up and deciding when
 the alignment is complete remain manual.
 
@@ -28,7 +31,7 @@ command from ICC to RTC. Both examples set `trigger=` in `[ncpc]` and
 complete, then discards `settleFrames` distinct camera frames before averaging.
 Set the delay to cover ICC-to-RTC delivery and both mirrors settling when
 applying and removing pokes. The example delay is provisional. Confirm that
-the relay delivers commands and zeros with the AO loop open. A local write
+the relay delivers commands and zeros with both AO loops open. A local write
 can succeed while the relay is offline.
 
 To verify a contribution on the combined stream, set a DM's `trigger` to
@@ -37,7 +40,7 @@ defaults. A named trigger must be visible to AutoJay, and its settling delay
 starts when the combined update is verified.
 
 The app refuses nonzero owned channels at startup of a sequence. Both DM
-combiners must process these active writes with the AO loop open. Use the
+combiners must process these active writes with both AO loops open. Use the
 reserved channels from one alignment app or camera instance at a time.
 
 In each of `[ncpc]` and `[tweeter]`, set paired comma-separated `pokeX` and
