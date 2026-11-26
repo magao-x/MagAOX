@@ -1,5 +1,5 @@
 /** \file camera_test.cpp
- * \brief Offline discovery, lifecycle, and command tests for the camera EM-gain-off button.
+ * \brief Offline discovery, lifecycle, and command tests for camera controls.
  * \ingroup cameraGUI_unit_test
  */
 #define CATCH_CONFIG_RUNNER

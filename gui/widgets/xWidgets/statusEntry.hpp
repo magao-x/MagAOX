@@ -131,7 +131,7 @@ public:
    /// Request a display refresh after connecting.
    virtual void onConnect();
 
-   /// Clear the cached values and reset the display on disconnect.
+   /// Clear the cached type and values and reset the display on disconnect.
    virtual void onDisconnect();
 
    /// Initialize the entry from an INDI property definition.
@@ -140,7 +140,7 @@ public:
    /// Clear the display if the configured property is deleted.
    void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] Deleted property. */ );
 
-   /// Cache the current and target elements from an INDI update.
+   /// Cache the reported property type and its current and target elements.
    void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Updated property. */ );
 
    /// Set the stretch of the horizontal layout
@@ -160,7 +160,7 @@ public slots:
   /// Display the current value if it has changed.
   void updateGUI();
 
-  /// Send the editor contents as a target value.
+  /// Send the edited target as a number for numeric properties or as text otherwise.
   void on_value_returnPressed();
 
   /// Set the value editor text and start editing.
