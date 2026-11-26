@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -450,6 +451,12 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
 
     pcf::IndiProperty m_indiP_offlFdump;
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlFdump );
+
+    /// Most recent calibrated focus dump amount from the offload thread, or NaN when unavailable.
+    std::atomic<float> m_offlF_dumpAmount{ std::numeric_limits<float>::quiet_NaN() };
+
+    /// Read-only INDI property for the current focus dump amount.
+    pcf::IndiProperty m_indiP_offlFdumpAmount;
 
     pcf::IndiProperty m_indiP_offlFavgInt;
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlFavgInt );
@@ -1210,6 +1217,20 @@ inline int tcsInterface::appStartup()
     {
         log<software_error>( { __FILE__, __LINE__ } );
         return -1;
+    }
+
+    createROIndiNumber( m_indiP_offlFdumpAmount, "offlF_dumpAmount", "Woofer Focus Dump Amount" );
+    indi::addNumberElement<float>( m_indiP_offlFdumpAmount,
+                                   "current",
+                                   std::numeric_limits<float>::lowest(),
+                                   std::numeric_limits<float>::max(),
+                                   0,
+                                   "%0.6f" );
+    m_indiP_offlFdumpAmount["current"] = m_offlF_dumpAmount.load();
+
+    if( registerIndiPropertyReadOnly( m_indiP_offlFdumpAmount ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
     createStandardIndiToggleSw( m_indiP_offlFenable, "offlF_enable" );
@@ -2642,6 +2663,9 @@ inline int tcsInterface::updateINDI()
         updateIfChanged( m_indiP_offlFavgInt, "current", offlFAvgInt );
         updateIfChanged( m_indiP_offlFgain, "current", offlFGain );
         updateIfChanged( m_indiP_offlFthresh, "current", offlFThresh );
+
+        // Serialize the amount at the precision used by the zimr command.
+        updateIfChanged( m_indiP_offlFdumpAmount, "current", std::to_string( m_offlF_dumpAmount.load() ) );
     }
     catch( ... )
     {
@@ -3129,6 +3153,11 @@ void tcsInterface::offloadThreadExec()
             offlFAvgInt  = m_offlF_avgInt;
         }
 
+        if( loopState != 2 && loopState != last_loopState )
+        {
+            m_offlF_dumpAmount.store( std::numeric_limits<float>::quiet_NaN() );
+        }
+
         // Check if loop open
         if( loopState == 0 )
         {
@@ -3232,6 +3261,8 @@ void tcsInterface::offloadThreadExec()
 
                 m_last_nRequests = m_nRequests;
             }
+
+            m_offlF_dumpAmount.store( avg_F_0 );
 
             ++sincelast_TT;
             if( sincelast_TT >= offlTTAvgInt )

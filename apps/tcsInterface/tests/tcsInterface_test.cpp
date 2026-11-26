@@ -32,6 +32,9 @@ class tcsInterface_test : public tcsInterface
 {
 
   public:
+    /// Expose the lab-mode callback for the common INDI validation tests.
+    using tcsInterface::newCallBack_m_indiP_labMode;
+
     tcsInterface_test( const std::string device )
     {
         m_configName = device;
