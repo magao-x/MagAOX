@@ -247,6 +247,7 @@ autoJayHarness::autoJayHarness()
     numbers( "stageflowfs", "position", { { "current", 32.0 } } );
     numbers( "camflowfs", "exptime", { { "current", 0.001 } } );
     toggle( "holoop", "loop_state", "toggle", false );
+    toggle( "loloop", "loop_state", "toggle", false );
     liveGeometry( 44, 40 );
     calibration aligned;
     std::string error;
@@ -515,7 +516,7 @@ int autoJayHarness::startMonitoring( const std::string &stream )
 }
 /// \endcond
 
-/// Default requirements resolve exposure at capture and verify the open AO loop.
+/// Default requirements resolve exposure at capture and verify that both AO loops are open.
 /** \ingroup autoJay_unit_test */
 TEST_CASE( "autoJay setup defaults capture stable camera settings", "[autoJay][app]" )
 {
@@ -637,9 +638,23 @@ TEST_CASE( "autoJay rejects invalid setup before opening channels", "[autoJay][a
     #endif
     // clang-format on
     autoJayHarness app;
-    SECTION( "AO loop closed" )
+    SECTION( "high-order loop closed" )
     {
         app.toggle( "holoop", "loop_state", "toggle", true );
+    }
+    SECTION( "low-order loop closed" )
+    {
+        app.toggle( "loloop", "loop_state", "toggle", true );
+    }
+    SECTION( "low-order loop state not received" )
+    {
+        app.m_observed.at( "loloop.loop_state" ).value.reset();
+    }
+    SECTION( "low-order loop state in Alert" )
+    {
+        auto value = app.observedProperty( "loloop.loop_state" );
+        value.setState( pcf::IndiProperty::Alert );
+        app.deliver( value );
     }
     SECTION( "LOS not pupil" )
     {
@@ -955,7 +970,7 @@ TEST_CASE( "autoJay publishes only a complete current measurement", "[autoJay][a
         REQUIRE_FALSE( app.m_continuous );
 }
 
-/// The normal startup and idle loop receive camera frames before a capture request can open the DMs.
+/// Startup receives camera frames before capture, and closing the low-order loop stops active pokes.
 /** \ingroup autoJay_unit_test */
 TEST_CASE( "autoJay can start a first capture after monitoring while idle", "[autoJay][app]" )
 {
@@ -968,8 +983,15 @@ TEST_CASE( "autoJay can start a first capture after monitoring while idle", "[au
     // clang-format on
     syntheticCamera camera;
     autoJayHarness  app;
+    app.m_observed.erase( "loloop.loop_state" );
     REQUIRE( app.startMonitoring( camera.m_name ) == 0 );
     REQUIRE_FALSE( app.m_calibration );
+    REQUIRE( app.m_observed.contains( "loloop.loop_state" ) );
+    auto loopState = pcf::IndiProperty( pcf::IndiProperty::Switch, "loloop", "loop_state" );
+    loopState.setState( pcf::IndiProperty::Idle );
+    loopState.add( pcf::IndiElement( "toggle" ) );
+    loopState["toggle"].setSwitchState( pcf::IndiElement::Off );
+    app.deliver( loopState );
     REQUIRE( app.m_observed.contains( "stagelosel.parked" ) );
     REQUIRE( app.m_observed.contains( "stageflowfs.parked" ) );
     REQUIRE_FALSE( app.m_observed.contains( "camflowfs.parked" ) );
@@ -998,6 +1020,21 @@ TEST_CASE( "autoJay can start a first capture after monitoring while idle", "[au
     REQUIRE( app.m_active );
     REQUIRE( app.m_openCount == 1 );
     REQUIRE( app.m_commands.size() == 1 );
+
+    const autoJayHarness::imageT baseline = autoJayHarness::imageT::Constant( 44, 40, 500 );
+    app.m_acquisition.frame( baseline, 1, app.monotonic() );
+    app.m_acquisition.frame( baseline, 2, app.monotonic() );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE( app.m_commands.size() == 2 );
+    REQUIRE( app.m_commands.back()[0] == 1 );
+
+    app.toggle( "loloop", "loop_state", "toggle", true );
+    REQUIRE( app.appLogic() == 0 );
+    REQUIRE_FALSE( app.m_active );
+    REQUIRE_FALSE( app.m_open );
+    REQUIRE( app.m_commands.size() == 2 );
+    REQUIRE_FALSE( app.m_calibration );
+    REQUIRE( app.m_status == "setup became invalid: loop must be open: loloop" );
 }
 
 /// Retain every completed capture while enabled and stop retaining successful captures when disabled.
@@ -1167,8 +1204,9 @@ TEST_CASE( "autoJay drops the legacy alignment interlock from old settings and b
     REQUIRE_FALSE( app.m_observed.contains( legacy + ".loop_state" ) );
     REQUIRE_FALSE( app.m_observed.contains( legacy + ".fsm" ) );
     REQUIRE( app.setupValid( false, error ) );
-    app.toggle( "holoop", "loop_state", "toggle", true );
+    app.toggle( "loloop", "loop_state", "toggle", true );
     REQUIRE_FALSE( app.setupValid( false, error ) );
+    REQUIRE( error == "loop must be open: loloop" );
 }
 
 /// An explicitly failed recall cannot leave an older calibration available for a subsequent measurement.

@@ -107,7 +107,8 @@ class autoJay : public MagAOXApp<true>, public dev::shmimMonitor<autoJay>, publi
     std::array<std::string, 2>                     m_patternFiles; ///< Optional FITS source maps for reference capture.
     std::array<std::vector<std::array<int, 2>>, 2> m_pokeActuators; ///< Zero-based (x, y) pairs for each DM.
     autoJayDetail::registrationSettings m_quality;       ///< Registration acceptance thresholds.
-    std::string                         m_aoLoop{ "holoop" };           ///< Main AO loop which must remain open.
+    std::string                                    m_aoLoop{ "holoop" }; ///< High-order AO loop which must remain open.
+    inline static const std::string c_lowOrderLoop{ "loloop" };          ///< Low-order AO loop which must remain open.
     std::string m_retiredAlignmentDevice; ///< Legacy override used only to discard obsolete setup rules.
     bool        m_publishControl{ false };   ///< Mark accepted measurements eligible for a correction consumer.
     double      m_frameMaxAge{ 5 };          ///< Maximum time since a coherent camera frame was received, in seconds.
@@ -649,7 +650,7 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
         }
     }
 
-    if( m_aoLoop.empty() || m_captureConfig.profile.empty() )
+    if( m_aoLoop.empty() || m_aoLoop == c_lowOrderLoop || m_captureConfig.profile.empty() )
     {
         return -1;
     }
@@ -790,6 +791,23 @@ inline bool autoJay::checkSetup( calibration &cal, geometry &geom, bool capture,
               geom.region.bin_x != cal.cameraGeometry.region.bin_x ||
               geom.region.bin_y != cal.cameraGeometry.region.bin_y ) )
             return reject( "calibration camera sampling/orientation differs" );
+
+        // Check the live interlocks even when a saved reference omits one of them.
+        for( const auto *device : { &m_aoLoop, &c_lowOrderLoop } )
+        {
+            const auto *loop = property( *device, "loop_state" );
+            if( !loop || loop->getType() != pcf::IndiProperty::Switch || !loop->find( "toggle" ) ||
+                ( loop->getState() != pcf::IndiProperty::Idle && loop->getState() != pcf::IndiProperty::Ok ) )
+            {
+                return reject( "loop state unavailable: " + *device );
+            }
+
+            if( ( *loop )["toggle"].getSwitchState() != pcf::IndiElement::Off )
+            {
+                return reject( "loop must be open: " + *device );
+            }
+        }
+
         for( auto &rule : cal.setup )
         {
             const auto *p   = property( rule.device, rule.property );
@@ -851,13 +869,6 @@ inline bool autoJay::checkSetup( calibration &cal, geometry &geom, bool capture,
             else if( value != rule.value )
                 return reject( "setup mismatch: " + rule.device + "." + rule.property );
         }
-        // AO must remain open even if the loaded bundle has different optical setup rules.
-        const auto *loop = property( m_aoLoop, "loop_state" );
-        if( !loop || !loop->find( "toggle" ) || ( *loop )["toggle"].getSwitchState() != pcf::IndiElement::Off )
-        {
-            return reject( "loop must be open: " + m_aoLoop );
-        }
-
     }
     catch( ... )
     {
@@ -1513,7 +1524,7 @@ inline void autoJay::finish()
 inline int autoJay::appStartup()
 {
     m_session = static_cast<double>( static_cast<uint64_t>( realtime() * 1e3 ) );
-    if( subscribeSetup( m_captureConfig.setup ) < 0 )
+    if( subscribeSetup( m_captureConfig.setup ) < 0 || subscribe( c_lowOrderLoop, "loop_state" ) < 0 )
     {
         return -1;
     }

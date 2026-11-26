@@ -787,3 +787,17 @@ time with the current 500-frame stacks using the user's instrument workflow.
 The optimized AutoJay build and all 45 cases across the four offline suites
 passed. Registration regressions cover shifts below the cubic grid spacing,
 unequal ROI origins, and the cubic fallback for clipped pokes.
+
+### Follow-up: low-order AO loop interlock
+
+AutoJay now subscribes to `loloop.loop_state` along with the existing
+high-order loop state. Both live `toggle` readbacks must be Off to begin or
+continue capture or measurement. Closing either loop during acquisition
+stops the transaction, clears the owned DM channels, and invalidates the
+correction sample. Each loop check uses the last received INDI state.
+Existing reference bundles pick up the live low-order interlock without
+recapture because it is checked independently of the saved setup.
+
+Offline tests cover the startup subscription, refusal to poke with either
+loop closed, refusal with unavailable or Alert low-order state, abort and
+cleanup during a simulated NCPC poke, and recall of an older bundle.
