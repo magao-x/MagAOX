@@ -1,6 +1,5 @@
 /** \file tcsInterface_test.cpp
  * \brief Catch2 tests for the tcsInterface app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup tcsInterface_files
  */
@@ -35,7 +34,8 @@ class tcsInterface_test : public tcsInterface
     /// Expose the lab-mode callback for the common INDI validation tests.
     using tcsInterface::newCallBack_m_indiP_labMode;
 
-    tcsInterface_test( const std::string device )
+    /// Prepare the app's INDI properties for callback validation.
+    tcsInterface_test( const std::string device /**< [in] INDI device name for the fixture. */ )
     {
         m_configName = device;
 
@@ -52,7 +52,6 @@ class tcsInterface_test : public tcsInterface
         XWCTEST_SETUP_INDI_NEW_PROP( offlFavgInt );
         XWCTEST_SETUP_INDI_NEW_PROP( offlFgain );
         XWCTEST_SETUP_INDI_NEW_PROP( offlFthresh );
-        // XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_teldata, tcsi, zd);
     }
 };
 /// \endcond
