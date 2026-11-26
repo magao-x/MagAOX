@@ -50,6 +50,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_adcConfig;
     using loPredCtrlAcc_operational::m_adcSegment;
     using loPredCtrlAcc_operational::m_assistedDiagnostic;
+    using loPredCtrlAcc_operational::m_assistedFrame;
     using loPredCtrlAcc_operational::m_assistedValid;
     using loPredCtrlAcc_operational::m_autoRatio;
     using loPredCtrlAcc_operational::m_autoSlots;
@@ -139,6 +140,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::processImage;
     using loPredCtrlAcc_operational::resetModels;
     using loPredCtrlAcc_operational::ringSize;
+    using loPredCtrlAcc_operational::selectedReady;
     using loPredCtrlAcc_operational::sensorHistory;
     using loPredCtrlAcc_operational::slotInputs;
     using loPredCtrlAcc_operational::standardInput;
@@ -2328,6 +2330,7 @@ int selectMode( Controller &app /**< [in,out] Application under test. */, const 
     auto mode = app.m_indiP_mode;
     for( const char *element : { "standard",
                                  "accel_assisted",
+                                 "accel_assisted_2k",
                                  "main_loop",
                                  "mfilt_copy_8k",
                                  "mfilt_copy_2k",
@@ -3382,5 +3385,123 @@ TEST_CASE( "Detected dm_slots and acc_ratio resize the controller while predicti
     app.applyRates();
     CHECK( app.m_slots == 2 );
     CHECK( app.m_slotsKnown.load() );
+}
+
+/** \brief accel_assisted_2k is standard DDSPC's per-frame path with the ACC window in the regressor: it learns from
+ * the ACC, decides once per WFS frame, and every DM slot of the frame carries that frame's command; the per-slot
+ * multirate fit is not used.
+ */
+TEST_CASE( "ACC-assisted 2 kHz predicts one command per WFS frame with the ACC in the regressor", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::newCallBack_m_indiP_mode;
+    MagAOX::app::loPredCtrlAcc_operational::step;
+    MagAOX::app::loPredCtrlAcc_operational::outputCandidate;
+    MagAOX::app::loPredCtrlAcc_operational::selectedReady;
+#endif
+    // clang-format on
+    Controller app( true );
+    REQUIRE( selectMode( app, "accel_assisted_2k" ) == 0 );
+    CHECK( app.m_indiP_mode["accel_assisted_2k"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( app.m_indiP_mode["accel_assisted"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_mode.load() == DDSPC::ShadowMode::AccelAssisted );
+    CHECK( app.m_assistedFrame.load() );
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_control["requested_mode"].get<std::string>() == "accel_assisted_2k" );
+
+    Plant plant( .02 );
+    app.m_source = [&]( std::uint64_t n )
+    {
+        return plant.acc( n );
+    };
+    app.train( "1500,0.1,0.1" );
+    DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 ), y = DDSPC::Matrix::Zero( 2, 1 );
+    std::uint64_t n = 0;
+    for( int i = 0; i < 2000; ++i )
+    {
+        app.nextFrame(); // This frame's ACC samples arrive before its WFS decision.
+        const auto features = app.window();
+        const auto slots    = app.advance( y, features, features.size() > 0 );
+
+        // The frame's one command, on every DM slot.
+        for( int p = 1; p < slots.cols(); ++p )
+        {
+            REQUIRE( slots.col( p ) == slots.col( 0 ) );
+        }
+
+        y.setZero();
+        for( int p = 0; p < slots.cols(); ++p, ++n )
+        {
+            const auto e = plant.residual( n, command );
+            command      = slots.col( p );
+            for( int axis = 0; axis < 2; ++axis )
+            {
+                y( axis ) += e[axis] / slots.cols();
+            }
+        }
+    }
+
+    CHECK( app.m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_ready );
+    CHECK( app.selectedReady() );
+    CHECK( app.m_multirate->status().m_updates == 0 ); // The per-slot fit is not used.
+    CHECK( app.m_fastStats.m_predictions == 0 );       // No per-slot calculation.
+    REQUIRE( app.appLogic() == 0 );
+    CHECK( app.m_indiP_control["assisted_ready"].get<std::string>() == "true" );
+}
+
+/** \brief With an informative ACC, accel_assisted_2k's per-frame commands correct the vibration better than standard
+ * DDSPC's on the same plant: the ACC window contributes to the 2 kHz command.
+ */
+TEST_CASE( "ACC-assisted 2 kHz corrects better than standard with an informative ACC", "[rtc-controller]" )
+{
+    auto run = []( const char *mode )
+    {
+        Controller app( true );
+        app.m_settings.m_history       = 6;
+        app.m_settings.m_accelChannels = 16;
+        app.resetModels();
+        REQUIRE( selectMode( app, mode ) == 0 );
+        Plant plant( .02 );
+        app.m_source = [&]( std::uint64_t n )
+        {
+            return plant.acc( n );
+        };
+        app.train( "2000,0.1,0.1" );
+        DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 ), y = DDSPC::Matrix::Zero( 2, 1 );
+        std::uint64_t n     = 0;
+        double        sum   = 0;
+        int           count = 0;
+        for( int i = 0; i < 5000; ++i )
+        {
+            if( i == 3000 )
+            {
+                app.freeze();
+            }
+
+            app.nextFrame();
+            const auto features = app.window();
+            const auto slots    = app.advance( y, features, features.size() > 0 );
+            y.setZero();
+            for( int p = 0; p < slots.cols(); ++p, ++n )
+            {
+                const auto e = plant.residual( n, command );
+                command      = slots.col( p );
+                for( int axis = 0; axis < 2; ++axis )
+                {
+                    y( axis ) += e[axis] / slots.cols();
+                    sum += i >= 4000 ? e[axis] * e[axis] : 0;
+                    count += i >= 4000;
+                }
+            }
+        }
+
+        REQUIRE( app.selectedReady() );
+        return std::sqrt( sum / count );
+    };
+
+    const double standard = run( "standard" ), assisted = run( "accel_assisted_2k" );
+    INFO( "standard " << standard << ", accel_assisted_2k " << assisted );
+    CHECK( assisted < .75 * standard ); // 0.33 against 0.65 on a development Mac.
 }
 } // namespace libXWCTest::loPredCtrlAccTest

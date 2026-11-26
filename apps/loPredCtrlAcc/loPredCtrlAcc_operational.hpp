@@ -555,6 +555,11 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// ddspc_mode mfilt_copy_2k: the copy is written once per WFS decision, not on every DM slot; same locking.
     std::atomic<bool> m_copyOnce{ false };
 
+    /// ddspc_mode accel_assisted_2k (m_mode AccelAssisted): standard DDSPC's per-frame path with the ACC window in the
+    /// regressor (the shadow controller's assisted fit), one command per WFS frame held on every DM slot and integrated
+    /// once per frame, instead of the per-slot multirate fit; same locking as m_mfiltCopy.
+    std::atomic<bool> m_assistedFrame{ false };
+
     /// WFS decisions stored in m_slotPlan; under m_commandMutex.
     std::uint64_t m_planDecisions{ 0 };
 
@@ -1438,8 +1443,11 @@ inline void loPredCtrlAcc_operational::applyTraining()
     const bool assisted = m_mode.load() == DDSPC::ShadowMode::AccelAssisted;
     const bool learning = m_learning;
     m_models->training( DDSPC::ShadowMode::Standard, learning && !assisted && !m_mfiltCopy.load() ); // Copy: no fit.
-    m_models->training( DDSPC::ShadowMode::AccelAssisted, false );
-    m_multirate->training( learning && assisted ); // The upstream lock is not needed: the ACC need not be synchronized.
+    // accel_assisted_2k trains the per-frame assisted fit, accel_assisted the multirate fit; the upstream lock is not
+    // needed by either.
+    const bool frame = m_assistedFrame.load();
+    m_models->training( DDSPC::ShadowMode::AccelAssisted, learning && assisted && frame );
+    m_multirate->training( learning && assisted && !frame );
 }
 
 inline void loPredCtrlAcc_operational::learnStdFinished()
@@ -1465,6 +1473,7 @@ inline void loPredCtrlAcc_operational::learnStdEnded( std::int64_t now )
 inline bool loPredCtrlAcc_operational::selectedReady() const
 {
     return m_mode.load() == DDSPC::ShadowMode::Standard ? m_models->status( DDSPC::ShadowMode::Standard ).m_ready
+           : m_assistedFrame.load()                     ? m_models->status( DDSPC::ShadowMode::AccelAssisted ).m_ready
                                                         : m_multirate->status().m_ready;
 }
 
@@ -1823,8 +1832,9 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
 
     const DDSPC::Matrix slots = slotInputs( applied ); // Positions, or per-slot deltas when integrating.
 
+    // accel_assisted_2k continues below like standard, with the per-frame assisted fit selected.
     const auto selected = m_mode.load();
-    if( selected == DDSPC::ShadowMode::AccelAssisted )
+    if( selected == DDSPC::ShadowMode::AccelAssisted && !m_assistedFrame.load() )
     {
         return stepAssisted( measurement, counter, features, assistedValid, slots, ordinal, now );
     }
@@ -1858,26 +1868,22 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
             m_models->predict_next( mode, counter, measurement, model ? features : empty, m_plans[model] );
         if( mode == selected )
             selectedReady = ready;
+        // Both fits plan one command per frame (m_settings.m_assistedCommandSlots is 1), held on its slots.
         if( m_predicting && mode == selected && ready )
             for( int f = 0; f < frames; ++f )
                 for( int j = 0; j < m_slots; ++j )
-                    plan.col( m_slots * f + j ) +=
-                        model
-                            ? m_plans[1].middleRows( ( ( frames - 1 - f ) * m_slots + m_slots - 1 - j ) * modes, modes )
-                            : m_plans[0].middleRows( ( frames - 1 - f ) * modes, modes );
+                    plan.col( m_slots * f + j ) += m_plans[model].middleRows( ( frames - 1 - f ) * modes, modes );
     }
     const bool numericalFault = m_models->status( selected ).m_reason == DDSPC::ShadowReason::NumericalFault;
     if( probing && !numericalFault )
     {
-        // Standard probes are held for the frame, as in loPredCtrl; assisted probes excite each slot independently.
+        // Probes are held for the frame, as in loPredCtrl: both per-frame fits identify one command per frame.
         auto &stage = m_exploration.front();
         for( int mode = 0; mode < modes; ++mode )
         {
-            float draw = stage.m_sigma * m_distribution( m_generator );
+            const float draw = stage.m_sigma * m_distribution( m_generator );
             for( int j = 0; j < m_slots; ++j )
             {
-                if( j && selected == DDSPC::ShadowMode::AccelAssisted )
-                    draw = stage.m_sigma * m_distribution( m_generator );
                 plan( mode, j ) += draw;
             }
         }
@@ -2117,7 +2123,8 @@ inline bool loPredCtrlAcc_operational::outputCandidate( const synco::Request &re
                                                         const synco::Record  &schedule,
                                                         std::span<float>      pixels )
 {
-    if( m_mode.load() == DDSPC::ShadowMode::AccelAssisted ) // Mode changes only after confirmed removal.
+    // Mode changes only after confirmed removal. accel_assisted_2k renders its per-frame plan below, like standard.
+    if( m_mode.load() == DDSPC::ShadowMode::AccelAssisted && !m_assistedFrame.load() )
     {
         return assistedCandidate( request, schedule, pixels );
     }
@@ -2837,6 +2844,7 @@ inline int loPredCtrlAcc_operational::setupINDI()
                                    "ddspc_mode",
                                    { "standard",
                                      "accel_assisted",
+                                     "accel_assisted_2k",
                                      "main_loop",
                                      "mfilt_copy_8k",
                                      "mfilt_copy_2k",
@@ -3081,7 +3089,7 @@ inline int loPredCtrlAcc_operational::appLogic()
 
     FRAMEGRABBER_UPDATE_INDI;
     const auto             output = m_output.status();
-    DDSPC::ShadowStatus    standard;
+    DDSPC::ShadowStatus    standard, frameAssisted; // The standard and per-frame (accel_assisted_2k) assisted fits.
     DDSPC::MultirateStatus assisted;
     bool                   learning, predicting;
     std::uint64_t          shifts, overruns, needed;
@@ -3117,7 +3125,8 @@ inline int loPredCtrlAcc_operational::appLogic()
                            logPrio::LOG_NOTICE );
         }
 
-        standard   = m_models->status( DDSPC::ShadowMode::Standard );
+        standard      = m_models->status( DDSPC::ShadowMode::Standard );
+        frameAssisted = m_models->status( DDSPC::ShadowMode::AccelAssisted );
         assisted   = m_multirate->status();
         learning   = m_learning;
         predicting = m_predicting;
@@ -3170,7 +3179,9 @@ inline int loPredCtrlAcc_operational::appLogic()
                               { double( slots ), double( ratio ), double( m_schedulerSteps ), m_accPerWfs },
                               slotsKnown && ratioKnown ? INDI_OK : INDI_BUSY );
     const bool selected      = m_mode.load() == DDSPC::ShadowMode::Standard;
-    const bool selectedReady = selected ? standard.m_ready : assisted.m_ready;
+    const bool assistedFrame = m_assistedFrame.load();
+    const bool assistedReady = assistedFrame ? frameAssisted.m_ready : assisted.m_ready; // The selected assisted fit.
+    const bool selectedReady = selected ? standard.m_ready : assistedReady;
     const bool mainLoop      = m_mainLoop.load();
     const bool mfiltCopy     = m_mfiltCopy.load();
     const bool locked = m_syncLocked.load(), samples = m_assistedValid.load();
@@ -3199,9 +3210,15 @@ inline int loPredCtrlAcc_operational::appLogic()
     }
     if( !samples )
         block( std::string( "acc_window_" ) + m_windowReason.load() );
-    if( !assisted.m_ready )
+    if( assistedFrame && !frameAssisted.m_ready )
+    {
+        block( std::string( "model_" ) + DDSPC::shadow_reason( frameAssisted.m_reason ) );
+    }
+    else if( !assistedFrame && !assisted.m_ready )
+    {
         block( std::string( assisted.m_training ? "model_warming_" : "model_untrained_" ) +
                std::to_string( assisted.m_updates ) + "_of_" + std::to_string( needed ) + "_updates" );
+    }
     // Assisted slots are not written while the scheduler's steps differ from dm_slots: say so, once in the log.
     const bool mismatched = fast.m_mismatch > m_rates.m_mismatch;
     if( mismatched )
@@ -3250,9 +3267,10 @@ inline int loPredCtrlAcc_operational::appLogic()
           : mfiltCopy && m_mfiltClone.load() ? ( m_copyOnce.load() ? "mfilt_clone_2k" : "mfilt_clone_8k" )
           : mfiltCopy                        ? ( m_copyOnce.load() ? "mfilt_copy_2k" : "mfilt_copy_8k" )
           : selected                         ? "standard"
+          : assistedFrame                    ? "accel_assisted_2k"
                                              : "accel_assisted",
           standard.m_ready && fresh ? "true" : "false",
-          assisted.m_ready && fresh && samples ? "true" : "false",
+          assistedReady && fresh && samples ? "true" : "false",
           learning ? "true" : "false",
           prediction,
           locked ? "true" : "false",
@@ -3283,10 +3301,12 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      upstreamNs < 0 ? "n/a" : format( ( now - upstreamNs ) / 1e9 ),
                                      !m_adc ? "disabled" : DDSPC::adc_state( adc.m_state ),
                                      m_windowReason.load(),
-                                     std::to_string( assisted.m_updates ) + "/" + std::to_string( needed ) +
-                                         ( assisted.m_ready      ? " ready"
-                                           : assisted.m_training ? " learning"
-                                                                 : " frozen" ) },
+                                     assistedFrame
+                                         ? std::string( "2k " ) + DDSPC::shadow_reason( frameAssisted.m_reason )
+                                         : std::to_string( assisted.m_updates ) + "/" + std::to_string( needed ) +
+                                               ( assisted.m_ready      ? " ready"
+                                                 : assisted.m_training ? " learning"
+                                                                       : " frozen" ) },
                                    blockers.empty() ? INDI_OK : INDI_BUSY );
     // Rates over the interval since the previous update.
     const double seconds = m_rates.m_ns > 0 ? ( now - m_rates.m_ns ) / 1e9 : 0;
@@ -3690,18 +3710,21 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
     bool              mfiltCopy = false; // mfilt_copy_*: the main loop's tip/tilt integrator on the own channel.
     bool              copyOnce  = false; // mfilt_copy_2k: written once per WFS frame instead of every DM slot.
     bool              clone     = false; // mfilt_clone_*: the copy clones mfilt's state from aolN_modevalDM.
+    bool              frame     = false; // accel_assisted_2k: the per-frame assisted fit, one command per WFS frame.
     for( const auto &entry : ipRecv.getElements() )
     {
-        if( entry.first != "standard" && entry.first != "accel_assisted" && entry.first != "main_loop" &&
-            entry.first != "mfilt_copy_8k" && entry.first != "mfilt_copy_2k" && entry.first != "mfilt_clone_8k" &&
-            entry.first != "mfilt_clone_2k" )
+        if( entry.first != "standard" && entry.first != "accel_assisted" && entry.first != "accel_assisted_2k" &&
+            entry.first != "main_loop" && entry.first != "mfilt_copy_8k" && entry.first != "mfilt_copy_2k" &&
+            entry.first != "mfilt_clone_8k" && entry.first != "mfilt_clone_2k" )
         {
             return -1;
         }
         if( entry.second.getSwitchState() == pcf::IndiElement::On )
         {
             ++selected;
-            mode     = entry.first == "accel_assisted" ? DDSPC::ShadowMode::AccelAssisted : DDSPC::ShadowMode::Standard;
+            frame     = entry.first == "accel_assisted_2k";
+            mode      = entry.first == "accel_assisted" || frame ? DDSPC::ShadowMode::AccelAssisted
+                                                                 : DDSPC::ShadowMode::Standard;
             mainLoop = entry.first == "main_loop";
             clone     = entry.first == "mfilt_clone_8k" || entry.first == "mfilt_clone_2k";
             copyOnce  = entry.first == "mfilt_copy_2k" || entry.first == "mfilt_clone_2k";
@@ -3727,6 +3750,7 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
     m_mfiltCopy.store( mfiltCopy );
     m_copyOnce.store( copyOnce );
     m_mfiltClone.store( clone );
+    m_assistedFrame.store( frame );
     m_mainLoopKnown = false;
     m_predicting    = false;
     applyTraining();
@@ -3737,8 +3761,11 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_mode )( const p
                            INDI_OK );
     updateSwitchIfChanged( m_indiP_mode,
                            "accel_assisted",
-                           mode == DDSPC::ShadowMode::AccelAssisted ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                           mode == DDSPC::ShadowMode::AccelAssisted && !frame ? pcf::IndiElement::On
+                                                                              : pcf::IndiElement::Off,
                            INDI_OK );
+    updateSwitchIfChanged(
+        m_indiP_mode, "accel_assisted_2k", frame ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
     updateSwitchIfChanged(
         m_indiP_mode, "main_loop", mainLoop ? pcf::IndiElement::On : pcf::IndiElement::Off, INDI_OK );
     updateSwitchIfChanged( m_indiP_mode,
