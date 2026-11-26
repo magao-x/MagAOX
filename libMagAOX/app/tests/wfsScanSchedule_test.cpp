@@ -219,6 +219,59 @@ TEST_CASE( "wfsScan lowers the scan count to fit the scan service", "[wfsScanSch
     REQUIRE( clock.m_count == 3 );
 }
 
+/** A slot within the lateness tolerance is taken even if it delays the next, which then catches up.
+ * \ingroup app_unit_test
+ */
+TEST_CASE( "wfsScan takes late slots within the tolerance", "[wfsScanSchedule]" )
+{
+    // clang-format off
+#ifdef WFSSCANSCHEDULE_TEST_DOXYGEN_REF
+    MagAOX::app::wfsScan::syncSchedule::discardLate;
+    MagAOX::app::wfsScan::syncSchedule::take;
+#endif
+    // clang-format on
+    syncSchedule  clock;
+    const int64_t anchor = 1000000000;
+
+    // 89 us reads at 8 kHz leave 36 us of slack. Without a tolerance, a slot 50 us late is skipped.
+    REQUIRE( clock.arm( anchor, 500000, 8000, 0, 89000, 20000 ) );
+    REQUIRE( clock.take( anchor ) );
+    REQUIRE_FALSE( clock.take( anchor + 125000 + 50000 ) );
+    REQUIRE( clock.m_skipped == 1 );
+    REQUIRE( clock.deadline() == anchor + 250000 );
+
+    // With a 50 us tolerance it is taken. A 208 us read before it makes slot 1 83 us late (beyond the tolerance:
+    // skipped), but with a 90 us tolerance every slot is taken, each later one less late.
+    clock = {};
+    REQUIRE( clock.arm( anchor, 500000, 8000, 0, 89000, 20000, 50000 ) );
+    REQUIRE( clock.take( anchor ) );
+    REQUIRE( clock.take( anchor + 125000 + 50000 ) );
+    REQUIRE( clock.m_skipped == 0 );
+
+    clock = {};
+    REQUIRE( clock.arm( anchor, 500000, 8000, 0, 89000, 20000, 50000 ) );
+    REQUIRE( clock.take( anchor ) );
+    REQUIRE_FALSE( clock.take( anchor + 208000 ) );
+    REQUIRE( clock.m_skipped == 1 );
+
+    clock = {};
+    REQUIRE( clock.arm( anchor, 500000, 8000, 0, 89000, 20000, 90000 ) );
+    REQUIRE( clock.take( anchor ) );
+    REQUIRE( clock.take( anchor + 208000 ) );         // Slot 1, 83 us late.
+    REQUIRE( clock.take( anchor + 208000 + 89000 ) ); // Slot 2, 47 us late: not compressed, 89 us after slot 1.
+    REQUIRE( clock.take( anchor + 375000 + 11000 ) ); // Slot 3, 11 us late.
+    REQUIRE( clock.m_skipped == 0 );
+    REQUIRE( clock.m_slot == 4 );
+
+    // The tolerance never allows two scans closer than half an interval.
+    clock = {};
+    REQUIRE( clock.arm( anchor, 500000, 8000, 0, 89000, 20000, 90000 ) );
+    REQUIRE( clock.take( anchor + 80000 ) );
+    REQUIRE_FALSE( clock.take( anchor + 125000 ) );
+    REQUIRE( clock.m_skipped == 1 );
+    REQUIRE( clock.deadline() == anchor + 250000 );
+}
+
 /** Reject invalid or physically impossible schedules.
  * \ingroup app_unit_test
  */

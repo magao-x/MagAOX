@@ -113,6 +113,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     double m_spinLead_ns{ 50e3 }; ///< Synchronized: poll instead of sleeping this long before each scan deadline.
 
+    double m_lateTolerance_ns{ 50e3 }; ///< Synchronized: a scan at most this late is taken even if it delays the next.
+
     int m_wfsFitMinEvents{
         16 }; ///< Consistent WFS references that qualify the rolling clock, at start or a rate change.
 
@@ -161,6 +163,12 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     /// Handle updates to the synchronized-mode signed phase offset property.
     INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_synchroDelay );
+
+    /// INDI property setting the synchronized scan lateness tolerance in microseconds.
+    pcf::IndiProperty m_indiP_lateTolerance;
+
+    /// Handle updates to the synchronized scan lateness tolerance.
+    INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_lateTolerance );
 
     /// INDI property selecting the runtime timing source.
     pcf::IndiProperty m_indiP_timingSource;
@@ -796,6 +804,18 @@ void mcp3208Ctrl::setupConfig()
         "Nanoseconds before each synchronized scan deadline to stop sleeping and poll, so the core is awake when "
         "the read starts (a read after sleeping is slower). 0 sleeps to the deadline. Default is 50000." );
 
+    config.add( "synchro.lateTolerance_ns",
+                "",
+                "synchro.lateTolerance_ns",
+                argType::Required,
+                "synchro",
+                "lateTolerance_ns",
+                false,
+                "double",
+                "A synchronized scan at most this late is still taken, even if that delays the next scan (which then "
+                "catches up); later scans that cannot finish before the next are skipped. INDI scanLateTolerance (us). "
+                "0 to 1000000, default 50000." );
+
     config.add( "synchro.wfsFitMinEvents",
                 "",
                 "synchro.wfsFitMinEvents",
@@ -911,6 +931,7 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_delayLockFracThreshold, "synchro.delayLockFracThreshold" );
     _config( m_cadenceGuard_ns, "synchro.cadenceGuard_ns" );
     _config( m_spinLead_ns, "synchro.spinLead_ns" );
+    _config( m_lateTolerance_ns, "synchro.lateTolerance_ns" );
     _config( m_wfsFitMinEvents, "synchro.wfsFitMinEvents" );
     _config( m_wfsCadenceTolerance, "synchro.wfsCadenceTolerance" );
     _config( m_alpha, "synchro.alpha" );
@@ -977,6 +998,7 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
         m_spinLead_ns = 0.0;
     }
 
+    m_lateTolerance_ns     = std::clamp( m_lateTolerance_ns, 0.0, 1e6 );
     m_wfsFitMinEvents      = std::clamp( m_wfsFitMinEvents, 2, 4096 );
     m_wfsCadenceTolerance  = std::clamp( m_wfsCadenceTolerance, 0.01, 0.5 );
     m_wfsClock.m_minEvents = static_cast<unsigned>( m_wfsFitMinEvents );
@@ -1062,6 +1084,11 @@ int mcp3208Ctrl::appStartup()
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_synchroDelay, "synchroDelay", -1000000, 1000000, 1, "%d", "us", "" );
     m_indiP_synchroDelay["current"].setValue( m_synchroPostDelay );
     m_indiP_synchroDelay["target"].setValue( m_synchroPostDelay );
+
+    // INDI prop for user to set the synchronized scan lateness tolerance in microseconds
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_lateTolerance, "scanLateTolerance", 0, 1000, 1, "%.1f", "us", "" );
+    m_indiP_lateTolerance["current"].setValue( m_lateTolerance_ns * 1e-3 );
+    m_indiP_lateTolerance["target"].setValue( m_lateTolerance_ns * 1e-3 );
 
     if( createStandardIndiSelectionSw( m_indiP_timingSource,
                                        "timingSource",
@@ -1376,6 +1403,9 @@ int mcp3208Ctrl::appLogic()
 
     updatesIfChanged<int>(
         m_indiP_synchroDelay, { "current", "target" }, { m_synchroPostDelay, m_synchroPostDelay } );
+
+    updatesIfChanged<double>(
+        m_indiP_lateTolerance, { "current", "target" }, { m_lateTolerance_ns * 1e-3, m_lateTolerance_ns * 1e-3 } );
 
     updateTimingSourceIndi();
 
@@ -2026,7 +2056,8 @@ int mcp3208Ctrl::processSyncReference( int64_t arrival )
                              m_fps,
                              static_cast<double>( m_synchroDelay ),
                              service,
-                             m_cadenceGuard_ns ) )
+                             m_cadenceGuard_ns,
+                             m_lateTolerance_ns ) )
     {
         if( m_wfsPeriodMeasured_ns > 0.0 )
         {
@@ -2308,6 +2339,25 @@ INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_synchroDelay )( const pcf::IndiPrope
     m_delayApplied_ns = static_cast<double>( m_synchroDelay );
 
     log<text_log>( "set synchroDelay offset = " + std::to_string( m_synchroPostDelay ) + " us" );
+    return 0;
+}
+
+// INDI callback handling for the synchronized scan lateness tolerance.
+INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_lateTolerance )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_lateTolerance, ipRecv );
+
+    double target;
+    if( indiTargetUpdate( m_indiP_lateTolerance, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    // Applied from the next WFS reference.
+    m_lateTolerance_ns = std::clamp( 1e3 * target, 0.0, 1e6 );
+
+    log<text_log>( "set scanLateTolerance = " + std::to_string( m_lateTolerance_ns * 1e-3 ) + " us" );
     return 0;
 }
 

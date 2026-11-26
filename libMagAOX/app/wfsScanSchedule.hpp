@@ -29,7 +29,8 @@ constexpr double c_ratioTolerance = 0.01;
  * rate not above `fps` (8 kHz at 2 kHz and 500 Hz, 7.7 kHz at 700 Hz for an 8 kHz limit), within
  * `c_ratioTolerance`. A WFS faster than `fps` still gets one scan per WFS frame. If the scans do not fit (scan
  * service plus guard must be less than the interval), the count drops to the highest that does: `fps()` then reports
- * the lower rate. The first scan is at the requested
+ * the lower rate. A slot too late to finish before the next one is skipped, unless it is within the lateness tolerance:
+ * then it is taken and the following slots catch up on the interval's slack. The first scan is at the requested
  * phase reduced modulo the scan interval, so a member of the scan grid aligns with the WFS phase model. Originally
  * written for ad7689Ctrl.
  */
@@ -43,6 +44,7 @@ struct syncSchedule
     double   m_phase{ 0 };          ///< Applied first-slot offset relative to the WFS arrival [ns].
     double   m_service{ 0 };        ///< Complete ADC service time used to reject expired slots [ns].
     double   m_budget{ 0 };         ///< ADC service plus reserved publication/guard time [ns].
+    double   m_tolerance{ 0 };      ///< A slot at most this late is taken even if it delays the next [ns].
     unsigned m_count{ 0 };          ///< Planned complete ADC scans per WFS period.
     unsigned m_slot{ 0 };           ///< Next slot within the finite current period.
     int64_t  m_lastSample{ 0 };     ///< Most recent consumed scan start; retained across WFS updates.
@@ -65,7 +67,8 @@ struct syncSchedule
               double  fps /**< [in] maximum per-channel scan rate [Hz] */,
               double  phase /**< [in] WFS phase-model delay plus signed user offset [ns] */,
               double  service /**< [in] complete ADC service [ns] */,
-              double  guard /**< [in] reserved publication and lateness allowance [ns] */ );
+              double  guard /**< [in] reserved publication and lateness allowance [ns] */,
+              double  tolerance = 0 /**< [in] lateness at which a slot is still taken, delaying the next [ns] */ );
 
     /// Return the next absolute scan deadline, rounding only the accumulated offset.
     int64_t deadline() const;
@@ -73,7 +76,7 @@ struct syncSchedule
     /// Return the end of the current WFS period on the monotonic clock.
     int64_t end() const;
 
-    /// Skip slots that cannot finish before the next slot or the next WFS boundary.
+    /// Skip slots more than the tolerance late that cannot finish before the next slot or the next WFS boundary.
     void discardLate( int64_t now /**< [in] current monotonic time [ns] */ );
 
     /// Consume exactly one due slot; reject early, expired, or unsafe compressed acquisitions.
@@ -92,16 +95,17 @@ inline void syncSchedule::cancel()
 {
     m_skipped += m_count - m_slot;
     m_count = m_slot = 0;
-    m_wfsPeriod = m_interval = m_phase = m_service = m_budget = 0;
+    m_wfsPeriod = m_interval = m_phase = m_service = m_budget = m_tolerance = 0;
 }
 
-inline bool syncSchedule::arm( int64_t anchor, double period, double fps, double phase, double service, double guard )
+inline bool syncSchedule::arm(
+    int64_t anchor, double period, double fps, double phase, double service, double guard, double tolerance )
 {
     cancel();
 
     if( anchor < 0 || !std::isfinite( period ) || period <= 0 || period > 1e9 || !std::isfinite( fps ) || fps <= 0 ||
         fps > 10000 || !std::isfinite( phase ) || !std::isfinite( service ) || service <= 0 ||
-        !std::isfinite( guard ) || guard < 0 )
+        !std::isfinite( guard ) || guard < 0 || !std::isfinite( tolerance ) || tolerance < 0 )
     {
         return false;
     }
@@ -135,6 +139,7 @@ inline bool syncSchedule::arm( int64_t anchor, double period, double fps, double
     m_wfsPeriod = period;
     m_interval  = interval;
     m_budget    = budget;
+    m_tolerance = tolerance;
     m_service   = service;
     m_phase     = std::min( wrapped, interval - budget );
     m_count     = count;
@@ -160,9 +165,13 @@ inline void syncSchedule::discardLate( int64_t now )
             m_slot + 1 < m_count
                 ? m_anchor + static_cast<int64_t>( std::llround( m_phase + ( m_slot + 1 ) * m_interval ) )
                 : end();
-        const bool compressed = m_haveSample && due < m_lastSample + 0.5 * m_interval;
+        // Scans start at least half an interval apart; a late scan starts when it is taken, not at its deadline.
+        const bool compressed = m_haveSample && std::max( due, now ) < m_lastSample + 0.5 * m_interval;
 
-        if( !compressed && static_cast<double>( now ) + m_service <= limit )
+        // On time: it can finish before the next slot, or it is within the lateness tolerance (delaying the next).
+        const bool onTime = now <= due + m_tolerance || static_cast<double>( now ) + m_service <= limit;
+
+        if( !compressed && onTime )
         {
             break;
         }

@@ -316,6 +316,7 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_alpha( app.makeAlphaUpdate( 0.01 ) ) );
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( 1.0 ) ) );
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_timingSource( app.makeTimingSourceUpdate( true ) ) );
+    XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_lateTolerance( pcf::IndiProperty() ) );
     XWCTEST_DOXYGEN_REF( app.updateTriggerTiming( timespec{}, 0.0 ) );
     XWCTEST_DOXYGEN_REF( app.updateTimingDiagnosticsIndi() );
     XWCTEST_DOXYGEN_REF( app.updateTimingSourceIndi() );
@@ -355,6 +356,7 @@ TEST_CASE( "mcp3208Ctrl configuration defaults load synchronized settings", "[mc
     REQUIRE( app.m_delayLockFracThreshold == Approx( 0.1 ) );
     REQUIRE( app.m_cadenceGuard_ns == Approx( 20000.0 ) );
     REQUIRE( app.m_spinLead_ns == Approx( 50000.0 ) );
+    REQUIRE( app.m_lateTolerance_ns == Approx( 50000.0 ) );
     REQUIRE( app.m_wfsClock.m_minEvents == 16 );
     REQUIRE( app.m_wfsClock.m_tolerance == Approx( 0.1 ) );
     REQUIRE( app.m_alpha == Approx( 0.01f ) );
@@ -391,6 +393,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "synchro",
                                 "synchro",
                                 "synchro",
+                                "synchro",
                                 "accel",
                                 "accel" },
                               { "shmimName",
@@ -404,6 +407,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "cadenceGuard_ns",
                                 "alpha",
                                 "spinLead_ns",
+                                "lateTolerance_ns",
                                 "wfsFitMinEvents",
                                 "wfsCadenceTolerance",
                                 "numChannels",
@@ -419,6 +423,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "15000",
                                 "0.25",
                                 "30000",
+                                "20000",
                                 "8",
                                 "0.2",
                                 "3",
@@ -436,6 +441,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( app.m_delayLockFracThreshold == Approx( 0.2 ) );
     REQUIRE( app.m_cadenceGuard_ns == Approx( 15000.0 ) );
     REQUIRE( app.m_spinLead_ns == Approx( 30000.0 ) );
+    REQUIRE( app.m_lateTolerance_ns == Approx( 20000.0 ) );
     REQUIRE( app.m_wfsClock.m_minEvents == 8 );
     REQUIRE( app.m_wfsClock.m_tolerance == Approx( 0.2 ) );
     REQUIRE( app.m_alpha == Approx( 0.25f ) );
@@ -1297,6 +1303,36 @@ TEST_CASE( "mcp3208Ctrl synchronized scans are anchored on the fitted WFS arriva
     REQUIRE( std::abs( app.m_syncSchedule.m_anchor - ( start + 39 * 500000 ) ) < 1000 );
     REQUIRE( app.m_wfsClock.m_rejected == 1 );
     REQUIRE( app.m_wfsClock.m_resets == 0 );
+}
+
+/// Verify INDI `scanLateTolerance` sets the lateness at which scans are still taken, from the next reference.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl scanLateTolerance sets the scan lateness tolerance", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_indiP_lateTolerance = pcf::IndiProperty( pcf::IndiProperty::Number );
+    app.m_indiP_lateTolerance.setName( "scanLateTolerance" );
+    app.m_indiP_lateTolerance.add( pcf::IndiElement( "current" ) );
+    app.m_indiP_lateTolerance.add( pcf::IndiElement( "target" ) );
+
+    pcf::IndiProperty update( pcf::IndiProperty::Number );
+    update.setName( "scanLateTolerance" );
+    update.add( pcf::IndiElement( "target" ) );
+    update["target"].setValue( 12.5 );
+
+    REQUIRE( app.newCallBack_m_indiP_lateTolerance( update ) == 0 );
+    REQUIRE( app.m_lateTolerance_ns == Approx( 12500.0 ) );
+
+    app.m_numChannels        = 2;
+    app.m_fps                = 8000;
+    app.m_syncFramesReceived = 100;
+    app.qualifyClock( 1000000000, 101 );
+
+    REQUIRE( app.processSyncReference( 1000000000 ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_tolerance == Approx( 12500.0 ) );
 }
 
 /// Verify a slow ADC read lowers the scans per WFS frame, and a read estimate that fits nothing is measured again.

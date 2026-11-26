@@ -21,6 +21,14 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
   service estimate, every later period was refused (`schedule_failures` 106989, no output). It now runs 3 scans
   (6 kHz) at those numbers; `cadenceGuard_ns=10000` fits 4. If not even one scan fits, mcp3208Ctrl restarts the
   service estimate from the nominal SPI time so it is measured again.
+- Late scans: a slot is skipped when it cannot finish before the next slot's deadline, so the implicit lateness
+  tolerance was the interval minus the read-time estimate (about 20 to 35 us at 8 kHz with 90 to 106 us reads; less
+  when slow reads raise the estimate). Any stall beyond that lost a sample (`skipped_scans`, about 13 per second on
+  the Pi). `synchro.lateTolerance_ns` (INDI `scanLateTolerance`, us; default 50 us) now takes a slot at most that late
+  even if it delays the next, which then catches up on the interval's slack (36 us per interval with 89 us reads).
+  Stalls up to about 36 us plus the tolerance are absorbed as briefly uneven spacing instead of a lost sample. The
+  half-interval minimum spacing now compares the actual start time (not the deadline) with the previous scan's start;
+  comparing the deadline would have skipped the catching-up scans.
 - The 106.5 us came from sleeping to each deadline: in timer mode, which polls every microsecond, the same read takes
   about 89 us. A core woken from sleep (idle state, lower clock) reads slower. The loop now sleeps only until
   `synchro.spinLead_ns` (default 50 us) before each scan deadline and polls from there, checking the WFS semaphore
