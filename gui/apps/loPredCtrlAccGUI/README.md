@@ -32,15 +32,18 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 
 | Display | INDI source |
 | --- | --- |
-| Prediction banner | `ddspc_control.prediction`, `main_loop_tt`; after a fault, `PREDICTION STOPPED:` and its reason |
+| Prediction banner | `ddspc_control.prediction`, `main_loop_tt`; after a fault, `PREDICTION STOPPED:` and its reason. With prediction on but not writing: `ACC-assisted not writing` when `dm_slots` differs from the DM scheduler's steps per cycle, or `holding the last DM command` with the input condition being held through |
 | Controller | `fsm.state` |
 | Standard / ACC-assisted model | `ddspc_control.standard_ready`/`standard_state`, `assisted_ready`/`assisted_state` |
 | ACC rate, ACC sync | `adc_values.rate_hz`/`valid`, `ddspc_control.accel_sync` |
-| Aux DM output | `safety.output_state` |
+| DM slots / ACC ratio | `rates.dm_slots`/`acc_ratio` in use, with the measured `scheduler_steps` and `acc_per_wfs`; `detecting:` while the property is BUSY (not yet confirmed, or a detected change waiting for prediction off) |
+| Aux DM output | `safety.output_state`; a failed or discarded DM write is explained (it never stops prediction) |
+| DM write failures | `ddspc_performance.dm_write_failures`: writes that failed (scheduler restart or unavailable, DM channel unavailable, no receipt within `dm.receiptTimeoutMs`); the DM keeps its last command and the next slot is written |
+| Commands discarded | `ddspc_performance.transport_discarded`: commands the DM scheduler discarded; the DM keeps the previous command |
 | Last stop | Why prediction last stopped: the decoded fault from `safety.output_state`, a stop by request, or `running` |
 | Main-loop tip/tilt | `ddspc_control.main_loop_tt`: `zeroed` (DDSPC only) or `passthrough` (main loop) |
 | Learning overruns | `ddspc_performance.learn_overruns` (assisted-mode WFS-thread work that delays the next main-loop frame) |
-| Warnings | A controller that is not `OPERATING`; an output fault with its reason; a refused prediction request with the condition that refused it (`integrator.ready`, not needed in Main Loop mode and always needed in the mfilt copies, then the selected model's `ddspc_control.*_ready`/`*_state` with learning off, then `safety.output_state`) |
+| Warnings | A controller that is not `OPERATING`; an output fault with its reason; DM write failures, discarded commands or `ddspc_performance.step_mismatch` rising (shown for 10 s after each rise); DM slots / ACC ratio not yet confirmed; a refused prediction request with the condition that refused it (`integrator.ready`, not needed in Main Loop mode and always needed in the mfilt copies, then DM slots / ACC ratio still being detected, then the selected model's `ddspc_control.*_ready`/`*_state` with learning off, then `safety.output_state`) |
 
 ## Why prediction stopped
 
@@ -50,12 +53,14 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 | --- | --- |
 | `input_or_model_qualification_lost: wfs_invalid` | the WFS measurement was invalid (non-finite) |
 | `…: integrator_parameters` | the main loop's integrator parameters were unavailable |
-| `…: command_invalid` | the selected model stopped qualifying (a WFS gap longer than `max_fill`, or a numerical fault) |
+| `…: command_invalid` | the selected model's command was not usable (a numerical fault, or no ready model) |
 | `…: wfs_stale` | no WFS frame arrived within `input_timeout` |
-| `…: acc_window <reason>` | the ACC window was unusable, with the reason (for example `stale_sample`, `counter_gap`, `no_new_sample`) |
-| `…: upstream_unlocked` | the ACC upstream timing lock was lost |
-| `command_discarded_zero_pending`, `scheduler_reset_zero_pending`, `ack_timeout_zero_unconfirmed` | the DM scheduler discarded a command, restarted, or did not acknowledge in time |
+| `…: acc_window <reason>` | the ACC window was unusable, with the reason (`stale_sample`: no ACC sample within `adc.max_age_us`; `history_filling`, `adc_stream_invalid`, `nonfinite_sample`, `adc_disabled`) |
 | `nonfinite_or_command_limit` | a DDSPC command was non-finite or beyond its limit |
+| `candidate_exception_zero_pending`, `copy_callback_exception_zero_pending` | an internal error while preparing or recording a DM command |
+| `auxiliary_geometry` | the DDSPC DM channel has the wrong geometry |
+
+A lost upstream lock and failed or discarded DM writes no longer stop prediction, so they are not listed: the lock only pauses learning, and write problems are counted and warned about instead.
 
 The reason stays shown until prediction is requested again.
 
