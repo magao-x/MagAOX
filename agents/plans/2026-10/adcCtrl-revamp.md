@@ -1251,6 +1251,145 @@ The INDI `ke_setpoint` range widens to ±180, since m (a difference or sum of tw
 - Check that "left" on camsci1 is smaller x in the raw frame.
 - The bottom-mask set point check above.
 
+## Co-Rotation Correction (planning, 2026-11-25)
+
+_Status: **plan only, awaiting user answers and "implement".** Branch `ktwitchell/adcCtrl-v2`. Standard (non-knife-edge) mode only._
+
+### Prompt (verbatim, for the record)
+> we need to add a new feature to the adcCtrl app code again (see agents/adcCtrl-revamp.md for what we've done so far). The ADCs are only meant to do shearing correction because the pupil has been de-rotated, keeping the direction of atmospheric dispersion consistent across an observation. However, we are still seeing some amount of dispersion along the axis perpendicular to the dipserion axis. This speaks to a need to co-rotate the ADCs in order to change the dispersion axis to match what we are currently seeing in an image. We need to add a mode into the app that, when adcLoop is enabled, will send co-rotation corrections on top of the current counter-rotation corrections. For now, this only needs to work in the "classic" coronagraph mode, not the knife-edge.
+
+### Problem Statement
+The loop controls only counter-rotation (`delta_1`), which changes how much dispersion the ADC corrects along a fixed axis (vertical in the image). Residual dispersion perpendicular to that axis is seen on the instrument. Co-rotating both prisms by θ turns the ADC's dispersion vector by θ, which adds a perpendicular component of about `A·θ`, where A is the ADC's dispersion magnitude. Add an optional second channel that measures the perpendicular residual and drives `delta_2`.
+
+### Findings
+- **The app already has the plumbing.** `send_command` writes `deltaADC1 = δ1 + δ2 + offset` and `deltaADC2 = δ1 − δ2 + offset`. `delta_2` exists but is always 0 (`add_command(step, 0)` in `run_cycle`). Reset and startup zeroing already zero both. `stages_settled` compares each stage's move with its own commanded change, so co-rotation moves are checked correctly.
+- **adcTracker** (`apps/adcTracker/adcTracker.hpp:654`): `adcN = adcNzero + adcNlupsign · (lookup + deltaADCN + deltaAngle)`. Equal `deltaADC1/2` counter-rotate the prisms only if `adc1lupsign = −adc2lupsign`. If so, `deltaADC1 = +δ2, deltaADC2 = −δ2` co-rotates them, which is what the existing formula does. **This depends on the deployed `adctrack.conf` (not in the repo), see Q1.**
+- **The measurement already contains the perpendicular component.** Dispersion D along image direction ψ tilts a spot at position angle φ by about `D·sin(ψ − φ)/s′` (s′ = the spot's radial smear per unit wavelength), and the opposite spot by the opposite amount. So:
+  - `pair02 ∝ sin(ψ − φ0)` and `pair13 ∝ sin(ψ − φ1)`, with `φ0 = 90° − angle` and `φ1 = −angle`.
+  - The two pair offsets are the two components of the dispersion vector. Today's 1×2 `ctrl_mtx` projects them onto one axis.
+  - Vertical (counter-rotation, ψ = 90°): `cos φ`, which is the model already used by `ke_sensitivity`.
+  - Horizontal (co-rotation, ψ = 0°): `−sin φ`. At the 45° sparkle pattern, pair02 and pair13 respond **equally** to counter-rotation (matches the 2026-11-24 slopes −8.1/−7.4) and **oppositely** to co-rotation. So the co-rotation row of the matrix is expected to have opposite signs, roughly `[−m, +m]`. At pattern angle 0°, only pair02 sees co-rotation.
+  - The sign of the horizontal axis depends on image parity (camsci1 vs camsci2, lab vs telescope). Calibration takes care of it.
+- **No new measurement code is needed.** This is a second row of the control matrix plus a second integrator channel.
+- **Co-rotation sensitivity depends on elevation.** The perpendicular dispersion per degree of co-rotation is about `A·θ`, and A follows the atmospheric dispersion (≈ tan zd). Near zenith A → 0: co-rotation has almost no effect, its error is mostly noise, and an integrator on it would wander. A row calibrated at one zd is about right within a factor of ~2 over a typical observation. With an integrator, a gain error under 2× still converges. See Q2.
+
+### Proposed Design
+1. **Switch `corotation`** (`off` / `on`), default from new config `corotation` (default `off`). It can be changed at any time. While it is `off`, `delta_2` is held, not reset.
+2. **Control matrix row 2.** The `ctrl_mtx` INDI property gains `m10` and `m11`. A new config `ctrl_mtx_corot : list[float] = [0, 0]` keeps the existing `ctrl_mtx` config compatible. Internally `_control_mtx` becomes 2×2. A zero row means "not calibrated": with the switch on and the row still zero, the app logs once at WARNING and sends nothing.
+3. **Error and step.** `error2 = M[1] · pairs`, measured with the same inlier mask as `error` (one batch, one mask on the counter-rotation error, so both channels use the same frames). `step2 = loop_sign · gain · error2` (shared gain and polarity, Q3). It is accepted if `|step2| < step_limit_deg` (shared, A4) and `|delta_2 + step2| ≤ corot_max_deg` (Q4). Each channel is accepted or rejected **independently**: a rejected co-rotation step doesn't block the counter-rotation step.
+4. **States.**
+   - adcLoop / oneshot with the switch on in standard mode: `add_command(step, step2)`, one write.
+   - Measure-only: `error2`/`step2` are always computed and published (even with the switch off), which also serves co-rotation calibration (Q5).
+   - Knife-edge mode: co-rotation is not measured (no opposite pairs) and `delta_2` is held. Entering knife-edge with the switch on logs once at INFO that co-rotation is paused.
+5. **INDI additions.** `measurement.error2`, `command.step2`, `command.delta2`. `status.last_command` reports a co-rotation-only rejection (e.g. `sent (corot rejected)`).
+6. **Logging and telemetry.** `log_cycle` and the `adcctrl_cycle` telemetry record gain `error2`, `step2`, `accepted2` and `corotation`. The INFO "delta command" line includes δ2.
+7. **Config additions.** `corotation`, `ctrl_mtx_corot`, `corot_max_deg` (default 15.0, A8).
+8. **Docs.** Module docstring: method paragraph, INDI table, operator procedure (calibrate the co-rotation row: co-rotate by known δ2 offsets in measure-only, fit pair02/pair13 slopes, enter inverse slopes as m10/m11, the same convention as m00/m01).
+
+### Tests (planned)
+- `test_corotation_matrix_math`: the 2×2 matrix and gain give the expected step2, and each channel's step limit and `corot_max_deg` reject independently.
+- `test_corotation_synthetic_response`: the existing broadband synthetic model with horizontal dispersion. pair02 and pair13 respond with opposite signs at 45° and equal signs for vertical dispersion; error2 tracks the horizontal dispersion and error is ~insensitive to it (with the inverse-slope rows).
+- `test_corotation_loop_converges`: a simulated loop with both vertical and horizontal residuals, the switch on → both δ1 and δ2 converge. With the switch off → δ2 stays fixed.
+- `test_corotation_writes`: deltaADC1/2 targets equal `δ1 ± δ2 + offset`. Reset zeros both.
+- `test_corotation_knife_edge_paused`: in knife-edge mode δ2 is held and no error2 is used.
+- `test_corotation_uncalibrated_row`: a zero row with the switch on gives one warning and no δ2 change.
+- `test_ctrl_mtx_handler` extended for `m10`/`m11`. Default tests take the new config fields.
+
+### Implementation Order (after "implement")
+1. Functional commit: config, state, properties, `run_cycle` / `measure_dispersion` / `handle_ctrl_mtx` / new `handle_corotation`, tests.
+2. Documentation commit: module docstring, INDI table, operator procedure, this plan's Implementation Log.
+3. Formatting commit only if needed.
+
+### Questions for the User (Round 1)
+- **Q1. adctrack lookup signs.** Is the deployed `adctrack.conf` set with `adc1lupsign = −adc2lupsign`? Then equal `deltaADC1/2` counter-rotate and `deltaADC1 = +δ2, deltaADC2 = −δ2` co-rotates, and the existing formula is right. If the signs are equal, the roles swap and the app needs to know (a config flag, or swap the formula).
+- **Q2. ✅ Resolved (user, 2026-11-25): the closed loop handles the elevation dependence on its own.** The loop doesn't need to be fast or precise, so the integrator just follows the slowly changing need, whether it is constant clocking or `atan(F/D)`. Decision:
+  - a fixed co-rotation row and the shared integrator;
+  - no zd scaling (option B) and no feed-forward (option C);
+  - no zd or TCS dependency and no hold near zenith (Q2b dropped);
+  - no start value: the loop finds the clocking offset after startup or reset (Q2c dropped);
+  - only the existing per-step limit, plus `corot_max_deg` as a runaway guard (see Q4).
+
+  The loop is stable at every elevation: a varying D only changes its effective gain, never above 2. Near zenith it is slow, but the absolute residual there is small too. Q2d (sparkles in `raster_lab2.fits`) stays open, for calibrating m10/m11. The analysis below is kept for the record.
+
+  *Original question:* **Elevation dependence.** Recommended for a first version: a fixed co-rotation row calibrated at one zd, plus the absolute limit `corot_max_deg`, and co-rotation paused (δ2 held) near zenith. Alternative: scale error2 by `tan(zd_cal)/tan(zd)` from the TCS zd. Which?
+
+  **Elaboration (2026-11-25).**
+  - **Physics.** Two prisms with dispersion vectors of size a at angles θ1 and θ2 add to `A = 2a·cos(Δ/2)` along the mean angle `(θ1 + θ2)/2`, where Δ = θ1 − θ2. Counter-rotation changes Δ, so it changes A. Co-rotation by ε changes the mean angle, giving a perpendicular dispersion of `A·sin ε ≈ A·ε`. adctrack keeps A ≈ the atmospheric dispersion, which is ∝ tan(zd). So the co-rotation response (pair offsets per degree of δ2) scales with tan(zd). Counter-rotation's response, `2a·sin(Δ/2)`, is nearly constant except at large zd.
+  - **Effect on the loop.** A row calibrated at zd_cal gives an effective gain of `g·tan(zd)/tan(zd_cal)`. With g = 0.1 and zd_cal = 45°:
+
+    | zd | tan(zd)/tan(45°) | effective gain | cycles to converge (~1/g) |
+    |---|---|---|---|
+    | 5.1° (adctrack minZD) | 0.09 | 0.009 | ~110 |
+    | 20° | 0.36 | 0.036 | ~28 |
+    | 30° | 0.58 | 0.058 | ~17 |
+    | 60° | 1.73 | 0.17 | ~6 |
+
+    An integrator goes unstable only above an effective gain of 2, i.e. 20× the calibration A, so a fixed row is **always stable**. Only the speed changes. At ≥10 s per cycle, that is ~1 min at 60° and ~5 min at 20°.
+  - **Noise near zenith.** Measurement noise σ (in pair-offset units) becomes `σ/A` in δ2. Held in place by a weakening restoring term, δ2 wanders with std ∝ `1/sqrt(A)`. That is optically harmless at the time (A·δ2 is small), but δ2 is wrong when the telescope moves to larger zd and A grows, until the loop pulls it back. Hence the pause near zenith and the cap.
+  - **Where the perpendicular residual comes from matters:**
+    - (a) **Clocking error.** The ADC axis is rotated by ε0 from the atmospheric axis (ADC zero point, derotator or pupil-alignment offset). Then `P = A·ε0 ∝ tan(zd)`, and the fix is a **constant** δ2 = −ε0 at every elevation. Once found it is right everywhere, so a fixed row plus holding δ2 near zenith is exactly right.
+    - (b) **Fixed perpendicular dispersion**, independent of A (a wedge in a filter, dichroic or window). The δ2 needed is −P/A, which grows as zd drops (2.8× at 20° vs 45°) and has no bound at zenith. Co-rotation can only partly fix it at small zd, and the cap matters.
+    - **How to tell:** in the lab with the ADCs at null (no atmosphere), is there a perpendicular residual? If yes, (b) contributes. On sky, error2 in measure-only that scales with tan(zd) means (a); a constant error2 means (b).
+  - **Lab calibration catch.** In the lab the ADCs sit near null (A ≈ 0), so a co-rotation sweep shows almost no response. To calibrate in the lab, first counter-rotate away from null to create a known A. The slope then applies to that A, which has to be related to an on-sky zd.
+  - **Correction to the earlier recommendation.** Pausing on `adctrack.belowMinZD` is too weak, because minZD defaults to 5.1°, where A is still only 9% of its 45° value. Better: read `tcsi.teldata.zd` (adctrack already depends on it) and hold δ2 below a new `corot_min_zd` (proposed 15–20°).
+  - **Options:**
+    - **A (recommended):** fixed row, hold δ2 below `corot_min_zd`, cap `|δ2| ≤ corot_max_deg`. It is stable everywhere, slow near zenith, and exactly right for source (a).
+    - **B:** A, plus scaling error2 by `tan(zd_cal)/tan(zd)`, with a `corot_zd_cal` config entered with the calibration. Once zd is read for A anyway, the extra code is small. It gives a uniform convergence speed, but is meaningless in the lab (no zd), so lab testing would need it switched off.
+    - **C:** scale by A computed from the stage angles (`A ∝ |cos(Δ/2)|`). Exact, and it works in the lab, but adcCtrl would need adctrack's `adcNzero`/`adcNlupsign` to know where the null is. The most complex.
+
+  **Lab raster results (2026-11-25).** The user suspects both a fixed perpendicular dispersion and a clocking error. The data: `Data/ADC/2026B/lab/raster_lab.fits`, analysed in `adc_sims/2026B/raster_elongation.ipynb`, results in `raster_lab_elongation.csv`. It is 11 shear (counter-rotation) offsets, +2° to −18°, × 6 clock (co-rotation) offsets, −6° to +4° (degrees, per the user). The measurement is the core's second-moment ellipse: elongation (major − minor FWHM) and major-axis angle θ.
+  - **Shear (counter-rotation).** Elongation is 1.55 px per degree of shear and zero at shear ≈ −0.8° to −1.0°. This matches the −0.85° / −0.9° pair-offset crossing found in the 2026-11-24 sparkle sweep, so both methods agree on where the lab null is. Elongation does not depend on clock (slope ≤ 0.05 px/deg), so the clock axis is pure co-rotation.
+  - **Clock (co-rotation).** θ moves 1.4–1.7° per degree of clock, decreasing with A (1.72 at shear −6, 1.38 at −18). For rigid prisms it should be exactly 1°/°. **Not explained.** It doesn't affect the controller (the row is calibrated empirically), but it does affect converting the fitted numbers to physical prism angles.
+  - **Both effects are present.** Let A = shear distance from the null (−0.85°), in shear-degrees. The clock that makes θ = 90° fits `c90 = 2.53 (±0.08) − 9.45 (±0.71)/A` degrees, with residuals ≤ 0.12° over shear −6 to −18:
+    - The **constant 2.5°** is the clocking error. It is independent of A and is all that remains at large A.
+    - The **−9.45/A** term is the fixed perpendicular dispersion. Converted with θ/clock ≈ 1.5, it is F ≈ 0.25 shear-degrees (about 0.4 px of elongation), consistent with the round core at the null. It is detected at 13σ, and the 1/A form fits within the noise.
+    - θ at clock 0 gives the same picture: `θ − 90 = 3.5 − 11.3/A`.
+  - **Co-rotation needed vs A** (clock degrees, raster sign convention):
+
+    | A [shear-deg] | 1 | 2 | 3 | 5 | 10 | 17 |
+    |---|---|---|---|---|---|---|
+    | needed clock | −6.9 | −2.2 | −0.6 | +0.6 | +1.6 | +2.0 |
+
+    It changes sign at A ≈ 3.7 and grows without bound toward the null. These are lab-path numbers (light injected inside MagAO-X). Telescope optics may add to or change F on sky.
+  - **DM spots in this raster are too faint for the app's pipeline.** Running `measure_spot_angles` (DM geometry, 57 λ/D at 28°) on all 66 frames gives pair offsets of ±100°, i.e. noise. The co-rotation matrix row (m10/m11) cannot be derived from this raster. `raster_lab2.fits` (12 × 7 frames) appears to contain sparkles at ~40 px (0°/90°/180°/270°); its axes are unknown.
+  - **Consequences for the design:**
+    - The needed δ2 changes with elevation (via A), so co-rotation has to be a **tracking loop**, not a one-time offset. zd changes over minutes to hours and the loop converges in minutes, so an integrator can follow it except near the null.
+    - Near the null (near zenith on sky) the needed δ2 diverges and the response vanishes. Holding δ2 below a threshold and capping |δ2| are both needed. The threshold is best stated in A: e.g. hold below A ≈ 3 shear-deg, where the needed value is still within ~3° of the large-A value. That has to be converted to zd through adctrack's lookup table (Q2b).
+    - A constant start value for δ2 (the 2.5° clocking part) would save a ~20-cycle ramp after each startup or reset. Alternatively, fix the clocking error at its source by changing adctrack's `adc1zero`/`adc2zero` (a config change, no code). See Q2c.
+    - **Option C becomes more attractive later:** a feed-forward `δ2(A) = 2.53 − 9.45/A` from the stage angles, with the loop trimming the rest. Not for the first version.
+  - **Follow-up questions:**
+    - **Q2b.** What is adctrack's lookup (zd → counter-rotation from null), so the hold threshold can be set in zd? Or would you rather hold on A, computed from the commanded counter-rotation?
+    - **Q2c.** Should the 2.5° clocking error go into adctrack's zero points, into an adcCtrl `corot_initial_deg` used at startup and on reset, or be left for the loop to find each time? How was clock applied in the raster (`deltaADC1 = +c, deltaADC2 = −c`, or directly to the stages)? That decides the sign in adcCtrl's δ2 convention.
+    - **Clarification (user, 2026-11-25): the k-mirror keeps the atmospheric dispersion axis fixed; only its strength D changes with elevation.** The analysis above assumes exactly this. The residual is `Dŷ − A·(ADC axis) + F`, with A ≈ D. Nulling it needs a co-rotation of `−ε0` (clocking, constant) plus about `−F⊥/D` (fixed instrumental perpendicular dispersion). The second term depends on elevation only through D. With F⊥ = 0 the needed co-rotation is constant, and the loop converges once.
+    - **Caveat on F⊥.** The raster measures core moments. A static achromatic core asymmetry (astigmatism, or the flare visible in the raster images) also biases θ by an amount that shrinks with elongation, roughly as 1/A. The 1/A term may therefore be an artefact of the core-moment measurement rather than chromatic F. Ways to tell: a narrowband image at the null (an elongated core means achromatic), or the same raster measured with spot pair offsets, which respond only to dispersion. If it is achromatic, only the ~2.5° clocking error is real, and the co-rotation correction is essentially constant.
+    - **Q2d.** Is `raster_lab2.fits` a shear × clock raster with sparkles? If so, the app's pipeline can be run on it to get m10/m11 and their dependence on A directly.
+- **Q3. Gain and polarity.** Share `gain` and `loop_sign` with counter-rotation (recommended: if the row is calibrated the same way as row 1, the same polarity converges), or add a separate `corot_gain`?
+- **Q4. Limits.** Per-step limit 1.0° (same as counter-rotation) and absolute `|δ2| ≤ 10°`? Co-rotation needs larger angles than counter-rotation for the same dispersion when A is small, so you may want a larger step limit.
+- **Q5. Measure-only.** Always publish error2/step2, even with the switch off (recommended, it's free and helps calibrate)?
+- **Q6. Calibration convention.** Enter m10/m11 as inverse slopes, like m00/m01 (recommended, simple). At the 45° pattern this already decouples the two channels, because counter-rotation moves both pairs equally and co-rotation moves them oppositely. At other pattern angles (e.g. 15°: slopes −4.1/−9.5) the channels couple. The fix there would be a full 2×2 inverse of the measured response (four slopes), which changes how m00/m01 are entered. Keep inverse slopes for now?
+
+#### Answers (Round 1, user, 2026-11-25)
+- **A1.** The lookup signs are the same. Checked in `magao-x/config/adctrack.conf`: `adc1lupsign = adc2lupsign = −1`, `adc1zero = 60`, `adc2zero = −60`. **This opens a new question (Q7).**
+- **A2.** Resolved above: the closed loop handles the elevation dependence. **A2d:** `raster_lab2.fits` has no sparkles, so m10/m11 must be calibrated by hand. The co-rotation sweep has to be done away from the null (A ≠ 0), or it shows no response.
+- **A3.** Share `gain` and `loop_sign`.
+- **A4.** The 1° per-step limit applies to both co- and counter-rotation, so no `corot_step_limit_deg`; `step_limit_deg` is used for both. The absolute cap `corot_max_deg` was not addressed (Q8).
+- **A5.** Always publish the measured co-rotation value, even with the switch off.
+- **A6.** Keep inverse slopes. The two degrees of freedom are assumed independent.
+
+#### Questions for the User (Round 2)
+- **Q7. ✅ Resolved (user, 2026-11-25): the adctrack sign convention is correct, and the stageadc2 stage faces backwards relative to stageadc1.** In each stage's own coordinates, equal `deltaADC1/2` move both stages the same way, and the backwards mount turns that into opposite rotations along the beam, i.e. **counter-rotation**. So adcCtrl's existing mapping is right:
+  - `delta_1` (equal offsets) counter-rotates;
+  - `delta_2` (`deltaADC1 = +δ2, deltaADC2 = −δ2`) co-rotates;
+  - no change to `send_command`; `ctrl_mtx` and `ke_gain` stay valid.
+
+  *Original question (kept for the record):* **Which `deltaADC` combination counter-rotates?** adctrack sets `stageN = adcNzero + adcNlupsign·(lutN + deltaADCN)`, with both lupsigns −1. The lookup table (`magao-x/calib/adc_lookup_table.txt`, Hedglen 2019) encodes the tracking motion with **opposite** signs. At zd 45: `lut1 = −15.50`, `lut2 = +15.64`, i.e. a difference of ≈ ∓15.6 and a common part of 0.07. So in adctrack's own convention, counter-rotation (the motion that grows with zd) is `deltaADC1 = +δ, deltaADC2 = −δ`, and **equal** `deltaADC1/2` co-rotate. adcCtrl does the opposite: `delta_1` (called counter-rotation) writes equal offsets, and `offset` is common to both.
+  - Unless the lookup table is itself in an unusual frame, this means the existing `delta_1` loop has been **co-rotating**, and the new `delta_2` would counter-rotate.
+  - What would settle it: how the −4°…+4° "ADC offset" sweeps and the raster's shear/clock axes were commanded (equal vs opposite `deltaADC1/2`, adcCtrl `offset`, or the stages directly). The shear sweep's zero crossing (−0.85°) matches the raster's elongation null, so whatever command made "shear" is the physical counter-rotation.
+  - If equal offsets turn out to be co-rotation, the fix is a swap in `send_command` (`deltaADC1 = δ1 + δ2`, `deltaADC2 = −δ1 + δ2`, with `offset` going on the counter-rotation pattern or staying common, Q7b), and `ctrl_mtx` and `ke_gain` stay as calibrated **only if** the calibration sweeps used the same pattern.
+  - *Side note:* the table also has a small zd-dependent common (co-rotation) part. Above adctrack's minZD of 5.1° it is 1.4° at zd 5, 0.66° at 10, 0.43° at 15, and under 0.1° above 40. The co-rotation loop would absorb it.
+- **Q8. ✅ Resolved (user, 2026-11-25): keep a 15° runaway guard (`corot_max_deg = 15`) in addition to the 1° per-step limit.** *Original question:* Keep `corot_max_deg = 10` as a runaway guard, or drop it (the per-step limit only)?
+
+
 ### References
 - MagAO-X PAPLC knife-edge mask (reflective D-shaped mirror at ~1.1 λ/D, adjustable IWA): [arXiv:2607.08146](https://arxiv.org/pdf/2607.08146), [arXiv:2303.13719](https://arxiv.org/pdf/2303.13719)
 - Satellite-spot dispersion method: arXiv:2608.10307
