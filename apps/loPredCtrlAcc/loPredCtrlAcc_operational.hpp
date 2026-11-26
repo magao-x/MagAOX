@@ -189,8 +189,8 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     std::atomic<std::int64_t> m_upstreamNs{ -1 };                              ///< Local receipt time of the report.
 
     /// Default-off configuration: let the assisted learner append, learn and score ACC windows without upstream
-    /// lock. It never publishes: assisted output still requires lock, and a fit that learned without lock must be
-    /// reset before it can predict.
+    /// lock. It never publishes an ACC prediction (without lock the slots carry the WFS feedback only), and a fit that
+    /// learned without lock must be reset before it can predict.
     bool m_assistedDiagnostic{ false };
 
     /// The assisted fit learned from frames without upstream lock; prediction is refused until a model reset.
@@ -355,6 +355,7 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
         std::uint64_t m_predictions{ 0 };   ///< Slot calculations with a ready model.
         std::uint64_t m_slots{ 0 };         ///< Assisted slots rendered.
         std::uint64_t m_holds{ 0 };         ///< Slots without a current frame (late WFS), holding the last command.
+        std::uint64_t              m_wfsOnly{ 0 }; ///< Predicting slots without a usable ACC origin: WFS feedback only.
         std::uint64_t m_lagging{ 0 };       ///< Slots with fewer new ACC samples than executed slots (k < p).
         std::uint64_t m_anomalies{ 0 };     ///< ACC counters outside the frame's [anchor, anchor+r) range.
         std::uint64_t m_mismatch{ 0 };      ///< Requests whose scheduler steps differ from dm_slots.
@@ -962,7 +963,7 @@ inline void loPredCtrlAcc_operational::setupConfig()
     add( "parameters",
          "assisted_diagnostic",
          "bool",
-         "Assisted learner/scoring without upstream lock; never publishes; default false." );
+         "Assisted learner/scoring without upstream lock; never publishes an ACC prediction; default false." );
     add( "parameters",
          "ripple",
          "float",
@@ -2004,7 +2005,7 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
                                     ? DDSPC::MatrixD( applied.cast<double>() )
                                     : DDSPC::MatrixD();
     // The default-off diagnostic mode lets the learner use complete windows without upstream lock. A fit that learns
-    // from them is barred from prediction until reset; output still requires lock (outputValid).
+    // from them is barred from prediction until reset; the ACC prediction still requires lock (assistedCandidate).
     const bool diagnostic = !assistedValid && m_assistedDiagnostic && m_windowValid;
     if( diagnostic && m_multirate->status().m_training )
         m_unlockedTraining = true;
@@ -2071,15 +2072,14 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
 
 inline const char *loPredCtrlAcc_operational::outputInvalid( std::int64_t now ) const
 {
-    const auto last     = m_wfsReceipt.load();
-    const bool assisted = m_mode != DDSPC::ShadowMode::Standard;
+    // ACC conditions (an incomplete window, a lost upstream lock) are not here: assisted slots then keep the WFS
+    // feedback without the ACC prediction (assistedCandidate), so the ACC never stops the output.
+    const auto last = m_wfsReceipt.load();
 
     return !m_inputValid.load()                                          ? "wfs_invalid"
            : ( m_integrate || m_mfiltCopy ) && !m_integratorReady.load() ? "integrator_parameters"
            : !m_candidateValid.load()                                    ? "command_invalid"
            : last < 0 || now < last || now - last > m_inputTimeout * 1e9 ? "wfs_stale"
-           : assisted && !m_assistedValid.load()                         ? "acc_window"
-           : assisted && !m_syncLocked.load()                            ? "upstream_unlocked"
                                                                          : nullptr;
 }
 
@@ -2385,15 +2385,21 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
         }
     }
     const auto &gains   = m_gainSets[m_gainFront];
-    const bool  current = origin.m_valid && prefix >= 0 && prefix < m_slots;
-    const bool  predict = current && m_fastFrame.m_predict && gains.m_ready;
+    const bool  frame   = prefix >= 0 && prefix < m_slots; // The current WFS frame owns this slot.
+    // The ACC prediction needs this frame's ACC origin (a complete window, under lock) and the upstream lock. Without
+    // them (missed or late ACC samples, a lost lock, a history refilling after a gap) the slot keeps the frame's WFS
+    // feedback, integrated as usual, so ACC problems never stop control; the prediction resumes with the ACC.
+    const bool current = origin.m_valid && frame;
+    const bool predict = current && m_fastFrame.m_predict && gains.m_ready && m_syncLocked.load();
     if( !m_fastFrame.m_predict )
     {
         m_fastCommand.setZero();
         m_fastState.setZero(); // Prediction always restarts from the confirmed own-channel zero.
     }
-    else if( !current )
+    else if( !frame )
+    {
         m_fastCommand = m_fastLast; // No frame owns this slot yet (late WFS): hold the last command.
+    }
     else
     {
         m_fastCommand = m_fastFrame.m_feedback;
@@ -2442,7 +2448,8 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
         std::lock_guard<std::mutex> lock( m_commandMutex );
         auto                       &stats = m_fastStats;
         ++stats.m_slots;
-        stats.m_holds += m_fastFrame.m_predict && !current;
+        stats.m_holds += m_fastFrame.m_predict && !frame;
+        stats.m_wfsOnly += m_fastFrame.m_predict && frame && !predict;
         stats.m_anomalies += anomaly;
         if( predict )
         {
@@ -2878,7 +2885,8 @@ inline int loPredCtrlAcc_operational::setupINDI()
                              "acc_age_calc_us_p99",  "acc_age_calc_us_max",  "acc_age_apply_us_mean",
                              "acc_age_apply_us_p99", "acc_age_apply_us_max", "learn_us_mean",
                              "learn_us_p99",         "learn_us_max",         "learn_overruns",
-                             "wfs_filled",           "acc_filled",           "input_holds" } )
+                             "wfs_filled",           "acc_filled",           "input_holds",
+                             "fast_wfs_only" } )
     {
         m_indiP_performance.add( pcf::IndiElement( key, 0.0 ) );
     }
@@ -3263,7 +3271,8 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      "acc_age_calc_us_p99",  "acc_age_calc_us_max",  "acc_age_apply_us_mean",
                                      "acc_age_apply_us_p99", "acc_age_apply_us_max", "learn_us_mean",
                                      "learn_us_p99",         "learn_us_max",         "learn_overruns",
-                                     "wfs_filled",           "acc_filled",           "input_holds" };
+                                     "wfs_filled",           "acc_filled",           "input_holds",
+                                     "fast_wfs_only" };
     std::vector<double>       values{ double( standard.m_updates ),
                                 double( assisted.m_updates ),
                                 standard.m_originRmse,
@@ -3299,7 +3308,8 @@ inline int loPredCtrlAcc_operational::appLogic()
                                 double( overruns ),
                                 double( wfsFills ),
                                 double( m_accFills.load() ),
-                                double( m_inputHolds.load() ) };
+                                double( m_inputHolds.load() ),
+                                double( fast.m_wfsOnly ) };
     for( int k = 0; k < m_ratio; ++k )
     {
         names.push_back( m_phaseNames[2 * k].c_str() );

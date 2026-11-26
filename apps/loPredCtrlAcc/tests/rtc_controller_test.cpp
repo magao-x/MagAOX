@@ -1131,6 +1131,18 @@ TEST_CASE( "Assisted DDSPC recalculates every DM slot from the newest ACC sample
             REQUIRE( ( slots.col( p ) - slots.col( p - 1 ) ).norm() > 1e-6 );
     }
 
+    // Without the upstream lock (or a complete ACC window) the slots keep the WFS feedback: every slot is still
+    // rendered, none uses the ACC prediction, and the prediction resumes with the lock.
+    app.m_syncLocked     = false;
+    const auto predicted = app.m_fastStats.m_predictions, wfsOnly = app.m_fastStats.m_wfsOnly;
+    for( int i = 0; i < 5; ++i )
+    {
+        REQUIRE( app.advanceAssisted( y, -1, false ).allFinite() );
+    }
+    REQUIRE( app.m_fastStats.m_predictions == predicted );
+    REQUIRE( app.m_fastStats.m_wfsOnly - wfsOnly == 20 );
+    app.m_syncLocked = true;
+
     // T4: a sample arriving between WFS frames changes the next slot by exactly its learned gain.
     namespace synco        = MagAOX::app::synco;
     const auto    anchor   = app.nextFrame();
@@ -1563,7 +1575,8 @@ TEST_CASE( "Assisted diagnostic mode never qualifies output without upstream loc
         frame( false );
     REQUIRE( app.m_multirate->status().m_scored.back() > scored );
     REQUIRE_FALSE( app.m_unlockedTraining );
-    REQUIRE_FALSE( app.outputValid() ); // Unlocked assisted output is never qualified.
+    // Unlocked, the output continues on the WFS alone: no slot uses the ACC prediction (assistedCandidate).
+    REQUIRE( app.outputValid() );
 
     // Learning without lock is allowed in the diagnostic mode, but the fit cannot then predict until reset.
     const auto updates = app.m_multirate->status().m_updates;
@@ -1574,7 +1587,8 @@ TEST_CASE( "Assisted diagnostic mode never qualifies output without upstream loc
         frame( false );
     REQUIRE( app.m_multirate->status().m_updates > updates );
     REQUIRE( app.m_unlockedTraining );
-    app.m_syncLocked = true;
+    app.m_syncLocked  = true;
+    app.m_holdTimeout = 0; // The bar itself, without the hold before it stops prediction.
     frame( true );
     REQUIRE_FALSE( app.outputValid() );
     auto predict = app.m_indiP_predicting;
@@ -2027,18 +2041,25 @@ TEST_CASE( "Output faults keep the condition that caused them", "[rtc-controller
     app.m_wfsReceipt.store( MagAOX::app::synco::monotonicNs() );
     REQUIRE( app.outputValid() );
 
-    // One frame without a complete ACC window ends qualification; the later loss of lock is a consequence.
+    // An incomplete ACC window or a lost lock does not end qualification: those slots keep the WFS feedback.
     app.m_windowReason.store( "stale_sample" );
     app.m_assistedValid.store( false );
-    CHECK_FALSE( app.outputValid() );
-    app.m_windowReason.store( "ok" );
-    app.m_assistedValid.store( true );
     app.m_syncLocked.store( false );
+    CHECK( app.outputValid() );
+
+    // One frame without a valid command ends qualification; the later invalid WFS is a consequence. The ACC window
+    // reason at that moment is kept with it.
+    app.m_candidateValid.store( false );
     CHECK_FALSE( app.outputValid() );
-    CHECK( std::string( app.m_invalidReason.load() ) == "acc_window" );
+    app.m_candidateValid.store( true );
+    app.m_inputValid.store( false );
+    CHECK_FALSE( app.outputValid() );
+    CHECK( std::string( app.m_invalidReason.load() ) == "command_invalid" );
     CHECK( std::string( app.m_invalidWindow.load() ) == "stale_sample" );
 
     // After qualifying again, a new failure is recorded.
+    app.m_inputValid.store( true );
+    app.m_assistedValid.store( true );
     app.m_syncLocked.store( true );
     app.m_wfsReceipt.store( MagAOX::app::synco::monotonicNs() );
     REQUIRE( app.outputValid() );
@@ -2072,14 +2093,21 @@ TEST_CASE( "Missed input holds the DM and prediction resumes", "[rtc-controller]
     REQUIRE( app.outputValid() );
     REQUIRE( app.m_invalidSinceNs.load() < 0 );
 
-    // An incomplete ACC window (missed samples), then a late WFS frame: still qualified, holding the DM.
-    app.m_windowReason.store( "counter_gap" );
+    // Missed ACC samples or a lost lock are not held at all: those slots keep the WFS feedback.
     app.m_assistedValid.store( false );
+    app.m_syncLocked.store( false );
+    REQUIRE( app.outputValid() );
+    REQUIRE( app.m_invalidSinceNs.load() < 0 );
+    app.m_assistedValid.store( true );
+    app.m_syncLocked.store( true );
+
+    // A model refilling its history after a long WFS gap, then a late WFS frame: still qualified, holding the DM.
+    app.m_candidateValid.store( false );
     REQUIRE( app.outputValid() );
     REQUIRE( app.m_invalidSinceNs.load() >= 0 );
     REQUIRE( app.m_inputHolds.load() == 1 );
-    REQUIRE( std::string( app.m_invalidReason.load() ) == "acc_window" );
-    app.m_assistedValid.store( true );
+    REQUIRE( std::string( app.m_invalidReason.load() ) == "command_invalid" );
+    app.m_candidateValid.store( true );
     app.m_wfsReceipt.store( synco::monotonicNs() - std::int64_t( 50e6 ) );
     REQUIRE( app.outputValid() );
     REQUIRE( app.m_inputHolds.load() == 1 ); // One continuous hold.
