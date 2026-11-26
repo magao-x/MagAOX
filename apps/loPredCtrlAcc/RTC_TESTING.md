@@ -77,6 +77,7 @@ Missed WFS or ACC frames do not stop prediction, up to `parameters.max_fill` con
 
 - **Missed WFS frame:** the DM keeps its command (standard: the held or planned slot; assisted: the last slot). At the next frame both fits' histories are advanced over the gap with the previous measurement and the slots actually copied, so the fits stay ready and the output stays qualified.
 - **Missed ACC samples:** a missing sample inside the window holds the sample before it; a WFS frame with no new samples gets a window one frame after the previous one, holding the newest sample. `assisted_qualification.acc_window` reads `ok_filled`.
+- **ACC reader segment breaks** (a counter gap from frames lost in transfer, a rejected sample, or an interval over `adc.max_interval_us`) keep the ACC history: the window continues and the missing samples are held as above, instead of the history restarting and reporting `history_filling`. Only a new source generation (the acc000 stream recreated, so its counters restart) starts a new history.
 - **Learning** pauses for `max(history, accel_history) + future + 1` frames after a fill, so no fit ever learns from a filled value. Prediction continues.
 
 `ddspc_performance.wfs_filled` and `acc_filled` count filled WFS frames and ACC samples. Longer gaps still break the histories (standard then stops qualifying until the history refills; assisted holds), and `max_fill=0` restores stopping on any gap.
