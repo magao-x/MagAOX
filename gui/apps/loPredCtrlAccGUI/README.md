@@ -2,7 +2,7 @@
 
 Concise operator panel for `loPredCtrlAcc` (DDSPC tip/tilt control): the core predictive-control controls and essential health monitoring. Use `cursesINDI` for everything else (exploration sequence, detailed timing and transport diagnostics). It replaces the common `cursesINDI` interactions and talks only to INDI; it never touches shared-memory streams, the AO loop or cacao.
 
-Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all_guis` list). Run `loPredCtrlAccGUI`, or `loPredCtrlAccGUI <device>` for an INDI device name other than `loPredCtrlAcc`. The panel uses the standard workstation INDI connection at `127.0.0.1:7624`.
+Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all_guis` list). Run `loPredCtrlAccGUI`, or `loPredCtrlAccGUI <device> [<accelerometer>]` for INDI device names other than `loPredCtrlAcc` and `acc000`. The panel uses the standard workstation INDI connection at `127.0.0.1:7624`.
 
 ## Safety behavior
 
@@ -25,6 +25,7 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 | Prediction | `predict.toggle` |
 | Gain | `gain.current`/`target` |
 | Extra learning [s] | `learn_std_extra.current`/`target`: seconds the Standard sequence keeps learning after its last stage before learning turns off (0: at its end). Applies at once, including during a running sequence. Disabled with a controller that does not publish it. |
+| ACC rate [Hz] | The accelerometer device's (`acc000`) `fps.current`/`target`: its acquisition rate, for example 2000 with ACC Assisted 2 kHz or 8000 with ACC Assisted. Available whenever the accelerometer publishes it, independently of `loPredCtrlAcc`. `loPredCtrlAcc` detects the new samples per WFS frame (`rates.acc_ratio`) and applies it while prediction is off, resetting the models: retrain after a change. |
 | Zero DDSPC DM | `zero_dm.request`. Turns prediction off and writes a fresh zero to the DDSPC auxiliary channel (`dm.channelName`), even if the last zero was already confirmed. |
 | Return tip/tilt to main loop | `release_tt.request`. Turns prediction off and passes main-loop tip/tilt through from the next WFS frame without waiting for `safety.zero_confirmed`; the zero is still retried. |
 
