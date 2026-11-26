@@ -159,7 +159,23 @@ Changes to the counters or latency alone do not trigger a record, so the rate st
 | `events`, `published`, `failed`, `missed`, `clipped`, `overflows` | Counts since startup; rates come from differences between records. |
 | `pipeline_us`, `pipeline_rms_us`, `compute_max_us` | The `latency` window values (see above); −1 with no data. |
 
-Adding this type changed libMagAOX, so install libMagAOX with this version of the app. `logdump` needs the updated
+### Frame timing (`fg_timing`, `telem_fgtimings`)
+
+Like the camera apps, the app reports frame timing over 1 s windows, in seconds, in the read-only `fg_timing` property
+(updated about every second) and in `telem_fgtimings` records (written when the values change, so about every second,
+and at least every `telemeter.maxInterval`).
+
+| `fg_timing` element | `telem_fgtimings` field | Meaning |
+| --- | --- | --- |
+| `acq_fps`, `acq_min`, `acq_max`, `acq_jitter` | `atime`, `atime_jitter` | Interval between woofer offload posts (the `atime` t2wOffloader stamps on each frame); `acq_fps` is the offload rate. Sampled whether or not the app is enabled. |
+| `write_fps`, `write_min`, `write_max`, `write_jitter` | `wtime`, `wtime_jitter` | Interval between consecutive publications to `dm01disp08_aux`; `write_fps` is about the synco rate (8000 or 6000). A failed or skipped slot, or idling, starts a new series, so gaps are not counted. |
+| `delta_aw`, `delta_aw_jitter` | `wmatime`, `wmatime_jitter` | Woofer post to the end of the first publication carrying that offload. Unlike `pipelineUs`, this includes the wait for a slot. |
+
+The rates are 1/mean interval. A mean or jitter needs at least 2 samples in the window, and min/max 1; otherwise the value
+is 0, as in the camera apps. Frames without a woofer stamp (from an older t2wOffloader) are not sampled for the offload
+interval or the delay.
+
+Adding `telem_counteroffload` changed libMagAOX, so install libMagAOX with this version of the app. `logdump` needs the updated
 libMagAOX to decode the records.
 
 ## Calibrate mode
