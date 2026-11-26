@@ -32,7 +32,8 @@ struct registrationSettings
     double minReferenceEnergy{ 0.25 }; ///< Minimum fraction of reference squared signal in the overlap.
     double maxSecondaryRatio{ 0.95 };  ///< Largest competing correlation divided by the primary correlation.
     double peakExclusion{ 2 };         ///< Radius around the principal peak excluded from ambiguity checking.
-    double tolerance{ 0.05 };          ///< Requested subpixel localization sampling in detector pixels.
+    double tolerance{ 0.05 };          ///< Sampling of the bounded correlation search in detector pixels.
+    bool   mftRefinement{ true };      ///< Refine a supported, unambiguous peak with mxlib's MFT.
     double saturation{ std::numeric_limits<double>::max() }; ///< Raw mean saturation threshold, exclusive.
 };
 
@@ -123,6 +124,17 @@ score( const imageT &reference, /**< [in] Unpadded reference response. */
 /// Check overlap and reference signal support independently of correlation and noise.
 inline bool supported( const registrationResult   &result, /**< [in] Candidate score. */
                        const registrationSettings &settings /**< [in] Required support fractions. */ );
+
+/// Refine an accepted peak on the shared image patch when its edges carry little signal.
+/** \tparam correlatorT mxlib cross-correlator used for the refinement. */
+template <class correlatorT = mx::improc::imageXCorrFFT<imageT>>
+inline void refineMft( registrationResult         &result,    /**< [in,out] Checked peak and quality. */
+                       const imageT               &reference, /**< [in] Recorded poke response. */
+                       const imageT               &live,      /**< [in] Current poke response. */
+                       const imageT               &variance,  /**< [in] Live response variance of the mean. */
+                       const mapping              &map,       /**< [in] Shared ROI mapping. */
+                       const geometry             &camera,    /**< [in] Physical binning. */
+                       const registrationSettings &settings /**< [in] Acceptance thresholds. */ );
 
 /// Register one DM with mxlib, then validate overlap, response noise, and competing lags.
 inline registrationResult
@@ -287,6 +299,105 @@ inline registrationResult score( const imageT &reference,
 inline bool supported( const registrationResult &result, const registrationSettings &settings )
 {
     return result.overlap >= settings.minOverlap && result.referenceEnergy >= settings.minReferenceEnergy;
+}
+
+template <class correlatorT>
+inline void refineMft( registrationResult         &result,
+                       const imageT               &reference,
+                       const imageT               &live,
+                       const imageT               &variance,
+                       const mapping              &map,
+                       const geometry             &camera,
+                       const registrationSettings &settings )
+{
+    constexpr double mftStep = 0.01;
+    constexpr int    edge    = 2;
+    const int        bx = camera.region.bin_x, by = camera.region.bin_y;
+    const double     coarseX = result.dx / bx - map.fractionX - ( map.liveX - map.referenceX );
+    const double     coarseY = result.dy / by - map.fractionY - ( map.liveY - map.referenceY );
+    const int        offsetX = std::lround( coarseX ), offsetY = std::lround( coarseY );
+    const int        rx = std::max( 0, -offsetX ), ry = std::max( 0, -offsetY );
+    const int        lx = rx + offsetX, ly = ry + offsetY;
+    const int        width  = std::min<int>( reference.rows() - rx, live.rows() - lx );
+    const int        height = std::min<int>( reference.cols() - ry, live.cols() - ly );
+
+    if( width <= 2 * edge || height <= 2 * edge )
+    {
+        return;
+    }
+
+    const auto r         = reference.block( rx, ry, width, height );
+    const auto t         = live.block( lx, ly, width, height );
+    const auto unclipped = [&]( const auto &patch )
+    {
+        const double energy = patch.template cast<double>().square().sum();
+        const double interior =
+            patch.block( edge, edge, width - 2 * edge, height - 2 * edge ).template cast<double>().square().sum();
+        return energy > 0 && interior >= 0.995 * energy;
+    };
+
+    if( !unclipped( r ) || !unclipped( t ) )
+    {
+        return;
+    }
+
+    // The mxlib MFT output covers one fine sample per array pixel. Keep at least
+    // +/-0.6 sampled pixels around its integer peak, even for a small ROI.
+    const int minSize = 128;
+    imageT    rMft = imageT::Zero( std::max( minSize, width ), std::max( minSize, height ) ), tMft = rMft;
+    rMft.block( 0, 0, width, height ) = r - r.mean();
+    tMft.block( 0, 0, width, height ) = t - t.mean();
+
+    float dx = 0, dy = 0, peak = 0;
+    try
+    {
+        correlatorT correlator;
+        correlator.peakMethod( mx::improc::xcorrPeakMethod::mftOversamp );
+        correlator.normalize( false );
+        correlator.maxLag( 1 );
+        if constexpr( requires { correlator.mftLimitPeakSearch( true ); } )
+        {
+            correlator.mftLimitPeakSearch( true );
+        }
+        correlator.tol( mftStep );
+
+        if( correlator.refIm( rMft ) < 0 || correlator( dx, dy, peak, tMft ) < 0 )
+        {
+            return;
+        }
+    }
+    catch( const std::exception & )
+    {
+        // The overlap-normalized estimate has already passed all quality checks.
+        return;
+    }
+
+    const double fineX = offsetX + double( dx ), fineY = offsetY + double( dy );
+    const double correctionX = fineX - coarseX, correctionY = fineY - coarseY;
+    if( !mx::math::isFinite( fineX ) || !mx::math::isFinite( fineY ) || !mx::math::isFinite( peak ) || peak <= 0 ||
+        std::abs( correctionX ) > 0.5 || std::abs( correctionY ) > 0.5 ||
+        std::hypot( correctionX * bx, correctionY * by ) > settings.peakExclusion )
+    {
+        return;
+    }
+
+    auto refined = score( reference, live, variance, fineX, fineY );
+    if( !supported( refined, settings ) || refined.correlation < settings.minCorrelation ||
+        refined.snr < settings.minSnr )
+    {
+        return;
+    }
+
+    refined.dx             = result.dx + correctionX * bx;
+    refined.dy             = result.dy + correctionY * by;
+    refined.secondaryRatio = result.secondaryRatio;
+    refined.valid          = std::abs( refined.dx ) < settings.maxShift - settings.tolerance &&
+                    std::abs( refined.dy ) < settings.maxShift - settings.tolerance;
+    if( !refined.valid )
+    {
+        refined.reason = "individual displacement exceeds the accepted search interior";
+    }
+    result = refined;
 }
 
 inline registrationResult registerImage( const imageT               &reference,
@@ -475,6 +586,12 @@ inline registrationResult registerImage( const imageT               &reference,
     }
 
     result.valid = true;
+
+    if( settings.mftRefinement )
+    {
+        refineMft( result, reference, live, variance, map, cameraGeometry, settings );
+    }
+
     return result;
 }
 

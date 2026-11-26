@@ -762,3 +762,28 @@ Both optimized builds and both focused offline suites passed on 2026-11-21
 (28 cases, 4,522 assertions). Tests cover sensor startup and publication
 without corrector telemetry and corrector arming and disarming with the
 `OPERATING` requirement.
+
+### Follow-up: MFT peak refinement
+
+After the overlap-normalized search accepts a unique peak, AutoJay uses
+`xcorrPeakMethod::mftOversamp` in mxlib's `imageXCorrFFT` on a shared image
+patch aligned at the nearest integer lag. The MFT samples at 0.01 camera
+pixels. It stays within the accepted peak, and AutoJay rechecks the refined
+shift on actual overlap.
+If an edge of the patch carries appreciable response energy or the refined
+estimate fails support or quality checks, use the cubic estimate. The existing
+physical displacement limits and original-template ambiguity check still apply.
+The visibility pass runs before MFT refinement, and existing calibration
+bundles remain usable. Default to MFT with `quality.mftRefinement=false`
+available for comparison. Use mxlib's bounded coarse search when available.
+
+An offline experiment with the original camflowfs poke responses and 24 known
+Fourier-injected shifts reduced individual-DM error from 0.060 to 0.0028
+detector pixels RMS per axis at 1×1 binning. With the full 512×512 images,
+an injected `(0.083, -0.113)` pixel shift returned `(0.08, -0.11)` for both
+DMs. These tests isolate numerical error. Commission repeatability and cycle
+time with the current 500-frame stacks using the user's instrument workflow.
+
+The optimized AutoJay build and all 45 cases across the four offline suites
+passed. Registration regressions cover shifts below the cubic grid spacing,
+unequal ROI origins, and the cubic fallback for clipped pokes.

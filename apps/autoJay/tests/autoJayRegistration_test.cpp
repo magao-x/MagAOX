@@ -162,6 +162,57 @@ TEST_CASE( "autoJay registers independent subpixel shifts and common motion", "[
     REQUIRE( result.deltaY == Approx( ty - ny ).margin( 0.1 ) );
 }
 
+/** \brief Resolve small opposing shifts using mxlib's local MFT peak refinement.
+ * \ingroup autoJay_registration_test
+ */
+TEST_CASE( "autoJay MFT resolves shifts below the correlation search spacing", "[autoJay][registration]" )
+{
+    // clang-format off
+    #ifdef AUTOJAY_TEST_DOXYGEN_REF
+    MagAOX::app::autoJayDetail::registerPair;
+    MagAOX::app::autoJayDetail::registrationDetail::refineMft;
+    #endif
+    // clang-format on
+    const auto g         = makeGeometry();
+    const auto reference = aligned( g );
+    const auto frames    = acquisition( g, -0.018, 0.017, 0.019, -0.018 );
+    const auto refined   = registerPair( reference, frames, g, {} );
+    INFO( refined.reason );
+    REQUIRE( refined.valid );
+    REQUIRE( refined.deltaX == Approx( 0.037 ).margin( 0.012 ) );
+    REQUIRE( refined.deltaY == Approx( -0.035 ).margin( 0.012 ) );
+
+    registrationSettings settings;
+    settings.mftRefinement = false;
+    const auto cubic       = registerPair( reference, frames, g, settings );
+    REQUIRE( cubic.valid );
+    REQUIRE( cubic.deltaX == Approx( 0 ).margin( 1e-6 ) );
+    REQUIRE( cubic.deltaY == Approx( 0 ).margin( 1e-6 ) );
+}
+
+/** \brief Keep subpixel displacements in detector coordinates when the shared live ROI changes.
+ * \ingroup autoJay_registration_test
+ */
+TEST_CASE( "autoJay MFT refines a supported peak with unequal ROIs", "[autoJay][registration]" )
+{
+    // clang-format off
+    #ifdef AUTOJAY_TEST_DOXYGEN_REF
+    MagAOX::app::autoJayDetail::registerPair;
+    MagAOX::app::autoJayDetail::registrationDetail::refineMft;
+    #endif
+    // clang-format on
+    const auto referenceROI = makeGeometry( 55, 51, -5, -6 );
+    const auto liveROI      = makeGeometry( 47, 46, -2, -4 );
+    const auto result =
+        registerPair( aligned( referenceROI ), acquisition( liveROI, 1.03, 0.08, -0.09, -0.12 ), liveROI, {} );
+    INFO( result.reason );
+    REQUIRE( result.valid );
+    REQUIRE( result.dm[0].dx == Approx( 1.03 ).margin( 0.012 ) );
+    REQUIRE( result.dm[0].dy == Approx( 0.08 ).margin( 0.012 ) );
+    REQUIRE( result.dm[1].dx == Approx( -0.09 ).margin( 0.012 ) );
+    REQUIRE( result.dm[1].dy == Approx( -0.12 ).margin( 0.012 ) );
+}
+
 /** \brief Changing only the shared camera ROI must not create differential motion.
  * \ingroup autoJay_registration_test
  */
@@ -209,12 +260,14 @@ TEST_CASE( "autoJay accepts partial distinctive poke patterns", "[autoJay][regis
 {
     const auto rg = makeGeometry();
     auto       lg = rg;
+    bool       clipped = false;
     SECTION( "one feature hidden" )
     {
     }
     SECTION( "pokes clipped by a smaller ROI" )
     {
         lg = makeGeometry( 28, 31, 6, 5 );
+        clipped = true;
     }
     auto frames    = acquisition( lg, 0.5, -0.5, -0.5, 0.5 );
     frames[1].mean = frames[0].mean + response( lg, 0, 0.5, -0.5, 1 );
@@ -224,6 +277,16 @@ TEST_CASE( "autoJay accepts partial distinctive poke patterns", "[autoJay][regis
     REQUIRE( result.valid );
     REQUIRE( result.deltaX == Approx( -1 ).margin( 0.15 ) );
     REQUIRE( result.deltaY == Approx( 1 ).margin( 0.15 ) );
+
+    if( clipped )
+    {
+        registrationSettings settings;
+        settings.mftRefinement = false;
+        const auto cubic       = registerPair( aligned( rg ), frames, lg, settings );
+        REQUIRE( cubic.valid );
+        REQUIRE( result.deltaX == cubic.deltaX );
+        REQUIRE( result.deltaY == cubic.deltaY );
+    }
 }
 
 /** \brief Correlation and visible-feature handling retain response-scale invariance and signed structure.

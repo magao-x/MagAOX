@@ -408,6 +408,7 @@ inline void autoJay::setupConfig()
              "Distinct averaged or discarded frame count; frames >= 2." );
     add( "control.enabled", "bool", "Mark accepted measurements eligible for a correction consumer." );
     add( "control.settle", "double", "Local delay in seconds after publishing a correction-eligible sample." );
+    add( "quality.mftRefinement", "bool", "Refine accepted overlap-normalized peaks using the mxlib MFT." );
     for( const auto &key : { "acquisition.dmSleep",
                              "acquisition.phaseTimeout",
                              "quality.maxShift",
@@ -517,6 +518,7 @@ inline int autoJay::loadConfigImpl( mx::app::appConfigurator &cfg )
     cfg( m_quality.maxSecondaryRatio, "quality.maxSecondaryRatio" );
     cfg( m_quality.peakExclusion, "quality.peakExclusion" );
     cfg( m_quality.saturation, "quality.saturation" );
+    cfg( m_quality.mftRefinement, "quality.mftRefinement" );
     cfg( m_controlSettle, "control.settle" );
     cfg( m_publishControl, "control.enabled" );
     // Older configs can still be loaded. The sensor has no corrector inputs.
