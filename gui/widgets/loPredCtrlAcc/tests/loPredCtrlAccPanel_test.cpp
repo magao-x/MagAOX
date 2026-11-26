@@ -827,6 +827,46 @@ TEST_CASE( "loPredCtrlAccGUI selects ACC-assisted 2 kHz", "[loPredCtrlAccGUI]" )
     CHECK( fixture.widget<QLabel>( "prediction.banner" )->text() ==
            "PREDICTION ACTIVE: ACC-assisted DDSPC, one command per WFS frame" );
 }
+/** \brief The ACC rate entry follows the accelerometer device's fps, independently of loPredCtrlAcc, and sends the
+ * typed rate as that device's fps target.
+ */
+TEST_CASE( "loPredCtrlAccGUI sets the accelerometer rate", "[loPredCtrlAccGUI]" )
+{
+    Fixture fixture;
+    auto   *entry = fixture.widget<QWidget>( "acc.fps.entry" );
+    CHECK_FALSE( entry->isEnabled() );
+
+    // As mcp3208Ctrl: CREATE_REG_INDI_NEW_NUMBERF( m_indiP_fps, "fps", 0, 10000, 1, "%d", "", "" ).
+    pcf::IndiProperty fps( pcf::IndiProperty::Number, "acc000", "fps" );
+    for( const char *element : { "current", "target" } )
+    {
+        fps.add( pcf::IndiElement( element, 8000 ) );
+        fps[element].setMin( "0" );
+        fps[element].setMax( "10000" );
+        fps[element].setStep( "1" );
+        fps[element].setFormat( "%d" );
+    }
+    fixture.publish( fps, true );
+    REQUIRE( entry->isEnabled() ); // Without loPredCtrlAcc running.
+    CHECK( fixture.m_publisher.m_commands.empty() );
+
+    auto *edit = entry->findChild<QLineEdit *>( QStringLiteral( "value" ) );
+    REQUIRE( edit );
+    edit->setText( QStringLiteral( "2000" ) );
+    emit edit->returnPressed();
+    QApplication::processEvents();
+    REQUIRE( fixture.m_publisher.m_commands.size() == 1 );
+    const auto &command = fixture.m_publisher.m_commands.back();
+    CHECK( command.getDevice() == "acc000" );
+    CHECK( command.getName() == "fps" );
+    CHECK( command["target"].get() == "2000" );
+
+    // The accelerometer stops: the entry is disabled.
+    pcf::IndiProperty gone( pcf::IndiProperty::Number, "acc000", "" );
+    fixture.m_publisher.handleDelProperty( gone );
+    QApplication::processEvents();
+    CHECK_FALSE( entry->isEnabled() );
+}
 } // namespace loPredCtrlAccGUITest
 } // namespace libXWCTest
 

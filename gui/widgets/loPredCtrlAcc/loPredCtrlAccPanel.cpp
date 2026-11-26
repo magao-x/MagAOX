@@ -149,8 +149,8 @@ QString describeFault( const std::string &outputState )
 }
 } // namespace
 
-loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *parent )
-    : xWidget( parent ), m_device( device )
+loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, const std::string &accDevice, QWidget *parent )
+    : xWidget( parent ), m_device( device ), m_accDevice( accDevice )
 {
     m_confirmReset = [this]()
     {
@@ -320,6 +320,15 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
         QStringLiteral( "Seconds the Standard sequence keeps learning after its last stage before learning turns off "
                         "(0: at its end). Enter seconds and press Return; it applies at once." ) );
     ctrlLayout->addWidget( m_learnStdExtraEntry );
+    m_accFpsEntry = new statusEntry( m_accDevice, "fps", statusEntry::INT, "ACC rate [Hz]", "", ctrlBox );
+    m_accFpsEntry->setObjectName( QStringLiteral( "acc.fps.entry" ) );
+    m_accFpsEntry->setStretch( 0, 1, 2 );
+    m_accFpsEntry->setToolTip(
+        QStringLiteral( "%1's acquisition rate (fps): for example 2000 with ACC Assisted 2 kHz, 8000 with ACC "
+                        "Assisted. Enter Hz and press Return. loPredCtrlAcc detects the new samples per WFS frame "
+                        "and applies it while prediction is off, resetting the models: retrain after a change." )
+            .arg( QString::fromStdString( m_accDevice ) ) );
+    ctrlLayout->addWidget( m_accFpsEntry );
     m_reset = new QPushButton( QStringLiteral( "Reset models..." ), ctrlBox );
     m_reset->setObjectName( QStringLiteral( "reset_model" ) );
     setXwFont( m_reset );
@@ -534,7 +543,7 @@ void loPredCtrlAccPanel::subscribe()
 
     // Standard widgets send through this panel; their readbacks are routed by handleSetProperty().
     for( multiIndiSubscriber *widget : std::initializer_list<multiIndiSubscriber *>{
-             m_learnStd, m_learn, m_predict, m_gainEntry, m_learnStdExtraEntry } )
+             m_learnStd, m_learn, m_predict, m_gainEntry, m_learnStdExtraEntry, m_accFpsEntry } )
     {
         registerSubscriber( widget );
     }
@@ -559,6 +568,8 @@ void loPredCtrlAccPanel::subscribe()
     {
         m_parent->addSubscriberProperty( this, m_device, property );
     }
+
+    m_parent->addSubscriberProperty( this, m_accDevice, "fps" ); // Routed to m_accFpsEntry by handleSetProperty().
 }
 
 void loPredCtrlAccPanel::onConnect()
@@ -572,6 +583,7 @@ void loPredCtrlAccPanel::onConnect()
 
     m_gainEntry->onConnect();
     m_learnStdExtraEntry->onConnect();
+    m_accFpsEntry->onConnect();
 }
 
 void loPredCtrlAccPanel::onDisconnect()
@@ -587,6 +599,8 @@ void loPredCtrlAccPanel::onDisconnect()
 
     m_gainEntry->onDisconnect();
     m_learnStdExtraEntry->onDisconnect();
+    m_accFpsEntry->onDisconnect();
+    m_accFpsKnown = false;
     refresh();
 }
 
@@ -597,6 +611,15 @@ void loPredCtrlAccPanel::handleDefProperty( const pcf::IndiProperty &property )
 
 void loPredCtrlAccPanel::handleDelProperty( const pcf::IndiProperty &property )
 {
+    // The accelerometer's fps, or the whole accelerometer device, is gone.
+    if( property.getDevice() == m_accDevice && ( property.getName().empty() || property.getName() == "fps" ) )
+    {
+        m_accFpsKnown = false;
+        m_accFpsEntry->onDisconnect();
+        refresh();
+        return;
+    }
+
     if( property.getDevice() != m_device )
     {
         return;
@@ -632,6 +655,14 @@ void loPredCtrlAccPanel::handleDelProperty( const pcf::IndiProperty &property )
 
 void loPredCtrlAccPanel::handleSetProperty( const pcf::IndiProperty &property )
 {
+    if( property.getDevice() == m_accDevice && property.getName() == "fps" )
+    {
+        m_accFpsKnown = true;
+        refresh(); // Enable the entry first, so it accepts the readback.
+        m_accFpsEntry->handleSetProperty( property );
+        return;
+    }
+
     if( property.getDevice() != m_device )
     {
         return;
@@ -926,6 +957,7 @@ void loPredCtrlAccPanel::refresh()
 
     m_gainEntry->setEnabled( ops && m_readbacks.count( "gain" ) );
     m_learnStdExtraEntry->setEnabled( ops && m_readbacks.count( "learn_std_extra" ) );
+    m_accFpsEntry->setEnabled( m_accFpsKnown ); // The accelerometer runs independently of loPredCtrlAcc.
 
     const QString blocked = interlock();
     m_interlock->setText( blocked.isEmpty() ? QStringLiteral( "Mode change and reset available." ) : blocked );

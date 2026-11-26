@@ -35,8 +35,9 @@ class loPredCtrlAccPanel : public xWidget
 {
   public:
     /// Construct the controls disabled and the readbacks unavailable.
-    explicit loPredCtrlAccPanel( const std::string &device = "loPredCtrlAcc", /**< [in] INDI device name. */
-                                 QWidget           *parent = nullptr /**< [in] Optional Qt parent. */ );
+    explicit loPredCtrlAccPanel( const std::string &device    = "loPredCtrlAcc", /**< [in] INDI device name. */
+                                 const std::string &accDevice = "acc000",        /**< [in] Accelerometer INDI device. */
+                                 QWidget           *parent    = nullptr /**< [in] Optional Qt parent. */ );
 
     /// Detach nested standard controls before Qt destroys them.
     ~loPredCtrlAccPanel() noexcept override;
@@ -87,6 +88,7 @@ class loPredCtrlAccPanel : public xWidget
     };
 
     std::string                     m_device;    ///< loPredCtrlAcc INDI device name.
+    std::string                     m_accDevice; ///< Accelerometer INDI device whose fps the rate entry sets.
     std::map<std::string, Readback> m_readbacks; ///< Controller properties by name.
 
     std::vector<Row> m_rows; ///< Status rows refreshed together.
@@ -113,6 +115,9 @@ class loPredCtrlAccPanel : public xWidget
     statusEntry *m_gainEntry{ nullptr }; ///< Gain current value and numeric target entry.
 
     statusEntry *m_learnStdExtraEntry{ nullptr }; ///< Seconds of learning after the Standard sequence ends.
+
+    statusEntry *m_accFpsEntry{ nullptr }; ///< The accelerometer's acquisition rate, its fps property [Hz].
+    bool         m_accFpsKnown{ false };   ///< The accelerometer device has published fps.
 
     std::function<bool()> m_confirmReset; ///< Reset confirmation.
 
