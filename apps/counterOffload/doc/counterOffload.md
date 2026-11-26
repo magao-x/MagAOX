@@ -137,6 +137,31 @@ How to read it:
 `handoffUs` needs the woofer post time, which t2wOffloader stores in the `atime` of each `aol0_tweeterOffload` frame. With
 an older t2wOffloader, which does not store it, `handoffUs`, `pipelineUs` and `pipelineRmsUs` stay at −1.
 
+## Telemetry
+
+The app writes `telem_counteroffload` records to its telemetry file (read them with `logdump`).
+
+When a record is written:
+
+- every `telemeter.maxInterval` (default 10 s);
+- at once when the app is enabled or disabled, a calibration starts or ends, or `gain`, `leak`, `rampStartUs` or
+  `rampDurationUs` changes (from INDI or from calibration). One record holds the old value at the change and the
+  next holds the new value;
+- at shutdown, with the final counters.
+
+Changes to the counters or latency alone do not trigger a record, so the rate stays low.
+
+| Field | Meaning |
+| --- | --- |
+| `enabled`, `calibrating` | App state. |
+| `gain`, `leak`, `ramp_start_us`, `ramp_duration_us`, `time_offset_us`, `max_command` | Settings in use. `leak` is per published slot. |
+| `slot_us` | dmSyncopation slot period (125 at 8 kHz, about 167 at 6 kHz); −1 until measured. |
+| `events`, `published`, `failed`, `missed`, `clipped`, `overflows` | Counts since startup; rates come from differences between records. |
+| `pipeline_us`, `pipeline_rms_us`, `compute_max_us` | The `latency` window values (see above); −1 with no data. |
+
+Adding this type changed libMagAOX, so install libMagAOX with this version of the app. `logdump` needs the updated
+libMagAOX to decode the records.
+
 ## Calibrate mode
 
 Calibrate mode tunes `rampStartUs`, `rampDurationUs` and `gain` to minimize the wavefront error that offloading
