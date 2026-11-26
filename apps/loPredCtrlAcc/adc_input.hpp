@@ -29,6 +29,10 @@ struct AdcConfig
     std::int64_t  m_maxAgeNs{ 20000000 };            ///< Maximum acquisition age, including during source silence.
     std::int64_t  m_maxIntervalNs{ 1000000 };    ///< Larger acquisition gaps break retention even if counters advance.
     std::int64_t  m_clockToleranceNs{ 1000000 }; ///< Maximum clock bracket/offset change before invalidation.
+
+    /// Reject samples on producer timestamps, clock faults and gaps (shadow analyses, the default). false accepts every
+    /// in-range sample as it arrives: producer timestamps, clocks and gaps are only counted, and age is from receipt.
+    bool m_strictTiming{ true };
 };
 
 /// Owned producer metadata used to bracket a payload copy; adapted from accelFFCtrl's input transport.

@@ -125,7 +125,6 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_syncopationTiming;
     using loPredCtrlAcc_operational::m_targetRatio;
     using loPredCtrlAcc_operational::m_targetSlots;
-    using loPredCtrlAcc_operational::m_unlockedTraining;
     using loPredCtrlAcc_operational::m_wasValid;
     using loPredCtrlAcc_operational::m_wfsArrived;
     using loPredCtrlAcc_operational::m_wfsCounter;
@@ -587,9 +586,9 @@ TEST_CASE( "Operational WFS decision consumes individual upstream sensor samples
         arrive( i, 10 + i, double( i ) );
     }
 
-    // The window is the newest samples received, newest first; the upstream lock does not gate it.
+    // The window is the newest samples received, newest first; no upstream lock is needed.
     REQUIRE( app.sensorHistory( batch, rows, features, 1500000 ) );
-    REQUIRE( std::string( app.m_windowReason.load() ) == "ok_unlocked" );
+    REQUIRE( std::string( app.m_windowReason.load() ) == "ok" );
     for( unsigned i = 0; i < 4; ++i )
     {
         REQUIRE( features( 2 * i ) == 3 - i );
@@ -1437,7 +1436,7 @@ TEST_CASE( "Assisted prediction continues through a missed WFS frame", "[rtc-con
     REQUIRE( app.m_multirate->status().m_ready );
 }
 
-/** \brief assisted_qualification names every failing condition and the upstream values behind it. */
+/** \brief assisted_qualification names every failing condition; the upstream lock is reported but never one. */
 TEST_CASE( "Assisted qualification reports why assistance is blocked", "[rtc-controller]" )
 {
     // clang-format off
@@ -1460,30 +1459,31 @@ TEST_CASE( "Assisted qualification reports why assistance is blocked", "[rtc-con
     REQUIRE( app.appLogic() == 0 );
     const auto blockers = app.m_indiP_qualification["blockers"].get<std::string>();
     INFO( blockers );
-    REQUIRE( blockers.find( "acc000.timingDiag.delay_lock=0" ) != std::string::npos );
+    REQUIRE( blockers.find( "delay_lock" ) == std::string::npos ); // The ACC need not be synchronized.
     REQUIRE( blockers.find( "mode_code" ) == std::string::npos );
     REQUIRE( blockers.find( "adc_disabled" ) != std::string::npos );
     REQUIRE( blockers.find( "model_untrained_0_of_" ) != std::string::npos );
+    REQUIRE( app.m_indiP_qualification["upstream_locked"].get<std::string>() == "0" );
     REQUIRE( app.m_indiP_qualification["upstream_read_latency_error_us"].get<std::string>() == "52.0" );
-    REQUIRE( app.m_indiP_qualification["diagnostic_mode"].get<std::string>() == "off" );
     REQUIRE( app.m_indiP_control["assisted_state"].get<std::string>() == blockers.substr( 0, blockers.find( ',' ) ) );
+    REQUIRE( app.m_indiP_control["accel_sync"].get<std::string>() == "false" );
     report["delay_lock"].set( 1 );
     REQUIRE( app.setCallBack_m_indiP_sync( report ) == 0 );
     REQUIRE( app.m_syncLocked );
     REQUIRE( app.appLogic() == 0 );
-    REQUIRE( app.m_indiP_qualification["blockers"].get<std::string>().find( "delay_lock" ) == std::string::npos );
+    REQUIRE( app.m_indiP_control["accel_sync"].get<std::string>() == "true" );
 }
 
-/** \brief The default-off diagnostic mode evaluates and trains the assisted fit without upstream lock, never qualifies
- * output, and bars a fit trained without lock from prediction until reset.
+/** \brief The ACC need not be synchronized to the WFS: without the upstream lock (acc000 free-running) the assisted fit
+ * learns, becomes ready and qualifies, and a lock report never invalidates its ACC window.
  */
-TEST_CASE( "Assisted diagnostic mode never qualifies output without upstream lock", "[rtc-controller]" )
+TEST_CASE( "Assisted DDSPC learns and predicts without the upstream lock", "[rtc-controller]" )
 {
     // clang-format off
 #ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
     MagAOX::app::loPredCtrlAcc_operational::stepAssisted;
-    MagAOX::app::loPredCtrlAcc_operational::sensorHistory;
-    MagAOX::app::loPredCtrlAcc_operational::outputValid;
+    MagAOX::app::loPredCtrlAcc_operational::applyTraining;
+    MagAOX::app::loPredCtrlAcc_operational::setCallBack_m_indiP_sync;
 #endif
     // clang-format on
     Controller app( true );
@@ -1496,9 +1496,9 @@ TEST_CASE( "Assisted diagnostic mode never qualifies output without upstream loc
     DDSPC::Matrix y       = DDSPC::Matrix::Zero( 2, 1 );
     DDSPC::Matrix command = DDSPC::Matrix::Zero( 2, 1 );
     std::uint64_t n       = 0;
-    auto          frame   = [&]( bool locked )
+    auto          frame   = [&]()
     {
-        const auto slots = app.advanceAssisted( y, -1, locked );
+        const auto slots = app.advanceAssisted( y, -1, false ); // acc000 reports no lock (integrator timing).
         y.setZero();
         for( int p = 0; p < slots.cols(); ++p, ++n )
         {
@@ -1508,49 +1508,25 @@ TEST_CASE( "Assisted diagnostic mode never qualifies output without upstream loc
                 y( axis ) += e[axis] / slots.cols();
         }
     };
-    // Without the configuration, unlocked frames never reach the assisted learner.
-    app.train( "300,0.1,0.1" );
-    for( int i = 0; i < 200; ++i )
-        frame( false );
-    REQUIRE( app.m_multirate->status().m_updates == 0 );
-    REQUIRE_FALSE( app.m_unlockedTraining );
 
-    // Evaluation of a locked-trained, frozen fit continues without lock and without contaminating it.
-    app.m_syncLocked = true;
     app.train( "1000,0.1,0.1" );
     for( int i = 0; i < 1200; ++i )
-        frame( true );
+        frame();
+    REQUIRE( app.m_multirate->status().m_updates > 0 );
     REQUIRE( app.m_multirate->status().m_ready );
-    app.freeze();
-    app.m_syncLocked         = false;
-    app.m_assistedDiagnostic = true;
-    const auto scored        = app.m_multirate->status().m_scored.back();
-    for( int i = 0; i < 50; ++i )
-        frame( false );
-    REQUIRE( app.m_multirate->status().m_scored.back() > scored );
-    REQUIRE_FALSE( app.m_unlockedTraining );
-    // Unlocked, the output continues on the WFS alone: no slot uses the ACC prediction (assistedCandidate).
+    REQUIRE( app.m_fastStats.m_predictions > 0 );
     REQUIRE( app.outputValid() );
 
-    // Learning without lock is allowed in the diagnostic mode, but the fit cannot then predict until reset.
-    const auto updates = app.m_multirate->status().m_updates;
-    auto       learn   = app.m_indiP_learning;
-    learn["toggle"].setSwitchState( pcf::IndiElement::On );
-    REQUIRE( app.newCallBack_m_indiP_learning( learn ) == 0 );
-    for( int i = 0; i < 20; ++i )
-        frame( false );
-    REQUIRE( app.m_multirate->status().m_updates > updates );
-    REQUIRE( app.m_unlockedTraining );
-    app.m_syncLocked  = true;
-    app.m_holdTimeout = 0; // The bar itself, without the hold before it stops prediction.
-    frame( true );
-    REQUIRE_FALSE( app.outputValid() );
-    auto predict = app.m_indiP_predicting;
-    predict["toggle"].setSwitchState( pcf::IndiElement::On );
-    app.m_predicting = false;
-    REQUIRE( app.newCallBack_m_indiP_predicting( predict ) < 0 );
-    app.resetModels();
-    REQUIRE_FALSE( app.m_unlockedTraining );
+    // acc000's report of no lock is shown only: the ACC window stays valid.
+    app.m_indiP_sync = pcf::IndiProperty( pcf::IndiProperty::Number );
+    app.m_indiP_sync.setDevice( "acc000" );
+    app.m_indiP_sync.setName( "timingDiag" );
+    auto report = app.m_indiP_sync;
+    report.add( pcf::IndiElement( "mode_code", 0.0 ) );
+    report.add( pcf::IndiElement( "delay_lock", 0.0 ) );
+    REQUIRE( app.setCallBack_m_indiP_sync( report ) == 0 );
+    REQUIRE( app.m_assistedValid.load() );
+    REQUIRE( app.outputValid() );
 }
 
 /** \brief The supplied RTC dimensions, prior, gain and calibration stages train each mode while it is selected. */
@@ -3336,13 +3312,16 @@ TEST_CASE( "Detected dm_slots and acc_ratio resize the controller while predicti
     MagAOX::app::loPredCtrlAcc_operational::applyRates;
 #endif
     // clang-format on
-    CHECK( Controller::detectRatio( 2000, 7990, 4 ) == 4 ); // acc000 at 7990 Hz with a 2 kHz WFS.
-    CHECK( Controller::detectRatio( 700, 7700, 4 ) == 11 );
-    CHECK( Controller::detectRatio( 500, 8000, 8 ) == 16 );
-    CHECK( Controller::detectRatio( 500, 8000, 9 ) == 0 );  // 144 samples exceed the 128-sample ACC history.
-    CHECK( Controller::detectRatio( 2000, 9000, 4 ) == 0 ); // 4.5: no whole ratio.
-    CHECK( Controller::detectRatio( 99, 396, 4 ) == 0 );    // Too few frames.
-    CHECK( Controller::detectRatio( 2000, 0, 4 ) == 0 );    // No ACC.
+    CHECK( Controller::detectRatio( 2000, 7990, 4, 0 ) == 4 ); // acc000 at 7990 Hz with a 2 kHz WFS.
+    CHECK( Controller::detectRatio( 700, 7700, 4, 0 ) == 11 );
+    CHECK( Controller::detectRatio( 500, 8000, 8, 0 ) == 16 );
+    CHECK( Controller::detectRatio( 500, 8000, 9, 0 ) == 14 ); // Limited to the 128-sample ACC history.
+    CHECK( Controller::detectRatio( 2000, 7000, 4, 0 ) == 4 ); // Free-running, 3.5: rounded.
+    CHECK( Controller::detectRatio( 2000, 7000, 4, 3 ) == 3 ); // Kept within 0.6 of the current ratio.
+    CHECK( Controller::detectRatio( 2000, 6000, 4, 4 ) == 3 ); // A real change.
+    CHECK( Controller::detectRatio( 2000, 1000, 4, 0 ) == 1 ); // ACC slower than the WFS.
+    CHECK( Controller::detectRatio( 99, 396, 4, 0 ) == 0 );    // Too few frames.
+    CHECK( Controller::detectRatio( 2000, 0, 4, 0 ) == 0 );    // No ACC.
 
     Controller app( true );
     app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );

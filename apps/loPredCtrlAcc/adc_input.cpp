@@ -1,5 +1,5 @@
 /** \file adc_input.cpp
- * \brief Calibrated raw-pair capture with strict source, gap, snapshot and clock handling.
+ * \brief Calibrated raw-pair capture with strict source, gap, snapshot and clock handling, or arrival timing.
  */
 #include "adc_input.hpp"
 #include <algorithm>
@@ -127,7 +127,7 @@ void AdcCapture::disconnected()
 
 void AdcCapture::tick( std::int64_t nowNs )
 {
-    if( nowNs < 0 || ( m_lastNow >= 0 && nowNs < m_lastNow ) )
+    if( m_config.m_strictTiming && ( nowNs < 0 || ( m_lastNow >= 0 && nowNs < m_lastNow ) ) )
     {
         break_segment( AdcState::ClockFault );
         m_haveClock  = false;
@@ -148,6 +148,19 @@ void AdcCapture::tick( std::int64_t nowNs )
 bool AdcCapture::check_clock( const AdcClock &clock )
 {
     tick( clock.m_monoNs );
+
+    // Arrival timing: the latest clock reading maps producer timestamps for diagnostics only; it is never a fault.
+    if( !m_config.m_strictTiming )
+    {
+        if( clock.m_realNs > 0 && clock.m_monoNs >= 0 )
+        {
+            m_anchor    = clock;
+            m_haveClock = true;
+        }
+
+        return true;
+    }
+
     if( m_clockFault || clock.m_realNs <= 0 || clock.m_monoNs < 0 || clock.m_uncertaintyNs < 0 ||
         clock.m_uncertaintyNs > m_config.m_clockToleranceNs || clock.m_monoNs != m_lastNow )
     {
@@ -253,7 +266,11 @@ std::size_t AdcCapture::drain( const AdcSource &source )
     if( first > m_cursor + 1 )
     {
         m_status.m_dropped += first - m_cursor - 1;
-        break_segment( AdcState::Invalid );
+
+        if( m_config.m_strictTiming )
+        {
+            break_segment( AdcState::Invalid );
+        }
     }
     std::size_t accepted = 0;
     for( std::size_t n = 0; n < count; ++n )
@@ -263,11 +280,24 @@ std::size_t AdcCapture::drain( const AdcSource &source )
         std::int64_t acquired = 0, published = 0;
         AdcSample    sample;
         bool         rail = false, range = false;
-        bool valid = map_time( frame.m_acquiredRealNs, m_anchor, acquired ) &&
-                     map_time( frame.m_writtenRealNs, m_anchor, published ) &&
-                     frame.m_writtenRealNs >= frame.m_acquiredRealNs && frame.m_writtenRealNs <= clock.m_realNs &&
-                     published <= clock.m_monoNs && acquired <= clock.m_monoNs &&
-                     clock.m_monoNs - acquired <= m_config.m_maxAgeNs && ( m_highTime < 0 || acquired > m_highTime );
+        const bool   mapped = map_time( frame.m_acquiredRealNs, m_anchor, acquired ) &&
+                            map_time( frame.m_writtenRealNs, m_anchor, published );
+        bool valid = mapped && frame.m_writtenRealNs >= frame.m_acquiredRealNs &&
+                     frame.m_writtenRealNs <= clock.m_realNs && published <= clock.m_monoNs &&
+                     acquired <= clock.m_monoNs && clock.m_monoNs - acquired <= m_config.m_maxAgeNs &&
+                     ( m_highTime < 0 || acquired > m_highTime );
+
+        // Arrival timing accepts any producer timestamps: an unmapped one is taken as the receipt time.
+        if( !m_config.m_strictTiming )
+        {
+            valid = true;
+
+            if( !mapped )
+            {
+                acquired = published = clock.m_monoNs;
+            }
+        }
+
         const bool timeValid = valid;
         for( std::size_t axis = 0; axis < 2; ++axis )
         {
@@ -287,7 +317,12 @@ std::size_t AdcCapture::drain( const AdcSource &source )
             m_status.m_timestampRejected += !timeValid;
             ++m_status.m_invalid;
             ++m_status.m_dropped;
-            break_segment( AdcState::Invalid );
+
+            if( m_config.m_strictTiming )
+            {
+                break_segment( AdcState::Invalid );
+            }
+
             m_status.m_latest              = {};
             m_status.m_latest.m_frame      = frame;
             m_status.m_latest.m_receivedNs = clock.m_monoNs;
@@ -296,7 +331,11 @@ std::size_t AdcCapture::drain( const AdcSource &source )
         if( m_lastTime >= 0 && acquired - m_lastTime > m_config.m_maxIntervalNs )
         {
             ++m_status.m_timingGaps;
-            break_segment( AdcState::Invalid );
+
+            if( m_config.m_strictTiming )
+            {
+                break_segment( AdcState::Invalid );
+            }
         }
         sample.m_frame       = frame;
         sample.m_generation  = m_status.m_generation;
@@ -315,11 +354,11 @@ std::size_t AdcCapture::drain( const AdcSource &source )
             m_status.m_rateHz = 1e9 * m_rateIntervals / ( sample.m_acquiredNs - m_firstRateTime );
         }
         m_lastTime        = sample.m_acquiredNs;
-        m_highTime        = sample.m_acquiredNs;
+        m_highTime        = m_config.m_strictTiming ? sample.m_acquiredNs : sample.m_receivedNs; // Age from receipt.
         m_status.m_latest = sample;
         m_status.m_valid  = true;
         m_status.m_state  = AdcState::Streaming;
-        m_status.m_ageUs  = ( clock.m_monoNs - m_lastTime ) * 1e-3;
+        m_status.m_ageUs  = ( clock.m_monoNs - m_highTime ) * 1e-3;
         if( m_status.m_retained == m_ring.size() )
         {
             ++m_status.m_overwrites;

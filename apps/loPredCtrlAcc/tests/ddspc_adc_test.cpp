@@ -70,6 +70,69 @@ void AdcFixture::publish( std::uint64_t counter, std::int64_t acquired, std::arr
 } // namespace
 /// \endcond
 
+/** \brief Arrival timing (operational loPredCtrlAcc) accepts every in-range sample as it arrives: a producer clock
+ * ahead of this computer's, a step of this computer's realtime clock and lost publications are counted, never
+ * rejected; only silence longer than max_age, from the last receipt, makes the input stale.
+ */
+TEST_CASE( "ADC arrival timing accepts every in-range sample whatever the producer clock", "[loPredCtrlAcc][adc]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    DDSPC::AdcCapture::drain;
+    DDSPC::AdcCapture::check_clock;
+    DDSPC::AdcCapture::tick;
+#endif
+    // clang-format on
+    DDSPC::AdcConfig strictConfig, arrivalConfig;
+    arrivalConfig.m_strictTiming = false;
+    DDSPC::AdcCapture strict( strictConfig ), arrival( arrivalConfig );
+    strict.attached( 1, 1 );
+    arrival.attached( 1, 1 );
+    AdcFixture source;
+
+    // The producer's (Pi's) clock is 5 s ahead of this computer's.
+    auto publish = [&]( std::uint64_t counter )
+    {
+        source.publish( counter, 1000000 + std::int64_t( counter - 1 ) * 125000 );
+        auto &frame = source.m_frames[source.m_header.m_index];
+        frame.m_acquiredRealNs += 5000000000LL;
+        frame.m_writtenRealNs += 5000000000LL;
+    };
+
+    publish( 1 );
+    REQUIRE( strict.drain( source ) == 0 );
+    REQUIRE( strict.status().m_timestampRejected == 1 );
+    REQUIRE( arrival.drain( source ) == 1 );
+    REQUIRE( arrival.status().m_valid );
+    REQUIRE( arrival.status().m_latest.m_receivedNs == source.m_clock.m_monoNs );
+
+    // A step of this computer's realtime clock (an NTP correction) latches a clock fault only when strict.
+    publish( 2 );
+    source.m_clock.m_realNs += 1000000000LL;
+    REQUIRE( strict.drain( source ) == 0 );
+    REQUIRE( strict.status().m_state == DDSPC::AdcState::ClockFault );
+    REQUIRE( arrival.drain( source ) == 1 );
+
+    // Publications overwritten before they were read are counted; the newer samples are all accepted.
+    for( std::uint64_t counter = 3; counter <= 12; ++counter )
+    {
+        publish( counter );
+    }
+
+    REQUIRE( arrival.drain( source ) == 8 );
+    REQUIRE( arrival.status().m_dropped == 2 );
+    REQUIRE( arrival.status().m_samples == 10 );
+    REQUIRE( arrival.status().m_valid );
+    REQUIRE( arrival.status().m_state == DDSPC::AdcState::Streaming );
+
+    // Silence: stale once nothing has been received for max_age.
+    arrival.tick( source.m_clock.m_monoNs + arrivalConfig.m_maxAgeNs );
+    REQUIRE( arrival.status().m_valid );
+    arrival.tick( source.m_clock.m_monoNs + arrivalConfig.m_maxAgeNs + 1 );
+    REQUIRE_FALSE( arrival.status().m_valid );
+    REQUIRE( arrival.status().m_state == DDSPC::AdcState::Stale );
+}
+
 /** \brief Raw UINT16 decoding preserves channel order, unsigned subtraction, configurable ranges and polarity. */
 TEST_CASE( "ADC capture decodes accelSim and explicit custom UINT16 profiles", "[loPredCtrlAcc][adc]" )
 {

@@ -178,7 +178,8 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     std::uint64_t m_adcAnchor{ 0 };  ///< Counter of the newest sample in the latest WFS-thread window.
     std::uint64_t m_adcSegment{ 0 }; ///< Source generation of that window; counters are continuous within it.
 
-    /// Existing producer lock diagnostic; there are no local phase estimates or counter anchors.
+    /// Upstream lock, shown as a diagnostic only: the ACC need not be synchronized to the WFS, and the lock gates
+    /// neither learning nor prediction.
     std::string       m_syncDevice{ "acc000" }, m_syncProperty{ "timingDiag" };
     std::atomic<bool> m_syncLocked{ false };
 
@@ -188,15 +189,11 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     std::atomic<double>       m_upstreamLatencyUs{ std::nan( "" ) };           ///< timingDiag read_latency_error_us.
     std::atomic<std::int64_t> m_upstreamNs{ -1 };                              ///< Local receipt time of the report.
 
-    /// Default-off configuration: let the assisted learner append, learn and score ACC windows without upstream
-    /// lock (otherwise the fit learns only under lock, while it predicts either way); a fit that learned without lock
-    /// must be reset before it can predict.
+    /// parameters.assisted_diagnostic, accepted for existing configurations: the assisted fit always learns without
+    /// the upstream lock now.
     bool m_assistedDiagnostic{ false };
 
-    /// The assisted fit learned from frames without upstream lock; prediction is refused until a model reset.
-    std::atomic<bool> m_unlockedTraining{ false };
-
-    /// Latest WFS-thread ACC window is complete and fresh, independently of upstream lock.
+    /// Latest WFS-thread ACC window is complete and fresh.
     bool m_windowValid{ false };
 
     /// Why the latest WFS-thread ACC window is not usable ("ok", or "ok_unlocked" without the upstream lock).
@@ -467,8 +464,6 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     int m_maxFill{ 5 }; ///< Sizes the copied-slot ring only; no longer fills (parameters.max_fill is still accepted).
 
     std::uint64_t m_wfsRawCounter{ 0 }; ///< Source counter of the latest WFS frame, to ignore a repeated frame.
-
-    bool m_trainLocked{ false }; ///< Upstream lock when the training gate was last applied; WFS thread.
     /// @}
 
     DDSPC::Matrix m_intState;                   ///< Standard integrator state, the held position; WFS thread.
@@ -621,12 +616,14 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Allocate the independent pair and pre-sized workspaces without changing operator intent.
     void resetModels();
 
-    /// ACC samples per WFS frame measured over one window, or 0 when it is not a usable whole number.
-    /** Usable: at least 100 frames, within 0.25 of a whole number from 1 to 16, and a window of that many samples per
-     * frame times accel_history that fits the 128-sample ACC history. */
+    /// ACC samples per WFS frame measured over one window, rounded; 0 with fewer than 100 frames or no ACC samples.
+    /** Any ACC rate: it need not be a multiple of the WFS rate. The result stays at current while the measurement is
+     * within 0.6 of it, so a rate near a half-integer does not alternate, and is limited to 1-16 and to a window
+     * (times accel_history) that fits the 128-sample ACC history. */
     static int detectRatio( std::uint64_t frames /**< [in] WFS frames in the window. */,
                             std::uint64_t samples /**< [in] ACC samples accepted in the window. */,
-                            int           history /**< [in] accel_history. */ );
+                            int           history /**< [in] accel_history. */,
+                            int           current /**< [in] Confirmed ratio, or 0 for none. */ );
 
     /// The DM scheduler's steps per cycle, read once from the timing stream; 0 when it is not available.
     int schedulerSteps() const;
@@ -998,7 +995,7 @@ inline void loPredCtrlAcc_operational::setupConfig()
     add( "parameters",
          "assisted_diagnostic",
          "bool",
-         "Assisted learning and scoring without upstream lock (otherwise only under lock); default false." );
+         "Accepted for existing configurations; the assisted fit learns without the upstream lock." );
     add( "parameters",
          "ripple",
          "float",
@@ -1055,14 +1052,30 @@ inline void loPredCtrlAcc_operational::setupConfig()
          "float",
          "Wait for a commit's receipt before counting a failed DM write and writing the next slot [ms] (default "
          "100)." );
-    add( "adc", "enabled", "bool", "Use upstream synchronized ADC inputs for the assisted model." );
-    for( const auto &key : { "shmimName", "profile", "sync_device", "sync_property" } )
-        add( "adc", key, "string", "Existing ADC source or existing upstream lock diagnostic." );
+    add( "adc",
+         "enabled",
+         "bool",
+         "Use the ACC stream for the assisted model, at any rate and without synchronization to the WFS." );
+    for( const auto &key : { "shmimName", "profile" } )
+    {
+        add( "adc", key, "string", "Existing ADC source and its calibration label." );
+    }
+    for( const auto &key : { "sync_device", "sync_property" } )
+    {
+        add(
+            "adc", key, "string", "Upstream lock, shown as a diagnostic only; it never gates learning or prediction." );
+    }
     for( const auto &key : { "min_code", "max_code" } )
         add( "adc", key, "int", "Raw ADC encoding bounds." );
     add( "adc", "capacity", "int", "Existing ADC reader ring capacity." );
-    for( const auto &key : { "max_age_us", "max_interval_us", "clock_tolerance_us" } )
-        add( "adc", key, "float", "Existing ADC reader validity interval in microseconds." );
+    add( "adc",
+         "max_age_us",
+         "float",
+         "ACC silence (no sample received) after which the assisted output holds the DM command [us]." );
+    for( const auto &key : { "max_interval_us", "clock_tolerance_us" } )
+    {
+        add( "adc", key, "float", "Accepted for existing configurations; samples are used on arrival (counted only)." );
+    }
     add( "adc", "reject_rails", "bool", "Reject ADC rail samples." );
     for( const auto &key : { "zero", "volts_per_count", "sensitivity", "polarity" } )
         for( int axis = 0; axis < 2; ++axis )
@@ -1174,6 +1187,7 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         if( !m_accelEnabled )
             return 0;
         config( m_adcConfig.m_capacity, "adc.capacity" );
+        m_adcConfig.m_strictTiming = false; // The newest samples received are used, on arrival, whatever their clocks.
         auto interval = [this]( const char *key, std::int64_t &nanoseconds )
         {
             double microseconds = nanoseconds / 1000.;
@@ -1275,7 +1289,6 @@ inline void loPredCtrlAcc_operational::resetModels()
     m_multirate->allocate( m_origin );
     m_learnUs          = {};
     m_learnOverruns    = 0;
-    m_unlockedTraining = false;
     m_lastFrameNs      = -1;
     applyTraining();
     m_plans[0] = DDSPC::Matrix::Zero( m_settings.m_future * m_settings.m_modes, 1 );
@@ -1313,18 +1326,23 @@ inline void loPredCtrlAcc_operational::resetModels()
     m_fastStats.m_phase.assign( m_ratio, 0 );
 }
 
-inline int loPredCtrlAcc_operational::detectRatio( std::uint64_t frames, std::uint64_t samples, int history )
+inline int
+loPredCtrlAcc_operational::detectRatio( std::uint64_t frames, std::uint64_t samples, int history, int current )
 {
-    if( frames < 100 )
+    if( frames < 100 || !samples )
     {
         return 0;
     }
 
     const double perFrame = double( samples ) / frames;
-    const int    ratio    = int( std::lround( perFrame ) );
-    const bool   fits     = ratio * history <= int( std::tuple_size_v<decltype( m_adcHistory )> );
+    const int    limit    = std::min( 16, int( std::tuple_size_v<decltype( m_adcHistory )> ) / history );
 
-    return std::abs( perFrame - ratio ) <= .25 && ratio >= 1 && ratio <= 16 && fits ? ratio : 0;
+    if( current >= 1 && current <= limit && std::abs( perFrame - current ) < .6 )
+    {
+        return current;
+    }
+
+    return std::clamp( int( std::lround( perFrame ) ), 1, limit );
 }
 
 inline int loPredCtrlAcc_operational::schedulerSteps() const
@@ -1361,7 +1379,8 @@ inline void loPredCtrlAcc_operational::detectRates( std::int64_t now, const DDSP
 
     const std::array<int, 2> detected{
         m_schedulerSteps,
-        m_autoRatio && counted ? detectRatio( wfs - m_rateWfs, acc - m_rateAcc, m_accelHistory ) : 0 };
+        m_autoRatio && counted ? detectRatio( wfs - m_rateWfs, acc - m_rateAcc, m_accelHistory, m_targetRatio.load() )
+                               : 0 };
 
     // Two agreeing windows confirm a value, so a rate change in progress is not applied half-way.
     if( detected[0] && detected[0] == m_rateCandidate[0] )
@@ -1420,9 +1439,7 @@ inline void loPredCtrlAcc_operational::applyTraining()
     const bool learning = m_learning;
     m_models->training( DDSPC::ShadowMode::Standard, learning && !assisted && !m_mfiltCopy.load() ); // Copy: no fit.
     m_models->training( DDSPC::ShadowMode::AccelAssisted, false );
-    // The assisted fit learns only under the upstream lock (or in the diagnostic mode); unlocked it still predicts.
-    m_trainLocked = m_syncLocked.load();
-    m_multirate->training( learning && assisted && ( m_trainLocked || m_assistedDiagnostic ) );
+    m_multirate->training( learning && assisted ); // The upstream lock is not needed: the ACC need not be synchronized.
 }
 
 inline void loPredCtrlAcc_operational::learnStdFinished()
@@ -1493,9 +1510,8 @@ inline bool loPredCtrlAcc_operational::sensorHistory( const DDSPC::AdcBatch     
                                                       DDSPC::Matrix                    &features,
                                                       std::int64_t                      now )
 {
-    const bool locked = m_syncLocked.load();
-    m_windowValid     = false;
-    auto reject       = [this]( const char *reason )
+    m_windowValid = false;
+    auto reject   = [this]( const char *reason )
     {
         m_windowReason.store( reason );
         return false;
@@ -1518,8 +1534,10 @@ inline bool loPredCtrlAcc_operational::sensorHistory( const DDSPC::AdcBatch     
     if( m_adcCount < count )
         return reject( "history_filling" );
     const auto &newest = m_adcHistory[( m_adcNext + m_adcHistory.size() - 1 ) % m_adcHistory.size()];
-    if( now < newest.m_receivedNs || now - newest.m_acquiredNs > m_adcConfig.m_maxAgeNs )
+    if( now - newest.m_receivedNs > m_adcConfig.m_maxAgeNs ) // ACC silent: no sample received for max_age.
+    {
         return reject( "stale_sample" );
+    }
 
     features.resize( m_settings.m_accelChannels, 1 );
     for( unsigned n = 0; n < count; ++n ) // Newest first.
@@ -1533,8 +1551,7 @@ inline bool loPredCtrlAcc_operational::sensorHistory( const DDSPC::AdcBatch     
     m_adcAnchor   = newest.m_sequence;
     m_adcSegment  = newest.m_generation;
     m_windowValid = true;
-    // Unlocked, the window still predicts; the fit only learns under lock (applyTraining).
-    m_windowReason.store( locked ? "ok" : "ok_unlocked" );
+    m_windowReason.store( "ok" );
     return true;
 }
 
@@ -1782,12 +1799,6 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
     m_wfsRawCounter = counter;
     counter         = m_wfsCounter + 1;
 
-    // The assisted fit learns only under lock: follow lock changes.
-    if( m_syncLocked.load() != m_trainLocked )
-    {
-        applyTraining();
-    }
-
     // learn_std_extra seconds after the learn_std sequence ended (read now, so a change applies at once).
     if( m_learnStdActive && m_learnStdEndNs >= 0 && now - m_learnStdEndNs >= m_learnStdExtra * 1e9 )
     {
@@ -1986,8 +1997,7 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
                                                     std::int64_t         now )
 {
     const int  modes   = m_settings.m_modes;
-    // Probes are physical commands: only under the upstream lock, as the fit that identifies them learns only then.
-    const bool probing = m_predicting && m_learning && !m_exploration.empty() && assistedValid && m_syncLocked.load();
+    const bool probing = m_predicting && m_learning && !m_exploration.empty() && assistedValid;
     if( probing )
         m_multirate->regularization( m_exploration.front().m_lambda );
     // Keep the frozen standard fit's histories continuous so it resumes without a gap when standard is reselected.
@@ -2002,12 +2012,6 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
     const DDSPC::MatrixD lift = applied.rows() == modes && applied.cols() == m_slots
                                     ? DDSPC::MatrixD( applied.cast<double>() )
                                     : DDSPC::MatrixD();
-    // The window predicts with or without the upstream lock; the fit learns from it only under lock, except in the
-    // default-off diagnostic mode, after which the fit is barred from prediction until reset.
-    if( !m_syncLocked.load() && assistedValid && m_multirate->status().m_training )
-    {
-        m_unlockedTraining = true;
-    }
     const DDSPC::VectorD window = assistedValid ? DDSPC::VectorD( features.cast<double>() ) : DDSPC::VectorD();
     m_multirate->append( counter, y, lift, window, m_adcAnchor, m_adcSegment, m_origin );
     const bool ready = m_multirate->status().m_ready;
@@ -2033,8 +2037,7 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
         m_frame.m_predict          = m_predicting;
         ++m_frameVersion;
         m_assistedValid.store( assistedValid );
-        m_candidateValid.store( !fault && !m_unlockedTraining.load() &&
-                                ( !m_predicting || ready || probing || ( m_learning && m_gain != 0 ) ) );
+        m_candidateValid.store( !fault && ( !m_predicting || ready || probing || ( m_learning && m_gain != 0 ) ) );
         m_wfsReceipt.store( now );
         m_inputValid.store( true );
     }
@@ -2935,9 +2938,10 @@ inline int loPredCtrlAcc_operational::setupINDI()
                              "upstream_age_s",
                              "adc_state",
                              "acc_window",
-                             "model",
-                             "diagnostic_mode" } )
+                             "model" } )
+    {
         m_indiP_qualification.add( pcf::IndiElement( key, "" ) );
+    }
     if( registerIndiPropertyReadOnly( m_indiP_qualification ) < 0 )
         return -1;
     createROIndiNumber( m_indiP_adc, "adc_values" );
@@ -3174,8 +3178,6 @@ inline int loPredCtrlAcc_operational::appLogic()
     std::string blockers;
     auto        block      = [&]( const std::string &reason ) { blockers += ( blockers.empty() ? "" : "," ) + reason; };
     const auto  upstreamNs = m_upstreamNs.load();
-    const bool  adcProperty = m_syncProperty == "ddspcTiming";
-    const auto  source      = m_syncDevice + "." + m_syncProperty + ".";
     const int   enabled = m_upstreamEnabled.load(), upstreamLock = m_upstreamLocked.load();
     if( !fresh )
         block( "wfs_stale" );
@@ -3183,15 +3185,6 @@ inline int loPredCtrlAcc_operational::appLogic()
         block( "adc_disabled" );
     else if( !adc.m_valid )
         block( std::string( "adc_" ) + DDSPC::adc_state( adc.m_state ) );
-    if( upstreamNs < 0 )
-        block( "no_upstream_status_from_" + m_syncDevice + "." + m_syncProperty );
-    else
-    {
-        if( enabled != 1 )
-            block( source + ( adcProperty ? "enabled=" : "mode_code=" ) + std::to_string( enabled ) );
-        if( upstreamLock != 1 )
-            block( source + ( adcProperty ? "valid=" : "delay_lock=" ) + std::to_string( upstreamLock ) );
-    }
     if( !slotsKnown )
     {
         block( m_targetSlots.load()
@@ -3206,8 +3199,6 @@ inline int loPredCtrlAcc_operational::appLogic()
     }
     if( !samples )
         block( std::string( "acc_window_" ) + m_windowReason.load() );
-    if( m_unlockedTraining.load() )
-        block( "reset_required_trained_without_upstream_lock" );
     if( !assisted.m_ready )
         block( std::string( assisted.m_training ? "model_warming_" : "model_untrained_" ) +
                std::to_string( assisted.m_updates ) + "_of_" + std::to_string( needed ) + "_updates" );
@@ -3261,7 +3252,7 @@ inline int loPredCtrlAcc_operational::appLogic()
           : selected                         ? "standard"
                                              : "accel_assisted",
           standard.m_ready && fresh ? "true" : "false",
-          assisted.m_ready && fresh && samples && locked ? "true" : "false",
+          assisted.m_ready && fresh && samples ? "true" : "false",
           learning ? "true" : "false",
           prediction,
           locked ? "true" : "false",
@@ -3283,8 +3274,7 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      "upstream_age_s",
                                      "adc_state",
                                      "acc_window",
-                                     "model",
-                                     "diagnostic_mode" },
+                                     "model" },
                                    { blockers.empty() ? "none" : blockers,
                                      std::to_string( enabled ),
                                      std::to_string( upstreamLock ),
@@ -3296,10 +3286,7 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      std::to_string( assisted.m_updates ) + "/" + std::to_string( needed ) +
                                          ( assisted.m_ready      ? " ready"
                                            : assisted.m_training ? " learning"
-                                                                 : " frozen" ),
-                                     !m_assistedDiagnostic       ? "off"
-                                     : m_unlockedTraining.load() ? "on_learned_without_lock"
-                                                                 : "on" },
+                                                                 : " frozen" ) },
                                    blockers.empty() ? INDI_OK : INDI_BUSY );
     // Rates over the interval since the previous update.
     const double seconds = m_rates.m_ns > 0 ? ( now - m_rates.m_ns ) / 1e9 : 0;
@@ -3500,14 +3487,10 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
             m_modevalDMOpen = false;
         }
     }
-    // Refused if learned without upstream lock (reset the models first), while integrating without the main loop's
-    // parameters, with nothing to apply yet, or without the own-channel output. Off is always accepted.
+    // Refused while integrating without the main loop's parameters, before dm_slots/acc_ratio are known, with nothing
+    // to apply yet, or without the own-channel output. Off is always accepted.
     std::string refused;
-    if( enabled && m_mode.load() == DDSPC::ShadowMode::AccelAssisted && m_unlockedTraining.load() )
-    {
-        refused = "the assisted fit learned without upstream lock; reset the models";
-    }
-    else if( enabled && ( m_integrate || mfiltCopy ) && !mainLoop && !m_integratorReady.load() )
+    if( enabled && ( m_integrate || mfiltCopy ) && !mainLoop && !m_integratorReady.load() )
     {
         refused = "the main loop's integrator parameters have not been received";
     }
@@ -3868,10 +3851,7 @@ inline INDI_SETCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_sync )( const p
     m_upstreamPhaseUs.store( value( "delay_phase_error_us" ) );
     m_upstreamLatencyUs.store( value( "read_latency_error_us" ) );
     m_upstreamNs.store( synco::monotonicNs() );
-    const bool valid = mode == 1 && lock == 1;
-    m_syncLocked.store( valid );
-    if( !valid )
-        m_assistedValid.store( false );
+    m_syncLocked.store( mode == 1 && lock == 1 ); // Shown as accel_sync only.
     return 0;
 }
 
