@@ -395,7 +395,7 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, QWidget *pare
                 const bool ok = finiteNumber( value( "adc_values", "valid" ), valid ) && valid == 1;
                 return QString::number( rate, 'f', 1 ) + ( ok ? QString() : QStringLiteral( " (invalid)" ) );
             } );
-    addElementRow( statusGrid, "ACC sync", "ddspc_control", "accel_sync" );
+    addElementRow( statusGrid, "ACC sync (info, not required)", "ddspc_control", "accel_sync" );
     addRow( statusGrid,
             "rates",
             "DM slots / ACC ratio",
