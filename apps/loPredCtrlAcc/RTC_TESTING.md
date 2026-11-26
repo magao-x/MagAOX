@@ -27,7 +27,7 @@ Each model trains only while its mode is selected, so the standard and assisted 
 | `parameters.dm_slots`, `acc_ratio` | `0`, `0` | DM slots and ACC samples per WFS frame, detected while running (see below); 1–16 fixes a value instead. |
 | `parameters.ripple` | `10` | Assisted only; see below. |
 
-`dm_slots` follows the DM scheduler's steps per cycle (read from `syncopation.timingStream`), and `acc_ratio` the ACC samples received per WFS frame, rounded (acc000 at 7990 Hz with a 2 kHz WFS gives 4; a 1 kHz WFS gives 8, 700 Hz gives 11, 500 Hz gives 16). Each is measured over one-second windows and confirmed by two agreeing windows. A change resizes and resets the models, and waits until prediction is off; it is then applied on the next WFS frame and logged as "DDSPC detected dm_slots ... acc_ratio ...: models reset", so retrain after changing a rate. `rates` shows the applied `dm_slots` and `acc_ratio` and the measured `scheduler_steps` and `acc_per_wfs` (BUSY until both are known). Prediction is refused until `dm_slots` is known (and, in assisted mode, `acc_ratio`), normally about 2 s after the WFS, scheduler and ACC are running; `assisted_qualification.blockers` shows `dm_slots_detecting`, `acc_ratio_detecting`, or `<name>_<value>_applies_when_prediction_off`. `acc_ratio × accel_history` must fit the 128-sample ACC history (so `accel_history` ≤ 8 for a 500 Hz WFS); a ratio above 16 (WFS below 500 Hz at 8 kHz ACC) or not near a whole number is not detected. Design: `agents/plans/2026-11/ddspc-detected-rates.md`.
+`dm_slots` follows the DM scheduler's steps per cycle (read from `syncopation.timingStream`), and `acc_ratio` the ACC samples received per WFS frame, rounded, at any ACC rate: the ACC need not be synchronized to the WFS or run at a multiple of its rate (acc000 at 8 kHz with a 2 kHz WFS gives 4, 7 kHz gives 4 or 3, 6 kHz gives 3, an ACC slower than the WFS gives 1). A measurement within 0.6 of the current ratio keeps it, so a rate near a half-integer does not alternate. Each is measured over one-second windows and confirmed by two agreeing windows. A change resizes and resets the models, and waits until prediction is off; it is then applied on the next WFS frame and logged as "DDSPC detected dm_slots ... acc_ratio ...: models reset", so retrain after changing a rate. `rates` shows the applied `dm_slots` and `acc_ratio` and the measured `scheduler_steps` and `acc_per_wfs` (BUSY until both are known). Prediction is refused until `dm_slots` is known (and, in assisted mode, `acc_ratio`), normally about 2 s after the WFS, scheduler and ACC are running; `assisted_qualification.blockers` shows `dm_slots_detecting`, `acc_ratio_detecting`, or `<name>_<value>_applies_when_prediction_off`. `acc_ratio` is limited to 16 and to `128 / accel_history`, so that `acc_ratio × accel_history` fits the 128-sample ACC history. Design: `agents/plans/2026-11/ddspc-detected-rates.md`.
 
 `ddspc_control.prediction` names why an accepted prediction is not writing: `dm_slots_<q>_differ_from_scheduler_steps_<n>` (assisted slots are not written; also logged once as "DDSPC assisted slots not written", fixed by `dm_slots = 0`), or `holding_<condition>` while holding through lost input; otherwise `awaiting_copy` until the scheduler copies the first command, then `active`.
 
@@ -45,7 +45,7 @@ A slot ordinal is the scheduler `cycle*steps+step`. A WFS frame owns the q slots
 In assisted mode, slot p of a frame is calculated with:
 
 - the frame's WFS measurement and the WFS/command histories, published before learning starts;
-- the k ACC samples received since the frame's anchor (the newest ACC counter at the WFS decision; upstream owns the 4:1 lock), normally k = p, fewer if a sample is late (`acc_lagging`);
+- the k ACC samples received since the frame's anchor (the newest ACC sample at the WFS decision), at most `acc_ratio − 1`. With an ACC not synchronized to the WFS, k need not equal p: `acc_lagging` and `acc_anomalies` count slots with fewer, or more, new samples than slots, and are then not health measures;
 - the p commands already executed in the frame: the scheduler's copies, or the retained copy for a slot that was not copied.
 
 A slot with no current frame (a late WFS frame) holds the last command (`fast_holds`). `ddspc_performance.slot_shifts` counts decisions whose interval contained other than q new copies; a steadily rising count means the WFS and DM clocks are not locked.
@@ -86,8 +86,9 @@ The feedback sign matches mfilt only if `dm.modeCube` planes 0 and 1 use mfilt's
 The WFS and ACC histories are the newest measurements received, in arrival order. A missed or late frame neither breaks nor fills them:
 
 - **WFS:** each frame received is the next history entry, whatever source frames were missed or how late it arrived. Both fits stay ready and the output stays qualified; learning continues.
-- **ACC:** the window is the newest `4 × accel_history` samples received (each numbered on arrival). A late sample takes its place when it arrives; a sample the source never delivered (lost in transfer, skipped by acc000) simply does not occur; a frame with no new samples reuses the newest ones. `assisted_qualification.acc_window` reads `ok`, or `ok_unlocked` while the upstream lock is down.
-- **Upstream lock:** prediction uses the ACC window with or without the lock; the assisted fit learns, and exploration probes run, only under the lock (or in the diagnostic mode).
+- **ACC:** the window is the newest `acc_ratio × accel_history` samples received (each numbered on arrival), at whatever rate they arrive. A late sample takes its place when it arrives; a sample the source never delivered (lost in transfer, skipped by acc000) simply does not occur; a frame with no new samples reuses the newest ones. `assisted_qualification.acc_window` reads `ok`.
+- **ACC reader:** every in-range sample is used as it arrives on the RTC. The producer's (Pi's) timestamps and clock, sample intervals and lost publications are only counted (`adc.max_interval_us` and `adc.clock_tolerance_us` are accepted for existing configurations); the Pi and RTC clocks need not agree.
+- **Upstream lock:** not needed. acc000 may run free (`synchro.timingSource = integrator`, the default); the lock is shown as `ddspc_control.accel_sync` and in `assisted_qualification`, and gates neither learning, probes nor prediction.
 
 `parameters.max_fill` is still accepted and only sizes the copied-slot ring. The window fails only before it first fills (`history_filling`) or when the ACC stream stops for longer than `adc.max_age_us` (`stale_sample`).
 
@@ -95,7 +96,7 @@ The WFS and ACC histories are the newest measurements received, in arrival order
 
 A condition that would otherwise stop prediction at once (`wfs_stale`, `wfs_invalid`, `command_invalid`, and in assisted mode `acc_window`: the ACC stream silent for longer than `adc.max_age_us`) is held for up to `parameters.hold_timeout` seconds (default 1): no slot is rendered, so synco keeps the DM at its last command, and prediction continues by itself when the condition clears. Only a failure lasting longer stops prediction, with the condition that started it in `safety.output_state`. A request made while the input has never qualified is still refused at once. `ddspc_performance.input_holds` counts the holds; `hold_timeout=0` stops at once, as before.
 
-A lost upstream lock never holds or stops assisted prediction; it only pauses learning.
+The upstream lock never holds, stops or pauses anything.
 
 ## Before installation (operator, on the RTC)
 
@@ -134,10 +135,10 @@ The DM basis comes from `dm.modeCube`, planes 0 and 1 at their stored scale. Con
 ```bash
 getINDI 'loPredCtrlAcc.th-dm.*'                  # priority 20
 getINDI 'loPredCtrlAcc.safety.*' 'loPredCtrlAcc.ddspc_control.*' 'loPredCtrlAcc.adc_values.*'
-getINDI 'acc000.timingDiag.mode_code' 'acc000.timingDiag.delay_lock'   # both 1 for assisted mode
+getINDI 'acc000.fps.current' 'loPredCtrlAcc.rates.*'   # acc000's rate, and acc_per_wfs / acc_ratio detected from it
 ```
 
-Wait for `safety.zero_confirmed=true`, the consumer's receipt for the initial own-channel zero. If it stays false, check the scheduler, the channel and `safety.output_state`. If a readiness flag stays false, `ddspc_control.standard_state` and `assisted_state` give the reason. Possible reasons are an absent WFS, the upstream lock, sensor history, insufficient training or excitation, and numerical faults. A refused `predict` or `learn_std` request is answered at once with its unchanged state and Alert; `predict` stays Alert until a request is accepted, which `loPredCtrlAccGUI` shows as a warning.
+Wait for `safety.zero_confirmed=true`, the consumer's receipt for the initial own-channel zero. If it stays false, check the scheduler, the channel and `safety.output_state`. If a readiness flag stays false, `ddspc_control.standard_state` and `assisted_state` give the reason. Possible reasons are an absent WFS, sensor history, insufficient training or excitation, and numerical faults. A refused `predict` or `learn_std` request is answered at once with its unchanged state and Alert; `predict` stays Alert until a request is accepted, which `loPredCtrlAccGUI` shows as a warning.
 
 Start the disturbance and record a 60 s baseline with prediction off:
 
@@ -148,7 +149,7 @@ setINDI -s 'acc000.dm_enable.toggle=On'
 
 ## Assisted qualification
 
-`ddspc_control.assisted_state` reports the first failing condition. `assisted_qualification.blockers` lists all of them, for example `acc000.timingDiag.delay_lock=0,model_untrained_0_of_212_updates`; `none` means assisted mode is qualified. The other elements give the values behind them: `upstream_enabled` and `upstream_locked` (`mode_code` and `delay_lock`, or `enabled` and `valid` for `ddspcTiming`), `upstream_phase_error_us`, `upstream_read_latency_error_us`, `upstream_age_s`, `adc_state`, `acc_window` (the WFS thread's ACC window: `ok`, `history_filling`, `stale_sample`, `counter_gap`, ...), `model` (updates/needed) and `diagnostic_mode`.
+`ddspc_control.assisted_state` reports the first failing condition. `assisted_qualification.blockers` lists all of them, for example `acc_window_history_filling,model_untrained_0_of_212_updates`; `none` means assisted mode is qualified. The other elements give the values behind them: `adc_state`, `acc_window` (the WFS thread's ACC window: `ok`, `history_filling`, `stale_sample`, ...) and `model` (updates/needed). `upstream_enabled`, `upstream_locked` (`mode_code` and `delay_lock`, or `enabled` and `valid` for `ddspcTiming`), `upstream_phase_error_us`, `upstream_read_latency_error_us` and `upstream_age_s` report acc000's synchronization for information only; it is never a blocker.
 
 ```bash
 getINDI 'loPredCtrlAcc.assisted_qualification.*'
@@ -159,13 +160,9 @@ getINDI 'acc000.sim_diag.lock_phase_ok' 'acc000.sim_diag.lock_timing_ok' 'acc000
 
 With accelSim, `delay_lock=0` while `delay_phase_error_us=0` means late acquisitions (`lock_timing_ok=0`); see the accelSim README. After installing the updated accelSim, `acq_timer_slack_ns` should read 1, and `read_latency_error_us` and `lateness_window_max_us` should fall well below 50.
 
-### Diagnostic mode (default off)
+### Assisted learning without synchronization
 
-`parameters.assisted_diagnostic=true` lets the assisted learner append, learn and score complete ACC windows while the upstream lock is down, so the ACC model can be evaluated during commissioning. Without it the fit learns only under lock (prediction uses the ACC window either way), and nothing about the DM transport changes.
-
-- To evaluate an assisted fit trained with lock, keep learning off and read `rmse_phase0..3`.
-- With learning on, the fit learns without lock. `diagnostic_mode` then reads `on_learned_without_lock`, and prediction is refused until `reset_model`.
-- Exploration probes are physical commands, so they are not applied while unlocked; the learner sees the commands actually copied.
+The assisted fit learns, and exploration probes run, whether or not acc000 reports a lock. `parameters.assisted_diagnostic` is accepted for existing configurations and has no effect, and there is no longer a reset required for a fit trained without lock. To evaluate a trained assisted fit, keep learning off and read `rmse_phase0..(acc_ratio−1)`. Design: `agents/plans/2026-11/ddspc-free-running-acc.md`.
 
 ## Train and test standard
 
