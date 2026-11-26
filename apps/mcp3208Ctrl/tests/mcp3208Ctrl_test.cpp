@@ -1578,6 +1578,41 @@ TEST_CASE( "mcp3208Ctrl synchronized complete scans never skip a slot", "[mcp320
     REQUIRE( stubState().m_readOrder.size() == 8 );
 }
 
+/// Verify the scans of a WFS frame that armed nothing (its notification merged or missed) are owed and read.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized complete scans owe missed WFS frames", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_numChannels        = 2;
+    app.m_fps                = 8000;
+    app.m_syncFramesReceived = 100;
+    app.qualifyClock( 1000000000, 101 );
+
+    REQUIRE( app.processSyncReference( 1000000000 ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+    app.m_syncSchedule.m_slot = 4; // Frame 101 fully scanned.
+
+    // Frame 102's notification is lost: frame 103 arms its own 4 scans and owes frame 102's.
+    app.m_syncFramesReceived = 102;
+    REQUIRE( app.processSyncReference( 1001000000 ) == 0 );
+    REQUIRE( app.m_missedFrames == 1 );
+    REQUIRE( app.m_syncSchedule.m_backlog == 4 );
+    REQUIRE( app.m_syncSchedule.m_carried == 4 );
+    REQUIRE( app.m_syncSchedule.m_skipped == 0 );
+    REQUIRE( app.m_lastArmedId == 103 );
+
+    // Not complete: the missed frame is counted but its scans are not owed.
+    app.m_completeScans      = false;
+    app.m_syncSchedule       = {};
+    app.m_syncFramesReceived = 104;
+    REQUIRE( app.processSyncReference( 1002000000 ) == 0 );
+    REQUIRE( app.m_missedFrames == 2 );
+    REQUIRE( app.m_syncSchedule.m_backlog == 0 );
+}
+
 /// Verify the read-latency EMA updates once per WFS period, at the scan nearest the modelled phase.
 /**
  * \ingroup mcp3208Ctrl_unit_test
@@ -1835,6 +1870,8 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     app.m_coalescedWakes          = 2;
     app.m_duplicateReferences     = 1;
     app.m_scheduleFailures        = 4;
+    app.m_haveArmedId             = true;
+    app.m_missedFrames            = 6;
     REQUIRE( app.m_syncSchedule.arm( 1000000000, 500000, 8000, 0, 40000, 20000 ) );
     app.qualifyClock( 2000000000, 100 );
     app.m_wfsClockSpan_s = 0.0075;
@@ -1893,6 +1930,8 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     REQUIRE( app.m_coalescedWakes == 0 );
     REQUIRE( app.m_duplicateReferences == 0 );
     REQUIRE( app.m_scheduleFailures == 0 );
+    REQUIRE( app.m_haveArmedId == false );
+    REQUIRE( app.m_missedFrames == 0 );
     REQUIRE_FALSE( app.m_wfsClock.valid() );
     REQUIRE( app.m_wfsClock.m_count == 0 );
     REQUIRE( app.m_wfsClockSpan_s == Approx( 0.0 ) );

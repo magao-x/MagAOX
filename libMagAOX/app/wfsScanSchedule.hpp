@@ -75,6 +75,11 @@ struct syncSchedule
               double  guard /**< [in] reserved publication and lateness allowance [ns] */,
               double  tolerance = 0 /**< [in] lateness at which a slot is still taken, delaying the next [ns] */ );
 
+    /// Carry the scans of WFS frames that armed nothing into the backlog, up to one period's count.
+    /** For frames whose notification was missed or merged with another; the excess is skipped.
+     */
+    void owe( unsigned slots /**< [in] scans owed, normally missed frames times `m_count` */ );
+
     /// Return whether a slot is due: a carried-over slot, or this period's next slot at or after its deadline.
     /**
      * \returns true if `take( now )` would be called for a scan now
@@ -176,6 +181,14 @@ inline bool syncSchedule::arm(
     m_carried += m_backlog;
     m_skipped += carried - m_backlog;
     return true;
+}
+
+inline void syncSchedule::owe( unsigned slots )
+{
+    const unsigned added = std::min( slots, m_count > m_backlog ? m_count - m_backlog : 0u );
+    m_backlog += added;
+    m_carried += added;
+    m_skipped += slots - added;
 }
 
 inline bool syncSchedule::due( int64_t now ) const

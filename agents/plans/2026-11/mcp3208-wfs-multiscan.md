@@ -38,6 +38,11 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
   excess is skipped, so a persistent overload cannot build a backlog). A carried scan keeps the previous
   `delay_applied_us`, so `delay_lock` is unaffected, and does not update the read-latency controller.
   `syncTiming.carried_scans` counts them.
+- Frames that arm nothing: a WFS frame whose notification was merged with the next (`coalesced_wakes`, likely when
+  `camwfs_sync` arrives in bursts over TCP), missed (`sync_frames_dropped`), or arrived while the rolling clock was
+  confirming a rate change, got no scans at all, so complete mode still averaged below 4 x the WFS rate. Each
+  reference carries its frame ID, so the frames since the last armed reference are counted
+  (`syncTiming.missed_frames`) and, in complete mode, their scans are owed into the backlog (same one-period cap).
 - The 106.5 us came from sleeping to each deadline: in timer mode, which polls every microsecond, the same read takes
   about 89 us. A core woken from sleep (idle state, lower clock) reads slower. The loop now sleeps only until
   `synchro.spinLead_ns` (default 50 us) before each scan deadline and polls from there, checking the WFS semaphore

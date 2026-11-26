@@ -294,6 +294,12 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     uint64_t m_scheduleFailures{ 0 }; ///< WFS references with a measured period whose scans could not be fitted.
 
+    uint64_t m_lastArmedId{ 0 }; ///< WFS frame ID of the latest reference that armed scans.
+
+    bool m_haveArmedId{ false }; ///< Whether m_lastArmedId is set, so frames armed by no reference can be counted.
+
+    uint64_t m_missedFrames{ 0 }; ///< WFS frames between armed references that armed nothing themselves.
+
     /// Ten-second fit of semaphore arrivals on WFS frame IDs: the scans' WFS period and per-frame anchor.
     wfsScan::rollingWfsClock m_wfsClock;
 
@@ -1156,7 +1162,8 @@ int mcp3208Ctrl::appStartup()
                               "coalesced_wakes",
                               "duplicate_references",
                               "schedule_failures",
-                              "carried_scans" } )
+                              "carried_scans",
+                              "missed_frames" } )
     {
         m_indiP_syncTiming.add( pcf::IndiElement( name ) );
     }
@@ -1368,7 +1375,8 @@ void mcp3208Ctrl::updateSyncTimingIndi()
                                 "coalesced_wakes",
                                 "duplicate_references",
                                 "schedule_failures",
-                                "carried_scans" },
+                                "carried_scans",
+                                "missed_frames" },
                               { static_cast<double>( schedule.m_count ),
                                 schedule.fps(),
                                 schedule.m_interval * 1e-3,
@@ -1379,7 +1387,8 @@ void mcp3208Ctrl::updateSyncTimingIndi()
                                 static_cast<double>( m_coalescedWakes ),
                                 static_cast<double>( m_duplicateReferences ),
                                 static_cast<double>( m_scheduleFailures ),
-                                static_cast<double>( schedule.m_carried ) } );
+                                static_cast<double>( schedule.m_carried ),
+                                static_cast<double>( m_missedFrames ) } );
 
     const auto &clock = m_wfsClock;
 
@@ -1746,6 +1755,9 @@ void mcp3208Ctrl::resetSynchroAcquisitionState()
     m_coalescedWakes          = 0;
     m_duplicateReferences     = 0;
     m_scheduleFailures        = 0;
+    m_lastArmedId             = 0;
+    m_haveArmedId             = false;
+    m_missedFrames            = 0;
     m_wfsClock.reset();
     m_wfsClockSpan_s = 0.0;
 }
@@ -2090,6 +2102,22 @@ int mcp3208Ctrl::processSyncReference( int64_t arrival )
 
         return 1;
     }
+
+    // Frames since the last armed one armed nothing (notifications missed or merged, or a WFS rate change being
+    // confirmed). Complete, their scans are owed and read as soon as possible.
+    if( m_haveArmedId && id > m_lastArmedId + 1 )
+    {
+        const uint64_t missed = id - m_lastArmedId - 1;
+        m_missedFrames += missed;
+
+        if( m_completeScans )
+        {
+            m_syncSchedule.owe( static_cast<unsigned>( std::min<uint64_t>( missed, 64 ) ) * m_syncSchedule.m_count );
+        }
+    }
+
+    m_lastArmedId = id;
+    m_haveArmedId = true;
 
     double requestedPhase = std::fmod( static_cast<double>( m_synchroDelay ), m_syncSchedule.m_interval );
 

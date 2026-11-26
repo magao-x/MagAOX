@@ -319,10 +319,30 @@ TEST_CASE( "wfsScan complete mode scans every slot", "[wfsScanSchedule]" )
     REQUIRE( clock.m_backlog == 4 );
     REQUIRE( clock.m_skipped == 4 );
 
+    // Scans owed for frames that armed nothing join the backlog up to one period's count.
+    clock            = {};
+    clock.m_complete = true;
+    REQUIRE( clock.arm( anchor, 500000, 8000, 0, 89000, 20000 ) );
+    clock.owe( 4 );
+    REQUIRE( clock.m_backlog == 4 );
+    clock.owe( 3 );
+    REQUIRE( clock.m_backlog == 4 );
+    REQUIRE( clock.m_carried == 4 );
+    REQUIRE( clock.m_skipped == 3 );
+    REQUIRE( clock.take( anchor ) );
+    clock.owe( 2 );
+    REQUIRE( clock.m_backlog == 4 );
+    REQUIRE( clock.m_skipped == 4 );
+    REQUIRE( clock.arm( anchor + 2000000, 500000, 8000, 0, 89000, 20000 ) );
+    REQUIRE( clock.arm( anchor + 2500000, 500000, 8000, 0, 89000, 20000 ) );
+    REQUIRE( clock.arm( anchor + 3000000, 500000, 8000, 0, 89000, 20000 ) );
+    REQUIRE( clock.m_backlog == 4 );
+
     // Cancelling, or a refused arm, drops the carried-over slots as skipped.
-    REQUIRE_FALSE( clock.arm( anchor + 2500000, 500000, 8000, 0, 600000, 20000 ) );
+    const uint64_t skipped = clock.m_skipped;
+    REQUIRE_FALSE( clock.arm( anchor + 3500000, 500000, 8000, 0, 600000, 20000 ) );
     REQUIRE( clock.m_backlog == 0 );
-    REQUIRE( clock.m_skipped == 12 );
+    REQUIRE( clock.m_skipped == skipped + 8 );
 }
 
 /** Reject invalid or physically impossible schedules.
