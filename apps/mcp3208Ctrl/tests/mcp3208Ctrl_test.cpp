@@ -357,6 +357,7 @@ TEST_CASE( "mcp3208Ctrl configuration defaults load synchronized settings", "[mc
     REQUIRE( app.m_cadenceGuard_ns == Approx( 20000.0 ) );
     REQUIRE( app.m_spinLead_ns == Approx( 50000.0 ) );
     REQUIRE( app.m_lateTolerance_ns == Approx( 50000.0 ) );
+    REQUIRE( app.m_completeScans == true );
     REQUIRE( app.m_wfsClock.m_minEvents == 16 );
     REQUIRE( app.m_wfsClock.m_tolerance == Approx( 0.1 ) );
     REQUIRE( app.m_alpha == Approx( 0.01f ) );
@@ -394,6 +395,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "synchro",
                                 "synchro",
                                 "synchro",
+                                "synchro",
                                 "accel",
                                 "accel" },
                               { "shmimName",
@@ -408,6 +410,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "alpha",
                                 "spinLead_ns",
                                 "lateTolerance_ns",
+                                "completeScans",
                                 "wfsFitMinEvents",
                                 "wfsCadenceTolerance",
                                 "numChannels",
@@ -424,6 +427,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "0.25",
                                 "30000",
                                 "20000",
+                                "false",
                                 "8",
                                 "0.2",
                                 "3",
@@ -442,6 +446,7 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( app.m_cadenceGuard_ns == Approx( 15000.0 ) );
     REQUIRE( app.m_spinLead_ns == Approx( 30000.0 ) );
     REQUIRE( app.m_lateTolerance_ns == Approx( 20000.0 ) );
+    REQUIRE( app.m_completeScans == false );
     REQUIRE( app.m_wfsClock.m_minEvents == 8 );
     REQUIRE( app.m_wfsClock.m_tolerance == Approx( 0.2 ) );
     REQUIRE( app.m_alpha == Approx( 0.25f ) );
@@ -1333,6 +1338,7 @@ TEST_CASE( "mcp3208Ctrl scanLateTolerance sets the scan lateness tolerance", "[m
 
     REQUIRE( app.processSyncReference( 1000000000 ) == 0 );
     REQUIRE( app.m_syncSchedule.m_tolerance == Approx( 12500.0 ) );
+    REQUIRE( app.m_syncSchedule.m_complete == true );
 }
 
 /// Verify a slow ADC read lowers the scans per WFS frame, and a read estimate that fits nothing is measured again.
@@ -1531,6 +1537,45 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
     REQUIRE( app.m_syncProducerFrameDelta == 0 );
 
     REQUIRE( app.m_duplicateReferences == 1 );
+}
+
+/// Verify complete scanning reads a late slot late, and the previous period's unscanned slot at once.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized complete scans never skip a slot", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    resetStubState();
+    stubState().m_channelValues = { 101, 202 };
+
+    app.m_numChannels = 2;
+    app.m_values.assign( 2, 0 );
+    app.m_gain                    = 0.0f;
+    app.m_synchroDelayTarget      = 409400.0f;
+    app.m_syncSchedule.m_complete = true;
+
+    const int64_t anchor = 1000000000;
+    REQUIRE( app.m_syncSchedule.arm( anchor, 500000, 8000, 409400, 40000, 20000 ) );
+
+    // Slots 0 to 2 are read 300 us late, one after another; nothing is skipped.
+    REQUIRE( app.acquireScan( anchor + 334400 ) == 0 );
+    REQUIRE( app.acquireScan( anchor + 423400 ) == 0 );
+    REQUIRE( app.acquireScan( anchor + 512400 ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_slot == 3 );
+    REQUIRE( app.m_lateScans == 3 );
+    REQUIRE( app.m_delayApplied_ns == Approx( 284400.0 ) );
+
+    // Slot 3 was not read when the next period armed: it is read at once, keeping the last slot's phase.
+    REQUIRE( app.m_syncSchedule.arm( anchor + 500000, 500000, 8000, 409400, 40000, 20000 ) );
+    REQUIRE( app.acquireScan( anchor + 601400 ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_carried == 1 );
+    REQUIRE( app.m_syncSchedule.m_backlog == 0 );
+    REQUIRE( app.m_delayApplied_ns == Approx( 284400.0 ) );
+    REQUIRE( app.m_firstReadLatency == true );
+    REQUIRE( app.m_syncSchedule.m_skipped == 0 );
+    REQUIRE( stubState().m_readOrder.size() == 8 );
 }
 
 /// Verify the read-latency EMA updates once per WFS period, at the scan nearest the modelled phase.

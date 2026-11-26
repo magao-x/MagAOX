@@ -115,6 +115,8 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     double m_lateTolerance_ns{ 50e3 }; ///< Synchronized: a scan at most this late is taken even if it delays the next.
 
+    bool m_completeScans{ true }; ///< Synchronized: never skip a scan (late ones late, unscanned ones next period).
+
     int m_wfsFitMinEvents{
         16 }; ///< Consistent WFS references that qualify the rolling clock, at start or a rate change.
 
@@ -804,6 +806,18 @@ void mcp3208Ctrl::setupConfig()
         "Nanoseconds before each synchronized scan deadline to stop sleeping and poll, so the core is awake when "
         "the read starts (a read after sleeping is slower). 0 sleeps to the deadline. Default is 50000." );
 
+    config.add( "synchro.completeScans",
+                "",
+                "synchro.completeScans",
+                argType::Required,
+                "synchro",
+                "completeScans",
+                false,
+                "bool",
+                "Never skip a synchronized scan: late scans are taken late, and a WFS period's unscanned slots are "
+                "taken at once in the next (up to one period's worth), so the average rate is exactly the scans per "
+                "WFS frame times the WFS rate. false skips scans later than lateTolerance_ns. Default is true." );
+
     config.add( "synchro.lateTolerance_ns",
                 "",
                 "synchro.lateTolerance_ns",
@@ -813,8 +827,8 @@ void mcp3208Ctrl::setupConfig()
                 false,
                 "double",
                 "A synchronized scan at most this late is still taken, even if that delays the next scan (which then "
-                "catches up); later scans that cannot finish before the next are skipped. INDI scanLateTolerance (us). "
-                "0 to 1000000, default 50000." );
+                "catches up); later scans that cannot finish before the next are skipped. Only with completeScans "
+                "false. INDI scanLateTolerance (us). 0 to 1000000, default 50000." );
 
     config.add( "synchro.wfsFitMinEvents",
                 "",
@@ -931,6 +945,7 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_delayLockFracThreshold, "synchro.delayLockFracThreshold" );
     _config( m_cadenceGuard_ns, "synchro.cadenceGuard_ns" );
     _config( m_spinLead_ns, "synchro.spinLead_ns" );
+    _config( m_completeScans, "synchro.completeScans" );
     _config( m_lateTolerance_ns, "synchro.lateTolerance_ns" );
     _config( m_wfsFitMinEvents, "synchro.wfsFitMinEvents" );
     _config( m_wfsCadenceTolerance, "synchro.wfsCadenceTolerance" );
@@ -1140,7 +1155,8 @@ int mcp3208Ctrl::appStartup()
                               "max_lateness_us",
                               "coalesced_wakes",
                               "duplicate_references",
-                              "schedule_failures" } )
+                              "schedule_failures",
+                              "carried_scans" } )
     {
         m_indiP_syncTiming.add( pcf::IndiElement( name ) );
     }
@@ -1351,7 +1367,8 @@ void mcp3208Ctrl::updateSyncTimingIndi()
                                 "max_lateness_us",
                                 "coalesced_wakes",
                                 "duplicate_references",
-                                "schedule_failures" },
+                                "schedule_failures",
+                                "carried_scans" },
                               { static_cast<double>( schedule.m_count ),
                                 schedule.fps(),
                                 schedule.m_interval * 1e-3,
@@ -1361,7 +1378,8 @@ void mcp3208Ctrl::updateSyncTimingIndi()
                                 m_maxLateness_ns * 1e-3,
                                 static_cast<double>( m_coalescedWakes ),
                                 static_cast<double>( m_duplicateReferences ),
-                                static_cast<double>( m_scheduleFailures ) } );
+                                static_cast<double>( m_scheduleFailures ),
+                                static_cast<double>( schedule.m_carried ) } );
 
     const auto &clock = m_wfsClock;
 
@@ -1882,7 +1900,7 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
 
         m_syncSchedule.discardLate( now );
 
-        if( m_syncSchedule.m_slot < m_syncSchedule.m_count && now >= m_syncSchedule.deadline() )
+        if( m_syncSchedule.due( now ) )
         {
             const int rv = acquireScan( now );
 
@@ -2051,6 +2069,8 @@ int mcp3208Ctrl::processSyncReference( int64_t arrival )
     m_delayBudget_ns     = std::max( 0.0, m_wfsPeriodMeasured_ns - service - m_cadenceGuard_ns );
     m_synchroDelay       = static_cast<float>( static_cast<double>( m_synchroDelayTarget ) + correction );
 
+    m_syncSchedule.m_complete = m_completeScans;
+
     if( !m_syncSchedule.arm( m_wfsClock.reference( id ),
                              m_wfsPeriodMeasured_ns,
                              m_fps,
@@ -2086,7 +2106,9 @@ int mcp3208Ctrl::acquireScan( int64_t now )
 {
     m_syncSchedule.discardLate( now );
 
-    const int64_t due      = m_syncSchedule.deadline();
+    // A slot carried over from the previous period is scanned at once and has no phase in this one.
+    const bool    carried  = m_syncSchedule.m_backlog > 0;
+    const int64_t due      = carried ? now : m_syncSchedule.deadline();
     const bool    previous = m_syncSchedule.m_haveSample;
     const int64_t last     = m_syncSchedule.m_lastSample;
 
@@ -2102,9 +2124,13 @@ int mcp3208Ctrl::acquireScan( int64_t now )
     }
 
     const unsigned slot  = m_syncSchedule.m_slot - 1;
-    m_delayApplied_ns    = static_cast<double>( due - m_syncSchedule.m_anchor );
-    m_triggerTime        = nsToTimespec( timespecToNs( m_atime ) + m_delayApplied_ns );
     m_triggerInterval_ns = previous ? static_cast<double>( now - last ) : 0.0;
+
+    if( !carried )
+    {
+        m_delayApplied_ns = static_cast<double>( due - m_syncSchedule.m_anchor );
+        m_triggerTime     = nsToTimespec( timespecToNs( m_atime ) + m_delayApplied_ns );
+    }
 
     if( getRealtime( m_currImageTimestamp ) < 0 )
     {
@@ -2134,7 +2160,7 @@ int mcp3208Ctrl::acquireScan( int64_t now )
                     0.0,
                     static_cast<double>( m_syncSchedule.m_count - 1 ) ) );
 
-    if( slot == referenceSlot )
+    if( !carried && slot == referenceSlot )
     {
         const double latency = static_cast<double>( now - m_syncSchedule.m_anchor );
         m_avgReadLatency_ns  = m_firstReadLatency ? latency : alpha * latency + ( 1.0 - alpha ) * m_avgReadLatency_ns;

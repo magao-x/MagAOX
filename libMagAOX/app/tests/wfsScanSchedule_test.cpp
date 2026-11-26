@@ -272,6 +272,59 @@ TEST_CASE( "wfsScan takes late slots within the tolerance", "[wfsScanSchedule]" 
     REQUIRE( clock.deadline() == anchor + 250000 );
 }
 
+/** Complete mode scans every slot: late slots late, and a period's unscanned slots at once in the next.
+ * \ingroup app_unit_test
+ */
+TEST_CASE( "wfsScan complete mode scans every slot", "[wfsScanSchedule]" )
+{
+    // clang-format off
+#ifdef WFSSCANSCHEDULE_TEST_DOXYGEN_REF
+    MagAOX::app::wfsScan::syncSchedule::due;
+    MagAOX::app::wfsScan::syncSchedule::take;
+    MagAOX::app::wfsScan::syncSchedule::arm;
+#endif
+    // clang-format on
+    syncSchedule clock;
+    clock.m_complete     = true;
+    const int64_t anchor = 1000000000;
+
+    // A 300 us stall after slot 0: slots 1 and 2 are taken late, back to back; slot 3 is pending at the next WFS
+    // frame, carried over, and taken at once before that frame's slots.
+    REQUIRE( clock.arm( anchor, 500000, 8000, 0, 89000, 20000 ) );
+    REQUIRE( clock.take( anchor ) );
+    REQUIRE( clock.due( anchor + 389000 ) );
+    REQUIRE( clock.take( anchor + 389000 ) );
+    REQUIRE( clock.take( anchor + 478000 ) );
+    REQUIRE( clock.m_slot == 3 );
+
+    REQUIRE( clock.arm( anchor + 500000, 500000, 8000, 0, 89000, 20000 ) );
+    REQUIRE( clock.m_backlog == 1 );
+    REQUIRE( clock.due( anchor + 500000 ) );
+    REQUIRE( clock.take( anchor + 567000 ) );
+    REQUIRE( clock.m_backlog == 0 );
+    REQUIRE( clock.due( anchor + 656000 ) ); // This frame's slot 0 is due, late, after the carried-over scan.
+
+    for( int slot = 0; slot < 4; ++slot )
+    {
+        REQUIRE( clock.take( std::max<int64_t>( anchor + 656000 + slot * 89000, clock.deadline() ) ) );
+    }
+
+    REQUIRE( clock.m_skipped == 0 );
+    REQUIRE( clock.m_carried == 1 );
+
+    // An unscanned period is carried over only up to one period's count; the excess is skipped.
+    REQUIRE( clock.arm( anchor + 1000000, 500000, 8000, 0, 89000, 20000 ) );
+    REQUIRE( clock.arm( anchor + 1500000, 500000, 8000, 0, 89000, 20000 ) );
+    REQUIRE( clock.arm( anchor + 2000000, 500000, 8000, 0, 89000, 20000 ) );
+    REQUIRE( clock.m_backlog == 4 );
+    REQUIRE( clock.m_skipped == 4 );
+
+    // Cancelling, or a refused arm, drops the carried-over slots as skipped.
+    REQUIRE_FALSE( clock.arm( anchor + 2500000, 500000, 8000, 0, 600000, 20000 ) );
+    REQUIRE( clock.m_backlog == 0 );
+    REQUIRE( clock.m_skipped == 12 );
+}
+
 /** Reject invalid or physically impossible schedules.
  * \ingroup app_unit_test
  */

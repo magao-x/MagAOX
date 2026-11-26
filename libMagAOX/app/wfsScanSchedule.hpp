@@ -30,7 +30,9 @@ constexpr double c_ratioTolerance = 0.01;
  * `c_ratioTolerance`. A WFS faster than `fps` still gets one scan per WFS frame. If the scans do not fit (scan
  * service plus guard must be less than the interval), the count drops to the highest that does: `fps()` then reports
  * the lower rate. A slot too late to finish before the next one is skipped, unless it is within the lateness tolerance:
- * then it is taken and the following slots catch up on the interval's slack. The first scan is at the requested
+ * then it is taken and the following slots catch up on the interval's slack. In complete mode (`m_complete`) no
+ * slot is skipped: late slots are taken late, and slots still pending at the next arm are carried over and taken at
+ * once, up to one period's count, so each period yields `m_count` scans on average. The first scan is at the requested
  * phase reduced modulo the scan interval, so a member of the scan grid aligns with the WFS phase model. Originally
  * written for ad7689Ctrl.
  */
@@ -50,11 +52,14 @@ struct syncSchedule
     int64_t  m_lastSample{ 0 };     ///< Most recent consumed scan start; retained across WFS updates.
     bool     m_haveSample{ false }; ///< Whether a minimum inter-scan spacing can be enforced.
     uint64_t m_skipped{ 0 };        ///< Slots abandoned after lateness, replacement, or insufficient separation.
+    bool     m_complete{ false };   ///< Scan every slot: late ones late, unscanned ones in the next period.
+    unsigned m_backlog{ 0 };        ///< Slots carried over from earlier periods, taken before this period's.
+    uint64_t m_carried{ 0 };        ///< Lifetime slots carried over into a later period.
     ///@}
 
     /** \name Schedule
      * @{ */
-    /// Abandon pending slots, retaining the last acquisition time and lifetime skipped count.
+    /// Abandon pending and carried-over slots, retaining the last acquisition time and lifetime counts.
     void cancel();
 
     /// Start a new period with the highest integer scan count within the rate limit that the scan service fits.
@@ -70,6 +75,12 @@ struct syncSchedule
               double  guard /**< [in] reserved publication and lateness allowance [ns] */,
               double  tolerance = 0 /**< [in] lateness at which a slot is still taken, delaying the next [ns] */ );
 
+    /// Return whether a slot is due: a carried-over slot, or this period's next slot at or after its deadline.
+    /**
+     * \returns true if `take( now )` would be called for a scan now
+     */
+    bool due( int64_t now /**< [in] current monotonic time [ns] */ ) const;
+
     /// Return the next absolute scan deadline, rounding only the accumulated offset.
     int64_t deadline() const;
 
@@ -77,9 +88,11 @@ struct syncSchedule
     int64_t end() const;
 
     /// Skip slots more than the tolerance late that cannot finish before the next slot or the next WFS boundary.
+    /** Nothing is skipped in complete mode.
+     */
     void discardLate( int64_t now /**< [in] current monotonic time [ns] */ );
 
-    /// Consume exactly one due slot; reject early, expired, or unsafe compressed acquisitions.
+    /// Consume exactly one due slot, carried-over slots first; reject early, expired, or unsafe compressed ones.
     /**
      * \returns true if a slot was consumed and a scan should start now
      * \returns false if no slot is due
@@ -93,21 +106,37 @@ struct syncSchedule
 
 inline void syncSchedule::cancel()
 {
-    m_skipped += m_count - m_slot;
-    m_count = m_slot = 0;
+    m_skipped += m_count - m_slot + m_backlog;
+    m_count = m_slot = m_backlog = 0;
     m_wfsPeriod = m_interval = m_phase = m_service = m_budget = m_tolerance = 0;
 }
 
 inline bool syncSchedule::arm(
     int64_t anchor, double period, double fps, double phase, double service, double guard, double tolerance )
 {
+    // Complete: this period's unscanned slots are carried over rather than skipped.
+    unsigned carried = 0;
+
+    if( m_complete )
+    {
+        carried   = m_backlog + ( m_count - m_slot );
+        m_backlog = 0;
+        m_slot    = m_count;
+    }
+
     cancel();
+
+    auto refuse = [this, carried]()
+    {
+        m_skipped += carried;
+        return false;
+    };
 
     if( anchor < 0 || !std::isfinite( period ) || period <= 0 || period > 1e9 || !std::isfinite( fps ) || fps <= 0 ||
         fps > 10000 || !std::isfinite( phase ) || !std::isfinite( service ) || service <= 0 ||
         !std::isfinite( guard ) || guard < 0 || !std::isfinite( tolerance ) || tolerance < 0 )
     {
-        return false;
+        return refuse();
     }
 
     const double   budget = service + guard;
@@ -117,7 +146,7 @@ inline bool syncSchedule::arm(
 
     if( count < 1 )
     {
-        return false;
+        return refuse();
     }
 
     const double interval = period / count;
@@ -125,7 +154,7 @@ inline bool syncSchedule::arm(
     if( budget >= interval || 1e9 / interval > 10000 * ( 1 + c_ratioTolerance ) ||
         static_cast<double>( anchor ) > static_cast<double>( std::numeric_limits<int64_t>::max() ) - 2e9 )
     {
-        return false;
+        return refuse();
     }
 
     double wrapped = std::fmod( phase, interval );
@@ -143,7 +172,15 @@ inline bool syncSchedule::arm(
     m_service   = service;
     m_phase     = std::min( wrapped, interval - budget );
     m_count     = count;
+    m_backlog   = std::min( carried, count );
+    m_carried += m_backlog;
+    m_skipped += carried - m_backlog;
     return true;
+}
+
+inline bool syncSchedule::due( int64_t now ) const
+{
+    return m_backlog || ( m_slot < m_count && now >= deadline() );
 }
 
 inline int64_t syncSchedule::deadline() const
@@ -158,6 +195,11 @@ inline int64_t syncSchedule::end() const
 
 inline void syncSchedule::discardLate( int64_t now )
 {
+    if( m_complete )
+    {
+        return; // Every slot is scanned, however late.
+    }
+
     while( m_slot < m_count )
     {
         const int64_t due = deadline();
@@ -183,6 +225,14 @@ inline void syncSchedule::discardLate( int64_t now )
 
 inline bool syncSchedule::take( int64_t now )
 {
+    if( m_backlog )
+    {
+        --m_backlog;
+        m_lastSample = now;
+        m_haveSample = true;
+        return true;
+    }
+
     discardLate( now );
 
     if( m_slot >= m_count || now < deadline() )

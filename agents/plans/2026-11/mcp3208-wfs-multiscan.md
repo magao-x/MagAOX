@@ -29,6 +29,15 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
   Stalls up to about 36 us plus the tolerance are absorbed as briefly uneven spacing instead of a lost sample. The
   half-interval minimum spacing now compares the actual start time (not the deadline) with the previous scan's start;
   comparing the deadline would have skipped the catching-up scans.
+- Complete scans (`synchro.completeScans`, default true): the priority is an average rate of exactly the scans per
+  frame times the WFS rate (8000 Hz at 2 kHz); spacing jitter is acceptable. A skipped scan is worse than a late one:
+  acc000's `cnt0` is assigned per published frame, so loPredCtrlAcc (which places ACC samples by counter) sees no
+  gap and its positional features shift by one sample for `accel_history` frames. In complete mode no slot is
+  skipped: late slots are taken late (`lateTolerance_ns` applies only when false), and slots still unscanned at the
+  next WFS reference are carried over and scanned at once, ahead of that period's, up to one period's count (the
+  excess is skipped, so a persistent overload cannot build a backlog). A carried scan keeps the previous
+  `delay_applied_us`, so `delay_lock` is unaffected, and does not update the read-latency controller.
+  `syncTiming.carried_scans` counts them.
 - The 106.5 us came from sleeping to each deadline: in timer mode, which polls every microsecond, the same read takes
   about 89 us. A core woken from sleep (idle state, lower clock) reads slower. The loop now sleeps only until
   `synchro.spinLead_ns` (default 50 us) before each scan deadline and polls from there, checking the WFS semaphore
