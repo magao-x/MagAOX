@@ -49,6 +49,7 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_offloadStamps;
     using counterOffload::m_onsetSigma;
     using counterOffload::m_overflows;
+    using counterOffload::m_published;
     using counterOffload::m_rampDurationUs;
     using counterOffload::m_ramps;
     using counterOffload::m_rampStartUs;
@@ -62,9 +63,12 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_stepMode;
     using counterOffload::m_stepPeriodS;
     using counterOffload::m_syncopationTiming;
+    using counterOffload::m_telemLast;
     using counterOffload::m_timeOffsetUs;
     using counterOffload::m_timeoutS;
     using counterOffload::m_zeroRequested;
+    using counterOffload::recordCounterOffload;
+    using counterOffload::recordTelem;
 
     /// Set up 2x2 buffers, a ramp from 120 to 450 us, a gain of 0.5, and a clip level high enough not to act.
     counterOffload_test()
@@ -1436,6 +1440,111 @@ TEST_CASE( "counterOffload records each offload's latency at its first slot", "[
 
         app.updateSlotPeriod( c );
         REQUIRE( app.m_slotNs == 125 * us );
+    }
+}
+
+/// Verify when telemetry records are written: periodically, and at once on a toggle or a settings change.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload writes telemetry at once on changes", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::recordCounterOffload(false);
+    counterOffload::recordTelem(nullptr);
+    counterOffload::telemSettings();
+    counterOffload::setEnabled(true);
+    counterOffload::setCalibParams({});
+    #endif
+    // clang-format on
+
+    using MagAOX::logger::telem_counteroffload;
+
+    counterOffload_test app;
+
+    auto recorded = []() { return telem_counteroffload::lastRecord.tv_sec != 0 || telem_counteroffload::lastRecord.tv_nsec != 0; };
+
+    auto reset = []() { telem_counteroffload::lastRecord = { 0, 0 }; };
+
+    reset();
+    REQUIRE( app.recordCounterOffload() == 0 ); // the first record is always written
+    REQUIRE( recorded() );
+
+    SECTION( "unchanged settings and changed counters do not record" )
+    {
+        reset();
+        REQUIRE( app.recordCounterOffload() == 0 );
+        REQUIRE_FALSE( recorded() );
+
+        app.m_events    = 5;
+        app.m_published = 100;
+        REQUIRE( app.recordCounterOffload() == 0 );
+        REQUIRE_FALSE( recorded() );
+
+        REQUIRE( app.recordCounterOffload( true ) == 0 );
+        REQUIRE( recorded() );
+    }
+
+    SECTION( "the periodic record is forced" )
+    {
+        reset();
+        REQUIRE( app.recordTelem( static_cast<const telem_counteroffload *>( nullptr ) ) == 0 );
+        REQUIRE( recorded() );
+    }
+
+    SECTION( "enabling and disabling record at once" )
+    {
+        reset();
+        REQUIRE( app.setEnabled( true ) );
+        REQUIRE( recorded() );
+        REQUIRE( app.m_telemLast.enabled );
+
+        reset();
+        REQUIRE_FALSE( app.setEnabled( true ) ); // no change, no record
+        REQUIRE_FALSE( recorded() );
+
+        REQUIRE( app.setEnabled( false ) );
+        REQUIRE( recorded() );
+        REQUIRE_FALSE( app.m_telemLast.enabled );
+    }
+
+    SECTION( "each setting change records" )
+    {
+        std::vector<double *> settings = {
+            &app.m_gain, &app.m_leak, &app.m_rampStartUs, &app.m_rampDurationUs, &app.m_timeOffsetUs, &app.m_maxCommand };
+
+        for( double *v : settings )
+        {
+            reset();
+            *v += 0.25;
+            REQUIRE( app.recordCounterOffload() == 0 );
+            REQUIRE( recorded() );
+        }
+
+        REQUIRE( app.m_telemLast.gain == Approx( 0.75 ) );
+        REQUIRE( app.m_telemLast.maxCommand == Approx( 100.25 ) );
+    }
+
+    SECTION( "a calibration starting records" )
+    {
+        reset();
+        app.m_calibRunning = true;
+        REQUIRE( app.recordCounterOffload() == 0 );
+        REQUIRE( recorded() );
+        REQUIRE( app.m_telemLast.calibrating );
+    }
+
+    SECTION( "calibration parameter changes record, unchanged ones do not" )
+    {
+        reset();
+        app.setCalibParams( { app.m_rampStartUs, app.m_rampDurationUs, app.m_gain } );
+        REQUIRE_FALSE( recorded() );
+
+        app.setCalibParams( { 0, 330, 1.16 } );
+        REQUIRE( recorded() );
+        REQUIRE( app.m_telemLast.rampStartUs == 0 );
+        REQUIRE( app.m_telemLast.gain == Approx( 1.16 ) );
     }
 }
 

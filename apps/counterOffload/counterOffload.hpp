@@ -85,6 +85,9 @@ struct residualShmimT
  * sweeps rampStartUs, gain and rampDurationUs, then rampStartUs and gain again, choosing each from a quadratic fit and
  * moving only for an improvement beyond the noise, and applies the result if replicates confirm it.
  *
+ * Telemetry (telem_counteroffload) is written every telemeter.maxInterval, and at once when the app is enabled or
+ * disabled, a calibration starts or ends, or gain, leak, rampStartUs or rampDurationUs changes.
+ *
  * The latency INDI property breaks each offload's delay into the handoff from the woofer post (whose time t2wOffloader
  * stores in the input frame's atime), the wait for a slot, and the compute and write times of that slot.
  *
@@ -93,7 +96,8 @@ struct residualShmimT
 class counterOffload : public MagAOXApp<true>,
                        public dev::shmimMonitor<counterOffload>,
                        public dev::shmimMonitor<counterOffload, residualShmimT>,
-                       public dev::dmSyncopationProducer<counterOffload>
+                       public dev::dmSyncopationProducer<counterOffload>,
+                       public dev::telemeter<counterOffload>
 {
     typedef float realT; ///< Floating point type of the tweeter commands.
 
@@ -103,11 +107,15 @@ class counterOffload : public MagAOXApp<true>,
 
     typedef dev::dmSyncopationProducer<counterOffload> dmSyncopationProducerT; ///< The syncopation producer base.
 
+    typedef dev::telemeter<counterOffload> telemeterT; ///< The telemetry base.
+
     friend class dev::shmimMonitor<counterOffload>;
 
     friend class dev::shmimMonitor<counterOffload, residualShmimT>;
 
     friend class dev::dmSyncopationProducer<counterOffload>;
+
+    friend class dev::telemeter<counterOffload>;
 
     friend class counterOffload_test;
 
@@ -186,6 +194,32 @@ class counterOffload : public MagAOXApp<true>,
 
     /// Calibrated parameters, in order: rampStartUs, rampDurationUs, gain.
     typedef std::array<double, 3> calibParamsT;
+
+    /// The fields of a telemetry record whose change triggers an immediate record.
+    struct telemSettingsT
+    {
+        bool enabled{ false }; ///< Whether new offloads are accepted.
+
+        bool calibrating{ false }; ///< Whether a calibration run is requested or in progress.
+
+        double gain{ 0 }; ///< Scale applied to each new offload.
+
+        double leak{ 0 }; ///< Fraction of the completed contribution removed after each published slot.
+
+        double rampStartUs{ 0 }; ///< Ramp start after the woofer command, us.
+
+        double rampDurationUs{ 0 }; ///< Ramp duration, us.
+
+        double timeOffsetUs{ 0 }; ///< Offset added to the input receipt time to give the ramp reference, us.
+
+        double maxCommand{ 0 }; ///< Largest magnitude of any pixel of the command and of the accumulator.
+
+        /// Compare all fields.
+        /**
+         * \returns true if every field is equal
+         */
+        bool operator==( const telemSettingsT &other /**< [in] the settings to compare with */ ) const = default;
+    };
 
     /// Calibration stages, as used by calibStageName(), the CSV and the calibration.stage INDI element.
     enum calibStage
@@ -515,6 +549,12 @@ class counterOffload : public MagAOXApp<true>,
     synco::Request m_lastRequest{}; ///< The previous slot request, for m_slotNs.  Producer thread only.
 
     bool m_leadLogged{ false }; ///< Whether the slot lead has been logged.  Producer thread only.
+
+    std::mutex m_telemMutex; ///< Serializes telemetry records, which are made from the INDI, appLogic and calibration threads.
+
+    telemSettingsT m_telemLast; ///< The settings in the last telemetry record.  m_telemMutex.
+
+    bool m_telemRecorded{ false }; ///< Whether a telemetry record has been made.  m_telemMutex.
 
     ///@}
 
@@ -1122,6 +1162,43 @@ class counterOffload : public MagAOXApp<true>,
 
     ///@}
 
+    /** \name Telemeter Interface
+     *
+     * @{
+     */
+
+    /// Check whether the periodic telemetry record is due.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int checkRecordTimes();
+
+    /// Record the counter-offload telemetry on demand.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int recordTelem( const telem_counteroffload *tag /**< [in] telemetry type tag */ );
+
+    /// Snapshot the fields of the telemetry record whose change triggers an immediate record.
+    /** Takes m_stateMutex, so the caller must not hold it.
+     *
+     * \returns the current settings
+     */
+    telemSettingsT telemSettings();
+
+    /// Write a telemetry record if forced, if none has been written, or if the settings changed since the last one.
+    /** Counters and latency alone do not trigger a record.  Takes m_telemMutex and m_stateMutex, so the caller must
+     * hold neither.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int recordCounterOffload( bool force = false /**< [in] record even when the settings are unchanged */ );
+
+    ///@}
+
     /** \name INDI Interface
      *
      * @{
@@ -1245,6 +1322,8 @@ inline void counterOffload::setupConfig()
     SHMIMMONITORT_SETUP_CONFIG( residualShmimMonitorT, config );
 
     DMSYNCOPATIONPRODUCER_SETUP_CONFIG( config );
+
+    TELEMETER_SETUP_CONFIG( config );
 
     config.add( "counterOffload.channel",
                 "",
@@ -1396,6 +1475,8 @@ inline int counterOffload::loadConfigImpl( mx::app::appConfigurator &_config )
     SHMIMMONITORT_LOAD_CONFIG( residualShmimMonitorT, _config );
 
     DMSYNCOPATIONPRODUCER_LOAD_CONFIG( _config );
+
+    TELEMETER_LOAD_CONFIG( _config );
 
     _config( m_channel, "counterOffload.channel" );
     _config( m_rampStartUs, "counterOffload.rampStartUs" );
@@ -1580,6 +1661,8 @@ inline int counterOffload::appStartup()
 
     SHMIMMONITORT_APP_STARTUP( residualShmimMonitorT );
 
+    TELEMETER_APP_STARTUP;
+
     if( threadStart( m_coThread,
                      m_coThreadInit,
                      m_coThreadID,
@@ -1636,6 +1719,8 @@ inline int counterOffload::appLogic()
     SHMIMMONITOR_APP_LOGIC;
 
     SHMIMMONITORT_APP_LOGIC( residualShmimMonitorT );
+
+    TELEMETER_APP_LOGIC;
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
 
@@ -1769,6 +1854,10 @@ inline int counterOffload::appShutdown()
     SHMIMMONITORT_APP_SHUTDOWN( residualShmimMonitorT );
 
     DMSYNCOPATIONPRODUCER_APP_SHUTDOWN;
+
+    recordCounterOffload( true ); // keep the final counters
+
+    TELEMETER_APP_SHUTDOWN;
 
     if( m_auxOpened )
     {
@@ -2075,12 +2164,16 @@ inline bool counterOffload::setEnabled( bool on )
         return false;
     }
 
+    recordCounterOffload( true ); // the old state up to the toggle
+
     if( !on )
     {
         m_zeroRequested = true; // clear the contribution at the next slot
     }
 
     m_enabled = on;
+
+    recordCounterOffload( true ); // the new state from the toggle, without waiting for the periodic record
 
     return true;
 }
@@ -2838,11 +2931,22 @@ inline counterOffload::calibParamsT counterOffload::calibParams()
 
 inline void counterOffload::setCalibParams( const calibParamsT &p )
 {
-    std::lock_guard<std::mutex> guard( m_stateMutex );
+    if( p == calibParams() )
+    {
+        return;
+    }
 
-    m_rampStartUs    = p[0];
-    m_rampDurationUs = p[1];
-    m_gain           = p[2];
+    recordCounterOffload( true ); // the old parameters up to the change
+
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_stateMutex );
+
+        m_rampStartUs    = p[0];
+        m_rampDurationUs = p[1];
+        m_gain           = p[2];
+    }
+
+    recordCounterOffload();
 }
 
 inline const char *counterOffload::calibStageName( int stage )
@@ -3156,9 +3260,13 @@ inline void counterOffload::runCalibration()
 
     if( !startChecks() )
     {
+        recordCounterOffload( true );
         m_calibRunning = false;
+        recordCounterOffload();
         return;
     }
+
+    recordCounterOffload( true );
 
     double originalLeak;
     { //mutex scope
@@ -3166,6 +3274,8 @@ inline void counterOffload::runCalibration()
         originalLeak = m_leak;
         m_leak       = m_calibLeak; // keep the held contribution small so gain steps cannot saturate the tweeter
     }
+
+    recordCounterOffload();
 
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_calibMutex );
@@ -3317,10 +3427,14 @@ inline void counterOffload::runCalibration()
                        logPrio::LOG_WARNING );
     }
 
+    recordCounterOffload( true );
+
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_stateMutex );
         m_leak = originalLeak;
     }
+
+    recordCounterOffload();
 
     if( m_csv.is_open() )
     {
@@ -3332,7 +3446,9 @@ inline void counterOffload::runCalibration()
         m_lagCsv.close();
     }
 
+    recordCounterOffload( true );
     m_calibRunning = false;
+    recordCounterOffload();
 }
 
 inline bool counterOffload::startChecks()
@@ -4230,6 +4346,86 @@ inline void counterOffload::coThreadExec()
     dmSyncopationProducerT::syncopationClose();
 }
 
+inline int counterOffload::checkRecordTimes()
+{
+    return telemeterT::checkRecordTimes( telem_counteroffload() );
+}
+
+inline int counterOffload::recordTelem( const telem_counteroffload *tag )
+{
+    static_cast<void>( tag ); // be unused
+
+    return recordCounterOffload( true );
+}
+
+inline counterOffload::telemSettingsT counterOffload::telemSettings()
+{
+    std::lock_guard<std::mutex> guard( m_stateMutex );
+
+    telemSettingsT s;
+
+    s.enabled        = m_enabled;
+    s.calibrating    = m_calibRunning;
+    s.gain           = m_gain;
+    s.leak           = m_leak;
+    s.rampStartUs    = m_rampStartUs;
+    s.rampDurationUs = m_rampDurationUs;
+    s.timeOffsetUs   = m_timeOffsetUs;
+    s.maxCommand     = m_maxCommand;
+
+    return s;
+}
+
+inline int counterOffload::recordCounterOffload( bool force )
+{
+    std::lock_guard<std::mutex> telemGuard( m_telemMutex );
+
+    const telemSettingsT s = telemSettings();
+
+    if( !force && m_telemRecorded && s == m_telemLast )
+    {
+        return 0;
+    }
+
+    uint64_t        events, published, failed, missed, clipped, overflows;
+    latencySummaryT lat;
+    { //mutex scope
+        std::lock_guard<std::mutex> guard( m_stateMutex );
+
+        events    = m_events;
+        published = m_published;
+        failed    = m_failed;
+        missed    = m_missed;
+        clipped   = m_clipped;
+        overflows = m_overflows;
+        lat       = summarizeLatency( m_latency.data(), m_latencyCount );
+    }
+
+    const int64_t slotNs = m_slotNs;
+
+    m_telemLast     = s;
+    m_telemRecorded = true;
+
+    return telem<telem_counteroffload>( { s.enabled,
+                                          s.calibrating,
+                                          static_cast<float>( s.gain ),
+                                          static_cast<float>( s.leak ),
+                                          static_cast<float>( s.rampStartUs ),
+                                          static_cast<float>( s.rampDurationUs ),
+                                          static_cast<float>( s.timeOffsetUs ),
+                                          static_cast<float>( s.maxCommand ),
+                                          ( slotNs > 0 ) ? static_cast<float>( slotNs / 1000.0 ) : -1.0f,
+                                          events,
+                                          published,
+                                          failed,
+                                          missed,
+                                          clipped,
+                                          overflows,
+                                          static_cast<float>( lat.pipelineUs ),
+                                          static_cast<float>( lat.pipelineRmsUs ),
+                                          static_cast<float>( lat.computeMaxUs ) } );
+}
+
 inline int counterOffload::setNumber(
     pcf::IndiProperty &prop, const pcf::IndiProperty &ipRecv, double &value, double minVal, double maxVal )
 {
@@ -4241,9 +4437,21 @@ inline int counterOffload::setNumber(
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid " + prop.getName() } );
     }
 
+    const bool changed = ( target != value );
+
+    if( changed )
+    {
+        recordCounterOffload( true ); // the old value up to the change
+    }
+
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_stateMutex );
         value = target;
+    }
+
+    if( changed )
+    {
+        recordCounterOffload();
     }
 
     updateIfChanged( prop, "current", value );
@@ -4393,9 +4601,13 @@ INDI_NEWCALLBACK_DEFN( counterOffload, m_indiP_calibrate )( const pcf::IndiPrope
         return log<text_log, 0>( "calibration needs the app enabled and OPERATING", logPrio::LOG_WARNING );
     }
 
+    recordCounterOffload( true );
+
     m_calibAbort   = false;
     m_calibRunning = true;
     m_calibStart   = true;
+
+    recordCounterOffload();
 
     log<text_log>( "calibration requested", logPrio::LOG_NOTICE );
 

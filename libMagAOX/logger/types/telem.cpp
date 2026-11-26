@@ -21,6 +21,7 @@ timespec ocam_temps::lastRecord           = { 0, 0 };
 timespec telem_blockgains::lastRecord     = { 0, 0 };
 timespec telem_chrony_stats::lastRecord   = { 0, 0 };
 timespec telem_chrony_status::lastRecord  = { 0, 0 };
+timespec telem_counteroffload::lastRecord = { 0, 0 };
 timespec telem_cooler::lastRecord         = { 0, 0 };
 timespec telem_coreloads::lastRecord      = { 0, 0 };
 timespec telem_coretemps::lastRecord      = { 0, 0 };

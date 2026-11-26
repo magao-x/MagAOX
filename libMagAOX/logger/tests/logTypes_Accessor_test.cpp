@@ -376,6 +376,19 @@ TEST_CASE( "Call to accessor with invalid member", "[libMagAOX::logger::logTypes
         REQUIRE( lmd.hierarch == true );
     }
 
+    SECTION( "telem_counteroffload" )
+    {
+        MagAOX::logger::logMetaDetail lmd = MagAOX::logger::telem_counteroffload::getAccessor( "" );
+
+        REQUIRE( lmd.keyword == "" );
+        REQUIRE( lmd.comment == "" );
+        REQUIRE( lmd.format == "" );
+        REQUIRE( lmd.valType == -1 );
+        REQUIRE( lmd.metaType == -1 );
+        REQUIRE( lmd.accessor == nullptr );
+        REQUIRE( lmd.hierarch == true );
+    }
+
     SECTION( "telem_dmspeck" )
     {
         MagAOX::logger::logMetaDetail lmd = MagAOX::logger::telem_dmspeck::getAccessor( "" );
