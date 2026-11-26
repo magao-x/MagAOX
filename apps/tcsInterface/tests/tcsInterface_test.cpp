@@ -1,6 +1,5 @@
 /** \file tcsInterface_test.cpp
  * \brief Catch2 tests for the tcsInterface app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup tcsInterface_files
  */
@@ -32,26 +31,31 @@ class tcsInterface_test : public tcsInterface
 {
 
   public:
-    tcsInterface_test( const std::string device )
-    {
-        m_configName = device;
+    /// Expose the lab-mode callback for the common INDI validation tests.
+    using tcsInterface::newCallBack_m_indiP_labMode;
 
-        XWCTEST_SETUP_INDI_NEW_PROP( pyrNudge );
-        XWCTEST_SETUP_INDI_NEW_PROP( acqFromGuider );
-        XWCTEST_SETUP_INDI_NEW_PROP( labMode );
-        XWCTEST_SETUP_INDI_NEW_PROP( offlTTenable );
-        XWCTEST_SETUP_INDI_NEW_PROP( offlTTdump );
-        XWCTEST_SETUP_INDI_NEW_PROP( offlTTavgInt );
-        XWCTEST_SETUP_INDI_NEW_PROP( offlTTgain );
-        XWCTEST_SETUP_INDI_NEW_PROP( offlTTthresh );
-        XWCTEST_SETUP_INDI_NEW_PROP( offlFenable );
-        XWCTEST_SETUP_INDI_NEW_PROP( offlFdump );
-        XWCTEST_SETUP_INDI_NEW_PROP( offlFavgInt );
-        XWCTEST_SETUP_INDI_NEW_PROP( offlFgain );
-        XWCTEST_SETUP_INDI_NEW_PROP( offlFthresh );
-        // XWCTEST_SETUP_INDI_ARB_PROP(m_indiP_teldata, tcsi, zd);
-    }
+    /// Prepare the app's INDI properties for callback validation.
+    tcsInterface_test( const std::string device /**< [in] INDI device name for the fixture. */ );
 };
+
+tcsInterface_test::tcsInterface_test( const std::string device )
+{
+    m_configName = device;
+
+    XWCTEST_SETUP_INDI_NEW_PROP( pyrNudge );
+    XWCTEST_SETUP_INDI_NEW_PROP( acqFromGuider );
+    XWCTEST_SETUP_INDI_NEW_PROP( labMode );
+    XWCTEST_SETUP_INDI_NEW_PROP( offlTTenable );
+    XWCTEST_SETUP_INDI_NEW_PROP( offlTTdump );
+    XWCTEST_SETUP_INDI_NEW_PROP( offlTTavgInt );
+    XWCTEST_SETUP_INDI_NEW_PROP( offlTTgain );
+    XWCTEST_SETUP_INDI_NEW_PROP( offlTTthresh );
+    XWCTEST_SETUP_INDI_NEW_PROP( offlFenable );
+    XWCTEST_SETUP_INDI_NEW_PROP( offlFdump );
+    XWCTEST_SETUP_INDI_NEW_PROP( offlFavgInt );
+    XWCTEST_SETUP_INDI_NEW_PROP( offlFgain );
+    XWCTEST_SETUP_INDI_NEW_PROP( offlFthresh );
+}
 /// \endcond
 
 /// Verify the tcsInterface callback validators accept only the expected properties.

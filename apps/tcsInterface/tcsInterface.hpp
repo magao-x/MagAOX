@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
@@ -19,7 +20,7 @@
 // #define LOG_TCS_STATUS
 
 /** \defgroup tcsInterface
- * \brief The MagAO-X application to do interface with the Clay TCS
+ * \brief The MagAO-X interface to the Clay telescope control system.
  *
  * <a href="../handbook/operating/software/apps/tcsInterface.html">Application Documentation</a>
  *
@@ -49,14 +50,16 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
     friend class dev::telemeter<tcsInterface>;
 
   protected:
-    /** \name lab mode
+    /** \name Lab Mode
      * @{
      */
 
-    /// Tracks whether the app is operating in lab mode rather than on-sky mode.
+    /// Tracks whether lab-mode controls are active.
     bool m_labMode{ true };
 
-    pcf::IndiProperty m_indiP_labMode;
+    pcf::IndiProperty m_indiP_labMode; ///< Publishes and accepts changes to lab mode.
+
+    /// Handle lab-mode requests.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_labMode );
 
     ///@}
@@ -66,38 +69,38 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
      */
 
     std::string m_deviceAddr{ "localhost" }; ///< The IP address or resolvable name of the TCS.
-    int m_devicePort{ 5811 }; ///< The IP port for TCS communications. Should be the command port.  Default is 5811
-    int m_seeingInterval{ 2 };
+    int         m_devicePort{ 5811 };        ///< The TCS command port.
+    int         m_seeingInterval{ 2 };       ///< Interval between seeing queries in seconds.
 
     /// Mutex for locking TCS communications.
     std::mutex m_tcsMutex;
 
-    tty::netSerial m_sock;
+    tty::netSerial m_sock; ///< Connection used for TCS queries and commands.
 
     ///@}
 
     // Telescope time:
-    double m_telST{ 0 };
+    double m_telST{ 0 }; ///< Telescope sidereal time in hours.
 
-    pcf::IndiProperty m_indiP_teltime;
+    pcf::IndiProperty m_indiP_teltime; ///< Publishes telescope time.
 
     // Telescope position:
-    double m_telEpoch{ 0 };
-    double m_telRA{ 0 };
-    double m_telDec{ 0 };
-    double m_telEl{ 0 };
-    double m_telHA{ 0 };
-    double m_telAM{ 0 };
-    double m_telRotOff{ 0 };
+    double m_telEpoch{ 0 };  ///< Epoch of the reported telescope coordinates.
+    double m_telRA{ 0 };     ///< Telescope right ascension in degrees.
+    double m_telDec{ 0 };    ///< Telescope declination in degrees.
+    double m_telEl{ 0 };     ///< Telescope elevation in degrees.
+    double m_telHA{ 0 };     ///< Telescope hour angle in hours.
+    double m_telAM{ 0 };     ///< Airmass at the telescope pointing.
+    double m_telRotOff{ 0 }; ///< Telescope rotator offset in degrees.
 
-    pcf::IndiProperty m_indiP_telpos;
+    pcf::IndiProperty m_indiP_telpos; ///< Publishes telescope coordinates and pointing geometry.
 
     /// \name Telescope Data
     /**@{
      */
     int    m_telROI{ 0 };          ///< The rotator of interest
     int    m_telTracking{ 0 };     ///< tracking state
-    int    m_telGuiding{ 0 };      ///< guider moving state
+    int    m_telGuiding{ 0 };      ///< guiding state
     int    m_telSlewing{ 0 };      ///< slewing state
     int    m_telGuiderMoving{ 0 }; ///< guider moving state
     double m_telAz{ 0 };           ///< azimuth
@@ -106,7 +109,7 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
     double m_telDomeAz{ 0 };       ///< dome azimuth
     int    m_telDomeStat{ 0 };     ///< dome status
 
-    pcf::IndiProperty m_indiP_teldata;
+    pcf::IndiProperty m_indiP_teldata; ///< Publishes telescope motion and dome status.
     ///@}
 
     /// \name Telescope Catalog Information
@@ -124,22 +127,22 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
     ///@}
 
     // Telescope Vane-End positions
-    double m_telSecZ{ 0 };
-    double m_telEncZ{ 0 };
-    double m_telSecX{ 0 };
-    double m_telEncX{ 0 };
-    double m_telSecY{ 0 };
-    double m_telEncY{ 0 };
-    double m_telSecH{ 0 };
-    double m_telEncH{ 0 };
-    double m_telSecV{ 0 };
-    double m_telEncV{ 0 };
+    double m_telSecZ{ 0 }; ///< Secondary mirror Z position reported by the TCS.
+    double m_telEncZ{ 0 }; ///< Encoder reading for the Z axis.
+    double m_telSecX{ 0 }; ///< Secondary mirror X position reported by the TCS.
+    double m_telEncX{ 0 }; ///< Encoder reading for the X axis.
+    double m_telSecY{ 0 }; ///< Secondary mirror Y position reported by the TCS.
+    double m_telEncY{ 0 }; ///< Encoder reading for the Y axis.
+    double m_telSecH{ 0 }; ///< Secondary mirror H position reported by the TCS.
+    double m_telEncH{ 0 }; ///< Encoder reading for the H axis.
+    double m_telSecV{ 0 }; ///< Secondary mirror V position reported by the TCS.
+    double m_telEncV{ 0 }; ///< Encoder reading for the V axis.
 
     pcf::IndiProperty m_indiP_vaneend; ///< INDI Property for the vane end positions
 
     // Environment
     double m_wxtemp{ 0 };     ///< Outside temperature, Celsius
-    double m_wxpres{ 0 };     ///< Outside pressue, millibars
+    double m_wxpres{ 0 };     ///< Outside pressure, millibars
     double m_wxhumid{ 0 };    ///< Outside humidity, percent
     double m_wxwind{ 0 };     ///< outside wind intensity, mph
     double m_wxwdir{ 0 };     ///< outside wind direction, degrees
@@ -165,28 +168,25 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
     pcf::IndiProperty m_indiP_seeing; ///< INDI Property for seeing
 
   public:
-    /// Default c'tor.
+    /// Construct the telescope interface app.
     tcsInterface();
 
-    /// D'tor, declared and defined for noexcept.
-    ~tcsInterface() noexcept
-    {
-    }
+    /// Destroy the telescope interface app.
+    ~tcsInterface() noexcept = default;
 
+    /// Declare TCS connection, acquisition, and offload settings.
     virtual void setupConfig();
 
     /// Implementation of loadConfig logic, separated for testing.
     /** This is called by loadConfig().
      */
     int loadConfigImpl(
-        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
+        mx::app::appConfigurator &_config /**< [in] Application configuration from which to load values. */ );
 
+    /// Load settings from the app configuration.
     virtual void loadConfig();
 
-    /// Startup function
-    /**
-     *
-     */
+    /// Register INDI properties and start the offload worker.
     virtual int appStartup();
 
     /// Implementation of the FSM for tcsInterface.
@@ -196,27 +196,42 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Join the offload worker during shutdown.
     virtual int appShutdown();
 
-    int getMagTelStatus( std::string &response, const std::string &statreq );
+    /// Query a named block of telescope status.
+    int getMagTelStatus( std::string       &response, /**< [out] Response from the TCS. */
+                         const std::string &statreq /**< [in] TCS status request. */ );
 
-    int sendMagTelCommand( const std::string &command, int timeout );
+    /// Send a command to the telescope and read its reply.
+    int sendMagTelCommand( const std::string &command, /**< [in] TCS command. */
+                           int                timeout /**< [in] Timeout in milliseconds. */ );
 
-    int parse_xms( double &x, double &m, double &s, const std::string &xmsstr );
+    /// Parse a colon-delimited hours or degrees, minutes, and seconds string.
+    int parse_xms( double            &x, /**< [out] Signed hours or degrees. */
+                   double            &m, /**< [out] Minutes. */
+                   double            &s, /**< [out] Seconds. */
+                   const std::string &xmsstr /**< [in] String to parse. */ );
 
-    std::vector<std::string> parse_teldata( std::string &tdat );
+    /// Split a telescope status response into its space-delimited fields.
+    std::vector<std::string> parse_teldata( std::string &tdat /**< [in] Response text. */ );
 
-    // The "dump" commands:
-
+    /// Query telescope sidereal time.
     int getTelTime();
+
+    /// Query telescope position and pointing geometry.
     int getTelPos();
+
+    /// Query telescope motion and dome status.
     int getTelData();
+
+    /// Query the current catalog target.
     int getCatData();
+
+    /// Query the secondary mirror and encoder positions.
     int getVaneData();
+
+    /// Query telescope environmental measurements.
     int getEnvData();
 
     /// Record bad seeing measurements on errors in getSeeing().
@@ -225,6 +240,7 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
     /// Query, parse, and record seeing measurements
     int getSeeing();
 
+    /// Publish changed telescope status and offload values.
     int updateINDI();
 
     /** \name Telemeter Interface
@@ -234,65 +250,67 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
     int checkRecordTimes();
 
     /// Record telescope-position telemetry on a forced telemeter update.
-    int recordTelem( const telem_telpos * );
+    int recordTelem( const telem_telpos *logType /**< [in] Selects the telemetry record type. */ );
 
     /// Record telescope-status telemetry on a forced telemeter update.
-    int recordTelem( const telem_teldata * );
+    int recordTelem( const telem_teldata *logType /**< [in] Selects the telemetry record type. */ );
 
     /// Record vane-position telemetry on a forced telemeter update.
-    int recordTelem( const telem_telvane * );
+    int recordTelem( const telem_telvane *logType /**< [in] Selects the telemetry record type. */ );
 
     /// Record telescope-environment telemetry on a forced telemeter update.
-    int recordTelem( const telem_telenv * );
+    int recordTelem( const telem_telenv *logType /**< [in] Selects the telemetry record type. */ );
 
     /// Record catalog telemetry on a forced telemeter update.
-    int recordTelem( const telem_telcat * );
+    int recordTelem( const telem_telcat *logType /**< [in] Selects the telemetry record type. */ );
 
     /// Record seeing telemetry on a forced telemeter update.
-    int recordTelem( const telem_telsee * );
+    int recordTelem( const telem_telsee *logType /**< [in] Selects the telemetry record type. */ );
 
     /// Record tip/tilt offload-control telemetry on a forced telemeter update.
-    int recordTelem( const telem_tcsi_tiptilt * );
+    int recordTelem( const telem_tcsi_tiptilt *logType /**< [in] Selects the telemetry record type. */ );
 
     /// Record focus offload-control telemetry on a forced telemeter update.
-    int recordTelem( const telem_tcsi_focus * );
+    int recordTelem( const telem_tcsi_focus *logType /**< [in] Selects the telemetry record type. */ );
 
     /// Record lab-mode telemetry on a forced telemeter update.
-    int recordTelem( const telem_tcsi_labmode * );
+    int recordTelem( const telem_tcsi_labmode *logType /**< [in] Selects the telemetry record type. */ );
 
     /// Record telescope-position telemetry when values change.
-    int recordTelPos( bool force = false );
+    int recordTelPos( bool force = false /**< [in] Record even if the values are unchanged. */ );
 
     /// Record telescope-status telemetry when values change.
-    int recordTelData( bool force = false );
+    int recordTelData( bool force = false /**< [in] Record even if the values are unchanged. */ );
 
     /// Record vane-position telemetry when values change.
-    int recordTelVane( bool force = false );
+    int recordTelVane( bool force = false /**< [in] Record even if the values are unchanged. */ );
 
     /// Record telescope-environment telemetry when values change.
-    int recordTelEnv( bool force = false );
+    int recordTelEnv( bool force = false /**< [in] Record even if the values are unchanged. */ );
 
     /// Record catalog telemetry when values change.
-    int recordTelCat( bool force = false );
+    int recordTelCat( bool force = false /**< [in] Record even if the values are unchanged. */ );
 
     /// Record seeing telemetry when values change.
-    int recordTelSee( bool force = false );
+    int recordTelSee( bool force = false /**< [in] Record even if the values are unchanged. */ );
 
     /// Record tip/tilt offload-control telemetry when values change.
-    int recordTcsiTipTilt( bool force = false );
+    int recordTcsiTipTilt( bool force = false /**< [in] Record even if the values are unchanged. */ );
 
     /// Record focus offload-control telemetry when values change.
-    int recordTcsiFocus( bool force = false );
+    int recordTcsiFocus( bool force = false /**< [in] Record even if the values are unchanged. */ );
 
     /// Record lab-mode telemetry when values change.
-    int recordTcsiLabMode( bool force = false );
+    int recordTcsiLabMode( bool force = false /**< [in] Record even if the values are unchanged. */ );
 
     ///@}
 
     /// Tracks the current loop state shared between the INDI callback and the offload thread.
-    std::atomic<int>  m_loopState{ 0 };
-    pcf::IndiProperty m_indiP_loopState; ///< Property used to report the loop state
+    std::atomic<int> m_loopState{ 0 };
 
+    pcf::IndiProperty m_indiP_loopState; ///< Subscription to the AO loop state.
+
+    /// Handle updates to the AO loop state.
     INDI_SETCALLBACK_DECL( tcsInterface, m_indiP_loopState );
 
     /** \name Pyramid Nudging and Acquisition
@@ -300,32 +318,39 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
      * @{
      */
 
-    // The Pyramid to AEG control matrix
-    float m_pyrNudge_C_00{ 1 };
-    float m_pyrNudge_C_01{ 0 };
-    float m_pyrNudge_C_10{ 0 };
-    float m_pyrNudge_C_11{ 1 };
-    float m_pyrNudge_F_sign{ 1 };
+    float m_pyrNudge_C_00{ 1 };   ///< Azimuth offset from a pyramid x nudge.
+    float m_pyrNudge_C_01{ 0 };   ///< Azimuth offset from a pyramid y nudge.
+    float m_pyrNudge_C_10{ 0 };   ///< Elevation offset from a pyramid x nudge.
+    float m_pyrNudge_C_11{ 1 };   ///< Elevation offset from a pyramid y nudge.
+    float m_pyrNudge_F_sign{ 1 }; ///< Sign of the telescope focus correction.
 
-    float m_pyrNudge_ang{ 45.0 };
-    float m_pyrNudge_ang0{ 0.0 };
-    float m_pyrNudge_parity{ -1 };
+    float m_pyrNudge_ang{ 45.0 };  ///< Nominal pyramid-to-telescope rotation in degrees.
+    float m_pyrNudge_ang0{ 0.0 };  ///< Offset for rotator-angle corrections in degrees.
+    float m_pyrNudge_parity{ -1 }; ///< Sign of the rotator-angle contribution.
 
-    int sendPyrNudge( float x, float y, float z );
+    /// Convert a pyramid nudge to telescope pointing and focus commands.
+    int sendPyrNudge( float x, /**< [in] Pyramid x nudge. */
+                      float y, /**< [in] Pyramid y nudge. */
+                      float z /**< [in] Focus nudge. */ );
 
-    pcf::IndiProperty m_indiP_pyrNudge; ///< Property used to request a pyramid nudge
+    pcf::IndiProperty m_indiP_pyrNudge; ///< Accepts pyramid nudge requests.
+
+    /// Handle a pyramid nudge request.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_pyrNudge );
 
-    int   m_acqZdSign{ -1 };
-    float m_acqAz0{ 18.5 };
-    float m_acqAzOff{ 0 };
-    float m_acqEl0{ 10 };
-    float m_acqElOff{ 0 };
-    float m_acqFocus{ 1400 };
+    int   m_acqZdSign{ -1 };  ///< Sign of the zenith-distance contribution to the acquisition rotation.
+    float m_acqAz0{ 18.5 };   ///< Guider-to-pyramid azimuth offset before rotation.
+    float m_acqAzOff{ 0 };    ///< Additional azimuth offset after rotation.
+    float m_acqEl0{ 10 };     ///< Guider-to-pyramid elevation offset before rotation.
+    float m_acqElOff{ 0 };    ///< Additional elevation offset after rotation.
+    float m_acqFocus{ 1400 }; ///< Guider-to-pyramid focus correction.
 
+    /// Send the calibrated acquisition offsets from the guider to the pyramid.
     int acquireFromGuider();
 
-    pcf::IndiProperty m_indiP_acqFromGuider; ///< Property used to request a pyramid nudge
+    pcf::IndiProperty m_indiP_acqFromGuider; ///< Accepts requests to acquire from the guider.
+
+    /// Handle an acquire-from-guider request.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_acqFromGuider );
 
     ///@}
@@ -369,9 +394,9 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
     int sendFoffload( float F_0 /**< [in] focus offload command */
     );
 
-    pcf::IndiProperty
-        m_indiP_offloadCoeffs; ///< Property used to report the latest woofer modal coefficients for offloading
+    pcf::IndiProperty m_indiP_offloadCoeffs; ///< Subscription to woofer modal coefficients.
 
+    /// Calibrate received woofer coefficients and queue them for averaging.
     INDI_SETCALLBACK_DECL( tcsInterface, m_indiP_offloadCoeffs );
 
     /// Protects shared offload control parameters accessed by callbacks and the offload thread.
@@ -389,81 +414,115 @@ class tcsInterface : public MagAOXApp<true>, public dev::ioDevice, public dev::t
     /// Index of the newest valid request in the offload ring.
     size_t m_lastRequest{ std::numeric_limits<size_t>::max() };
 
-    /// Number of valid requests currently stored in the offload ring.
+    /// Number of requests received since the offload ring was reset.
     size_t m_nRequests{ 0 };
 
     /// Request count last processed by the offload thread.
     size_t m_last_nRequests{ 0 };
 
-    // The TT control matrix -- LAb
-    float m_lab_offlTT_C_00{ 0.17 };
-    float m_lab_offlTT_C_01{ 1.03 };
-    float m_lab_offlTT_C_10{ -1.03 };
-    float m_lab_offlTT_C_11{ 0.48 };
+    float m_lab_offlTT_C_00{ 0.17 };  ///< Lab tip response to woofer tip.
+    float m_lab_offlTT_C_01{ 1.03 };  ///< Lab tip response to woofer tilt.
+    float m_lab_offlTT_C_10{ -1.03 }; ///< Lab tilt response to woofer tip.
+    float m_lab_offlTT_C_11{ 0.48 };  ///< Lab tilt response to woofer tilt.
 
-    // The TT control matrix -- Telescope
-    float m_offlTT_C_00{ -0.5 };
-    float m_offlTT_C_01{ 0 };
-    float m_offlTT_C_10{ 0 };
-    float m_offlTT_C_11{ -0.25 };
+    float m_offlTT_C_00{ -0.5 };  ///< Telescope tip response to woofer tip.
+    float m_offlTT_C_01{ 0 };     ///< Telescope tip response to woofer tilt.
+    float m_offlTT_C_10{ 0 };     ///< Telescope tilt response to woofer tip.
+    float m_offlTT_C_11{ -0.25 }; ///< Telescope tilt response to woofer tilt.
 
     /// Tracks whether tip/tilt offloading is currently enabled.
     bool m_offlTT_enabled{ false };
+
+    /// Whether the next tip/tilt offload should send the full average.
     bool m_offlTT_dump{ false };
+
     /// The number of recent requests included in each tip/tilt offload average.
     float m_offlTT_avgInt{ 1.0 };
+
     /// The operator-set gain applied to tip/tilt offload requests.
     float m_offlTT_gain{ 0.1 };
+
     /// The deadband threshold applied to tip/tilt offload requests.
     float m_offlTT_thresh{ 0.1 };
 
-    pcf::IndiProperty m_indiP_offlTTenable;
+    pcf::IndiProperty m_indiP_offlTTenable; ///< Controls automatic tip/tilt offloading.
+
+    /// Handle changes to the automatic tip/tilt offload enable switch.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlTTenable );
 
-    pcf::IndiProperty m_indiP_offlTTdump;
+    pcf::IndiProperty m_indiP_offlTTdump; ///< Accepts requests to dump the tip/tilt average.
+
+    /// Queue a tip/tilt dump request.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlTTdump );
 
-    pcf::IndiProperty m_indiP_offlTTavgInt;
+    pcf::IndiProperty m_indiP_offlTTavgInt; ///< Controls the tip/tilt averaging interval.
+
+    /// Handle changes to the tip/tilt averaging interval.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlTTavgInt );
 
-    pcf::IndiProperty m_indiP_offlTTgain;
+    pcf::IndiProperty m_indiP_offlTTgain; ///< Controls the automatic tip/tilt offload gain.
+
+    /// Handle changes to the tip/tilt offload gain.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlTTgain );
 
-    pcf::IndiProperty m_indiP_offlTTthresh;
+    pcf::IndiProperty m_indiP_offlTTthresh; ///< Controls the tip/tilt offload deadband.
+
+    /// Handle changes to the tip/tilt offload threshold.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlTTthresh );
 
-    // The Focus control constant
+    /// Converts the woofer focus coefficient to a telescope focus correction.
     float m_offlCFocus_00{ 1 };
 
     /// Tracks whether focus offloading is currently enabled.
     bool m_offlF_enabled{ false };
+
+    /// Whether the next focus offload should send the full average.
     bool m_offlF_dump{ false };
+
     /// The number of recent requests included in each focus offload average.
     float m_offlF_avgInt{ 1.0 };
+
     /// The operator-set gain applied to focus offload requests.
     float m_offlF_gain{ 0.1 };
+
     /// The deadband threshold applied to focus offload requests.
     float m_offlF_thresh{ 0.1 };
 
-    pcf::IndiProperty m_indiP_offlFenable;
+    pcf::IndiProperty m_indiP_offlFenable; ///< Controls automatic focus offloading.
+
+    /// Handle changes to the automatic focus offload enable switch.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlFenable );
 
-    pcf::IndiProperty m_indiP_offlFdump;
+    pcf::IndiProperty m_indiP_offlFdump; ///< Accepts requests to dump the focus average.
+
+    /// Queue a focus dump request.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlFdump );
 
-    pcf::IndiProperty m_indiP_offlFavgInt;
+    /// Most recent calibrated focus dump amount from the offload thread, or NaN when unavailable.
+    std::atomic<float> m_offlF_dumpAmount{ std::numeric_limits<float>::quiet_NaN() };
+
+    /// Read-only INDI property for the current focus dump amount.
+    pcf::IndiProperty m_indiP_offlFdumpAmount;
+
+    pcf::IndiProperty m_indiP_offlFavgInt; ///< Controls the focus averaging interval.
+
+    /// Handle changes to the focus averaging interval.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlFavgInt );
 
-    pcf::IndiProperty m_indiP_offlFgain;
+    pcf::IndiProperty m_indiP_offlFgain; ///< Controls the automatic focus offload gain.
+
+    /// Handle changes to the focus offload gain.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlFgain );
 
-    pcf::IndiProperty m_indiP_offlFthresh;
+    pcf::IndiProperty m_indiP_offlFthresh; ///< Controls the focus offload deadband.
+
+    /// Handle changes to the focus offload threshold.
     INDI_NEWCALLBACK_DECL( tcsInterface, m_indiP_offlFthresh );
 
-    float m_offlCComa_00{ 1 };
-    float m_offlCComa_01{ 0 };
-    float m_offlCComa_10{ 1 };
-    float m_offlCComa_11{ 0 };
+    float m_offlCComa_00{ 1 }; ///< First offload component from the first woofer coma mode.
+    float m_offlCComa_01{ 0 }; ///< First offload component from the second woofer coma mode.
+    float m_offlCComa_10{ 1 }; ///< Second offload component from the first woofer coma mode.
+    float m_offlCComa_11{ 0 }; ///< Second offload component from the second woofer coma mode.
 
     ///@}
 };
@@ -863,7 +922,7 @@ inline int tcsInterface::appStartup()
     float offlFGain;
     float offlFThresh;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         labMode      = m_labMode;
         offlTTAvgInt = m_offlTT_avgInt;
@@ -1210,6 +1269,20 @@ inline int tcsInterface::appStartup()
     {
         log<software_error>( { __FILE__, __LINE__ } );
         return -1;
+    }
+
+    createROIndiNumber( m_indiP_offlFdumpAmount, "offlF_dumpAmount", "Woofer Focus Dump Amount" );
+    indi::addNumberElement<float>( m_indiP_offlFdumpAmount,
+                                   "current",
+                                   std::numeric_limits<float>::lowest(),
+                                   std::numeric_limits<float>::max(),
+                                   0,
+                                   "%0.6f" );
+    m_indiP_offlFdumpAmount["current"] = m_offlF_dumpAmount.load();
+
+    if( registerIndiPropertyReadOnly( m_indiP_offlFdumpAmount ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
     createStandardIndiToggleSw( m_indiP_offlFenable, "offlF_enable" );
@@ -2575,7 +2648,7 @@ inline int tcsInterface::updateINDI()
     float offlFGain;
     float offlFThresh;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         offlTTDump    = m_offlTT_dump;
         offlTTEnabled = m_offlTT_enabled;
@@ -2642,6 +2715,9 @@ inline int tcsInterface::updateINDI()
         updateIfChanged( m_indiP_offlFavgInt, "current", offlFAvgInt );
         updateIfChanged( m_indiP_offlFgain, "current", offlFGain );
         updateIfChanged( m_indiP_offlFthresh, "current", offlFThresh );
+
+        // Serialize the amount at the precision used by the zimr command.
+        updateIfChanged( m_indiP_offlFdumpAmount, "current", std::to_string( m_offlF_dumpAmount.load() ) );
     }
     catch( ... )
     {
@@ -2939,7 +3015,7 @@ inline int tcsInterface::recordTcsiTipTilt( bool force )
     float gain;
     float thresh;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         enabled = m_offlTT_enabled;
         avgInt  = m_offlTT_avgInt;
@@ -2972,7 +3048,7 @@ inline int tcsInterface::recordTcsiFocus( bool force )
     float gain;
     float thresh;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         enabled = m_offlF_enabled;
         avgInt  = m_offlF_avgInt;
@@ -3002,7 +3078,7 @@ inline int tcsInterface::recordTcsiLabMode( bool force )
 {
     bool labMode;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         labMode = m_labMode;
     }
@@ -3123,10 +3199,15 @@ void tcsInterface::offloadThreadExec()
         float offlTTAvgInt;
         float offlFAvgInt;
 
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
             offlTTAvgInt = m_offlTT_avgInt;
             offlFAvgInt  = m_offlF_avgInt;
+        }
+
+        if( loopState != 2 && loopState != last_loopState )
+        {
+            m_offlF_dumpAmount.store( std::numeric_limits<float>::quiet_NaN() );
         }
 
         // Check if loop open
@@ -3135,7 +3216,7 @@ void tcsInterface::offloadThreadExec()
             // If this is new, then reset the averaging buffer
             if( loopState != last_loopState )
             {
-                { // mutex scope
+                { //mutex scope
                     std::lock_guard<std::mutex> lock( m_offloadMutex );
                     m_firstRequest   = 0;
                     m_lastRequest    = std::numeric_limits<size_t>::max();
@@ -3167,7 +3248,7 @@ void tcsInterface::offloadThreadExec()
 
         bool haveNewRequests = false;
 
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_offloadMutex );
             haveNewRequests = ( m_nRequests > 0 && m_last_nRequests != m_nRequests );
         }
@@ -3178,7 +3259,7 @@ void tcsInterface::offloadThreadExec()
             // std::cerr << m_firstRequest << " " << m_lastRequest << " " << m_nRequests << std::endl;
 
             ///\todo offloading: These sections ought to be separate functions for clarity
-            { // mutex scope
+            { //mutex scope
                 std::lock_guard<std::mutex> lock( m_offloadMutex );
 
                 /* --- TT --- */
@@ -3196,12 +3277,18 @@ void tcsInterface::offloadThreadExec()
                     ++navg;
 
                     if( i == m_firstRequest )
+                    {
                         break;
+                    }
 
                     if( i == 0 )
+                    {
                         i = m_offloadRequests[0].size() - 1;
+                    }
                     else
+                    {
                         --i;
+                    }
                 }
 
                 avg_TT_0 /= navg;
@@ -3220,18 +3307,26 @@ void tcsInterface::offloadThreadExec()
                     ++navg;
 
                     if( i == m_firstRequest )
+                    {
                         break;
+                    }
 
                     if( i == 0 )
+                    {
                         i = m_offloadRequests[0].size() - 1;
+                    }
                     else
+                    {
                         --i;
+                    }
                 }
 
                 avg_F_0 /= navg;
 
                 m_last_nRequests = m_nRequests;
             }
+
+            m_offlF_dumpAmount.store( avg_F_0 );
 
             ++sincelast_TT;
             if( sincelast_TT >= offlTTAvgInt )
@@ -3263,7 +3358,7 @@ int tcsInterface::doTToffload( float tt_0, float tt_1 )
     bool  offlTTEnabled;
     bool  labMode;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         offlTTDump    = m_offlTT_dump;
         offlTTGain    = m_offlTT_gain;
@@ -3276,7 +3371,7 @@ int tcsInterface::doTToffload( float tt_0, float tt_1 )
     {
         log<text_log>( "[OFFL] TT dumping: " + std::to_string( tt_0 ) + " " + std::to_string( tt_1 ) );
         sendTToffload( tt_0, tt_1 );
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
             m_offlTT_dump = false;
         }
@@ -3313,7 +3408,7 @@ int tcsInterface::sendTToffload( float tt_0, float tt_1 )
 {
     bool labMode;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         labMode = m_labMode;
     }
@@ -3352,7 +3447,7 @@ int tcsInterface::doFoffload( float F_0 )
     bool  offlFEnabled;
     bool  labMode;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         offlFDump    = m_offlF_dump;
         offlFGain    = m_offlF_gain;
@@ -3365,7 +3460,7 @@ int tcsInterface::doFoffload( float F_0 )
     {
         log<text_log>( "[OFFL] Focus dumping: " + std::to_string( F_0 ) );
         sendFoffload( F_0 );
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
             m_offlF_dump = false;
         }
@@ -3428,7 +3523,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_labMode )( const pcf::IndiProperty 
 
     bool changed = false;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         if( m_labMode != labMode )
         {
@@ -3546,7 +3641,7 @@ INDI_SETCALLBACK_DEFN( tcsInterface, m_indiP_offloadCoeffs )( const pcf::IndiPro
     float offlCComa10;
     float offlCComa11;
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         labMode      = m_labMode;
         labOfflTTC00 = m_lab_offlTT_C_00;
@@ -3564,7 +3659,7 @@ INDI_SETCALLBACK_DEFN( tcsInterface, m_indiP_offloadCoeffs )( const pcf::IndiPro
         offlCComa11  = m_offlCComa_11;
     }
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadMutex );
 
         size_t nextReq = m_lastRequest + 1;
@@ -3623,7 +3718,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlTTenable )( const pcf::IndiProp
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
     {
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
             if( m_offlTT_enabled == false )
             {
@@ -3639,7 +3734,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlTTenable )( const pcf::IndiProp
     }
     else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
     {
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
             if( m_offlTT_enabled == true )
             {
@@ -3668,7 +3763,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlTTdump )( const pcf::IndiProper
     {
         updateSwitchIfChanged( m_indiP_offlTTdump, "request", pcf::IndiElement::On, INDI_OK );
 
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
             m_offlTT_dump = true;
         }
@@ -3689,7 +3784,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlTTavgInt )( const pcf::IndiProp
         return -1;
     }
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         m_offlTT_avgInt = target;
     }
@@ -3710,7 +3805,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlTTgain )( const pcf::IndiProper
         return -1;
     }
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         m_offlTT_gain = target;
     }
@@ -3731,7 +3826,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlTTthresh )( const pcf::IndiProp
         return -1;
     }
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         m_offlTT_thresh = target;
     }
@@ -3751,7 +3846,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlFenable )( const pcf::IndiPrope
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On )
     {
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
             if( m_offlF_enabled == false )
             {
@@ -3767,7 +3862,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlFenable )( const pcf::IndiPrope
     }
     else if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off )
     {
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
             if( m_offlF_enabled == true )
             {
@@ -3796,7 +3891,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlFdump )( const pcf::IndiPropert
     {
         updateSwitchIfChanged( m_indiP_offlFdump, "request", pcf::IndiElement::On, INDI_OK );
 
-        { // mutex scope
+        { //mutex scope
             std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
             m_offlF_dump = true;
         }
@@ -3817,7 +3912,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlFavgInt )( const pcf::IndiPrope
         return -1;
     }
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         m_offlF_avgInt = target;
     }
@@ -3838,7 +3933,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlFgain )( const pcf::IndiPropert
         return -1;
     }
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         m_offlF_gain = target;
     }
@@ -3861,7 +3956,7 @@ INDI_NEWCALLBACK_DEFN( tcsInterface, m_indiP_offlFthresh )( const pcf::IndiPrope
         return -1;
     }
 
-    { // mutex scope
+    { //mutex scope
         std::lock_guard<std::mutex> lock( m_offloadCtrlMutex );
         m_offlF_thresh = target;
     }
