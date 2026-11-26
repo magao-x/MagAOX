@@ -84,7 +84,9 @@ Missed WFS or ACC frames do not stop prediction, up to `parameters.max_fill` con
 
 ### Holding through lost input
 
-A condition that would otherwise stop prediction at once (`wfs_stale`, `wfs_invalid`, `command_invalid` while a history refills, and in assisted mode `acc_window` and `upstream_unlocked`) is held for up to `parameters.hold_timeout` seconds (default 1): no slot is rendered, so synco keeps the DM at its last command, and prediction continues by itself when the condition clears. Only a failure lasting longer stops prediction, with the condition that started it in `safety.output_state`. A request made while the input has never qualified is still refused at once. `ddspc_performance.input_holds` counts the holds; `hold_timeout=0` stops at once, as before.
+A WFS or command condition that would otherwise stop prediction at once (`wfs_stale`, `wfs_invalid`, `command_invalid` while a history refills) is held for up to `parameters.hold_timeout` seconds (default 1): no slot is rendered, so synco keeps the DM at its last command, and prediction continues by itself when the condition clears. Only a failure lasting longer stops prediction, with the condition that started it in `safety.output_state`. A request made while the input has never qualified is still refused at once. `ddspc_performance.input_holds` counts the holds; `hold_timeout=0` stops at once, as before.
+
+ACC problems never stop prediction or hold the DM. An assisted slot whose frame has no ACC origin (an incomplete ACC window, the upstream lock lost, or the assisted history refilling after a gap), or rendered while the lock is down, carries the frame's WFS feedback (`gain*y`, integrated as usual) without the ACC prediction; the prediction resumes with the ACC. `ddspc_performance.fast_wfs_only` counts those slots, and `assisted_qualification` still reports the cause.
 
 ## Before installation (operator, on the RTC)
 
@@ -150,7 +152,7 @@ With accelSim, `delay_lock=0` while `delay_phase_error_us=0` means late acquisit
 
 ### Diagnostic mode (default off)
 
-`parameters.assisted_diagnostic=true` lets the assisted learner append, learn and score complete ACC windows while the upstream lock is down, so the ACC model can be evaluated during commissioning. It never publishes physical corrections: assisted output still requires the upstream lock, and nothing about the DM transport changes.
+`parameters.assisted_diagnostic=true` lets the assisted learner append, learn and score complete ACC windows while the upstream lock is down, so the ACC model can be evaluated during commissioning. It never publishes an ACC prediction: without the lock assisted slots carry the WFS feedback only, and nothing about the DM transport changes.
 
 - To evaluate an assisted fit trained with lock, keep learning off and read `rmse_phase0..3`.
 - With learning on, the fit learns without lock. `diagnostic_mode` then reads `on_learned_without_lock`, and prediction is refused until `reset_model`.
