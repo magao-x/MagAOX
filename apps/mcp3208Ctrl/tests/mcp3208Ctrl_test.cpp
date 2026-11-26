@@ -347,6 +347,7 @@ TEST_CASE( "mcp3208Ctrl configuration defaults load synchronized settings", "[mc
     REQUIRE( app.m_alpha == Approx( 0.01f ) );
     REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
+    REQUIRE( app.m_fps == Approx( 8000.0f ) );
     REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
     REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Integrator );
     REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Integrator );
@@ -363,30 +364,33 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
 
     app.setupConfig();
 
-    mx::app::writeConfigFile( "/tmp/mcp3208Ctrl_test_override.conf",
-                              { "synchro",
-                                "synchro",
-                                "synchro",
-                                "synchro",
-                                "synchro",
-                                "synchro",
-                                "synchro",
-                                "synchro",
-                                "synchro",
-                                "synchro",
-                                "accel" },
-                              { "shmimName",
-                                "postDelay",
-                                "dtTransfer_ns",
-                                "wfsProcess_ns",
-                                "dtF_ns",
-                                "wfsRead_ns",
-                                "delayLockAbsThreshold_ns",
-                                "delayLockFracThreshold",
-                                "cadenceGuard_ns",
-                                "alpha",
-                                "numChannels" },
-                              { "camwfs_sync", "17", "4000", "62000", "11000", "290000", "75000", "0.2", "15000", "0.25", "3" } );
+    mx::app::writeConfigFile(
+        "/tmp/mcp3208Ctrl_test_override.conf",
+        { "synchro",
+          "synchro",
+          "synchro",
+          "synchro",
+          "synchro",
+          "synchro",
+          "synchro",
+          "synchro",
+          "synchro",
+          "synchro",
+          "accel",
+          "accel" },
+        { "shmimName",
+          "postDelay",
+          "dtTransfer_ns",
+          "wfsProcess_ns",
+          "dtF_ns",
+          "wfsRead_ns",
+          "delayLockAbsThreshold_ns",
+          "delayLockFracThreshold",
+          "cadenceGuard_ns",
+          "alpha",
+          "numChannels",
+          "fps" },
+        { "camwfs_sync", "17", "4000", "62000", "11000", "290000", "75000", "0.2", "15000", "0.25", "3", "6000" } );
     app.config.readConfig( "/tmp/mcp3208Ctrl_test_override.conf" );
 
     REQUIRE( app.loadConfigImpl( app.config ) == 0 );
@@ -401,12 +405,48 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( app.m_cadenceGuard_ns == Approx( 15000.0 ) );
     REQUIRE( app.m_alpha == Approx( 0.25f ) );
     REQUIRE( app.m_numChannels == 3 );
+    REQUIRE( app.m_fps == Approx( 6000.0f ) );
+    REQUIRE( app.m_trigger == Approx( 1e9f / 6000.0f ) );
     REQUIRE( app.m_synchroDelayTarget == Approx( 17000.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 17000.0f ) );
     REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
     REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Semaphore );
     REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Semaphore );
     REQUIRE( app.m_semaphoreFallbackActive == false );
+}
+
+/// Verify an out-of-range `accel.fps` keeps the default rate limit.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl configuration rejects an out-of-range fps limit", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.setupConfig();
+
+    mx::app::writeConfigFile( "/tmp/mcp3208Ctrl_test_fps.conf", { "accel" }, { "fps" }, { "20000" } );
+    app.config.readConfig( "/tmp/mcp3208Ctrl_test_fps.conf" );
+
+    REQUIRE( app.loadConfigImpl( app.config ) == 0 );
+    REQUIRE( app.m_fps == Approx( 8000.0f ) );
+}
+
+/// Verify a synchronized fps source reports the WFS rate without lowering the scan rate limit.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl fps source keeps the synchronized rate limit", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.setupFpsSourceProperty();
+    app.m_timingSource = mcp3208Ctrl::TimingSource::Semaphore;
+
+    REQUIRE( app.setCallBack_m_indiP_fpsSource( app.makeFpsSourceUpdate( 2000.0 ) ) == 0 );
+    REQUIRE( app.m_wfs_fps == Approx( 2000.0 ) );
+    REQUIRE( app.m_fps == Approx( 8000.0f ) );
+    REQUIRE( app.m_trigger == Approx( 1e9f / 8000.0f ) );
 }
 
 /// Verify the user fps callback still updates cadence metadata.
@@ -1102,7 +1142,7 @@ TEST_CASE( "mcp3208Ctrl loadImageIntoStream updates frame mapping counters", "[m
     REQUIRE( app.m_syncFramesWritten == 1 );
 }
 
-/// Verify a WFS reference arms `round(fps * period)` scans with the grid aligned to the modelled phase.
+/// Verify a WFS reference arms `floor(fps * period)` scans with the grid aligned to the modelled phase.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
@@ -1143,6 +1183,46 @@ TEST_CASE( "mcp3208Ctrl synchronized reference arms scans at the modelled phase"
     REQUIRE( fresh.processSyncReference( arrival ) == 1 );
     REQUIRE( fresh.m_syncSchedule.m_count == 0 );
     REQUIRE( fresh.m_scheduleFailures == 0 );
+}
+
+/// Verify the scan count is the highest multiple of the WFS rate within the limit, as the WFS rate changes.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized scans follow a WFS rate change within the limit", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_numChannels           = 2;
+    app.m_fps                   = 8000;
+    app.m_alpha                 = 0.01f;
+    app.m_firstSemaphore        = false;
+    app.m_avgSemaphorePeriod_ns = 500000.0;
+    app.m_lastAtime             = timespec{ 10, 0 };
+
+    // One long interval is jitter: it enters the EMA and keeps 4 scans.
+    app.updateTriggerTiming( timespec{ 10, 1428571L } );
+    REQUIRE( app.m_cadenceResets == 0 );
+    REQUIRE( app.m_wfsPeriodMeasured_ns < 520000.0 );
+
+    // Three consecutive 700 Hz intervals restart the estimate at 700 Hz.
+    app.updateTriggerTiming( timespec{ 10, 2857142L } );
+    app.updateTriggerTiming( timespec{ 10, 4285713L } );
+    REQUIRE( app.m_cadenceResets == 1 );
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 1428571.0 ) );
+
+    REQUIRE( app.m_syncSchedule.arm( 1000000000, app.m_wfsPeriodMeasured_ns, app.m_fps, 0, 40000, 20000 ) );
+    REQUIRE( app.m_syncSchedule.m_count == 11 );
+    REQUIRE( app.m_syncSchedule.fps() == Approx( 7700.0 ).epsilon( 1e-4 ) );
+
+    // A 500 Hz WFS gets 16 scans, 8 kHz.
+    REQUIRE( app.m_syncSchedule.arm( 1000000000, 2000000, app.m_fps, 0, 40000, 20000 ) );
+    REQUIRE( app.m_syncSchedule.m_count == 16 );
+
+    // Lowering the limit to 6 kHz gives 3 scans at 2 kHz.
+    app.m_fps = 6000;
+    REQUIRE( app.m_syncSchedule.arm( 1000000000, 500000, app.m_fps, 0, 40000, 20000 ) );
+    REQUIRE( app.m_syncSchedule.m_count == 3 );
 }
 
 /// Verify scans read at their deadlines, record their phase, and are never published as a catch-up burst.

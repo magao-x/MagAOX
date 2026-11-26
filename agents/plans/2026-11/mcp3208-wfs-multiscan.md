@@ -8,14 +8,22 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
 
 ## Design
 
-- `libMagAOX/app/wfsScanSchedule.hpp`: ad7689Ctrl's `syncSchedule`, unchanged except for namespace (`wfsScan`), moved
-  to libMagAOX so both ADC apps can share it. Each WFS arrival arms `max(1, round(fps * period))` scans spaced
-  `period / count` apart (4 at 125 us for 8000 / 2000 Hz). The first scan is at the requested phase modulo the scan
+- `libMagAOX/app/wfsScanSchedule.hpp`: ad7689Ctrl's `syncSchedule`, moved to libMagAOX (namespace `wfsScan`) so both
+  ADC apps can share it. Each WFS arrival arms `max(1, floor(fps * period * 1.01))` scans spaced `period / count`
+  apart: the highest integer multiple of the WFS rate not above `fps`. With an 8 kHz limit that is 4 scans (8 kHz) at
+  a 2 kHz WFS, 16 (8 kHz) at 500 Hz, 11 (7.7 kHz) at 700 Hz, 4 (6.8 kHz) at 1.7 kHz. ad7689Ctrl rounded instead, which
+  exceeds the limit (5 scans, 8.5 kHz, at 1.7 kHz). The 1% allowance (`c_ratioTolerance`) keeps 4 scans for a 2 kHz
+  WFS measured slightly fast (ratio 3.9992 at 2000.4 Hz), so the rate can exceed the limit by at most 1%. A WFS faster
+  than the limit still gets one scan per frame. The first scan is at the requested phase modulo the scan
   interval, capped to leave the scan service plus `cadenceGuard_ns` before the next slot. Late slots are skipped, never
   published as a catch-up burst; nothing is scanned after the period without a new semaphore.
 - `mcp3208Ctrl` semaphore mode:
-  - `fps` (config `[fps]`, INDI `fps`) is the requested ADC rate, as in timer mode. Leave `fps.device` empty: it would
-    set the ADC rate to the WFS rate (1 scan per frame).
+  - `fps` is the scan rate limit: config `accel.fps` (default 8000, must be in (0, 10000], otherwise the default is
+    kept with a warning) and the INDI `fps` target at runtime. In timer mode it remains the ADC rate. In semaphore
+    mode an `fps.device` source only records the WFS rate (`m_wfs_fps`); it no longer overwrites the limit.
+  - The WFS period estimate restarts from the latest interval after 3 consecutive intervals more than 10% from it
+    (`syncTiming.cadence_resets`), so a WFS rate change re-fits the scan count within a few frames. Isolated outliers
+    (jitter, a missed notification without producer metadata) only enter the EMA, as before.
   - `processSyncReference()` handles each semaphore: the existing producer-metadata tracking, then the existing WFS
     delay model (`updateTriggerTiming`), then arms the schedule at the controller-corrected delay. A repeated producer
     `cnt0` arms nothing (`duplicate_references`). Posts drained together count once (`coalesced_wakes`).
@@ -39,19 +47,21 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
     (fractions of the WFS period), so loPredCtrlAcc's lock check keeps its meaning.
   - `timingDiag.sync_frames_written` now counts 4 per WFS frame.
 - New INDI `syncTiming`: `scans_per_wfs`, `scheduled_fps`, `scan_period_us`, `phase_us`, `skipped_scans`, `late_scans`,
-  `max_lateness_us`, `coalesced_wakes`, `duplicate_references`, `schedule_failures`.
+  `max_lateness_us`, `coalesced_wakes`, `duplicate_references`, `schedule_failures`, `cadence_resets`.
 
 ## Verification
 
-- `wfsScanSchedule_test` (ad7689Ctrl's five schedule tests, ported): built and passed on the development Mac (9071
-  assertions).
+- `wfsScanSchedule_test` (ad7689Ctrl's schedule tests, ported, plus the integer-multiple limit at 2000, 500, 700,
+  1700, 2000.4, 1000 and 9000 Hz): built and passed on the development Mac (6 cases).
 - `mcp3208Ctrl_test`: compiles with GCC 15 against the real ImageStreamIO headers on the Mac (syntax check, no
   warnings in the changed files). It cannot link or run there (no ImageStreamIO library, macOS has no unnamed
   semaphores), so it must be run on Linux:
   `make -C tests -f Makefile.one t=../apps/mcp3208Ctrl/tests/mcp3208Ctrl_test && apps/mcp3208Ctrl/tests/mcp3208Ctrl_test`.
   New or rewritten cases: arming at the modelled phase, deadlines and late-slot skipping, the read-latency EMA and
   controller per WFS period, the service EMA, four scans from one real semaphore post, period start and missed-frame
-  normalization, reconfig reset.
+  normalization, a 2 kHz to 700 Hz change (11 scans), `accel.fps` loading and range, the synchronized fps source,
+  reconfig reset.
+- loPredCtrlAcc's `acc_ratio` must equal `syncTiming.scans_per_wfs` (4 at 2 kHz); it is not adaptive.
 - On the Pi: `syncTiming.scans_per_wfs=4`, `scheduled_fps=8000`, `skipped_scans` and `late_scans` near zero,
   `fg_timing` at 8 kHz, `timingDiag.mode_code=1` and `delay_lock=1`.
 

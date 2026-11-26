@@ -9,6 +9,7 @@
 #include "../wfsScanSchedule.hpp"
 
 #include <limits>
+#include <utility>
 
 namespace libXWCTest
 {
@@ -149,7 +150,49 @@ TEST_CASE( "wfsScan missed subscans never become catch-up bursts", "[wfsScanSche
     REQUIRE( clock.m_skipped == skipped );
 }
 
-/** Reject invalid or physically impossible schedules, including a rounded rate above the admission limit.
+/** The scan count is the highest integer multiple of the WFS rate not above the maximum rate.
+ * \ingroup app_unit_test
+ */
+TEST_CASE( "wfsScan highest integer multiple of the WFS rate within the limit", "[wfsScanSchedule]" )
+{
+    // clang-format off
+#ifdef WFSSCANSCHEDULE_TEST_DOXYGEN_REF
+    MagAOX::app::wfsScan::syncSchedule::arm;
+    MagAOX::app::wfsScan::syncSchedule::fps;
+#endif
+    // clang-format on
+    syncSchedule clock;
+
+    // WFS rate [Hz], expected scans per WFS period with an 8 kHz limit.
+    for( auto [wfs, count] : { std::pair{ 2000.0, 4u },
+                               std::pair{ 500.0, 16u },
+                               std::pair{ 700.0, 11u },
+                               std::pair{ 1700.0, 4u },
+                               std::pair{ 2000.4, 4u },
+                               std::pair{ 1000.0, 8u } } )
+    {
+        REQUIRE( clock.arm( 1000000000, 1e9 / wfs, 8000, 0, 40000, 20000 ) );
+        REQUIRE( clock.m_count == count );
+        REQUIRE( clock.fps() == Approx( count * wfs ) );
+        REQUIRE( clock.fps() <= 8000 * ( 1 + MagAOX::app::wfsScan::c_ratioTolerance ) );
+    }
+
+    // A WFS faster than the limit still gets one scan per WFS frame.
+    REQUIRE( clock.arm( 1000000000, 1e9 / 9000, 8000, 0, 40000, 20000 ) );
+    REQUIRE( clock.m_count == 1 );
+
+    // A lower limit lowers the multiple: 6 kHz gives 3 scans at 2 kHz and 8 at 700 Hz.
+    REQUIRE( clock.arm( 1000000000, 500000, 6000, 0, 40000, 20000 ) );
+    REQUIRE( clock.m_count == 3 );
+    REQUIRE( clock.arm( 1000000000, 1e9 / 700, 6000, 0, 40000, 20000 ) );
+    REQUIRE( clock.m_count == 8 );
+
+    // Never above the limit: 2.5 scans per period at 10 kHz is 2, where rounding would give 3 (12 kHz).
+    REQUIRE( clock.arm( 1000000000, 250000, 10000, 0, 10000, 1000 ) );
+    REQUIRE( clock.m_count == 2 );
+}
+
+/** Reject invalid or physically impossible schedules.
  * \ingroup app_unit_test
  */
 TEST_CASE( "wfsScan rejects impossible subscan timing", "[wfsScanSchedule]" )
@@ -164,7 +207,6 @@ TEST_CASE( "wfsScan rejects impossible subscan timing", "[wfsScanSchedule]" )
     REQUIRE_FALSE( clock.arm( 1000000000, 0, 8000, 0, 56000, 20000 ) );
     REQUIRE_FALSE( clock.arm( 1000000000, 500000, 0, 0, 56000, 20000 ) );
     REQUIRE_FALSE( clock.arm( 1000000000, 500000, 8000, 0, 224000, 20000 ) );
-    REQUIRE_FALSE( clock.arm( 1000000000, 250000, 10000, 0, 10000, 1000 ) );
     REQUIRE_FALSE( clock.arm( std::numeric_limits<int64_t>::max(), 500000, 8000, 0, 56000, 20000 ) );
 
     for( double invalid : { std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN() } )

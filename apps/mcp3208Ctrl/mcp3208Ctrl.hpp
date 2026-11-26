@@ -37,10 +37,12 @@ namespace app
 /** MagAO-X application to read MCP3208 channels on a Raspberry Pi.
  *
  * The controller can either acquire on its internal timer loop or synchronize reads to an
- * ImageStreamIO semaphore. Synchronized, each WFS semaphore arms `round(fps * WFS period)` scans
- * (4 at 8 kHz with a 2 kHz WFS) uniformly spaced across that WFS period, with the scan grid aligned
- * to the WFS phase model (`wfsScan::syncSchedule`). Scans are never free-running: a period without a
- * new semaphore produces no further scans.
+ * ImageStreamIO semaphore. Synchronized, `fps` (`accel.fps`, INDI `fps`) is an upper limit: each WFS
+ * semaphore arms the highest integer number of scans whose rate does not exceed it (8 kHz at a 2 kHz or
+ * 500 Hz WFS, 7.7 kHz at 700 Hz, for an 8 kHz limit), uniformly spaced across that WFS period, with the
+ * scan grid aligned to the WFS phase model (`wfsScan::syncSchedule`). The count follows the measured WFS
+ * period, which restarts after a persistent rate change. Scans are never free-running: a period without
+ * a new semaphore produces no further scans.
  *
  * \ingroup mcp3208Ctrl
  */
@@ -71,6 +73,12 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     /// Nominal SPI time of one 24-bit channel transfer at the default rate; a floor on the scan service estimate.
     static constexpr double c_channelReadNominal_ns = 24e9 / MCP3208Lib::MCP3208::DEFAULT_SPI_BAUD;
+
+    /// Relative difference from the WFS period estimate that counts a semaphore interval toward a cadence change.
+    static constexpr double c_cadenceChangeFraction = 0.1;
+
+    /// Consecutive differing semaphore intervals that restart the WFS period estimate.
+    static constexpr unsigned c_cadenceChangeIntervals = 3;
 
     /** \name Configurable Parameters - Data
      * @{
@@ -272,6 +280,10 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     uint64_t m_duplicateReferences{ 0 }; ///< WFS references repeating the previous producer frame ID; they arm nothing.
 
     uint64_t m_scheduleFailures{ 0 }; ///< WFS references with a measured period whose scans could not be fitted.
+
+    unsigned m_cadenceOutliers{ 0 }; ///< Consecutive semaphore intervals differing from the WFS period estimate.
+
+    uint64_t m_cadenceResets{ 0 }; ///< WFS period estimate restarts after a persistent WFS rate change.
 
     ///@}
 
@@ -560,6 +572,19 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
             dt_ns /= static_cast<double>( m_syncProducerFrameDelta );
         }
 
+        // A WFS rate change is followed at once: after c_cadenceChangeIntervals consecutive intervals more than
+        // c_cadenceChangeFraction from the estimate, restart it. Isolated outliers (jitter) only enter the EMA.
+        const bool outlier = m_avgSemaphorePeriod_ns > 0.0 && std::fabs( dt_ns - m_avgSemaphorePeriod_ns ) >
+                                                                  c_cadenceChangeFraction * m_avgSemaphorePeriod_ns;
+        m_cadenceOutliers = outlier ? m_cadenceOutliers + 1 : 0;
+
+        if( m_cadenceOutliers >= c_cadenceChangeIntervals )
+        {
+            m_avgSemaphorePeriod_ns = 0.0;
+            m_cadenceOutliers       = 0;
+            ++m_cadenceResets;
+        }
+
         // Start from the first measured interval, so the scan count is right from the second reference.
         const double alpha = static_cast<double>( m_alpha );
         m_avgSemaphorePeriod_ns =
@@ -767,6 +792,18 @@ void mcp3208Ctrl::setupConfig()
                 "float",
                 "Global EMA coefficient for synchronized timing smoothers. Default is 0.01." );
 
+    config.add( "accel.fps",
+                "",
+                "accel.fps",
+                argType::Required,
+                "accel",
+                "fps",
+                false,
+                "float",
+                "ADC rate in timer mode. In semaphore mode the upper limit: each WFS frame gets the highest integer "
+                "number of scans not exceeding it (8000 Hz at a 2 kHz or 500 Hz WFS, 7700 Hz at 700 Hz). Also the INDI "
+                "fps target. Default is 8000, maximum 10000." );
+
     config.add( "numChannels.device",
                 "",
                 "numChannels.device",
@@ -840,6 +877,20 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_alpha, "synchro.alpha" );
 
     _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
+
+    float fps = m_fps;
+    _config( fps, "accel.fps" );
+
+    if( fps > 0 && fps <= 10000 )
+    {
+        m_fps           = fps;
+        m_trigger       = 1e9f / m_fps;
+        nano_sec_target = 1e9f / m_fps;
+    }
+    else
+    {
+        log<text_log>( "accel.fps must be in (0, 10000]; keeping " + std::to_string( m_fps ), logPrio::LOG_WARNING );
+    }
     _config( m_numChannelsDevice, "numChannels.device" );
     _config( m_numChannelsProperty, "numChannels.property" );
     _config( m_numChannelsElement, "numChannels.element" );
@@ -1013,7 +1064,8 @@ int mcp3208Ctrl::appStartup()
                               "max_lateness_us",
                               "coalesced_wakes",
                               "duplicate_references",
-                              "schedule_failures" } )
+                              "schedule_failures",
+                              "cadence_resets" } )
     {
         m_indiP_syncTiming.add( pcf::IndiElement( name ) );
     }
@@ -1209,7 +1261,8 @@ void mcp3208Ctrl::updateSyncTimingIndi()
                                 "max_lateness_us",
                                 "coalesced_wakes",
                                 "duplicate_references",
-                                "schedule_failures" },
+                                "schedule_failures",
+                                "cadence_resets" },
                               { static_cast<double>( schedule.m_count ),
                                 schedule.fps(),
                                 schedule.m_interval * 1e-3,
@@ -1219,7 +1272,8 @@ void mcp3208Ctrl::updateSyncTimingIndi()
                                 m_maxLateness_ns * 1e-3,
                                 static_cast<double>( m_coalescedWakes ),
                                 static_cast<double>( m_duplicateReferences ),
-                                static_cast<double>( m_scheduleFailures ) } );
+                                static_cast<double>( m_scheduleFailures ),
+                                static_cast<double>( m_cadenceResets ) } );
 }
 
 int mcp3208Ctrl::appLogic()
@@ -1559,6 +1613,8 @@ void mcp3208Ctrl::resetSynchroAcquisitionState()
     m_coalescedWakes          = 0;
     m_duplicateReferences     = 0;
     m_scheduleFailures        = 0;
+    m_cadenceOutliers         = 0;
+    m_cadenceResets           = 0;
 }
 
 void mcp3208Ctrl::updateEffectiveTimingSource()
@@ -2201,8 +2257,15 @@ INDI_SETCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fpsSource )( const pcf::IndiProperty
 
     float target = ipRecv[m_fpsElement].get<float>();
 
+    m_wfs_fps = target;
+
+    // Synchronized, the scan count follows the measured WFS period; the source must not lower the rate limit.
+    if( m_timingSource == TimingSource::Semaphore )
+    {
+        return 0;
+    }
+
     m_fps           = target;
-    m_wfs_fps       = m_fps;
     m_trigger       = 1e9f / m_fps; // Update trigger value based off new fps
     nano_sec_target = 1e9f / m_fps;
 

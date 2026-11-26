@@ -18,8 +18,16 @@ namespace app
 namespace wfsScan
 {
 
+/// Relative allowance on the scan:WFS ratio, so a WFS slightly faster than nominal keeps its scan count.
+/** With a 2 kHz WFS measured at 2000.4 Hz and an 8 kHz limit the ratio is 3.9992, which still gives 4 scans. The
+ * scheduled rate can therefore exceed the limit by at most this fraction.
+ */
+constexpr double c_ratioTolerance = 0.01;
+
 /// Finite scan schedule re-anchored by each unique WFS trigger; never free-runs after the source stops.
-/** Each WFS arrival arms `max(1, round(fps * period))` uniformly spaced scans. The first scan is at the requested
+/** Each WFS arrival arms `max(1, floor(fps * period))` uniformly spaced scans: the highest integer multiple of the WFS
+ * rate not above `fps` (8 kHz at 2 kHz and 500 Hz, 7.7 kHz at 700 Hz for an 8 kHz limit), within
+ * `c_ratioTolerance`. A WFS faster than `fps` still gets one scan per WFS frame. The first scan is at the requested
  * phase reduced modulo the scan interval, so a member of the scan grid aligns with the WFS phase model. Originally
  * written for ad7689Ctrl.
  */
@@ -45,14 +53,14 @@ struct syncSchedule
     /// Abandon pending slots, retaining the last acquisition time and lifetime skipped count.
     void cancel();
 
-    /// Start a new period with the nearest positive integer scan count and a checked service budget.
+    /// Start a new period with the highest integer scan count within the rate limit and a checked service budget.
     /**
      * \returns true if the period was armed
      * \returns false if an input is invalid or the scans cannot fit, leaving the schedule cancelled
      */
     bool arm( int64_t anchor /**< [in] unique WFS arrival [monotonic ns] */,
               double  period /**< [in] measured WFS period [ns] */,
-              double  fps /**< [in] requested per-channel scan rate [Hz] */,
+              double  fps /**< [in] maximum per-channel scan rate [Hz] */,
               double  phase /**< [in] WFS phase-model delay plus signed user offset [ns] */,
               double  service /**< [in] complete ADC service [ns] */,
               double  guard /**< [in] reserved publication and lateness allowance [ns] */ );
@@ -73,7 +81,7 @@ struct syncSchedule
      */
     bool take( int64_t now /**< [in] actual software scan start [monotonic ns] */ );
 
-    /// Return the scheduled rate, distinct from the user's requested rate.
+    /// Return the scheduled rate, distinct from the maximum rate requested.
     double fps() const;
     ///@}
 };
@@ -96,11 +104,12 @@ inline bool syncSchedule::arm( int64_t anchor, double period, double fps, double
         return false;
     }
 
-    const double   budget   = service + guard;
-    const unsigned count    = static_cast<unsigned>( std::max( 1.0, std::floor( fps * period / 1e9 + 0.5 ) ) );
-    const double   interval = period / count;
+    const double   budget = service + guard;
+    const unsigned count =
+        static_cast<unsigned>( std::max( 1.0, std::floor( fps * period / 1e9 * ( 1 + c_ratioTolerance ) ) ) );
+    const double interval = period / count;
 
-    if( budget >= interval || 1e9 / interval > 10000 ||
+    if( budget >= interval || 1e9 / interval > 10000 * ( 1 + c_ratioTolerance ) ||
         static_cast<double>( anchor ) > static_cast<double>( std::numeric_limits<int64_t>::max() ) - 2e9 )
     {
         return false;
