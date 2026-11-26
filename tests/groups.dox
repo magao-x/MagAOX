@@ -112,6 +112,11 @@ $ less tests/results/latest/run.log
  * \ingroup application_unit_test
  */
 
+/** \defgroup dmRecon_unit_test DM Reconstruction Unit Tests
+ * \brief Private reconstruction, publication ownership, validation and loop-trigger diagnostics.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup dmSyncopation_unit_test DM Syncopation Unit Tests
  * \brief Deterministic scheduling, control and local shared-memory publication tests.
  * \ingroup application_unit_test
@@ -256,6 +261,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
 
 /** \defgroup timingGUI_unit_test Timing GUI Unit Tests
  * \brief Offline timing conversions, INDI availability, and command routing tests.
+ * \ingroup application_unit_test
+ */
+
+/** \defgroup polarimetryGUI_unit_test Polarimetry GUI Unit Tests
+ * \brief Offline hwpSequencer subscription, control availability, status, and command tests.
  * \ingroup application_unit_test
  */
 
