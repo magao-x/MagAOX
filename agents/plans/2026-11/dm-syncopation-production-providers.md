@@ -1122,3 +1122,196 @@ The callback changes the cadence under the existing producer mutex. An
 outstanding tagged payload still follows the protocol's acknowledgement and
 ownership rules. Offline tests exercise switching in both directions with
 modulation active and three auxiliary slots receiving distinct planes at 8 kHz.
+
+## 2026-11-21 Automatic production cadence
+
+The operator requested the fastest rated combined cadence from a 500 Hz to
+3.6 kHz main loop. The production preset uses `scheduler.maxSubframes=0`
+and `scheduler.maxCadenceHz=8000`. Choose the largest integer subdivision
+allowed by the measured period, the existing rating tolerance and the
+16-slot protocol capacity. At 3.6 kHz, two steps give 7.2 kHz. At 500 Hz,
+16 steps give 8 kHz. The preset allows primary measurements down to 450 Hz
+to avoid placing the nominal 500 Hz endpoint on the qualification boundary.
+
+The shared timing record already has room for 16 steps. Carry the selected
+count through schedule publication, execution, main timing labels and optional
+per-slot diagnostics. A changed count advances the provider generation.
+Retain the existing exact reader-release checks, fixed copy budget and
+publication cutoffs. After a rate change puts the old grid outside the
+mapping window, withdraw it and acquire a new full cadence baseline.
+
+The workstation app build and diagnostic INDI syntax check pass. The scheduler,
+simulation, zero timing, main timing and provider suites pass 251 cases. The
+private-stream regression checks every auxiliary acknowledgement, provider
+snapshot, passive step-zero copy and final-slot INDI readback at 500 Hz, 1 kHz,
+2 kHz, 2.5 kHz and approximately 3.6 kHz. The live 2-to-1 kHz case checks
+schedule withdrawal and new slot spacing after reacquisition. Delivered rate
+and misses at the endpoints still require instrument qualification.
+
+## 2026-11-22 Channel clearing in either enable state
+
+The operator reports repeated saturation trips when enabling synco with a
+1 kHz main loop and the DM running at 8 kHz. The same symptom did not occur
+at 2 kHz main. For the captured attempt, the rate change started near
+05:51:32.16 UTC and the saturation interlock paused the loop at 05:51:35.254.
+The accepted main timings through 05:51:34.998 remained near 1 ms apart.
+The available telemetry establishes the trip time while the cause of the
+first clipped command remains open.
+
+The operator requested that Zero Channels accept the request with either loop
+state and either synco enable state. Queue the request under the existing cycle
+mutex and withdraw the provider schedule. Clear the numbered destinations
+within a protected interval when the primary is live, and let the next genuine
+combination consume the batch. If the primary is idle, publish one destination
+counter to trigger dmcomb. Retry unavailable required streams and busy
+destinations on the ordinary thread. The operator clarified that triggering
+dmcomb completes the request. Acknowledge the next primary publication after
+the passive copy or the explicit trigger when the primary is idle. The combined
+stream supplies pre-copy timing for reader safety. Resume using the current
+enable setting. The provider generation fences prior tagged commands. Legacy
+source publications predating the clear are ineligible during the current app
+session.
+
+The workstation application and GUI builds passed. All 166 scheduler tests and
+both offline GUI tests passed. The private stream tests cover both enable
+states, live and idle primary publications, retry while a destination is busy,
+the main-to-idle transition after a passive copy, and legacy source eligibility
+on reattachment. The trigger can complete a request with the combined counter
+unchanged, and the idle path can clear inputs with the combined stream absent.
+Live timing and recovery at the instrument remain to be qualified.
+
+### Preserve the running cadence during channel clearing
+
+The operator saw the DM write rate drop from 8 kHz when requesting Zero
+Channels with the AO loop closed and synco enabled. The clear suspended
+auxiliary triggers and reopened the production streams, which restarted the
+one-second ownership warmup. A running production scheduler now substitutes
+zeros for provider payloads at its next eligible auxiliary slot and preserves
+the existing release checks, copy budget, trigger and primary grid. Posting the
+clear retires the provider generation. The rest of the cycle uses the cleared
+cache, and the next primary advertises the new generation. If the production
+schedule stops before the clear, the ordinary live or idle path takes over.
+
+The private-stream regression checks one primary and seven auxiliary writes
+at 1 kHz during the clear, rejection of a stale provider command, and the
+explicit idle trigger when the primary stops before the scheduled clear.
+It runs with and without startup averaging confirmation and checks that a
+clear at the running cadence keeps the existing confirmation.
+The dry-run branch built and all 169 scheduler cases passed with this fix.
+
+### Closed-loop disturbance on enable
+
+The operator now sees an enable transient at 2 kHz that the loop recovers
+from, and repeatable saturation trips at 1 kHz. The effect occurs on sky
+under real load. The operator sees no disturbance in the lab. In the 1 kHz
+capture the tweeter cadence transitions near 05:51:32 UTC. The accepted main commands
+still arrive about 1 ms apart, and the measured camera-to-SDK-start mean
+changes from about 137 us to 139 us before the 05:51:35.254 trip. These
+statistics cover accepted timings and contain no command pixels or modal
+state. They cannot identify the first perturbation or exclude a short
+unmatched event at enable.
+
+The production scheduler retains the previously applied contribution for
+each provider that supplies no new command. Even with all contributions
+zero, the auxiliary triggers recompute and send the combined shape using
+the held primary command.
+At 8 kHz, 1 kHz main uses seven auxiliary slots per main cycle, versus
+three at 2 kHz. The saved tweeter configuration uses the primary channel
+as the controller's delta input. Every completed controller command
+publishes `dm01disp_delta`, which `dmtweeter-recon` consumes. If `writeDMf`
+is enabled, cacao `mfilt` can replace the integrator state from those
+reconstructions without validating their source-command age or coherence.
+The operator confirms `writeDMf` was Off during these trips. That excludes
+this optional integrator feedback path. Reconstruction itself can still run
+while the switch is Off. In the earlier slowdown investigation, stopping
+the reconstructor at 2 kHz did not improve MVM timing. The earlier one-step
+and four-step comparison did isolate the slowdown to work associated with
+auxiliary slots. See the [rate isolation](dm-syncopation-fixed-copy-budget.md#enable-dependent-mvm-slowdown).
+
+The local cacao combiner copies the new pixels into `dm01disp` before calling
+the publication routine, without setting the stream's write flag around the
+copy. BMC's vector check compares the combined stream identity before and
+after conversion. A reader running entirely within that copy interval can
+see the previous identity and a mixed payload. This is a protocol gap in the
+inspected source. The deployed revision, overlap at enable and any resulting
+command corruption remain unconfirmed. Saved deltas in `dmtweeter.sdk_pipeline`
+and `holoop-time.loop_timing_quality` can establish observed rejection,
+admission or main-pairing changes around the transition. They cannot detect
+a mixed payload accepted under a stable identity.
+
+Identical rewrites within one main cycle cannot produce a different shape
+through a torn pixel read. For zero auxiliary contributions with all other
+inputs held, a mixed command would require overlapping different primary
+shapes at a main-cycle boundary. Auxiliary triggers wait for the matching
+controller reader release. A new primary publication can trigger the combiner
+independently. Separately, BMC submits each qualified repeat on its serialized
+SDK worker. A repeat already in the SDK can delay the next changing command
+even after its shared-memory readers release. Compare the tails and misses
+of main-publication-to-SDK-start timing at the on-sky transition to test the
+timing hypothesis. The lab/sky difference alone cannot separate transport
+timing from command integrity or loop response.
+
+### Production startup dry run
+
+Use the production enable callback, primary grid, release gate, waits and copy
+routine with the live primary and combined streams. The dry run allocates one
+zero-filled private destination per configured mapping and keeps the schedule
+in process. It does not open a numbered destination or provider stream. Exact
+real reader release gates the first auxiliary slot. Subsequent virtual slots
+use configurable combination and release delays, initially 5 and 30 us from
+the simulated trigger. The real clock, primary identity and unexpected
+combined-publication checks remain active.
+
+Record the last 32 disabled primary callbacks and the first 32 callbacks
+starting at activation. Use the same logger for enable time, private copy
+latency and per-cycle virtual outcomes. Keep genuine-main diagnostic output
+available for the existing loop timing monitor. The proposed comparison can
+show an effect of synco's own scheduling and copies without reproducing the
+additional combiner, SDK or mirror load.
+
+The dry-run branch built and all 167 scheduler cases passed. The private-stream
+test exercised 1 kHz and 2 kHz startup with and without a genuine main reader
+release. It verified the timing capture and actual private buffer copies while
+checking that the numbered stream pixels, counters and timestamps did not
+change. The fixture produced only genuine-main combined publications and no
+live provider schedule or sidecar files. On-sky timing remains to be measured.
+
+## 2026-11-23 Woofer offload rate at synco enable
+
+The operator identified an offload-rate transition as a possible cause of the
+repeatable on-sky transient. The `ktwitchell/counter-offload` branch's rate
+manager updates the averager after receiving synco `timing.active` over INDI.
+That status is published on synco's ordinary app loop. It can therefore lag
+actual auxiliary triggers, with additional time for the INDI request to reach
+the averager. The averager ends its old generation when it accepts the new
+count. While the count is still four after a 1 to 8 kHz transition, a block
+average can arrive at 2 kHz instead of the requested 250 Hz. At 2 kHz main the
+old count is eight and the corresponding burst is 1 kHz. Actual throughput can
+be lower if average or offload processing drops frames. The woofer gain and
+leak apply per processed average. The `fps` readback is calculated from the
+last reported DM rate and count, and can miss the initial burst.
+
+The dry run uses the real main rate on the command streams. Report zero live
+steps through `timing.active`, preserving the virtual `plannedHz` and capture
+so the rate manager keeps the main-rate count during a dry-run comparison.
+
+### Startup averaging confirmation
+
+For installations with managed woofer offload, `production.offloadDevice` opts
+in to a preparation exchange over INDI. Synco advertises the selected future
+cadence with an instance epoch and request sequence. The offloader sets the
+corresponding average count and waits for the averager to report the active
+window and publication stride from its running generation, then echoes the
+request identity with the frame count. Synco defers the provider schedule and
+auxiliary writes until it sees the corresponding confirmation. A pending
+averager request is serialized through its current-count response so a fast
+disable and re-enable cannot acknowledge the preceding window before an
+already-queued rollback takes effect. Main-rate averaging is requested after
+synco withdraws its preparation. The dry run bypasses the exchange.
+
+The offline 1 kHz test rejects stale epoch and sequence replies and a
+zero-frame acknowledgement, then posts seven auxiliary slots after a
+32-frame confirmation. Withdrawal stops auxiliary posts on the next main.
+Averager and offloader tests cover activation of the new generation and
+matching the publication stride. The on-sky enable transient still needs
+an instrument comparison.

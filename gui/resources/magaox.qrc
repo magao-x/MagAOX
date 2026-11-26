@@ -37,6 +37,7 @@
         <file>icons/scamper_cutout_sq_64.jpeg</file>
         <file>icons/square_128.png</file>
         <file>icons/stop-circle-outline.png</file>
+        <file>icons/timer.png</file>
         <file>icons/tune.png</file>
         <file>icons/waves.png</file>
     </qresource>

@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QGridLayout>
 #include <QGroupBox>
+#include <QIcon>
 #include <QLabel>
 #include <QPushButton>
 #include <QTimer>
@@ -43,6 +44,7 @@ std::optional<double> readTimingNumber( const pcf::IndiElement &element )
 timingPanel::timingPanel( QWidget *parent ) : xWidget( parent )
 {
     setWindowTitle( QStringLiteral( "timingGUI" ) );
+    setWindowIcon( QIcon( QStringLiteral( ":/icons/timer.png" ) ) );
     setStyleSheet( QStringLiteral( "QGroupBox { border: none; }" ) );
     auto *layout = new QVBoxLayout( this );
 
@@ -128,8 +130,7 @@ timingPanel::timingPanel( QWidget *parent ) : xWidget( parent )
     auto *syncoActions = new QHBoxLayout;
     syncoLayout->addLayout( syncoActions );
     addRequest( syncoActions, "dmtweeter-synco", "reacquire", "Reacquire", "Reset the synco timing estimate" );
-    addRequest(
-        syncoActions, "dmtweeter-synco", "zero", "Zero Channels", "Requires an open AO loop and disabled synco" );
+    addRequest( syncoActions, "dmtweeter-synco", "zero", "Zero Channels", "Clear the applied synco contributions" );
     layout->addWidget( synco );
 
     auto *modulators = new QHBoxLayout;

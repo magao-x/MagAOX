@@ -7,8 +7,9 @@ at `127.0.0.1:7624`.
 The synco slider controls `dmtweeter-synco.enable`. The line below it shows the
 phase from `health.reason` and active step count from `timing.active`.
 **Reacquire** resets its
-timing estimate and leaves synco disabled. **Zero Channels** clears the configured
-destinations when the AO loop is open and synco is disabled. `tweeterSpeck` has
+timing estimate and leaves synco disabled. **Zero Channels** queues a clear of
+the configured synco destinations with the AO loop open or closed. The button
+is disabled while dmSyncopation is servicing the request. `tweeterSpeck` has
 amplitude, separation (λ/D), and angle (degrees) inputs. `tweeterMod` has
 amplitude and frequency inputs and shows its current file name, with the full
 path on hover. Both modulators have a modulation slider and a **Zero** request

@@ -2,8 +2,10 @@
 
 Production mode uses the counter-publication scheduler qualified by the finite
 zero trials, with changing, independent contributions from applications on the
-same RTC. It supports one through four steps, including passive-only `N=1`;
-four steps at 2 kHz main request 8 kHz total. `dmSpeckle` is the first application using the shared
+same RTC. It supports one through sixteen steps, including passive-only
+`N=1`. Automatic mode selects the highest integer subdivision allowed by the
+measured main rate and the configured combined-cadence rating. Four steps at
+2 kHz main request 8 kHz total. `dmSpeckle` is the first application using the shared
 `dev::dmSyncopationProducer<derivedT>` helper. The implementation and verification
 record is in the [production plan](../../../agents/plans/2026-11/dm-syncopation-production-providers.md).
 
@@ -107,6 +109,35 @@ is an alias for `logdump --dir=/opt/MagAOX/telem --ext=.bintel`, not a separate
 reader to build. Restart the affected applications through the normal operator
 procedure after installing their instance configurations.
 
+### Woofer offload startup
+
+When `t2wOffloader` manages the woofer offload rate, set the following on
+`dmtweeter-synco` to coordinate the averaging change with the first auxiliary
+write. Use versions of `t2wOffloader` and `shmimIntegrator` that support the
+acknowledgement and leave `offloadRate` set to a positive value.
+
+```ini
+[production]
+offloadDevice=t2wOffloader
+```
+
+Synco qualifies the main clock and publishes `timing.offloadPrepareHz`.
+`t2wOffloader` requests the frame count for that future cadence and reports
+`offloadReady.frames` once `dmtweeter-avg` reports that the count and
+publication stride are active. Synco continues observing genuine main
+commands with `timing.active=0` and health reason `waiting for woofer averaging`
+until it receives the acknowledgement for the current request. At 1 kHz main,
+8 kHz combined and 250 Hz offloading, this means applying 32 frames before
+auxiliary writes begin. Offloading may briefly slow while the new count runs
+at the main cadence. If confirmation is missing when the 30-second startup
+window expires, synco disables the enable request.
+
+Disabling synco withdraws the preparation so the offloader can restore the
+main-rate count. One-step operation and the production dry run have no
+auxiliary hardware cadence to prepare.
+
+### Tested 8 kHz setup
+
 The tested 8 kHz setup uses the BMC controller's full
 [preparation / SDK / post pipeline](../../bmcCtrl/doc/sdk-worker.md#full-preparation--sdk--post-pipeline),
 with distinct isolated cores for the monitor, SDK worker, post worker, synco
@@ -180,9 +211,13 @@ readerReleaseReady=false
 pipelineBackend=false
 
 [scheduler]
-maxSubframes=4
+maxSubframes=0
 maxCadenceHz=8000
 copyBudgetUs=30
+
+[tracking]
+minMainRateHz=450
+maxMainRateHz=4000
 
 [diagnostics]
 windowSec=0
@@ -236,6 +271,29 @@ copy-cutoff checks, provider results, timing maxima and aggregate telemetry.
 The default INDI build exposes the operator controls plus `health` and the
 short `timing` summary. The primary monitor and `readerReleaseMonitor` worker
 continue running.
+
+The production scheduler seeds its phase grid after measuring a full cadence
+baseline, which takes at least 10 seconds of main publications. With
+`scheduler.maxSubframes=0`, it selects the highest integer count up to 16 whose
+combined rate fits `scheduler.maxCadenceHz` plus `tracking.rateTolerance`
+(default 1%). Step zero counts toward the total and is published by the main
+loop. A positive `maxSubframes` requests a fixed count.
+
+| Main rate | Steps | Planned combined rate with an 8 kHz rating |
+| --- | ---: | --- |
+| 500 Hz | 16 | 8 kHz |
+| 1 kHz | 8 | 8 kHz |
+| 2 kHz | 4 | 8 kHz |
+| 2.5 kHz | 3 | 7.5 kHz |
+| 3.6 kHz | 2 | 7.2 kHz |
+
+The preset's tracking range leaves headroom for a nominal 500 Hz loop's
+measured cadence. Synco uses the qualified primary publication rate and
+changes the provider schedule generation when the selected count changes.
+If a live rate change moves the frozen grid outside the publication clock's
+mapping window, synco withdraws the provider schedule and measures a fresh
+baseline before resuming. Delivery remains subject to the configured copy
+cutoffs and exact reader-release checks.
 
 Keep `diagnostics.maxEvents` positive: production also uses this capacity for
 the required reader-release queue, so zero is rejected even in minimal mode.
@@ -331,9 +389,56 @@ disabling synco or stopping either application. A "zero submitted" log confirms
 transport submission, not destination application. Stopping either application
 alone does not remove the last copied contribution.
 
-With the AO loop open and synco disabled, use
-`dmtweeter-synco.zero.request=On` to clear all configured destinations and
-trigger one dmcomb update. [Open-loop clearing procedure](dmSyncopation.md#controller-clearing-and-maintenance)
+Use `dmtweeter-synco.zero.request=On` to clear all configured destinations,
+including while synco is enabled or the AO loop is closed. Synco fences old
+provider commands. Running production synco clears on a scheduled auxiliary
+trigger and keeps its selected cadence. Providers can submit new commands with
+the following schedule generation.
+[Channel clearing procedure](dmSyncopation.md#controller-clearing-and-maintenance)
+
+## Production startup dry run
+
+For the zero-auxiliary startup comparison, add this setting to the working
+production configuration and restart the synco instance. Keep the real primary,
+combined stream, reader-release observer, CPU placement and scheduler settings.
+
+```ini
+[production]
+enabled=true
+dryRun=true
+```
+
+Confirm `health.mode` reads `production dry run`, allow the timing grid to
+qualify with `enable.toggle` Off, then enable it as usual. Synco uses the live
+main command and exact controller reader release for the first auxiliary slot
+in each cycle. It runs the production waits and full-size copies with zero
+inputs and process-local destinations. It leaves the numbered channels and
+provider streams alone. Zero Channels is unavailable in this mode.
+
+The virtual auxiliary responses use `production.dryRunCombineUs=5` and
+`production.dryRunReleaseUs=30` by default, both measured from the simulated
+trigger. The release delay must be at least as long as the combine delay.
+These are model inputs. The dry run exercises synco's own scheduling and copy
+work during live operation. Actual dmcomb, controller and mirror work remains
+at the genuine-main rate. A configured main timing stream continues to export
+genuine main associations.
+
+`timing.active` remains zero so INDI rate consumers such as `t2wOffloader`
+continue to use the main-loop rate. `timing.plannedHz` describes the dry-run
+schedule.
+
+Find `production dry run startup` and `production dry run cycle` in the synco
+log. Each enable captures up to 32 primary callbacks immediately before enable
+and the first 32 callbacks starting at activation. Turning enable Off flushes
+a partial capture.
+The header includes the enable time and first callback time. Each cycle gives
+the primary counter and producer publication time, monotonic receipt and
+callback times, first private copy time, maximum copy-batch duration, and
+virtual trigger, skip and unacknowledged counts. Times and durations are in
+nanoseconds. Subtract timestamps only within the same clock domain.
+
+Restore `production.dryRun=false` and restart the instance to use live
+auxiliary publications again.
 
 ## Adding another producer application
 
@@ -374,7 +479,9 @@ positive diagnostic window, and controller telemetry provides the independent
 evidence for backend execution.
 
 In production mode, `settings` exposes only `steps` and `maxCadenceHz`, editable
-while disabled. The older keepout/guard/step-0 settings belong to the legacy
+while disabled. Set `steps=0` for automatic selection. In this mode
+`timing.requested` shows 0 and `timing.active` shows the selected count once
+the scheduler is primed. The older keepout/guard/step-0 settings belong to the legacy
 scheduler; production uses exact reader-release readiness and its configured
 ready/passive-copy leads. The standard timing/health properties describe actual
 production state, rate and publications, rather than a hypothetical shadow rate.
