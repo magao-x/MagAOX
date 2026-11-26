@@ -589,6 +589,14 @@ void loPredCtrlAccPanel::onConnect()
 void loPredCtrlAccPanel::onDisconnect()
 {
     setWindowTitle( QString::fromStdString( m_device ) + QStringLiteral( " (disconnected)" ) );
+    clearController();
+    m_accFpsEntry->onDisconnect();
+    m_accFpsKnown = false;
+    refresh();
+}
+
+void loPredCtrlAccPanel::clearController()
+{
     m_readbacks.clear();
     m_writeFailures = m_discarded = m_mismatch = {};
 
@@ -599,9 +607,6 @@ void loPredCtrlAccPanel::onDisconnect()
 
     m_gainEntry->onDisconnect();
     m_learnStdExtraEntry->onDisconnect();
-    m_accFpsEntry->onDisconnect();
-    m_accFpsKnown = false;
-    refresh();
 }
 
 void loPredCtrlAccPanel::handleDefProperty( const pcf::IndiProperty &property )
@@ -629,8 +634,10 @@ void loPredCtrlAccPanel::handleDelProperty( const pcf::IndiProperty &property )
 
     if( name.empty() )
     {
-        // The whole device left the INDI server: nothing the panel shows is current any more.
-        onDisconnect();
+        // The whole controller left the INDI server: nothing it showed is current any more. The accelerometer, a
+        // separate device, publishes its rate only when it changes, so its entry is kept.
+        clearController();
+        refresh();
         setWindowTitle( QString::fromStdString( m_device ) + QStringLiteral( " (not running)" ) );
         return;
     }

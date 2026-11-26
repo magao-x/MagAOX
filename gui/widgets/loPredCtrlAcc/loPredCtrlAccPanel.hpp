@@ -188,6 +188,9 @@ class loPredCtrlAccPanel : public xWidget
 
     /// Recompute every readback, indicator and control availability.
     void refresh();
+
+    /// Forget every loPredCtrlAcc readback and disconnect its controls; the accelerometer's rate entry is kept.
+    void clearController();
 };
 
 } // namespace xqt

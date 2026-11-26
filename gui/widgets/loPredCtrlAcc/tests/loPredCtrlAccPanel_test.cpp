@@ -861,6 +861,14 @@ TEST_CASE( "loPredCtrlAccGUI sets the accelerometer rate", "[loPredCtrlAccGUI]" 
     CHECK( command.getName() == "fps" );
     CHECK( command["target"].get() == "2000" );
 
+    // loPredCtrlAcc stopping or restarting leaves the accelerometer's entry: acc000 publishes fps only on a change.
+    fixture.defineAll();
+    pcf::IndiProperty controller( pcf::IndiProperty::Text, "loPredCtrlAcc", "" );
+    fixture.m_publisher.handleDelProperty( controller );
+    QApplication::processEvents();
+    CHECK( entry->isEnabled() );
+    CHECK( edit->text().toStdString() != "---" );
+
     // The accelerometer stops: the entry is disabled.
     pcf::IndiProperty gone( pcf::IndiProperty::Number, "acc000", "" );
     fixture.m_publisher.handleDelProperty( gone );
