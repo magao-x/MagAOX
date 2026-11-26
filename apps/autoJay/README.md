@@ -123,6 +123,14 @@ selected patterns and mask. Partial grids are acceptable only when the remaining
 signal supports a unique registration. An ambiguous original template cannot be
 made acceptable by discarding absent features.
 
+AutoJay uses mxlib's MFT to refine an accepted peak on a shared patch of the
+reference and live images. It samples the local peak at 0.01 camera pixels
+(0.01 detector pixels at 1×1 binning). If a patch edge contains substantial poke
+signal or the refined shift fails the local support checks, the app uses the
+overlap-normalized cubic estimate. Set `quality.mftRefinement=false` to use that
+estimate for every measurement. Changing this setting requires an app restart
+and works with the existing calibration bundle.
+
 The two captured references share one ROI; all three current images share another
 ROI. Reference and current ROI sizes/origins may differ. Their binning, orientation,
 and optical pixel scale must agree. Physical-coordinate mapping preserves fractional
@@ -205,10 +213,10 @@ persistence run outside the frame/state lock. The acquisition, calibration,
 and registration helpers can be tested without launching the application or
 connecting to instrument resources.
 
-Registration uses mxlib FFT cross-products and cubic interpolation of an
-overlap-normalized correlation surface. Noise comes from frame-stack variance,
-with baseline variance included. The test fixtures cover unequal ROIs, subpixel
-shifts, partial and ambiguous patterns, first capture, and rejection paths.
+Registration uses mxlib FFT cross-products, an overlap-normalized peak search,
+and local MFT refinement. Noise comes from frame-stack variance, with baseline
+variance included. The test fixtures cover small subpixel shifts, unequal ROIs,
+partial and ambiguous patterns, first capture, and rejection paths.
 Build individual suites with `tests/Makefile.one`, for example:
 
 ```sh
