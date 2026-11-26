@@ -31,6 +31,7 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 #include "../../libMagAOX/app/dev/dmSyncopationProducer.hpp"
+#include "../../libMagAOX/common/timingStats.hpp"
 
 /** \defgroup counterOffload Tweeter Counter-Offload
  * \brief Counters woofer offloads on the tweeter through dmSyncopation.
@@ -88,6 +89,11 @@ struct residualShmimT
  *
  * Telemetry (telem_counteroffload) is written every telemeter.maxInterval, and at once when the app is enabled or
  * disabled, a calibration starts or ends, or gain, leak, rampStartUs or rampDurationUs changes.
+ *
+ * Like a frame grabber, the app reports frame timing over 1 s windows in the fg_timing INDI property and in
+ * telem_fgtimings (written when the values change, so about every second): the interval between woofer offload
+ * posts, the interval between consecutive publications to the auxiliary source, and the delay from a woofer post to
+ * the first publication carrying it.
  *
  * The latency INDI property breaks each offload's delay into the handoff from the woofer post (whose time t2wOffloader
  * stores in the input frame's atime), the wait for a slot, and the compute and write times of that slot.
@@ -220,6 +226,16 @@ class counterOffload : public MagAOXApp<true>,
          * \returns true if every field is equal
          */
         bool operator==( const telemSettingsT &other /**< [in] the settings to compare with */ ) const = default;
+    };
+
+    /// Frame-grabber style timing statistics over one window, in seconds.
+    struct fgWindowT
+    {
+        MagAOX::timing::Stats acq; ///< Interval between successive woofer offload posts.
+
+        MagAOX::timing::Stats write; ///< Interval between consecutive publications to the auxiliary source.
+
+        MagAOX::timing::Stats delay; ///< Woofer post to the end of the first publication carrying that offload.
     };
 
     /// Calibration stages, as used by calibStageName(), the CSV and the calibration.stage INDI element.
@@ -558,6 +574,22 @@ class counterOffload : public MagAOXApp<true>,
 
     bool m_telemRecorded{ false }; ///< Whether a telemetry record has been made.  m_telemMutex.
 
+    MagAOX::timing::Accumulator m_fgAcq; ///< Woofer post intervals in the current window, s.  m_stateMutex.
+
+    MagAOX::timing::Accumulator m_fgWrite; ///< Publication intervals in the current window, s.  m_stateMutex.
+
+    MagAOX::timing::Accumulator m_fgDelay; ///< Woofer post to publication delays in the current window, s.  m_stateMutex.
+
+    int64_t m_lastPostNs{ -1 }; ///< CLOCK_ISIO woofer post time of the last stamped offload, ns; -1 for none.  m_stateMutex.
+
+    int64_t m_lastWriteNs{ -1 }; ///< CLOCK_MONOTONIC end of the last publication in a consecutive series, ns; -1 for none.  m_stateMutex.
+
+    fgWindowT m_fgWindow; ///< Statistics of the last completed window.  appLogic thread only.
+
+    std::array<double, 6> m_fgLast{}; ///< Values in the last telem_fgtimings record.  appLogic thread only.
+
+    bool m_fgRecorded{ false }; ///< Whether a telem_fgtimings record has been made.  appLogic thread only.
+
     ///@}
 
     /** \name Calibrate State - Data
@@ -763,6 +795,46 @@ class counterOffload : public MagAOXApp<true>,
 
     /// Update m_slotNs from a new slot request, when it directly follows the previous one.  Producer thread only.
     void updateSlotPeriod( const synco::Request &request /**< [in] the new slot request */ );
+
+    /// Add the interval since the previous stamped offload to the fg_timing acquisition statistics.
+    /** The caller must hold m_stateMutex.
+     */
+    void sampleOffloadPost( int64_t postNs /**< [in] CLOCK_ISIO woofer post time of the offload, ns */ );
+
+    /// Add the interval since the previous publication to the fg_timing write statistics, or end the series.
+    /** Only consecutive publications are counted: a failed publication, or a slot not published (idle or nothing
+     * to publish), ends the series so the next publication starts a new one.  The caller must hold m_stateMutex.
+     */
+    void samplePublication( int64_t writeEndNs /**< [in] CLOCK_MONOTONIC end of the publication, ns */,
+                            bool    published /**< [in] whether the slot was published */ );
+
+    /// End the series of consecutive publications.  The caller must hold m_stateMutex.
+    void endPublicationSeries();
+
+    /// Take the fg_timing statistics accumulated since the last call into m_fgWindow, and start a new window.
+    /** Takes m_stateMutex, so the caller must not hold it.  appLogic thread only.
+     */
+    void takeFGWindow();
+
+    /// The fg_timing INDI element names, in frameGrabber's order.
+    /**
+     * \returns acq_fps, acq_min, acq_max, acq_jitter, write_fps, write_min, write_max, write_jitter, delta_aw,
+     *          delta_aw_jitter
+     */
+    static const std::vector<std::string> &fgTimingElements();
+
+    /// The fg_timing INDI values for a window, with frameGrabber's conventions.
+    /** A rate is 1/mean interval; a mean or jitter needs at least 2 samples and min/max at least 1, else 0.
+     *
+     * \returns the values in the order of fgTimingElements()
+     */
+    static std::vector<double> fgTimingValues( const fgWindowT &w /**< [in] the window statistics */ );
+
+    /// The telem_fgtimings values for a window: mean and jitter of the acquisition, write and delay, in s.
+    /**
+     * \returns atime, atime_jitter, wtime, wtime_jitter, wmatime, wmatime_jitter; 0 where fewer than 2 samples
+     */
+    static std::array<double, 6> fgTelemValues( const fgWindowT &w /**< [in] the window statistics */ );
 
     /// Enable or disable accepting offloads; disabling also requests a zero of the contribution.
     /** \returns true if the enabled state changed
@@ -1184,6 +1256,21 @@ class counterOffload : public MagAOXApp<true>,
      */
     int recordTelem( const telem_counteroffload *tag /**< [in] telemetry type tag */ );
 
+    /// Record the frame timing telemetry on demand, from the last completed window.
+    /**
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int recordTelem( const telem_fgtimings *tag /**< [in] telemetry type tag */ );
+
+    /// Write telem_fgtimings from m_fgWindow if forced, if none has been written, or if the values changed.
+    /** appLogic thread only, or at shutdown after the threads have joined.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
+    int recordFGTimings( bool force = false /**< [in] record even when the values are unchanged */ );
+
     /// Snapshot the fields of the telemetry record whose change triggers an immediate record.
     /** Takes m_stateMutex, so the caller must not hold it.
      *
@@ -1222,6 +1309,8 @@ class counterOffload : public MagAOXApp<true>,
     pcf::IndiProperty m_indiP_stats; ///< Read-only counters.
 
     pcf::IndiProperty m_indiP_latency; ///< Read-only offload latency statistics.
+
+    pcf::IndiProperty m_indiP_fgTiming; ///< Read-only frame-grabber style timing, fg_timing.
 
     pcf::IndiProperty m_indiP_calibrate; ///< Toggle switch: On starts a calibration run, Off aborts it.
 
@@ -1635,6 +1724,17 @@ inline int counterOffload::appStartup()
         return log<software_error, -1>( { __FILE__, __LINE__ } );
     }
 
+    createROIndiNumber( m_indiP_fgTiming, "fg_timing" );
+    for( const std::string &el : fgTimingElements() )
+    {
+        m_indiP_fgTiming.add( pcf::IndiElement( el ) );
+        m_indiP_fgTiming[el] = 0;
+    }
+    if( registerIndiPropertyReadOnly( m_indiP_fgTiming ) < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
     createStandardIndiToggleSw( m_indiP_calibrate, "calibrate" );
     if( registerIndiPropertyNew( m_indiP_calibrate, INDI_NEWCALLBACK( m_indiP_calibrate ) ) < 0 )
     {
@@ -1728,6 +1828,13 @@ inline int counterOffload::appLogic()
 
     SHMIMMONITORT_APP_LOGIC( residualShmimMonitorT );
 
+    takeFGWindow();
+
+    if( state() == stateCodes::OPERATING )
+    {
+        recordFGTimings();
+    }
+
     TELEMETER_APP_LOGIC;
 
     std::unique_lock<std::mutex> lock( m_indiMutex );
@@ -1757,6 +1864,8 @@ inline int counterOffload::appLogic()
     }
 
     const int64_t slotNs = m_slotNs;
+
+    updateIfChanged( m_indiP_fgTiming, fgTimingElements(), fgTimingValues( m_fgWindow ) );
 
     updateIfChanged( m_indiP_latency,
                      latencyElements(),
@@ -1860,6 +1969,9 @@ inline int counterOffload::appShutdown()
 
     recordCounterOffload( true ); // keep the final counters
 
+    takeFGWindow();
+    recordFGTimings( true );
+
     TELEMETER_APP_SHUTDOWN;
 
     if( m_auxOpened )
@@ -1928,12 +2040,17 @@ inline int counterOffload::processImage( void *curr_src, const dev::shmimT &dumm
         m_offloadStamps.push_back( stampNs );
     }
 
+    std::lock_guard<std::mutex> guard( m_stateMutex );
+
+    if( handoff >= 0 ) // fg_timing acquisition interval, from the woofer post stamps
+    {
+        sampleOffloadPost( toNs( receivedIsio ) - handoff );
+    }
+
     if( !m_enabled )
     {
         return 0;
     }
-
-    std::lock_guard<std::mutex> guard( m_stateMutex );
 
     rampT *r =
         addRamp( static_cast<const realT *>( curr_src ), received + static_cast<int64_t>( m_timeOffsetUs * 1000 ) );
@@ -2143,6 +2260,11 @@ counterOffload::recordLatency( int64_t computeStartNs, int64_t computeEndNs, int
             ++m_missed;
         }
 
+        if( r.handoffNs >= 0 ) // fg_timing delay: woofer post to the end of this publication
+        {
+            m_fgDelay.add( ( r.handoffNs + writeEndNs - r.wakeNs ) * 1e-9, r.wakeNs, writeEndNs );
+        }
+
         r.latencyPending = false;
     }
 }
@@ -2158,6 +2280,91 @@ inline void counterOffload::updateSlotPeriod( const synco::Request &request )
     }
 
     m_lastRequest = request;
+}
+
+inline void counterOffload::sampleOffloadPost( int64_t postNs )
+{
+    if( m_lastPostNs >= 0 && postNs > m_lastPostNs )
+    {
+        m_fgAcq.add( ( postNs - m_lastPostNs ) * 1e-9, m_lastPostNs, postNs );
+    }
+
+    m_lastPostNs = postNs;
+}
+
+inline void counterOffload::samplePublication( int64_t writeEndNs, bool published )
+{
+    if( !published )
+    {
+        endPublicationSeries();
+        return;
+    }
+
+    if( m_lastWriteNs >= 0 && writeEndNs > m_lastWriteNs )
+    {
+        m_fgWrite.add( ( writeEndNs - m_lastWriteNs ) * 1e-9, m_lastWriteNs, writeEndNs );
+    }
+
+    m_lastWriteNs = writeEndNs;
+}
+
+inline void counterOffload::endPublicationSeries()
+{
+    m_lastWriteNs = -1;
+}
+
+inline void counterOffload::takeFGWindow()
+{
+    std::lock_guard<std::mutex> guard( m_stateMutex );
+
+    m_fgWindow = { m_fgAcq.stats(), m_fgWrite.stats(), m_fgDelay.stats() };
+
+    m_fgAcq   = MagAOX::timing::Accumulator();
+    m_fgWrite = MagAOX::timing::Accumulator();
+    m_fgDelay = MagAOX::timing::Accumulator();
+}
+
+inline const std::vector<std::string> &counterOffload::fgTimingElements()
+{
+    static const std::vector<std::string> els = { "acq_fps",   "acq_min",   "acq_max",      "acq_jitter",
+                                                  "write_fps", "write_min", "write_max",    "write_jitter",
+                                                  "delta_aw",  "delta_aw_jitter" };
+
+    return els;
+}
+
+inline std::vector<double> counterOffload::fgTimingValues( const fgWindowT &w )
+{
+    std::vector<double> v;
+
+    for( const MagAOX::timing::Stats *st : { &w.acq, &w.write } )
+    {
+        const double mean = st->valid ? st->mean : 0;
+
+        v.push_back( mean != 0 ? 1.0 / mean : 0 );
+        v.push_back( st->count ? st->min : 0 );
+        v.push_back( st->count ? st->max : 0 );
+        v.push_back( st->valid ? st->stddev : 0 );
+    }
+
+    v.push_back( w.delay.valid ? w.delay.mean : 0 );
+    v.push_back( w.delay.valid ? w.delay.stddev : 0 );
+
+    return v;
+}
+
+inline std::array<double, 6> counterOffload::fgTelemValues( const fgWindowT &w )
+{
+    std::array<double, 6> v{};
+    size_t                k = 0;
+
+    for( const MagAOX::timing::Stats *st : { &w.acq, &w.write, &w.delay } )
+    {
+        v[k++] = st->valid ? st->mean : 0;
+        v[k++] = st->valid ? st->stddev : 0;
+    }
+
+    return v;
 }
 
 inline bool counterOffload::setEnabled( bool on )
@@ -4264,6 +4471,11 @@ inline void counterOffload::coThreadExec()
 
         if( idle )
         {
+            { //mutex scope
+                std::lock_guard<std::mutex> guard( m_stateMutex );
+                endPublicationSeries();
+            }
+
             mx::sys::milliSleep( 1 );
             continue;
         }
@@ -4314,6 +4526,7 @@ inline void counterOffload::coThreadExec()
 
             if( m_command.size() == 0 || !needPublish() )
             {
+                endPublicationSeries();
                 continue;
             }
 
@@ -4343,6 +4556,8 @@ inline void counterOffload::coThreadExec()
 
         std::lock_guard<std::mutex> guard( m_stateMutex );
 
+        samplePublication( writeEndNs, published );
+
         if( !published )
         {
             ++m_failed;
@@ -4367,7 +4582,29 @@ inline void counterOffload::coThreadExec()
 
 inline int counterOffload::checkRecordTimes()
 {
-    return telemeterT::checkRecordTimes( telem_counteroffload() );
+    return telemeterT::checkRecordTimes( telem_counteroffload(), telem_fgtimings() );
+}
+
+inline int counterOffload::recordTelem( const telem_fgtimings *tag )
+{
+    static_cast<void>( tag ); // be unused
+
+    return recordFGTimings( true );
+}
+
+inline int counterOffload::recordFGTimings( bool force )
+{
+    const std::array<double, 6> v = fgTelemValues( m_fgWindow );
+
+    if( !force && m_fgRecorded && v == m_fgLast )
+    {
+        return 0;
+    }
+
+    m_fgLast     = v;
+    m_fgRecorded = true;
+
+    return telem<telem_fgtimings>( { v[0], v[1], v[2], v[3], v[4], v[5] } );
 }
 
 inline int counterOffload::recordTelem( const telem_counteroffload *tag )

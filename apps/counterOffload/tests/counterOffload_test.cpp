@@ -36,6 +36,7 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_durationGridUs;
     using counterOffload::m_enabled;
     using counterOffload::m_events;
+    using counterOffload::m_fgWindow;
     using counterOffload::m_finalZero;
     using counterOffload::m_fomWindowMs;
     using counterOffload::m_gain;
@@ -68,6 +69,7 @@ class counterOffload_test : public counterOffload
     using counterOffload::m_timeoutS;
     using counterOffload::m_zeroRequested;
     using counterOffload::recordCounterOffload;
+    using counterOffload::recordFGTimings;
     using counterOffload::recordTelem;
 
     /// Set up 2x2 buffers, a ramp from 120 to 450 us, a gain of 0.5, and a clip level high enough not to act.
@@ -1545,6 +1547,123 @@ TEST_CASE( "counterOffload writes telemetry at once on changes", "[counterOffloa
         REQUIRE( recorded() );
         REQUIRE( app.m_telemLast.rampStartUs == 0 );
         REQUIRE( app.m_telemLast.gain == Approx( 1.16 ) );
+    }
+}
+
+/// Verify the frame-grabber style timing behind fg_timing and telem_fgtimings.
+/**
+ * \ingroup counterOffload_unit_test
+ */
+TEST_CASE( "counterOffload measures fg_timing", "[counterOffload]" )
+{
+    // clang-format off
+    #ifdef COUNTEROFFLOAD_TEST_DOXYGEN_REF
+    counterOffload::sampleOffloadPost(0);
+    counterOffload::samplePublication(0, true);
+    counterOffload::endPublicationSeries();
+    counterOffload::takeFGWindow();
+    counterOffload::fgTimingElements();
+    counterOffload::fgTimingValues(counterOffload::fgWindowT());
+    counterOffload::fgTelemValues(counterOffload::fgWindowT());
+    counterOffload::recordFGTimings(false);
+    counterOffload::recordTelem(static_cast<const telem_fgtimings *>(nullptr));
+    #endif
+    // clang-format on
+
+    using MagAOX::logger::telem_fgtimings;
+
+    counterOffload_test app;
+
+    SECTION( "offload post intervals" )
+    {
+        for( int64_t t : { 0, 4000, 8000, 12000 } ) // 4 ms apart, in us
+        {
+            app.sampleOffloadPost( t * us );
+        }
+
+        app.takeFGWindow();
+        REQUIRE( app.m_fgWindow.acq.count == 3 );
+        REQUIRE( app.m_fgWindow.acq.mean == Approx( 0.004 ) );
+        REQUIRE( app.m_fgWindow.acq.stddev == Approx( 0 ).margin( 1e-12 ) );
+
+        const auto v = counterOffload::fgTimingValues( app.m_fgWindow );
+        REQUIRE( v.size() == counterOffload::fgTimingElements().size() );
+        REQUIRE( v[0] == Approx( 250 ) ); // acq_fps
+        REQUIRE( v[1] == Approx( 0.004 ) );
+        REQUIRE( v[2] == Approx( 0.004 ) );
+
+        app.takeFGWindow(); // a new window starts empty
+        REQUIRE( app.m_fgWindow.acq.count == 0 );
+        REQUIRE( counterOffload::fgTimingValues( app.m_fgWindow )[0] == 0 );
+    }
+
+    SECTION( "only consecutive publications are counted" )
+    {
+        app.samplePublication( 0, true );
+        app.samplePublication( 125 * us, true );
+        app.samplePublication( 250 * us, true );
+        app.samplePublication( 375 * us, false ); // a failure ends the series
+        app.samplePublication( 1000 * us, true );
+        app.samplePublication( 1125 * us, true );
+        app.endPublicationSeries(); // idle, or nothing to publish
+        app.samplePublication( 5000 * us, true );
+        app.samplePublication( 5175 * us, true );
+
+        app.takeFGWindow();
+        REQUIRE( app.m_fgWindow.write.count == 4 );
+        REQUIRE( app.m_fgWindow.write.min == Approx( 125e-6 ) );
+        REQUIRE( app.m_fgWindow.write.max == Approx( 175e-6 ) );
+        REQUIRE( counterOffload::fgTimingValues( app.m_fgWindow )[4] == Approx( 1 / 137.5e-6 ) ); // write_fps
+    }
+
+    SECTION( "the delay runs from the woofer post to the end of the publication" )
+    {
+        const std::vector<float> d( 4, 1.0f );
+
+        counterOffload::rampT *stamped   = app.addRamp( d.data(), 0 );
+        counterOffload::rampT *unstamped = app.addRamp( d.data(), 0 );
+        REQUIRE( stamped != nullptr );
+        REQUIRE( unstamped != nullptr );
+
+        stamped->wakeNs         = 1000 * us;
+        stamped->handoffNs      = 12 * us;
+        stamped->latencyPending = true;
+
+        unstamped->wakeNs         = 1000 * us; // no woofer stamp, so not sampled
+        unstamped->latencyPending = true;
+
+        app.recordLatency( 1100 * us, 1103 * us, 1150 * us, 1151 * us );
+
+        app.takeFGWindow();
+        REQUIRE( app.m_fgWindow.delay.count == 1 );
+        REQUIRE( app.m_fgWindow.delay.mean == Approx( 163e-6 ) );
+        REQUIRE( counterOffload::fgTelemValues( app.m_fgWindow )[4] == 0 ); // a mean needs 2 samples
+    }
+
+    SECTION( "telem_fgtimings is written on a change, or when forced" )
+    {
+        auto recorded = []() { return telem_fgtimings::lastRecord.tv_sec != 0 || telem_fgtimings::lastRecord.tv_nsec != 0; };
+
+        auto reset = []() { telem_fgtimings::lastRecord = { 0, 0 }; };
+
+        reset();
+        REQUIRE( app.recordFGTimings() == 0 ); // the first record is always written
+        REQUIRE( recorded() );
+
+        reset();
+        REQUIRE( app.recordFGTimings() == 0 );
+        REQUIRE_FALSE( recorded() );
+
+        app.samplePublication( 0, true );
+        app.samplePublication( 125 * us, true );
+        app.samplePublication( 250 * us, true );
+        app.takeFGWindow();
+        REQUIRE( app.recordFGTimings() == 0 );
+        REQUIRE( recorded() );
+
+        reset();
+        REQUIRE( app.recordTelem( static_cast<const telem_fgtimings *>( nullptr ) ) == 0 );
+        REQUIRE( recorded() );
     }
 }
 
