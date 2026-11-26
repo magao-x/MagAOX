@@ -54,7 +54,9 @@ class Widget
 void events()
 {
     for( int depth = 0; depth < 4; ++depth )
+    {
         QApplication::processEvents();
+    }
 }
 
 Widget::Widget() : m_widget( m_device )
@@ -286,6 +288,7 @@ TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
     // clang-format on
     Widget widget;
     widget.ready();
+
     for( const auto *name : { "temp_ccd", "emgain" } )
     {
         pcf::IndiProperty number( pcf::IndiProperty::Number, widget.m_device, name );
@@ -294,6 +297,7 @@ TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
         number.add( pcf::IndiElement( "target", value ) );
         widget.publish( number );
     }
+
     widget.support();
     pcf::IndiProperty synchro( pcf::IndiProperty::Switch, widget.m_device, "synchro" );
     synchro.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
@@ -311,13 +315,21 @@ TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
         auto *control = widget.m_widget.findChild<QWidget *>( name );
         REQUIRE( control != nullptr );
         REQUIRE( control->isVisible() );
+
         for( auto *previous : controls )
+        {
             REQUIRE_FALSE( previous->geometry().intersects( control->geometry() ) );
+        }
+
         controls.push_back( control );
     }
+
     const QString screenshot = qEnvironmentVariable( "CAMERA_GUI_SCREENSHOT" );
+
     if( !screenshot.isEmpty() )
+    {
         REQUIRE( widget.m_widget.grab().save( screenshot ) );
+    }
 }
 
 } // namespace cameraGUITest
