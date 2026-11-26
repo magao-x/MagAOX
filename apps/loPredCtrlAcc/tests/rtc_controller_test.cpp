@@ -34,20 +34,25 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::allocate;
     using loPredCtrlAcc_operational::appliedSlots;
     using loPredCtrlAcc_operational::appLogic;
+    using loPredCtrlAcc_operational::applyRates;
     using loPredCtrlAcc_operational::appShutdown;
     using loPredCtrlAcc_operational::appStartup;
     using loPredCtrlAcc_operational::configureAcquisition;
     using loPredCtrlAcc_operational::copied;
+    using loPredCtrlAcc_operational::detectRatio;
     using loPredCtrlAcc_operational::fastSample;
     using loPredCtrlAcc_operational::integrator;
     using loPredCtrlAcc_operational::loadCalibration;
     using loPredCtrlAcc_operational::loadImageIntoStream;
     using loPredCtrlAcc_operational::m_accelEnabled;
+    using loPredCtrlAcc_operational::m_accelHistory;
     using loPredCtrlAcc_operational::m_adcAnchor;
     using loPredCtrlAcc_operational::m_adcConfig;
     using loPredCtrlAcc_operational::m_adcSegment;
     using loPredCtrlAcc_operational::m_assistedDiagnostic;
     using loPredCtrlAcc_operational::m_assistedValid;
+    using loPredCtrlAcc_operational::m_autoRatio;
+    using loPredCtrlAcc_operational::m_autoSlots;
     using loPredCtrlAcc_operational::m_calibration;
     using loPredCtrlAcc_operational::m_candidateValid;
     using loPredCtrlAcc_operational::m_cloneStarted;
@@ -107,14 +112,19 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_planBase;
     using loPredCtrlAcc_operational::m_predicting;
     using loPredCtrlAcc_operational::m_ratio;
+    using loPredCtrlAcc_operational::m_ratioKnown;
     using loPredCtrlAcc_operational::m_renderLeadNs;
+    using loPredCtrlAcc_operational::m_ring;
     using loPredCtrlAcc_operational::m_ripple;
     using loPredCtrlAcc_operational::m_settings;
     using loPredCtrlAcc_operational::m_slotPlan;
     using loPredCtrlAcc_operational::m_slots;
     using loPredCtrlAcc_operational::m_slotShifts;
+    using loPredCtrlAcc_operational::m_slotsKnown;
     using loPredCtrlAcc_operational::m_syncLocked;
     using loPredCtrlAcc_operational::m_syncopationTiming;
+    using loPredCtrlAcc_operational::m_targetRatio;
+    using loPredCtrlAcc_operational::m_targetSlots;
     using loPredCtrlAcc_operational::m_unlockedTraining;
     using loPredCtrlAcc_operational::m_wasValid;
     using loPredCtrlAcc_operational::m_wfsArrived;
@@ -129,6 +139,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::parseExploration;
     using loPredCtrlAcc_operational::processImage;
     using loPredCtrlAcc_operational::resetModels;
+    using loPredCtrlAcc_operational::ringSize;
     using loPredCtrlAcc_operational::sensorHistory;
     using loPredCtrlAcc_operational::slotInputs;
     using loPredCtrlAcc_operational::standardInput;
@@ -3310,5 +3321,87 @@ TEST_CASE( "Modal output always starts with the application", "[rtc-controller][
     REQUIRE( grabber.m_starts == 1 );
     REQUIRE( tel.m_starts == 1 );
     REQUIRE( grabber.m_stops == 1 );
+}
+
+/** \brief dm_slots and acc_ratio follow the rates measured while running: a usable ACC-per-WFS ratio is detected,
+ * prediction is refused until the rates are known, and a confirmed change resizes and resets the models only while
+ * prediction is off, after which assisted DDSPC runs at the new dimensions.
+ */
+TEST_CASE( "Detected dm_slots and acc_ratio resize the controller while prediction is off", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::detectRatio;
+    MagAOX::app::loPredCtrlAcc_operational::detectRates;
+    MagAOX::app::loPredCtrlAcc_operational::applyRates;
+#endif
+    // clang-format on
+    CHECK( Controller::detectRatio( 2000, 7990, 4 ) == 4 ); // acc000 at 7990 Hz with a 2 kHz WFS.
+    CHECK( Controller::detectRatio( 700, 7700, 4 ) == 11 );
+    CHECK( Controller::detectRatio( 500, 8000, 8 ) == 16 );
+    CHECK( Controller::detectRatio( 500, 8000, 9 ) == 0 );  // 144 samples exceed the 128-sample ACC history.
+    CHECK( Controller::detectRatio( 2000, 9000, 4 ) == 0 ); // 4.5: no whole ratio.
+    CHECK( Controller::detectRatio( 99, 396, 4 ) == 0 );    // Too few frames.
+    CHECK( Controller::detectRatio( 2000, 0, 4 ) == 0 );    // No ACC.
+
+    Controller app( true );
+    app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
+    app.m_autoSlots = app.m_autoRatio = true;
+    app.m_slotsKnown                  = false;
+    app.m_ratioKnown                  = false;
+    app.m_accelHistory                = 1;
+    app.qualifyOutput();
+
+    // Not yet detected: prediction is refused.
+    auto predict = app.m_indiP_predicting;
+    predict["toggle"].setSwitchState( pcf::IndiElement::On );
+    CHECK( app.newCallBack_m_indiP_predicting( predict ) == -1 );
+    CHECK_FALSE( app.m_predicting );
+
+    // Confirmed while predicting: nothing changes until prediction is off.
+    app.m_targetSlots = 2;
+    app.m_targetRatio = 8;
+    app.m_predicting  = true;
+    app.applyRates();
+    CHECK( app.m_slots == 4 );
+    CHECK( app.m_ratio == 4 );
+    CHECK_FALSE( app.m_slotsKnown.load() );
+    CHECK_FALSE( app.m_ratioKnown.load() );
+
+    app.m_predicting = false;
+    app.applyRates();
+    REQUIRE( app.m_slots == 2 );
+    REQUIRE( app.m_ratio == 8 );
+    CHECK( app.m_slotsKnown.load() );
+    CHECK( app.m_ratioKnown.load() );
+    CHECK( app.m_settings.m_accelChannels == 16 );
+    CHECK( app.m_multirate->config().m_slots == 2 );
+    CHECK( app.m_multirate->config().m_ratio == 8 );
+    CHECK( app.m_ring == app.ringSize() );
+
+    // Assisted DDSPC at the new dimensions: two slots per frame, eight ACC samples per frame.
+    app.m_syncLocked = true;
+    Plant plant( .02 );
+    app.m_source = [&]( std::uint64_t n )
+    {
+        return plant.acc( n );
+    };
+    app.train( "500,0.1,0.1" );
+    for( int i = 0; i < 300; ++i )
+    {
+        REQUIRE( app.advanceAssisted( DDSPC::Matrix::Zero( 2, 1 ) ).cols() == 2 );
+    }
+
+    CHECK( app.m_multirate->status().m_updates > 0 );
+    CHECK( app.m_fastStats.m_predictions > 0 );
+    CHECK( app.m_fastStats.m_mismatch == 0 );
+
+    // Fixed values never change.
+    app.m_autoSlots = app.m_autoRatio = false;
+    app.m_predicting                  = false;
+    app.m_targetSlots                 = 4;
+    app.applyRates();
+    CHECK( app.m_slots == 2 );
+    CHECK( app.m_slotsKnown.load() );
 }
 } // namespace libXWCTest::loPredCtrlAccTest

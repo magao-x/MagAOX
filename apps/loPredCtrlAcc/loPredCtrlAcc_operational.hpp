@@ -236,10 +236,12 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     std::uint64_t                            m_wfsCounter{ 0 };
     std::array<DDSPC::Matrix, 2>             m_plans;
 
-    /// DM slots per WFS frame, q: scheduler steps per cycle (four at 2 kHz give 8-kHz output).
+    /// DM slots per WFS frame, q: scheduler steps per cycle (four at 2 kHz give 8-kHz output). Detected with
+    /// dm_slots = 0 (applyRates()); changed only by the WFS thread while prediction is off.
     int m_slots{ 4 };
 
-    /// ACC samples per WFS frame, r, set by the upstream synchronized sampling ratio.
+    /// ACC samples per WFS frame, r, set by the upstream synchronized sampling ratio. Detected with acc_ratio = 0
+    /// (applyRates()); changed only by the WFS thread while prediction is off.
     int m_ratio{ 4 };
 
     /// ACC base window in WFS frames; the window holds r*accel_history samples.
@@ -251,6 +253,30 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Size of the copied-slot ring, set by loadConfig() from ringSize(); a gap it cannot hold falls back to the newest
     /// copy.
     int m_ring{ 16 };
+
+    /** \name Detected rates - Data
+     * With dm_slots = 0 or acc_ratio = 0 (the defaults), appLogic measures the DM scheduler's steps per cycle and the
+     * ACC samples received per WFS frame over one-second windows; two agreeing windows confirm a value, and the WFS
+     * thread applies it (resizing and resetting the models) while prediction is off.
+     * @{ */
+    bool m_autoSlots{ false }; ///< dm_slots = 0: follow the DM scheduler; set by loadConfig().
+    bool m_autoRatio{ false }; ///< acc_ratio = 0: follow the ACC samples per WFS frame; set by loadConfig().
+
+    /// Confirmed rates for the WFS thread to apply; 0 is none yet.
+    std::atomic<int> m_targetSlots{ 0 }, m_targetRatio{ 0 };
+
+    /// The applied dm_slots and acc_ratio are the confirmed ones (always true when fixed in the configuration).
+    std::atomic<bool> m_slotsKnown{ true }, m_ratioKnown{ true };
+
+    /// Newest WFS source counter received, for the ACC-per-WFS measurement; written by the WFS thread.
+    std::atomic<std::uint64_t> m_wfsNewest{ 0 };
+
+    std::int64_t       m_rateStartNs{ -1 };            ///< Start of the current measurement window; appLogic only.
+    std::uint64_t      m_rateWfs{ 0 }, m_rateAcc{ 0 }; ///< WFS counter and accepted ACC samples at the window start.
+    std::array<int, 2> m_rateCandidate{};              ///< Previous window's (slots, ratio), confirmed by the next.
+    double             m_accPerWfs{ 0 };               ///< Latest window's ACC samples per WFS frame.
+    int                m_schedulerSteps{ 0 };          ///< Latest window's scheduler steps per cycle (0 unknown).
+    /// @}
 
     /// Brief plan/copied-command exchange with the producer worker, kept separate from all RLS and QR work.
     std::mutex m_commandMutex;
@@ -472,6 +498,9 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// mfilt_clone: step-0 sync with the main loop's write, and the aolN_modevalDM tip/tilt the clone started from.
     pcf::IndiProperty m_indiP_clone;
 
+    /// Applied dm_slots and acc_ratio, and the scheduler steps and ACC samples per WFS frame last measured.
+    pcf::IndiProperty m_indiP_rates;
+
     /// Every assisted-mode qualification condition and the upstream values behind it.
     pcf::IndiProperty m_indiP_qualification;
 
@@ -590,6 +619,24 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
     /// Allocate the independent pair and pre-sized workspaces without changing operator intent.
     void resetModels();
+
+    /// ACC samples per WFS frame measured over one window, or 0 when it is not a usable whole number.
+    /** Usable: at least 100 frames, within 0.25 of a whole number from 1 to 16, and a window of that many samples per
+     * frame times accel_history that fits the 128-sample ACC history. */
+    static int detectRatio( std::uint64_t frames /**< [in] WFS frames in the window. */,
+                            std::uint64_t samples /**< [in] ACC samples accepted in the window. */,
+                            int           history /**< [in] accel_history. */ );
+
+    /// The DM scheduler's steps per cycle, read once from the timing stream; 0 when it is not available.
+    int schedulerSteps() const;
+
+    /// Measure the rates over one-second windows and confirm them for applyRates(); appLogic.
+    void detectRates( std::int64_t            now /**< [in] Current monotonic time [ns]. */,
+                      const DDSPC::AdcStatus &adc /**< [in] Current ADC reader status. */ );
+
+    /// Apply confirmed rates while prediction is off: resize the slot and ACC dimensions and reset the models; WFS
+    /// thread, before the frame's ACC window is built.
+    void applyRates();
 
     /// Train only the selected mode's model: standard while standard is selected, the multirate learner otherwise.
     void applyTraining();
@@ -957,8 +1004,15 @@ inline void loPredCtrlAcc_operational::setupConfig()
          "Assisted within-frame command-variation weight, scaled like regularization (10)." );
     for( const auto &key : { "num_modes", "history", "future", "accel_history", "modal_index0", "modal_index1" } )
         add( "parameters", key, "int", "Model dimensions or WFS modal indices; accel_history counts WFS periods." );
-    add( "parameters", "dm_slots", "int", "DM slots per WFS frame: the scheduler's steps per cycle (default 4)." );
-    add( "parameters", "acc_ratio", "int", "Upstream ACC samples per WFS frame (default 4)." );
+    add( "parameters",
+         "dm_slots",
+         "int",
+         "DM slots per WFS frame: the scheduler's steps per cycle (1-16); 0 (default) detects them from the "
+         "scheduler." );
+    add( "parameters",
+         "acc_ratio",
+         "int",
+         "Upstream ACC samples per WFS frame (1-16); 0 (default) detects them from the samples received." );
     add( "parameters",
          "max_fill",
          "int",
@@ -1055,8 +1109,9 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         config( m_inputTimeout, "parameters.input_timeout" );
         config( m_holdTimeout, "parameters.hold_timeout" );
         config( m_accelHistory, "parameters.accel_history" );
-        config( m_slots, "parameters.dm_slots" );
-        config( m_ratio, "parameters.acc_ratio" );
+        int slots = 0, ratio = 0; // 0: detected while running.
+        config( slots, "parameters.dm_slots" );
+        config( ratio, "parameters.acc_ratio" );
         config( m_maxFill, "parameters.max_fill" );
         config( m_learnStdExtra, "parameters.learn_std_extra" );
         config( m_ripple, "parameters.ripple" );
@@ -1077,11 +1132,11 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
             !std::isfinite( m_gain ) || std::abs( m_gain ) > 10 || !std::isfinite( m_inputTimeout ) ||
             m_inputTimeout <= 0 || m_inputTimeout > 1 || !std::isfinite( m_holdTimeout ) || m_holdTimeout < 0 ||
             m_holdTimeout > 60 || m_settings.m_modes < 1 || m_settings.m_modes > 2 || m_accelHistory < 1 ||
-            m_accelHistory > 16 || m_slots < 1 || m_slots > 16 || m_ratio < 1 || m_ratio > 16 ||
-            !std::isfinite( renderLeadUs ) || renderLeadUs < 0 || renderLeadUs > 1000 ||
-            !std::isfinite( m_receiptTimeoutMs ) || m_receiptTimeoutMs <= 0 || m_receiptTimeoutMs > 10000 ||
-            !std::isfinite( m_ripple ) || m_ripple < 0 || m_maxFill < 0 || m_maxFill > 20 ||
-            !std::isfinite( m_learnStdExtra ) || m_learnStdExtra < 0 || m_learnStdExtra > 3600 )
+            m_accelHistory > 16 || slots < 0 || slots > 16 || ratio < 0 || ratio > 16 ||
+            ratio * m_accelHistory > int( m_adcHistory.size() ) || !std::isfinite( renderLeadUs ) || renderLeadUs < 0 ||
+            renderLeadUs > 1000 || !std::isfinite( m_receiptTimeoutMs ) || m_receiptTimeoutMs <= 0 ||
+            m_receiptTimeoutMs > 10000 || !std::isfinite( m_ripple ) || m_ripple < 0 || m_maxFill < 0 ||
+            m_maxFill > 20 || !std::isfinite( m_learnStdExtra ) || m_learnStdExtra < 0 || m_learnStdExtra > 3600 )
         {
             throw std::invalid_argument( "Invalid operational WFS, producer, gain or model configuration" );
         }
@@ -1092,6 +1147,14 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
                                "m*fact",
                            logPrio::LOG_NOTICE );
         }
+
+        // Detected rates start from the defaults until confirmed; fixed ones are known at once.
+        m_autoSlots = slots == 0;
+        m_autoRatio = ratio == 0;
+        m_slots     = m_autoSlots ? m_slots : slots;
+        m_ratio     = m_autoRatio ? m_ratio : ratio;
+        m_slotsKnown.store( !m_autoSlots );
+        m_ratioKnown.store( !m_autoRatio );
 
         m_renderLeadNs             = std::llround( renderLeadUs * 1000 );
         m_ring                     = ringSize();
@@ -1247,6 +1310,107 @@ inline void loPredCtrlAcc_operational::resetModels()
     m_fastExtras.assign( 2 * m_ratio, 0 );
     m_fastStats = {};
     m_fastStats.m_phase.assign( m_ratio, 0 );
+}
+
+inline int loPredCtrlAcc_operational::detectRatio( std::uint64_t frames, std::uint64_t samples, int history )
+{
+    if( frames < 100 )
+    {
+        return 0;
+    }
+
+    const double perFrame = double( samples ) / frames;
+    const int    ratio    = int( std::lround( perFrame ) );
+    const bool   fits     = ratio * history <= int( std::tuple_size_v<decltype( m_adcHistory )> );
+
+    return std::abs( perFrame - ratio ) <= .25 && ratio >= 1 && ratio <= 16 && fits ? ratio : 0;
+}
+
+inline int loPredCtrlAcc_operational::schedulerSteps() const
+{
+    // Opened for one read and closed again: no reader stays attached to the scheduler's stream.
+    IMAGE timing{};
+    if( m_syncopationTiming.empty() || ImageStreamIO_openIm( &timing, m_syncopationTiming.c_str() ) != 0 )
+    {
+        return 0;
+    }
+
+    synco::Record record{};
+    const bool    valid =
+        synco::readRecord( timing, record ) && synco::validProductionRecord( record, synco::monotonicNs() );
+    ImageStreamIO_closeIm( &timing );
+
+    return valid ? int( record[synco::steps] ) : 0;
+}
+
+inline void loPredCtrlAcc_operational::detectRates( std::int64_t now, const DDSPC::AdcStatus &adc )
+{
+    if( ( !m_autoSlots && !m_autoRatio ) || ( m_rateStartNs >= 0 && now - m_rateStartNs < 1000000000 ) )
+    {
+        return;
+    }
+
+    // One window: the scheduler's steps now, and the ACC samples accepted per WFS frame since the window began. A
+    // restarted stream (a counter going back) gives no ratio for this window.
+    const std::uint64_t wfs = m_wfsNewest.load(), acc = adc.m_samples;
+    const bool          counted = m_rateStartNs >= 0 && m_adc && wfs > m_rateWfs && acc >= m_rateAcc;
+
+    m_accPerWfs      = counted ? double( acc - m_rateAcc ) / ( wfs - m_rateWfs ) : 0;
+    m_schedulerSteps = m_autoSlots ? schedulerSteps() : 0;
+
+    const std::array<int, 2> detected{
+        m_schedulerSteps,
+        m_autoRatio && counted ? detectRatio( wfs - m_rateWfs, acc - m_rateAcc, m_accelHistory ) : 0 };
+
+    // Two agreeing windows confirm a value, so a rate change in progress is not applied half-way.
+    if( detected[0] && detected[0] == m_rateCandidate[0] )
+    {
+        m_targetSlots.store( detected[0] );
+    }
+
+    if( detected[1] && detected[1] == m_rateCandidate[1] )
+    {
+        m_targetRatio.store( detected[1] );
+    }
+
+    m_rateCandidate = detected;
+    m_rateStartNs   = now;
+    m_rateWfs       = wfs;
+    m_rateAcc       = acc;
+}
+
+inline void loPredCtrlAcc_operational::applyRates()
+{
+    const int slots = m_autoSlots ? m_targetSlots.load() : 0, ratio = m_autoRatio ? m_targetRatio.load() : 0;
+
+    if( ( slots && slots != m_slots ) || ( ratio && ratio != m_ratio ) )
+    {
+        // The model, slot and ACC dimensions change: only while prediction is off, so no slot is rendered meanwhile.
+        std::lock_guard<std::mutex> lock( m_modelMutex );
+        if( !m_predicting )
+        {
+            log<text_log>( "DDSPC detected dm_slots " + std::to_string( m_slots ) + " -> " +
+                               std::to_string( slots ? slots : m_slots ) + ", acc_ratio " + std::to_string( m_ratio ) +
+                               " -> " + std::to_string( ratio ? ratio : m_ratio ) + ": models reset",
+                           logPrio::LOG_NOTICE );
+
+            m_slots                    = slots ? slots : m_slots;
+            m_ratio                    = ratio ? ratio : m_ratio;
+            m_settings.m_accelChannels = 2 * m_ratio * m_accelHistory;
+
+            { //mutex scope
+                std::lock_guard<std::mutex> commandLock( m_commandMutex );
+                m_ring           = ringSize();
+                m_appliedSlots   = DDSPC::Matrix::Zero( m_settings.m_modes, m_ring );
+                m_appliedOrdinal = -1; // The next copy restarts the slot history.
+            }
+
+            resetModels();
+        }
+    }
+
+    m_slotsKnown.store( !m_autoSlots || ( slots && slots == m_slots ) );
+    m_ratioKnown.store( !m_autoRatio || ( ratio && ratio == m_ratio ) );
 }
 
 inline void loPredCtrlAcc_operational::applyTraining()
@@ -2366,6 +2530,8 @@ inline int loPredCtrlAcc_operational::allocate( const dev::shmimT & )
 
 inline int loPredCtrlAcc_operational::processImage( void *source, const dev::shmimT & )
 {
+    applyRates(); // Before this frame's slot and ACC histories are sized.
+
     DDSPC::Matrix applied;
     std::int64_t  now, ordinal;
     { //mutex scope
@@ -2407,6 +2573,7 @@ inline int loPredCtrlAcc_operational::processImage( void *source, const dev::shm
     {
         return 0;
     }
+    m_wfsNewest.store( counter );
     const bool mainLoop = m_mainLoop.load();
     m_mainLoopPredicted = false; // Set only by this frame's main-loop route decision.
     if( modal && !mainLoop )     // Before learning, as loPredCtrl posts its output before updating the model.
@@ -2721,12 +2888,14 @@ inline int loPredCtrlAcc_operational::setupINDI()
         m_indiP_performance.add( pcf::IndiElement( key, 0.0 ) );
     }
     m_phaseNames.clear();
-    for( int k = 0; k < m_ratio; ++k )
+    for( int k = 0; k < ( m_autoRatio ? 16 : m_ratio ); ++k ) // A detected ratio can change while running.
+    {
         for( const auto *key : { "rmse_phase", "acc_phase" } )
         {
             m_phaseNames.push_back( key + std::to_string( k ) );
             m_indiP_performance.add( pcf::IndiElement( m_phaseNames.back(), 0.0 ) );
         }
+    }
     if( registerIndiPropertyReadOnly( m_indiP_performance ) < 0 )
         return -1;
     createROIndiNumber( m_indiP_clone, "mfilt_clone" );
@@ -2737,6 +2906,17 @@ inline int loPredCtrlAcc_operational::setupINDI()
     }
 
     if( registerIndiPropertyReadOnly( m_indiP_clone ) < 0 )
+    {
+        return -1;
+    }
+
+    createROIndiNumber( m_indiP_rates, "rates" );
+    for( const auto &key : { "dm_slots", "acc_ratio", "scheduler_steps", "acc_per_wfs" } )
+    {
+        m_indiP_rates.add( pcf::IndiElement( key, 0.0 ) );
+    }
+
+    if( registerIndiPropertyReadOnly( m_indiP_rates ) < 0 )
     {
         return -1;
     }
@@ -2900,6 +3080,7 @@ inline int loPredCtrlAcc_operational::appLogic()
     DDSPC::MultirateStatus assisted;
     bool                   learning, predicting;
     std::uint64_t          shifts, overruns, needed;
+    int                    slots, ratio;
     Latency                learn;
     FastStats              fast;
     CloneStats             clone;
@@ -2938,6 +3119,8 @@ inline int loPredCtrlAcc_operational::appLogic()
         overruns   = m_learnOverruns;
         cloneStart = m_cloneStart;
         needed     = m_multirate->config().features( m_ratio - 1 );
+        slots      = m_slots;
+        ratio      = m_ratio;
         m_learnUs  = {};
     }
     { //mutex scope
@@ -2972,6 +3155,13 @@ inline int loPredCtrlAcc_operational::appLogic()
                                     double( adc.m_valid ) },
                                   adc.m_valid ? INDI_OK : INDI_IDLE );
     }
+
+    detectRates( now, adc );
+    const bool slotsKnown = m_slotsKnown.load(), ratioKnown = m_ratioKnown.load();
+    updatesIfChanged<double>( m_indiP_rates,
+                              { "dm_slots", "acc_ratio", "scheduler_steps", "acc_per_wfs" },
+                              { double( slots ), double( ratio ), double( m_schedulerSteps ), m_accPerWfs },
+                              slotsKnown && ratioKnown ? INDI_OK : INDI_BUSY );
     const bool selected      = m_mode.load() == DDSPC::ShadowMode::Standard;
     const bool selectedReady = selected ? standard.m_ready : assisted.m_ready;
     const bool mainLoop      = m_mainLoop.load();
@@ -2999,6 +3189,18 @@ inline int loPredCtrlAcc_operational::appLogic()
         if( upstreamLock != 1 )
             block( source + ( adcProperty ? "valid=" : "delay_lock=" ) + std::to_string( upstreamLock ) );
     }
+    if( !slotsKnown )
+    {
+        block( m_targetSlots.load()
+                   ? "dm_slots_" + std::to_string( m_targetSlots.load() ) + "_applies_when_prediction_off"
+                   : std::string( "dm_slots_detecting" ) );
+    }
+    if( !ratioKnown )
+    {
+        block( m_targetRatio.load()
+                   ? "acc_ratio_" + std::to_string( m_targetRatio.load() ) + "_applies_when_prediction_off"
+                   : std::string( "acc_ratio_detecting" ) );
+    }
     if( !samples )
         block( std::string( "acc_window_" ) + m_windowReason.load() );
     if( m_unlockedTraining.load() )
@@ -3016,40 +3218,41 @@ inline int loPredCtrlAcc_operational::appLogic()
         return std::isfinite( value ) ? std::string( text ) : std::string( "n/a" );
     };
     const std::string assistedState = blockers.empty() ? "ready" : blockers.substr( 0, blockers.find( ',' ) );
-    updatesIfChanged<std::string>( m_indiP_control,
-                                   { "requested_mode",
-                                     "standard_ready",
-                                     "assisted_ready",
-                                     "learning",
-                                     "prediction",
-                                     "accel_sync",
-                                     "standard_state",
-                                     "assisted_state",
-                                     "main_loop_tt" },
-                                   { mainLoop ? "main_loop"
-                                     : mfiltCopy && m_mfiltClone.load()
-                                         ? ( m_copyOnce.load() ? "mfilt_clone_2k" : "mfilt_clone_8k" )
-                                     : mfiltCopy ? ( m_copyOnce.load() ? "mfilt_copy_2k" : "mfilt_copy_8k" )
-                                     : selected  ? "standard"
-                                                 : "accel_assisted",
-                                     standard.m_ready && fresh ? "true" : "false",
-                                     assisted.m_ready && fresh && samples && locked ? "true" : "false",
-                                     learning ? "true" : "false",
-                                     !predicting                    ? "off"
-                                     : mainLoop                     ? ( selectedReady ? "active" : "warming" )
-                                     : !valid                       ? "inhibited"
-                                     : !selectedReady && !mfiltCopy ? "warming"
-                                     : output.m_acknowledged        ? "active"
-                                                                    : "awaiting_copy",
-                                     locked ? "true" : "false",
-                                     !fresh             ? "awaiting_wfs"
-                                     : standard.m_ready ? "ready"
-                                                        : DDSPC::shadow_reason( standard.m_reason ),
-                                     assistedState,
-                                     mainLoop && predicting                         ? "predicted"
-                                     : modalZeroed( output, m_modalEngaged.load() ) ? "zeroed"
-                                                                                    : "passthrough" },
-                                   INDI_OK );
+    updatesIfChanged<std::string>(
+        m_indiP_control,
+        { "requested_mode",
+          "standard_ready",
+          "assisted_ready",
+          "learning",
+          "prediction",
+          "accel_sync",
+          "standard_state",
+          "assisted_state",
+          "main_loop_tt" },
+        { mainLoop                           ? "main_loop"
+          : mfiltCopy && m_mfiltClone.load() ? ( m_copyOnce.load() ? "mfilt_clone_2k" : "mfilt_clone_8k" )
+          : mfiltCopy                        ? ( m_copyOnce.load() ? "mfilt_copy_2k" : "mfilt_copy_8k" )
+          : selected                         ? "standard"
+                                             : "accel_assisted",
+          standard.m_ready && fresh ? "true" : "false",
+          assisted.m_ready && fresh && samples && locked ? "true" : "false",
+          learning ? "true" : "false",
+          !predicting                    ? "off"
+          : mainLoop                     ? ( selectedReady ? "active" : "warming" )
+          : !valid                       ? "inhibited"
+          : !selectedReady && !mfiltCopy ? "warming"
+          : output.m_acknowledged        ? "active"
+                                         : "awaiting_copy",
+          locked ? "true" : "false",
+          !fresh             ? "awaiting_wfs"
+          : !slotsKnown      ? ( m_targetSlots.load() ? "dm_slots_pending" : "dm_slots_detecting" )
+          : standard.m_ready ? "ready"
+                             : DDSPC::shadow_reason( standard.m_reason ),
+          assistedState,
+          mainLoop && predicting                         ? "predicted"
+          : modalZeroed( output, m_modalEngaged.load() ) ? "zeroed"
+                                                         : "passthrough" },
+        INDI_OK );
     updatesIfChanged<std::string>( m_indiP_qualification,
                                    { "blockers",
                                      "upstream_enabled",
@@ -3136,7 +3339,7 @@ inline int loPredCtrlAcc_operational::appLogic()
                                 double( m_inputHolds.load() ),
                                 double( output.m_discarded ),
                                 double( output.m_writeFailures ) };
-    for( int k = 0; k < m_ratio; ++k )
+    for( int k = 0; k < int( m_phaseNames.size() ) / 2; ++k )
     {
         names.push_back( m_phaseNames[2 * k].c_str() );
         values.push_back( k < int( assisted.m_rmse.size() ) ? assisted.m_rmse[k] : 0 );
@@ -3286,6 +3489,18 @@ inline INDI_NEWCALLBACK_DEFN( loPredCtrlAcc_operational, m_indiP_predicting )( c
     else if( enabled && ( m_integrate || mfiltCopy ) && !mainLoop && !m_integratorReady.load() )
     {
         refused = "the main loop's integrator parameters have not been received";
+    }
+    else if( enabled && !mainLoop && !m_slotsKnown.load() )
+    {
+        refused = m_targetSlots.load() ? "dm_slots changes to " + std::to_string( m_targetSlots.load() ) +
+                                             " on the next WFS frame; request again"
+                                       : "dm_slots is not yet detected from " + m_syncopationTiming;
+    }
+    else if( enabled && m_mode.load() == DDSPC::ShadowMode::AccelAssisted && !m_ratioKnown.load() )
+    {
+        refused = m_targetRatio.load() ? "acc_ratio changes to " + std::to_string( m_targetRatio.load() ) +
+                                             " on the next WFS frame; request again"
+                                       : "acc_ratio is not yet detected from the ACC samples per WFS frame";
     }
     else if( enabled && clone && !m_modevalDMOpen )
     {
