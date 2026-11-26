@@ -45,6 +45,8 @@ protected:
 
   int m_type{ FLOAT }; ///< Display type used to interpret the current value.
 
+  pcf::IndiProperty::Type m_propertyType{ pcf::IndiProperty::Unknown }; ///< Last reported INDI property type.
+
   bool m_valChanged{ false }; ///< Whether a new current value awaits a display refresh.
 
   std::string m_current; ///< Last received value of the current element.
@@ -388,10 +390,12 @@ void statusEntry::onConnect()
 
 void statusEntry::onDisconnect()
 {
+    m_propertyType = pcf::IndiProperty::Unknown;
     m_current.clear();
     m_target.clear();
     m_valChanged = false;
-    ui.value->setText("---");
+
+    ui.value->setText( "---" );
 }
 
 void statusEntry::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -409,29 +413,36 @@ void statusEntry::handleDelProperty( const pcf::IndiProperty & ipRecv)
    }
 }
 
-void statusEntry::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void statusEntry::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getDevice() != m_device) return;
+    if( ipRecv.getDevice() != m_device )
+    {
+        return;
+    }
 
-   if(ipRecv.getName() == m_property)
-   {
-      if(ipRecv.find(m_currEl))
-      {
-         std::string current = ipRecv[m_currEl].get();
-         if(current != m_current)
-         {
-            m_valChanged = true;
-         }
-         m_current = current;
-      }
+    if( ipRecv.getName() == m_property )
+    {
+        m_propertyType = ipRecv.getType();
 
-      if(ipRecv.find(m_targEl))
-      {
-         m_target = ipRecv[m_targEl].get();
-      }
-   }
+        if( ipRecv.find( m_currEl ) )
+        {
+            const std::string current = ipRecv[m_currEl].get();
 
-   emit doUpdateGUI();
+            if( current != m_current )
+            {
+                m_valChanged = true;
+            }
+
+            m_current = current;
+        }
+
+        if( ipRecv.find( m_targEl ) )
+        {
+            m_target = ipRecv[m_targEl].get();
+        }
+    }
+
+    emit doUpdateGUI();
 }
 
 void statusEntry::setStretch( int s0,
@@ -466,18 +477,14 @@ void statusEntry::clearFocus()
 
 void statusEntry::on_value_returnPressed()
 {
-   std::string str = ui.value->text().toStdString();
-   ui.value->clearFocus();
+    const std::string value = ui.value->text().toStdString();
+    ui.value->clearFocus();
 
-   pcf::IndiProperty ip(pcf::IndiProperty::Text);
+    const auto type = m_propertyType == pcf::IndiProperty::Number ? pcf::IndiProperty::Number : pcf::IndiProperty::Text;
+    pcf::IndiProperty ip( type, m_device, m_property );
+    ip.add( pcf::IndiElement( m_targEl, value ) );
 
-   ip.setDevice(m_device);
-   ip.setName(m_property);
-   ip.add(pcf::IndiElement(m_targEl));
-   ip[m_targEl] = str;
-
-   sendNewProperty(ip);
-
+    sendNewProperty( ip );
 }
 
 void statusEntry::updateGUI()

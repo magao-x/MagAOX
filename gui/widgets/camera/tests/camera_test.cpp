@@ -6,6 +6,8 @@
 #include "../../../../tests/testXWC.hpp"
 
 #include <QApplication>
+#include <QKeyEvent>
+#include <QLineEdit>
 #include "../../../lib/tests/offlineIndiPublisher.hpp"
 #include "../camera.hpp"
 
@@ -220,6 +222,56 @@ TEST_CASE( "Camera EM-gain-off readiness and reconnect", "[cameraGUI]" )
     REQUIRE( widget.button()->isEnabled() );
     widget.button()->click();
     REQUIRE( widget.m_publisher.m_commands.size() == 1 );
+}
+
+/// Pressing Return in Avg. Time sends a numeric target to the camera's averager.
+/** \ingroup cameraGUI_unit_test */
+TEST_CASE( "Camera averaging time sends a numeric target", "[cameraGUI]" )
+{
+    // clang-format off
+    #ifdef CAMERA_GUI_TEST_DOXYGEN_REF
+    xqt::camera::setup_avgTime;
+    xqt::statusEntry::handleSetProperty;
+    xqt::statusEntry::on_value_returnPressed;
+    #endif
+    // clang-format on
+    Widget widget;
+    widget.ready();
+
+    pcf::IndiProperty average( pcf::IndiProperty::Number, widget.m_device + "-avg", "avgTime" );
+    average.add( pcf::IndiElement( "current", 1.0 ) );
+    average.add( pcf::IndiElement( "target", 1.0 ) );
+    widget.publish( average );
+
+    auto *entry = widget.m_widget.findChild<xqt::statusEntry *>( "avgTime" );
+    REQUIRE( entry != nullptr );
+
+    // The entry subscribes when created. Deliver the averager's reply to that subscription.
+    widget.publish( average );
+    REQUIRE( entry->formattedValue().toDouble() == 1.0 );
+    REQUIRE( entry->isEnabled() );
+    REQUIRE_FALSE( entry->readOnly() );
+
+    auto *editor = entry->findChild<QLineEdit *>( "value" );
+    REQUIRE( editor != nullptr );
+    editor->setFocus();
+    entry->setEditText( "2.75" );
+    QKeyEvent submit( QEvent::KeyPress, Qt::Key_Return, Qt::NoModifier );
+    QApplication::sendEvent( editor, &submit );
+
+    REQUIRE( widget.m_publisher.m_commands.size() == 1 );
+    const auto &command = widget.m_publisher.m_commands.back();
+    CHECK( command.getDevice() == average.getDevice() );
+    CHECK( command.getName() == average.getName() );
+    CHECK( command.getType() == pcf::IndiProperty::Number );
+    REQUIRE( command.getNumElements() == 1 );
+    CHECK( command["target"].get<double>() == 2.75 );
+
+    average["current"].set( 2.75 );
+    average["target"].set( 2.75 );
+    widget.m_publisher.handleSetProperty( average );
+    events();
+    CHECK( entry->inputText().toDouble() == 2.75 );
 }
 
 /// The optional command occupies its own row beside the existing gain, synchronization, and averaging controls.
