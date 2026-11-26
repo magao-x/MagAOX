@@ -217,6 +217,14 @@ TEST_CASE( "wfsScan lowers the scan count to fit the scan service", "[wfsScanSch
     // A budget dividing the period exactly leaves no margin, so one scan fewer.
     REQUIRE( clock.arm( 1000000000, 500000, 8000, 0, 105000, 20000 ) );
     REQUIRE( clock.m_count == 3 );
+
+    // Complete mode keeps the full count and the requested phase; slow scans run late instead.
+    clock.m_complete = true;
+    REQUIRE( clock.arm( 1000000000, 500000, 8000, 34400, 106530, 20000 ) );
+    REQUIRE( clock.m_count == 4 );
+    REQUIRE( clock.m_phase == Approx( 34400.0 ) );
+    REQUIRE( clock.arm( 1000000000, 500000, 8000, 0, 600000, 20000 ) );
+    REQUIRE( clock.m_count == 4 );
 }
 
 /** A slot within the lateness tolerance is taken even if it delays the next, which then catches up.
@@ -340,7 +348,7 @@ TEST_CASE( "wfsScan complete mode scans every slot", "[wfsScanSchedule]" )
 
     // Cancelling, or a refused arm, drops the carried-over slots as skipped.
     const uint64_t skipped = clock.m_skipped;
-    REQUIRE_FALSE( clock.arm( anchor + 3500000, 500000, 8000, 0, 600000, 20000 ) );
+    REQUIRE_FALSE( clock.arm( anchor + 3500000, 0, 8000, 0, 89000, 20000 ) );
     REQUIRE( clock.m_backlog == 0 );
     REQUIRE( clock.m_skipped == skipped + 8 );
 }

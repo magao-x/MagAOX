@@ -32,7 +32,8 @@ constexpr double c_ratioTolerance = 0.01;
  * the lower rate. A slot too late to finish before the next one is skipped, unless it is within the lateness tolerance:
  * then it is taken and the following slots catch up on the interval's slack. In complete mode (`m_complete`) no
  * slot is skipped: late slots are taken late, and slots still pending at the next arm are carried over and taken at
- * once, up to one period's count, so each period yields `m_count` scans on average. The first scan is at the requested
+ * once, up to one period's count, so each period yields `m_count` scans on average; the count and phase then do not
+ * depend on the scan service. The first scan is at the requested
  * phase reduced modulo the scan interval, so a member of the scan grid aligns with the WFS phase model. Originally
  * written for ad7689Ctrl.
  */
@@ -144,10 +145,11 @@ inline bool syncSchedule::arm(
         return refuse();
     }
 
-    const double   budget = service + guard;
-    const double   limit  = std::max( 1.0, std::floor( fps * period / 1e9 * ( 1 + c_ratioTolerance ) ) );
-    const unsigned count =
-        static_cast<unsigned>( std::max( 0.0, std::min( limit, std::ceil( period / budget ) - 1 ) ) );
+    const double budget = service + guard;
+    const double limit  = std::max( 1.0, std::floor( fps * period / 1e9 * ( 1 + c_ratioTolerance ) ) );
+    // Complete mode keeps the full count however slow the scans: they run late and catch up, rather than fewer.
+    const unsigned count = static_cast<unsigned>(
+        std::max( 0.0, m_complete ? limit : std::min( limit, std::ceil( period / budget ) - 1 ) ) );
 
     if( count < 1 )
     {
@@ -156,7 +158,7 @@ inline bool syncSchedule::arm(
 
     const double interval = period / count;
 
-    if( budget >= interval || 1e9 / interval > 10000 * ( 1 + c_ratioTolerance ) ||
+    if( ( !m_complete && budget >= interval ) || 1e9 / interval > 10000 * ( 1 + c_ratioTolerance ) ||
         static_cast<double>( anchor ) > static_cast<double>( std::numeric_limits<int64_t>::max() ) - 2e9 )
     {
         return refuse();
@@ -175,7 +177,7 @@ inline bool syncSchedule::arm(
     m_budget    = budget;
     m_tolerance = tolerance;
     m_service   = service;
-    m_phase     = std::min( wrapped, interval - budget );
+    m_phase     = m_complete ? wrapped : std::min( wrapped, interval - budget );
     m_count     = count;
     m_backlog   = std::min( carried, count );
     m_carried += m_backlog;

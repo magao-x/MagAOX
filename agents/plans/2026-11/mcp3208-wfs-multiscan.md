@@ -116,6 +116,14 @@ those frames armed no scans; their owed scans overflowed the one-period backlog.
 change is confirmed, so scans now follow the fit whenever one exists (`m_ready`), and `delay_lock` likewise, so it
 no longer drops during a burst.
 
+## Full count in complete mode
+
+The Pi then showed `scans_per_wfs` 3 (`scheduled_fps` 6000) at times and `acq_fps` about 7980. The count was still
+lowered to what `ceil(period / (service + guard)) - 1` fits: with a 20 us guard, a read-time estimate above about
+105 us (raised by stalls) gives 3 at 2 kHz, until the estimate settles. In complete mode slow scans run late and catch
+up, so the count is now always the rate-limit multiple (4) and the phase is the requested one; neither depends on the
+read-time estimate. The service fit, its refusal and the phase cap remain for `completeScans=false`.
+
 ## Verification
 
 - `wfsClock_test` (ad7689Ctrl's clock tests, without its continuous schedule): passed on the Mac (6 cases). A

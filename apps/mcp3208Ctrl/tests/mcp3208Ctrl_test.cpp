@@ -1392,7 +1392,8 @@ TEST_CASE( "mcp3208Ctrl scanLateTolerance sets the scan lateness tolerance", "[m
     REQUIRE( app.m_syncSchedule.m_complete == true );
 }
 
-/// Verify a slow ADC read lowers the scans per WFS frame, and a read estimate that fits nothing is measured again.
+/// Verify that, not complete, a slow ADC read lowers the scans per WFS frame and a read estimate that fits nothing
+/// is measured again; complete, the count is kept.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
@@ -1400,6 +1401,7 @@ TEST_CASE( "mcp3208Ctrl synchronized scans fit the ADC read time", "[mcp3208Ctrl
 {
     mcp3208Ctrl_test app;
 
+    app.m_completeScans        = false;
     app.m_numChannels          = 2;
     app.m_fps                  = 8000;
     app.m_firstNonDelayService = false;
@@ -1418,6 +1420,12 @@ TEST_CASE( "mcp3208Ctrl synchronized scans fit the ADC read time", "[mcp3208Ctrl
     REQUIRE( app.m_scheduleFailures == 1 );
     REQUIRE( app.m_firstNonDelayService == true );
     REQUIRE( app.processSyncReference( 1001000000 ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+
+    // Complete (the default), slow reads never lower the count.
+    app.m_completeScans         = true;
+    app.m_avgNonDelayService_ns = 106530.0;
+    REQUIRE( app.processSyncReference( 1001500000 ) == 0 );
     REQUIRE( app.m_syncSchedule.m_count == 4 );
 }
 
