@@ -27,7 +27,9 @@ constexpr double c_ratioTolerance = 0.01;
 /// Finite scan schedule re-anchored by each unique WFS trigger; never free-runs after the source stops.
 /** Each WFS arrival arms `max(1, floor(fps * period))` uniformly spaced scans: the highest integer multiple of the WFS
  * rate not above `fps` (8 kHz at 2 kHz and 500 Hz, 7.7 kHz at 700 Hz for an 8 kHz limit), within
- * `c_ratioTolerance`. A WFS faster than `fps` still gets one scan per WFS frame. The first scan is at the requested
+ * `c_ratioTolerance`. A WFS faster than `fps` still gets one scan per WFS frame. If the scans do not fit (scan
+ * service plus guard must be less than the interval), the count drops to the highest that does: `fps()` then reports
+ * the lower rate. The first scan is at the requested
  * phase reduced modulo the scan interval, so a member of the scan grid aligns with the WFS phase model. Originally
  * written for ad7689Ctrl.
  */
@@ -53,10 +55,10 @@ struct syncSchedule
     /// Abandon pending slots, retaining the last acquisition time and lifetime skipped count.
     void cancel();
 
-    /// Start a new period with the highest integer scan count within the rate limit and a checked service budget.
+    /// Start a new period with the highest integer scan count within the rate limit that the scan service fits.
     /**
      * \returns true if the period was armed
-     * \returns false if an input is invalid or the scans cannot fit, leaving the schedule cancelled
+     * \returns false if an input is invalid or not even one scan fits, leaving the schedule cancelled
      */
     bool arm( int64_t anchor /**< [in] unique WFS arrival [monotonic ns] */,
               double  period /**< [in] measured WFS period [ns] */,
@@ -105,8 +107,15 @@ inline bool syncSchedule::arm( int64_t anchor, double period, double fps, double
     }
 
     const double   budget = service + guard;
+    const double   limit  = std::max( 1.0, std::floor( fps * period / 1e9 * ( 1 + c_ratioTolerance ) ) );
     const unsigned count =
-        static_cast<unsigned>( std::max( 1.0, std::floor( fps * period / 1e9 * ( 1 + c_ratioTolerance ) ) ) );
+        static_cast<unsigned>( std::max( 0.0, std::min( limit, std::ceil( period / budget ) - 1 ) ) );
+
+    if( count < 1 )
+    {
+        return false;
+    }
+
     const double interval = period / count;
 
     if( budget >= interval || 1e9 / interval > 10000 * ( 1 + c_ratioTolerance ) ||

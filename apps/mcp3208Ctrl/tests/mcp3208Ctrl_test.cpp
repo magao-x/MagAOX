@@ -1225,6 +1225,51 @@ TEST_CASE( "mcp3208Ctrl synchronized scans follow a WFS rate change within the l
     REQUIRE( app.m_syncSchedule.m_count == 3 );
 }
 
+/// Verify a slow ADC read lowers the scans per WFS frame, and a read estimate that fits nothing is measured again.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized scans fit the ADC read time", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_numChannels           = 2;
+    app.m_fps                   = 8000;
+    app.m_alpha                 = 0.0f;
+    app.m_firstSemaphore        = false;
+    app.m_avgSemaphorePeriod_ns = 500000.0;
+    app.m_firstNonDelayService  = false;
+
+    // Each reference follows the previous by one 2 kHz WFS period.
+    auto reference = [&app]( int64_t arrival )
+    {
+        REQUIRE( clock_gettime( CLOCK_REALTIME, &app.m_lastAtime ) == 0 );
+        app.m_lastAtime.tv_nsec -= 500000;
+
+        if( app.m_lastAtime.tv_nsec < 0 )
+        {
+            app.m_lastAtime.tv_nsec += 1000000000;
+            --app.m_lastAtime.tv_sec;
+        }
+
+        return app.processSyncReference( arrival );
+    };
+
+    // 106.5 us reads plus the 20 us guard do not fit 125 us: 3 scans, 6 kHz.
+    app.m_avgNonDelayService_ns = 106530.0;
+    REQUIRE( reference( 1000000000 ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_count == 3 );
+    REQUIRE( app.m_syncSchedule.fps() == Approx( 6000.0 ) );
+
+    // A read estimate longer than the period fits nothing; it restarts from the nominal read time.
+    app.m_avgNonDelayService_ns = 600000.0;
+    REQUIRE( reference( 1000500000 ) == 1 );
+    REQUIRE( app.m_scheduleFailures == 1 );
+    REQUIRE( app.m_firstNonDelayService == true );
+    REQUIRE( reference( 1001000000 ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+}
+
 /// Verify scans read at their deadlines, record their phase, and are never published as a catch-up burst.
 /**
  * \ingroup mcp3208Ctrl_unit_test

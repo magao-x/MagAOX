@@ -1924,6 +1924,10 @@ int mcp3208Ctrl::processSyncReference( int64_t arrival )
         if( m_wfsPeriodMeasured_ns > 0.0 )
         {
             ++m_scheduleFailures;
+
+            // Only scans update the service estimate, so restart it from the nominal read time to measure it again.
+            m_avgNonDelayService_ns = 0.0;
+            m_firstNonDelayService  = true;
         }
 
         return 1;

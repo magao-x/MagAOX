@@ -14,7 +14,13 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
   a 2 kHz WFS, 16 (8 kHz) at 500 Hz, 11 (7.7 kHz) at 700 Hz, 4 (6.8 kHz) at 1.7 kHz. ad7689Ctrl rounded instead, which
   exceeds the limit (5 scans, 8.5 kHz, at 1.7 kHz). The 1% allowance (`c_ratioTolerance`) keeps 4 scans for a 2 kHz
   WFS measured slightly fast (ratio 3.9992 at 2000.4 Hz), so the rate can exceed the limit by at most 1%. A WFS faster
-  than the limit still gets one scan per frame. The first scan is at the requested phase modulo the scan
+  than the limit still gets one scan per frame.
+- The count is also lowered to the highest that the scan service fits (`ceil(period / (service + guard)) - 1`), instead
+  of refusing the period as ad7689Ctrl does. On the Pi, reading 2 MCP3208 channels through lgpio averaged 106.5 us
+  (208 us worst seen); with the 20 us `cadenceGuard_ns` that does not fit 125 us, and since only scans update the
+  service estimate, every later period was refused (`schedule_failures` 106989, no output). It now runs 3 scans
+  (6 kHz) at those numbers; `cadenceGuard_ns=10000` fits 4. If not even one scan fits, mcp3208Ctrl restarts the
+  service estimate from the nominal SPI time so it is measured again. The first scan is at the requested phase modulo the scan
   interval, capped to leave the scan service plus `cadenceGuard_ns` before the next slot. Late slots are skipped, never
   published as a catch-up burst; nothing is scanned after the period without a new semaphore.
 - `mcp3208Ctrl` semaphore mode:
@@ -66,6 +72,13 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
   `fg_timing` at 8 kHz, `timingDiag.mode_code=1` and `delay_lock=1`.
 
 ## Follow-ups
+
+- The MCP3208 read (about 50 us per channel, mostly per-transfer overhead: 24 bits at 1.35 MHz is 18 us) limits the
+  rate. Reading all channels in one spidev ioctl, or a faster SPI clock within the MCP3208's rating for its supply,
+  would leave margin for 4 scans at 2 kHz.
+- `MCP3208::read` sends the start byte `0x06` (start, single-ended, D2 = 0) and then `mode << 7 | channel << 4`, the
+  MCP3008 layout, so D1 is always 1 and channels 0 and 1 both select CH2. Check whether acc000's two values are
+  identical before relying on the second axis.
 
 - ad7689Ctrl should include `libMagAOX/app/wfsScanSchedule.hpp` instead of its own copy when its branch is merged.
 - ad7689Ctrl's DDSPC mode (continuous clock from a rolling fit of semaphore arrivals) is not ported. It tolerates

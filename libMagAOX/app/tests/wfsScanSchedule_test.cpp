@@ -192,6 +192,33 @@ TEST_CASE( "wfsScan highest integer multiple of the WFS rate within the limit", 
     REQUIRE( clock.m_count == 2 );
 }
 
+/** A scan service too long for the rate limit lowers the count to the highest that fits, rather than none.
+ * \ingroup app_unit_test
+ */
+TEST_CASE( "wfsScan lowers the scan count to fit the scan service", "[wfsScanSchedule]" )
+{
+    // clang-format off
+#ifdef WFSSCANSCHEDULE_TEST_DOXYGEN_REF
+    MagAOX::app::wfsScan::syncSchedule::arm;
+#endif
+    // clang-format on
+    syncSchedule clock;
+
+    // 106.5 us reads plus a 20 us guard do not fit 125 us: 3 scans (6 kHz) at a 2 kHz WFS.
+    REQUIRE( clock.arm( 1000000000, 500000, 8000, 0, 106530, 20000 ) );
+    REQUIRE( clock.m_count == 3 );
+    REQUIRE( clock.fps() == Approx( 6000.0 ) );
+    REQUIRE( clock.m_budget < clock.m_interval );
+
+    // A 10 us guard fits 4 scans again.
+    REQUIRE( clock.arm( 1000000000, 500000, 8000, 0, 106530, 10000 ) );
+    REQUIRE( clock.m_count == 4 );
+
+    // A budget dividing the period exactly leaves no margin, so one scan fewer.
+    REQUIRE( clock.arm( 1000000000, 500000, 8000, 0, 105000, 20000 ) );
+    REQUIRE( clock.m_count == 3 );
+}
+
 /** Reject invalid or physically impossible schedules.
  * \ingroup app_unit_test
  */
@@ -206,7 +233,7 @@ TEST_CASE( "wfsScan rejects impossible subscan timing", "[wfsScanSchedule]" )
     REQUIRE_FALSE( clock.arm( -1, 500000, 8000, 0, 56000, 20000 ) );
     REQUIRE_FALSE( clock.arm( 1000000000, 0, 8000, 0, 56000, 20000 ) );
     REQUIRE_FALSE( clock.arm( 1000000000, 500000, 0, 0, 56000, 20000 ) );
-    REQUIRE_FALSE( clock.arm( 1000000000, 500000, 8000, 0, 224000, 20000 ) );
+    REQUIRE_FALSE( clock.arm( 1000000000, 500000, 8000, 0, 480000, 20000 ) ); // Not one scan fits.
     REQUIRE_FALSE( clock.arm( std::numeric_limits<int64_t>::max(), 500000, 8000, 0, 56000, 20000 ) );
 
     for( double invalid : { std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN() } )
