@@ -1,3 +1,6 @@
+/** \file statusEntry.hpp
+ * \brief Editable INDI status and target entry widget.
+ */
 #ifndef statusEntry_hpp
 #define statusEntry_hpp
 
@@ -13,75 +16,94 @@
 namespace xqt
 {
 
+/// Display an INDI current value and accept edits to its target.
 class statusEntry : public QWidget, public multiIndiSubscriber
 {
    Q_OBJECT
 
 public:
-   enum types{ STRING, INT, FLOAT };
+  /// Display formats supported by the entry.
+  enum types
+  {
+      STRING,
+      INT,
+      FLOAT
+  };
 
 protected:
+  std::string m_device;              ///< INDI device owning the property.
+  std::string m_property;            ///< INDI property displayed and edited by this entry.
+  std::string m_label;               ///< Label displayed beside the entry.
+  std::string m_units;               ///< Optional units appended to the label.
+  std::string m_currEl{ "current" }; ///< Name of the element supplying the displayed value.
+  std::string m_targEl{ "target" };  ///< Name of the element receiving edits.
 
-   std::string m_device;
-   std::string m_property;
-   std::string m_label;
-   std::string m_units;
-   std::string m_currEl {"current"};
-   std::string m_targEl {"target"};
+  bool m_readOnly{ false };        ///< Whether edits are disabled.
+  bool m_highlightChanges{ true }; ///< Whether to highlight updates to the displayed value.
 
-   bool m_readOnly {false};
-   bool m_highlightChanges {true};
+  std::string m_format; ///< Display format for numeric values.
 
-   std::string m_format;
+  int m_type{ FLOAT }; ///< Display type used to interpret the current value.
 
+  pcf::IndiProperty::Type m_propertyType{ pcf::IndiProperty::Unknown }; ///< Last reported INDI property type.
 
-   int m_type {FLOAT};
+  bool m_valChanged{ false }; ///< Whether a new current value awaits a display refresh.
 
-   bool m_valChanged {false};
+  std::string m_current; ///< Last received value of the current element.
+  std::string m_target;  ///< Last received value of the target element.
 
-   std::string m_current;
-   std::string m_target;
-
-   QTimer * m_updateTimer {nullptr};
+  QTimer *m_updateTimer{ nullptr }; ///< Timer for refreshing the displayed value.
 
 public:
-   statusEntry( QWidget * Parent = 0,
-                Qt::WindowFlags f = Qt::WindowFlags()
-              );
+  /// Construct an unconfigured entry.
+  statusEntry( QWidget        *Parent = 0 /**< [in] Optional Qt parent. */,
+               Qt::WindowFlags f      = Qt::WindowFlags() /**< [in] Qt window flags. */
+  );
 
-   statusEntry( const std::string & device,
-                const std::string & property,
-                int type,
-                const std::string & label,
-                const std::string & units,
-                QWidget * Parent = 0,
-                Qt::WindowFlags f = Qt::WindowFlags()
-              );
+  /// Construct an entry bound to an INDI property.
+  statusEntry( const std::string &device /**< [in] INDI device name. */,
+               const std::string &property /**< [in] INDI property name. */,
+               int                type /**< [in] Display type from types. */,
+               const std::string &label /**< [in] Entry label. */,
+               const std::string &units /**< [in] Optional units for the label. */,
+               QWidget           *Parent = 0 /**< [in] Optional Qt parent. */,
+               Qt::WindowFlags    f      = Qt::WindowFlags() /**< [in] Qt window flags. */
+  );
 
-   ~statusEntry() noexcept;
+  /// Destroy the entry.
+  ~statusEntry() noexcept;
 
-   void construct();
+  /// Initialize the designer controls and display refresh timer.
+  void construct();
 
-   void setup( const std::string & device,
-               const std::string & property,
-               int type,
-               const std::string & label,
-               const std::string & units
-             );
+  /// Bind the entry to an INDI property and configure its display.
+  void setup( const std::string &device /**< [in] INDI device name. */,
+              const std::string &property /**< [in] INDI property name. */,
+              int                type /**< [in] Display type from types. */,
+              const std::string &label /**< [in] Entry label. */,
+              const std::string &units /**< [in] Optional units for the label. */
+  );
 
-   void currEl(const std::string & cel)
-   {
+  /// Set the name of the element displayed by the entry.
+  void currEl( const std::string &cel /**< [in] Current element name. */ )
+  {
       m_currEl = cel;
-   }
+  }
 
-   void targEl(const std::string & tel)
-   {
+  /// Set the name of the element written by the entry.
+  void targEl( const std::string &tel /**< [in] Target element name. */ )
+  {
       m_targEl = tel;
    }
 
+   /// Restore the default format for the configured display type.
    void defaultFormat();
 
+   /// Format the last reported value for display.
    QString formattedValue();
+
+   /// Return the text shown by the editor, including an active edit.
+   QString inputText() const;
 
    /// Set the read only flag
    /** If set to true, the widget will not accept focus and will not enter edit mode.
@@ -89,7 +111,7 @@ public:
      *
      * This sets m_readOnly
      */
-   void readOnly(bool ro /**< [in] the new value of the read only flag*/);
+   void readOnly( bool ro /**< [in] Whether to disable editing. */ );
 
    /// Get the value of the read only flag
    /**
@@ -97,60 +119,63 @@ public:
      */
    bool readOnly();
 
-   /// Set the highlight changes flag
-   /** If set to false, the widget will not changed to statusChanged.
-     * The default is true.
-     *
-     * This sets m_highlightChanges
-     */
-   void highlightChanges(bool hc);
+   /// Choose whether to highlight a changed current value.
+   void highlightChanges( bool hc /**< [in] Whether to highlight changes. */ );
 
-   /// Get the value of the highlight changes flag
-   /**
-     * \returns the current value of m_readOnly
-     */
+   /// Return whether current-value changes are highlighted.
    bool highlightChanges();
 
+   /// Subscribe to the configured INDI property.
    virtual void subscribe();
 
+   /// Request a display refresh after connecting.
    virtual void onConnect();
 
+   /// Clear the cached type and values and reset the display on disconnect.
    virtual void onDisconnect();
 
-   void handleDefProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   /// Initialize the entry from an INDI property definition.
+   void handleDefProperty( const pcf::IndiProperty &ipRecv /**< [in] Property definition. */ );
 
-   void handleDelProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has been deleted*/);
+   /// Clear the display if the configured property is deleted.
+   void handleDelProperty( const pcf::IndiProperty &ipRecv /**< [in] Deleted property. */ );
 
-   void handleSetProperty( const pcf::IndiProperty & ipRecv /**< [in] the property which has changed*/);
+   /// Cache the reported property type and its current and target elements.
+   void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Updated property. */ );
 
    /// Set the stretch of the horizontal layout
-   void setStretch( int s0, ///< Stretch of the spacer.  If 0, the spacer is removed.
-                    int s1, ///< Stretch of the label
-                    int s2  ///< Stretch of the value
-                  );
+   void setStretch( int s0 /**< [in] Stretch of the spacer, or zero to remove it. */,
+                    int s1 /**< [in] Stretch of the label. */,
+                    int s2 /**< [in] Stretch of the value. */
+   );
 
    /// Set the format string
-   void format( const std::string & f /**< [in] the new format string */);
+   void format( const std::string &f /**< [in] Format for displaying the current value. */ );
 
-protected:
+ protected:
+   /// Release keyboard focus from the value editor.
    virtual void clearFocus();
 
 public slots:
-   void updateGUI();
+  /// Display the current value if it has changed.
+  void updateGUI();
 
-   void on_value_returnPressed();
+  /// Send the edited target as a number for numeric properties or as text otherwise.
+  void on_value_returnPressed();
 
-   void setEditText(const QString & qs);
+  /// Set the value editor text and start editing.
+  void setEditText( const QString &qs /**< [in] Text to edit. */ );
 
-   void stopEditing();
+  /// End editing and restore the current value display.
+  void stopEditing();
 
 signals:
 
-   void doUpdateGUI();
+  /// Request a refresh of the displayed value.
+  void doUpdateGUI();
 
 private:
-
-   Ui::statusEntry ui;
+  Ui::statusEntry ui; ///< Qt Designer controls for this widget.
 };
 
 statusEntry::statusEntry( QWidget * Parent,
@@ -239,7 +264,8 @@ void statusEntry::defaultFormat()
    }
 }
 
-QString floatAutoFormat(const std::string & value)
+/// Format a floating-point value using precision based on its magnitude.
+QString floatAutoFormat( const std::string &value /**< [in] Numeric text to format. */ )
 {
    double v;
    try
@@ -321,6 +347,11 @@ QString statusEntry::formattedValue()
    }
 }
 
+QString statusEntry::inputText() const
+{
+    return ui.value->text();
+}
+
 void statusEntry::readOnly(bool ro)
 {
    m_readOnly = ro;
@@ -359,10 +390,12 @@ void statusEntry::onConnect()
 
 void statusEntry::onDisconnect()
 {
+    m_propertyType = pcf::IndiProperty::Unknown;
     m_current.clear();
     m_target.clear();
     m_valChanged = false;
-    ui.value->setText("---");
+
+    ui.value->setText( "---" );
 }
 
 void statusEntry::handleDefProperty( const pcf::IndiProperty & ipRecv)
@@ -380,29 +413,36 @@ void statusEntry::handleDelProperty( const pcf::IndiProperty & ipRecv)
    }
 }
 
-void statusEntry::handleSetProperty( const pcf::IndiProperty & ipRecv)
+void statusEntry::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-   if(ipRecv.getDevice() != m_device) return;
+    if( ipRecv.getDevice() != m_device )
+    {
+        return;
+    }
 
-   if(ipRecv.getName() == m_property)
-   {
-      if(ipRecv.find(m_currEl))
-      {
-         std::string current = ipRecv[m_currEl].get();
-         if(current != m_current)
-         {
-            m_valChanged = true;
-         }
-         m_current = current;
-      }
+    if( ipRecv.getName() == m_property )
+    {
+        m_propertyType = ipRecv.getType();
 
-      if(ipRecv.find(m_targEl))
-      {
-         m_target = ipRecv[m_targEl].get();
-      }
-   }
+        if( ipRecv.find( m_currEl ) )
+        {
+            const std::string current = ipRecv[m_currEl].get();
 
-   emit doUpdateGUI();
+            if( current != m_current )
+            {
+                m_valChanged = true;
+            }
+
+            m_current = current;
+        }
+
+        if( ipRecv.find( m_targEl ) )
+        {
+            m_target = ipRecv[m_targEl].get();
+        }
+    }
+
+    emit doUpdateGUI();
 }
 
 void statusEntry::setStretch( int s0,
@@ -437,18 +477,14 @@ void statusEntry::clearFocus()
 
 void statusEntry::on_value_returnPressed()
 {
-   std::string str = ui.value->text().toStdString();
-   ui.value->clearFocus();
+    const std::string value = ui.value->text().toStdString();
+    ui.value->clearFocus();
 
-   pcf::IndiProperty ip(pcf::IndiProperty::Text);
+    const auto type = m_propertyType == pcf::IndiProperty::Number ? pcf::IndiProperty::Number : pcf::IndiProperty::Text;
+    pcf::IndiProperty ip( type, m_device, m_property );
+    ip.add( pcf::IndiElement( m_targEl, value ) );
 
-   ip.setDevice(m_device);
-   ip.setName(m_property);
-   ip.add(pcf::IndiElement(m_targEl));
-   ip[m_targEl] = str;
-
-   sendNewProperty(ip);
-
+    sendNewProperty( ip );
 }
 
 void statusEntry::updateGUI()

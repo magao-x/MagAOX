@@ -7,16 +7,18 @@
 #ifndef alignLoop_hpp
 #define alignLoop_hpp
 
+#include <cmath>
+#include <sstream>
+
+#include <mx/math/floatUtils.hpp>
+
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
 /** \defgroup alignLoop
  * \brief The MagAO-X application for alignment-loop control.
  *
- * <a href="../handbook/operating/software/apps/XXXXXX.html">Application Documentation</a>
- *
  * \ingroup apps
- *
  */
 
 /** \defgroup alignLoop_files
@@ -28,122 +30,185 @@ namespace MagAOX
 namespace app
 {
 
-/// The MagAO-X alignment-loop controller.
+/// Drive two controller axes from a shared-memory measurement stream.
 /**
+ * The loop subtracts `offset0` and `offset1` from the two measurement axes before
+ * publishing residuals and converting them to stage corrections. Each INDI offset
+ * is a live setpoint in measurement units and starts at zero.
+ * Binary telemetry records the loop state and its processed measurements.
+ *
  * \ingroup alignLoop
  */
-class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
+class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>, public dev::telemeter<alignLoop>
 {
-    // Give the test harness access.
+    /// Give the test harness access to internal loop state.
     friend class alignLoop_test;
 
+    /// Allow the stream monitor to dispatch frames to this app.
     friend class dev::shmimMonitor<alignLoop>;
 
+    /// Allow periodic telemetry to request a state record.
+    friend class dev::telemeter<alignLoop>;
+
   public:
-    // The base shmimMonitor type
+    /// Stream monitor for the alignment measurements.
     typedef dev::shmimMonitor<alignLoop> shmimMonitorT;
+
+    /// Binary telemetry writer for alignment records.
+    typedef dev::telemeter<alignLoop> telemeterT;
 
   protected:
     /** \name Configurable Parameters
      *@{
      */
 
-    std::vector<std::string> m_ctrlDevices;    ///< Device names of the controlled axes.
-    std::vector<std::string> m_ctrlProperties; ///< INDI properties used to send loop commands.
-    std::vector<std::string> m_ctrlCurrents;   ///< INDI elements holding the current controller values.
-    std::vector<std::string> m_ctrlTargets;    ///< INDI elements to which updated commands are written.
+    /// Device name for each controlled axis.
+    std::vector<std::string> m_ctrlDevices;
 
-    std::vector<float> m_currents; ///< Most recently received controller values.
+    /// INDI property used to read and command each axis.
+    std::vector<std::string> m_ctrlProperties;
 
-    std::vector<pcf::IndiProperty> m_indiP_ctrl; ///< Registered controller properties for each axis.
+    /// INDI readback element for each axis.
+    std::vector<std::string> m_ctrlCurrents;
 
-    std::string m_intMatFile; ///< Interaction matrix file name from configuration.
+    /// INDI command element for each axis.
+    std::vector<std::string> m_ctrlTargets;
 
-    std::vector<float> m_defaultGains; ///< Default per-axis gains loaded from configuration.
+    /// Latest controller readback for each axis, protected by m_indiMutex after startup.
+    std::vector<float> m_currents;
 
-    std::string m_upstreamDevice;                   ///< Upstream loop device that this loop can follow.
-    std::string m_upstreamProperty{ "loop_state" }; ///< Toggle property on the upstream loop to monitor.
-    bool        m_upstreamFollowClosed{ false };    ///< If true, this loop closes when the upstream loop closes.
+    /// Registered INDI subscriptions to controller readback properties.
+    std::vector<pcf::IndiProperty> m_indiP_ctrl;
+
+    /// Configured file name reserved for loading an interaction matrix.
+    std::string m_intMatFile;
+
+    /// Startup gains, either one shared value or one value per axis.
+    std::vector<float> m_defaultGains;
+
+    /// Optional upstream loop device whose open state opens this loop.
+    std::string m_upstreamDevice;
+
+    /// INDI toggle property of the upstream loop.
+    std::string m_upstreamProperty{ "loop_state" };
+
+    /// Whether to close this loop when the upstream loop closes.
+    bool m_upstreamFollowClosed{ false };
 
     ///@}
 
-    mx::improc::eigenImage<float> m_intMat; ///< Interaction matrix mapping measurements to commands.
+    /// Interaction matrix mapping measurement residuals to command deltas.
+    mx::improc::eigenImage<float> m_intMat;
 
-    mx::improc::eigenImage<float> m_measurements; ///< Most recent measured loop disturbance vector.
-    float                         m_delta0{ 0 };  ///< Latest first-axis residual.
-    float                         m_delta1{ 0 };  ///< Latest second-axis residual.
+    /// Private copy of the current measurement frame, corrected in place.
+    mx::improc::eigenImage<float> m_measurements;
 
-    mx::improc::eigenImage<float> m_commands; ///< Most recent command delta vector.
+    /// Latest first-axis residual.
+    float m_delta0{ 0 };
 
-    float m_ggain{ 0 }; ///< Global loop gain applied to all axes.
+    /// Latest second-axis residual.
+    float m_delta1{ 0 };
 
-    std::vector<float> m_gains; ///< Active per-axis gains.
+    /// Magnitude limit used for offset validation and INDI number metadata.
+    static constexpr float c_maxOffset{ 1e15f };
 
-    bool m_ctrlEnabled{ false }; ///< True when the loop is closed and may send controller commands.
+    /// Active first-axis measurement setpoint, protected by m_indiMutex.
+    float m_offset0{ 0 };
+
+    /// Active second-axis measurement setpoint, protected by m_indiMutex.
+    float m_offset1{ 0 };
+
+    /// Most recent mapped command deltas before gain and sign are applied.
+    mx::improc::eigenImage<float> m_commands;
+
+    /// Global loop gain, protected by m_indiMutex after startup.
+    float m_ggain{ 0 };
+
+    /// Per-axis loop gains initialized during startup.
+    std::vector<float> m_gains;
+
+    /// True when stage output is enabled, protected by m_indiMutex.
+    bool m_ctrlEnabled{ false };
 
   public:
-    /// Default c'tor.
+    /// Construct the app with the current repository version.
     alignLoop();
 
-    /// D'tor, declared and defined for noexcept.
+    /// Destroy the app after shutdown.
     ~alignLoop() noexcept
     {
     }
 
-    /// Set up the app configuration interface.
+    /// Register the monitor and loop configuration keys.
     virtual void setupConfig();
 
-    /// Implementation of loadConfig logic, separated for testing.
-    /** This is called by loadConfig().
-     */
-    int loadConfigImpl(
-        mx::app::appConfigurator &_config /**< [in] an application configuration from which to load values*/ );
+    /// Load monitor and loop settings from the supplied configuration.
+    int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] configuration from which to load values */ );
 
     /// Load the application configuration.
     virtual void loadConfig();
 
-    /// Startup function
+    /// Initialize the control state, INDI properties, telemetry writer, and input monitor.
     /**
-     *
+     * \returns 0 on success or -1 on a startup error.
      */
     virtual int appStartup();
 
-    /// Implementation of the FSM for alignLoop.
+    /// Check monitor and telemetry health and keep the app in the operating state.
     /**
      * \returns 0 on no critical error
      * \returns -1 on an error requiring shutdown
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Shut down the input stream monitor and telemetry interface.
     virtual int appShutdown();
 
-    /// Change the loop state.
+    /// Change the loop state and acknowledge it over INDI.
     int toggleLoop( bool onoff /**< [in] true to close the loop and false to open it */ );
 
     // shmimMonitor interface:
     /// Allocate working memory for the monitored image stream.
-    int allocate( const dev::shmimT &dummy /**< [in] ignored shmim descriptor */ );
+    int allocate( const dev::shmimT &dummy /**< [in] input monitor dispatch tag */ );
 
-    /// Process a new measurement image from the monitored stream.
+    /// Publish the corrected measurement residuals and send any closed-loop correction.
     int processImage( void              *curr_src /**< [in] pointer to the current image buffer */,
-                      const dev::shmimT &dummy /**< [in] ignored shmim descriptor */
+                      const dev::shmimT &dummy /**< [in] input monitor dispatch tag */
     );
 
-    /// Send the newly computed commands to the controller devices.
-    int sendCommands( std::vector<float> &commands /**< [in] command values to transmit */ );
+    /// Send each computed target to its configured controller property.
+    /**
+     * \returns A bit mask of successful local INDI sends for the first two controller axes.
+     */
+    uint8_t sendCommands( const std::vector<float> &commands /**< [in] command values to transmit */ );
 
     // INDI
 
-    pcf::IndiProperty m_indiP_deltas; ///< Published loop residual values.
+    /// Published offset-corrected loop residuals.
+    pcf::IndiProperty m_indiP_deltas;
 
-    pcf::IndiProperty m_indiP_ggain;       ///< INDI property exposing the global loop gain.
-    pcf::IndiProperty m_indiP_ctrlEnabled; ///< INDI property exposing the loop open/closed state.
+    /// First-axis offset with current and target elements.
+    pcf::IndiProperty m_indiP_offset0;
 
+    /// Apply the first-axis offset from the incoming INDI request `ipRecv`.
+    INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_offset0 );
+
+    /// Second-axis offset with current and target elements.
+    pcf::IndiProperty m_indiP_offset1;
+
+    /// Apply the second-axis offset from the incoming INDI request `ipRecv`.
+    INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_offset1 );
+
+    /// Global loop gain with current and target elements.
+    pcf::IndiProperty m_indiP_ggain;
+
+    /// INDI toggle exposing whether the loop is closed.
+    pcf::IndiProperty m_indiP_ctrlEnabled;
+
+    /// Apply the requested global gain from the incoming INDI request `ipRecv`.
     INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_ggain );
+
+    /// Open or close the loop from the incoming INDI request `ipRecv`.
     INDI_NEWCALLBACK_DECL( alignLoop, m_indiP_ctrlEnabled );
 
     /// Route controller property updates into the instance callback.
@@ -157,10 +222,31 @@ class alignLoop : public MagAOXApp<true>, public dev::shmimMonitor<alignLoop>
     /// Update cached controller current values from an INDI property callback.
     int setCallBack_ctrl( const pcf::IndiProperty &ipRecv /**< [in] controller property update */ );
 
-    int               m_upstreamState{ 0 }; ///< Cached upstream state indicator.
-    pcf::IndiProperty m_indiP_upstream;     ///< Property used to monitor the upstream loop state.
+    /// Storage reserved for a cached upstream state indicator.
+    int m_upstreamState{ 0 };
 
+    /// INDI subscription to the upstream loop toggle.
+    pcf::IndiProperty m_indiP_upstream;
+
+    /// Follow the upstream loop state reported by the subscribed INDI update `ipRecv`.
     INDI_SETCALLBACK_DECL( alignLoop, m_indiP_upstream );
+
+  protected:
+    /// Apply and acknowledge a valid offset request.
+    int setOffset( float                   &offset, /**< [in/out] active setpoint for the requested axis */
+                   pcf::IndiProperty       &prop,   /**< [in/out] local offset property */
+                   const pcf::IndiProperty &ipRecv /**< [in] received offset property */ );
+
+    /// Refresh the archived state when no frame or state change has been recorded recently.
+    int checkRecordTimes();
+
+    /// Record the current state while holding m_indiMutex.
+    int recordTelem( const telem_alignloop *tag /**< [in] unused telemetry type selector */ );
+
+    /// Queue a state or frame record while holding m_indiMutex, or during startup.
+    int recordAlignment( const AlignLoopSample *sample  = nullptr, /**< [in] processed frame, if present */
+                         const AlignLoopAxes   *targets = nullptr, /**< [in] attempted controller targets, if present */
+                         uint8_t                sentMask = 0 /**< [in] mask of successful local sends */ );
 };
 
 alignLoop::alignLoop() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
@@ -172,6 +258,7 @@ alignLoop::alignLoop() : MagAOXApp( MAGAOX_CURRENT_SHA1, MAGAOX_REPO_MODIFIED )
 void alignLoop::setupConfig()
 {
     shmimMonitorT::setupConfig( config );
+    TELEMETER_SETUP_CONFIG( config );
 
     config.add( "ctrl.devices",
                 "",
@@ -263,6 +350,7 @@ void alignLoop::setupConfig()
 int alignLoop::loadConfigImpl( mx::app::appConfigurator &_config )
 {
     shmimMonitorT::loadConfig( _config );
+    TELEMETER_LOAD_CONFIG( _config );
 
     _config( m_ctrlDevices, "ctrl.devices" );
     _config( m_ctrlProperties, "ctrl.properties" );
@@ -284,11 +372,6 @@ void alignLoop::loadConfig()
 
 int alignLoop::appStartup()
 {
-    if( shmimMonitorT::appStartup() < 0 )
-    {
-        return log<software_error, -1>( { __FILE__, __LINE__ } );
-    }
-
     if( m_ctrlTargets.size() != m_ctrlDevices.size() )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "ctrl.Targets and ctrl.devices are not the same size" } );
@@ -327,9 +410,19 @@ int alignLoop::appStartup()
     m_indiP_deltas.add( pcf::IndiElement( "delta1" ) );
     m_indiP_deltas["delta1"] = 0;
 
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_offset0, "offset0", -c_maxOffset, c_maxOffset, 0, "%g", "Offset 0", "Loop" );
+    m_indiP_offset0["current"] = m_offset0;
+    m_indiP_offset0["target"]  = m_offset0;
+
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_offset1, "offset1", -c_maxOffset, c_maxOffset, 0, "%g", "Offset 1", "Loop" );
+    m_indiP_offset1["current"] = m_offset1;
+    m_indiP_offset1["target"]  = m_offset1;
+
     m_gains.resize( m_defaultGains.size() );
     for( size_t n = 0; n < m_defaultGains.size(); ++n )
+    {
         m_gains[n] = m_defaultGains[n];
+    }
 
     createStandardIndiNumber<unsigned>( m_indiP_ggain, "loop_gain", 0, 1, 0, "%0.2f" );
     m_indiP_ggain["current"] = m_ggain;
@@ -398,6 +491,14 @@ int alignLoop::appStartup()
         REG_INDI_SETPROP( m_indiP_upstream, m_upstreamDevice, m_upstreamProperty );
     }
 
+    TELEMETER_APP_STARTUP;
+    recordAlignment();
+
+    if( shmimMonitorT::appStartup() < 0 )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__ } );
+    }
+
     return 0;
 }
 
@@ -409,6 +510,7 @@ int alignLoop::appLogic()
     }
 
     state( stateCodes::OPERATING );
+    TELEMETER_APP_LOGIC;
 
     return 0;
 }
@@ -416,16 +518,20 @@ int alignLoop::appLogic()
 int alignLoop::appShutdown()
 {
     shmimMonitorT::appShutdown();
+    TELEMETER_APP_SHUTDOWN;
 
     return 0;
 }
 
 int alignLoop::toggleLoop( bool onoff )
 {
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
     if( !m_ctrlEnabled && onoff ) // not enabled so change
     {
         m_ctrlEnabled = true;
         log<loop_closed>();
+        recordAlignment();
         updateSwitchIfChanged( m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::On, INDI_OK );
         return 0;
     }
@@ -434,6 +540,7 @@ int alignLoop::toggleLoop( bool onoff )
     {
         m_ctrlEnabled = false;
         log<loop_open>();
+        recordAlignment();
         updateSwitchIfChanged( m_indiP_ctrlEnabled, "toggle", pcf::IndiElement::Off, INDI_IDLE );
 
         return 0;
@@ -457,14 +564,28 @@ inline int alignLoop::allocate( const dev::shmimT &dummy )
 inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
 {
     static_cast<void>( dummy );
+    const uint64_t frame    = shmimMonitorT::currCnt0();
+    const timespec acquired = shmimMonitorT::currAtime();
 
     for( unsigned nn = 0; nn < shmimMonitorT::m_width * shmimMonitorT::m_height; ++nn )
     {
         m_measurements.data()[nn] = ( static_cast<float *>( curr_src ) )[nn];
     }
 
+    // Keep the accepted offsets and stage-send decision consistent for this frame.
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    const AlignLoopAxes measurement{ m_measurements( 0, 0 ), m_measurements( 1, 0 ) };
+    m_measurements( 0, 0 ) -= m_offset0;
+    m_measurements( 1, 0 ) -= m_offset1;
     m_delta0 = m_measurements( 0, 0 );
     m_delta1 = m_measurements( 1, 0 );
+
+    const AlignLoopSample sample{
+        frame, acquired.tv_sec, static_cast<int32_t>( acquired.tv_nsec ), measurement, { m_delta0, m_delta1 } };
+
+    updateIfChanged(
+        m_indiP_deltas, std::vector<std::string>{ "delta0", "delta1" }, std::vector<float>{ m_delta0, m_delta1 } );
 
     std::cout << "measurements: ";
     for( int cc = 0; cc < m_measurements.rows(); ++cc )
@@ -474,7 +595,10 @@ inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
     std::cout << "\n";
 
     if( m_currents[0] < -1e14 )
+    {
+        recordAlignment( &sample );
         return 0;
+    }
 
     m_commands.matrix() = m_intMat.matrix() * m_measurements.matrix();
 
@@ -496,25 +620,22 @@ inline int alignLoop::processImage( void *curr_src, const dev::shmimT &dummy )
     }
     std::cout << "\n";
 
-    // And send commands.
-    int rv;
-    if( m_ctrlEnabled )
+    if( m_ctrlEnabled && ( m_delta0 != 0 || m_delta1 != 0 ) )
     {
-        rv = sendCommands( commands );
-    }
-    else
-    {
-        rv = 0;
+        const uint8_t       sentMask = sendCommands( commands );
+        const AlignLoopAxes targets{ commands[0], commands[1] };
+        recordAlignment( &sample, &targets, sentMask );
+        return 0;
     }
 
-    updateIfChanged( m_indiP_deltas,
-                     std::vector<std::string>( { "delta0", "delta1" } ),
-                     std::vector<float>( { m_delta0, m_delta1 } ) );
-    return rv;
+    recordAlignment( &sample );
+    return 0;
 }
 
-inline int alignLoop::sendCommands( std::vector<float> &commands )
+inline uint8_t alignLoop::sendCommands( const std::vector<float> &commands )
 {
+    uint8_t sentMask = 0;
+
     for( size_t n = 0; n < m_ctrlDevices.size(); ++n )
     {
         pcf::IndiProperty ip( pcf::IndiProperty::Number );
@@ -524,10 +645,75 @@ inline int alignLoop::sendCommands( std::vector<float> &commands )
         ip.add( pcf::IndiElement( m_ctrlTargets[n] ) );
         ip[m_ctrlTargets[n]] = commands[n];
 
-        sendNewProperty( ip );
+        if( sendNewProperty( ip ) == 0 && n < 2 )
+        {
+            sentMask |= static_cast<uint8_t>( 1u << n );
+        }
     }
 
+    return sentMask;
+}
+
+inline int alignLoop::checkRecordTimes()
+{
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+    return telemeterT::checkRecordTimes( telem_alignloop() );
+}
+
+inline int alignLoop::recordTelem( const telem_alignloop * )
+{
+    return recordAlignment();
+}
+
+inline int alignLoop::recordAlignment( const AlignLoopSample *sample, const AlignLoopAxes *targets, uint8_t sentMask )
+{
+    return telem<telem_alignloop>(
+        { m_ctrlEnabled, m_ggain, { m_gains[0], m_gains[1] }, { m_offset0, m_offset1 }, sample, targets, sentMask } );
+}
+
+inline int alignLoop::setOffset( float &offset, pcf::IndiProperty &prop, const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( prop, ipRecv );
+
+    const char *element = ipRecv.find( "target" ) ? "target" : "current";
+
+    if( !ipRecv.find( element ) )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "missing offset value" } );
+    }
+
+    std::istringstream value( ipRecv[element].get() );
+    float              target;
+
+    if( !( value >> target ) || !( value >> std::ws ).eof() || !mx::math::isFinite( target ) ||
+        std::abs( target ) > c_maxOffset )
+    {
+        return log<software_error, -1>( { __FILE__, __LINE__, "invalid offset value" } );
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    const bool changed = offset != target;
+    offset             = target;
+
+    if( changed )
+    {
+        recordAlignment();
+    }
+
+    updateIfChanged( prop, std::vector<std::string>{ "current", "target" }, std::vector<float>{ target, target } );
+
     return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_offset0 )( const pcf::IndiProperty &ipRecv )
+{
+    return setOffset( m_offset0, m_indiP_offset0, ipRecv );
+}
+
+INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_offset1 )( const pcf::IndiProperty &ipRecv )
+{
+    return setOffset( m_offset1, m_indiP_offset1, ipRecv );
 }
 
 INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_ggain )( const pcf::IndiProperty &ipRecv )
@@ -546,7 +732,15 @@ INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_ggain )( const pcf::IndiProperty &ipRe
         return -1;
     }
 
-    m_ggain = target;
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    const bool changed = m_ggain != target;
+    m_ggain            = target;
+
+    if( changed )
+    {
+        recordAlignment();
+    }
 
     updateIfChanged( m_indiP_ggain, "current", m_ggain );
     updateIfChanged( m_indiP_ggain, "target", m_ggain );
@@ -581,6 +775,8 @@ INDI_NEWCALLBACK_DEFN( alignLoop, m_indiP_ctrlEnabled )( const pcf::IndiProperty
 
 inline int alignLoop::setCallBack_ctrl( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
     for( size_t n = 0; n < m_ctrlDevices.size(); ++n )
     {
         if( ipRecv.getDevice() == m_ctrlDevices[n] )
@@ -603,7 +799,9 @@ INDI_SETCALLBACK_DEFN( alignLoop, m_indiP_upstream )( const pcf::IndiProperty &i
     }
 
     if( !ipRecv.find( "toggle" ) )
+    {
         return 0;
+    }
 
     if( ipRecv["toggle"].getSwitchState() == pcf::IndiElement::On && m_upstreamFollowClosed )
     {

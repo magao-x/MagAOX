@@ -15,6 +15,21 @@ Either row can be used alone. Rows appear in slot order. Without either key,
 the plugin unloads normally. Malformed keys or invalid precision reject the
 configuration with a startup diagnostic.
 
+For the amount of focus a woofer dump would send to the telescope, configure a
+single row in the desired viewer:
+
+```ini
+[valueDisplay]
+key1=tcsi.offlF_dumpAmount.current
+label1=Woofer focus
+precision1=6
+```
+
+The readout uses the signed, calibrated average in the same units and decimal
+precision as the `zimr` focus dump command. It is available after `tcsi` processes
+woofer coefficients with the loop closed, even if automatic focus offloading is
+disabled. The value is blank before the first average and when the loop opens.
+
 For camflowfs-fit, using two decimal places:
 
 ```ini

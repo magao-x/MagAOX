@@ -89,7 +89,8 @@ apps_rtc = \
 	modalFilter \
 	dmRecon
 pythonapps_rtc = \
-	efcControl
+	efcControl \
+	po4aoTrainer
 
 # Apps needed on ICC
 apps_icc = \
@@ -240,6 +241,7 @@ ifeq ($(ALL_APPS),1)
 endif
 
 all_guis = \
+	po4aoGUI \
 	dmCtrlGUI \
 	dmModeGUI \
 	offloadCtrlGUI \
@@ -250,7 +252,8 @@ all_guis = \
 	timingGUI \
 	roiGUI \
 	cameraGUI \
-	stageGUI
+	stageGUI \
+	polarimetryGUI \
 
 # If building for coverage, don't build guis for now
 ifeq ($(NO_GUIS),1)
@@ -325,9 +328,15 @@ scripts_to_install = \
 	list_xfiles_by_semester \
 	loop_instrument_backup_sync \
 	cyverse_replicate \
-	xnormconfig
+	xnormconfig \
+	xnormcalib 
 
-ifeq ($(MAGAOX_ROLE),RTC)
+ifeq ($(MAGAOX_ROLE),AOC)
+  scripts_to_install += xlabmode
+  scripts_to_install += xskymode
+  scripts_to_install += xhomezabers
+  scripts_to_install += xtransportmode
+else ifeq ($(MAGAOX_ROLE),RTC)
   scripts_to_install += cacao/RTC/cacao-startup
   scripts_to_install += cacao/RTC/cacao-shutdown
   scripts_to_install += cacao/RTC/tweeter-vispyr-rootdir-scripts/tweeter-pre-calib-apply

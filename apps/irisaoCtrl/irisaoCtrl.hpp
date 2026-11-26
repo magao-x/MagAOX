@@ -74,7 +74,7 @@ class irisaoCtrl : public MagAOXApp<true>,
 
     typedef float realT; ///< This defines the datatype used to signal the DM using the ImageStreamIO library.
 
-    size_t m_nsat{ 0 }; ///< Saturated actuator count accumulated for ordinary app reporting.
+    size_t m_nsat{ 0 }; ///< Saturated actuator count reported as a notice when nonzero.
 
   protected:
     /** \name Configurable Parameters - Data
@@ -119,20 +119,13 @@ class irisaoCtrl : public MagAOXApp<true>,
      */
     virtual int appLogic();
 
-    /// Shutdown the app.
-    /**
-     *
-     */
+    /// Shut down the app.
     virtual int appShutdown();
 
-    /// Cleanup after a power off.
-    /**
-     */
+    /// Clean up after power is turned off.
     virtual int onPowerOff();
 
-    /// Maintenace while powered off.
-    /**
-     */
+    /// Run DM maintenance while powered off.
     virtual int whilePowerOff();
 
     /** \name DM Base Class Interface
@@ -312,7 +305,7 @@ int irisaoCtrl::appLogic()
 
     if( m_nsat > 0 )
     {
-        log<text_log>( "Saturated actuators in last second: " + std::to_string( m_nsat ), logPrio::LOG_WARNING );
+        log<text_log>( "Saturated actuators in last second: " + std::to_string( m_nsat ), logPrio::LOG_NOTICE );
     }
 
     m_nsat = 0;

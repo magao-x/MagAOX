@@ -1,0 +1,3 @@
+# Build products specific to this util. Generic patterns (*.o, tests/*_test,
+# build/, ...) are in the top-level .gitignore.
+/xrif2fits

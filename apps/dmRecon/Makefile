@@ -1,7 +1,7 @@
 
 allall: all
 
-OTHER_HEADERS=
+OTHER_HEADERS=dmReconMath.hpp dmReconTiming.hpp
 TARGET=dmRecon
 include ../../Make/magAOXApp.mk
 

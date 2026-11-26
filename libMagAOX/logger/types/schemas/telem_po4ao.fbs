@@ -1,0 +1,23 @@
+namespace MagAOX.logger;
+
+// Callback durations, monotonic sample time, and cumulative process-lifetime counters.
+table Telem_po4ao_fb
+{
+    p50_us:uint;
+    p95_us:uint;
+    p99_us:uint;
+    max_us:uint;
+    samples:ulong;
+    sequence:ulong;
+    sample_time_ns:ulong;
+    fresh:bool;
+    mixed_window:bool;
+    missed_frames:ulong;
+    deadline_misses:ulong;
+    inference_failures:ulong;
+    replay_drops:ulong;
+    deadline_us:uint;
+    model_id:ulong;
+    backend:uint;
+}
+root_type Telem_po4ao_fb;

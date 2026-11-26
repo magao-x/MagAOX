@@ -1,0 +1,42 @@
+name: gitignore-check
+
+on:
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'utils/**'
+      - '**/.gitignore'
+      - '.github/workflows/gitignore-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  gitignore-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check per-directory .gitignore files
+        run: |
+          fail=0
+          for mk in apps/*/Makefile utils/*/Makefile; do
+            d=$(dirname "$mk")
+            if [ ! -f "$d/.gitignore" ]; then
+              echo "::error file=$mk::$d has no .gitignore"
+              fail=1
+              continue
+            fi
+            if grep -q 'pythonApp.mk' "$mk"; then
+              continue
+            fi
+            target=$(sed -nE 's/^[[:space:]]*TARGET[[:space:]]*:?=[[:space:]]*([^[:space:]]+).*/\1/p' "$mk" | head -n1)
+            if [ -z "$target" ]; then
+              echo "::error file=$mk::could not read TARGET from $mk"
+              fail=1
+            elif ! grep -qxF "/$target" "$d/.gitignore"; then
+              echo "::error file=$d/.gitignore::missing '/$target' line (TARGET in $mk)"
+              fail=1
+            fi
+          done
+          exit $fail

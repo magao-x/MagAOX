@@ -39,14 +39,24 @@ class ProductionHarness : public Harness
     using dmSyncopation::closeProduction;
     using dmSyncopation::configureDiagnostics;
     using dmSyncopation::detailedTimingEnabled;
+    using dmSyncopation::inode;
+    using dmSyncopation::liveSteps;
+    using dmSyncopation::logDryRunCapture;
+    using dmSyncopation::m_dryCapture;
     using dmSyncopation::m_generation;
     using dmSyncopation::m_indiP_production;
+    using dmSyncopation::m_indiP_zeroPublication;
+    using dmSyncopation::m_offloadDevice;
+    using dmSyncopation::m_offloadPrepareHz;
+    using dmSyncopation::m_offloadPrepareSequence;
     using dmSyncopation::m_passiveCopied;
+    using dmSyncopation::m_productionDryRun;
     using dmSyncopation::m_productionEnabled;
     using dmSyncopation::m_productionReadyLeadUs;
     using dmSyncopation::m_productionStep0LeadUs;
     using dmSyncopation::m_snapshotMax;
     using dmSyncopation::m_zeroTrial;
+    using dmSyncopation::offloadEpoch;
     using dmSyncopation::openProduction;
     using dmSyncopation::productionCopy;
     using dmSyncopation::productionSnapshot;
@@ -327,7 +337,13 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
 {
     ProductionHarness app;
     app.setupConfig();
-    const int  fault      = GENERATE( 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 );
+    const int  fault      = GENERATE( 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 );
+    const int  steps      = fault == 8    ? synco::maxSteps + 1
+                            : fault == 9  ? 1
+                            : fault == 15 ? synco::maxSteps
+                            : fault >= 14 ? 0
+                                          : 4;
+    const bool production = fault != 13 && fault != 16;
     char       path[]     = "/tmp/dm-synco-production-config-XXXXXX";
     const auto descriptor = mkstemp( path );
     REQUIRE( descriptor >= 0 );
@@ -338,14 +354,10 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
         config << "[shmimMonitor]\nshmimName=dm97disp03\n"
                << "[streams]\ncombined=dm97disp\ntiming=synco_test_timing\n"
                << "destinations=dm97disp07,dm97disp08\n"
-               << "[scheduler]\nmaxSubframes="
-               << ( fault == 8   ? 5
-                    : fault == 9 ? 1
-                                 : 4 )
-               << "\nmaxCadenceHz=8000\ncopyBudgetUs=30\nsnapshotBudgetUs=10\n"
-               << "[readerReleaseMonitor]\nshmimName=" << ( fault == 3 || fault == 13 ? "" : "dmtweeter_read_done" )
+               << "[scheduler]\nmaxSubframes=" << steps << "\nmaxCadenceHz=8000\ncopyBudgetUs=30\nsnapshotBudgetUs=10\n"
+               << "[readerReleaseMonitor]\nshmimName=" << ( fault == 3 || !production ? "" : "dmtweeter_read_done" )
                << "\n"
-               << "[production]\nenabled=" << ( fault == 13 ? "false" : "true" ) << "\nreadyLeadUs="
+               << "[production]\nenabled=" << ( production ? "true" : "false" ) << "\nreadyLeadUs="
                << ( fault == 4   ? 20
                     : fault == 7 ? 100
                                  : 50 )
@@ -368,17 +380,17 @@ TEST_CASE( "production startup validates mode and preparation settings", "[dmSyn
     const auto result = app.loadConfigImpl( app.config );
     CAPTURE( fault );
 
-    if( fault == 0 || fault == 9 || fault == 10 || fault == 11 || fault == 13 )
+    if( fault == 0 || fault == 9 || fault == 10 || fault == 11 || fault == 13 || fault == 14 || fault == 15 )
     {
         CHECK( result == 0 );
-        CHECK( app.m_productionEnabled == ( fault != 13 ) );
+        CHECK( app.m_productionEnabled == production );
         CHECK_FALSE( app.m_zeroTestEnabled );
         CHECK_FALSE( app.m_simulationEnabled );
         CHECK( app.m_zeroLateUs == ( fault == 13 ? 5 : 6 ) );
         CHECK( app.m_zeroWakeAheadUs == ( fault == 13 ? 0 : 10 ) );
         CHECK( app.m_productionReadyLeadUs == 50 );
         CHECK( app.m_productionStep0LeadUs == 20 );
-        CHECK( app.m_requested == ( fault == 9 ? 1 : 4 ) );
+        CHECK( app.m_requested == steps );
         CHECK( app.m_maxCadence == 8000 );
         CHECK( app.m_bounds.copy == 30000 );
         CHECK( app.m_bounds.snapshot == 10000 );
@@ -887,6 +899,525 @@ TEST_CASE( "production common scheduler continuously publishes tagged contributi
     MagAOX::app::dmSyncopation::shmimMonitorTiming;
     MagAOX::app::dmSyncopation::processImage;
     MagAOX::app::synco::MainTiming::capture;
+#endif
+    // clang-format on
+}
+
+/// Production selects the fastest rated integer cadence and delivers every advertised slot.
+TEST_CASE( "production chooses the fastest rated cadence", "[dmSyncopation][production][integration]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    const auto [period, steps] = GENERATE(
+        table<int64_t, int>( { { 2000000, 16 }, { 1000000, 8 }, { 500000, 4 }, { 400000, 3 }, { 277778, 2 } } ) );
+    CAPTURE( period, steps );
+
+    ZeroClock::connect( app, streams, 4 );
+    app.m_productionEnabled     = true;
+    app.m_zeroTestEnabled       = false;
+    app.m_productionReadyLeadUs = 70;
+    app.m_zeroLateUs            = 6;
+    app.m_zeroWakeAheadUs       = 10;
+    app.m_bounds.copy           = 30000;
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+#if !DMSYNCOPATION_DIAGNOSTIC_INDI
+    REQUIRE( app.setupZeroTestINDI() == 0 );
+#endif
+    auto settings            = app.m_indiP_settings;
+    settings["steps"]        = 0.0;
+    settings["maxCadenceHz"] = 8000.0;
+    REQUIRE( app.newCallBack_m_indiP_settings( settings ) == 0 );
+
+    ProductionCycleClock::app         = &app;
+    ProductionCycleClock::pending     = {};
+    ProductionCycleClock::lastTarget  = 0;
+    ProductionCycleClock::sequence    = 0;
+    ProductionCycleClock::copyDelayNs = 0;
+    app.m_now                         = ProductionCycleClock::now;
+    app.m_wait                        = ProductionCycleClock::wait;
+    app.m_enabled                     = true;
+    int64_t observed                  = 1000000000;
+
+    for( ; observed < 12000000000LL; observed += period )
+    {
+        ZeroClock::primary( observed );
+
+        if( app.m_zeroStats.active )
+        {
+            break;
+        }
+    }
+
+    REQUIRE( app.m_zeroStats.active );
+    CHECK( app.m_record[synco::steps] == steps );
+    CHECK( app.liveSteps() == steps );
+    CHECK( app.m_record[synco::period] == period );
+    CHECK( app.m_zeroStats.auxiliaryOpportunities == uint64_t( steps - 1 ) );
+    CHECK( app.m_zeroStats.acknowledged == uint64_t( steps - 1 ) );
+    CHECK( app.m_mappings.front().m_accepted == uint64_t( steps ) );
+    CHECK( app.m_passiveCopied == 1 );
+    CHECK( app.m_zeroPhase.summary().interval[steps - 1].count == 1 );
+    CHECK( app.m_zeroPublicationTiming.summary().publicationError[steps - 1].count == 1 );
+
+    app.updateZeroTest( false );
+    CHECK( app.m_indiP_zeroPhase["interval" + std::to_string( steps - 1 ) + "Count"].get<double>() == 1 );
+    CHECK( app.m_indiP_zeroPublication["publicationError" + std::to_string( steps - 1 ) + "Count"].get<double>() == 1 );
+
+    REQUIRE( ZeroClock::posts.size() == size_t( steps - 1 ) );
+
+    for( int step = 1; step < steps; ++step )
+    {
+        const auto target = observed + step * period / steps;
+        CHECK( ZeroClock::posts[step - 1] >= target );
+        CHECK( ZeroClock::posts[step - 1] <= target + 6000 );
+    }
+
+    ProductionCycleClock::app = nullptr;
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::scheduleSteps;
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_settings;
+    MagAOX::app::dmSyncopation::publishProductionSchedule;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
+/** \brief Run genuine mains while waiting for a current, applied offload acknowledgement.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "production waits for applied woofer averaging before posting", "[dmSyncopation][production][integration]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_productionEnabled     = true;
+    app.m_zeroTestEnabled       = false;
+    app.m_productionReadyLeadUs = 70;
+    app.m_zeroLateUs            = 6;
+    app.m_zeroWakeAheadUs       = 10;
+    app.m_bounds.copy           = 30000;
+    app.m_maxCadence            = 8000;
+    app.m_requested             = 0;
+    app.m_offloadDevice         = "test-woofer-offload";
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+    REQUIRE( app.configureZeroTest() );
+
+    auto enable = app.m_indiP_enable;
+    enable["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+
+    constexpr int64_t period = 1000000;
+    int64_t           main   = 1000000000;
+
+    for( ; main < 12000000000LL && !app.m_offloadPrepareSequence; main += period )
+    {
+        ZeroClock::primary( main );
+    }
+
+    REQUIRE( app.m_offloadPrepareHz == 8000 );
+    REQUIRE( app.m_offloadPrepareSequence > 0 );
+    CHECK( app.m_reason == std::string( "waiting for woofer averaging" ) );
+    CHECK( app.liveSteps() == 0 );
+    CHECK( ZeroClock::posts.empty() );
+    CHECK( streams.images[1].md->cnt0 == streams.images[0].md->cnt0 );
+
+    pcf::IndiProperty ready( pcf::IndiProperty::Number, app.m_offloadDevice, "offloadReady" );
+    const auto        sequence = app.m_offloadPrepareSequence;
+    ready.add( pcf::IndiElement( "epoch", app.offloadEpoch() ) );
+    ready.add( pcf::IndiElement( "sequence", sequence - 1 ) );
+    ready.add( pcf::IndiElement( "frames", 32 ) );
+    REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+    ZeroClock::primary( main );
+    CHECK( ZeroClock::posts.empty() );
+
+    ready["sequence"] = sequence;
+    ready["epoch"]    = app.offloadEpoch() + 1;
+    REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+    main += period;
+    ZeroClock::primary( main );
+    CHECK( ZeroClock::posts.empty() );
+
+    ready["epoch"]  = app.offloadEpoch();
+    ready["frames"] = 0;
+    REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+    main += period;
+    ZeroClock::primary( main );
+    CHECK( ZeroClock::posts.empty() );
+
+    ready["frames"] = 32;
+    REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+    main += period;
+    ZeroClock::primary( main );
+    CHECK( app.liveSteps() == 8 );
+    REQUIRE( ZeroClock::posts.size() == 7 );
+
+    ready["frames"] = 0;
+    REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+    ZeroClock::posts.clear();
+    ZeroClock::primary( main + period );
+    CHECK( app.liveSteps() == 0 );
+    CHECK( ZeroClock::posts.empty() );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::prepareOffload;
+    MagAOX::app::dmSyncopation::setCallBack_m_indiP_offloadReady;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
+/** \brief Run production startup against a genuine-main fixture and keep every auxiliary write private.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "production dry run measures startup without touching live command streams",
+           "[dmSyncopation][production][integration]" )
+{
+    Streams           streams;
+    ProductionHarness app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_productionEnabled     = true;
+    app.m_productionDryRun      = true;
+    app.m_offloadDevice         = "test-woofer-offload";
+    app.m_zeroTestEnabled       = false;
+    app.m_productionReadyLeadUs = 70;
+    app.m_zeroLateUs            = 6;
+    app.m_zeroWakeAheadUs       = 10;
+    app.m_bounds.copy           = 30000;
+    app.m_maxCadence            = 8000;
+    app.m_requested             = 0;
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+    REQUIRE( app.configureZeroTest() );
+    REQUIRE( app.m_indiP_zero.getElements().empty() );
+
+    const int64_t period = GENERATE( 1000000, 500000 );
+    const int64_t steps  = period / 125000;
+    int64_t       main   = 1000000000;
+
+    for( ; main < 3000000000; main += period )
+    {
+        ZeroClock::primary( main );
+    }
+
+    REQUIRE( app.m_zeroAttached );
+    REQUIRE( app.m_dryCapture.beforeSize == app.m_dryCapture.before.size() );
+    REQUIRE( app.m_mappings.size() == 2 );
+
+    auto &trigger  = streams.images[2];
+    auto &other    = streams.images[3];
+    auto &combined = streams.images[1];
+    std::fill_n( trigger.array.F, 9, 2.0F );
+    const auto firstBefore     = trigger.md->cnt0;
+    const auto otherBefore     = other.md->cnt0;
+    const auto combinedBefore  = combined.md->cnt0;
+    const auto firstStamp      = trigger.md->writetime;
+    const auto otherStamp      = other.md->writetime;
+    const auto mainBefore      = streams.images[0].md->cnt0;
+    const auto firstEnableMain = main;
+
+    for( auto &mapping : app.m_mappings )
+    {
+        REQUIRE( mapping.m_dryDestination.size() == 9 );
+        std::fill( mapping.m_dryDestination.begin(), mapping.m_dryDestination.end(), 42.0F );
+    }
+
+    auto enable = app.m_indiP_enable;
+    enable["toggle"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_enable( enable ) == 0 );
+    REQUIRE( app.newCallBack_m_indiP_zero( app.m_indiP_zero ) < 0 );
+    const bool realRelease = GENERATE( true, false );
+    ZeroClock::release     = realRelease;
+
+    for( ; main < 12000000000LL && app.m_dryCapture.afterSize < app.m_dryCapture.after.size(); main += period )
+    {
+        ZeroClock::primary( main );
+    }
+
+    REQUIRE( app.m_dryCapture.afterSize == app.m_dryCapture.after.size() );
+    CHECK( app.m_dryCapture.firstEnabledNs >= firstEnableMain );
+    CHECK( app.m_dryCapture.firstEnabledNs < firstEnableMain + period );
+    CHECK( app.m_dryCapture.after.front().primary > mainBefore );
+    CHECK( app.m_record[synco::steps] == steps );
+    CHECK( app.liveSteps() == 0 );
+    CHECK( app.m_delivered == 0 );
+    CHECK( app.m_timing.md == nullptr );
+    CHECK( app.inode( app.m_timingName ) == 0 );
+    CHECK( app.inode( "dm97disp07_aux" ) == 0 );
+    CHECK( app.inode( "dm97disp07_aux_ready" ) == 0 );
+    CHECK( app.inode( "dm97disp07_aux_ack" ) == 0 );
+    CHECK( trigger.md->cnt0 == firstBefore );
+    CHECK( other.md->cnt0 == otherBefore );
+    CHECK( trigger.md->writetime.tv_sec == firstStamp.tv_sec );
+    CHECK( trigger.md->writetime.tv_nsec == firstStamp.tv_nsec );
+    CHECK( other.md->writetime.tv_sec == otherStamp.tv_sec );
+    CHECK( other.md->writetime.tv_nsec == otherStamp.tv_nsec );
+    CHECK( trigger.array.F[0] == 2.0F );
+    CHECK( other.array.F[0] == 3.0F );
+    CHECK( combined.md->cnt0 - combinedBefore == streams.images[0].md->cnt0 - mainBefore );
+    CHECK( ZeroClock::posts.empty() );
+
+    const auto &firstCycle = app.m_dryCapture.after.front();
+    const auto  slots      = uint64_t( steps - 1 );
+    CHECK( firstCycle.posted == ( realRelease ? slots : 0 ) );
+    CHECK( firstCycle.skipped == ( realRelease ? 0 : slots ) );
+    CHECK( firstCycle.unacknowledged == 0 );
+    CHECK( ( firstCycle.firstCopyNs > 0 ) == realRelease );
+    CHECK( app.m_zeroStats.acknowledged == ( realRelease ? 32 * slots : 0 ) );
+
+    for( const auto &mapping : app.m_mappings )
+    {
+        for( const auto pixel : mapping.m_dryDestination )
+        {
+            CHECK( pixel == ( realRelease ? 0.0F : 42.0F ) );
+        }
+    }
+
+    app.logDryRunCapture();
+    CHECK( app.m_dryCapture.enableNs == 0 );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::openDryRunDestinations;
+    MagAOX::app::dmSyncopation::postDryRunTrigger;
+    MagAOX::app::dmSyncopation::captureDryRunCycle;
+    MagAOX::app::dmSyncopation::logDryRunCapture;
+#endif
+    // clang-format on
+}
+
+/** \brief Clear a running 1 kHz loop's auxiliary inputs while preserving all eight scheduled DM writes.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "production clears channels at the running cadence", "[dmSyncopation][production][integration]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    const bool         waitForOffload = GENERATE( false, true );
+    ZeroClock::connect( app, streams, 4 );
+    app.m_productionEnabled     = true;
+    app.m_zeroTestEnabled       = false;
+    app.m_productionReadyLeadUs = 70;
+    app.m_zeroLateUs            = 6;
+    app.m_zeroWakeAheadUs       = 10;
+    app.m_bounds.copy           = 30000;
+    app.m_maxCadence            = 8000;
+    app.m_requested             = 0;
+
+    if( waitForOffload )
+    {
+        app.m_offloadDevice = "test-woofer-offload";
+    }
+
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+    REQUIRE( app.configureZeroTest() );
+    app.m_enabled = true;
+
+    auto &trigger  = streams.images[2];
+    auto &other    = streams.images[3];
+    auto &combined = streams.images[1];
+    std::fill_n( trigger.array.F, 9, 2.0F );
+
+    constexpr int64_t period = 1000000;
+    int64_t           main   = 1000000000;
+
+    for( ; main < 12000000000LL && !app.m_zeroStats.active && !app.m_offloadPrepareSequence; main += period )
+    {
+        ZeroClock::primary( main );
+    }
+
+    const auto offloadSequence = app.m_offloadPrepareSequence;
+
+    if( waitForOffload )
+    {
+        REQUIRE( offloadSequence > 0 );
+        REQUIRE_FALSE( app.m_zeroStats.active );
+        pcf::IndiProperty ready( pcf::IndiProperty::Number, app.m_offloadDevice, "offloadReady" );
+        ready.add( pcf::IndiElement( "epoch", app.offloadEpoch() ) );
+        ready.add( pcf::IndiElement( "sequence", offloadSequence ) );
+        ready.add( pcf::IndiElement( "frames", 32 ) );
+        REQUIRE( app.setCallBack_m_indiP_offloadReady( ready ) == 0 );
+        ZeroClock::primary( main );
+        main += period;
+    }
+
+    REQUIRE( app.m_zeroStats.active );
+    REQUIRE( app.m_record[synco::steps] == 8 );
+    REQUIRE( app.m_zeroStats.acknowledged == 7 );
+    REQUIRE( trigger.array.F[0] == 2.0F );
+    REQUIRE( other.array.F[0] == 3.0F );
+
+    const auto generation  = app.m_generation;
+    const auto trial       = app.m_zeroTrial;
+    const auto oldCommand  = productionCommand( app, 0, synco::request( app.m_record, 0 ), 12.0F );
+    const auto firstBefore = trigger.md->cnt0;
+    const auto otherBefore = other.md->cnt0;
+    auto       request     = app.m_indiP_zero;
+    request["request"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_zero( request ) == 0 );
+    app.serviceChannelZero();
+    REQUIRE( app.m_indiP_zero.getState() == INDI_BUSY );
+    CHECK( app.m_record[synco::state] == synco::armed );
+    CHECK( app.m_generation == generation );
+
+    const bool mainContinues = GENERATE( true, false );
+
+    if( mainContinues )
+    {
+        const auto combinedBefore = combined.md->cnt0;
+        ZeroClock::posts.clear();
+        ZeroClock::primary( main );
+        app.serviceChannelZero();
+        REQUIRE( ZeroClock::posts.size() == 7 );
+        CHECK( combined.md->cnt0 == combinedBefore + 8 );
+        CHECK( trigger.md->cnt0 == firstBefore + 7 );
+        CHECK( app.m_zeroStats.acknowledged == 14 );
+        CHECK( app.m_mappings.front().m_accepted == 0 );
+        CHECK( app.m_zeroStats.active );
+        CHECK( app.m_zeroIdle );
+        CHECK( app.m_zeroTrial == trial );
+        CHECK( app.m_scheduleState == synco::armed );
+        CHECK( app.m_generation == generation + 1 );
+
+        for( int step = 1; step < 8; ++step )
+        {
+            const auto target = main + step * period / 8;
+            CHECK( ZeroClock::posts[step - 1] >= target );
+            CHECK( ZeroClock::posts[step - 1] <= target + 6000 );
+        }
+
+        ZeroClock::primary( main + period );
+        CHECK( app.m_record[synco::generation] == generation + 1 );
+        CHECK( app.m_zeroStats.acknowledged == 21 );
+        CHECK( app.m_offloadPrepareSequence == offloadSequence );
+        const auto ack = productionAck( app, 0 );
+        CHECK( synco::acknowledges( ack, oldCommand ) );
+        CHECK( ack[synco::ackStatus] == synco::discarded );
+    }
+    else
+    {
+        ZeroClock::time += 5 * period;
+        app.serviceChannelZero();
+        CHECK( trigger.md->cnt0 == firstBefore + 1 );
+        CHECK_FALSE( app.m_zeroStats.active );
+    }
+
+    CHECK( app.m_indiP_zero.getState() == INDI_OK );
+    CHECK( app.m_indiP_zero["request"].getSwitchState() == pcf::IndiElement::Off );
+    CHECK( app.m_enabled );
+    CHECK( other.md->cnt0 == otherBefore );
+
+    for( size_t pixel = 0; pixel < 9; ++pixel )
+    {
+        CHECK( trigger.array.F[pixel] == 0 );
+        CHECK( other.array.F[pixel] == 0 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_zero;
+    MagAOX::app::dmSyncopation::serviceChannelZero;
+    MagAOX::app::dmSyncopation::productionSnapshot;
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+#endif
+    // clang-format on
+}
+
+/// Fixed and automatic scheduling qualify a clean 1 kHz grid and recover from an active 2 kHz grid.
+TEST_CASE( "production qualifies a 1 kHz primary grid", "[dmSyncopation][production][integration]" )
+{
+    Streams            streams;
+    ProductionSidecars sidecars;
+    ProductionHarness  app;
+    ZeroClock::connect( app, streams, 4 );
+    app.m_productionEnabled     = true;
+    app.m_zeroTestEnabled       = false;
+    app.m_productionReadyLeadUs = 70;
+    app.m_zeroLateUs            = 6;
+    app.m_zeroWakeAheadUs       = 10;
+    app.m_maxCadence            = 8000;
+    app.m_bounds.copy           = 30000;
+    app.m_requested             = GENERATE( 0, 4 );
+    REQUIRE( app.configureZeroTest() );
+
+    constexpr int64_t period           = 1000000;
+    int64_t           acquisitionStart = 1000000000;
+    const bool        rateChange       = GENERATE( false, true );
+    const int         steps            = app.m_requested == 0 ? 8 : 4;
+    CAPTURE( rateChange, steps );
+
+    if( rateChange )
+    {
+        const auto next = ZeroClock::warm();
+        app.m_enabled   = true;
+        ZeroClock::primary( next );
+        REQUIRE( app.m_zeroStats.acknowledged == 3 );
+        const auto generation = app.m_generation;
+
+        for( int cycle = 1; cycle <= 20; ++cycle )
+        {
+            acquisitionStart = next + cycle * period;
+            ZeroClock::primary( acquisitionStart );
+
+            if( app.m_generation != generation )
+            {
+                break;
+            }
+        }
+
+        REQUIRE( app.m_generation == generation + 1 );
+        CHECK( app.m_record[synco::state] == synco::invalid );
+    }
+    else
+    {
+        app.m_enabled = true;
+        ZeroClock::primary( acquisitionStart );
+    }
+
+    CHECK( app.m_zeroStats.warming );
+    CHECK_FALSE( app.m_zeroStats.active );
+    const auto posted  = app.m_zeroStats.posted;
+    const auto acked   = app.m_zeroStats.acknowledged;
+    const auto readyAt = acquisitionStart + 10000000000LL;
+
+    for( auto observed = acquisitionStart + period; observed < readyAt; observed += period )
+    {
+        ZeroClock::primary( observed );
+    }
+
+    REQUIRE( app.m_zeroStats.posted == posted );
+    REQUIRE( app.m_enabled );
+    ZeroClock::primary( readyAt );
+    REQUIRE( app.m_zeroStats.active );
+    CHECK_FALSE( app.m_zeroStats.warming );
+    REQUIRE( app.m_zeroStats.posted == posted + steps - 1 );
+    CHECK( app.m_zeroStats.acknowledged == acked + steps - 1 );
+    CHECK( app.m_record[synco::steps] == steps );
+    CHECK( app.m_record[synco::period] == period );
+    REQUIRE( ZeroClock::posts.size() == posted + steps - 1 );
+
+    for( int step = 1; step < steps; ++step )
+    {
+        const auto target = readyAt + step * period / steps;
+        CHECK( ZeroClock::posts[posted + step - 1] >= target );
+        CHECK( ZeroClock::posts[posted + step - 1] <= target + 6000 );
+    }
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::processZeroTestPrimary;
+    MagAOX::app::dmSyncopation::zeroTestGrid;
+    MagAOX::app::synco::Simulation::primary;
+    MagAOX::app::synco::Simulation::frozenGrid;
 #endif
     // clang-format on
 }

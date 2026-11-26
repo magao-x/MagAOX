@@ -189,8 +189,9 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Persistent stream handles and one-pass source staging, owned by the scheduler.
     struct Mapping
     {
-        std::unique_ptr<syncoImage> m_destination; ///< Existing numbered main channel.
-        std::unique_ptr<syncoImage> m_source;      ///< Persistent matching _aux image.
+        std::unique_ptr<syncoImage> m_destination;    ///< Existing numbered main channel.
+        std::unique_ptr<syncoImage> m_source;         ///< Persistent matching _aux image.
+        std::vector<float>          m_dryDestination; ///< Process-local copy destination used by the dry run.
         std::vector<float> m_cache; ///< Legacy source snapshot or production contribution committed to the destination.
         std::vector<float> m_stage; ///< Frozen snapshot for one copy.
         uint64_t           m_counter{ 0 };          ///< Last destination counter owned/accepted by this app.
@@ -239,11 +240,10 @@ class dmSyncopation : public MagAOXApp<true>,
     std::string              m_cameraDevice{ "camwfs" };      ///< Device publishing measured acquisition timing.
     std::string              m_cameraProperty{ "fg_timing" }; ///< Measured camera timing property.
     std::string              m_cameraElement{ "acq_fps" };    ///< Measured acquisition-rate element.
-    std::string              m_loopDevice{ "holoop" };        ///< AO loop readback for the open-loop zero request.
-    int                      m_requested{ 3 };                ///< Fixed requested count, including passive step 0.
-    int                      m_primarySemaphore{ 5 }; ///< Required reader semaphore; reject allocation fallback.
-    unsigned                 m_lockFrames{ 32 };  ///< Clean main observations before preparing the first active cycle.
-    unsigned                 m_failureLimit{ 3 }; ///< Consecutive original event failures before reacquisition.
+    int         m_requested{ 3 }; ///< Requested count including step zero, or zero for automatic production selection.
+    int         m_primarySemaphore{ 5 }; ///< Required reader semaphore; reject allocation fallback.
+    unsigned    m_lockFrames{ 32 };      ///< Clean main observations before preparing the first active cycle.
+    unsigned    m_failureLimit{ 3 };     ///< Consecutive original event failures before reacquisition.
     unsigned    m_rateFrames{ 32 };    ///< Cadence violation persistence and primary-rate qualification interval count.
     double      m_nominalRate{ 2000 }; ///< Acquisition fallback, Hz.
     double      m_maxCadence{ 6000 };  ///< Nominal sanity rating, Hz, including step 0.
@@ -264,10 +264,15 @@ class dmSyncopation : public MagAOXApp<true>,
     bool        m_diagnosticsOnly{ false };    ///< Observe arbitrary primary metadata without attaching DM resources.
     bool        m_simulationEnabled{ false };  ///< Startup-only shadow policy; live scheduling is prohibited.
     bool        m_productionEnabled{ false };  ///< Continuous tagged-provider operation on the qualified counter grid.
-    double      m_productionReadyLeadUs{ 50 }; ///< Source completion cutoff ahead of each slot.
-    double      m_productionStep0LeadUs{ 20 }; ///< Passive-copy completion lead before the next predicted main.
-    uint64_t    m_passiveCopied{ 0 }, m_passiveSkipped{ 0 }; ///< Completed and suppressed passive batches.
-    pcf::IndiProperty m_indiP_production;                    ///< Continuous-mode per-provider admission diagnostics.
+    bool m_productionDryRun{ false };      ///< Run production timing with process-local writes and virtual auxiliaries.
+    std::string       m_offloadDevice;     ///< Optional offloader which must confirm the next hardware cadence.
+    double            m_dryCombineUs{ 5 }; ///< Modeled trigger-to-combined-publication delay, us.
+    double            m_dryReleaseUs{ 30 };          ///< Modeled trigger-to-last-auxiliary-reader delay, us.
+    int               m_productionSteps{ 0 };        ///< Selected automatic count, zero until qualified.
+    double            m_productionReadyLeadUs{ 50 }; ///< Source completion cutoff ahead of each slot.
+    double            m_productionStep0LeadUs{ 20 }; ///< Passive-copy completion lead before the next predicted main.
+    uint64_t          m_passiveCopied{ 0 }, m_passiveSkipped{ 0 }; ///< Completed and suppressed passive batches.
+    pcf::IndiProperty m_indiP_production;          ///< Continuous-mode per-provider admission diagnostics.
     bool              m_zeroTestEnabled{ false };  ///< Startup-only finite empirical coordinated zero-write trial.
     std::string m_zeroTestChannel{ "dm01disp07" }; ///< Existing exclusive zero auxiliary; never created or cleared.
     std::string m_zeroSdkStream{ "dmtweeter_sdk_done" }; ///< Optional exact native-entry/result observer.
@@ -296,6 +301,44 @@ class dmSyncopation : public MagAOXApp<true>,
     std::mutex        m_cycleMutex; ///< Serializes lifecycle/configuration with a complete callback.
     synco::Simulation m_simulation; ///< Fixed-storage shadow engine, serialized by the cycle mutex.
     synco::Simulation m_zeroClock;  ///< Raw producer-clock cadence/phase estimator; never evaluates modeled admission.
+
+    /// Main callback timing and the measured local copy work for one dry-run cycle.
+    struct DryRunCycle
+    {
+        uint64_t primary{ 0 };        ///< Genuine primary counter.
+        int64_t  publicationNs{ 0 };  ///< Genuine primary publication in the producer clock.
+        int64_t  receiptNs{ 0 };      ///< Primary semaphore receipt in the scheduling clock.
+        int64_t  startNs{ 0 };        ///< Primary callback entry in the scheduling clock.
+        int64_t  endNs{ 0 };          ///< Primary callback body completion in the scheduling clock.
+        int64_t  firstCopyNs{ 0 };    ///< Start time of the first private copy, or zero.
+        int64_t  maxCopyNs{ 0 };      ///< Longest completed private copy batch in this callback.
+        uint64_t posted{ 0 };         ///< Virtual triggers posted during the callback.
+        uint64_t skipped{ 0 };        ///< Auxiliary slots skipped during the callback.
+        uint64_t unacknowledged{ 0 }; ///< Posted slots that failed to match the modeled output.
+    };
+
+    /// Retain a bounded trace on either side of one dry-run enable transition.
+    struct DryRunCapture
+    {
+        std::array<DryRunCycle, 32> before{};        ///< Latest distinct primary callbacks with enable Off.
+        std::array<DryRunCycle, 32> after{};         ///< First distinct callbacks starting at activation.
+        size_t                      beforeNext{ 0 }; ///< Next position in the rolling pre-enable trace.
+        size_t                      beforeSize{ 0 }; ///< Number of retained pre-enable callbacks.
+        size_t                      afterSize{ 0 };  ///< Number of retained active callbacks.
+        int64_t                     enableNs{ 0 };   ///< Monotonic enable time, zero while collecting baseline.
+        int64_t  firstEnabledNs{ 0 };                ///< First genuine callback entry after enable, including warmup.
+        uint64_t trial{ 0 };                         ///< Trial identifier assigned by the normal enable callback.
+    };
+
+    IMAGE_METADATA         m_dryChannel{}; ///< Process-local metadata aliased by the dummy trigger handle.
+    synco::ZeroTiming::Key m_dryMain;      ///< Genuine combined publication anchoring the virtual cycle.
+    synco::ZeroTiming::Key m_dryOutput;    ///< Pending virtual auxiliary combination, never exported as a real main.
+    int64_t                m_dryOutputAt{ 0 };        ///< Earliest monotonic observation of the virtual combination.
+    int64_t                m_dryReleaseAt{ 0 };       ///< Earliest virtual reader-release time.
+    uint64_t               m_dryReleaseEpoch{ 0 };    ///< Reader-observer epoch used by the pending virtual release.
+    DryRunCycle            m_dryCycle;                ///< Copy measurements accumulated in the current callback.
+    DryRunCapture          m_dryCapture;              ///< Cycle-owned startup trace, drained by ordinary app logic.
+    uint64_t               m_dryCapturedPrimary{ 0 }; ///< Last primary counter included in the dry-run trace.
 
     /// Actual event outcomes and diagnostic causes; numeric values before schema 2 were less specific.
     enum class ZeroOutcome : int
@@ -653,15 +696,41 @@ class dmSyncopation : public MagAOXApp<true>,
     int64_t m_step0Wake{ 0 };       ///< Latest passive-copy start lateness relative to the requested wake, ns.
     int64_t m_step0WakeMax{ 0 };    ///< Maximum observed passive-copy wake/check lateness, ns.
 
-    pcf::IndiProperty m_indiP_enable;            ///< Enable request and acknowledged quiescence.
-    pcf::IndiProperty m_indiP_reacquire;         ///< Request fresh synchronization.
-    pcf::IndiProperty m_indiP_zero;              ///< Request one open-loop zero publication.
-    pcf::IndiProperty m_indiP_settings;          ///< Disabled-only essential numeric controls.
-    pcf::IndiProperty m_indiP_status;            ///< Compact rates/counts/outcome summary.
-    pcf::IndiProperty m_indiP_health;            ///< Scheduler phase, last fault and mode.
-    pcf::IndiProperty m_indiP_camera;            ///< External camera FPS subscription.
-    pcf::IndiProperty m_indiP_loop;              ///< External AO loop state subscription.
-    bool              m_loopOpen{ false };       ///< Affirmative Off readback, serialized with the zero request.
+    pcf::IndiProperty m_indiP_enable;                ///< Enable request and acknowledged quiescence.
+    pcf::IndiProperty m_indiP_reacquire;             ///< Request fresh synchronization.
+    pcf::IndiProperty m_indiP_zero;                  ///< Clear the applied contributions in every numbered mapping.
+    pcf::IndiProperty m_indiP_settings;              ///< Disabled-only essential numeric controls.
+    pcf::IndiProperty m_indiP_status;                ///< Compact rates/counts/outcome summary.
+    pcf::IndiProperty m_indiP_health;                ///< Scheduler phase, last fault and mode.
+    pcf::IndiProperty m_indiP_camera;                ///< External camera FPS subscription.
+    pcf::IndiProperty m_indiP_offloadReady;          ///< Offloader's applied averaging acknowledgement.
+    double            m_offloadPrepareHz{ 0 };       ///< Candidate hardware cadence advertised to the offloader.
+    int               m_offloadPrepareSteps{ 0 };    ///< Subdivision count used to select the pending hardware cadence.
+    uint32_t          m_offloadPrepareSequence{ 0 }; ///< Current preparation request within this app instance.
+    double            m_offloadReadySequence{ 0 };   ///< Preparation sequence confirmed for this app instance, or zero.
+
+    /// Publication state of a pending operator clear, serialized with the scheduler cycle.
+    struct ChannelZero
+    {
+        /// Select the writer and track whether it has posted the trigger.
+        enum class State
+        {
+            idle,
+            ordinary,  ///< Suspend scheduler copies while the ordinary thread clears the channels.
+            scheduled, ///< Use a qualified production auxiliary slot to clear the channels.
+            triggered  ///< The production scheduler posted the clear and the ordinary thread owes an INDI reply.
+        };
+
+        State                 state{ State::idle }; ///< Current request state.
+        std::vector<ino_t>    destinations;         ///< Numbered backing files cleared in the current attempt.
+        std::vector<uint64_t> counters;             ///< Numbered publication counters expected until the trigger.
+        uint64_t              primary{ 0 };         ///< Last main counter before a passive clear.
+        int64_t               copiedNs{ 0 };        ///< Producer-clock time after the completed zero batch.
+    };
+
+    ChannelZero m_channelZero;                   ///< Cycle-owned clear request and acknowledgement state.
+    std::mutex  m_channelZeroMutex;              ///< Serializes ordinary clear servicing and INDI acknowledgement.
+    int64_t     m_channelZeroSourceCutoff{ 0 };  ///< Reject legacy source publications preceding the applied clear.
     pcf::IndiProperty m_indiP_simulation;        ///< Conditional grid, phase and collection-quality diagnostics.
     pcf::IndiProperty m_indiP_simulationCadence; ///< Long-baseline cadence state, coverage and independent freshness.
     pcf::IndiProperty
@@ -794,16 +863,21 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Accept measured camera FPS and optional acquisition statistics as one coherent report.
     INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_camera );
 
-    /// Track affirmative Off reports from the configured AO loop interface.
-    INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_loop );
+    /// Accept or withdraw confirmation of the selected offload averaging configuration.
+    INDI_SETCALLBACK_DECL( dmSyncopation, m_indiP_offloadReady );
 
   protected:
     /// Register the operator interface, camera subscription and build-selected diagnostic readbacks.
     int setupINDI();
 
-    /// Clear the numbered destinations, trigger dmcomb once and check the combined output.
-    /** \returns A failure message, or nullptr after dmcomb publishes the updated combination. */
-    const char *zeroDestinations();
+    /// Try the pending clear and return true once a trigger follows the completed batch.
+    bool zeroDestinations();
+
+    /// Retry the clear on the ordinary thread and acknowledge its trigger over INDI.
+    void serviceChannelZero();
+
+    /// Check whether a legacy source can replace the retained contribution after the last clear.
+    bool legacySourceCurrent( const IMAGE_METADATA &metadata /**< [in] Source publication metadata. */ ) const;
 
     /// Configure/reset the shadow engine without opening or modifying any image.
     bool configureSimulation( double seedRate = 0 /**< [in] New acquisition seed, Hz; zero retains the reference. */ );
@@ -976,7 +1050,8 @@ class dmSyncopation : public MagAOXApp<true>,
     bool zeroTestGrid( uint64_t         counter /**< [in] Genuine main cycle label. */,
                        synco::GridTime &grid /**< [out] Frozen local monotonic main grid. */,
                        uint64_t        &periodQ32 /**< [out] Frozen cadence, scaled nanoseconds. */,
-                       synco::GridTime *rawGrid = nullptr /**< [out] Optional frozen producer-clock main grid. */ );
+                       synco::GridTime *rawGrid =
+                           nullptr /**< [out] Optional frozen producer-clock grid, even if local projection fails. */ );
 
     /// Publish source-counter timing and clock-quality populations only from an ordinary-thread snapshot.
     void updateZeroPublication( const ZeroSnapshot &snapshot /**< [in] Coherent cycle-owned state copy. */,
@@ -1046,8 +1121,33 @@ class dmSyncopation : public MagAOXApp<true>,
     /// Select the common qualified counter scheduler for finite or continuous operation.
     bool zeroEngine() const;
 
+    /// Return the selected automatic count or the configured fixed count.
+    int scheduleSteps() const;
+
+    /// Report the active hardware subdivision count for INDI rate consumers.
+    int liveSteps() const;
+
+    /// Return a restart identity that can be represented exactly in an INDI number.
+    double offloadEpoch() const;
+
+    /// Offer the next hardware cadence and decide whether its averaging has been confirmed.
+    bool prepareOffload( int    steps /**< [in] Selected main plus auxiliary subdivision count. */,
+                         double rateHz /**< [in] Candidate hardware cadence from the qualified grid. */ );
+
     /// Attach production mappings and tagged command sidecars before arming.
     bool openProduction();
+
+    /// Allocate the zero-filled production copy buffers without opening any provider or destination stream.
+    bool openDryRunDestinations();
+
+    /// Post one simulated auxiliary trigger and begin its modeled combination and release timers.
+    int postDryRunTrigger();
+
+    /// Add the current genuine primary callback to the bounded startup timing trace.
+    void captureDryRunCycle( int64_t completed /**< [in] Monotonic callback body completion. */ );
+
+    /// Drain a finished startup trace and log it from ordinary app logic.
+    void logDryRunCapture();
 
     /// Close scheduler-owned sidecars without destroying persistent source pixels.
     void closeProduction();
@@ -1204,11 +1304,11 @@ inline void dmSyncopation::setupConfig()
         { "streams.destinations", "Ordered numbered DM destinations; sources append _aux; first triggers." },
         { "streams.combined", "Combined output to observe." },
         { "streams.timing", "Same-host signed-int64 schedule stream." },
-        { "zero.loopDevice", "Device publishing loop_state.toggle for open-loop zero requests." },
         { "tracking.cameraDevice", "Camera device publishing measured acquisition timing." },
         { "tracking.cameraProperty", "Measured camera timing property." },
         { "tracking.cameraElement", "Measured camera FPS element." },
-        { "scheduler.maxSubframes", "Fixed requested steps, including passive step zero (1-16)." },
+        { "scheduler.maxSubframes",
+          "Steps including passive step zero (1-16), or 0 for automatic production cadence." },
         { "scheduler.maxCadenceHz", "Nominal total cadence sanity rating, Hz." },
         { "scheduler.keepoutUs", "Controller processing/last-reader bound, us." },
         { "scheduler.guardUs", "Extra reserve beyond explicit delivery/reader bounds, us." },
@@ -1240,6 +1340,10 @@ inline void dmSyncopation::setupConfig()
         { "diagnostics.camera", "Observe camera acquisition/publication intervals independently of camera INDI FPS." },
         { "diagnostics.pipeline", "Observe the primary producer's bounded upstream processing trace." },
         { "production.enabled", "Continuous tagged same-host producers on the qualified counter-publication grid." },
+        { "production.dryRun", "Run production timing and copies without publishing live auxiliary commands." },
+        { "production.offloadDevice", "Wait for this offloader to confirm averaging before auxiliary writes." },
+        { "production.dryRunCombineUs", "Dry-run trigger-to-combined delay, us." },
+        { "production.dryRunReleaseUs", "Dry-run trigger-to-reader-release delay, us." },
         { "production.readyLeadUs", "Input-ready deadline lead before the counter target, us." },
         { "production.step0LeadUs", "Passive step-zero copy completion lead before the main grid, us." },
         { "production.lateUs", "Final counter-publication admission allowance, us; default6." },
@@ -1299,7 +1403,6 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_destinations, "streams.destinations" );
     config( m_combinedName, "streams.combined" );
     config( m_timingName, "streams.timing" );
-    config( m_loopDevice, "zero.loopDevice" );
     config( m_cameraDevice, "tracking.cameraDevice" );
     config( m_cameraProperty, "tracking.cameraProperty" );
     config( m_cameraElement, "tracking.cameraElement" );
@@ -1317,6 +1420,10 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     config( m_maxAdvanceUs, "feedback.maxAdvanceUs" );
     config( m_outputTimeoutUs, "scheduler.outputTimeoutUs" );
     config( m_productionEnabled, "production.enabled" );
+    config( m_productionDryRun, "production.dryRun" );
+    config( m_offloadDevice, "production.offloadDevice" );
+    config( m_dryCombineUs, "production.dryRunCombineUs" );
+    config( m_dryReleaseUs, "production.dryRunReleaseUs" );
 
     if( m_productionEnabled )
     {
@@ -1411,6 +1518,12 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         return -1;
     }
 
+    if( m_productionDryRun && ( !m_productionEnabled || !finite( m_dryCombineUs ) || !finite( m_dryReleaseUs ) ||
+                                m_dryCombineUs < 0 || m_dryReleaseUs < m_dryCombineUs || m_dryReleaseUs > 1000000 ) )
+    {
+        return -1;
+    }
+
     if( m_productionEnabled )
     {
         m_zeroLateUs       = 6;
@@ -1419,7 +1532,7 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
         config( m_zeroLateUs, "production.lateUs" );
         config( m_zeroWakeAheadUs, "production.wakeAheadUs" );
         m_zeroTestChannel = m_destinations.empty() ? std::string{} : m_destinations.front();
-        if( m_zeroTestEnabled || m_simulationEnabled || m_diagnosticsOnly || m_requested < 1 || m_requested > 4 ||
+        if( m_zeroTestEnabled || m_simulationEnabled || m_diagnosticsOnly ||
             readerReleaseMonitorT::m_shmimName.empty() || !finite( m_productionReadyLeadUs ) ||
             !finite( m_productionStep0LeadUs ) || m_productionStep0LeadUs <= 0 ||
             m_productionStep0LeadUs >= m_productionReadyLeadUs || m_productionReadyLeadUs >= 100 ||
@@ -1503,12 +1616,12 @@ inline int dmSyncopation::loadConfigImpl( mx::app::appConfigurator &config )
     {
         return -1;
     }
-    if( m_requested < 1 || m_requested > synco::maxSteps || m_destinations.empty() || m_destinations.size() > 32 ||
-        !finite( m_maxCadence ) || m_maxCadence <= 0 || !finite( m_nominalRate ) || !finite( m_minRate ) ||
-        !finite( m_maxRate ) || m_minRate < 1 || m_maxRate > 100000 || m_minRate > m_nominalRate ||
-        m_nominalRate > m_maxRate || !finite( m_rateTolerance ) || m_rateTolerance < 0 || m_rateTolerance > 1 ||
-        !finite( m_gain ) || m_gain < 0 || m_gain > 1 || !finite( m_maxAdvanceUs ) || m_maxAdvanceUs < 0 ||
-        m_maxAdvanceUs > 1000 || !finite( m_outputTimeoutUs ) || m_outputTimeoutUs <= 0 ||
+    if( m_requested < ( m_productionEnabled ? 0 : 1 ) || m_requested > synco::maxSteps || m_destinations.empty() ||
+        m_destinations.size() > 32 || !finite( m_maxCadence ) || m_maxCadence <= 0 || !finite( m_nominalRate ) ||
+        !finite( m_minRate ) || !finite( m_maxRate ) || m_minRate < 1 || m_maxRate > 100000 ||
+        m_minRate > m_nominalRate || m_nominalRate > m_maxRate || !finite( m_rateTolerance ) || m_rateTolerance < 0 ||
+        m_rateTolerance > 1 || !finite( m_gain ) || m_gain < 0 || m_gain > 1 || !finite( m_maxAdvanceUs ) ||
+        m_maxAdvanceUs < 0 || m_maxAdvanceUs > 1000 || !finite( m_outputTimeoutUs ) || m_outputTimeoutUs <= 0 ||
         m_outputTimeoutUs > 1000000 || !m_lockFrames || !m_failureLimit || !m_rateFrames || m_primarySemaphore < 0 ||
         m_primarySemaphore == 9 || m_primarySemaphore >= SEMAPHORE_MAXVAL || m_bounds.copy == 0 ||
         m_bounds.snapshot == 0 || m_bounds.visibility == 0 || m_bounds.reserve == 0 ||
@@ -1586,8 +1699,9 @@ inline void dmSyncopation::synchronizeMainTiming()
         return;
     }
 
-    m_mainTiming.synchronize(
-        m_enabled.load( std::memory_order_acquire ), uint64_t( m_requested ), uint64_t( m_generation ) );
+    m_mainTiming.synchronize( m_enabled.load( std::memory_order_acquire ),
+                              uint64_t( std::max( 1, scheduleSteps() ) ),
+                              uint64_t( m_generation ) );
 }
 
 inline void dmSyncopation::capturePassiveMainTiming()
@@ -1748,160 +1862,6 @@ inline ino_t dmSyncopation::inode( const std::string &name )
     ImageStreamIO_filename( filename, sizeof( filename ), name.c_str() );
     struct stat info{};
     return stat( filename, &info ) == 0 ? info.st_ino : 0;
-}
-
-inline const char *dmSyncopation::zeroDestinations()
-{
-    auto closeImage = []( IMAGE *image )
-    {
-        ImageStreamIO_closeIm( image );
-        delete image;
-    };
-    using ImageHandle    = std::unique_ptr<IMAGE, decltype( closeImage )>;
-    const auto openImage = [&closeImage]( const std::string &name ) -> ImageHandle
-    {
-        auto image = std::make_unique<IMAGE>();
-
-        if( ImageStreamIO_openIm( image.get(), name.c_str() ) != IMAGESTREAMIO_SUCCESS )
-        {
-            return { nullptr, closeImage };
-        }
-
-        return { image.release(), closeImage };
-    };
-    const auto backingInode = []( const IMAGE &image ) -> ino_t
-    {
-        struct stat status{};
-        return fstat( image.shmfd, &status ) == 0 ? status.st_ino : 0;
-    };
-
-    ImageHandle combined( nullptr, closeImage );
-    ino_t       combinedFile{ 0 };
-    uint64_t    combinedCounter{ 0 };
-
-    { //mutex scope
-        std::lock_guard<std::mutex> lock( m_cycleMutex );
-
-        if( !m_loopOpen || m_enabled || shutdown() )
-        {
-            return "zero requires an open AO loop and disabled synco";
-        }
-
-        combined = openImage( m_combinedName );
-
-        if( !combined || !combined->md )
-        {
-            return "combined DM stream unavailable";
-        }
-
-        const auto width       = combined->md->size[0];
-        const auto height      = combined->md->size[1];
-        const auto count       = uint64_t( width ) * height;
-        const auto bytes       = count * sizeof( float );
-        const auto validPixels = [width, height, count, bytes]( const IMAGE &image )
-        {
-            const auto *md = image.md;
-            return md && md->shared == 1 && md->location == -1 && md->naxis == 2 && md->datatype == _DATATYPE_FLOAT &&
-                   md->size[0] == width && md->size[1] == height && md->nelement == count &&
-                   md->imdatamemsize == bytes && image.array.F;
-        };
-        combinedFile           = backingInode( *combined );
-        combinedCounter        = combined->md->cnt0;
-        const auto primaryFile = inode( shmimMonitorT::m_shmimName );
-
-        if( m_destinations.empty() || !count || count > 1048576 || !validPixels( *combined ) || !combinedFile ||
-            combinedFile == primaryFile || combined->md->write || combinedCounter == UINT64_MAX )
-        {
-            return "combined DM stream busy or incompatible";
-        }
-
-        const std::vector<float> zeros( count, 0.0F );
-        std::vector<ImageHandle> destinations;
-        std::vector<ino_t>       identities{ combinedFile, primaryFile };
-        std::vector<uint64_t>    counters;
-
-        for( const auto &name : m_destinations )
-        {
-            auto       image = openImage( name );
-            const auto file  = image ? backingInode( *image ) : 0;
-
-            if( !image || !validPixels( *image ) || image->md->write || !file ||
-                std::find( identities.begin(), identities.end(), file ) != identities.end() )
-            {
-                return "a synco destination is missing, busy, aliased or incompatible";
-            }
-
-            identities.push_back( file );
-            counters.push_back( image->md->cnt0 );
-            destinations.push_back( std::move( image ) );
-        }
-
-        for( size_t j = 0; j < destinations.size(); ++j )
-        {
-            const auto *md = destinations[j]->md;
-
-            if( md->write || md->cnt0 != counters[j] || inode( m_destinations[j] ) != identities[j + 2] )
-            {
-                return "a synco destination changed during zero preflight";
-            }
-        }
-
-        auto      &trigger        = *destinations.front();
-        const auto triggerCounter = counters.front();
-        timespec   stamp{};
-
-        if( trigger.md->sem == 0 || triggerCounter == UINT64_MAX || inode( m_combinedName ) != combinedFile ||
-            combined->md->write || combined->md->cnt0 != combinedCounter || clock_gettime( CLOCK_ISIO, &stamp ) < 0 )
-        {
-            return "DM trigger or combined stream unavailable for zero publication";
-        }
-
-        for( auto &image : destinations )
-        {
-            image->md->write = 1;
-            MagAOX::streamCopy( image->array.F, zeros.data(), bytes );
-        }
-
-        // Finish the passive destinations before the first destination's counter can trigger dmcomb.
-        for( size_t j = 1; j < destinations.size(); ++j )
-        {
-            auto &md     = *destinations[j]->md;
-            md.writetime = md.atime = stamp;
-            md.write                = 0;
-        }
-
-        const bool published = ImageStreamIO_UpdateIm( &trigger ) == IMAGESTREAMIO_SUCCESS &&
-                               trigger.md->cnt0 == triggerCounter + 1 && !trigger.md->write;
-        trigger.md->write = 0;
-        invalidate( published ? "open-loop zero published" : "open-loop zero trigger failed" );
-        closeResources();
-        m_nextAttach = 0;
-
-        if( m_productionEnabled )
-        {
-            closeZeroTest();
-            m_zeroNextAttach = 0;
-        }
-
-        if( !published )
-        {
-            return "channels cleared; zero trigger publication failed";
-        }
-    }
-
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds( 100 );
-    do
-    {
-        if( !combined->md->write && combined->md->cnt0 == combinedCounter + 1 &&
-            inode( m_combinedName ) == combinedFile )
-        {
-            return nullptr;
-        }
-
-        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
-    } while( !shutdown() && std::chrono::steady_clock::now() < deadline );
-
-    return "channels cleared and trigger published; dmcomb did not confirm a single combined update";
 }
 
 inline bool dmSyncopation::configureSimulation( double seedRate )
@@ -2668,6 +2628,12 @@ inline void dmSyncopation::updateSimulationINDI()
 inline bool dmSyncopation::openResources()
 {
     closeResources();
+
+    if( m_productionDryRun )
+    {
+        return false;
+    }
+
     try
     {
         m_combined = std::make_unique<syncoImage>();
@@ -2749,7 +2715,7 @@ inline bool dmSyncopation::openResources()
             identities.push_back( mapping.m_sourceInode );
             mapping.m_cache.resize( width * height );
             mapping.m_stage.resize( width * height );
-            if( !m_productionEnabled )
+            if( !m_productionEnabled && legacySourceCurrent( *mapping.m_source->image()->md ) )
             {
                 const auto count = mapping.m_source->image()->md->cnt0;
                 if( mapping.m_source->image()->md->write )
@@ -3054,7 +3020,7 @@ inline bool dmSyncopation::snapshot()
     {
         auto      *metadata = mapping.m_source->image()->md;
         const auto counter  = metadata->cnt0;
-        bool       complete = !metadata->write;
+        bool       complete = !metadata->write && legacySourceCurrent( *metadata );
         if( complete )
         {
             std::memcpy( mapping.m_stage.data(), mapping.m_source->data(), mapping.m_stage.size() * sizeof( float ) );
@@ -3259,6 +3225,12 @@ inline bool dmSyncopation::executeStep( int step, int64_t target, int64_t cutoff
 
 inline void dmSyncopation::publishSchedule( int64_t observed, int completed )
 {
+    if( m_productionDryRun )
+    {
+        m_record.fill( 0 );
+        return;
+    }
+
     if( !m_timing.md || m_timing.md->datatype != _DATATYPE_INT64 || m_timing.md->naxis != 1 ||
         m_timing.md->size[0] != synco::words || m_timing.md->location != -1 )
     {
@@ -3269,7 +3241,7 @@ inline void dmSyncopation::publishSchedule( int64_t observed, int completed )
     m_record[synco::epoch]      = m_epoch;
     m_record[synco::generation] = m_generation;
     m_record[synco::state]      = observed > 0 ? m_scheduleState : synco::invalid;
-    m_record[synco::steps]      = m_requested;
+    m_record[synco::steps]      = scheduleSteps();
     m_record[synco::period]     = m_period;
     m_record[synco::reference]  = observed;
     m_record[synco::expires]    = observed > 0 ? observed + 2 * m_period : 0;
@@ -3391,6 +3363,17 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
 
     std::lock_guard<std::mutex> lock( m_cycleMutex );
     capturePassiveMainTiming();
+
+    if( m_productionDryRun )
+    {
+        m_dryCycle                = {};
+        m_dryCycle.startNs        = observed;
+        m_dryCycle.receiptNs      = receipt;
+        m_dryCycle.posted         = m_zeroStats.posted;
+        m_dryCycle.skipped        = m_zeroStats.skipped;
+        m_dryCycle.unacknowledged = m_zeroStats.unacknowledged;
+    }
+
     const int     result    = zeroEngine() ? processZeroTestPrimary( observed, receipt ) : processPrimary( observed );
     const int64_t completed = m_now();
     if( m_productionEnabled )
@@ -3402,13 +3385,19 @@ inline int dmSyncopation::processImage( void *source, const dev::shmimT &tag )
         }
         m_scheduleState = m_enabled ? ( m_zeroStats.active ? synco::armed : synco::acquiring ) : synco::invalid;
         m_primed        = m_enabled && m_zeroStats.active;
-        m_feasible      = m_primed ? m_requested : 0;
+        m_feasible      = m_primed ? scheduleSteps() : 0;
         m_mainDelivered = m_zeroStats.mainMatched;
-        m_delivered     = m_zeroStats.acknowledged;
+        m_delivered     = m_productionDryRun ? 0 : m_zeroStats.acknowledged;
         m_missed        = m_zeroStats.skipped;
         m_notStarted    = m_passiveSkipped;
         m_periodSource  = "primary publication grid";
     }
+
+    if( m_productionDryRun )
+    {
+        captureDryRunCycle( completed );
+    }
+
     publishZeroTestStatus( completed );
     m_previousCallbackRuntime = completed >= observed ? completed - observed : -1;
     m_previousCallbackEnd     = completed;
@@ -3878,6 +3867,11 @@ inline void dmSyncopation::readPrimaryCadence( int64_t observed )
 
 inline int dmSyncopation::processPrimary( int64_t observed )
 {
+    if( m_channelZero.state == ChannelZero::State::ordinary )
+    {
+        return 0;
+    }
+
     if( !m_resources )
     {
         if( observed < m_nextAttach )
@@ -4852,7 +4846,7 @@ inline int dmSyncopation::setupINDI()
     for( const auto &name : settingKeys )
     {
         m_indiP_settings.add( pcf::IndiElement( name ) );
-        m_indiP_settings[name].setMin( std::string( name ) == "steps" ? 1 : 0 );
+        m_indiP_settings[name].setMin( std::string( name ) == "steps" && !m_productionEnabled ? 1 : 0 );
         m_indiP_settings[name].setMax( std::string( name ) == "steps" ? synco::maxSteps : 1000000 );
         m_indiP_settings[name].setStep( std::string( name ) == "steps" ? 1 : 0 );
         m_indiP_settings[name].setFormat( "%g" );
@@ -4877,6 +4871,9 @@ inline int dmSyncopation::setupINDI()
              "feasible",
              "missed",
              "faults",
+             "offloadPrepareHz",
+             "offloadEpoch",
+             "offloadSequence",
 #if DMSYNCOPATION_DIAGNOSTIC_INDI
              "cameraHz",
              "delivered",
@@ -4941,15 +4938,18 @@ inline int dmSyncopation::setupINDI()
         REG_INDI_SETPROP( m_indiP_camera, m_cameraDevice, m_cameraProperty );
     }
 
-    if( !m_diagnosticsOnly && !m_simulationEnabled && !m_zeroTestEnabled && !m_loopDevice.empty() )
+    if( m_productionEnabled && !m_productionDryRun && !m_offloadDevice.empty() )
+    {
+        REG_INDI_SETPROP( m_indiP_offloadReady, m_offloadDevice, std::string( "offloadReady" ) );
+    }
+
+    if( !m_diagnosticsOnly && !m_simulationEnabled && !m_zeroTestEnabled && !m_productionDryRun )
     {
         if( createStandardIndiRequestSw( m_indiP_zero, "zero" ) < 0 ||
             registerIndiPropertyNew( m_indiP_zero, INDI_NEWCALLBACK( m_indiP_zero ) ) < 0 )
         {
             return -1;
         }
-
-        REG_INDI_SETPROP( m_indiP_loop, m_loopDevice, "loop_state" );
     }
 
     return 0;
@@ -5017,6 +5017,13 @@ inline int dmSyncopation::appStartup()
 
 inline int dmSyncopation::appLogic()
 {
+    serviceChannelZero();
+
+    if( m_productionDryRun )
+    {
+        logDryRunCapture();
+    }
+
     const bool detailed  = detailedTimingEnabled();
     const auto loopBegan = detailed || !m_mainTimingName.empty() ? m_now() : 0;
     updateMainTiming( loopBegan );
@@ -5145,7 +5152,8 @@ inline int dmSyncopation::appLogic()
                 m_reason = m_simulationSnapshot.valid ? "simulation observing" : "simulation warming or stale";
             }
 
-            if( m_productionEnabled && m_enabled && m_zeroClockCounter && m_previousCallbackEnd > 0 &&
+            if( m_channelZero.state != ChannelZero::State::ordinary && m_productionEnabled && m_enabled &&
+                m_zeroClockCounter && m_previousCallbackEnd > 0 &&
                 m_now() - m_previousCallbackEnd > int64_t( 2e9 / m_minRate ) )
             {
                 ++m_generation;
@@ -5157,7 +5165,8 @@ inline int dmSyncopation::appLogic()
                 publishSchedule( 0, -1 );
                 m_reason = "production main timeout; reacquiring";
             }
-            if( !zeroEngine() && m_enabled && m_lastMain && m_now() - m_lastMain > int64_t( 2e9 / m_minRate ) )
+            if( m_channelZero.state != ChannelZero::State::ordinary && !zeroEngine() && m_enabled && m_lastMain &&
+                m_now() - m_lastMain > int64_t( 2e9 / m_minRate ) )
             {
                 invalidate( "main timeout", Fault::primary );
             }
@@ -5194,6 +5203,9 @@ inline int dmSyncopation::appLogic()
                 "feasible",
                 "missed",
                 "faults",
+                "offloadPrepareHz",
+                "offloadEpoch",
+                "offloadSequence",
 #if DMSYNCOPATION_DIAGNOSTIC_INDI
                 "cameraHz",
                 "delivered",
@@ -5233,15 +5245,20 @@ inline int dmSyncopation::appLogic()
                 "faultEntryToCounterUs",
 #endif
             };
+            const int  plannedSteps = m_requested != 0 ? m_requested : ( m_primed ? scheduleSteps() : 0 );
+            const auto prepareHz    = m_enabled ? m_offloadPrepareHz : 0.0;
             const std::vector<double> values{
                 1e9 / m_period,
-                m_requested * 1e9 / m_period,
+                plannedSteps * 1e9 / m_period,
                 m_deliveredHz,
                 double( m_requested ),
-                m_primed ? double( m_requested ) : 0,
+                double( liveSteps() ),
                 double( m_feasible ),
                 double( m_missed ),
                 double( m_faults ),
+                prepareHz,
+                prepareHz > 0 ? offloadEpoch() : 0.0,
+                prepareHz > 0 ? double( m_offloadPrepareSequence ) : 0.0,
 #if DMSYNCOPATION_DIAGNOSTIC_INDI
                 m_cameraReport.m_fps,
                 double( m_delivered ),
@@ -5306,7 +5323,8 @@ inline int dmSyncopation::appLogic()
             updateIfChanged( m_indiP_health, "mapping", mappings );
 #endif
             const std::string mode =
-                m_productionEnabled ? "production providers"
+                m_productionDryRun    ? "production dry run"
+                : m_productionEnabled ? "production providers"
                 : m_zeroTestEnabled
                     ? "coordinated zero test"
                     : ( m_simulationEnabled ? "shadow simulation"
@@ -5547,6 +5565,8 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
             else if( !m_enabled )
             {
                 ++m_generation;
+                m_offloadPrepareHz     = 0;
+                m_offloadReadySequence = 0;
                 if( m_productionEnabled )
                 {
                     m_reportTime        = 0;
@@ -5560,6 +5580,15 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_enable )( const pcf::IndiProperty 
                 m_zeroPublicationTiming.reset();
                 ++m_zeroTrial;
                 m_zeroArmed = true;
+
+                if( m_productionDryRun )
+                {
+                    m_dryCapture.enableNs       = m_zeroArmedAt;
+                    m_dryCapture.trial          = m_zeroTrial;
+                    m_dryCapture.afterSize      = 0;
+                    m_dryCapture.firstEnabledNs = 0;
+                }
+
                 m_reason =
                     m_productionEnabled ? "production clock/ownership warming" : "zero trial clock/ownership warming";
             }
@@ -5623,6 +5652,11 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_reacquire )( const pcf::IndiProper
 
 INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_zero )( const pcf::IndiProperty &ipRecv )
 {
+    if( m_productionDryRun )
+    {
+        return -1;
+    }
+
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_zero, ipRecv );
 
     if( ipRecv.getType() != pcf::IndiProperty::Switch || !ipRecv.find( "request" ) || ipRecv.getElements().size() != 1 )
@@ -5635,29 +5669,28 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_zero )( const pcf::IndiProperty &i
         return 0;
     }
 
-    updateSwitchIfChanged( m_indiP_zero, "request", pcf::IndiElement::On, INDI_BUSY );
-    std::string failure;
+    std::lock_guard<std::mutex> control( m_channelZeroMutex );
+    { //mutex scope
+        // The cycle owns all destination writes. Queue the request between complete scheduler cycles.
+        std::lock_guard<std::mutex> cycle( m_cycleMutex );
 
-    try
-    {
-        if( const char *reason = zeroDestinations() )
+        if( m_channelZero.state == ChannelZero::State::idle )
         {
-            failure = reason;
+            if( m_productionEnabled && m_enabled && m_zeroStats.active && scheduleSteps() > 1 )
+            {
+                m_channelZero.state = ChannelZero::State::scheduled;
+            }
+            else
+            {
+                m_channelZero.state = ChannelZero::State::ordinary;
+                m_zeroStats.active  = false;
+                invalidate( "clearing synco channels" );
+            }
         }
     }
-    catch( const std::exception &error )
-    {
-        failure = error.what();
-    }
 
-    if( !failure.empty() )
-    {
-        updateSwitchIfChanged( m_indiP_zero, "request", pcf::IndiElement::Off, INDI_ALERT );
-        return log<text_log, -1>( "open-loop zero: " + failure, logPrio::LOG_ERROR );
-    }
-
-    updateSwitchIfChanged( m_indiP_zero, "request", pcf::IndiElement::Off, INDI_OK );
-    return log<text_log, 0>( "open-loop zero published by dmcomb", logPrio::LOG_NOTICE );
+    updateSwitchIfChanged( m_indiP_zero, "request", pcf::IndiElement::On, INDI_BUSY );
+    return 0;
 }
 
 INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiProperty &ipRecv )
@@ -5698,7 +5731,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
         }
         else if( name == "steps" )
         {
-            if( value < 1 || value > synco::maxSteps || value != std::floor( value ) )
+            if( value < ( m_productionEnabled ? 0 : 1 ) || value > synco::maxSteps || value != std::floor( value ) )
             {
                 return -1;
             }
@@ -5743,7 +5776,7 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
     m_zeroDurationSec              = duration;
     if( zeroEngine() )
     {
-        if( requested < ( m_productionEnabled ? 1 : 2 ) || requested > 4 || ( reconfigure && !configureZeroTest() ) )
+        if( ( m_zeroTestEnabled && ( requested < 2 || requested > 4 ) ) || ( reconfigure && !configureZeroTest() ) )
         {
             m_requested       = previousRequested;
             m_maxCadence      = previousCadence;
@@ -5775,17 +5808,6 @@ INDI_NEWCALLBACK_DEFN( dmSyncopation, m_indiP_settings )( const pcf::IndiPropert
         updateIfChanged( m_indiP_settings, "durationSec", duration );
     }
 
-    return 0;
-}
-
-INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_loop )( const pcf::IndiProperty &ipRecv )
-{
-    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_loop, ipRecv );
-
-    std::lock_guard<std::mutex> lock( m_cycleMutex );
-    m_loopOpen = ipRecv.getType() == pcf::IndiProperty::Switch && ipRecv.find( "toggle" ) &&
-                 ipRecv.getState() != INDI_ALERT && ipRecv.getState() != INDI_BUSY &&
-                 ipRecv["toggle"].getSwitchState() == pcf::IndiElement::Off;
     return 0;
 }
 
@@ -5831,4 +5853,6 @@ INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_camera )( const pcf::IndiProperty 
 
 #include "dmSyncopationProduction.hpp"
 #include "dmSyncopationZeroTest.hpp"
+#include "dmSyncopationChannelZero.hpp"
+#include "dmSyncopationDryRun.hpp"
 #endif

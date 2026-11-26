@@ -20,4 +20,5 @@ FORMS += ../../widgets/xWidgets/statusEntry.ui \
 LIBS += ../../../INDI/libcommon/libcommon.a \
         ../../../INDI/liblilxml/liblilxml.a
 
+RESOURCES += ../../resources/magaox.qrc
 RESOURCES += ../../resources/MagAOXStyleSheets/MagAOXStyle.qrc
