@@ -135,6 +135,10 @@ all channels as one `SPI_IOC_MESSAGE` on `/dev/spidevD.C` (chip select raised be
 kernel adds its default deselect delay), with unchanged command bytes, and mcp3208Ctrl reads each scan with one call
 (`readScan`). lgpio is no longer linked.
 
+Reverted at the user's request: on the Pi (a Pi 5) `channel_readout_us` stayed about 95 us, so the time is in the
+kernel's per-transfer SPI handling on RP1 (over PCIe), not in the lgpio system calls, and the `performance` governor
+(2.4 GHz) did not change it either. The per-channel lgpio `MCP3208::read` and its link flags are restored.
+
 ## Verification
 
 - `wfsClock_test` (ad7689Ctrl's clock tests, without its continuous schedule): passed on the Mac (6 cases). A

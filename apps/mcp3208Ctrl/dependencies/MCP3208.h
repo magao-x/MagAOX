@@ -34,11 +34,6 @@ public:
     void disconnect();
     unsigned short read(const std::uint8_t channel, const Mode m = Mode::SINGLE) const;
 
-    // Read count channels in one SPI message (one system call), chip select raised between conversions.
-    void read(const std::uint8_t *channels, unsigned short *values, const int count, const Mode m = Mode::SINGLE) const;
-
-    static const int MAX_CHANNELS = 8;
-
 
 protected:
     int _handle;

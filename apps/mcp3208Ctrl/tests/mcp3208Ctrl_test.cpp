@@ -98,14 +98,6 @@ unsigned short MCP3208::read( const std::uint8_t channel, const Mode ) const
     return 0;
 }
 
-void MCP3208::read( const std::uint8_t *channels, unsigned short *values, const int count, const Mode m ) const
-{
-    for( int i = 0; i < count; ++i )
-    {
-        values[i] = read( channels[i], m );
-    }
-}
-
 } // namespace MCP3208Lib
 
 using namespace MagAOX::app;
@@ -333,7 +325,6 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     XWCTEST_DOXYGEN_REF( app.acquireScan( 0 ) );
     XWCTEST_DOXYGEN_REF( app.waitForSync( 0 ) );
     XWCTEST_DOXYGEN_REF( app.monotonicNow() );
-    XWCTEST_DOXYGEN_REF( app.readScan() );
     XWCTEST_DOXYGEN_REF( app.timespecToNs( timespec{} ) );
     XWCTEST_DOXYGEN_REF( app.nsToTimespec( 0.0 ) );
 
