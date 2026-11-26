@@ -2886,7 +2886,7 @@ inline int loPredCtrlAcc_operational::setupINDI()
                              "acc_age_apply_us_p99", "acc_age_apply_us_max", "learn_us_mean",
                              "learn_us_p99",         "learn_us_max",         "learn_overruns",
                              "wfs_filled",           "acc_filled",           "input_holds",
-                             "fast_wfs_only" } )
+                             "fast_wfs_only",        "transport_discarded" } )
     {
         m_indiP_performance.add( pcf::IndiElement( key, 0.0 ) );
     }
@@ -3272,7 +3272,7 @@ inline int loPredCtrlAcc_operational::appLogic()
                                      "acc_age_apply_us_p99", "acc_age_apply_us_max", "learn_us_mean",
                                      "learn_us_p99",         "learn_us_max",         "learn_overruns",
                                      "wfs_filled",           "acc_filled",           "input_holds",
-                                     "fast_wfs_only" };
+                                     "fast_wfs_only",        "transport_discarded" };
     std::vector<double>       values{ double( standard.m_updates ),
                                 double( assisted.m_updates ),
                                 standard.m_originRmse,
@@ -3309,7 +3309,8 @@ inline int loPredCtrlAcc_operational::appLogic()
                                 double( wfsFills ),
                                 double( m_accFills.load() ),
                                 double( m_inputHolds.load() ),
-                                double( fast.m_wfsOnly ) };
+                                double( fast.m_wfsOnly ),
+                                double( output.m_discarded ) };
     for( int k = 0; k < m_ratio; ++k )
     {
         names.push_back( m_phaseNames[2 * k].c_str() );

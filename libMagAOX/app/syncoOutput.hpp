@@ -28,6 +28,9 @@ struct SyncoOutputConfig
     bool m_producerDefaults{ false }; ///< App-selected finite-value/base-ack policy; never an INDI/config trust switch.
     std::uint32_t m_width{ 0 },
         m_height{ 0 }; ///< Optional exact geometry from a two-dimensional synthesis calibration.
+    /// Consecutive commands the consumer may discard (late or stale; it keeps its previous copy) before a fault; 0
+    /// never faults on discards.
+    std::uint32_t m_maxDiscards{ 1000 };
 };
 
 /// Copyable requested/transport-acknowledged state; never a physical application certificate.
@@ -38,6 +41,7 @@ struct SyncoOutputStatus
     std::uint64_t m_published{ 0 }, m_acknowledgements{ 0 },
         m_rejected{ 0 };          ///< Committed payloads, exact receipts and failed bounds.
     std::uint64_t m_skipped{ 0 }; ///< Observed slots not committed by their cutoff; synco retains the last copy.
+    std::uint64_t m_discarded{ 0 };       ///< Committed commands the consumer discarded; it retained its previous copy.
     const char   *m_reason{ "disabled" }; ///< Stable diagnostic text, without acquisition-thread string allocation.
     const char   *m_faultReason{ "" };    ///< Why the latest fault latched; kept after its zero is acknowledged.
     std::uint64_t m_faults{ 0 };          ///< Faults latched since startup, so a reader can detect each new one.
@@ -51,6 +55,8 @@ class SyncoOutputState
     bool m_permitted{ false }, m_pending{ false }, m_pendingZero{ true }, m_initialZero{ false }; ///< Output ownership.
     std::int64_t       m_sent{ -1 }; ///< Actual commit time, used only for acknowledgement timeout.
     std::vector<float> m_last;       ///< Last submitted own contribution, never another application's command.
+    std::vector<float> m_copied;     ///< Last contribution the consumer copied, restored to m_last on a discard.
+    std::uint32_t      m_discards{ 0 }; ///< Consecutive discarded commands, against m_config.m_maxDiscards.
   public:
     /// Allocate fixed storage before any producer thread starts.
     SyncoOutputState( const SyncoOutputConfig &config /**< [in] Reviewed authorization. */,
@@ -91,7 +97,7 @@ class SyncoOutputState
 };
 
 inline SyncoOutputState::SyncoOutputState( const SyncoOutputConfig &c, std::size_t n, bool permitted )
-    : m_config( c ), m_permitted( permitted ), m_last( n, 0 )
+    : m_config( c ), m_permitted( permitted ), m_last( n, 0 ), m_copied( n, 0 )
 {
 }
 inline bool SyncoOutputState::request( bool enabled, bool qualified )
@@ -164,9 +170,22 @@ inline void SyncoOutputState::acknowledge( bool copied )
     ++m_status.m_acknowledgements;
     if( !copied )
     {
-        fault( "command_discarded_zero_pending" );
+        // The consumer kept its previous copy, as for a skipped slot: that stays the own contribution. A discarded
+        // zero is still needed (zero_needed()), so it is sent again. Only a sustained run of discards faults.
+        ++m_status.m_discarded;
+        std::copy( m_copied.begin(), m_copied.end(), m_last.begin() );
+
+        if( !m_pendingZero && m_config.m_maxDiscards && ++m_discards >= m_config.m_maxDiscards )
+        {
+            fault( "command_discarded_zero_pending" );
+            return;
+        }
+
+        m_status.m_reason = m_pendingZero ? "zero_discarded_resending" : "command_discarded_previous_retained";
         return;
     }
+    m_discards = 0;
+    std::copy( m_last.begin(), m_last.end(), m_copied.begin() );
     m_status.m_zeroConfirmed = m_pendingZero;
     m_status.m_acknowledged  = !m_pendingZero;
     if( m_pendingZero )

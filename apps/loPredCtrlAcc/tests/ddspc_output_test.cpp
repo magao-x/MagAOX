@@ -88,6 +88,54 @@ TEST_CASE( "Operational faults require removal and an explicit new request", "[m
     output.check( 1400, false );
     REQUIRE_FALSE( output.status().m_requested );
 }
+/** \brief A discarded command is like a skipped slot: the consumer's previous copy stays; a discarded zero is resent;
+ * only a sustained run of discards faults. */
+TEST_CASE( "Discarded commands keep the previous copy without a fault", "[multirate][output]" )
+{
+    MagAOX::app::SyncoOutputConfig c{ true, true, 1, .2, 1000 };
+    c.m_maxDiscards = 3;
+    MagAOX::app::SyncoOutputState output( c, 2, true );
+    const std::array<float, 2>    first{ .1f, .1f }, second{ .15f, .15f }, zero{};
+    REQUIRE( output.request( true, true ) );
+    output.submitted( first, false, 100 );
+    output.acknowledge( true );
+
+    // Two discards: still requested, no fault.
+    for( int k = 0; k < 2; ++k )
+    {
+        REQUIRE( output.validate( second, false ) );
+        output.submitted( second, false, 200 + k );
+        output.acknowledge( false );
+        REQUIRE_FALSE( output.status().m_fault );
+        REQUIRE( output.status().m_requested );
+    }
+    REQUIRE( output.status().m_discarded == 2 );
+
+    // The slew check compares with the copied .1, not the discarded .15: .32 is .22 above it and is rejected.
+    REQUIRE_FALSE( output.validate( std::array<float, 2>{ .32f, .32f }, false ) );
+
+    // A copy resets the run; the third consecutive discard after it would fault, as would a dead route.
+    MagAOX::app::SyncoOutputState run( c, 2, true );
+    REQUIRE( run.request( true, true ) );
+    for( int k = 0; k < 3; ++k )
+    {
+        run.submitted( first, false, 300 + k );
+        run.acknowledge( false );
+    }
+    REQUIRE( run.status().m_fault );
+    REQUIRE( std::string( run.status().m_faultReason ) == "command_discarded_zero_pending" );
+
+    // A discarded zero is resent rather than faulting.
+    REQUIRE( run.zero_needed() );
+    run.submitted( zero, true, 400 );
+    run.acknowledge( false );
+    REQUIRE( run.zero_needed() );
+    REQUIRE( run.status().m_faults == 1 );
+    run.submitted( zero, true, 401 );
+    run.acknowledge( true );
+    REQUIRE_FALSE( run.zero_needed() );
+}
+
 /** \brief Independent absolute, slew and finite checks all reject unsafe candidates before transport. */
 TEST_CASE( "Output finite and slew guards apply to every pixel", "[multirate][output]" )
 {
