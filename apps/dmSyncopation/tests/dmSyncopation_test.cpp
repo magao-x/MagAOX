@@ -100,6 +100,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::drainZeroTestReader;
     using dmSyncopation::executeStep;
     using dmSyncopation::Fault;
+    using dmSyncopation::legacySourceCurrent;
     using dmSyncopation::LogicStage;
     using dmSyncopation::m_advances;
     using dmSyncopation::m_bounds;
@@ -277,6 +278,7 @@ class Harness : public dmSyncopation
     using dmSyncopation::readerReleaseMonitorEnabled;
     using dmSyncopation::readPrimaryTiming;
     using dmSyncopation::recordLogicStage;
+    using dmSyncopation::serviceChannelZero;
     using dmSyncopation::setupCadenceINDI;
     using dmSyncopation::setupCombinerCadenceINDI;
     using dmSyncopation::setupINDI;
@@ -10709,7 +10711,7 @@ TEST_CASE( "syncopation advertises the build-selected INDI interface", "[dmSynco
 
     CHECK( ( definitions.find( "<defNumberVector device=\"synco_test\" name=\"production\"" ) != std::string::npos ) ==
            ( production && DMSYNCOPATION_DIAGNOSTIC_INDI ) );
-    CHECK( app.m_indiP_status.getElements().size() == ( DMSYNCOPATION_DIAGNOSTIC_INDI ? 44 : 8 ) );
+    CHECK( app.m_indiP_status.getElements().size() == ( DMSYNCOPATION_DIAGNOSTIC_INDI ? 47 : 11 ) );
     CHECK( app.m_indiP_health.getElements().size() == ( DMSYNCOPATION_DIAGNOSTIC_INDI ? 8 : 3 ) );
 
     if( !production )
@@ -10738,19 +10740,36 @@ TEST_CASE( "syncopation advertises the build-selected INDI interface", "[dmSynco
     // clang-format on
 }
 
-/** \brief Check open-loop zero interlocks and one combined publication with idle primary fixtures.
+/** \brief An idle clear retries busy channels, then acknowledges a single explicit dmcomb trigger.
  * \ingroup dmSyncopation_unit_test
  */
-TEST_CASE( "syncopation zeros configured channels and triggers dmcomb while open", "[dmSyncopation][indi]" )
+TEST_CASE( "syncopation queues an idle channel clear in either enable state", "[dmSyncopation][indi]" )
 {
-    Streams streams;
-    Harness app;
-    app.m_productionEnabled = GENERATE( false, true );
-    app.m_shmimName         = "dm97disp03";
-    app.m_combinedName      = "dm97disp";
-    app.m_destinations      = { "dm97disp07", "dm97disp08" };
+    Streams    streams;
+    Harness    app;
+    const bool enabled       = GENERATE( false, true );
+    const bool outputPresent = GENERATE( false, true );
+    app.m_productionEnabled  = GENERATE( false, true );
+    app.m_enabled            = enabled;
+    app.m_shmimName          = "dm97disp03";
+    app.m_combinedName       = "dm97disp";
+    app.m_destinations       = { "dm97disp07", "dm97disp08" };
     app.localDriver( streams.directory );
     REQUIRE( app.setupINDI() == 0 );
+
+    if( !app.m_productionEnabled )
+    {
+        app.attach();
+        auto &source = *app.m_mappings.front().m_source;
+        source.setWrite( true );
+        source.data()[0] = 2.0F;
+        source.post();
+    }
+
+    if( !outputPresent )
+    {
+        app.m_combinedName = "dm97disp_unavailable";
+    }
 
     auto request = app.m_indiP_zero;
     request["request"].setSwitchState( pcf::IndiElement::On );
@@ -10764,79 +10783,172 @@ TEST_CASE( "syncopation zeros configured channels and triggers dmcomb while open
     const auto triggerBefore  = trigger.md->cnt0;
     const auto otherBefore    = other.md->cnt0;
 
-    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
-    pcf::IndiProperty loop( pcf::IndiProperty::Switch );
-    loop.setDevice( "holoop" );
-    loop.setName( "loop_state" );
-    loop.setState( INDI_OK );
-    loop.add( pcf::IndiElement( "toggle" ) );
-    loop["toggle"].setSwitchState( pcf::IndiElement::On );
-    REQUIRE( app.setCallBack_m_indiP_loop( loop ) == 0 );
-    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
-
-    loop["toggle"].setSwitchState( pcf::IndiElement::Off );
-    REQUIRE( app.setCallBack_m_indiP_loop( loop ) == 0 );
-    app.m_enabled = true;
-    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
-    app.m_enabled = false;
-
     other.md->write = 1;
-    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
-    other.md->write = 0;
-    CHECK( app.m_indiP_zero.getState() == INDI_ALERT );
+    REQUIRE( app.newCallBack_m_indiP_zero( request ) == 0 );
+    app.serviceChannelZero();
+    CHECK( app.m_indiP_zero.getState() == INDI_BUSY );
     CHECK( trigger.md->cnt0 == triggerBefore );
     CHECK( trigger.array.F[0] == 2.0F );
     CHECK( other.array.F[0] == 3.0F );
+    REQUIRE( app.newCallBack_m_indiP_zero( request ) == 0 );
+    other.md->write = 0;
 
     ImageStreamIO_semflush( &trigger, 0 );
-    auto dmcomb =
-        std::async( std::launch::async,
-                    [&]()
-                    {
-                        timespec deadline{};
-                        clock_gettime( CLOCK_REALTIME, &deadline );
-                        ++deadline.tv_sec;
-
-                        if( ImageStreamIO_semtimedwait( &trigger, 0, &deadline ) != 0 || trigger.md->write ||
-                            other.md->write || trigger.md->cnt0 != triggerBefore + 1 || other.md->cnt0 != otherBefore )
-                        {
-                            return false;
-                        }
-
-                        for( size_t pixel = 0; pixel < 9; ++pixel )
-                        {
-                            if( trigger.array.F[pixel] != 0 || other.array.F[pixel] != 0 )
-                            {
-                                return false;
-                            }
-                        }
-
-                        combined.md->write = 1;
-                        std::copy_n( primary.array.F, 9, combined.array.F );
-                        return ImageStreamIO_UpdateIm( &combined ) == IMAGESTREAMIO_SUCCESS;
-                    } );
-
-    CHECK( app.newCallBack_m_indiP_zero( request ) == 0 );
-    REQUIRE( dmcomb.get() );
+    app.serviceChannelZero();
     CHECK( app.m_indiP_zero.getState() == INDI_OK );
     CHECK( app.m_indiP_zero["request"].getSwitchState() == pcf::IndiElement::Off );
-    CHECK( combined.md->cnt0 == combinedBefore + 1 );
-    CHECK( combined.array.F[0] == 4.0F );
+    app.serviceChannelZero();
+    REQUIRE( ImageStreamIO_semtrywait( &trigger, 0 ) == 0 );
+    CHECK( ImageStreamIO_semtrywait( &trigger, 0 ) != 0 );
+    REQUIRE( trigger.md->cnt0 == triggerBefore + 1 );
+    CHECK( other.md->cnt0 == otherBefore );
+    CHECK_FALSE( trigger.md->write );
+    CHECK_FALSE( other.md->write );
+
+    for( size_t pixel = 0; pixel < 9; ++pixel )
+    {
+        CHECK( trigger.array.F[pixel] == 0 );
+        CHECK( other.array.F[pixel] == 0 );
+    }
+
+    CHECK( combined.md->cnt0 == combinedBefore );
     CHECK( primary.md->cnt0 == primaryBefore );
     CHECK( primary.array.F[0] == 4.0F );
-    CHECK_FALSE( app.m_enabled );
+    CHECK( app.m_enabled == enabled );
 
-    CHECK( app.newCallBack_m_indiP_zero( request ) < 0 );
-    CHECK( app.m_indiP_zero.getState() == INDI_ALERT );
-    CHECK( trigger.md->cnt0 == triggerBefore + 2 );
-    CHECK( combined.md->cnt0 == combinedBefore + 1 );
+    if( !app.m_productionEnabled )
+    {
+        app.m_combinedName = "dm97disp";
+        REQUIRE( app.allocate( dev::shmimT{} ) == 0 );
+        REQUIRE( app.m_mappings.size() == 2 );
+        auto &mapping = app.m_mappings.front();
+        CHECK( mapping.m_source->data()[0] == 2.0F );
+        CHECK( mapping.m_cache.front() == 0.0F );
+        app.m_bounds.snapshot = 1000000;
+        REQUIRE( app.snapshot() );
+        CHECK( mapping.m_stage.front() == 0.0F );
+        mapping.m_source->setWrite( true );
+        mapping.m_source->data()[0] = 6.0F;
+        mapping.m_source->post();
+        REQUIRE( app.snapshot() );
+        CHECK( mapping.m_stage.front() == 6.0F );
+    }
 
     // clang-format off
 #ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
     MagAOX::app::dmSyncopation::setupINDI;
-    MagAOX::app::dmSyncopation::setCallBack_m_indiP_loop;
     MagAOX::app::dmSyncopation::newCallBack_m_indiP_zero;
+    MagAOX::app::dmSyncopation::serviceChannelZero;
     MagAOX::app::dmSyncopation::zeroDestinations;
+#endif
+    // clang-format on
+}
+
+/** \brief A live clear uses a safe passive interval and prefers the next primary trigger.
+ * \ingroup dmSyncopation_unit_test
+ */
+TEST_CASE( "syncopation clears live inputs without adding an auxiliary trigger", "[dmSyncopation][indi]" )
+{
+    Streams    streams;
+    Harness    app;
+    const bool enabled      = GENERATE( false, true );
+    app.m_productionEnabled = GENERATE( false, true );
+    app.m_enabled           = enabled;
+    app.m_shmimName         = "dm97disp03";
+    app.m_combinedName      = "dm97disp";
+    app.m_destinations      = { "dm97disp07", "dm97disp08" };
+    app.localDriver( streams.directory );
+    REQUIRE( app.setupINDI() == 0 );
+    app.m_simulationReleaseQueue.configure( 8 );
+
+    constexpr int64_t raw = 2000000000000000000LL;
+    app.m_publicationNow  = []
+    {
+        return raw;
+    };
+    app.m_now = []
+    {
+        return int64_t( 1000000000 );
+    };
+    auto &primary            = streams.images[0];
+    auto &combined           = streams.images[1];
+    auto &trigger            = streams.images[2];
+    auto &other              = streams.images[3];
+    primary.md->cnt0         = 10;
+    primary.md->writetime    = synco::toTimespec( raw - 210000 );
+    combined.md->cnt0        = 20;
+    combined.md->writetime   = synco::toTimespec( raw - 2000 );
+    primary.array.F[0]       = 4;
+    const auto triggerBefore = trigger.md->cnt0;
+    const auto otherBefore   = other.md->cnt0;
+
+    auto request = app.m_indiP_zero;
+    request["request"].setSwitchState( pcf::IndiElement::On );
+    REQUIRE( app.newCallBack_m_indiP_zero( request ) == 0 );
+    app.serviceChannelZero();
+    CHECK( app.m_indiP_zero.getState() == INDI_BUSY );
+    CHECK( trigger.array.F[0] == 2 );
+    CHECK( other.array.F[0] == 3 );
+
+    combined.md->writetime = synco::toTimespec( raw - 175000 );
+
+    if( app.m_productionEnabled )
+    {
+        auto release  = readerCompletion( combined, 1, 999900000, 999950000 );
+        release.kind  = MagAOX::dmCompletion::Kind::readers;
+        release.state = MagAOX::dmCompletion::State::released;
+        REQUIRE(
+            app.m_simulationReleaseQueue.push( { release, 999960000, app.m_simulationReleaseEpoch.load(), true } ) );
+    }
+
+    app.serviceChannelZero();
+    CHECK( app.m_indiP_zero.getState() == INDI_BUSY );
+    CHECK( trigger.md->cnt0 == triggerBefore );
+    CHECK( other.md->cnt0 == otherBefore );
+    CHECK( combined.md->cnt0 == 20 );
+    CHECK( trigger.array.F[0] == 0 );
+    CHECK( other.array.F[0] == 0 );
+
+    IMAGE_METADATA source{};
+    source.writetime = synco::toTimespec( raw - 1 );
+    CHECK_FALSE( app.legacySourceCurrent( source ) );
+    source.writetime = synco::toTimespec( raw + 1 );
+    CHECK( app.legacySourceCurrent( source ) );
+
+    const bool mainContinues = GENERATE( false, true );
+
+    if( mainContinues )
+    {
+        ++primary.md->cnt0;
+        primary.md->writetime = synco::toTimespec( raw + 1000 );
+        app.m_publicationNow  = []
+        {
+            return raw + 2000;
+        };
+        combined.md->write = 1;
+    }
+    else
+    {
+        app.m_publicationNow = []
+        {
+            return raw + 5000000;
+        };
+    }
+
+    app.serviceChannelZero();
+    CHECK( app.m_indiP_zero.getState() == INDI_OK );
+    CHECK( app.m_indiP_zero["request"].getSwitchState() == pcf::IndiElement::Off );
+    combined.md->write = 0;
+    CHECK( combined.md->cnt0 == 20 );
+    CHECK( trigger.md->cnt0 == triggerBefore + ( mainContinues ? 0 : 1 ) );
+    CHECK( app.m_enabled == enabled );
+
+    // clang-format off
+#ifdef DMSYNCOPATION_TEST_DOXYGEN_REF
+    MagAOX::app::dmSyncopation::newCallBack_m_indiP_zero;
+    MagAOX::app::dmSyncopation::serviceChannelZero;
+    MagAOX::app::dmSyncopation::zeroDestinations;
+    MagAOX::app::dmSyncopation::legacySourceCurrent;
 #endif
     // clang-format on
 }

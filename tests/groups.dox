@@ -250,7 +250,7 @@ report from their counters and then returns nonzero. An HTML report therefore do
  */
 
 /** \defgroup cameraGUI_unit_test Camera GUI Unit Tests
- * \brief Offline EM-gain-off discovery, command routing, and availability tests.
+ * \brief Offline discovery, command routing, and availability tests for camera controls.
  * \ingroup application_unit_test
  */
 
