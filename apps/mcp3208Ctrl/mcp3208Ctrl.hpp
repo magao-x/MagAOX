@@ -38,10 +38,11 @@ namespace app
 /** MagAO-X application to read MCP3208 channels on a Raspberry Pi.
  *
  * The controller can either acquire on its internal timer loop or synchronize reads to an
- * ImageStreamIO semaphore. Synchronized, `fps` (`accel.fps`, INDI `fps`) is an upper limit: each WFS
- * semaphore arms the highest integer number of scans whose rate does not exceed it (8 kHz at a 2 kHz or
- * 500 Hz WFS, 7.7 kHz at 700 Hz, for an 8 kHz limit), uniformly spaced across that WFS period, with the
- * first scan at the fitted WFS arrival plus the optional signed `synchroDelay` offset (no built-in delay;
+ * ImageStreamIO semaphore. By default (`synchro.timingSource=integrator`) it reads free-running on the internal timer
+ * at `accel.fps`, whatever the WFS does; `fps.device` only reports the WFS rate. Synchronized, `fps` (`accel.fps`, INDI
+ * `fps`) is an upper limit: each WFS semaphore arms the highest integer number of scans whose rate does not exceed it
+ * (8 kHz at a 2 kHz or 500 Hz WFS, 7.7 kHz at 700 Hz, for an 8 kHz limit), uniformly spaced across that WFS period,
+ * with the first scan at the fitted WFS arrival plus the optional signed `synchroDelay` offset (no built-in delay;
  * `wfsScan::syncSchedule`). The WFS period and each frame's
  * scan anchor come from a ten-second least-squares fit of semaphore arrivals on WFS frame IDs
  * (`wfsScan::rollingWfsClock`), so semaphore jitter moves neither; the fit restarts after a persistent
@@ -678,7 +679,7 @@ void mcp3208Ctrl::setupConfig()
                 "device",
                 false,
                 "string",
-                "Device name for getting fps to set circular buffer length." );
+                "Device providing the WFS fps, reported as the WFS rate; it does not change accel.fps." );
 
     config.add( "fps.property",
                 "",
@@ -688,7 +689,7 @@ void mcp3208Ctrl::setupConfig()
                 "property",
                 false,
                 "string",
-                "Property name for getting fps to set circular buffer length. Default is 'fps'." );
+                "Property name of the WFS fps. Default is 'fps'." );
 
     config.add( "fps.element",
                 "",
@@ -698,7 +699,7 @@ void mcp3208Ctrl::setupConfig()
                 "element",
                 false,
                 "string",
-                "Property name for getting fps to set circular buffer length. Default is 'current'." );
+                "Element name of the WFS fps. Default is 'current'." );
 
     config.add( "fps.tol",
                 "",
@@ -813,6 +814,17 @@ void mcp3208Ctrl::setupConfig()
         "double",
         "Nanoseconds before each synchronized scan deadline to stop sleeping and poll, so the core is awake when "
         "the read starts (a read after sleeping is slower). 0 sleeps to the deadline. Default is 50000." );
+
+    config.add( "synchro.timingSource",
+                "",
+                "synchro.timingSource",
+                argType::Required,
+                "synchro",
+                "timingSource",
+                false,
+                "string",
+                "Startup timing source. integrator (default) reads free-running on the internal timer at accel.fps; "
+                "semaphore synchronizes scans to synchro.shmimName. INDI timingSource changes it while running." );
 
     config.add( "synchro.completeScans",
                 "",
@@ -944,6 +956,8 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_fpsElement, "fps.element" );
     _config( m_fpsTol, "fps.tol" );
     _config( m_synchroShmimName, "synchro.shmimName" );
+    std::string timingSource = "integrator";
+    _config( timingSource, "synchro.timingSource" );
     _config( m_synchroPostDelay, "synchro.postDelay" );
     _config( m_synchroDtTransfer_ns, "synchro.dtTransfer_ns" );
     _config( m_synchroWfsProcess_ns, "synchro.wfsProcess_ns" );
@@ -1064,14 +1078,15 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     m_syncProducerFrameValid  = false;
     m_wfs_fps            = m_fps;
     m_channelReadoutTime_ns = 0.0;
-    if( m_synchroShmimName.empty() )
+    // Free-running on the internal timer unless semaphore timing is selected; a configured synchro.shmimName alone
+    // no longer selects it.
+    if( timingSource != "integrator" && timingSource != "semaphore" )
     {
-        m_timingSource = TimingSource::Integrator;
+        log<text_log>( "synchro.timingSource must be integrator or semaphore; using integrator", logPrio::LOG_WARNING );
     }
-    else
-    {
-        m_timingSource = TimingSource::Semaphore;
-    }
+
+    m_timingSource =
+        timingSource == "semaphore" && !m_synchroShmimName.empty() ? TimingSource::Semaphore : TimingSource::Integrator;
     m_effectiveTimingSource   = m_timingSource;
     m_semaphoreFallbackActive = false;
 
@@ -2442,19 +2457,9 @@ INDI_SETCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fpsSource )( const pcf::IndiProperty
 
     float target = ipRecv[m_fpsElement].get<float>();
 
+    // The WFS rate is recorded only: accel.fps alone sets the acquisition rate, the free-running integrator's rate
+    // and the synchronized scans' limit.
     m_wfs_fps = target;
-
-    // Synchronized, the scan count follows the measured WFS period; the source must not lower the rate limit.
-    if( m_timingSource == TimingSource::Semaphore )
-    {
-        return 0;
-    }
-
-    m_fps           = target;
-    m_trigger       = 1e9f / m_fps; // Update trigger value based off new fps
-    nano_sec_target = 1e9f / m_fps;
-
-    log<text_log>( "set fps from " + m_fpsDevice + " = " + std::to_string( m_fps ) );
     return 0;
 
 } // INDI_SETCALLBACK_DEFN(mcp3208Ctrl, m_indiP_fpsSource)

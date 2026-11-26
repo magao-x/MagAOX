@@ -455,9 +455,22 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( app.m_synchroDelayTarget == Approx( 17000.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 17000.0f ) );
     REQUIRE( app.m_wfs_fps == Approx( static_cast<double>( app.m_fps ) ) );
-    REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Semaphore );
-    REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Semaphore );
+
+    // A synchro stream alone does not select semaphore timing: the integrator is the default.
+    REQUIRE( app.m_timingSource == mcp3208Ctrl::TimingSource::Integrator );
+    REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Integrator );
     REQUIRE( app.m_semaphoreFallbackActive == false );
+
+    mx::app::writeConfigFile( "/tmp/mcp3208Ctrl_test_semaphore.conf",
+                              { "synchro", "synchro" },
+                              { "shmimName", "timingSource" },
+                              { "camwfs_sync", "semaphore" } );
+    mcp3208Ctrl_test synchronized;
+    synchronized.setupConfig();
+    synchronized.config.readConfig( "/tmp/mcp3208Ctrl_test_semaphore.conf" );
+    REQUIRE( synchronized.loadConfigImpl( synchronized.config ) == 0 );
+    REQUIRE( synchronized.m_timingSource == mcp3208Ctrl::TimingSource::Semaphore );
+    REQUIRE( synchronized.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Semaphore );
 }
 
 /// Verify an out-of-range `accel.fps` keeps the default rate limit.
@@ -515,17 +528,18 @@ TEST_CASE( "mcp3208Ctrl fps callback updates trigger metadata", "[mcp3208Ctrl]" 
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
-TEST_CASE( "mcp3208Ctrl fps source callback updates trigger metadata", "[mcp3208Ctrl]" )
+TEST_CASE( "mcp3208Ctrl fps source records the WFS rate without changing the acquisition rate", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
 
     app.setupFpsSourceProperty();
 
+    // Free-running on the integrator, the accelerometers keep accel.fps whatever the WFS runs at.
     REQUIRE( app.setCallBack_m_indiP_fpsSource( app.makeFpsSourceUpdate( 250.0 ) ) == 0 );
-    REQUIRE( app.m_fps == Approx( 250.0f ) );
     REQUIRE( app.m_wfs_fps == Approx( 250.0 ) );
-    REQUIRE( app.m_trigger == Approx( 1e9f / 250.0f ) );
-    REQUIRE( app.nano_sec_target == Approx( 1e9f / 250.0f ) );
+    REQUIRE( app.m_fps == Approx( 8000.0f ) );
+    REQUIRE( app.m_trigger == Approx( 1e9f / 8000.0f ) );
+    REQUIRE( app.nano_sec_target == Approx( 1e9f / 8000.0f ) );
 }
 
 /// Verify synchronized alpha configuration is clamped to the valid range.
