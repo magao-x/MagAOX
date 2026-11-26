@@ -10,6 +10,11 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 #include "dependencies/MCP3208.h" // Included for the MCP3208 device interface
+#include "../../libMagAOX/app/wfsScanSchedule.hpp"
+
+#ifdef __linux__
+    #include <sys/prctl.h>
+#endif
 
 /** \defgroup mcp3208Ctrl
  * \brief The MagAO-X application to readout a mcp3208 A/D on a raspberry Pi.
@@ -32,7 +37,10 @@ namespace app
 /** MagAO-X application to read MCP3208 channels on a Raspberry Pi.
  *
  * The controller can either acquire on its internal timer loop or synchronize reads to an
- * ImageStreamIO semaphore.
+ * ImageStreamIO semaphore. Synchronized, each WFS semaphore arms `round(fps * WFS period)` scans
+ * (4 at 8 kHz with a 2 kHz WFS) uniformly spaced across that WFS period, with the scan grid aligned
+ * to the WFS phase model (`wfsScan::syncSchedule`). Scans are never free-running: a period without a
+ * new semaphore produces no further scans.
  *
  * \ingroup mcp3208Ctrl
  */
@@ -60,6 +68,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
         Integrator = 0, ///< Use the internal timer/integrator cadence.
         Semaphore  = 1  ///< Use synchronization-stream semaphore cadence.
     };
+
+    /// Nominal SPI time of one 24-bit channel transfer at the default rate; a floor on the scan service estimate.
+    static constexpr double c_channelReadNominal_ns = 24e9 / MCP3208Lib::MCP3208::DEFAULT_SPI_BAUD;
 
     /** \name Configurable Parameters - Data
      * @{
@@ -148,6 +159,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     /// INDI property exposing runtime timing diagnostics for acquisition health checks.
     pcf::IndiProperty m_indiP_timingDiag;
+
+    /// INDI property exposing the WFS scan schedule diagnostics.
+    pcf::IndiProperty m_indiP_syncTiming;
 
     float m_trigger{ 1e9f / m_fps };       ///< The timer-mode read interval in nanoseconds.
     float m_gain{ .1 };                    ///< The simple integrator gain used for timer and synchro delay control.
@@ -247,6 +261,18 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     bool m_firstTimerTrigger{ true }; ///< Tracks first-trigger initialization for timer-mode trigger-interval measurement.
 
+    wfsScan::syncSchedule m_syncSchedule; ///< Scans armed by the latest WFS reference, one period's worth.
+
+    uint64_t m_lateScans{ 0 }; ///< Scans that started after their deadline.
+
+    double m_maxLateness_ns{ 0.0 }; ///< Largest scan start lateness since acquisition started, in nanoseconds.
+
+    uint64_t m_coalescedWakes{ 0 }; ///< Semaphore posts drained with another post and handled as one WFS reference.
+
+    uint64_t m_duplicateReferences{ 0 }; ///< WFS references repeating the previous producer frame ID; they arm nothing.
+
+    uint64_t m_scheduleFailures{ 0 }; ///< WFS references with a measured period whose scans could not be fitted.
+
     ///@}
 
     /** \name Synchronization Helpers
@@ -293,13 +319,42 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      */
     int acquireTimerAndCheckValid();
 
-    /// Acquire one frame using the synchronization semaphore.
+    /// Acquire the next scheduled scan, handling WFS semaphore references while waiting for it.
     /**
      * \returns 0 when a new sample is ready.
-     * \returns 1 when the loop should continue without publishing.
+     * \returns 1 after a second without a reference, a stream change, or a semaphore error.
      * \returns -1 on a critical timing error.
      */
     int acquireSynchroAndCheckValid();
+
+    /// Handle one WFS reference: track producer metadata, update the delay model, and arm this period's scans.
+    /**
+     * \returns 0 when scans were armed.
+     * \returns 1 when the reference armed no scans (repeated frame ID, no measured period yet, or no fit).
+     * \returns -1 on a critical timing error.
+     */
+    int processSyncReference( int64_t arrival /**< [in] semaphore arrival on the monotonic clock, in nanoseconds */ );
+
+    /// Read the scan due at `now`, if any, and update the synchronized timing estimates.
+    /**
+     * \returns 0 when a new sample is ready.
+     * \returns 1 when no scan was due, or a channel read failed.
+     * \returns -1 on a critical timing error.
+     */
+    int acquireScan( int64_t now /**< [in] current monotonic time in nanoseconds */ );
+
+    /// Wait for a synchronization semaphore post until a monotonic deadline.
+    /**
+     * \returns 0 when a post was consumed.
+     * \returns -1 with errno ETIMEDOUT at the deadline, EINTR when interrupted, or another error.
+     */
+    int waitForSync( int64_t deadline /**< [in] monotonic deadline in nanoseconds */ );
+
+    /// Read the monotonic clock, the clock of all scan deadlines.
+    /**
+     * \returns the current monotonic time in nanoseconds.
+     */
+    static int64_t monotonicNow();
 
     /// Read the current realtime clock value.
     /**
@@ -307,14 +362,6 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      * \returns -1 on error.
      */
     int getRealtime( timespec &ts /**< [out] the current realtime clock value */ );
-
-    /// Wait on the claimed synchronization semaphore until the supplied timeout.
-    /**
-     * \returns 0 on success.
-     * \returns -1 on error.
-     */
-    int waitOnSemaphore( sem_t    *sem /**< [in] the semaphore to wait on */,
-                         timespec &ts /**< [in] the absolute timeout for the wait */ );
 
     /// Convert a timespec timestamp to nanoseconds.
     static inline double timespecToNs( const timespec &t /**< [in] the timespec value to convert */ );
@@ -329,9 +376,6 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      */
     int readChannelValue( int       channel /**< [in] the MCP3208 channel index to read */,
                           uint16_t &value /**< [out] the sampled channel value */ );
-
-    /// Apply the current controlled delay between semaphore wake and ADC read.
-    void delayBeforeRead();
 
     /// Update the synchronized delay command with anti-windup and physical bounds.
     void updateSynchroDelayController( double desiredDelay_ns /**< [in] the unconstrained synchronized-delay command */ );
@@ -348,6 +392,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     /// Publish the runtime timing-source switch state to the INDI property.
     void updateTimingSourceIndi();
+
+    /// Publish the WFS scan schedule diagnostics to the INDI read-only property.
+    void updateSyncTimingIndi();
 
     ///@}
 
@@ -507,8 +554,16 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
     {
         dt_ns = timespecToNs( atime ) - timespecToNs( m_lastAtime );
 
+        // A missed WFS notification is not a cadence change.
+        if( m_syncProducerFrameValid && m_syncProducerFrameDelta > 1 )
+        {
+            dt_ns /= static_cast<double>( m_syncProducerFrameDelta );
+        }
+
+        // Start from the first measured interval, so the scan count is right from the second reference.
         const double alpha = static_cast<double>( m_alpha );
-        m_avgSemaphorePeriod_ns = alpha * dt_ns + ( 1.0 - alpha ) * m_avgSemaphorePeriod_ns;
+        m_avgSemaphorePeriod_ns =
+            m_avgSemaphorePeriod_ns > 0.0 ? alpha * dt_ns + ( 1.0 - alpha ) * m_avgSemaphorePeriod_ns : dt_ns;
     }
     else
     {
@@ -948,6 +1003,21 @@ int mcp3208Ctrl::appStartup()
     m_indiP_timingDiag.add( pcf::IndiElement( "sync_producer_frame_delta" ) );
     m_indiP_timingDiag.add( pcf::IndiElement( "mode_code" ) );
 
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_syncTiming, "syncTiming", "WFS scan schedule", "Diagnostics" );
+    for( const char *name : { "scans_per_wfs",
+                              "scheduled_fps",
+                              "scan_period_us",
+                              "phase_us",
+                              "skipped_scans",
+                              "late_scans",
+                              "max_lateness_us",
+                              "coalesced_wakes",
+                              "duplicate_references",
+                              "schedule_failures" } )
+    {
+        m_indiP_syncTiming.add( pcf::IndiElement( name ) );
+    }
+
     if( m_fpsDevice != "" )
     {
         REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsDevice, m_fpsProperty );
@@ -967,6 +1037,7 @@ int mcp3208Ctrl::appStartup()
 
     updateTimingSourceIndi();
     updateTimingDiagnosticsIndi();
+    updateSyncTimingIndi();
 
     state( stateCodes::OPERATING );
     return 0;
@@ -1016,7 +1087,8 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
 
     if( synchroMode && wfsPeriodMeasured_ns > 0.0 )
     {
-        const double wfsPeriod_ns = wfsPeriodMeasured_ns;
+        // Scans an interval apart are equivalent phases; the lock thresholds stay fractions of the WFS period.
+        const double wfsPeriod_ns = m_syncSchedule.m_count ? m_syncSchedule.m_interval : wfsPeriodMeasured_ns;
 
         double delayAppliedWrapped_ns = std::fmod( delayAppliedDiag_ns, wfsPeriod_ns );
         if( delayAppliedWrapped_ns < 0.0 )
@@ -1042,7 +1114,7 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
 
         const double absDelayPhaseError_ns = std::fabs( delayPhaseError_ns );
         if( absDelayPhaseError_ns <= m_delayLockAbsThreshold_ns &&
-            absDelayPhaseError_ns <= m_delayLockFracThreshold * wfsPeriod_ns )
+            absDelayPhaseError_ns <= m_delayLockFracThreshold * wfsPeriodMeasured_ns )
         {
             delayLock = 1.0;
         }
@@ -1123,6 +1195,33 @@ void mcp3208Ctrl::updateTimingDiagnosticsIndi()
                                 modeCode } );
 }
 
+void mcp3208Ctrl::updateSyncTimingIndi()
+{
+    const auto &schedule = m_syncSchedule;
+
+    updatesIfChanged<double>( m_indiP_syncTiming,
+                              { "scans_per_wfs",
+                                "scheduled_fps",
+                                "scan_period_us",
+                                "phase_us",
+                                "skipped_scans",
+                                "late_scans",
+                                "max_lateness_us",
+                                "coalesced_wakes",
+                                "duplicate_references",
+                                "schedule_failures" },
+                              { static_cast<double>( schedule.m_count ),
+                                schedule.fps(),
+                                schedule.m_interval * 1e-3,
+                                schedule.m_phase * 1e-3,
+                                static_cast<double>( schedule.m_skipped ),
+                                static_cast<double>( m_lateScans ),
+                                m_maxLateness_ns * 1e-3,
+                                static_cast<double>( m_coalescedWakes ),
+                                static_cast<double>( m_duplicateReferences ),
+                                static_cast<double>( m_scheduleFailures ) } );
+}
+
 int mcp3208Ctrl::appLogic()
 {
     FRAMEGRABBER_APP_LOGIC;
@@ -1142,6 +1241,8 @@ int mcp3208Ctrl::appLogic()
     updateTimingSourceIndi();
 
     updateTimingDiagnosticsIndi();
+
+    updateSyncTimingIndi();
 
     return 0;
 }
@@ -1208,6 +1309,12 @@ float mcp3208Ctrl::fps()
 
 int mcp3208Ctrl::startAcquisition()
 {
+#ifdef __linux__
+    // Scan deadlines are reached through semaphore wait timeouts, which carry the thread's timer slack (50 us by
+    // default, applied to SCHED_FIFO threads by older kernels). 1 ns is the minimum; 0 would restore the default.
+    prctl( PR_SET_TIMERSLACK, 1UL, 0UL, 0UL, 0UL );
+#endif
+
     updateEffectiveTimingSource();
 
     if( m_effectiveTimingSource == TimingSource::Semaphore )
@@ -1446,6 +1553,12 @@ void mcp3208Ctrl::resetSynchroAcquisitionState()
     m_delayPhaseError_ns     = 0.0;
     m_delayLock              = 0.0;
     m_delayCapped            = 0.0;
+    m_syncSchedule            = {};
+    m_lateScans               = 0;
+    m_maxLateness_ns          = 0.0;
+    m_coalescedWakes          = 0;
+    m_duplicateReferences     = 0;
+    m_scheduleFailures        = 0;
 }
 
 void mcp3208Ctrl::updateEffectiveTimingSource()
@@ -1563,32 +1676,59 @@ int mcp3208Ctrl::acquireTimerAndCheckValid()
 
 int mcp3208Ctrl::acquireSynchroAndCheckValid()
 {
-    timespec ts;
-
     if( m_synchroSemaphore == nullptr )
     {
         m_reconfig = true;
         return 1;
     }
 
-    errno = 0;
-    if( getRealtime( ts ) < 0 )
-    {
-        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
-    }
+    bool    wake     = false;
+    int64_t lastWake = monotonicNow(); // Start of the one-second silence timeout.
 
-    ts.tv_sec += 1;
-
-    errno = 0;
-    if( waitOnSemaphore( m_synchroSemaphore, ts ) != 0 )
+    while( !m_shutdown && !m_reconfig )
     {
-        if( errno == EINTR )
+        const int64_t now = monotonicNow();
+
+        // A new WFS reference takes precedence over a pending scan of the previous period.
+        if( wake || sem_trywait( m_synchroSemaphore ) == 0 )
         {
-            return 1;
+            wake = false;
+
+            while( sem_trywait( m_synchroSemaphore ) == 0 )
+            {
+                ++m_syncFramesReceived;
+                ++m_coalescedWakes;
+            }
+
+            if( processSyncReference( now ) < 0 )
+            {
+                return -1;
+            }
+
+            lastWake = now;
+            continue;
         }
 
-        if( errno == ETIMEDOUT )
+        m_syncSchedule.discardLate( now );
+
+        if( m_syncSchedule.m_slot < m_syncSchedule.m_count && now >= m_syncSchedule.deadline() )
         {
+            const int rv = acquireScan( now );
+
+            if( rv != 1 || m_reconfig )
+            {
+                return rv;
+            }
+
+            continue;
+        }
+
+        const int64_t timeout = lastWake + 1000000000LL;
+
+        if( now >= timeout )
+        {
+            m_syncSchedule.cancel();
+
             if( synchroStreamStale() )
             {
                 log<text_log>( "Synchronized trigger stream changed, reconfiguring.", logPrio::LOG_NOTICE );
@@ -1598,18 +1738,42 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
             return 1;
         }
 
-        log<software_error>( { __FILE__, __LINE__, errno, "sem_timedwait" } );
-        m_reconfig = true;
-        return 1;
+        const int64_t until =
+            m_syncSchedule.m_slot < m_syncSchedule.m_count ? std::min( m_syncSchedule.deadline(), timeout ) : timeout;
+
+        errno = 0;
+        if( waitForSync( until ) == 0 )
+        {
+            wake = true;
+        }
+        else if( errno != ETIMEDOUT && errno != EINTR )
+        {
+            log<software_error>( { __FILE__, __LINE__, errno, "WFS semaphore wait" } );
+            m_reconfig = true;
+            return 1;
+        }
     }
 
+    return 1;
+}
+
+int mcp3208Ctrl::processSyncReference( int64_t arrival )
+{
     ++m_syncFramesReceived;
 
     if( m_synchroStream.md != nullptr )
     {
-        const uint64_t producerCnt0 = m_synchroStream.md[0].cnt0;
-        const timespec producerAtime = m_synchroStream.md[0].atime;
-        const bool producerAtimeValid = ( producerAtime.tv_sec != 0 || producerAtime.tv_nsec != 0 );
+        const uint64_t producerCnt0       = m_synchroStream.md[0].cnt0;
+        const timespec producerAtime      = m_synchroStream.md[0].atime;
+        const bool     producerAtimeValid = ( producerAtime.tv_sec != 0 || producerAtime.tv_nsec != 0 );
+
+        // A repeated frame ID is not a new WFS frame: it neither re-anchors the scans nor updates the cadence.
+        if( m_syncProducerFrameValid && producerCnt0 == m_lastSyncProducerFrameId )
+        {
+            m_syncProducerFrameDelta = 0;
+            ++m_duplicateReferences;
+            return 1;
+        }
 
         m_syncProducerFrameId = producerCnt0;
         if( !m_syncProducerFrameValid )
@@ -1684,63 +1848,72 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
         return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
     }
 
+    // Carry the controller's correction across changes of the modelled target.
+    const double correction =
+        m_firstReadLatency ? 0.0 : static_cast<double>( m_synchroDelay ) - static_cast<double>( m_synchroDelayTarget );
+
     updateTriggerTiming( m_atime );
 
-    m_synchroDelay = m_synchroDelayTarget;
+    const double service = std::max( m_avgNonDelayService_ns, m_numChannels * c_channelReadNominal_ns );
+    m_delayBudget_ns     = std::max( 0.0, m_wfsPeriodMeasured_ns - service - m_cadenceGuard_ns );
+    m_synchroDelay       = static_cast<float>( static_cast<double>( m_synchroDelayTarget ) + correction );
 
-    double desiredDelay_ns = static_cast<double>( m_synchroDelay );
-    if( desiredDelay_ns < 0.0 )
+    if( !m_syncSchedule.arm( arrival,
+                             m_wfsPeriodMeasured_ns,
+                             m_fps,
+                             static_cast<double>( m_synchroDelay ),
+                             service,
+                             m_cadenceGuard_ns ) )
     {
-        desiredDelay_ns = 0.0;
-    }
-
-    if( m_wfsPeriodMeasured_ns > 0.0 )
-    {
-        m_delayBudget_ns = m_wfsPeriodMeasured_ns - m_avgNonDelayService_ns - m_cadenceGuard_ns;
-        if( m_delayBudget_ns < 0.0 )
+        if( m_wfsPeriodMeasured_ns > 0.0 )
         {
-            m_delayBudget_ns = 0.0;
+            ++m_scheduleFailures;
         }
-    }
-    else
-    {
-        m_delayBudget_ns = 0.0;
+
+        return 1;
     }
 
-    if( desiredDelay_ns > m_delayBudget_ns )
+    double requestedPhase = std::fmod( static_cast<double>( m_synchroDelay ), m_syncSchedule.m_interval );
+
+    if( requestedPhase < 0.0 )
     {
-        m_delayApplied_ns = m_delayBudget_ns;
-        m_delayCapped     = 1.0;
-    }
-    else
-    {
-        m_delayApplied_ns = desiredDelay_ns;
-        m_delayCapped     = 0.0;
+        requestedPhase += m_syncSchedule.m_interval;
     }
 
-    delayBeforeRead();
+    m_delayCapped = requestedPhase > m_syncSchedule.m_phase ? 1.0 : 0.0;
+    return 0;
+}
+
+int mcp3208Ctrl::acquireScan( int64_t now )
+{
+    m_syncSchedule.discardLate( now );
+
+    const int64_t due      = m_syncSchedule.deadline();
+    const bool    previous = m_syncSchedule.m_haveSample;
+    const int64_t last     = m_syncSchedule.m_lastSample;
+
+    if( !m_syncSchedule.take( now ) )
+    {
+        return 1;
+    }
+
+    if( now > due )
+    {
+        ++m_lateScans;
+        m_maxLateness_ns = std::max( m_maxLateness_ns, static_cast<double>( now - due ) );
+    }
+
+    const unsigned slot  = m_syncSchedule.m_slot - 1;
+    m_delayApplied_ns    = static_cast<double>( due - m_syncSchedule.m_anchor );
+    m_triggerTime        = nsToTimespec( timespecToNs( m_atime ) + m_delayApplied_ns );
+    m_triggerInterval_ns = previous ? static_cast<double>( now - last ) : 0.0;
 
     if( getRealtime( m_currImageTimestamp ) < 0 )
     {
         return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
     }
 
-    const double readLatency_ns = timespecToNs( m_currImageTimestamp ) - timespecToNs( m_atime );
-    const double alpha = static_cast<double>( m_alpha );
-
-    if( !m_firstReadLatency )
-    {
-        m_avgReadLatency_ns = alpha * readLatency_ns + ( 1.0 - alpha ) * m_avgReadLatency_ns;
-    }
-    else
-    {
-        m_avgReadLatency_ns = readLatency_ns;
-        m_firstReadLatency  = false;
-    }
-
-    updateSynchroDelayController( desiredDelay_ns );
-
-    const auto readStart = std::chrono::high_resolution_clock::now();
+    const int64_t start = monotonicNow();
     for( int i = 0; i < m_numChannels; ++i )
     {
         if( readChannelValue( i, m_values[i] ) < 0 )
@@ -1749,36 +1922,80 @@ int mcp3208Ctrl::acquireSynchroAndCheckValid()
             return 1;
         }
     }
-    const auto readEnd = std::chrono::high_resolution_clock::now();
-    m_channelReadoutTime_ns = static_cast<double>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>( readEnd - readStart ).count() );
+    const int64_t finished = monotonicNow();
 
-    timespec cycleEnd;
-    if( getRealtime( cycleEnd ) < 0 )
+    m_channelReadoutTime_ns = static_cast<double>( finished - start );
+
+    const double alpha = static_cast<double>( m_alpha );
+
+    // Update the read-latency controller once per WFS period, at the scan nearest the model phase.
+    const unsigned referenceSlot = static_cast<unsigned>(
+        std::clamp( std::floor( ( static_cast<double>( m_synchroDelayTarget ) - m_syncSchedule.m_phase ) /
+                                    m_syncSchedule.m_interval +
+                                0.5 ),
+                    0.0,
+                    static_cast<double>( m_syncSchedule.m_count - 1 ) ) );
+
+    if( slot == referenceSlot )
     {
-        return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
+        const double latency = static_cast<double>( now - m_syncSchedule.m_anchor );
+        m_avgReadLatency_ns  = m_firstReadLatency ? latency : alpha * latency + ( 1.0 - alpha ) * m_avgReadLatency_ns;
+        m_firstReadLatency   = false;
+        updateSynchroDelayController( static_cast<double>( m_synchroDelay ) );
     }
 
-    double nonDelayService_ns = timespecToNs( cycleEnd ) - timespecToNs( m_atime ) - m_delayApplied_ns;
-    if( nonDelayService_ns < 0.0 )
-    {
-        nonDelayService_ns = 0.0;
-    }
-
-    m_nonDelayService_ns = nonDelayService_ns;
-    const double alphaService = static_cast<double>( m_alpha );
-    if( !m_firstNonDelayService )
-    {
-        m_avgNonDelayService_ns =
-            alphaService * nonDelayService_ns + ( 1.0 - alphaService ) * m_avgNonDelayService_ns;
-    }
-    else
-    {
-        m_avgNonDelayService_ns = nonDelayService_ns;
-        m_firstNonDelayService  = false;
-    }
+    m_nonDelayService_ns    = m_channelReadoutTime_ns;
+    m_avgNonDelayService_ns = m_firstNonDelayService
+                                  ? m_nonDelayService_ns
+                                  : alpha * m_nonDelayService_ns + ( 1.0 - alpha ) * m_avgNonDelayService_ns;
+    m_firstNonDelayService  = false;
 
     return 0;
+}
+
+int mcp3208Ctrl::waitForSync( int64_t deadline )
+{
+#if defined( __linux__ ) && defined( __GLIBC__ )
+    #if __GLIBC_PREREQ( 2, 30 )
+    const timespec until{ static_cast<time_t>( deadline / 1000000000LL ),
+                          static_cast<long>( deadline % 1000000000LL ) };
+    return sem_clockwait( m_synchroSemaphore, CLOCK_MONOTONIC, &until );
+    #endif
+#endif
+
+    while( !m_shutdown && !m_reconfig )
+    {
+        if( sem_trywait( m_synchroSemaphore ) == 0 )
+        {
+            return 0;
+        }
+
+        if( errno != EAGAIN )
+        {
+            return -1;
+        }
+
+        const int64_t now = monotonicNow();
+
+        if( now >= deadline )
+        {
+            errno = ETIMEDOUT;
+            return -1;
+        }
+
+        const timespec pause{ 0, static_cast<long>( std::min<int64_t>( deadline - now, 1000000 ) ) };
+        nanosleep( &pause, nullptr );
+    }
+
+    errno = EINTR;
+    return -1;
+}
+
+int64_t mcp3208Ctrl::monotonicNow()
+{
+    timespec ts;
+    clock_gettime( CLOCK_MONOTONIC, &ts );
+    return static_cast<int64_t>( ts.tv_sec ) * 1000000000LL + ts.tv_nsec;
 }
 
 int mcp3208Ctrl::getRealtime( timespec &ts )
@@ -1786,25 +2003,10 @@ int mcp3208Ctrl::getRealtime( timespec &ts )
     return clock_gettime( CLOCK_REALTIME, &ts );
 }
 
-int mcp3208Ctrl::waitOnSemaphore( sem_t *sem, timespec &ts )
-{
-    return sem_timedwait( sem, &ts );
-}
-
 int mcp3208Ctrl::readChannelValue( int channel, uint16_t &value )
 {
     value = m_adc.read( channel );
     return 0;
-}
-
-void mcp3208Ctrl::delayBeforeRead()
-{
-    if( m_delayApplied_ns > 0.0 )
-    {
-        // Delay intentionally disabled to isolate skipped-frame and acc-local timestamp-drift behavior.
-        // mx::sys::nanoSleep( static_cast<unsigned>( m_delayApplied_ns ) );
-        return;
-    }
 }
 
 void mcp3208Ctrl::updateSynchroDelayController( double desiredDelay_ns )

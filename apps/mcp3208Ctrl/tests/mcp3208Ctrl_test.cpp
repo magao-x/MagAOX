@@ -309,7 +309,11 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     XWCTEST_DOXYGEN_REF( app.updateTriggerTiming( timespec{} ) );
     XWCTEST_DOXYGEN_REF( app.updateTimingDiagnosticsIndi() );
     XWCTEST_DOXYGEN_REF( app.updateTimingSourceIndi() );
-    XWCTEST_DOXYGEN_REF( app.delayBeforeRead() );
+    XWCTEST_DOXYGEN_REF( app.updateSyncTimingIndi() );
+    XWCTEST_DOXYGEN_REF( app.processSyncReference( 0 ) );
+    XWCTEST_DOXYGEN_REF( app.acquireScan( 0 ) );
+    XWCTEST_DOXYGEN_REF( app.waitForSync( 0 ) );
+    XWCTEST_DOXYGEN_REF( app.monotonicNow() );
     XWCTEST_DOXYGEN_REF( app.updateSynchroDelayController( 0.0 ) );
     XWCTEST_DOXYGEN_REF( app.timespecToNs( timespec{} ) );
     XWCTEST_DOXYGEN_REF( app.nsToTimespec( 0.0 ) );
@@ -937,6 +941,27 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming guards non-positive period", "[mcp32
     REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 0.0 ) );
 }
 
+/// Verify the semaphore period starts from the first measured interval and normalizes missed WFS frames.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl updateTriggerTiming starts from the first interval per WFS frame", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_alpha                  = 0.01f;
+    app.m_firstSemaphore         = false;
+    app.m_lastAtime              = timespec{ 10, 0 };
+    app.m_avgSemaphorePeriod_ns  = 0.0;
+    app.m_syncProducerFrameValid = true;
+    app.m_syncProducerFrameDelta = 2;
+
+    app.updateTriggerTiming( timespec{ 10, 1000000L } );
+
+    REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( 500000.0 ) );
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 500000.0 ) );
+}
+
 /// Verify timer-driven acquisition configures the published frame geometry.
 /**
  * \ingroup mcp3208Ctrl_unit_test
@@ -1077,11 +1102,94 @@ TEST_CASE( "mcp3208Ctrl loadImageIntoStream updates frame mapping counters", "[m
     REQUIRE( app.m_syncFramesWritten == 1 );
 }
 
-/// Verify synchronized acquisition performs one ADC sweep per semaphore wake.
+/// Verify a WFS reference arms `round(fps * period)` scans with the grid aligned to the modelled phase.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
-TEST_CASE( "mcp3208Ctrl synchronized mode reads on semaphore wake", "[mcp3208Ctrl]" )
+TEST_CASE( "mcp3208Ctrl synchronized reference arms scans at the modelled phase", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_numChannels           = 2;
+    app.m_fps                   = 8000;
+    app.m_alpha                 = 0.0f;
+    app.m_firstSemaphore        = false;
+    app.m_avgSemaphorePeriod_ns = 500000.0;
+    app.m_synchroDelay          = 0.0f;
+    app.m_synchroDelayTarget    = 0.0f;
+
+    const int64_t arrival = 1000000000;
+
+    // 0.5 * 500 us - 340.6 us wraps to 409.4 us; the four 125-us scans start at 409.4 mod 125 = 34.4 us.
+    REQUIRE( app.processSyncReference( arrival ) == 0 );
+    REQUIRE( app.m_synchroDelayTarget == Approx( 409400.0f ) );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+    REQUIRE( app.m_syncSchedule.m_interval == Approx( 125000.0 ) );
+    REQUIRE( app.m_syncSchedule.m_phase == Approx( 34400.0 ).margin( 1.0 ) );
+    REQUIRE( app.m_syncSchedule.deadline() == arrival + 34400 );
+    REQUIRE( app.m_syncSchedule.fps() == Approx( 8000.0 ) );
+    REQUIRE( app.m_delayCapped == Approx( 0.0 ) );
+    REQUIRE( app.m_syncFramesReceived == 1 );
+
+    // Requesting the WFS rate keeps one scan per period, at the full modelled delay.
+    app.m_fps = 2000;
+    REQUIRE( app.processSyncReference( arrival + 500000 ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_count == 1 );
+    REQUIRE( app.m_syncSchedule.m_phase == Approx( 409400.0 ).margin( 1.0 ) );
+
+    // No measured period yet: the reference arms nothing and is not counted as a failure.
+    mcp3208Ctrl_test fresh;
+    fresh.m_fps = 8000;
+    REQUIRE( fresh.processSyncReference( arrival ) == 1 );
+    REQUIRE( fresh.m_syncSchedule.m_count == 0 );
+    REQUIRE( fresh.m_scheduleFailures == 0 );
+}
+
+/// Verify scans read at their deadlines, record their phase, and are never published as a catch-up burst.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized scans read at deadlines and skip late slots", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    resetStubState();
+    stubState().m_channelValues = { 101, 202 };
+
+    app.m_numChannels = 2;
+    app.m_values.assign( 2, 0 );
+    app.m_gain               = 0.0f;
+    app.m_synchroDelayTarget = 409400.0f;
+
+    const int64_t anchor = 1000000000;
+    REQUIRE( app.m_syncSchedule.arm( anchor, 500000, 8000, 409400, 40000, 20000 ) );
+
+    REQUIRE( app.acquireScan( anchor + 34399 ) == 1 ); // Early: nothing is read.
+    REQUIRE( stubState().m_readOrder.empty() );
+
+    REQUIRE( app.acquireScan( anchor + 34400 ) == 0 );
+    REQUIRE( app.m_values == std::vector<uint16_t>( { 101, 202 } ) );
+    REQUIRE( stubState().m_readOrder == std::vector<int>( { 0, 1 } ) );
+    REQUIRE( app.m_delayApplied_ns == Approx( 34400.0 ) );
+    REQUIRE( app.m_triggerInterval_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_lateScans == 0 );
+
+    // Waking after slot 3 is due skips slots 1 and 2 and reads slot 3 once, late.
+    REQUIRE( app.acquireScan( anchor + 409400 + 5000 ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_skipped == 2 );
+    REQUIRE( app.m_delayApplied_ns == Approx( 409400.0 ) );
+    REQUIRE( app.m_triggerInterval_ns == Approx( 380000.0 ) );
+    REQUIRE( app.m_lateScans == 1 );
+    REQUIRE( app.m_maxLateness_ns == Approx( 5000.0 ) );
+    REQUIRE( app.acquireScan( anchor + 500000 ) == 1 ); // The period is exhausted; nothing free-runs.
+    REQUIRE( stubState().m_readOrder.size() == 4 );
+}
+
+/// Verify one semaphore post publishes four synchronized scans at 8 kHz with a 2 kHz WFS period.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized mode reads four scans per WFS semaphore", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
     sem_t            semaphore;
@@ -1090,29 +1198,36 @@ TEST_CASE( "mcp3208Ctrl synchronized mode reads on semaphore wake", "[mcp3208Ctr
     stubState().m_channelValues = { 101, 202, 303 };
 
     REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
+
+    app.m_synchroShmimName = "camwfs_sync";
+    app.m_timingSource     = mcp3208Ctrl::TimingSource::Semaphore;
+    app.m_numChannels      = 3;
+    app.m_values.assign( 3, 0 );
+    app.m_synchroSemaphore      = &semaphore;
+    app.m_synchroStreamOpen     = true;
+    app.m_gain                  = 0.0f;
+    app.m_fps                   = 8000;
+    app.m_alpha                 = 0.0f;
+    app.m_firstSemaphore        = false;
+    app.m_avgSemaphorePeriod_ns = 500000.0;
+    REQUIRE( clock_gettime( CLOCK_REALTIME, &app.m_lastAtime ) == 0 );
+
     REQUIRE( sem_post( &semaphore ) == 0 );
 
-    app.m_synchroShmimName   = "camwfs_sync";
-    app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
-    app.m_numChannels        = 3;
-    app.m_values.assign( 3, 0 );
-    app.m_synchroSemaphore   = &semaphore;
-    app.m_synchroStreamOpen  = true;
-    app.m_synchroDelay       = 0;
-    app.m_synchroDelayTarget = 0;
-    app.m_gain               = 0;
-    app.m_wfs_fps            = 2000.0;
+    for( int scan = 0; scan < 4; ++scan )
+    {
+        REQUIRE( app.acquireAndCheckValid() == 0 );
+        REQUIRE( app.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Semaphore );
+        REQUIRE( app.m_delayApplied_ns == Approx( 34400.0 + 125000.0 * scan ).margin( 1.0 ) );
+    }
 
-    REQUIRE( app.acquireAndCheckValid() == 0 );
     REQUIRE( app.m_values == std::vector<uint16_t>( { 101, 202, 303 } ) );
-    REQUIRE( stubState().m_readOrder == std::vector<int>( { 0, 1, 2 } ) );
-    REQUIRE( app.m_firstSemaphore == false );
-    REQUIRE( app.m_lastAtime.tv_sec > 0 );
-    REQUIRE( app.m_triggerTime.tv_sec > 0 );
+    REQUIRE( stubState().m_readOrder.size() == 12 );
+    REQUIRE( app.m_syncFramesReceived == 1 );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
+    REQUIRE( app.m_syncSchedule.m_skipped == 0 );
     REQUIRE( app.m_currImageTimestamp.tv_sec > 0 );
     REQUIRE( app.m_firstReadLatency == false );
-    REQUIRE( app.m_avgReadLatency_ns ==
-             Approx( mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime ) ) );
 
     REQUIRE( sem_destroy( &semaphore ) == 0 );
 }
@@ -1124,19 +1239,15 @@ TEST_CASE( "mcp3208Ctrl synchronized mode reads on semaphore wake", "[mcp3208Ctr
 TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
-    sem_t            semaphore;
     IMAGE_METADATA   metadata{};
 
     resetStubState();
     stubState().m_channelValues = { 44 };
 
-    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
-
     app.m_synchroShmimName   = "camwfs_sync";
     app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
     app.m_numChannels        = 1;
     app.m_values.assign( 1, 0 );
-    app.m_synchroSemaphore = &semaphore;
     app.m_synchroStreamOpen = true;
     app.m_synchroStream.md = &metadata;
     app.m_synchroDelay     = 0.0f;
@@ -1147,8 +1258,7 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
 
     metadata.cnt0  = 100;
     metadata.atime = timespec{ 10, 0 };
-    REQUIRE( sem_post( &semaphore ) == 0 );
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    app.processSyncReference( mcp3208Ctrl::monotonicNow() );
 
     REQUIRE( app.m_firstProducerSample == false );
     REQUIRE( app.m_producerPeriodInst_ns == Approx( 0.0 ) );
@@ -1162,8 +1272,7 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
 
     metadata.cnt0  = 102;
     metadata.atime = timespec{ 10, 1000000L };
-    REQUIRE( sem_post( &semaphore ) == 0 );
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    app.processSyncReference( mcp3208Ctrl::monotonicNow() );
 
     REQUIRE( app.m_producerPeriodInst_ns == Approx( 500000.0 ) );
     REQUIRE( app.m_avgProducerPeriod_ns == Approx( 500000.0 ) );
@@ -1176,8 +1285,7 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
 
     metadata.cnt0  = 104;
     metadata.atime = timespec{ 10, 2100000L };
-    REQUIRE( sem_post( &semaphore ) == 0 );
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    app.processSyncReference( mcp3208Ctrl::monotonicNow() );
 
     const double expectedPeriod2_ns = 550000.0;
     const double expectedAvg2_ns =
@@ -1195,8 +1303,7 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
 
     metadata.cnt0  = 104;
     metadata.atime = timespec{ 10, 2200000L };
-    REQUIRE( sem_post( &semaphore ) == 0 );
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    app.processSyncReference( mcp3208Ctrl::monotonicNow() );
 
     REQUIRE( app.m_producerPeriodInst_ns == Approx( periodBeforeNoAdvance_ns ) );
     REQUIRE( app.m_avgProducerPeriod_ns == Approx( avgBeforeNoAdvance_ns ) );
@@ -1206,146 +1313,117 @@ TEST_CASE( "mcp3208Ctrl synchronized mode tracks producer cadence from metadata"
     REQUIRE( app.m_syncProducerFrameId == 104 );
     REQUIRE( app.m_syncProducerFrameDelta == 0 );
 
-    REQUIRE( sem_destroy( &semaphore ) == 0 );
+    REQUIRE( app.m_duplicateReferences == 1 );
 }
 
-/// Verify synchronized read-latency EMA initializes from the first sample and smooths subsequent samples.
+/// Verify the read-latency EMA updates once per WFS period, at the scan nearest the modelled phase.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
 TEST_CASE( "mcp3208Ctrl synchronized read latency EMA initializes and smooths", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
-    sem_t            semaphore;
 
     resetStubState();
     stubState().m_channelValues = { 77 };
 
-    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
-
-    app.m_synchroShmimName   = "camwfs_sync";
-    app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
-    app.m_numChannels        = 1;
+    app.m_numChannels = 1;
     app.m_values.assign( 1, 0 );
-    app.m_synchroSemaphore   = &semaphore;
-    app.m_synchroStreamOpen  = true;
-    app.m_synchroDelayTarget = 0.0f;
-    app.m_synchroDelay       = 0.0f;
     app.m_gain               = 0.0f;
     app.m_alpha              = 0.2f;
-    app.m_firstReadLatency   = true;
-    app.m_avgReadLatency_ns  = 0.0;
+    app.m_synchroDelayTarget = 409400.0f;
 
-    REQUIRE( sem_post( &semaphore ) == 0 );
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    const int64_t anchor = 1000000000;
+    REQUIRE( app.m_syncSchedule.arm( anchor, 500000, 8000, 409400, 40000, 20000 ) );
 
-    const double readLatency0_ns =
-        mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime );
+    for( int64_t offset : { 34400LL, 159400LL, 284400LL } )
+    {
+        REQUIRE( app.acquireScan( anchor + offset ) == 0 );
+        REQUIRE( app.m_firstReadLatency == true );
+    }
 
+    REQUIRE( app.acquireScan( anchor + 409400 ) == 0 );
     REQUIRE( app.m_firstReadLatency == false );
-    REQUIRE( app.m_avgReadLatency_ns == Approx( readLatency0_ns ) );
+    REQUIRE( app.m_avgReadLatency_ns == Approx( 409400.0 ) );
 
-    REQUIRE( sem_post( &semaphore ) == 0 );
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_syncSchedule.arm( anchor + 500000, 500000, 8000, 409400, 40000, 20000 ) );
+    REQUIRE( app.acquireScan( anchor + 500000 + 409400 + 1000 ) == 0 );
 
-    const double readLatency1_ns =
-        mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime );
     const double alpha = static_cast<double>( app.m_alpha );
-    const double expectedAvgLatency_ns = alpha * readLatency1_ns + ( 1.0 - alpha ) * readLatency0_ns;
-
-    REQUIRE( app.m_avgReadLatency_ns == Approx( expectedAvgLatency_ns ) );
-
-    REQUIRE( sem_destroy( &semaphore ) == 0 );
+    REQUIRE( app.m_avgReadLatency_ns == Approx( alpha * 410400.0 + ( 1.0 - alpha ) * 409400.0 ) );
 }
 
-/// Verify synchronized non-delay service EMA uses the configurable global alpha.
+/// Verify the scan service EMA, which bounds the schedule, uses the configurable global alpha.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
 TEST_CASE( "mcp3208Ctrl synchronized non-delay service EMA uses global alpha", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
-    sem_t            semaphore;
 
     resetStubState();
     stubState().m_channelValues = { 55 };
 
-    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
-
-    app.m_synchroShmimName      = "camwfs_sync";
-    app.m_timingSource          = mcp3208Ctrl::TimingSource::Semaphore;
-    app.m_numChannels           = 1;
+    app.m_numChannels = 1;
     app.m_values.assign( 1, 0 );
-    app.m_synchroSemaphore      = &semaphore;
-    app.m_synchroStreamOpen     = true;
-    app.m_synchroDelayTarget    = 0.0f;
-    app.m_synchroDelay          = 0.0f;
     app.m_gain                  = 0.0f;
     app.m_alpha                 = 0.2f;
     app.m_firstNonDelayService  = true;
     app.m_avgNonDelayService_ns = 0.0;
 
-    REQUIRE( sem_post( &semaphore ) == 0 );
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    const int64_t anchor = 1000000000;
+    REQUIRE( app.m_syncSchedule.arm( anchor, 500000, 8000, 0, 40000, 20000 ) );
+
+    REQUIRE( app.acquireScan( anchor ) == 0 );
 
     const double nonDelay0_ns = app.m_nonDelayService_ns;
     REQUIRE( app.m_firstNonDelayService == false );
+    REQUIRE( nonDelay0_ns == Approx( app.m_channelReadoutTime_ns ) );
     REQUIRE( app.m_avgNonDelayService_ns == Approx( nonDelay0_ns ) );
 
-    REQUIRE( sem_post( &semaphore ) == 0 );
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( app.acquireScan( anchor + 125000 ) == 0 );
 
     const double nonDelay1_ns = app.m_nonDelayService_ns;
     const double alpha        = static_cast<double>( app.m_alpha );
-    const double expectedAvgNonDelay_ns = alpha * nonDelay1_ns + ( 1.0 - alpha ) * nonDelay0_ns;
-
-    REQUIRE( app.m_avgNonDelayService_ns == Approx( expectedAvgNonDelay_ns ) );
-
-    REQUIRE( sem_destroy( &semaphore ) == 0 );
+    REQUIRE( app.m_avgNonDelayService_ns == Approx( alpha * nonDelay1_ns + ( 1.0 - alpha ) * nonDelay0_ns ) );
 }
 
-/// Verify synchronized delay control uses read-latency EMA for the integrator correction.
+/// Verify the delay controller integrates the read-latency error and the next reference keeps its correction.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
 TEST_CASE( "mcp3208Ctrl synchronized delay controller uses read latency EMA", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
-    sem_t            semaphore;
 
     resetStubState();
     stubState().m_channelValues = { 99 };
 
-    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
-    REQUIRE( sem_post( &semaphore ) == 0 );
-
-    app.m_synchroShmimName   = "camwfs_sync";
-    app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
-    app.m_numChannels        = 1;
+    app.m_numChannels = 1;
     app.m_values.assign( 1, 0 );
-    app.m_synchroSemaphore   = &semaphore;
-    app.m_synchroStreamOpen  = true;
-    app.m_synchroDelayTarget = 0.0f;
-    app.m_synchroDelay       = 2000000.0f;
     app.m_gain               = 1.0f;
     app.m_alpha              = 0.2f;
+    app.m_synchroDelayTarget = 409400.0f;
+    app.m_synchroDelay       = 409400.0f;
     app.m_firstReadLatency   = false;
-    app.m_avgReadLatency_ns  = 800000.0;
+    app.m_avgReadLatency_ns  = 409400.0;
 
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    const int64_t anchor = 1000000000;
+    REQUIRE( app.m_syncSchedule.arm( anchor, 500000, 8000, 409400, 40000, 20000 ) );
 
-    const double readLatency_ns =
-        mcp3208Ctrl::timespecToNs( app.m_currImageTimestamp ) - mcp3208Ctrl::timespecToNs( app.m_atime );
-    const double alpha = static_cast<double>( app.m_alpha );
-    const double expectedAvgLatency_ns = alpha * readLatency_ns + ( 1.0 - alpha ) * 800000.0;
-    const double expectedDelay_ns =
-        ( 2000000.0 - expectedAvgLatency_ns ) > 0.0 ? ( 2000000.0 - expectedAvgLatency_ns ) : 0.0;
-
-    REQUIRE( app.m_avgReadLatency_ns == Approx( expectedAvgLatency_ns ) );
-    REQUIRE( app.m_synchroDelay == Approx( expectedDelay_ns ) );
+    // Slot 3 starts 10 us late: the latency EMA moves 2 us and the delay command 2 us earlier.
+    REQUIRE( app.acquireScan( anchor + 409400 + 10000 ) == 0 );
+    REQUIRE( app.m_avgReadLatency_ns == Approx( 411400.0 ) );
+    REQUIRE( app.m_synchroDelay == Approx( 407400.0f ) );
     REQUIRE( app.m_values[0] == 99 );
 
-    REQUIRE( sem_destroy( &semaphore ) == 0 );
+    // The next reference re-arms at the corrected phase.
+    app.m_firstSemaphore        = false;
+    app.m_avgSemaphorePeriod_ns = 500000.0;
+    app.m_alpha                 = 0.0f;
+    REQUIRE( app.processSyncReference( anchor + 500000 ) == 0 );
+    REQUIRE( app.m_synchroDelay == Approx( 407400.0f ) );
+    REQUIRE( app.m_syncSchedule.m_phase == Approx( 32400.0 ).margin( 1.0 ) );
 }
 
 /// Verify synchronized delay control clamps at zero when the control step overshoots.
@@ -1355,29 +1433,22 @@ TEST_CASE( "mcp3208Ctrl synchronized delay controller uses read latency EMA", "[
 TEST_CASE( "mcp3208Ctrl synchronized delay controller clamps to zero", "[mcp3208Ctrl]" )
 {
     mcp3208Ctrl_test app;
-    sem_t            semaphore;
 
     resetStubState();
     stubState().m_channelValues = { 11 };
 
-    REQUIRE( sem_init( &semaphore, 0, 0 ) == 0 );
-    REQUIRE( sem_post( &semaphore ) == 0 );
-
-    app.m_synchroShmimName   = "camwfs_sync";
-    app.m_timingSource       = mcp3208Ctrl::TimingSource::Semaphore;
-    app.m_numChannels        = 1;
+    app.m_numChannels = 1;
     app.m_values.assign( 1, 0 );
-    app.m_synchroSemaphore   = &semaphore;
-    app.m_synchroStreamOpen  = true;
     app.m_synchroDelayTarget = 0.0f;
     app.m_synchroDelay       = 1000.0f;
     app.m_gain               = 1.0f;
 
-    REQUIRE( app.acquireAndCheckValid() == 0 );
+    const int64_t anchor = 1000000000;
+    REQUIRE( app.m_syncSchedule.arm( anchor, 500000, 8000, 1000, 40000, 20000 ) );
+
+    REQUIRE( app.acquireScan( anchor + 6000 ) == 0 );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
     REQUIRE( app.m_values[0] == 11 );
-
-    REQUIRE( sem_destroy( &semaphore ) == 0 );
 }
 
 /// Verify synchronized delay control blocks integrator windup while cadence capping is active.
@@ -1498,6 +1569,12 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     app.m_lastTriggerTime        = timespec{ 4, 4 };
     app.m_firstTriggerTime       = false;
     app.m_firstTimerTrigger      = false;
+    app.m_lateScans               = 3;
+    app.m_maxLateness_ns          = 9000.0;
+    app.m_coalescedWakes          = 2;
+    app.m_duplicateReferences     = 1;
+    app.m_scheduleFailures        = 4;
+    REQUIRE( app.m_syncSchedule.arm( 1000000000, 500000, 8000, 0, 40000, 20000 ) );
 
     REQUIRE( app.reconfig() == 0 );
     REQUIRE( app.m_synchroSemaphore == nullptr );
@@ -1544,6 +1621,14 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     REQUIRE( app.m_lastTriggerTime.tv_nsec == 0 );
     REQUIRE( app.m_firstTriggerTime == true );
     REQUIRE( app.m_firstTimerTrigger == true );
+    REQUIRE( app.m_syncSchedule.m_count == 0 );
+    REQUIRE( app.m_syncSchedule.m_skipped == 0 );
+    REQUIRE( app.m_syncSchedule.m_haveSample == false );
+    REQUIRE( app.m_lateScans == 0 );
+    REQUIRE( app.m_maxLateness_ns == Approx( 0.0 ) );
+    REQUIRE( app.m_coalescedWakes == 0 );
+    REQUIRE( app.m_duplicateReferences == 0 );
+    REQUIRE( app.m_scheduleFailures == 0 );
 }
 
 } // namespace mcp3208CtrlTest

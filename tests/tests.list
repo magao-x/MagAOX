@@ -6,6 +6,7 @@
 ../libMagAOX/app/tests/stateCodes_test
 ../libMagAOX/app/tests/semUtils_test
 ../libMagAOX/app/tests/framePoll_test
+../libMagAOX/app/tests/wfsScanSchedule_test
 ../libMagAOX/app/dev/tests/outletController_test
 ../libMagAOX/app/dev/tests/telemeter_test
 ../libMagAOX/app/dev/tests/dm_test
