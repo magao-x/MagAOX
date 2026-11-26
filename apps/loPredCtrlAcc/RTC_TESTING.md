@@ -82,6 +82,10 @@ Missed WFS or ACC frames do not stop prediction, up to `parameters.max_fill` con
 
 `ddspc_performance.wfs_filled` and `acc_filled` count filled WFS frames and ACC samples. Longer gaps still break the histories (standard then stops qualifying until the history refills; assisted holds), and `max_fill=0` restores stopping on any gap.
 
+### Holding through lost input
+
+A condition that would otherwise stop prediction at once (`wfs_stale`, `wfs_invalid`, `command_invalid` while a history refills, and in assisted mode `acc_window` and `upstream_unlocked`) is held for up to `parameters.hold_timeout` seconds (default 1): no slot is rendered, so synco keeps the DM at its last command, and prediction continues by itself when the condition clears. Only a failure lasting longer stops prediction, with the condition that started it in `safety.output_state`. A request made while the input has never qualified is still refused at once. `ddspc_performance.input_holds` counts the holds; `hold_timeout=0` stops at once, as before.
+
 ## Before installation (operator, on the RTC)
 
 ```bash
