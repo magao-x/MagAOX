@@ -46,6 +46,7 @@ std::map<std::string, Image>  images;
 std::map<std::string, double> peaks; ///< Producer-only payload peaks, inspected after join.
 std::atomic<std::int64_t>     tick{ 1000000000 };
 std::atomic<bool>             accept{ true };
+std::atomic<bool>             receipts{ true }; ///< The mock consumer writes receipts; false loses them.
 std::mutex                    registry;
 std::atomic<bool>     foreignOwned{ false }, interfered{ false }; ///< Explicit competing-provider fault injection.
 std::filesystem::path directory;
@@ -172,7 +173,7 @@ int ImageStreamIO_UpdateIm( IMAGE *image )
     if( name.ends_with( "_aux" ) )
         for( float value : images.at( name ).pixels )
             peaks[name] = std::max( peaks[name], double( std::abs( value ) ) );
-    if( name.ends_with( "_ready" ) )
+    if( name.ends_with( "_ready" ) && receipts.load() )
     {
         auto       &receipt = images.at( name.substr( 0, name.size() - 6 ) + "_ack" );
         const auto *commit  = static_cast<const std::int64_t *>( image->array.raw );
@@ -408,10 +409,100 @@ TEST_CASE( "Real producer skips slots it cannot prepare in time", "[operational-
     std::filesystem::remove_all( directory );
 }
 
-/** \brief Throwing, discarded or newly invalid candidates latch off and remove only this provider. */
+/** \brief Discarded commands and lost receipts are failed DM writes: the output stays requested and writes the next
+ * slots, and its commands are copied again once the consumer recovers. */
+TEST_CASE( "Real producer keeps writing through failed DM writes", "[operational-transport]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::SyncoOutputState::write_failed;
+    MagAOX::app::SyncoOutputState::check;
+#endif
+    // clang-format on
+    const bool lost = GENERATE( false, true );
+    directory       = std::filesystem::temp_directory_path() / ( "ddspc-private-write-" + std::to_string( getpid() ) );
+    std::filesystem::create_directory( directory );
+    images.clear();
+    peaks.clear();
+    tick.store( 1000000000 );
+    accept.store( true );
+    receipts.store( true );
+    make_image( "private_timing", synco::words, false );
+    make_image( "dm10disp10_aux", 4, true );
+    make_image( "dm10disp10_aux_ack", synco::ackWords, false );
+    schedule( tick.load() );
+    MagAOX::app::SyncoOutput output;
+    output.configure( { true, true, 1, 1, 10000000 }, "dm10disp10_aux", "private_timing", 30, 4 );
+    output.start(
+        []
+        {
+            return true;
+        },
+        []( const auto &, const auto &, std::int64_t, std::span<float> pixels )
+        {
+            std::fill( pixels.begin(), pixels.end(), .1f );
+            return true;
+        } );
+    REQUIRE( output.request( true ) );
+    REQUIRE( wait_for(
+        [&]
+        {
+            return output.status().m_acknowledged;
+        } ) );
+
+    // Every write fails for a while: discarded, or its receipt never arrives.
+    if( lost )
+    {
+        receipts.store( false );
+    }
+    else
+    {
+        accept.store( false );
+    }
+
+    REQUIRE( wait_for(
+        [&]
+        {
+            const auto status = output.status();
+            return ( lost ? status.m_writeFailures : status.m_discarded ) > 3;
+        } ) );
+
+    const auto during = output.status();
+    CHECK_FALSE( during.m_fault );
+    CHECK( during.m_requested );
+    CHECK( during.m_faults == 0 );
+
+    // The consumer recovers: commands are copied again without an operator request.
+    accept.store( true );
+    receipts.store( true );
+    const auto acks = output.status().m_acknowledgements;
+    REQUIRE( wait_for(
+        [&]
+        {
+            return output.status().m_acknowledgements > acks + 3;
+        } ) );
+    CHECK( output.status().m_requested );
+    CHECK_FALSE( output.status().m_fault );
+    REQUIRE( output.request( false ) );
+    REQUIRE( wait_for(
+        [&]
+        {
+            return output.status().m_zeroConfirmed;
+        } ) );
+    REQUIRE( output.stop() );
+    for( float value : images.at( "dm10disp10_aux" ).pixels )
+    {
+        REQUIRE( value == 0 );
+    }
+
+    images.clear();
+    std::filesystem::remove_all( directory );
+}
+
+/** \brief Throwing or newly invalid candidates latch off and remove only this provider. */
 TEST_CASE( "Real producer faults inhibit and remove their own contribution", "[operational-transport]" )
 {
-    const int failure = GENERATE( 1, 2, 3 );
+    const int failure = GENERATE( 1, 3 );
     directory = std::filesystem::temp_directory_path() / ( "ddspc-private-fault-" + std::to_string( getpid() ) );
     std::filesystem::create_directory( directory );
     images.clear();
@@ -454,7 +545,8 @@ TEST_CASE( "Real producer faults inhibit and remove their own contribution", "[o
     std::filesystem::remove_all( directory );
 }
 
-/** \brief A competing cooperative producer prevents all source and sidecar writes, then only zero may recover. */
+/** \brief A competing cooperative producer prevents all source and sidecar writes; the output waits, counting one
+ * failed write, and writes once the owner leaves. */
 TEST_CASE( "Real producer respects an existing exclusive owner", "[operational-transport]" )
 {
     directory = std::filesystem::temp_directory_path() / ( "ddspc-private-owner-" + std::to_string( getpid() ) );
@@ -481,19 +573,31 @@ TEST_CASE( "Real producer respects an existing exclusive owner", "[operational-t
                       return true;
                   } );
     REQUIRE( output.request( true ) );
-    const bool blocked = wait_for( [&] { return output.status().m_fault; } );
-    const auto during  = output.status();
-    output.request( false );
+    const bool blocked = wait_for(
+        [&]
+        {
+            return output.status().m_writeFailures > 0;
+        } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+    const auto during = output.status();
     foreignOwned.store( false );
     flock( owner, LOCK_UN );
     close( owner );
     REQUIRE( blocked );
     REQUIRE( during.m_published == 0 );
+    REQUIRE( during.m_writeFailures == 1 ); // One outage, one failure.
+    REQUIRE( during.m_requested );
+    REQUIRE_FALSE( during.m_fault );
     REQUIRE_FALSE( interfered.load() );
+    REQUIRE( wait_for(
+        [&]
+        {
+            return output.status().m_acknowledged;
+        } ) );
+    REQUIRE( output.request( false ) );
     REQUIRE( wait_for( [&] { return output.status().m_zeroConfirmed; } ) );
     REQUIRE( output.stop() );
     REQUIRE_FALSE( output.status().m_requested );
-    REQUIRE_FALSE( output.status().m_acknowledged );
     for( float value : images.at( "dm10disp10_aux" ).pixels )
         REQUIRE( value == 0 );
     images.clear();

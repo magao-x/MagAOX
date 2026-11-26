@@ -209,7 +209,8 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// outputValid() last passed, so the next failure is recorded as the first one.
     mutable std::atomic<bool> m_wasValid{ false };
 
-    std::uint64_t m_faultsLogged{ 0 }; ///< Output faults already logged; appLogic only.
+    std::uint64_t m_faultsLogged{ 0 };        ///< Output faults already logged; appLogic only.
+    std::uint64_t m_writeFailuresLogged{ 0 }; ///< Failed DM writes already logged; appLogic only.
     std::string   m_faultDetail;       ///< Latest fault's reason and condition, shown in safety; appLogic only.
 
     /// Shared WFS freshness policy, independent of ACC synchronization and the model's excitation rank.
@@ -286,6 +287,9 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     pcf::IndiProperty m_outputThreadProp;         ///< Framework thread property (th-dm: pid and priority).
     int               m_outputThreadPrio{ 0 };    ///< Worker real-time priority; 0 keeps SCHED_OTHER.
     std::string       m_outputThreadCpuset;       ///< Worker cpuset; empty leaves placement unchanged.
+
+    /// Wait for a commit's receipt before counting a failed DM write and writing the next slot [ms].
+    double m_receiptTimeoutMs{ 100 };
 
     /// Bounded latency distribution over one INDI update interval, in 1-us bins.
     struct Latency
@@ -991,6 +995,11 @@ inline void loPredCtrlAcc_operational::setupConfig()
          "renderLeadUs",
          "float",
          "Every slot is rendered this long before its cutoff, from the newest decision [us] (default 40)." );
+    add( "dm",
+         "receiptTimeoutMs",
+         "float",
+         "Wait for a commit's receipt before counting a failed DM write and writing the next slot [ms] (default "
+         "100)." );
     add( "adc", "enabled", "bool", "Use upstream synchronized ADC inputs for the assisted model." );
     for( const auto &key : { "shmimName", "profile", "sync_device", "sync_property" } )
         add( "adc", key, "string", "Existing ADC source or existing upstream lock diagnostic." );
@@ -1062,15 +1071,17 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         config( m_calibrationFile, "dm.calibration" );
         config( m_outputThreadPrio, "dm.threadPrio" );
         config( m_outputThreadCpuset, "dm.cpuset" );
+        config( m_receiptTimeoutMs, "dm.receiptTimeoutMs" );
         if( m_channel.size() <= 4 || !m_channel.ends_with( "_aux" ) || m_outputThreadPrio < 0 ||
             m_outputThreadPrio > 99 || m_syncopationTiming.empty() || shmimMonitorT::m_shmimName.empty() ||
             !std::isfinite( m_gain ) || std::abs( m_gain ) > 10 || !std::isfinite( m_inputTimeout ) ||
             m_inputTimeout <= 0 || m_inputTimeout > 1 || !std::isfinite( m_holdTimeout ) || m_holdTimeout < 0 ||
             m_holdTimeout > 60 || m_settings.m_modes < 1 || m_settings.m_modes > 2 || m_accelHistory < 1 ||
             m_accelHistory > 16 || m_slots < 1 || m_slots > 16 || m_ratio < 1 || m_ratio > 16 ||
-            !std::isfinite( renderLeadUs ) || renderLeadUs < 0 || renderLeadUs > 1000 || !std::isfinite( m_ripple ) ||
-            m_ripple < 0 || m_maxFill < 0 || m_maxFill > 20 || !std::isfinite( m_learnStdExtra ) ||
-            m_learnStdExtra < 0 || m_learnStdExtra > 3600 )
+            !std::isfinite( renderLeadUs ) || renderLeadUs < 0 || renderLeadUs > 1000 ||
+            !std::isfinite( m_receiptTimeoutMs ) || m_receiptTimeoutMs <= 0 || m_receiptTimeoutMs > 10000 ||
+            !std::isfinite( m_ripple ) || m_ripple < 0 || m_maxFill < 0 || m_maxFill > 20 ||
+            !std::isfinite( m_learnStdExtra ) || m_learnStdExtra < 0 || m_learnStdExtra > 3600 )
         {
             throw std::invalid_argument( "Invalid operational WFS, producer, gain or model configuration" );
         }
@@ -2705,7 +2716,7 @@ inline int loPredCtrlAcc_operational::setupINDI()
            "margin_us_min",        "margin_us_mean",      "wake_us_p99",           "acc_age_calc_us_mean",
            "acc_age_calc_us_p99",  "acc_age_calc_us_max", "acc_age_apply_us_mean", "acc_age_apply_us_p99",
            "acc_age_apply_us_max", "learn_us_mean",       "learn_us_p99",          "learn_us_max",
-           "learn_overruns",       "input_holds",         "transport_discarded" } )
+           "learn_overruns",       "input_holds",         "transport_discarded",   "dm_write_failures" } )
     {
         m_indiP_performance.add( pcf::IndiElement( key, 0.0 ) );
     }
@@ -2817,6 +2828,7 @@ inline int loPredCtrlAcc_operational::appStartup()
         output.m_authorized = output.m_routingVerified = output.m_producerDefaults = true;
         output.m_width                                                             = m_calWidth;
         output.m_height                                                            = m_calHeight;
+        output.m_ackTimeoutNs = std::llround( m_receiptTimeoutMs * 1e6 ); // A lost receipt never stalls the output.
         m_output.configure( output, m_channel, m_syncopationTiming, m_writeLeadUs, m_calibration.m_shapes.rows() );
         m_output.start(
             [this] { return outputValid(); },
@@ -3087,8 +3099,8 @@ inline int loPredCtrlAcc_operational::appLogic()
         "margin_us_min",        "margin_us_mean",      "wake_us_p99",           "acc_age_calc_us_mean",
         "acc_age_calc_us_p99",  "acc_age_calc_us_max", "acc_age_apply_us_mean", "acc_age_apply_us_p99",
         "acc_age_apply_us_max", "learn_us_mean",       "learn_us_p99",          "learn_us_max",
-        "learn_overruns",       "input_holds",         "transport_discarded" };
-    std::vector<double>       values{ double( standard.m_updates ),
+        "learn_overruns",       "input_holds",         "transport_discarded",   "dm_write_failures" };
+    std::vector<double> values{ double( standard.m_updates ),
                                 double( assisted.m_updates ),
                                 standard.m_originRmse,
                                 assisted.m_rmse.empty() ? 0 : assisted.m_rmse.back(),
@@ -3122,7 +3134,8 @@ inline int loPredCtrlAcc_operational::appLogic()
                                 learn.m_max,
                                 double( overruns ),
                                 double( m_inputHolds.load() ),
-                                double( output.m_discarded ) };
+                                double( output.m_discarded ),
+                                double( output.m_writeFailures ) };
     for( int k = 0; k < m_ratio; ++k )
     {
         names.push_back( m_phaseNames[2 * k].c_str() );
@@ -3159,6 +3172,15 @@ inline int loPredCtrlAcc_operational::appLogic()
         }
 
         log<text_log>( "DDSPC output fault, prediction stopped: " + m_faultDetail, logPrio::LOG_WARNING );
+    }
+
+    // Failed DM writes never stop the output: log them at most once per update, and keep writing.
+    if( output.m_writeFailures != m_writeFailuresLogged )
+    {
+        log<text_log>( "DDSPC DM write failed " + std::to_string( output.m_writeFailures - m_writeFailuresLogged ) +
+                           " time(s) (latest: " + output.m_writeFailure + "); output continues",
+                       logPrio::LOG_WARNING );
+        m_writeFailuresLogged = output.m_writeFailures;
     }
 
     updatesIfChanged<std::string>( m_indiP_safety,

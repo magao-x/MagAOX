@@ -23,14 +23,12 @@ struct SyncoOutputConfig
 {
     bool         m_authorized{ false }, m_routingVerified{ false }; ///< Both are startup-only operator assertions.
     double       m_maxAbs{ 0 }, m_maxStep{ 0 }; ///< Approved full-image surface-micron limits; no guessed defaults.
-    std::int64_t m_ackTimeoutNs{
-        0 }; ///< Strict bounds require a positive timeout; producer defaults permit zero/base-only ack wait.
+    /// Receipt wait before a commit counts as a failed write and the next slot is written; strict bounds require it,
+    /// producer defaults permit zero (wait indefinitely).
+    std::int64_t m_ackTimeoutNs{ 0 };
     bool m_producerDefaults{ false }; ///< App-selected finite-value/base-ack policy; never an INDI/config trust switch.
     std::uint32_t m_width{ 0 },
         m_height{ 0 }; ///< Optional exact geometry from a two-dimensional synthesis calibration.
-    /// Consecutive commands the consumer may discard (late or stale; it keeps its previous copy) before a fault; 0
-    /// never faults on discards.
-    std::uint32_t m_maxDiscards{ 1000 };
 };
 
 /// Copyable requested/transport-acknowledged state; never a physical application certificate.
@@ -45,6 +43,8 @@ struct SyncoOutputStatus
     const char   *m_reason{ "disabled" }; ///< Stable diagnostic text, without acquisition-thread string allocation.
     const char   *m_faultReason{ "" };    ///< Why the latest fault latched; kept after its zero is acknowledged.
     std::uint64_t m_faults{ 0 };          ///< Faults latched since startup, so a reader can detect each new one.
+    std::uint64_t m_writeFailures{ 0 };   ///< Failed DM writes; output stays requested and the next slot is written.
+    const char   *m_writeFailure{ "" };   ///< Why the latest write failed.
 };
 
 /// Small deterministic output interlock reused by the two native providers and mock consumers.
@@ -56,7 +56,6 @@ class SyncoOutputState
     std::int64_t       m_sent{ -1 }; ///< Actual commit time, used only for acknowledgement timeout.
     std::vector<float> m_last;       ///< Last submitted own contribution, never another application's command.
     std::vector<float> m_copied;     ///< Last contribution the consumer copied, restored to m_last on a discard.
-    std::uint32_t      m_discards{ 0 }; ///< Consecutive discarded commands, against m_config.m_maxDiscards.
   public:
     /// Allocate fixed storage before any producer thread starts.
     SyncoOutputState( const SyncoOutputConfig &config /**< [in] Reviewed authorization. */,
@@ -71,6 +70,8 @@ class SyncoOutputState
     bool initialize();
     /// Require a tagged initial zero after exclusive attachment, before any nonzero contribution.
     void attached();
+    /// Count a failed DM write without a fault: release any pending commit, as a discard, and keep the request.
+    void write_failed( const char *reason /**< [in] Stable diagnostic string. */ );
     /// Release abandoned transport ownership on an observed scheduler incarnation change, without fabricating an ack.
     void transport_reset();
     /// Clear only an acknowledged, removed fault; never enables output.
@@ -78,7 +79,8 @@ class SyncoOutputState
     /// Observe an exact matching transport acknowledgement, separately from physical application.
     void acknowledge( bool copied /**< [in] Consumer copied rather than discarded the pending payload. */ );
     /// Check the pending receipt timeout and current qualification without inventing a new write opportunity.
-    void check( std::int64_t now /**< [in] Same-host monotonic time. */, bool qualified /**< [in] Current gate. */ );
+    /** \returns true if a pending commit timed out: the caller releases its transport ownership. */
+    bool check( std::int64_t now /**< [in] Same-host monotonic time. */, bool qualified /**< [in] Current gate. */ );
     /// Validate finite values and any strict DDSPC bounds; zero removal bypasses the active slew limit.
     bool validate( std::span<const float> pixels /**< [in] Prepared complete image. */,
                    bool                   zero /**< [in] Removal command. */ );
@@ -149,10 +151,23 @@ inline void SyncoOutputState::attached()
     m_initialZero            = true;
     m_status.m_zeroConfirmed = false;
 }
+inline void SyncoOutputState::write_failed( const char *reason )
+{
+    // The consumer did not copy a pending commit: as for a discard, its previous copy stays the own contribution. A
+    // lost zero is still needed (zero_needed()), so it is sent again.
+    if( m_pending )
+    {
+        m_pending = false;
+        std::copy( m_copied.begin(), m_copied.end(), m_last.begin() );
+    }
+
+    ++m_status.m_writeFailures;
+    m_status.m_writeFailure = reason;
+    m_status.m_reason       = reason;
+}
 inline void SyncoOutputState::transport_reset()
 {
-    m_pending = false;
-    fault( "scheduler_reset_zero_pending" );
+    write_failed( "write_failed_scheduler_reset" );
 }
 inline bool SyncoOutputState::clear_fault()
 {
@@ -171,20 +186,12 @@ inline void SyncoOutputState::acknowledge( bool copied )
     if( !copied )
     {
         // The consumer kept its previous copy, as for a skipped slot: that stays the own contribution. A discarded
-        // zero is still needed (zero_needed()), so it is sent again. Only a sustained run of discards faults.
+        // zero is still needed (zero_needed()), so it is sent again. Discards never fault.
         ++m_status.m_discarded;
         std::copy( m_copied.begin(), m_copied.end(), m_last.begin() );
-
-        if( !m_pendingZero && m_config.m_maxDiscards && ++m_discards >= m_config.m_maxDiscards )
-        {
-            fault( "command_discarded_zero_pending" );
-            return;
-        }
-
         m_status.m_reason = m_pendingZero ? "zero_discarded_resending" : "command_discarded_previous_retained";
         return;
     }
-    m_discards = 0;
     std::copy( m_last.begin(), m_last.end(), m_copied.begin() );
     m_status.m_zeroConfirmed = m_pendingZero;
     m_status.m_acknowledged  = !m_pendingZero;
@@ -196,12 +203,20 @@ inline void SyncoOutputState::acknowledge( bool copied )
     m_status.m_reason = m_pendingZero ? ( m_status.m_fault ? "fault_zero_acknowledged" : "disabled_zero_acknowledged" )
                                       : "transport_acknowledged_not_physical_application";
 }
-inline void SyncoOutputState::check( std::int64_t now, bool qualified )
+inline bool SyncoOutputState::check( std::int64_t now, bool qualified )
 {
     if( m_status.m_requested && !qualified )
+    {
         fault( "input_or_model_qualification_lost" );
+    }
+
     if( m_pending && m_config.m_ackTimeoutNs > 0 && now - m_sent > m_config.m_ackTimeoutNs )
-        fault( "ack_timeout_zero_unconfirmed" );
+    {
+        write_failed( "write_failed_receipt_timeout" );
+        return true;
+    }
+
+    return false;
 }
 inline bool SyncoOutputState::validate( std::span<const float> pixels, bool zero )
 {
@@ -403,6 +418,7 @@ inline void SyncoOutput::run()
     synco::Request pending;
     bool           haveRequest = false;
     std::int64_t   stopping    = -1;
+    bool           down        = false; // Channel or transport unavailable: one write failure per outage.
     // Called with the output mutex held, before the single payload buffer may be reused.
     auto receive = [&]( const synco::CommitRecord &commit )
     {
@@ -442,7 +458,11 @@ inline void SyncoOutput::run()
             std::lock_guard<std::mutex> lock( m_mutex );
             if( m_syncopationOutstanding )
                 receive( m_syncopationPending );
-            m_state->check( now, qualified );
+            if( m_state->check( now, qualified ) )
+            {
+                m_syncopationOutstanding = false; // The receipt is abandoned; poll offers the next slot.
+            }
+
             const auto state = m_state->status();
             wanted           = state.m_requested;
             zero             = m_state->zero_needed();
@@ -459,10 +479,13 @@ inline void SyncoOutput::run()
         {
             if( m_name.empty() || ImageStreamIO_openIm( &m_source, m_name.c_str() ) != 0 )
             {
+                if( !down )
                 { //mutex scope
                     std::lock_guard<std::mutex> lock( m_mutex );
-                    m_state->fault( "auxiliary_unavailable" );
+                    m_state->write_failed( "write_failed_channel_unavailable" );
+                    down = true;
                 }
+
                 std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
                 continue;
             }
@@ -496,9 +519,20 @@ inline void SyncoOutput::run()
         }
         if( polled < 0 )
         {
-            std::lock_guard<std::mutex> lock( m_mutex );
-            m_state->fault( "syncopation_transport_unavailable" );
+            // The scheduler is unavailable or restarting: count the outage once, retry, and keep the request.
+            if( !down )
+            { //mutex scope
+                std::lock_guard<std::mutex> lock( m_mutex );
+                m_state->write_failed( "write_failed_transport_unavailable" );
+                down = true;
+            }
+
+            haveRequest = false;
+            std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+            continue;
         }
+
+        down = false;
         if( polled > 0 )
             haveRequest = true;
         const auto decision = synco::monotonicNs();
@@ -563,7 +597,7 @@ inline void SyncoOutput::run()
                     if( published )
                         m_state->submitted( m_pixels, zero, synco::monotonicNs() );
                     else
-                        m_state->skipped(); // Cutoff passed or the slot was revoked; transport loss faults in poll.
+                        m_state->skipped(); // Cutoff passed or the slot was revoked; transport loss is counted in poll.
                     haveRequest = false;
                 }
             }

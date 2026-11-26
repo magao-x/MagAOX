@@ -58,8 +58,8 @@ TEST_CASE( "Disturbance and correction output states remain independent", "[mult
     REQUIRE( disturbance.status().m_zeroConfirmed );
     REQUIRE_FALSE( correction.status().m_requested );
 }
-/** \brief Invalid commands, discarded payloads and missing acknowledgements revoke active intent until explicit
- * recovery. */
+/** \brief Invalid commands and lost qualification revoke active intent until explicit recovery; a missing
+ * acknowledgement is a failed write that keeps it. */
 TEST_CASE( "Operational faults require removal and an explicit new request", "[multirate][output]" )
 {
     MagAOX::app::SyncoOutputConfig c{ true, true, 1, .2, 1000 };
@@ -75,26 +75,68 @@ TEST_CASE( "Operational faults require removal and an explicit new request", "[m
     output.acknowledge( true );
     REQUIRE( output.request( true, true ) );
     output.submitted( value, false, 200 );
-    output.check( 1201, true );
+
+    // No receipt by the timeout: the write failed, the request stays and the next command can be written.
+    REQUIRE_FALSE( output.check( 1200, true ) );
+    REQUIRE( output.check( 1201, true ) );
+    REQUIRE_FALSE( output.status().m_fault );
+    REQUIRE( output.status().m_requested );
+    REQUIRE_FALSE( output.pending() );
+    REQUIRE( output.status().m_writeFailures == 1 );
+    REQUIRE( std::string( output.status().m_writeFailure ) == "write_failed_receipt_timeout" );
+    REQUIRE_FALSE( output.zero_needed() );
+    REQUIRE( output.validate( value, false ) );
+
+    // Lost qualification still faults.
+    output.check( 1400, false );
     REQUIRE( output.status().m_fault );
     REQUIRE_FALSE( output.status().m_requested );
-    output.acknowledge( false );
     REQUIRE( output.zero_needed() );
-    output.submitted( zero, true, 1300 );
+    output.submitted( zero, true, 1500 );
     output.acknowledge( true );
-    REQUIRE_FALSE( output.status().m_requested );
     REQUIRE( output.clear_fault() );
+}
+
+/** \brief A scheduler reset abandons the pending commit as a failed write: the request stays, the consumer's previous
+ * copy is the own contribution, and an abandoned zero is sent again. */
+TEST_CASE( "Scheduler resets are failed writes, not faults", "[multirate][output]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::SyncoOutputState::transport_reset;
+    MagAOX::app::SyncoOutputState::write_failed;
+#endif
+    // clang-format on
+    MagAOX::app::SyncoOutputState output( { true, true, 1, .2, 1000 }, 2, true );
+    const std::array<float, 2>    first{ .1f, .1f }, second{ .25f, .25f }, zero{};
     REQUIRE( output.request( true, true ) );
-    output.check( 1400, false );
-    REQUIRE_FALSE( output.status().m_requested );
+    output.submitted( first, false, 100 );
+    output.acknowledge( true );
+    output.submitted( second, false, 200 );
+    output.transport_reset();
+    REQUIRE_FALSE( output.status().m_fault );
+    REQUIRE( output.status().m_requested );
+    REQUIRE_FALSE( output.pending() );
+    REQUIRE( output.status().m_writeFailures == 1 );
+
+    // The slew check compares with the copied .1, not the abandoned .25: .32 is .22 above it and is rejected.
+    REQUIRE( output.validate( second, false ) );
+    REQUIRE_FALSE( output.validate( std::array<float, 2>{ .32f, .32f }, false ) );
+
+    MagAOX::app::SyncoOutputState removal( { true, true, 1, .2, 1000 }, 2, true );
+    REQUIRE( removal.request( true, true ) );
+    REQUIRE( removal.request( false, false ) );
+    removal.submitted( zero, true, 100 );
+    removal.transport_reset();
+    REQUIRE( removal.zero_needed() );
+    REQUIRE_FALSE( removal.status().m_zeroConfirmed );
 }
 /** \brief A discarded command is like a skipped slot: the consumer's previous copy stays; a discarded zero is resent;
- * only a sustained run of discards faults. */
+ * no run of discards faults. */
 TEST_CASE( "Discarded commands keep the previous copy without a fault", "[multirate][output]" )
 {
     MagAOX::app::SyncoOutputConfig c{ true, true, 1, .2, 1000 };
-    c.m_maxDiscards = 3;
-    MagAOX::app::SyncoOutputState output( c, 2, true );
+    MagAOX::app::SyncoOutputState  output( c, 2, true );
     const std::array<float, 2>    first{ .1f, .1f }, second{ .15f, .15f }, zero{};
     REQUIRE( output.request( true, true ) );
     output.submitted( first, false, 100 );
@@ -114,24 +156,25 @@ TEST_CASE( "Discarded commands keep the previous copy without a fault", "[multir
     // The slew check compares with the copied .1, not the discarded .15: .32 is .22 above it and is rejected.
     REQUIRE_FALSE( output.validate( std::array<float, 2>{ .32f, .32f }, false ) );
 
-    // A copy resets the run; the third consecutive discard after it would fault, as would a dead route.
+    // A sustained run of discards never faults.
     MagAOX::app::SyncoOutputState run( c, 2, true );
     REQUIRE( run.request( true, true ) );
-    for( int k = 0; k < 3; ++k )
+    for( int k = 0; k < 5000; ++k )
     {
         run.submitted( first, false, 300 + k );
         run.acknowledge( false );
     }
-    REQUIRE( run.status().m_fault );
-    REQUIRE( std::string( run.status().m_faultReason ) == "command_discarded_zero_pending" );
+    REQUIRE_FALSE( run.status().m_fault );
+    REQUIRE( run.status().m_requested );
 
     // A discarded zero is resent rather than faulting.
+    REQUIRE( run.request( false, false ) );
     REQUIRE( run.zero_needed() );
-    run.submitted( zero, true, 400 );
+    run.submitted( zero, true, 6000 );
     run.acknowledge( false );
     REQUIRE( run.zero_needed() );
-    REQUIRE( run.status().m_faults == 1 );
-    run.submitted( zero, true, 401 );
+    REQUIRE( run.status().m_faults == 0 );
+    run.submitted( zero, true, 6001 );
     run.acknowledge( true );
     REQUIRE_FALSE( run.zero_needed() );
 }
