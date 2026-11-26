@@ -64,6 +64,12 @@ class Harness : public pupilXCFit
     /// Apply a reference change through its INDI callback.
     void select( const std::string &element /**< [in] reference selector element */ );
 
+    /// Apply a startup reference value through the app configuration loader.
+    int configureReference( const char *value /**< [in] startup value or null to use the default */ );
+
+    /// Expose the result of loading a startup reference value.
+    using pupilXCFit::m_fitSelected;
+
     /// Claim a pending frame through the production worker callback.
     void claim();
 
@@ -103,7 +109,7 @@ Harness::Harness( bool fit )
     fitRefMonitorT::m_shmimName     = "test_fit_reference";
     m_metadata.atime                = { 123, 456 };
     m_fitSelected                   = fit;
-    createStandardIndiSelectionSw( m_indiP_reference, "reference", { "wfs", "fit" } );
+    createStandardIndiSelectionSw( m_indiP_reference, "reference", { "wfsref", "fitref" } );
     REQUIRE( allocate( dev::shmimT() ) == 0 );
 }
 
@@ -138,6 +144,21 @@ void Harness::select( const std::string &element )
     request.setName( m_indiP_reference.getName() );
     request.add( pcf::IndiElement( element, pcf::IndiElement::On ) );
     REQUIRE( newCallBack_m_indiP_reference( request ) == 0 );
+}
+
+int Harness::configureReference( const char *value )
+{
+    setupConfig();
+
+    if( value )
+    {
+        auto &target = config.m_targets.at( "fit.reference" );
+        target.values.emplace_back( value );
+        target.sources.emplace_back( "startup reference fixture" );
+        target.set = true;
+    }
+
+    return loadConfigImpl( config );
 }
 
 void Harness::claim()
@@ -210,6 +231,22 @@ std::vector<flatlogs::bufferPtrT> Harness::archivedFits()
 }
 /// \endcond
 
+/// Verify startup defaults, both advertised values, and compatibility with deployed configuration files.
+TEST_CASE( "pupilXCFit accepts current and legacy startup reference names", "[pupilXCFit]" )
+{
+    // clang-format off
+    #ifdef PUPILXCFIT_TEST_DOXYGEN_REF
+    pupilXCFit::loadConfigImpl;
+    #endif
+    // clang-format on
+
+    auto [value, expectedFit] = GENERATE( table<const char *, bool>(
+        { { nullptr, false }, { "wfsref", false }, { "fitref", true }, { "wfs", false }, { "fit", true } } ) );
+    Harness app( !expectedFit );
+    REQUIRE( app.configureReference( value ) == 0 );
+    CHECK( app.m_fitSelected == expectedFit );
+}
+
 /// Verify live-minus-reference shifts, subpixel resolution, and transfer of the acquisition timestamp.
 TEST_CASE( "pupilXCFit keeps ImageStreamIO axis order and acquisition time", "[pupilXCFit]" )
 {
@@ -279,7 +316,7 @@ TEST_CASE( "pupilXCFit waits for the selected reference and recovers after inval
     app.claim();
     app.reference<false>( wfs );
     CHECK( app.claimed()[0] == Approx( -3 ).margin( 0.03 ) );
-    app.select( "wfs" );
+    app.select( "wfsref" );
     CHECK( mx::math::isNan( app.claimed()[0] ) );
     CHECK( mx::math::isNan( app.output()[0] ) );
     app.live( wfs );
@@ -322,7 +359,7 @@ TEST_CASE( "pupilXCFit archives each live fit with its selected reference", "[pu
     auto distant = scene( -8.5f, -2 );
     app.reference<false>( wfs );
     app.live( target );
-    app.select( "fit" );
+    app.select( "fitref" );
     app.live( target );
     app.reference<true>( fit );
     app.live( target );

@@ -131,4 +131,4 @@ camwfs_fit_ref will be loaded independently
   shmimName=camwfs_xc_fitdelta
   ```
 
-- With the alignment loop open, choose `wfs` or `fit` on `camwfs-xc-fit.reference`, then choose `alternate` on `camwfs-align.input_source`. Check the selection state and the reported shifts before closing the loop. Instrument convergence and camera writer timing remain commissioning measurements.
+- With the alignment loop open, choose `wfsref` or `fitref` on `camwfs-xc-fit.reference`, then choose `alternate` on `camwfs-align.input_source`. The `[fit]` section accepts `reference=wfsref` (default) or `reference=fitref`. Existing startup files can still use `wfs` or `fit`. Check the selection state and the reported shifts before closing the loop. Instrument convergence and camera writer timing remain commissioning measurements.

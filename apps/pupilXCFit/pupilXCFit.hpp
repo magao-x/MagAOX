@@ -86,6 +86,12 @@ class pupilXCFit : public MagAOXApp<true>,
     /// The measurement stream has a fixed axis ordering.
     static constexpr bool c_frameGrabber_flippable{ false };
 
+    /// Configuration value and INDI element for the WFS reference.
+    static constexpr const char *c_wfsRefSelection{ "wfsref" };
+
+    /// Configuration value and INDI element for the dedicated fit reference.
+    static constexpr const char *c_fitRefSelection{ "fitref" };
+
     /// Marker for an unavailable correlation result or an invalid output sample.
     static constexpr float c_invalid{ std::numeric_limits<float>::quiet_NaN() };
 
@@ -287,7 +293,7 @@ inline void pupilXCFit::setupConfig()
                 "reference",
                 false,
                 "string",
-                "Startup reference selection: wfs or fit (default wfs)." );
+                "Select wfsref or fitref at startup (default wfsref)." );
     config.add( "fit.maxShift",
                 "",
                 "fit.maxShift",
@@ -323,18 +329,21 @@ inline int pupilXCFit::loadConfigImpl( mx::app::appConfigurator &cfg )
     FRAMEGRABBER_LOAD_CONFIG( cfg );
     TELEMETER_LOAD_CONFIG( cfg );
 
-    std::string selection{ "wfs" };
+    std::string selection{ c_wfsRefSelection };
     cfg( selection, "fit.reference" );
     cfg( m_maxShift, "fit.maxShift" );
     cfg( m_minPeak, "fit.minPeak" );
 
-    if( ( selection != "wfs" && selection != "fit" ) || m_maxShift < 1 || !mx::math::isFinite( m_minPeak ) ||
-        m_minPeak < 0 || m_minPeak > 1 )
+    const bool useWfsRef = selection == c_wfsRefSelection || selection == "wfs";
+    const bool useFitRef = selection == c_fitRefSelection || selection == "fit";
+
+    if( ( !useWfsRef && !useFitRef ) || m_maxShift < 1 || !mx::math::isFinite( m_minPeak ) || m_minPeak < 0 ||
+        m_minPeak > 1 )
     {
         return log<software_error, -1>( { __FILE__, __LINE__, "invalid pupilXCFit fit configuration" } );
     }
 
-    m_fitSelected = selection == "fit";
+    m_fitSelected = useFitRef;
     return 0;
 }
 
@@ -348,8 +357,9 @@ inline void pupilXCFit::loadConfig()
 
 inline int pupilXCFit::appStartup()
 {
-    createStandardIndiSelectionSw( m_indiP_reference, "reference", { "wfs", "fit" }, "Reference" );
-    m_indiP_reference[m_fitSelected ? "fit" : "wfs"].setSwitchState( pcf::IndiElement::On );
+    createStandardIndiSelectionSw(
+        m_indiP_reference, "reference", { c_wfsRefSelection, c_fitRefSelection }, "Reference" );
+    m_indiP_reference[m_fitSelected ? c_fitRefSelection : c_wfsRefSelection].setSwitchState( pcf::IndiElement::On );
     m_indiP_reference.setState( INDI_BUSY );
 
     if( registerIndiPropertyNew( m_indiP_reference, INDI_NEWCALLBACK( m_indiP_reference ) ) < 0 )
@@ -417,8 +427,10 @@ inline int pupilXCFit::appShutdown()
 INDI_NEWCALLBACK_DEFN( pupilXCFit, m_indiP_reference )( const pcf::IndiProperty &ipRecv )
 {
     INDI_VALIDATE_CALLBACK_PROPS( m_indiP_reference, ipRecv );
-    const bool wfs = ipRecv.find( "wfs" ) && ipRecv["wfs"].getSwitchState() == pcf::IndiElement::On;
-    const bool fit = ipRecv.find( "fit" ) && ipRecv["fit"].getSwitchState() == pcf::IndiElement::On;
+    const bool wfs =
+        ipRecv.find( c_wfsRefSelection ) && ipRecv[c_wfsRefSelection].getSwitchState() == pcf::IndiElement::On;
+    const bool fit =
+        ipRecv.find( c_fitRefSelection ) && ipRecv[c_fitRefSelection].getSwitchState() == pcf::IndiElement::On;
 
     if( wfs == fit )
     {
@@ -721,8 +733,10 @@ inline void pupilXCFit::publish( const std::optional<shiftT> &shift, const times
 
 inline void pupilXCFit::updateReferenceSelection()
 {
-    indi::updateSelectionSwitchIfChanged(
-        m_indiP_reference, m_fitSelected ? "fit" : "wfs", m_indiDriver, m_referenceReady ? INDI_OK : INDI_BUSY );
+    indi::updateSelectionSwitchIfChanged( m_indiP_reference,
+                                          m_fitSelected ? c_fitRefSelection : c_wfsRefSelection,
+                                          m_indiDriver,
+                                          m_referenceReady ? INDI_OK : INDI_BUSY );
 }
 
 } // namespace app
