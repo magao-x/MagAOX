@@ -63,6 +63,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_gain;
     using loPredCtrlAcc_operational::m_gainFront;
     using loPredCtrlAcc_operational::m_gainSets;
+    using loPredCtrlAcc_operational::m_holdTimeout;
     using loPredCtrlAcc_operational::m_indiP_clone;
     using loPredCtrlAcc_operational::m_indiP_control;
     using loPredCtrlAcc_operational::m_indiP_exploration;
@@ -79,11 +80,13 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::m_indiP_reset;
     using loPredCtrlAcc_operational::m_indiP_sync;
     using loPredCtrlAcc_operational::m_indiP_zeroDm;
+    using loPredCtrlAcc_operational::m_inputHolds;
     using loPredCtrlAcc_operational::m_inputValid;
     using loPredCtrlAcc_operational::m_integrate;
     using loPredCtrlAcc_operational::m_integratorReady;
     using loPredCtrlAcc_operational::m_intState;
     using loPredCtrlAcc_operational::m_invalidReason;
+    using loPredCtrlAcc_operational::m_invalidSinceNs;
     using loPredCtrlAcc_operational::m_invalidWindow;
     using loPredCtrlAcc_operational::m_learning;
     using loPredCtrlAcc_operational::m_learnStdExtra;
@@ -123,6 +126,7 @@ class Controller : public MagAOX::app::loPredCtrlAcc_operational
     using loPredCtrlAcc_operational::mainLoopInput;
     using loPredCtrlAcc_operational::modalZeroed;
     using loPredCtrlAcc_operational::outputCandidate;
+    using loPredCtrlAcc_operational::outputInvalid;
     using loPredCtrlAcc_operational::outputValid;
     using loPredCtrlAcc_operational::parseExploration;
     using loPredCtrlAcc_operational::processImage;
@@ -736,9 +740,11 @@ TEST_CASE( "Standard integrator follows the main loop's mfilt law", "[rtc-contro
     DDSPC::Matrix y( 2, 1 ), empty;
     y << .4f, -.6f;
     REQUIRE( app.advance( y, empty, false ).isZero() );
-    app.m_wasValid = true; // Record the first failing condition.
+    app.m_wasValid    = true; // Record the first failing condition.
+    app.m_holdTimeout = 0;    // Without holding.
     REQUIRE_FALSE( app.outputValid() );
     REQUIRE( std::string( app.m_invalidReason.load() ) == "integrator_parameters" );
+    app.m_invalidSinceNs = -1; // Qualified again, as outputValid() records once the parameters arrive.
 
     // holoop gain .25, mc .9, limit .3; mode 0 gain factor 2, mode 1 limit factor 2; mode 2 is not a DDSPC mode.
     app.mainLoop( .25, .9, .3, { 2, 1, 7 }, { 1, 1, 7 }, { 1, 2, 7 } );
@@ -2012,6 +2018,7 @@ TEST_CASE( "Output faults keep the condition that caused them", "[rtc-controller
     CHECK( output.status().m_faults == 1 );
 
     Controller app( true );
+    app.m_holdTimeout = 0; // Stop at once, so each failure is seen (holding is tested separately).
     app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
     app.m_inputValid.store( true );
     app.m_candidateValid.store( true );
@@ -2038,6 +2045,56 @@ TEST_CASE( "Output faults keep the condition that caused them", "[rtc-controller
     app.m_wfsReceipt.store( MagAOX::app::synco::monotonicNs() - std::int64_t( 1e9 ) );
     CHECK_FALSE( app.outputValid() );
     CHECK( std::string( app.m_invalidReason.load() ) == "wfs_stale" );
+}
+
+/** \brief Missed or late WFS/ACC input holds the DM rather than stopping prediction, up to hold_timeout. */
+TEST_CASE( "Missed input holds the DM and prediction resumes", "[rtc-controller]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACC_TEST_DOXYGEN_REF
+    MagAOX::app::loPredCtrlAcc_operational::outputValid;
+    MagAOX::app::loPredCtrlAcc_operational::outputInvalid;
+#endif
+    // clang-format on
+    namespace synco = MagAOX::app::synco;
+    Controller app( true );
+    REQUIRE( app.m_holdTimeout == 1.0 );
+
+    // Never qualified: a request still fails at once.
+    REQUIRE_FALSE( app.outputValid() );
+
+    app.m_mode.store( DDSPC::ShadowMode::AccelAssisted );
+    app.m_inputValid.store( true );
+    app.m_candidateValid.store( true );
+    app.m_assistedValid.store( true );
+    app.m_syncLocked.store( true );
+    app.m_wfsReceipt.store( synco::monotonicNs() );
+    REQUIRE( app.outputValid() );
+    REQUIRE( app.m_invalidSinceNs.load() < 0 );
+
+    // An incomplete ACC window (missed samples), then a late WFS frame: still qualified, holding the DM.
+    app.m_windowReason.store( "counter_gap" );
+    app.m_assistedValid.store( false );
+    REQUIRE( app.outputValid() );
+    REQUIRE( app.m_invalidSinceNs.load() >= 0 );
+    REQUIRE( app.m_inputHolds.load() == 1 );
+    REQUIRE( std::string( app.m_invalidReason.load() ) == "acc_window" );
+    app.m_assistedValid.store( true );
+    app.m_wfsReceipt.store( synco::monotonicNs() - std::int64_t( 50e6 ) );
+    REQUIRE( app.outputValid() );
+    REQUIRE( app.m_inputHolds.load() == 1 ); // One continuous hold.
+
+    // Input returns: prediction continues without a fault.
+    app.m_wfsReceipt.store( synco::monotonicNs() );
+    REQUIRE( app.outputValid() );
+    REQUIRE( app.m_invalidSinceNs.load() < 0 );
+
+    // A failure lasting longer than hold_timeout stops prediction.
+    app.m_inputValid.store( false );
+    REQUIRE( app.outputValid() );
+    REQUIRE( app.m_inputHolds.load() == 2 );
+    app.m_invalidSinceNs.store( synco::monotonicNs() - std::int64_t( 1.5e9 ) );
+    REQUIRE_FALSE( app.outputValid() );
 }
 
 /** \brief The modal output requires DDSPC to control exactly modes 0 and 1 and a stream distinct from the WFS input and

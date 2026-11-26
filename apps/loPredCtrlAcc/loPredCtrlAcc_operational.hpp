@@ -214,6 +214,16 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
     /// Shared WFS freshness policy, independent of ACC synchronization and the model's excitation rank.
     double                    m_inputTimeout{ .01 };
+
+    /// Seconds an input or model condition may fail (missed or late WFS/ACC frames) before prediction stops; meanwhile
+    /// no slot is rendered, so the DM holds its command, and prediction continues when the condition clears.
+    double m_holdTimeout{ 1.0 };
+
+    /// Start of the current failure of outputValid()'s conditions, or -1.
+    mutable std::atomic<std::int64_t> m_invalidSinceNs{ -1 };
+
+    /// Failures of outputValid()'s conditions held without stopping prediction.
+    mutable std::atomic<std::uint64_t> m_inputHolds{ 0 };
     std::atomic<std::int64_t> m_wfsReceipt{ -1 };
     std::atomic<bool>         m_inputValid{ false }, m_assistedValid{ false }, m_candidateValid{ false };
 
@@ -698,7 +708,13 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
                       std::int64_t         now /**< [in] Current monotonic decision time. */ );
 
     /// Check only current WFS/selected sensor input; bootstrap prediction may explore before a model is trained.
+    /** A failure shorter than hold_timeout still qualifies (the candidates then hold the DM), so missed frames do not
+     * stop prediction.
+     */
     bool outputValid() const;
+
+    /// Name the first failing input or model condition, or nullptr when the output may render.
+    const char *outputInvalid( std::int64_t now /**< [in] Current monotonic time. */ ) const;
 
     /// Render the modal command of an actual existing producer Request at cutoff minus the render lead.
     bool outputCandidate( const synco::Request &request /**< [in] Exact slot being prepared. */,
@@ -960,6 +976,12 @@ inline void loPredCtrlAcc_operational::setupConfig()
          "int",
          "Consecutive missed WFS frames, and WFS frames of missed ACC samples, filled instead of stopping (0-20, "
          "default 5)." );
+    add( "parameters",
+         "hold_timeout",
+         "float",
+         "Seconds a missed or late WFS/ACC input (or a model refilling its history) may last before prediction "
+         "stops; meanwhile the DM holds its command and prediction resumes when the input returns (0-60, default "
+         "1)." );
     add( "parameters", "qrd", "bool", "Use QR-RLS for both independent models." );
     add( "parameters",
          "learn_std_extra",
@@ -1038,6 +1060,7 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         config( m_settings.m_future, "parameters.future" );
         config( m_settings.m_useQrd, "parameters.qrd" );
         config( m_inputTimeout, "parameters.input_timeout" );
+        config( m_holdTimeout, "parameters.hold_timeout" );
         config( m_accelHistory, "parameters.accel_history" );
         config( m_slots, "parameters.dm_slots" );
         config( m_ratio, "parameters.acc_ratio" );
@@ -1058,8 +1081,9 @@ inline int loPredCtrlAcc_operational::loadConfigImpl()
         if( m_channel.size() <= 4 || !m_channel.ends_with( "_aux" ) || m_outputThreadPrio < 0 ||
             m_outputThreadPrio > 99 || m_syncopationTiming.empty() || shmimMonitorT::m_shmimName.empty() ||
             !std::isfinite( m_gain ) || std::abs( m_gain ) > 10 || !std::isfinite( m_inputTimeout ) ||
-            m_inputTimeout <= 0 || m_inputTimeout > 1 || m_settings.m_modes < 1 || m_settings.m_modes > 2 ||
-            m_accelHistory < 1 || m_accelHistory > 16 || m_slots < 1 || m_slots > 16 || m_ratio < 1 || m_ratio > 16 ||
+            m_inputTimeout <= 0 || m_inputTimeout > 1 || !std::isfinite( m_holdTimeout ) || m_holdTimeout < 0 ||
+            m_holdTimeout > 60 || m_settings.m_modes < 1 || m_settings.m_modes > 2 || m_accelHistory < 1 ||
+            m_accelHistory > 16 || m_slots < 1 || m_slots > 16 || m_ratio < 1 || m_ratio > 16 ||
             !std::isfinite( renderLeadUs ) || renderLeadUs < 0 || renderLeadUs > 1000 || !std::isfinite( m_ripple ) ||
             m_ripple < 0 || m_maxFill < 0 || m_maxFill > 20 || !std::isfinite( m_learnStdExtra ) ||
             m_learnStdExtra < 0 || m_learnStdExtra > 3600 )
@@ -2045,33 +2069,45 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
     return 0;
 }
 
-inline bool loPredCtrlAcc_operational::outputValid() const
+inline const char *loPredCtrlAcc_operational::outputInvalid( std::int64_t now ) const
 {
-    const auto now = synco::monotonicNs(), last = m_wfsReceipt.load();
+    const auto last     = m_wfsReceipt.load();
     const bool assisted = m_mode != DDSPC::ShadowMode::Standard;
 
-    const char *reason = !m_inputValid.load()                                          ? "wfs_invalid"
-                         : ( m_integrate || m_mfiltCopy ) && !m_integratorReady.load() ? "integrator_parameters"
-                         : !m_candidateValid.load()                                    ? "command_invalid"
-                         : last < 0 || now < last || now - last > m_inputTimeout * 1e9 ? "wfs_stale"
-                         : assisted && !m_assistedValid.load()                         ? "acc_window"
-                         : assisted && !m_syncLocked.load()                            ? "upstream_unlocked"
-                                                                                       : nullptr;
+    return !m_inputValid.load()                                          ? "wfs_invalid"
+           : ( m_integrate || m_mfiltCopy ) && !m_integratorReady.load() ? "integrator_parameters"
+           : !m_candidateValid.load()                                    ? "command_invalid"
+           : last < 0 || now < last || now - last > m_inputTimeout * 1e9 ? "wfs_stale"
+           : assisted && !m_assistedValid.load()                         ? "acc_window"
+           : assisted && !m_syncLocked.load()                            ? "upstream_unlocked"
+                                                                         : nullptr;
+}
+
+inline bool loPredCtrlAcc_operational::outputValid() const
+{
+    const auto  now    = synco::monotonicNs();
+    const char *reason = outputInvalid( now );
 
     if( !reason )
     {
         m_wasValid.store( true );
+        m_invalidSinceNs.store( -1 );
         return true;
     }
 
-    // Keep the condition that ended a qualified period, not the consequences that follow it.
+    // Keep the condition that ended a qualified period, not the consequences that follow it. Missed or late frames
+    // then hold the DM (the candidates render nothing) rather than stopping prediction; only a failure lasting longer
+    // than hold_timeout stops it. Without a qualified period first (never valid), it fails at once.
     if( m_wasValid.exchange( false ) )
     {
         m_invalidWindow.store( m_windowReason.load() );
         m_invalidReason.store( reason );
+        m_invalidSinceNs.store( now );
+        ++m_inputHolds;
     }
 
-    return false;
+    const auto since = m_invalidSinceNs.load();
+    return since >= 0 && now - since < m_holdTimeout * 1e9; // hold_timeout 0 stops at once.
 }
 
 inline bool loPredCtrlAcc_operational::outputCandidate( const synco::Request &request,
@@ -2086,6 +2122,11 @@ inline bool loPredCtrlAcc_operational::outputCandidate( const synco::Request &re
     // Rendered on eligibility, a slot would carry the decision of up to a slot earlier: a WFS decision completed while
     // the slot waited to publish would reach the DM a slot (125 us) late.
     renderWait( request );
+
+    if( m_invalidSinceNs.load() >= 0 )
+    {
+        return false; // Holding through missed or late input (outputValid): synco keeps the last command.
+    }
 
     const bool                  clone = m_mfiltClone.load();
     std::lock_guard<std::mutex> lock( m_commandMutex );
@@ -2248,6 +2289,10 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
         return false;
     renderWait( request ); // Calculate as late as the render lead allows, so the newest ACC sample is used.
     const auto start = synco::monotonicNs();
+    if( m_invalidSinceNs.load() >= 0 )
+    {
+        return false; // Holding through missed or late input (outputValid): synco keeps the last command.
+    }
     const int  modes = m_settings.m_modes;
     int        prefix;
     bool       mismatch;
@@ -2822,17 +2867,21 @@ inline int loPredCtrlAcc_operational::setupINDI()
     if( registerIndiPropertyReadOnly( m_indiP_control ) < 0 )
         return -1;
     createROIndiNumber( m_indiP_performance, "ddspc_performance" );
-    for( const auto &key :
-         { "standard_updates",     "assisted_updates",    "standard_rmse",         "assisted_rmse",
-           "transport_published",  "transport_acks",      "transport_skipped",     "slot_shifts",
-           "publish_rate_hz",      "predict_rate_hz",     "update_rate_hz",        "refresh_rate_hz",
-           "fast_predictions",     "fast_holds",          "acc_lagging",           "acc_anomalies",
-           "step_mismatch",        "fast_us_mean",        "fast_us_p99",           "fast_us_max",
-           "margin_us_min",        "margin_us_mean",      "wake_us_p99",           "acc_age_calc_us_mean",
-           "acc_age_calc_us_p99",  "acc_age_calc_us_max", "acc_age_apply_us_mean", "acc_age_apply_us_p99",
-           "acc_age_apply_us_max", "learn_us_mean",       "learn_us_p99",          "learn_us_max",
-           "learn_overruns",       "wfs_filled",          "acc_filled" } )
+    for( const auto &key : { "standard_updates",     "assisted_updates",     "standard_rmse",
+                             "assisted_rmse",        "transport_published",  "transport_acks",
+                             "transport_skipped",    "slot_shifts",          "publish_rate_hz",
+                             "predict_rate_hz",      "update_rate_hz",       "refresh_rate_hz",
+                             "fast_predictions",     "fast_holds",           "acc_lagging",
+                             "acc_anomalies",        "step_mismatch",        "fast_us_mean",
+                             "fast_us_p99",          "fast_us_max",          "margin_us_min",
+                             "margin_us_mean",       "wake_us_p99",          "acc_age_calc_us_mean",
+                             "acc_age_calc_us_p99",  "acc_age_calc_us_max",  "acc_age_apply_us_mean",
+                             "acc_age_apply_us_p99", "acc_age_apply_us_max", "learn_us_mean",
+                             "learn_us_p99",         "learn_us_max",         "learn_overruns",
+                             "wfs_filled",           "acc_filled",           "input_holds" } )
+    {
         m_indiP_performance.add( pcf::IndiElement( key, 0.0 ) );
+    }
     m_phaseNames.clear();
     for( int k = 0; k < m_ratio; ++k )
         for( const auto *key : { "rmse_phase", "acc_phase" } )
@@ -3203,17 +3252,19 @@ inline int loPredCtrlAcc_operational::appLogic()
     const double updateRate  = rate( assisted.m_updates, m_rates.m_updates );
     const double refreshRate = rate( assisted.m_refreshes, m_rates.m_refreshes );
     m_rates.m_ns             = now;
-    std::vector<const char *> names{
-        "standard_updates",     "assisted_updates",    "standard_rmse",         "assisted_rmse",
-        "transport_published",  "transport_acks",      "transport_skipped",     "slot_shifts",
-        "publish_rate_hz",      "predict_rate_hz",     "update_rate_hz",        "refresh_rate_hz",
-        "fast_predictions",     "fast_holds",          "acc_lagging",           "acc_anomalies",
-        "step_mismatch",        "fast_us_mean",        "fast_us_p99",           "fast_us_max",
-        "margin_us_min",        "margin_us_mean",      "wake_us_p99",           "acc_age_calc_us_mean",
-        "acc_age_calc_us_p99",  "acc_age_calc_us_max", "acc_age_apply_us_mean", "acc_age_apply_us_p99",
-        "acc_age_apply_us_max", "learn_us_mean",       "learn_us_p99",          "learn_us_max",
-        "learn_overruns",       "wfs_filled",          "acc_filled" };
-    std::vector<double> values{ double( standard.m_updates ),
+    std::vector<const char *> names{ "standard_updates",     "assisted_updates",     "standard_rmse",
+                                     "assisted_rmse",        "transport_published",  "transport_acks",
+                                     "transport_skipped",    "slot_shifts",          "publish_rate_hz",
+                                     "predict_rate_hz",      "update_rate_hz",       "refresh_rate_hz",
+                                     "fast_predictions",     "fast_holds",           "acc_lagging",
+                                     "acc_anomalies",        "step_mismatch",        "fast_us_mean",
+                                     "fast_us_p99",          "fast_us_max",          "margin_us_min",
+                                     "margin_us_mean",       "wake_us_p99",          "acc_age_calc_us_mean",
+                                     "acc_age_calc_us_p99",  "acc_age_calc_us_max",  "acc_age_apply_us_mean",
+                                     "acc_age_apply_us_p99", "acc_age_apply_us_max", "learn_us_mean",
+                                     "learn_us_p99",         "learn_us_max",         "learn_overruns",
+                                     "wfs_filled",           "acc_filled",           "input_holds" };
+    std::vector<double>       values{ double( standard.m_updates ),
                                 double( assisted.m_updates ),
                                 standard.m_originRmse,
                                 assisted.m_rmse.empty() ? 0 : assisted.m_rmse.back(),
@@ -3247,7 +3298,8 @@ inline int loPredCtrlAcc_operational::appLogic()
                                 learn.m_max,
                                 double( overruns ),
                                 double( wfsFills ),
-                                double( m_accFills.load() ) };
+                                double( m_accFills.load() ),
+                                double( m_inputHolds.load() ) };
     for( int k = 0; k < m_ratio; ++k )
     {
         names.push_back( m_phaseNames[2 * k].c_str() );
