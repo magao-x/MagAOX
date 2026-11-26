@@ -176,7 +176,7 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     std::array<DDSPC::AdcSample, 128> m_adcHistory{};
     unsigned                          m_adcCount{ 0 }, m_adcNext{ 0 };
     std::uint64_t m_adcAnchor{ 0 };  ///< Counter of the newest sample in the latest WFS-thread window.
-    std::uint64_t m_adcSegment{ 0 }; ///< Source generation and segment of that window.
+    std::uint64_t m_adcSegment{ 0 }; ///< Source generation of that window; counters are continuous within it.
 
     /// Existing producer lock diagnostic; there are no local phase estimates or counter anchors.
     std::string       m_syncDevice{ "acc000" }, m_syncProperty{ "timingDiag" };
@@ -429,7 +429,7 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     DDSPC::Matrix m_lastMeasurement; ///< Previous WFS measurement, held for a missed frame; WFS thread.
 
     std::uint64_t m_lastAnchor{ 0 };      ///< ACC anchor of the previous accepted window; WFS thread.
-    std::uint64_t m_lastSegment{ 0 };     ///< Source generation and segment of that window.
+    std::uint64_t m_lastSegment{ 0 };     ///< Source generation of that window.
     bool          m_anchorKnown{ false }; ///< The previous window was accepted, so a missing frame can be placed.
     bool          m_accFilled{ false };   ///< The latest ACC window contains filled samples; WFS thread.
 
@@ -726,7 +726,7 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Read new ACC samples into the worker's ring; return the newest sample, or nullptr.
     const DDSPC::AdcSample *fastSamples( std::int64_t now /**< [in] Availability cutoff. */ );
 
-    /// Insert one ACC sample into the worker's ring; a counter or segment discontinuity restarts the ring.
+    /// Insert one ACC sample into the worker's ring; a counter gap or new source generation restarts the run.
     void fastSample( const DDSPC::AdcSample &sample /**< [in] Decoded upstream sample. */ );
 
     /// Retain the exact transport-copied own contribution of a slot, separately from physical application.
@@ -1317,19 +1317,24 @@ inline bool loPredCtrlAcc_operational::sensorHistory( const DDSPC::AdcBatch     
         m_anchorKnown = false;
         return false;
     };
-    if( copied.m_count > batch.size() || !copied.m_status.m_valid || ( !locked && !m_assistedDiagnostic ) )
+    if( copied.m_count > batch.size() || ( !locked && !m_assistedDiagnostic ) )
     {
         m_adcCount = m_adcNext = 0;
-        return reject( !copied.m_status.m_valid || copied.m_count > batch.size() ? "adc_stream_invalid"
-                                                                                 : "awaiting_upstream_lock" );
+        return reject( copied.m_count > batch.size() ? "adc_stream_invalid" : "awaiting_upstream_lock" );
     }
-    if( copied.m_discontinuity || copied.m_more )
-        m_adcCount = m_adcNext = 0;
+
+    // A reader segment break (counter gap, rejected sample, timing gap) keeps the history: the window holds a missing
+    // sample from the one before it (within max_fill). Only another source generation, whose counters restart, is
+    // excluded, by the generation check in find() below.
     for( unsigned n = 0; n < copied.m_count; ++n )
     {
         m_adcHistory[m_adcNext] = batch[n];
         m_adcNext               = ( m_adcNext + 1 ) % m_adcHistory.size();
         m_adcCount              = std::min<unsigned>( m_adcCount + 1, m_adcHistory.size() );
+    }
+    if( !copied.m_status.m_valid )
+    {
+        return reject( "adc_stream_invalid" );
     }
     const unsigned count = m_settings.m_accelChannels / 2;
     const unsigned limit = unsigned( m_maxFill * m_ratio ); // One missed WFS frame's worth of samples per fill.
@@ -1343,7 +1348,7 @@ inline bool loPredCtrlAcc_operational::sensorHistory( const DDSPC::AdcBatch     
 
     // The window ends at the newest sample. If a whole frame of samples is missing, it ends one frame after the
     // previous window instead, so anchors keep advancing by r, and the missing samples are filled.
-    const std::uint64_t segment = ( newest.m_generation << 32 ) ^ newest.m_segment;
+    const std::uint64_t segment = newest.m_generation; // Counters are continuous within a source generation.
     std::uint64_t       anchor  = newest.m_frame.m_counter;
     if( !copied.m_count )
     {
@@ -1356,7 +1361,7 @@ inline bool loPredCtrlAcc_operational::sensorHistory( const DDSPC::AdcBatch     
         anchor = m_lastAnchor + m_ratio;
     }
 
-    // A sample of this segment received by now, by counter; a missing one holds the sample before it.
+    // A sample of this generation received by now, by counter; a missing one holds the sample before it.
     auto find = [&]( std::uint64_t counter, bool older ) -> const DDSPC::AdcSample *
     {
         const DDSPC::AdcSample *best = nullptr;
@@ -1364,7 +1369,7 @@ inline bool loPredCtrlAcc_operational::sensorHistory( const DDSPC::AdcBatch     
         {
             const auto &sample = m_adcHistory[( m_adcNext + m_adcHistory.size() - n - 1 ) % m_adcHistory.size()];
             const auto  value  = sample.m_frame.m_counter;
-            if( ( ( sample.m_generation << 32 ) ^ sample.m_segment ) != segment || sample.m_receivedNs > now ||
+            if( sample.m_generation != segment || sample.m_receivedNs > now ||
                 ( older ? value >= counter : value != counter ) )
             {
                 continue;
@@ -2130,11 +2135,11 @@ inline bool loPredCtrlAcc_operational::outputCandidate( const synco::Request &re
 inline void loPredCtrlAcc_operational::fastSample( const DDSPC::AdcSample &sample )
 {
     const auto counter = sample.m_frame.m_counter;
-    const auto segment = ( sample.m_generation << 32 ) ^ sample.m_segment;
+    const auto segment = sample.m_generation;
     if( m_fastHaveSample )
     {
         const auto &newest  = m_fastSamples[m_fastNewest % m_fastSamples.size()];
-        const auto  current = ( newest.m_generation << 32 ) ^ newest.m_segment;
+        const auto  current = newest.m_generation;
         if( counter <= m_fastNewest && segment == current )
             return; // Already held.
         if( counter != m_fastNewest + 1 || segment != current )
@@ -2156,8 +2161,7 @@ inline const DDSPC::AdcSample *loPredCtrlAcc_operational::fastSamples( std::int6
         {
             const auto copied = m_adc->copy_after( m_fastCursor, batch, now );
             m_fastCursor      = copied.m_next;
-            if( copied.m_discontinuity || !copied.m_status.m_valid )
-                m_fastHaveSample = false;
+            // A reader segment break alone keeps the run; fastSample() restarts it on a counter gap.
             for( std::size_t n = 0; n < copied.m_count && n < batch.size(); ++n )
                 fastSample( batch[n] );
             if( !copied.m_more )
@@ -2318,7 +2322,7 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
     bool        anomaly = false;
     if( newest && origin.m_valid )
     {
-        const auto segment = ( newest->m_generation << 32 ) ^ newest->m_segment;
+        const auto segment = newest->m_generation;
         anomaly =
             segment != origin.m_segment || m_fastNewest < anchor || m_fastNewest - anchor >= std::uint64_t( m_ratio );
         if( segment == origin.m_segment && m_fastNewest > anchor )

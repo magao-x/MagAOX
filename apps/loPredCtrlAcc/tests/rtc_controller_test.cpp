@@ -306,7 +306,7 @@ DDSPC::Matrix Controller::window()
     if( m_nextSample < std::uint64_t( length ) )
         return {};
     m_adcAnchor  = m_nextSample - 1;
-    m_adcSegment = ( std::uint64_t( 1 ) << 32 ) ^ 1;
+    m_adcSegment = 1; // The source generation.
     DDSPC::Matrix features( 2 * length, 1 );
     for( int j = 0; j < length; ++j )
         for( int axis = 0; axis < 2; ++axis )
@@ -617,9 +617,26 @@ TEST_CASE( "Operational WFS decision consumes individual upstream sensor samples
     REQUIRE_FALSE( app.sensorHistory( batch, rows, features, 1500000 ) );
     app.m_maxFill = 1;
 
-    batch.m_discontinuity = true;
-    batch.m_count         = 1;
+    // A reader segment break (counter gap, rejected sample, timing gap) keeps the history: the next sample continues
+    // the window, and the missing counter 25 holds 24.
+    batch.m_discontinuity     = true;
+    batch.m_count             = 1;
+    rows[0].m_frame.m_counter = 28;
+    rows[0].m_acceleration    = { 13, 0 };
+    rows[0].m_segment         = 2;
+    REQUIRE( app.sensorHistory( batch, rows, features, 1500000 ) );
+    REQUIRE( app.m_adcAnchor == 28 );
+    REQUIRE( app.m_accFilled );
+    REQUIRE( features( 0 ) == 13 ); // 28
+    REQUIRE( features( 2 ) == 12 ); // 27
+    REQUIRE( features( 4 ) == 11 ); // 26
+    REQUIRE( features( 6 ) == 10 ); // 25, missing: holds 24
+
+    // A new source generation restarts its counters: its first sample cannot be completed from the previous one.
+    rows[0].m_frame.m_counter = 5;
+    rows[0].m_generation      = 2;
     REQUIRE_FALSE( app.sensorHistory( batch, rows, features, 1500000 ) );
+    REQUIRE( std::string( app.m_windowReason.load() ) == "counter_gap" );
 }
 
 /** \brief Read actual FITS planes and recover their signed coefficients through the operational projection. */
@@ -1716,7 +1733,7 @@ TEST_CASE( "Operational RTC decision time", "[.][rtc-benchmark]" )
                 {
                     std::lock_guard<std::mutex> lock( app.m_modelMutex ); // Serializes the anchor with step().
                     app.m_adcAnchor  = anchor;
-                    app.m_adcSegment = ( std::uint64_t( 1 ) << 32 ) ^ 1;
+                    app.m_adcSegment = 1;
                 }
                 if( app.step( y, i, features, true, applied, ordinal, start ) != 0 )
                     failed = true;
