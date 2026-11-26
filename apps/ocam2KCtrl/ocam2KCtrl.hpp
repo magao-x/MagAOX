@@ -11,6 +11,9 @@
 #include <edtinc.h>
 #include <unistd.h>
 
+#include <future>
+#include <optional>
+
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 
@@ -20,6 +23,7 @@ typedef MagAOX::app::MagAOXApp<true> MagAOXAppT; // This needs to be before pdvU
 #include "ocamDescrambler.hpp"
 #include "ocamDescrambleParallel.hpp"
 #include "ocamDescramblePlacement.hpp"
+#include "ocamFrameDelay.hpp"
 #include "ocamUtils.hpp"
 
 namespace MagAOX
@@ -227,6 +231,19 @@ class ocam2KCtrl : public MagAOXApp<>,
     std::string m_syncFreqProp{ "C1freq" }; ///< INDI property name reporting the external sync frequency.
 
     std::atomic<float> m_workerFPS{ 0 }; ///< Published rate; the worker never reads control-owned FPS storage.
+
+    bool                  m_frameDelayEnabled{ false };  ///< Enable raw timing history and cadence warnings at startup.
+    unsigned              m_frameDelayHistorySec{ 900 }; ///< Rolling history duration in seconds.
+    double                m_frameDelayFraction{ 1 };     ///< Inclusive warning excess in units of a frame period.
+    std::filesystem::path m_frameDelayDirectory;         ///< Final dump directory, resolved during startup.
+    ocamFrameDelay        m_frameDelay;                  ///< Ordinary-thread cadence and rolling-history state.
+    std::atomic<unsigned> m_frameDelayEnable{ ocamFrameDelay::allChecks }; ///< Warning mask initialized from config.
+    std::optional<ocamFrameDelay::Snapshot> m_frameDelayRequest; ///< Manual request and worker fence, under INDI mutex.
+    bool              m_frameDelayFenced{ false };  ///< Pending manual request has an acquisition sequence cutoff.
+    uint64_t          m_frameDelayRequestId{ 0 };   ///< Last accepted manual snapshot request, under INDI mutex.
+    bool              m_frameDelayRestart{ false }; ///< Acquisition worker owes a successful-restart latch reset.
+    std::atomic<bool> m_frameDelayWriting{ false }; ///< A snapshot is owned by the writer or about to be handed off.
+    std::future<std::filesystem::path> m_frameDelayWriter; ///< Ordinary-thread handle to the single dump writer.
 
     float m_syncFreq{ 0 }; ///< Current externally supplied sync frequency in Hz.
 
@@ -519,6 +536,24 @@ class ocam2KCtrl : public MagAOXApp<>,
     int frameGrabberPostPublish( IMAGE *imageStream /**< [in] main framegrabber stream that was just posted */ );
 
   protected:
+    /// Initialize frame-delay capture and register its INDI switches before acquisition starts.
+    int initFrameDelay();
+
+    /// Tag the explicit standard-camera request under the INDI mutex before it reaches the worker.
+    void onManualCameraReconfigure();
+
+    /// Under the INDI mutex, freeze the timing handoff boundary for a pending manual request.
+    void fenceFrameDelay();
+
+    /// Drain the frame-delay controls after raw timing consumption and hand off completed snapshots.
+    void updateFrameDelay();
+
+    /// Deliver one raw timing attempt on the ordinary thread.
+    void observeFrameDelay( const fgTiming::Event &event /**< [in] Raw framegrabber attempt. */ );
+
+    /// Collect the writer's result and report any filesystem error.
+    void finishFrameDelayWrite();
+
     /// Read the monotonic clock in nanoseconds for ordinary-thread housekeeping decisions.
     virtual int64_t housekeepingNow() const;
 
@@ -612,9 +647,16 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     pcf::IndiProperty m_indiP_descrambleStatus; ///< Last applied implementation and current fast-path availability.
 
+    pcf::IndiProperty m_indiP_frameDelayEnable; ///< Writable independent switches governing warning delivery.
+
+    pcf::IndiProperty m_indiP_frameDelayWarning; ///< Read-only raw latched timing warnings.
+
   public:
     /// Request a descramble implementation without changing camera acquisition or publication settings.
     INDI_NEWCALLBACK_DECL( ocam2KCtrl, m_indiP_descrambleMethod );
+
+    /// Change any subset of the frame-delay warning enables.
+    INDI_NEWCALLBACK_DECL( ocam2KCtrl, m_indiP_frameDelayEnable );
 
     /// Start a 120-second quiet interval or explicitly resume routine serial polling.
     INDI_NEWCALLBACK_DECL( ocam2KCtrl, m_indiP_housekeepingPause );
@@ -643,6 +685,9 @@ class ocam2KCtrl : public MagAOXApp<>,
 
     /// Record a forced cached frame-stage/quality snapshot on the ordinary telemetry path.
     int recordTelem( const telem_fgstage *telem /**< [in] Telemetry type selector. */ );
+
+    /// Record the current frame-delay intervals and warning state.
+    int recordTelem( const telem_ocamdelay *telem /**< [in] Telemetry type selector. */ );
 
     /// Record the latest OCAM temperatures when they change or when forced.
     int
@@ -759,6 +804,52 @@ inline void ocam2KCtrl::setupConfig()
 
     dev::frameGrabber<ocam2KCtrl>::setupConfig( config );
 
+    config.add( "frameDelay.enabled",
+                "",
+                "frameDelay.enabled",
+                argType::True,
+                "frameDelay",
+                "enabled",
+                false,
+                "bool",
+                "Capture OCAM cadence and retain a rolling manual-reconfigure history." );
+    config.add( "frameDelay.warnings",
+                "",
+                "frameDelay.warnings",
+                argType::Required,
+                "frameDelay",
+                "warnings",
+                false,
+                "bool",
+                "Start with all frame-delay warnings enabled (default true)." );
+    config.add( "frameDelay.historySec",
+                "",
+                "frameDelay.historySec",
+                argType::Required,
+                "frameDelay",
+                "historySec",
+                false,
+                "unsigned",
+                "Seconds of history before a manual reconfigure request." );
+    config.add( "frameDelay.thresholdFrames",
+                "",
+                "frameDelay.thresholdFrames",
+                argType::Required,
+                "frameDelay",
+                "thresholdFrames",
+                false,
+                "double",
+                "Inclusive warning excess in frame periods, default 1." );
+    config.add( "frameDelay.dumpDir",
+                "",
+                "frameDelay.dumpDir",
+                argType::Required,
+                "frameDelay",
+                "dumpDir",
+                false,
+                "string",
+                "Directory for manual history dumps, relative to the normal log directory or absolute." );
+
     config.add( "framegrabber.syncShmimName",
                 "",
                 "framegrabber.syncShmimName",
@@ -838,6 +929,25 @@ inline int ocam2KCtrl::loadConfigImpl()
     }
 
     dev::frameGrabber<ocam2KCtrl>::loadConfig( config );
+    config( m_frameDelayEnabled, "frameDelay.enabled" );
+    bool warnings = true;
+    config( warnings, "frameDelay.warnings" );
+    m_frameDelayEnable.store( warnings ? ocamFrameDelay::allChecks : 0, std::memory_order_relaxed );
+
+    double historySec = m_frameDelayHistorySec;
+    config( historySec, "frameDelay.historySec" );
+
+    if( !mx::math::isFinite( historySec ) || historySec < 1 || historySec > std::numeric_limits<unsigned>::max() ||
+        std::floor( historySec ) != historySec )
+    {
+        return log<software_error, -1>( { "frameDelay.historySec must be a positive integer" } );
+    }
+
+    m_frameDelayHistorySec = static_cast<unsigned>( historySec );
+    config( m_frameDelayFraction, "frameDelay.thresholdFrames" );
+    std::string delayDirectory = "frame-delays";
+    config( delayDirectory, "frameDelay.dumpDir" );
+    m_frameDelayDirectory = std::filesystem::path( m_log.logPath() ) / delayDirectory;
     config( m_descrambleCpuset, "descramble.cpuset" );
     config( m_descrambleThreadPrio, "descramble.threadPrio" );
     std::string partition = "paired30";
@@ -898,6 +1008,287 @@ inline int ocam2KCtrl::loadConfigImpl()
 
     dev::dssShutter<ocam2KCtrl>::loadConfig( config );
     dev::telemeter<ocam2KCtrl>::loadConfig( config );
+    return 0;
+}
+
+inline int ocam2KCtrl::initFrameDelay()
+{
+    if( !m_frameDelayEnabled )
+    {
+        return 0;
+    }
+
+    if( m_latencyCircBuffMaxTime <= 0 || m_latencyCircBuffMaxLength <= 0 )
+    {
+        return log<software_error, -1>( { "Frame-delay capture requires enabled framegrabber timing" } );
+    }
+
+    double maxFPS = 0;
+
+    for( const auto &[name, mode] : m_cameraModes )
+    {
+        maxFPS = std::max( maxFPS, static_cast<double>( mode.m_maxFPS ) );
+    }
+
+    try
+    {
+        m_frameDelay.configure( m_frameDelayHistorySec, maxFPS > 0 ? maxFPS : 6000, m_frameDelayFraction );
+    }
+    catch( const std::invalid_argument &error )
+    {
+        return log<software_error, -1>( { error.what() } );
+    }
+
+    m_indiP_frameDelayEnable = pcf::IndiProperty( pcf::IndiProperty::Switch );
+    m_indiP_frameDelayEnable.setDevice( configName() );
+    m_indiP_frameDelayEnable.setName( "frame_delay_enable" );
+    m_indiP_frameDelayEnable.setPerm( pcf::IndiProperty::ReadWrite );
+    m_indiP_frameDelayEnable.setRule( pcf::IndiProperty::AnyOfMany );
+    m_indiP_frameDelayEnable.setState( INDI_OK );
+    m_indiP_frameDelayWarning = pcf::IndiProperty( pcf::IndiProperty::Switch );
+    m_indiP_frameDelayWarning.setDevice( configName() );
+    m_indiP_frameDelayWarning.setName( "frame_delay_warning" );
+    m_indiP_frameDelayWarning.setPerm( pcf::IndiProperty::ReadOnly );
+    m_indiP_frameDelayWarning.setRule( pcf::IndiProperty::AnyOfMany );
+    m_indiP_frameDelayWarning.setState( INDI_OK );
+
+    const auto enabled = m_frameDelayEnable.load( std::memory_order_relaxed );
+
+    for( size_t check = 0; check < ocamFrameDelay::checks; ++check )
+    {
+        const auto *name  = ocamFrameDelay::names[check];
+        const auto  state = enabled & ( 1u << check ) ? pcf::IndiElement::On : pcf::IndiElement::Off;
+        m_indiP_frameDelayEnable.add( pcf::IndiElement( name, state ) );
+        m_indiP_frameDelayWarning.add( pcf::IndiElement( name, pcf::IndiElement::Off ) );
+    }
+
+    if( registerIndiPropertyNew( m_indiP_frameDelayEnable, INDI_NEWCALLBACK( m_indiP_frameDelayEnable ) ) < 0 ||
+        registerIndiPropertyReadOnly( m_indiP_frameDelayWarning ) < 0 )
+    {
+        return -1;
+    }
+
+    m_fgTiming.observe(
+        []( void *context, const fgTiming::Event &event )
+        {
+            static_cast<ocam2KCtrl *>( context )->observeFrameDelay( event );
+        },
+        this );
+    return 0;
+}
+
+inline void ocam2KCtrl::onManualCameraReconfigure()
+{
+    if( !m_frameDelayEnabled )
+    {
+        return;
+    }
+
+    if( m_frameDelayRequest || m_frameDelayWriting.load( std::memory_order_relaxed ) )
+    {
+        log<text_log>( "Manual reconfigure history already pending or being written", logPrio::LOG_WARNING );
+        return;
+    }
+
+    const auto now      = dev::frameGrabberTiming::monotonicNowNs();
+    const auto realtime = dev::frameGrabberTiming::realtimeNowNs();
+
+    if( now < 0 || realtime < 0 )
+    {
+        log<text_log>( "Cannot timestamp manual reconfigure history request", logPrio::LOG_WARNING );
+        return;
+    }
+
+    auto &request       = m_frameDelayRequest.emplace();
+    request.id          = ++m_frameDelayRequestId;
+    request.cutoff      = now;
+    request.requestedAt = realtime;
+
+    if( powerState() <= 0 )
+    {
+        fenceFrameDelay();
+    }
+}
+
+inline void ocam2KCtrl::fenceFrameDelay()
+{
+    if( m_frameDelayRequest && !m_frameDelayFenced )
+    {
+        m_frameDelayRequest->boundary = m_fgTiming.finishedSequence();
+        m_frameDelayRequest->dropped  = m_fgTiming.droppedEvents();
+        m_frameDelayFenced            = true;
+    }
+}
+
+inline void ocam2KCtrl::observeFrameDelay( const fgTiming::Event &event )
+{
+    const auto latched = m_frameDelay.observe( event, m_frameDelayEnable.load( std::memory_order_relaxed ) );
+
+    if( !latched )
+    {
+        return;
+    }
+
+    const auto &reading = m_frameDelay.reading();
+
+    for( size_t check = 0; check < ocamFrameDelay::checks; ++check )
+    {
+        if( latched & ( 1u << check ) )
+        {
+            const double expected = ( check < ocamFrameDelay::endpoints ? 1 : reading.samples ) * 1e9 / reading.fps;
+            log<text_log>( std::format( "Frame delay {} measured {} ns, expected {:.1f} ns at {:.3f} FPS (frame {})",
+                                        ocamFrameDelay::names[check],
+                                        reading.elapsed[check],
+                                        expected,
+                                        reading.fps,
+                                        event.frameNumber ),
+                           logPrio::LOG_WARNING );
+        }
+    }
+
+    recordTelem( static_cast<const telem_ocamdelay *>( nullptr ) );
+}
+
+inline void ocam2KCtrl::finishFrameDelayWrite()
+{
+    try
+    {
+        const auto filename = m_frameDelayWriter.get();
+        log<text_log>( "Saved manual reconfigure frame history to " + filename.string() );
+    }
+    catch( const std::exception &error )
+    {
+        log<text_log>( std::string( "Could not save or rotate manual reconfigure frame history: " ) + error.what(),
+                       logPrio::LOG_WARNING );
+    }
+
+    m_frameDelayWriting.store( false, std::memory_order_relaxed );
+}
+
+inline void ocam2KCtrl::updateFrameDelay()
+{
+    if( !m_frameDelayEnabled )
+    {
+        return;
+    }
+
+    if( m_frameDelayWriter.valid() &&
+        m_frameDelayWriter.wait_for( std::chrono::seconds( 0 ) ) == std::future_status::ready )
+    {
+        finishFrameDelayWrite();
+    }
+
+    const auto restart = m_fgTiming.observedRestart();
+
+    if( restart && m_fgTiming.drainedSequence() >= restart - 1 )
+    {
+        const auto before = m_frameDelay.reading().latched;
+        m_frameDelay.restart( restart );
+
+        if( before != m_frameDelay.reading().latched )
+        {
+            recordTelem( static_cast<const telem_ocamdelay *>( nullptr ) );
+        }
+    }
+
+    int64_t                                 expireAt = dev::frameGrabberTiming::monotonicNowNs();
+    std::optional<ocamFrameDelay::Snapshot> snapshot;
+
+    { //mutex scope
+        std::unique_lock<std::mutex> lock( m_indiMutex, std::try_to_lock );
+
+        if( !lock.owns_lock() )
+        {
+            return;
+        }
+
+        if( m_frameDelayRequest )
+        {
+            expireAt = m_frameDelayRequest->cutoff;
+
+            if( powerState() <= 0 )
+            {
+                fenceFrameDelay();
+            }
+
+            if( m_frameDelayFenced && m_fgTiming.drainedSequence() >= m_frameDelayRequest->boundary )
+            {
+                m_frameDelayWriting.store( true, std::memory_order_relaxed );
+                snapshot = std::move( m_frameDelayRequest );
+                m_frameDelayRequest.reset();
+                m_frameDelayFenced = false;
+            }
+        }
+
+        const auto latched = m_frameDelay.reading().latched;
+
+        for( size_t check = 0; check < ocamFrameDelay::checks; ++check )
+        {
+            updateSwitchIfChanged( m_indiP_frameDelayWarning,
+                                   ocamFrameDelay::names[check],
+                                   latched & ( 1u << check ) ? pcf::IndiElement::On : pcf::IndiElement::Off,
+                                   INDI_OK );
+        }
+    }
+
+    if( snapshot )
+    {
+        try
+        {
+            m_frameDelay.freeze( *snapshot );
+            log<text_log>( std::format( "Manual reconfigure frame history {}: {:.3f} s of {:.0f} s, {} rows, "
+                                        "{} dropped, {} capacity evictions",
+                                        snapshot->id,
+                                        snapshot->coverage * 1e-9,
+                                        snapshot->duration * 1e-9,
+                                        snapshot->rows,
+                                        snapshot->dropped,
+                                        snapshot->trimmed ) );
+            m_frameDelayWriter = std::async( std::launch::async,
+                                             ocamFrameDelay::write,
+                                             std::move( *snapshot ),
+                                             m_frameDelayDirectory,
+                                             configName() );
+        }
+        catch( const std::exception &error )
+        {
+            m_frameDelayWriting.store( false, std::memory_order_relaxed );
+            log<text_log>( std::string( "Cannot queue manual reconfigure frame history: " ) + error.what(),
+                           logPrio::LOG_WARNING );
+        }
+    }
+
+    m_frameDelay.expire( expireAt );
+}
+
+INDI_NEWCALLBACK_DEFN( ocam2KCtrl, m_indiP_frameDelayEnable )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_frameDelayEnable, ipRecv );
+
+    std::lock_guard<std::mutex> lock( m_indiMutex );
+    unsigned                    enabled = m_frameDelayEnable.load( std::memory_order_relaxed );
+
+    for( const auto &[name, element] : ipRecv.getElements() )
+    {
+        const auto it    = std::find( ocamFrameDelay::names.begin(), ocamFrameDelay::names.end(), name );
+        const auto state = element.getSwitchState();
+
+        if( it == ocamFrameDelay::names.end() || ( state != pcf::IndiElement::On && state != pcf::IndiElement::Off ) )
+        {
+            return -1;
+        }
+
+        const unsigned bit = 1u << ( it - ocamFrameDelay::names.begin() );
+        enabled            = state == pcf::IndiElement::On ? enabled | bit : enabled & ~bit;
+    }
+
+    m_frameDelayEnable.store( enabled, std::memory_order_relaxed );
+
+    for( const auto &[name, element] : ipRecv.getElements() )
+    {
+        updateSwitchIfChanged( m_indiP_frameDelayEnable, name, element.getSwitchState(), INDI_OK );
+    }
+
     return 0;
 }
 
@@ -1696,7 +2087,7 @@ inline int ocam2KCtrl::appStartup()
     createStandardIndiRequestSw( m_indiP_emProtReset, "emProtectionReset", "Reset", "EM Protection" );
     registerIndiPropertyNew( m_indiP_emProtReset, INDI_NEWCALLBACK( m_indiP_emProtReset ) );
 
-    if( initHousekeeping() < 0 || initDescramble() < 0 )
+    if( initHousekeeping() < 0 || initDescramble() < 0 || initFrameDelay() < 0 )
     {
         return -1;
     }
@@ -1773,6 +2164,8 @@ inline int ocam2KCtrl::appLogic()
         endHousekeepingPause( "frameGrabber logic failed" );
         return log<software_error, -1>( { "" } );
     }
+
+    updateFrameDelay();
 
     // and run dssShutter's appLogic
     if( dev::dssShutter<ocam2KCtrl>::appLogic() < 0 )
@@ -1993,6 +2386,8 @@ inline int ocam2KCtrl::whilePowerOff()
         log<software_error>( { "" } );
     }
 
+    updateFrameDelay();
+
     if( dssShutter<ocam2KCtrl>::whilePowerOff() < 0 )
     {
         log<software_error>( { "" } );
@@ -2017,6 +2412,22 @@ inline int ocam2KCtrl::appShutdown()
     dev::edtCamera<ocam2KCtrl>::appShutdown();
 
     dev::frameGrabber<ocam2KCtrl>::appShutdown();
+
+    if( m_frameDelayEnabled )
+    {
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_indiMutex );
+            fenceFrameDelay();
+        }
+
+        m_fgTiming.update();
+        updateFrameDelay();
+    }
+
+    if( m_frameDelayWriter.valid() )
+    {
+        finishFrameDelayWrite();
+    }
 
     stopDescrambleWorker();
     releaseOcamSdk();
@@ -2799,7 +3210,15 @@ inline float ocam2KCtrl::fps()
 inline int ocam2KCtrl::startAcquisition()
 {
     m_lastImageNumber = -1;
-    return edtCamera<ocam2KCtrl>::pdvStartAcquisition();
+    const int result  = edtCamera<ocam2KCtrl>::pdvStartAcquisition();
+
+    if( result == 0 && m_frameDelayRestart )
+    {
+        m_fgTiming.observeRestart();
+        m_frameDelayRestart = false;
+    }
+
+    return result;
 }
 
 inline int ocam2KCtrl::acquireAndCheckValid()
@@ -2825,6 +3244,7 @@ inline int ocam2KCtrl::acquireAndCheckValid()
     // This is how it is in the ocam2_sdk:
     unsigned currImageNumber = ( reinterpret_cast<int *>( m_image_p ) )[OCAM2_IMAGE_NB_OFFSET / 4]; /* int offset */
     m_currImageNumber        = currImageNumber;
+    m_fgTiming.acquired( m_currImageTimestamp );
     m_fgTiming.frame( currImageNumber );
 
     // For the first loop after a restart
@@ -2955,6 +3375,8 @@ inline int ocam2KCtrl::reconfig()
     m_descrambleParallel.park();
     std::lock_guard<std::mutex>           lock( m_indiMutex );
     std::lock_guard<std::recursive_mutex> guard( m_cameraMutex );
+
+    fenceFrameDelay();
     endHousekeepingPause( "camera reconfiguration" );
     ++m_fpsConfirmation.generation;
     m_fpsConfirmation.phase = ConfirmationPhase::unavailable;
@@ -2973,6 +3395,7 @@ inline int ocam2KCtrl::reconfig()
         return rv;
     }
 
+    m_frameDelayRestart = m_frameDelayEnabled;
     state( stateCodes::READY );
     return 0;
 }
@@ -3199,6 +3622,11 @@ INDI_SETCALLBACK_DEFN( ocam2KCtrl, m_indiP_syncFreq )( const pcf::IndiProperty &
 
 inline int ocam2KCtrl::checkRecordTimes()
 {
+    if( m_frameDelayEnabled )
+    {
+        telemeter<ocam2KCtrl>::checkRecordTimes( telem_ocamdelay() );
+    }
+
     if( frameGrabberTimingEnabled() )
     {
         return telemeter<ocam2KCtrl>::checkRecordTimes(
@@ -3226,6 +3654,19 @@ inline int ocam2KCtrl::recordTelem( const telem_fgtimings * )
 inline int ocam2KCtrl::recordTelem( const telem_fgstage * )
 {
     return recordFGStageTimings( true );
+}
+
+inline int ocam2KCtrl::recordTelem( const telem_ocamdelay * )
+{
+    const auto &reading = m_frameDelay.reading();
+    return telem<telem_ocamdelay>( { reading.fps,
+                                     reading.samples,
+                                     m_frameDelay.fraction(),
+                                     reading.elapsed,
+                                     reading.excess,
+                                     m_frameDelayEnable.load( std::memory_order_relaxed ),
+                                     reading.latched,
+                                     m_fgTiming.droppedEvents() } );
 }
 
 inline int ocam2KCtrl::recordTemps( bool force )

@@ -3,7 +3,7 @@
 
 allall: all
 
-OTHER_HEADERS=ocamUtils.hpp ocamDescrambler.hpp ocamDescrambleParallel.hpp ocamDescramblePlacement.hpp
+OTHER_HEADERS=ocamUtils.hpp ocamDescrambler.hpp ocamDescrambleParallel.hpp ocamDescramblePlacement.hpp ocamFrameDelay.hpp
 OTHER_OBJS=fli/ocam2_sdk.o
 TARGET=ocam2KCtrl
 

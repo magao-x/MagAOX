@@ -116,6 +116,9 @@ struct Event
     uint32_t                                                  invalidMarkers{ 0 }; ///< Failed/backward local captures.
     Outcome                                                   outcome{ Outcome::rejected }; ///< Attempt result.
     int64_t anchorNs{ -1 }; ///< Consumer-assigned local retention anchor; never read from producer storage.
+    int64_t  arrivalNs{ -1 }; ///< SDK return for an optional raw observer with stage timing disabled.
+    double   fps{ 0 };        ///< Effective rate captured for this attempt by the optional raw observer.
+    uint64_t restart{ 0 };    ///< First attempt sequence after an explicitly reported successful restart.
 };
 
 /// Completed ordinary control operation; its producer is serialized separately from acquisition.

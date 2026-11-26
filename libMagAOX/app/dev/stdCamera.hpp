@@ -4501,6 +4501,11 @@ int stdCamera<derivedT>::newCallBack_reconfigure( const pcf::IndiProperty &ipRec
         indi::updateSwitchIfChanged(
             m_indiP_reconfig, "request", pcf::IndiElement::Off, derived().m_indiDriver, INDI_IDLE );
 
+        if constexpr( requires { derived().onManualCameraReconfigure(); } )
+        {
+            derived().onManualCameraReconfigure();
+        }
+
         m_nextMode           = m_modeName;
         derived().m_reconfig = true;
         return 0;

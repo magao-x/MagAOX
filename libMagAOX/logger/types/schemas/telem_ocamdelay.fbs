@@ -1,0 +1,28 @@
+/// \file telem_ocamdelay.fbs
+/// \brief OCAM timing intervals, rolling spans and warning state.
+namespace MagAOX.logger;
+
+// Durations are integer nanoseconds.
+struct OcamDelaySpans
+{
+    atime:long;
+    arrival:long;
+    write:long;
+    atime_sum:long;
+    arrival_sum:long;
+    write_sum:long;
+}
+
+table Telem_ocamdelay_fb
+{
+    fps:double;
+    samples:ulong;
+    fraction:double;
+    elapsed:OcamDelaySpans (required); // -1 means no continuous observation.
+    excess:OcamDelaySpans (required);  // Interpretable when the corresponding elapsed span is available.
+    enabled:uint;
+    latched:uint;
+    dropped:ulong;
+}
+
+root_type Telem_ocamdelay_fb;

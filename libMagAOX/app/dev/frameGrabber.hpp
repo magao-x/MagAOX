@@ -1127,7 +1127,7 @@ void frameGrabber<derivedT>::fgThreadExec()
             //==================
             // Get next image, process validity.
             //====================
-            m_fgTiming.begin();
+            m_fgTiming.begin( m_cbFPS );
             int isValid = derived().acquireAndCheckValid();
             m_fgTiming.mark( MagAOX::fgTiming::Marker::validated );
 
