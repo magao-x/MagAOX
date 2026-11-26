@@ -18,6 +18,75 @@ inline bool dmSyncopation::zeroEngine() const
     return m_zeroTestEnabled || m_productionEnabled;
 }
 
+inline int dmSyncopation::scheduleSteps() const
+{
+    return m_productionEnabled && m_requested == 0 ? m_productionSteps : m_requested;
+}
+
+inline int dmSyncopation::liveSteps() const
+{
+    return m_primed && !m_productionDryRun ? scheduleSteps() : 0;
+}
+
+inline double dmSyncopation::offloadEpoch() const
+{
+    // INDI formats floating-point values with 15 significant decimal digits.
+    return double( 1 + ( uint64_t( m_epoch ) & ( ( uint64_t{ 1 } << 49 ) - 1 ) ) );
+}
+
+inline bool dmSyncopation::prepareOffload( int steps, double rateHz )
+{
+    if( m_offloadDevice.empty() || m_productionDryRun || steps <= 1 )
+    {
+        m_offloadPrepareHz     = 0;
+        m_offloadReadySequence = 0;
+        return true;
+    }
+
+    if( m_offloadPrepareSteps != steps || m_offloadPrepareHz <= 0 ||
+        std::abs( rateHz - m_offloadPrepareHz ) > m_rateTolerance * m_offloadPrepareHz )
+    {
+        m_offloadPrepareSteps  = steps;
+        m_offloadPrepareHz     = rateHz;
+        m_offloadReadySequence = 0;
+
+        if( ++m_offloadPrepareSequence == 0 )
+        {
+            ++m_offloadPrepareSequence;
+        }
+    }
+
+    return m_offloadReadySequence == m_offloadPrepareSequence;
+}
+
+INDI_SETCALLBACK_DEFN( dmSyncopation, m_indiP_offloadReady )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadReady, ipRecv );
+
+    if( ipRecv.getType() != pcf::IndiProperty::Number || !ipRecv.find( "epoch" ) || !ipRecv.find( "sequence" ) ||
+        !ipRecv.find( "frames" ) )
+    {
+        return 0;
+    }
+
+    const auto                  epoch    = ipRecv["epoch"].get<double>();
+    const auto                  sequence = ipRecv["sequence"].get<double>();
+    const auto                  frames   = ipRecv["frames"].get<double>();
+    std::lock_guard<std::mutex> lock( m_cycleMutex );
+
+    if( epoch == offloadEpoch() && sequence == m_offloadPrepareSequence && m_offloadPrepareHz > 0 )
+    {
+        m_offloadReadySequence =
+            mx::math::isFinite( frames ) && frames >= 1 && std::floor( frames ) == frames ? sequence : 0;
+    }
+    else if( epoch == 0 && sequence == 0 )
+    {
+        m_offloadReadySequence = 0;
+    }
+
+    return 0;
+}
+
 inline void dmSyncopation::closeProduction()
 {
     for( auto &mapping : m_mappings )
@@ -36,6 +105,11 @@ inline void dmSyncopation::closeProduction()
 
 inline bool dmSyncopation::openProduction()
 {
+    if( m_productionDryRun )
+    {
+        return openDryRunDestinations();
+    }
+
     if( !openResources() )
     {
         return false;
@@ -88,26 +162,27 @@ inline bool dmSyncopation::openProduction()
 
 inline void dmSyncopation::publishProductionSchedule( synco::GridTime grid, uint64_t periodQ32, uint64_t primary )
 {
-    if( !m_timing.md || primary >= INT64_MAX )
+    if( ( !m_timing.md && !m_productionDryRun ) || primary >= INT64_MAX )
     {
         return;
     }
 
-    const auto now = m_now();
+    const auto now   = m_now();
+    const int  steps = scheduleSteps();
     m_record.fill( 0 );
     m_record[synco::version]    = synco::productionVersion;
     m_record[synco::epoch]      = m_epoch;
     m_record[synco::generation] = m_generation;
     m_record[synco::state]      = m_enabled ? synco::armed : synco::invalid;
-    m_record[synco::steps]      = m_requested;
+    m_record[synco::steps]      = steps;
     m_record[synco::period]     = int64_t( periodQ32 / MagAOX::dmSyncoSimulation::periodScale );
     m_record[synco::reference]  = now;
     m_record[synco::expires]    = now + 2 * m_record[synco::period];
     m_record[synco::cycle]      = int64_t( primary );
 
-    for( int step = 0; step < m_requested; ++step )
+    for( int step = 0; step < steps; ++step )
     {
-        const auto target = synco::stepGrid( grid, periodQ32, step ? step : m_requested, m_requested ).ns;
+        const auto target = synco::stepGrid( grid, periodQ32, step ? step : steps, steps ).ns;
         const auto cutoff = target - int64_t( m_productionReadyLeadUs * 1000 );
 
         if( cutoff > now )
@@ -117,6 +192,11 @@ inline void dmSyncopation::publishProductionSchedule( synco::GridTime grid, uint
         }
     }
 
+    if( m_productionDryRun )
+    {
+        return;
+    }
+
     m_timing.md->write = 1;
     std::memcpy( m_timing.array.raw, m_record.data(), sizeof( m_record ) );
     ImageStreamIO_UpdateIm( &m_timing );
@@ -124,11 +204,33 @@ inline void dmSyncopation::publishProductionSchedule( synco::GridTime grid, uint
 
 inline bool dmSyncopation::productionSnapshot( const synco::Request &request, int64_t now )
 {
-    const auto started = m_now();
+    const auto started  = m_now();
+    const bool clearing = m_channelZero.state == ChannelZero::State::scheduled;
+    const bool fenced =
+        m_channelZero.state == ChannelZero::State::triggered && m_record[synco::generation] != m_generation;
 
     for( auto &mapping : m_mappings )
     {
+        if( clearing && request.step > 0 )
+        {
+            std::fill( mapping.m_stage.begin(), mapping.m_stage.end(), 0.0F );
+            continue;
+        }
+
         std::copy( mapping.m_cache.begin(), mapping.m_cache.end(), mapping.m_stage.begin() );
+
+        if( m_productionDryRun )
+        {
+            ++mapping.m_missing;
+            continue;
+        }
+
+        // Retain the applied value through step zero and discard the retired generation at the next snapshot.
+        if( clearing || fenced )
+        {
+            continue;
+        }
+
         synco::CommitRecord command{};
         auto               *ready           = mapping.m_ready.md;
         const auto         *source          = mapping.m_source->image()->md;
@@ -228,23 +330,44 @@ inline bool dmSyncopation::productionCopy( uint64_t primary, int64_t cutoff )
 
     for( auto &mapping : m_mappings )
     {
-        auto *destination = mapping.m_destination->image()->md;
+        auto *destination = m_productionDryRun ? nullptr : mapping.m_destination->image()->md;
 
-        if( input->write || input->cnt0 != primary || destination->write || destination->cnt0 != mapping.m_counter )
+        if( input->write || input->cnt0 != primary ||
+            ( destination && ( destination->write || destination->cnt0 != mapping.m_counter ) ) )
         {
             m_zeroWaitFailure = ZeroOutcome::primaryChanged;
             return false;
         }
 
-        mapping.m_destination->setWrite( true );
-        std::memcpy( mapping.m_destination->data(), mapping.m_stage.data(), mapping.m_stage.size() * sizeof( float ) );
-        mapping.m_destination->post();
+        if( destination )
+        {
+            mapping.m_destination->setWrite( true );
+        }
+
+        auto *pixels = m_productionDryRun ? mapping.m_dryDestination.data() : mapping.m_destination->data();
+        std::memcpy( pixels, mapping.m_stage.data(), mapping.m_stage.size() * sizeof( float ) );
+
+        if( destination )
+        {
+            mapping.m_destination->post();
+        }
+
         std::copy( mapping.m_stage.begin(), mapping.m_stage.end(), mapping.m_cache.begin() );
     }
 
     const auto finished = m_now();
     // Keep excursions visible without changing the configured admission budget for later slots.
     m_copyMax = std::max( m_copyMax, finished - started );
+
+    if( m_productionDryRun )
+    {
+        if( !m_dryCycle.firstCopyNs )
+        {
+            m_dryCycle.firstCopyNs = started;
+        }
+
+        m_dryCycle.maxCopyNs = std::max( m_dryCycle.maxCopyNs, finished - started );
+    }
 
     if( finished > cutoff || input->write || input->cnt0 != primary )
     {
@@ -270,7 +393,7 @@ inline bool dmSyncopation::prepareProductionStep( int step, int64_t target, uint
 
 inline void dmSyncopation::productionStep0( synco::GridTime grid, uint64_t periodQ32, uint64_t primary )
 {
-    const auto           target = synco::stepGrid( grid, periodQ32, m_requested, m_requested ).ns;
+    const auto           target = synco::stepGrid( grid, periodQ32, 1, 1 ).ns;
     const synco::Request request{
         m_epoch, m_generation, int64_t( primary + 1 ), 0, target, target - int64_t( m_productionReadyLeadUs * 1000 ) };
     const auto cutoff = target - int64_t( m_productionStep0LeadUs * 1000 );

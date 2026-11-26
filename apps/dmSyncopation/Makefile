@@ -4,7 +4,8 @@ OTHER_HEADERS=syncoSchedule.hpp syncoCadence.hpp syncoSimulation.hpp syncoPipeli
               syncoPublicationClock.hpp ../../libMagAOX/common/publicationClock.hpp \
               syncoMainTiming.hpp ../../libMagAOX/common/dmTimingEvents.hpp \
               ../../libMagAOX/app/dev/dmTimingEventStream.hpp \
-              dmSyncopationZeroTest.hpp dmSyncopationProduction.hpp syncoZeroTiming.hpp \
+              dmSyncopationZeroTest.hpp dmSyncopationProduction.hpp dmSyncopationChannelZero.hpp \
+              dmSyncopationDryRun.hpp syncoZeroTiming.hpp \
               ../../libMagAOX/common/dmSyncoSimulation.hpp \
               ../../libMagAOX/app/dmSyncopationTiming.hpp \
               ../../libMagAOX/app/dev/dmSyncopationProducer.hpp \

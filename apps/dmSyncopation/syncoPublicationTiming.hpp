@@ -34,15 +34,19 @@ class PublicationTiming
     struct Summary
     {
         unsigned steps{ 0 }; ///< Configured total slots, including the genuine primary publication.
-        std::array<ZeroTiming::Stats, 4>
+        std::array<ZeroTiming::Stats, maxSteps>
             interval{}; ///< Consecutive labelled publications; zero is last auxiliary to main.
-        std::array<ZeroTiming::Stats, 4> intervalError{}; ///< Adjacent interval minus the preceding frozen period/N.
-        std::array<ZeroTiming::Stats, 4> phaseError{};    ///< Auxiliary minus its actual main, less its nominal offset.
-        std::array<ZeroTiming::Stats, 4>
-            publicationError{};                            ///< Raw publication minus its frozen producer-clock target.
-        std::array<ZeroTiming::Stats, 4> preCounterLead{}; ///< Raw publication proxy minus the mapped final guard.
-        std::array<ZeroTiming::Stats, 4> apiCost{}; ///< Monotonic final guard through complete update-API return.
-        uint64_t                         mainObserved{ 0 }; ///< Unique accepted genuine primary publications.
+        std::array<ZeroTiming::Stats, maxSteps>
+            intervalError{}; ///< Adjacent interval minus the preceding frozen period/N.
+        std::array<ZeroTiming::Stats, maxSteps>
+            phaseError{}; ///< Auxiliary minus its actual main, less its nominal offset.
+        std::array<ZeroTiming::Stats, maxSteps>
+            publicationError{}; ///< Raw publication minus its frozen producer-clock target.
+        std::array<ZeroTiming::Stats, maxSteps>
+            preCounterLead{}; ///< Raw publication proxy minus the mapped final guard.
+        std::array<ZeroTiming::Stats, maxSteps>
+                 apiCost{};              ///< Monotonic final guard through complete update-API return.
+        uint64_t mainObserved{ 0 };      ///< Unique accepted genuine primary publications.
         uint64_t auxiliaryObserved{ 0 }; ///< Unique accepted auxiliary publications, including unacknowledged ones.
         uint64_t paired{ 0 }; ///< Adjacent publications with consecutive slot/cycle labels and source progression.
         uint64_t phaseMatched{ 0 };   ///< Auxiliary publications paired with their same-cycle genuine main.
@@ -55,7 +59,7 @@ class PublicationTiming
         bool     sourceFault{ false }; ///< Replacement or regression blocks further observations until reset.
     };
 
-    /// Select one through four total slots and clear all retained identities and populations on success.
+    /// Select the total number of slots and clear all retained identities and populations on success.
     bool configure( unsigned steps /**< [in] Total main-plus-auxiliary slots. */ );
 
     /// Clear measurements and frozen source identities while retaining the configured slot count.

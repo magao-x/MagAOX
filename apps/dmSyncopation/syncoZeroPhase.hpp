@@ -1,11 +1,12 @@
 /** \file syncoZeroPhase.hpp
- * \brief Bounded same-clock combined-publication phase measurements for finite zero trials.
+ * \brief Bounded same-clock combined-publication phase measurements for syncopation.
  */
 #ifndef dmSyncopation_syncoZeroPhase_hpp
 #define dmSyncopation_syncoZeroPhase_hpp
 
 #include <array>
 
+#include "../../libMagAOX/app/dmSyncopationTiming.hpp"
 #include "../../libMagAOX/common/dmSyncoSimulation.hpp"
 #include "syncoZeroTiming.hpp"
 
@@ -29,11 +30,15 @@ class ZeroPhase
     /// Full-rate populations in nanoseconds, indexed by the destination step.
     struct Summary
     {
-        unsigned                         steps{ 0 }; ///< Configured total step count, including the genuine main.
-        std::array<ZeroTiming::Stats, 4> interval{}; ///< Adjacent combined-publication intervals; zero is last-to-main.
-        std::array<ZeroTiming::Stats, 4> intervalError{}; ///< Adjacent interval minus the preceding frozen period/N.
-        std::array<ZeroTiming::Stats, 4> phaseError{}; ///< Auxiliary minus its actual main, less nominal step*period/N.
-        std::array<ZeroTiming::Stats, 4> transport{};  ///< Auxiliary publication through its acknowledged combination.
+        unsigned steps{ 0 }; ///< Configured total step count, including the genuine main.
+        std::array<ZeroTiming::Stats, maxSteps>
+            interval{}; ///< Adjacent combined-publication intervals; zero is last-to-main.
+        std::array<ZeroTiming::Stats, maxSteps>
+            intervalError{}; ///< Adjacent interval minus the preceding frozen period/N.
+        std::array<ZeroTiming::Stats, maxSteps>
+            phaseError{}; ///< Auxiliary minus its actual main, less nominal step*period/N.
+        std::array<ZeroTiming::Stats, maxSteps>
+                 transport{};   ///< Auxiliary publication through its acknowledged combination.
         uint64_t observed{ 0 }; ///< Valid labelled combined identities presented to the collector, including repeats.
         uint64_t paired{ 0 };   ///< Exact adjacent publications with consecutive step and genuine-cycle labels.
         uint64_t phaseMatched{ 0 }; ///< Auxiliary publications compared with their retained genuine main.
@@ -45,7 +50,7 @@ class ZeroPhase
         uint64_t transportExcluded{ 0 }; ///< Auxiliary observations lacking usable same-clock publication evidence.
     };
 
-    /// Select one through four total steps and clear all measurements on success.
+    /// Select the total number of steps and clear all measurements on success.
     bool configure( unsigned steps /**< [in] Total steps, including the genuine main. */ );
 
     /// Clear statistics and pending identities while retaining the configured step count.
