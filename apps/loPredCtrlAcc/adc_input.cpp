@@ -304,6 +304,7 @@ std::size_t AdcCapture::drain( const AdcSource &source )
         sample.m_acquiredNs  = acquired;
         sample.m_publishedNs = published;
         sample.m_receivedNs  = clock.m_monoNs;
+        sample.m_sequence    = m_status.m_samples + 1; // Arrival order; never reset, so it spans every gap.
         if( m_firstRateTime < 0 )
         {
             m_firstRateTime = sample.m_acquiredNs;

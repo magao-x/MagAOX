@@ -81,6 +81,7 @@ struct AdcSample
     AdcFrame              m_frame;                           ///< Original counts and producer metadata.
     std::array<double, 2> m_acceleration{};                  ///< Calibrated X/Y acceleration in m/s^2.
     std::uint64_t         m_generation{ 0 }, m_segment{ 0 }; ///< Source incarnation and uninterrupted sample segment.
+    std::uint64_t         m_sequence{ 0 }; ///< Arrival order of accepted samples: consecutive across source gaps.
     std::int64_t m_acquiredNs{ 0 }, m_publishedNs{ 0 }, m_receivedNs{ 0 }; ///< Mapped acquisition/write and receipt.
 };
 

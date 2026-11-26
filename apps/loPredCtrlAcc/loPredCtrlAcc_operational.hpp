@@ -189,8 +189,8 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     std::atomic<std::int64_t> m_upstreamNs{ -1 };                              ///< Local receipt time of the report.
 
     /// Default-off configuration: let the assisted learner append, learn and score ACC windows without upstream
-    /// lock. It never publishes an ACC prediction (without lock the slots carry the WFS feedback only), and a fit that
-    /// learned without lock must be reset before it can predict.
+    /// lock (otherwise the fit learns only under lock, while it predicts either way); a fit that learned without lock
+    /// must be reset before it can predict.
     bool m_assistedDiagnostic{ false };
 
     /// The assisted fit learned from frames without upstream lock; prediction is refused until a model reset.
@@ -199,7 +199,7 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Latest WFS-thread ACC window is complete and fresh, independently of upstream lock.
     bool m_windowValid{ false };
 
-    /// Why the latest WFS-thread ACC window is not usable ("ok" when it is, "ok_filled" when it holds filled samples).
+    /// Why the latest WFS-thread ACC window is not usable ("ok", or "ok_unlocked" without the upstream lock).
     std::atomic<const char *> m_windowReason{ "no_samples" };
 
     /// First failed outputValid() condition after the output was last qualified, and the ACC window reason then.
@@ -355,7 +355,6 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
         std::uint64_t m_predictions{ 0 };   ///< Slot calculations with a ready model.
         std::uint64_t m_slots{ 0 };         ///< Assisted slots rendered.
         std::uint64_t m_holds{ 0 };         ///< Slots without a current frame (late WFS), holding the last command.
-        std::uint64_t              m_wfsOnly{ 0 }; ///< Predicting slots without a usable ACC origin: WFS feedback only.
         std::uint64_t m_lagging{ 0 };       ///< Slots with fewer new ACC samples than executed slots (k < p).
         std::uint64_t m_anomalies{ 0 };     ///< ACC counters outside the frame's [anchor, anchor+r) range.
         std::uint64_t m_mismatch{ 0 };      ///< Requests whose scheduler steps differ from dm_slots.
@@ -430,24 +429,15 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
 
     pcf::IndiProperty m_indiP_integrator; ///< Published integrator state and combined parameters.
 
-    /** \name Missed-frame filling - Data
-     * A missed WFS frame, or one WFS frame's worth of missed ACC samples, is filled instead of breaking the histories:
-     * the missed WFS measurement holds the previous one, a missed ACC sample holds the one before it, and the DM keeps
-     * its command. Prediction continues; learning pauses until no example contains a filled value.
+    /** \name Arrival-order histories - Data
+     * The WFS and ACC histories are the most recent measurements received, in arrival order: a missed or late frame
+     * neither breaks nor fills them.
      * @{ */
-    int m_maxFill{ 5 }; ///< Consecutive missed WFS frames (and WFS frames of ACC samples) filled; 0 disables filling.
+    int m_maxFill{ 5 }; ///< Sizes the copied-slot ring only; no longer fills (parameters.max_fill is still accepted).
 
-    DDSPC::Matrix m_lastMeasurement; ///< Previous WFS measurement, held for a missed frame; WFS thread.
+    std::uint64_t m_wfsRawCounter{ 0 }; ///< Source counter of the latest WFS frame, to ignore a repeated frame.
 
-    std::uint64_t m_lastAnchor{ 0 };      ///< ACC anchor of the previous accepted window; WFS thread.
-    std::uint64_t m_lastSegment{ 0 };     ///< Source generation of that window.
-    bool          m_anchorKnown{ false }; ///< The previous window was accepted, so a missing frame can be placed.
-    bool          m_accFilled{ false };   ///< The latest ACC window contains filled samples; WFS thread.
-
-    int m_fillHoldoff{ 0 }; ///< WFS frames left with learning paused after a fill; under m_modelMutex.
-
-    std::uint64_t              m_wfsFills{ 0 }; ///< Missed WFS frames filled; under m_modelMutex.
-    std::atomic<std::uint64_t> m_accFills{ 0 }; ///< Missed ACC samples filled.
+    bool m_trainLocked{ false }; ///< Upstream lock when the training gate was last applied; WFS thread.
     /// @}
 
     DDSPC::Matrix m_intState;                   ///< Standard integrator state, the held position; WFS thread.
@@ -646,15 +636,8 @@ class loPredCtrlAcc_operational : public MagAOXApp<true>,
     /// Return a copy of the combined main-loop integrator parameters.
     Integrator integrator();
 
-    /// Copied-slot ring size: the slots of max(max_fill, 2) + 2 WFS frames, so a filled gap's slots are all retained.
+    /// Copied-slot ring size: the slots of max(max_fill, 2) + 2 WFS frames, retained across a late WFS frame.
     int ringSize() const;
-
-    /// Advance both fits' histories over a missed WFS frame without changing the DM command; caller holds m_modelMutex.
-    /** The missed measurement holds the previous one; its interval's commands are the q slots copied after the previous
-     * decision. Nothing is learned, published to the DM worker or explored.
-     */
-    void fillFrame( std::uint64_t counter /**< [in] Missed WFS counter. */,
-                    std::uint64_t current /**< [in] WFS counter of the frame that revealed the gap. */ );
 
     /// Store a main-loop cacaoInterface scalar (loop_gain, loop_multcoeff or loop_max_limit) and recombine.
     void loopParameter( const pcf::IndiProperty &ipRecv /**< [in] Received property with a "current" element. */,
@@ -963,7 +946,7 @@ inline void loPredCtrlAcc_operational::setupConfig()
     add( "parameters",
          "assisted_diagnostic",
          "bool",
-         "Assisted learner/scoring without upstream lock; never publishes an ACC prediction; default false." );
+         "Assisted learning and scoring without upstream lock (otherwise only under lock); default false." );
     add( "parameters",
          "ripple",
          "float",
@@ -975,8 +958,8 @@ inline void loPredCtrlAcc_operational::setupConfig()
     add( "parameters",
          "max_fill",
          "int",
-         "Consecutive missed WFS frames, and WFS frames of missed ACC samples, filled instead of stopping (0-20, "
-         "default 5)." );
+         "Accepted for existing configurations; missed frames are no longer filled (the histories use the newest "
+         "measurements received). Sizes the copied-slot ring (0-20, default 5)." );
     add( "parameters",
          "hold_timeout",
          "float",
@@ -1217,8 +1200,6 @@ inline void loPredCtrlAcc_operational::resetModels()
     m_multirate->allocate( m_origin );
     m_learnUs          = {};
     m_learnOverruns    = 0;
-    m_fillHoldoff      = 0;
-    m_anchorKnown      = false;
     m_unlockedTraining = false;
     m_lastFrameNs      = -1;
     applyTraining();
@@ -1227,6 +1208,7 @@ inline void loPredCtrlAcc_operational::resetModels()
     m_pending  = {};
     m_havePending       = false;
     m_wfsCounter        = 0;
+    m_wfsRawCounter     = 0;
     m_intState          = DDSPC::Matrix::Zero( m_settings.m_modes, 1 );
     m_intPreviousKnown  = false;
     m_slotPreviousKnown = false;
@@ -1259,10 +1241,12 @@ inline void loPredCtrlAcc_operational::resetModels()
 inline void loPredCtrlAcc_operational::applyTraining()
 {
     const bool assisted = m_mode.load() == DDSPC::ShadowMode::AccelAssisted;
-    const bool learning = m_learning && m_fillHoldoff == 0; // Never learn from examples containing filled values.
+    const bool learning = m_learning;
     m_models->training( DDSPC::ShadowMode::Standard, learning && !assisted && !m_mfiltCopy.load() ); // Copy: no fit.
     m_models->training( DDSPC::ShadowMode::AccelAssisted, false );
-    m_multirate->training( learning && assisted );
+    // The assisted fit learns only under the upstream lock (or in the diagnostic mode); unlocked it still predicts.
+    m_trainLocked = m_syncLocked.load();
+    m_multirate->training( learning && assisted && ( m_trainLocked || m_assistedDiagnostic ) );
 }
 
 inline void loPredCtrlAcc_operational::learnStdFinished()
@@ -1335,116 +1319,47 @@ inline bool loPredCtrlAcc_operational::sensorHistory( const DDSPC::AdcBatch     
 {
     const bool locked = m_syncLocked.load();
     m_windowValid     = false;
-    m_accFilled       = false;
     auto reject       = [this]( const char *reason )
     {
         m_windowReason.store( reason );
-        m_anchorKnown = false;
         return false;
     };
-    if( copied.m_count > batch.size() || ( !locked && !m_assistedDiagnostic ) )
+    if( copied.m_count > batch.size() )
     {
         m_adcCount = m_adcNext = 0;
-        return reject( copied.m_count > batch.size() ? "adc_stream_invalid" : "awaiting_upstream_lock" );
+        return reject( "adc_stream_invalid" );
     }
 
-    // A reader segment break (counter gap, rejected sample, timing gap) keeps the history: the window holds a missing
-    // sample from the one before it (within max_fill). Only another source generation, whose counters restart, is
-    // excluded, by the generation check in find() below.
+    // The window is the newest samples received, in arrival order (m_sequence): late samples take their place when
+    // they arrive, and samples the source never delivered simply do not occur. Nothing is filled or reset.
     for( unsigned n = 0; n < copied.m_count; ++n )
     {
         m_adcHistory[m_adcNext] = batch[n];
         m_adcNext               = ( m_adcNext + 1 ) % m_adcHistory.size();
         m_adcCount              = std::min<unsigned>( m_adcCount + 1, m_adcHistory.size() );
     }
-    if( !copied.m_status.m_valid )
-    {
-        return reject( "adc_stream_invalid" );
-    }
     const unsigned count = m_settings.m_accelChannels / 2;
-    const unsigned limit = unsigned( m_maxFill * m_ratio ); // One missed WFS frame's worth of samples per fill.
-    if( copied.m_more )
-        return reject( "reader_backlog" );
     if( m_adcCount < count )
         return reject( "history_filling" );
     const auto &newest = m_adcHistory[( m_adcNext + m_adcHistory.size() - 1 ) % m_adcHistory.size()];
     if( now < newest.m_receivedNs || now - newest.m_acquiredNs > m_adcConfig.m_maxAgeNs )
         return reject( "stale_sample" );
 
-    // The window ends at the newest sample. If a whole frame of samples is missing, it ends one frame after the
-    // previous window instead, so anchors keep advancing by r, and the missing samples are filled.
-    const std::uint64_t segment = newest.m_generation; // Counters are continuous within a source generation.
-    std::uint64_t       anchor  = newest.m_frame.m_counter;
-    if( !copied.m_count )
-    {
-        // At most max_fill consecutive frames beyond the newest real sample.
-        if( !m_anchorKnown || m_lastSegment != segment || m_lastAnchor + m_ratio - anchor > limit )
-        {
-            return reject( "no_new_sample" );
-        }
-
-        anchor = m_lastAnchor + m_ratio;
-    }
-
-    // A sample of this generation received by now, by counter; a missing one holds the sample before it.
-    auto find = [&]( std::uint64_t counter, bool older ) -> const DDSPC::AdcSample *
-    {
-        const DDSPC::AdcSample *best = nullptr;
-        for( unsigned n = 0; n < m_adcCount; ++n )
-        {
-            const auto &sample = m_adcHistory[( m_adcNext + m_adcHistory.size() - n - 1 ) % m_adcHistory.size()];
-            const auto  value  = sample.m_frame.m_counter;
-            if( sample.m_generation != segment || sample.m_receivedNs > now ||
-                ( older ? value >= counter : value != counter ) )
-            {
-                continue;
-            }
-
-            if( !best || value > best->m_frame.m_counter )
-            {
-                best = &sample;
-            }
-        }
-        return best;
-    };
-
     features.resize( m_settings.m_accelChannels, 1 );
-    unsigned                filled = 0;
-    const DDSPC::AdcSample *held   = nullptr;
-    for( unsigned n = count; n-- > 0; ) // Oldest first, so a missing sample can hold the one before it.
+    for( unsigned n = 0; n < count; ++n ) // Newest first.
     {
-        const auto *sample = find( anchor - n, false );
-        if( !sample )
-        {
-            ++filled;
-            sample = held ? held : find( anchor - n, true );
-            if( !sample )
-            {
-                return reject( "counter_gap" );
-            }
-        }
-
-        held                  = sample;
-        features( 2 * n )     = sample->m_acceleration[0];
-        features( 2 * n + 1 ) = sample->m_acceleration[1];
-    }
-
-    if( filled > limit )
-    {
-        return reject( "counter_gap" );
+        const auto &sample    = m_adcHistory[( m_adcNext + m_adcHistory.size() - 1 - n ) % m_adcHistory.size()];
+        features( 2 * n )     = sample.m_acceleration[0];
+        features( 2 * n + 1 ) = sample.m_acceleration[1];
     }
     if( !features.allFinite() )
         return reject( "nonfinite_sample" );
-    m_adcAnchor   = anchor;
-    m_adcSegment  = segment;
-    m_lastAnchor  = anchor;
-    m_lastSegment = segment;
-    m_anchorKnown = true;
-    m_accFilled   = filled > 0;
-    m_accFills += filled;
+    m_adcAnchor   = newest.m_sequence;
+    m_adcSegment  = newest.m_generation;
     m_windowValid = true;
-    m_windowReason.store( locked ? ( filled ? "ok_filled" : "ok" ) : "ok_unlocked_diagnostic" );
-    return locked; // Assisted control and output always require the upstream lock.
+    // Unlocked, the window still predicts; the fit only learns under lock (applyTraining).
+    m_windowReason.store( locked ? "ok" : "ok_unlocked" );
+    return true;
 }
 
 inline std::int64_t loPredCtrlAcc_operational::appliedSlots( DDSPC::Matrix &applied ) const
@@ -1547,77 +1462,6 @@ inline loPredCtrlAcc_operational::Integrator loPredCtrlAcc_operational::integrat
 inline int loPredCtrlAcc_operational::ringSize() const
 {
     return ( std::max( m_maxFill, 2 ) + 2 ) * m_slots;
-}
-
-inline void loPredCtrlAcc_operational::fillFrame( std::uint64_t counter, std::uint64_t current )
-{
-    // The missed frame's interval: the q slots after the previous decision, as copied (later ones hold the newest).
-    DDSPC::Matrix applied;
-    { //mutex scope
-        std::lock_guard<std::mutex> lock( m_commandMutex );
-        if( m_appliedOrdinal >= 0 && m_decisionOrdinal >= 0 && m_appliedOrdinal - m_decisionOrdinal < m_ring )
-        {
-            applied.resize( m_settings.m_modes, m_slots );
-            for( int j = 0; j < m_slots; ++j )
-            {
-                applied.col( j ) =
-                    m_appliedSlots.col( std::min( m_decisionOrdinal + 1 + j, m_appliedOrdinal ) % m_ring );
-            }
-
-            m_decisionOrdinal += m_slots; // The missed decision, so the current one is not counted as a slot shift.
-        }
-        else if( m_commandKnown )
-        {
-            applied = m_copiedCommand.replicate( 1, m_slots );
-        }
-    }
-
-    // The standard fit's histories, kept continuous in both modes, exactly as a received frame advances them.
-    DDSPC::Matrix input;
-    m_pending.m_appliedValid = standardInput( applied, input );
-    if( m_pending.m_appliedValid )
-    {
-        m_pending.m_appliedCommand = input;
-    }
-
-    // Main-loop route: nothing was published for the missed frame, so mfilt received no delta.
-    if( m_mainLoop.load() )
-    {
-        mainLoopInput();
-        m_mainLoopCommand.setZero();
-    }
-
-    const DDSPC::Matrix slots = slotInputs( applied );
-    if( m_havePending )
-    {
-        m_pending.m_assistedAppliedValid = false;
-        m_pending.m_accelValid           = false;
-        m_models->process( m_pending );
-    }
-
-    DDSPC::Matrix empty;
-    m_models->predict_next( DDSPC::ShadowMode::Standard, counter, m_lastMeasurement, empty, m_plans[0] );
-
-    // The assisted fit: the held measurement at the missed frame's anchor, without an ACC window of its own. The
-    // following windows overlap it, so the sample history stays continuous; its origin is never published.
-    if( m_mode.load() == DDSPC::ShadowMode::AccelAssisted )
-    {
-        const DDSPC::MatrixD lift   = slots.rows() == m_settings.m_modes && slots.cols() == m_slots
-                                          ? DDSPC::MatrixD( slots.cast<double>() )
-                                          : DDSPC::MatrixD();
-        const std::uint64_t  anchor = m_adcAnchor - std::uint64_t( m_ratio ) * ( current - counter );
-        m_multirate->append(
-            counter, m_lastMeasurement.cast<double>(), lift, DDSPC::VectorD(), anchor, m_adcSegment, m_origin );
-    }
-
-    m_pending               = {};
-    m_pending.m_index       = counter;
-    m_pending.m_residual    = m_lastMeasurement;
-    m_pending.m_wfsValid    = true;
-    m_pending.m_timingValid = true;
-    m_havePending           = true;
-    m_wfsCounter            = counter;
-    ++m_wfsFills;
 }
 
 inline void loPredCtrlAcc_operational::loopParameter( const pcf::IndiProperty &ipRecv, std::size_t which )
@@ -1752,44 +1596,21 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
         m_inputValid.store( false );
         return 0;
     }
-    if( counter == m_wfsCounter )
+    if( counter == m_wfsRawCounter )
+    {
         return 0;
-
-    // A missed WFS frame is filled and prediction continues; only a longer gap or a counter reset breaks the histories.
-    bool filled = false;
-    if( m_wfsCounter && counter != m_wfsCounter + 1 )
-    {
-        if( counter > m_wfsCounter && counter - m_wfsCounter - 1 <= std::uint64_t( m_maxFill ) &&
-            m_lastMeasurement.rows() == measurement.rows() )
-        {
-            for( auto missed = m_wfsCounter + 1; missed < counter; ++missed )
-            {
-                fillFrame( missed, counter );
-            }
-
-            filled = true;
-        }
-        else
-        {
-            m_models->invalidate( {} );
-            m_havePending = false;
-        }
     }
 
-    // Filled ACC samples only enter the assisted fit's examples.
-    filled = filled || ( m_accFilled && m_mode.load() == DDSPC::ShadowMode::AccelAssisted );
-    if( filled )
-    {
-        // Every example within history (or the ACC window's frames) + future frames of a filled value contains it.
-        m_fillHoldoff = std::max( m_settings.m_history, m_accelHistory ) + m_settings.m_future + 1;
-        applyTraining();
-    }
-    else if( m_fillHoldoff > 0 && --m_fillHoldoff == 0 )
+    // The WFS history is the frames received, in arrival order: each is the next index whatever source frames were
+    // missed or arrived late, so a gap neither breaks nor fills the histories.
+    m_wfsRawCounter = counter;
+    counter         = m_wfsCounter + 1;
+
+    // The assisted fit learns only under lock: follow lock changes.
+    if( m_syncLocked.load() != m_trainLocked )
     {
         applyTraining();
     }
-
-    m_lastMeasurement = measurement;
 
     // learn_std_extra seconds after the learn_std sequence ended (read now, so a change applies at once).
     if( m_learnStdActive && m_learnStdEndNs >= 0 && now - m_learnStdEndNs >= m_learnStdExtra * 1e9 )
@@ -1957,7 +1778,7 @@ inline int loPredCtrlAcc_operational::step( const DDSPC::Matrix &measurement,
             ++m_planDecisions;
             if( clone )
             {
-                m_planCounter   = counter;
+                m_planCounter   = m_wfsRawCounter; // The source counter, as processImage() records arrivals.
                 m_planArrivalNs = now;
                 m_planDoneNs    = synco::monotonicNs();
             }
@@ -1989,7 +1810,8 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
                                                     std::int64_t         now )
 {
     const int  modes   = m_settings.m_modes;
-    const bool probing = m_predicting && m_learning && !m_exploration.empty() && assistedValid;
+    // Probes are physical commands: only under the upstream lock, as the fit that identifies them learns only then.
+    const bool probing = m_predicting && m_learning && !m_exploration.empty() && assistedValid && m_syncLocked.load();
     if( probing )
         m_multirate->regularization( m_exploration.front().m_lambda );
     // Keep the frozen standard fit's histories continuous so it resumes without a gap when standard is reselected.
@@ -2004,13 +1826,13 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
     const DDSPC::MatrixD lift = applied.rows() == modes && applied.cols() == m_slots
                                     ? DDSPC::MatrixD( applied.cast<double>() )
                                     : DDSPC::MatrixD();
-    // The default-off diagnostic mode lets the learner use complete windows without upstream lock. A fit that learns
-    // from them is barred from prediction until reset; the ACC prediction still requires lock (assistedCandidate).
-    const bool diagnostic = !assistedValid && m_assistedDiagnostic && m_windowValid;
-    if( diagnostic && m_multirate->status().m_training )
+    // The window predicts with or without the upstream lock; the fit learns from it only under lock, except in the
+    // default-off diagnostic mode, after which the fit is barred from prediction until reset.
+    if( !m_syncLocked.load() && assistedValid && m_multirate->status().m_training )
+    {
         m_unlockedTraining = true;
-    const DDSPC::VectorD window =
-        assistedValid || diagnostic ? DDSPC::VectorD( features.cast<double>() ) : DDSPC::VectorD();
+    }
+    const DDSPC::VectorD window = assistedValid ? DDSPC::VectorD( features.cast<double>() ) : DDSPC::VectorD();
     m_multirate->append( counter, y, lift, window, m_adcAnchor, m_adcSegment, m_origin );
     const bool ready = m_multirate->status().m_ready;
     const bool fault = !y.allFinite();
@@ -2072,14 +1894,16 @@ inline int loPredCtrlAcc_operational::stepAssisted( const DDSPC::Matrix &measure
 
 inline const char *loPredCtrlAcc_operational::outputInvalid( std::int64_t now ) const
 {
-    // ACC conditions (an incomplete window, a lost upstream lock) are not here: assisted slots then keep the WFS
-    // feedback without the ACC prediction (assistedCandidate), so the ACC never stops the output.
-    const auto last = m_wfsReceipt.load();
+    // The ACC window uses the newest samples received, so it fails only before the history first fills or when the
+    // ACC stream stops for longer than adc.max_age_us; the upstream lock only gates learning.
+    const auto last     = m_wfsReceipt.load();
+    const bool assisted = m_mode != DDSPC::ShadowMode::Standard;
 
     return !m_inputValid.load()                                          ? "wfs_invalid"
            : ( m_integrate || m_mfiltCopy ) && !m_integratorReady.load() ? "integrator_parameters"
            : !m_candidateValid.load()                                    ? "command_invalid"
            : last < 0 || now < last || now - last > m_inputTimeout * 1e9 ? "wfs_stale"
+           : assisted && !m_assistedValid.load()                         ? "acc_window"
                                                                          : nullptr;
 }
 
@@ -2175,7 +1999,7 @@ inline bool loPredCtrlAcc_operational::outputCandidate( const synco::Request &re
 
 inline void loPredCtrlAcc_operational::fastSample( const DDSPC::AdcSample &sample )
 {
-    const auto counter = sample.m_frame.m_counter;
+    const auto counter = sample.m_sequence; // Arrival order, as the WFS thread's window anchor.
     const auto segment = sample.m_generation;
     if( m_fastHaveSample )
     {
@@ -2378,25 +2202,23 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
         for( ; phase < available; ++phase )
         {
             const auto &sample = m_fastSamples[( anchor + 1 + phase ) % m_fastSamples.size()];
-            if( sample.m_frame.m_counter != anchor + 1 + phase )
+            if( sample.m_sequence != anchor + 1 + phase )
+            {
                 break;
+            }
             m_fastExtras[2 * phase]     = sample.m_acceleration[0];
             m_fastExtras[2 * phase + 1] = sample.m_acceleration[1];
         }
     }
     const auto &gains   = m_gainSets[m_gainFront];
-    const bool  frame   = prefix >= 0 && prefix < m_slots; // The current WFS frame owns this slot.
-    // The ACC prediction needs this frame's ACC origin (a complete window, under lock) and the upstream lock. Without
-    // them (missed or late ACC samples, a lost lock, a history refilling after a gap) the slot keeps the frame's WFS
-    // feedback, integrated as usual, so ACC problems never stop control; the prediction resumes with the ACC.
-    const bool current = origin.m_valid && frame;
-    const bool predict = current && m_fastFrame.m_predict && gains.m_ready && m_syncLocked.load();
+    const bool  current = origin.m_valid && prefix >= 0 && prefix < m_slots;
+    const bool  predict = current && m_fastFrame.m_predict && gains.m_ready;
     if( !m_fastFrame.m_predict )
     {
         m_fastCommand.setZero();
         m_fastState.setZero(); // Prediction always restarts from the confirmed own-channel zero.
     }
-    else if( !frame )
+    else if( !current )
     {
         m_fastCommand = m_fastLast; // No frame owns this slot yet (late WFS): hold the last command.
     }
@@ -2448,8 +2270,7 @@ inline bool loPredCtrlAcc_operational::assistedCandidate( const synco::Request &
         std::lock_guard<std::mutex> lock( m_commandMutex );
         auto                       &stats = m_fastStats;
         ++stats.m_slots;
-        stats.m_holds += m_fastFrame.m_predict && !frame;
-        stats.m_wfsOnly += m_fastFrame.m_predict && frame && !predict;
+        stats.m_holds += m_fastFrame.m_predict && !current;
         stats.m_anomalies += anomaly;
         if( predict )
         {
@@ -2526,8 +2347,9 @@ inline int loPredCtrlAcc_operational::allocate( const dev::shmimT & )
     }
     std::lock_guard<std::mutex> lock( m_modelMutex );
     m_models->invalidate( {} );
-    m_havePending = false;
-    m_wfsCounter  = 0;
+    m_havePending   = false;
+    m_wfsCounter    = 0;
+    m_wfsRawCounter = 0;
     return 0;
 }
 
@@ -2874,19 +2696,16 @@ inline int loPredCtrlAcc_operational::setupINDI()
     if( registerIndiPropertyReadOnly( m_indiP_control ) < 0 )
         return -1;
     createROIndiNumber( m_indiP_performance, "ddspc_performance" );
-    for( const auto &key : { "standard_updates",     "assisted_updates",     "standard_rmse",
-                             "assisted_rmse",        "transport_published",  "transport_acks",
-                             "transport_skipped",    "slot_shifts",          "publish_rate_hz",
-                             "predict_rate_hz",      "update_rate_hz",       "refresh_rate_hz",
-                             "fast_predictions",     "fast_holds",           "acc_lagging",
-                             "acc_anomalies",        "step_mismatch",        "fast_us_mean",
-                             "fast_us_p99",          "fast_us_max",          "margin_us_min",
-                             "margin_us_mean",       "wake_us_p99",          "acc_age_calc_us_mean",
-                             "acc_age_calc_us_p99",  "acc_age_calc_us_max",  "acc_age_apply_us_mean",
-                             "acc_age_apply_us_p99", "acc_age_apply_us_max", "learn_us_mean",
-                             "learn_us_p99",         "learn_us_max",         "learn_overruns",
-                             "wfs_filled",           "acc_filled",           "input_holds",
-                             "fast_wfs_only",        "transport_discarded" } )
+    for( const auto &key :
+         { "standard_updates",     "assisted_updates",    "standard_rmse",         "assisted_rmse",
+           "transport_published",  "transport_acks",      "transport_skipped",     "slot_shifts",
+           "publish_rate_hz",      "predict_rate_hz",     "update_rate_hz",        "refresh_rate_hz",
+           "fast_predictions",     "fast_holds",          "acc_lagging",           "acc_anomalies",
+           "step_mismatch",        "fast_us_mean",        "fast_us_p99",           "fast_us_max",
+           "margin_us_min",        "margin_us_mean",      "wake_us_p99",           "acc_age_calc_us_mean",
+           "acc_age_calc_us_p99",  "acc_age_calc_us_max", "acc_age_apply_us_mean", "acc_age_apply_us_p99",
+           "acc_age_apply_us_max", "learn_us_mean",       "learn_us_p99",          "learn_us_max",
+           "learn_overruns",       "input_holds",         "transport_discarded" } )
     {
         m_indiP_performance.add( pcf::IndiElement( key, 0.0 ) );
     }
@@ -3068,7 +2887,7 @@ inline int loPredCtrlAcc_operational::appLogic()
     DDSPC::ShadowStatus    standard;
     DDSPC::MultirateStatus assisted;
     bool                   learning, predicting;
-    std::uint64_t          shifts, overruns, needed, wfsFills;
+    std::uint64_t          shifts, overruns, needed;
     Latency                learn;
     FastStats              fast;
     CloneStats             clone;
@@ -3105,7 +2924,6 @@ inline int loPredCtrlAcc_operational::appLogic()
         predicting = m_predicting;
         learn      = m_learnUs;
         overruns   = m_learnOverruns;
-        wfsFills   = m_wfsFills;
         cloneStart = m_cloneStart;
         needed     = m_multirate->config().features( m_ratio - 1 );
         m_learnUs  = {};
@@ -3260,19 +3078,16 @@ inline int loPredCtrlAcc_operational::appLogic()
     const double updateRate  = rate( assisted.m_updates, m_rates.m_updates );
     const double refreshRate = rate( assisted.m_refreshes, m_rates.m_refreshes );
     m_rates.m_ns             = now;
-    std::vector<const char *> names{ "standard_updates",     "assisted_updates",     "standard_rmse",
-                                     "assisted_rmse",        "transport_published",  "transport_acks",
-                                     "transport_skipped",    "slot_shifts",          "publish_rate_hz",
-                                     "predict_rate_hz",      "update_rate_hz",       "refresh_rate_hz",
-                                     "fast_predictions",     "fast_holds",           "acc_lagging",
-                                     "acc_anomalies",        "step_mismatch",        "fast_us_mean",
-                                     "fast_us_p99",          "fast_us_max",          "margin_us_min",
-                                     "margin_us_mean",       "wake_us_p99",          "acc_age_calc_us_mean",
-                                     "acc_age_calc_us_p99",  "acc_age_calc_us_max",  "acc_age_apply_us_mean",
-                                     "acc_age_apply_us_p99", "acc_age_apply_us_max", "learn_us_mean",
-                                     "learn_us_p99",         "learn_us_max",         "learn_overruns",
-                                     "wfs_filled",           "acc_filled",           "input_holds",
-                                     "fast_wfs_only",        "transport_discarded" };
+    std::vector<const char *> names{
+        "standard_updates",     "assisted_updates",    "standard_rmse",         "assisted_rmse",
+        "transport_published",  "transport_acks",      "transport_skipped",     "slot_shifts",
+        "publish_rate_hz",      "predict_rate_hz",     "update_rate_hz",        "refresh_rate_hz",
+        "fast_predictions",     "fast_holds",          "acc_lagging",           "acc_anomalies",
+        "step_mismatch",        "fast_us_mean",        "fast_us_p99",           "fast_us_max",
+        "margin_us_min",        "margin_us_mean",      "wake_us_p99",           "acc_age_calc_us_mean",
+        "acc_age_calc_us_p99",  "acc_age_calc_us_max", "acc_age_apply_us_mean", "acc_age_apply_us_p99",
+        "acc_age_apply_us_max", "learn_us_mean",       "learn_us_p99",          "learn_us_max",
+        "learn_overruns",       "input_holds",         "transport_discarded" };
     std::vector<double>       values{ double( standard.m_updates ),
                                 double( assisted.m_updates ),
                                 standard.m_originRmse,
@@ -3306,10 +3121,7 @@ inline int loPredCtrlAcc_operational::appLogic()
                                 learn.quantile( .99 ),
                                 learn.m_max,
                                 double( overruns ),
-                                double( wfsFills ),
-                                double( m_accFills.load() ),
                                 double( m_inputHolds.load() ),
-                                double( fast.m_wfsOnly ),
                                 double( output.m_discarded ) };
     for( int k = 0; k < m_ratio; ++k )
     {
