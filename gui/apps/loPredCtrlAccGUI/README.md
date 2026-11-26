@@ -35,7 +35,7 @@ Build with `make -C gui/apps/loPredCtrlAccGUI` (it is also in the top-level `all
 | Prediction banner | `ddspc_control.prediction`, `main_loop_tt`; after a fault, `PREDICTION STOPPED:` and its reason. With prediction on but not writing: `ACC-assisted not writing` when `dm_slots` differs from the DM scheduler's steps per cycle, or `holding the last DM command` with the input condition being held through |
 | Controller | `fsm.state` |
 | Standard / ACC-assisted model | `ddspc_control.standard_ready`/`standard_state`, `assisted_ready`/`assisted_state` |
-| ACC rate, ACC sync | `adc_values.rate_hz`/`valid`, `ddspc_control.accel_sync` |
+| ACC rate, ACC sync | `adc_values.rate_hz`/`valid`, `ddspc_control.accel_sync`. The sync is information only: the ACC may run free (acc000 `synchro.timingSource = integrator`) and the upstream lock gates nothing |
 | DM slots / ACC ratio | `rates.dm_slots`/`acc_ratio` in use, with the measured `scheduler_steps` and `acc_per_wfs`; `detecting:` while the property is BUSY (not yet confirmed, or a detected change waiting for prediction off) |
 | Aux DM output | `safety.output_state`; a failed or discarded DM write is explained (it never stops prediction) |
 | DM write failures | `ddspc_performance.dm_write_failures`: writes that failed (scheduler restart or unavailable, DM channel unavailable, no receipt within `dm.receiptTimeoutMs`); the DM keeps its last command and the next slot is written |
