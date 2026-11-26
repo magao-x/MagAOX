@@ -32,9 +32,20 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
   - `fps` is the scan rate limit: config `accel.fps` (default 8000, must be in (0, 10000], otherwise the default is
     kept with a warning) and the INDI `fps` target at runtime. In timer mode it remains the ADC rate. In semaphore
     mode an `fps.device` source only records the WFS rate (`m_wfs_fps`); it no longer overwrites the limit.
-  - The WFS period estimate restarts from the latest interval after 3 consecutive intervals more than 10% from it
-    (`syncTiming.cadence_resets`), so a WFS rate change re-fits the scan count within a few frames. Isolated outliers
-    (jitter, a missed notification without producer metadata) only enter the EMA, as before.
+  - WFS period and scan anchor: `libMagAOX/app/wfsClock.hpp`, ad7689Ctrl's `rollingWfsClock` (namespace `wfsScan`,
+    with its tests ported). It fits ten seconds of semaphore arrivals (monotonic) against the WFS frame ID (`cnt0` of
+    the sync stream; the semaphore count without metadata) by centered least squares. The scans use its period and,
+    as each frame's anchor, its fitted arrival for that frame ID, so semaphore jitter moves neither. An arrival outside
+    the gate (`wfsCadenceTolerance` x period, at least 20 us and 6x the fitted jitter) is rejected but still scanned
+    from the fit; `wfsFitMinEvents` (16) mutually consistent rejected arrivals restart the fit at the new rate. No scans
+    until the fit qualifies (16 frames, 8 ms at 2 kHz) and while a rate change is being confirmed.
+  - This replaced an EMA of semaphore intervals (alpha 0.01) with a reset after 3 consecutive intervals more than 10%
+    off. On the Pi, `camwfs_sync` arrives over TCP; jittered or bunched arrivals moved the EMA, and three in a row reset
+    it to a single jittered interval. Below a 495 us estimate the count fell to 3, so `acq_fps` dropped whenever
+    `avg_semaphore_period_us` moved from 500 us. The EMA remains only for the delay-model diagnostics before the fit
+    qualifies; `avg_semaphore_period_us` reports the fitted period once it does.
+  - INDI `wfsClock`: `valid`, `events`, `span_s`, `fps`, `period_us`, `jitter_us` (RMS residual of arrivals),
+    `arrival_error_us` (latest arrival minus fit), `drift_us`, `rejected`, `resets`.
   - `processSyncReference()` handles each semaphore: the existing producer-metadata tracking, then the existing WFS
     delay model (`updateTriggerTiming`), then arms the schedule at the controller-corrected delay. A repeated producer
     `cnt0` arms nothing (`duplicate_references`). Posts drained together count once (`coalesced_wakes`).
@@ -58,10 +69,12 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
     (fractions of the WFS period), so loPredCtrlAcc's lock check keeps its meaning.
   - `timingDiag.sync_frames_written` now counts 4 per WFS frame.
 - New INDI `syncTiming`: `scans_per_wfs`, `scheduled_fps`, `scan_period_us`, `phase_us`, `skipped_scans`, `late_scans`,
-  `max_lateness_us`, `coalesced_wakes`, `duplicate_references`, `schedule_failures`, `cadence_resets`.
+  `max_lateness_us`, `coalesced_wakes`, `duplicate_references`, `schedule_failures`.
 
 ## Verification
 
+- `wfsClock_test` (ad7689Ctrl's clock tests, without its continuous schedule): passed on the Mac (6 cases). A
+  standalone run of the clock confirmed the sequences the new mcp3208Ctrl tests expect.
 - `wfsScanSchedule_test` (ad7689Ctrl's schedule tests, ported, plus the integer-multiple limit at 2000, 500, 700,
   1700, 2000.4, 1000 and 9000 Hz): built and passed on the development Mac (6 cases).
 - `mcp3208Ctrl_test`: compiles with GCC 15 against the real ImageStreamIO headers on the Mac (syntax check, no
@@ -70,7 +83,7 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
   `make -C tests -f Makefile.one t=../apps/mcp3208Ctrl/tests/mcp3208Ctrl_test && apps/mcp3208Ctrl/tests/mcp3208Ctrl_test`.
   New or rewritten cases: arming at the modelled phase, deadlines and late-slot skipping, the read-latency EMA and
   controller per WFS period, the service EMA, four scans from one real semaphore post, period start and missed-frame
-  normalization, a 2 kHz to 700 Hz change (11 scans), `accel.fps` loading and range, the synchronized fps source,
+  normalization, a 2 kHz to 700 Hz change re-fitted by the clock (11 scans), anchors under +/-30 us jitter, `accel.fps` loading and range, the synchronized fps source,
   reconfig reset.
 - loPredCtrlAcc's `acc_ratio` must equal `syncTiming.scans_per_wfs` (4 at 2 kHz); it is not adaptive.
 - On the Pi: `syncTiming.scans_per_wfs=4`, `scheduled_fps=8000`, `skipped_scans` and `late_scans` near zero,
@@ -86,6 +99,7 @@ WFS. ad7689Ctrl (`parkertjohnson1/ad7689Ctrl`) already solves this; this ports i
   identical before relying on the second axis.
 
 - ad7689Ctrl should include `libMagAOX/app/wfsScanSchedule.hpp` instead of its own copy when its branch is merged.
-- ad7689Ctrl's DDSPC mode (continuous clock from a rolling fit of semaphore arrivals) is not ported. It tolerates
-  semaphore jitter better, which matters for `camwfs_sync` delivered over TCP; port it if `delay_lock` or
-  `late_scans` show the jitter.
+- ad7689Ctrl should also include `libMagAOX/app/wfsClock.hpp` instead of its own copy.
+- ad7689Ctrl's continuous schedule (one clock across WFS periods, so a late reference never cancels the previous
+  period's pending scans) is not ported; with fitted anchors only a semaphore delayed past the last scan of its period
+  loses scans.

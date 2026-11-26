@@ -244,6 +244,16 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         return ip;
     }
 
+    /// Qualify the rolling WFS clock on 16 references 500 us apart, predicting `nextId` to arrive at `next`.
+    void qualifyClock( const int64_t  next /**< [in] predicted arrival of `nextId`, monotonic nanoseconds */,
+                       const uint64_t nextId /**< [in] frame ID of the next reference, at least 16 */ )
+    {
+        for( uint64_t id = nextId - 16; id < nextId; ++id )
+        {
+            m_wfsClock.observe( id, next - static_cast<int64_t>( nextId - id ) * 500000 );
+        }
+    }
+
     /// Initialize the timing-diagnostics INDI property used by diagnostics tests.
     void setupTimingDiagnosticsProperty()
     {
@@ -306,7 +316,7 @@ TEST_CASE( "mcp3208Ctrl Doxygen references are preserved", "[mcp3208Ctrl]" )
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_alpha( app.makeAlphaUpdate( 0.01 ) ) );
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_synchroDelay( app.makeSynchroDelayUpdate( 1.0 ) ) );
     XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_timingSource( app.makeTimingSourceUpdate( true ) ) );
-    XWCTEST_DOXYGEN_REF( app.updateTriggerTiming( timespec{} ) );
+    XWCTEST_DOXYGEN_REF( app.updateTriggerTiming( timespec{}, 0.0 ) );
     XWCTEST_DOXYGEN_REF( app.updateTimingDiagnosticsIndi() );
     XWCTEST_DOXYGEN_REF( app.updateTimingSourceIndi() );
     XWCTEST_DOXYGEN_REF( app.updateSyncTimingIndi() );
@@ -345,6 +355,8 @@ TEST_CASE( "mcp3208Ctrl configuration defaults load synchronized settings", "[mc
     REQUIRE( app.m_delayLockFracThreshold == Approx( 0.1 ) );
     REQUIRE( app.m_cadenceGuard_ns == Approx( 20000.0 ) );
     REQUIRE( app.m_spinLead_ns == Approx( 50000.0 ) );
+    REQUIRE( app.m_wfsClock.m_minEvents == 16 );
+    REQUIRE( app.m_wfsClock.m_tolerance == Approx( 0.1 ) );
     REQUIRE( app.m_alpha == Approx( 0.01f ) );
     REQUIRE( app.m_synchroDelayTarget == Approx( 0.0f ) );
     REQUIRE( app.m_synchroDelay == Approx( 0.0f ) );
@@ -377,6 +389,8 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "synchro",
                                 "synchro",
                                 "synchro",
+                                "synchro",
+                                "synchro",
                                 "accel",
                                 "accel" },
                               { "shmimName",
@@ -390,6 +404,8 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "cadenceGuard_ns",
                                 "alpha",
                                 "spinLead_ns",
+                                "wfsFitMinEvents",
+                                "wfsCadenceTolerance",
                                 "numChannels",
                                 "fps" },
                               { "camwfs_sync",
@@ -403,6 +419,8 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
                                 "15000",
                                 "0.25",
                                 "30000",
+                                "8",
+                                "0.2",
                                 "3",
                                 "6000" } );
     app.config.readConfig( "/tmp/mcp3208Ctrl_test_override.conf" );
@@ -418,6 +436,8 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( app.m_delayLockFracThreshold == Approx( 0.2 ) );
     REQUIRE( app.m_cadenceGuard_ns == Approx( 15000.0 ) );
     REQUIRE( app.m_spinLead_ns == Approx( 30000.0 ) );
+    REQUIRE( app.m_wfsClock.m_minEvents == 8 );
+    REQUIRE( app.m_wfsClock.m_tolerance == Approx( 0.2 ) );
     REQUIRE( app.m_alpha == Approx( 0.25f ) );
     REQUIRE( app.m_numChannels == 3 );
     REQUIRE( app.m_fps == Approx( 6000.0f ) );
@@ -1015,6 +1035,11 @@ TEST_CASE( "mcp3208Ctrl updateTriggerTiming starts from the first interval per W
 
     REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( 500000.0 ) );
     REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 500000.0 ) );
+
+    // A fitted period replaces the interval average.
+    app.updateTriggerTiming( timespec{ 10, 1300000L }, 714285.0 );
+    REQUIRE( app.m_avgSemaphorePeriod_ns == Approx( 714285.0 ) );
+    REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 714285.0 ) );
 }
 
 /// Verify timer-driven acquisition configures the published frame geometry.
@@ -1167,13 +1192,12 @@ TEST_CASE( "mcp3208Ctrl synchronized reference arms scans at the modelled phase"
 
     app.m_numChannels           = 2;
     app.m_fps                   = 8000;
-    app.m_alpha                 = 0.0f;
-    app.m_firstSemaphore        = false;
-    app.m_avgSemaphorePeriod_ns = 500000.0;
+    app.m_syncFramesReceived    = 100;
     app.m_synchroDelay          = 0.0f;
     app.m_synchroDelayTarget    = 0.0f;
 
     const int64_t arrival = 1000000000;
+    app.qualifyClock( arrival, 101 );
 
     // 0.5 * 500 us - 340.6 us wraps to 409.4 us; the four 125-us scans start at 409.4 mod 125 = 34.4 us.
     REQUIRE( app.processSyncReference( arrival ) == 0 );
@@ -1184,7 +1208,7 @@ TEST_CASE( "mcp3208Ctrl synchronized reference arms scans at the modelled phase"
     REQUIRE( app.m_syncSchedule.deadline() == arrival + 34400 );
     REQUIRE( app.m_syncSchedule.fps() == Approx( 8000.0 ) );
     REQUIRE( app.m_delayCapped == Approx( 0.0 ) );
-    REQUIRE( app.m_syncFramesReceived == 1 );
+    REQUIRE( app.m_syncFramesReceived == 101 );
 
     // Requesting the WFS rate keeps one scan per period, at the full modelled delay.
     app.m_fps = 2000;
@@ -1192,7 +1216,7 @@ TEST_CASE( "mcp3208Ctrl synchronized reference arms scans at the modelled phase"
     REQUIRE( app.m_syncSchedule.m_count == 1 );
     REQUIRE( app.m_syncSchedule.m_phase == Approx( 409400.0 ).margin( 1.0 ) );
 
-    // No measured period yet: the reference arms nothing and is not counted as a failure.
+    // Before the rolling clock qualifies, a reference arms nothing and is not counted as a failure.
     mcp3208Ctrl_test fresh;
     fresh.m_fps = 8000;
     REQUIRE( fresh.processSyncReference( arrival ) == 1 );
@@ -1200,7 +1224,7 @@ TEST_CASE( "mcp3208Ctrl synchronized reference arms scans at the modelled phase"
     REQUIRE( fresh.m_scheduleFailures == 0 );
 }
 
-/// Verify the scan count is the highest multiple of the WFS rate within the limit, as the WFS rate changes.
+/// Verify the rolling clock re-fits a WFS rate change and the scan count follows it within the limit.
 /**
  * \ingroup mcp3208Ctrl_unit_test
  */
@@ -1208,27 +1232,29 @@ TEST_CASE( "mcp3208Ctrl synchronized scans follow a WFS rate change within the l
 {
     mcp3208Ctrl_test app;
 
-    app.m_numChannels           = 2;
-    app.m_fps                   = 8000;
-    app.m_alpha                 = 0.01f;
-    app.m_firstSemaphore        = false;
-    app.m_avgSemaphorePeriod_ns = 500000.0;
-    app.m_lastAtime             = timespec{ 10, 0 };
+    app.m_numChannels        = 2;
+    app.m_fps                = 8000;
+    app.m_syncFramesReceived = 100;
 
-    // One long interval is jitter: it enters the EMA and keeps 4 scans.
-    app.updateTriggerTiming( timespec{ 10, 1428571L } );
-    REQUIRE( app.m_cadenceResets == 0 );
-    REQUIRE( app.m_wfsPeriodMeasured_ns < 520000.0 );
+    int64_t arrival = 1000000000;
+    app.qualifyClock( arrival, 101 );
+    REQUIRE( app.processSyncReference( arrival ) == 0 );
+    REQUIRE( app.m_syncSchedule.m_count == 4 );
 
-    // Three consecutive 700 Hz intervals restart the estimate at 700 Hz.
-    app.updateTriggerTiming( timespec{ 10, 2857142L } );
-    app.updateTriggerTiming( timespec{ 10, 4285713L } );
-    REQUIRE( app.m_cadenceResets == 1 );
+    // 2 kHz to 700 Hz: the first two arrivals are outliers of the 2 kHz fit, which still anchors them; then no scans
+    // while 16 consistent arrivals confirm the new rate, which the last of them re-fits.
+    for( int frame = 1; frame <= 16; ++frame )
+    {
+        arrival += 1428571;
+        const int rv = app.processSyncReference( arrival );
+        REQUIRE( rv == ( frame < 3 || frame == 16 ? 0 : 1 ) );
+    }
+
+    REQUIRE( app.m_wfsClock.m_resets == 1 );
     REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 1428571.0 ) );
-
-    REQUIRE( app.m_syncSchedule.arm( 1000000000, app.m_wfsPeriodMeasured_ns, app.m_fps, 0, 40000, 20000 ) );
     REQUIRE( app.m_syncSchedule.m_count == 11 );
     REQUIRE( app.m_syncSchedule.fps() == Approx( 7700.0 ).epsilon( 1e-4 ) );
+    REQUIRE( app.m_syncSchedule.m_anchor == arrival );
 
     // A 500 Hz WFS gets 16 scans, 8 kHz.
     REQUIRE( app.m_syncSchedule.arm( 1000000000, 2000000, app.m_fps, 0, 40000, 20000 ) );
@@ -1240,6 +1266,39 @@ TEST_CASE( "mcp3208Ctrl synchronized scans follow a WFS rate change within the l
     REQUIRE( app.m_syncSchedule.m_count == 3 );
 }
 
+/// Verify semaphore jitter moves neither the scans' period nor their anchor.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl synchronized scans are anchored on the fitted WFS arrival", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    app.m_numChannels        = 2;
+    app.m_fps                = 8000;
+    app.m_syncFramesReceived = 100;
+
+    const int64_t start = 1000000000;
+    app.qualifyClock( start, 101 );
+
+    // Arrivals alternately 30 us late and 30 us early, and one 200 us late (rejected): every frame still gets 4
+    // scans, anchored within 10 us of the nominal 2 kHz frame time, and within 1 us by the last.
+    for( int frame = 0; frame < 40; ++frame )
+    {
+        const int64_t nominal = start + frame * 500000;
+        const int64_t error   = frame == 25 ? 200000 : ( frame % 2 ? 30000 : -30000 );
+
+        REQUIRE( app.processSyncReference( nominal + error ) == 0 );
+        REQUIRE( app.m_syncSchedule.m_count == 4 );
+        REQUIRE( std::abs( app.m_syncSchedule.m_anchor - nominal ) < 10000 );
+        REQUIRE( app.m_wfsPeriodMeasured_ns == Approx( 500000.0 ).margin( 1000.0 ) );
+    }
+
+    REQUIRE( std::abs( app.m_syncSchedule.m_anchor - ( start + 39 * 500000 ) ) < 1000 );
+    REQUIRE( app.m_wfsClock.m_rejected == 1 );
+    REQUIRE( app.m_wfsClock.m_resets == 0 );
+}
+
 /// Verify a slow ADC read lowers the scans per WFS frame, and a read estimate that fits nothing is measured again.
 /**
  * \ingroup mcp3208Ctrl_unit_test
@@ -1248,40 +1307,24 @@ TEST_CASE( "mcp3208Ctrl synchronized scans fit the ADC read time", "[mcp3208Ctrl
 {
     mcp3208Ctrl_test app;
 
-    app.m_numChannels           = 2;
-    app.m_fps                   = 8000;
-    app.m_alpha                 = 0.0f;
-    app.m_firstSemaphore        = false;
-    app.m_avgSemaphorePeriod_ns = 500000.0;
-    app.m_firstNonDelayService  = false;
-
-    // Each reference follows the previous by one 2 kHz WFS period.
-    auto reference = [&app]( int64_t arrival )
-    {
-        REQUIRE( clock_gettime( CLOCK_REALTIME, &app.m_lastAtime ) == 0 );
-        app.m_lastAtime.tv_nsec -= 500000;
-
-        if( app.m_lastAtime.tv_nsec < 0 )
-        {
-            app.m_lastAtime.tv_nsec += 1000000000;
-            --app.m_lastAtime.tv_sec;
-        }
-
-        return app.processSyncReference( arrival );
-    };
+    app.m_numChannels          = 2;
+    app.m_fps                  = 8000;
+    app.m_firstNonDelayService = false;
+    app.m_syncFramesReceived   = 100;
+    app.qualifyClock( 1000000000, 101 );
 
     // 106.5 us reads plus the 20 us guard do not fit 125 us: 3 scans, 6 kHz.
     app.m_avgNonDelayService_ns = 106530.0;
-    REQUIRE( reference( 1000000000 ) == 0 );
+    REQUIRE( app.processSyncReference( 1000000000 ) == 0 );
     REQUIRE( app.m_syncSchedule.m_count == 3 );
     REQUIRE( app.m_syncSchedule.fps() == Approx( 6000.0 ) );
 
     // A read estimate longer than the period fits nothing; it restarts from the nominal read time.
     app.m_avgNonDelayService_ns = 600000.0;
-    REQUIRE( reference( 1000500000 ) == 1 );
+    REQUIRE( app.processSyncReference( 1000500000 ) == 1 );
     REQUIRE( app.m_scheduleFailures == 1 );
     REQUIRE( app.m_firstNonDelayService == true );
-    REQUIRE( reference( 1001000000 ) == 0 );
+    REQUIRE( app.processSyncReference( 1001000000 ) == 0 );
     REQUIRE( app.m_syncSchedule.m_count == 4 );
 }
 
@@ -1347,11 +1390,9 @@ TEST_CASE( "mcp3208Ctrl synchronized mode reads four scans per WFS semaphore", "
     app.m_synchroStreamOpen     = true;
     app.m_gain                  = 0.0f;
     app.m_fps                   = 8000;
-    app.m_alpha                 = 0.0f;
-    app.m_firstSemaphore        = false;
-    app.m_avgSemaphorePeriod_ns = 500000.0;
-    REQUIRE( clock_gettime( CLOCK_REALTIME, &app.m_lastAtime ) == 0 );
+    app.m_syncFramesReceived    = 100;
 
+    app.qualifyClock( mcp3208Ctrl::monotonicNow(), 101 );
     REQUIRE( sem_post( &semaphore ) == 0 );
 
     for( int scan = 0; scan < 4; ++scan )
@@ -1363,7 +1404,7 @@ TEST_CASE( "mcp3208Ctrl synchronized mode reads four scans per WFS semaphore", "
 
     REQUIRE( app.m_values == std::vector<uint16_t>( { 101, 202, 303 } ) );
     REQUIRE( stubState().m_readOrder.size() == 12 );
-    REQUIRE( app.m_syncFramesReceived == 1 );
+    REQUIRE( app.m_syncFramesReceived == 101 );
     REQUIRE( app.m_syncSchedule.m_count == 4 );
     REQUIRE( app.m_syncSchedule.m_skipped == 0 );
     REQUIRE( app.m_currImageTimestamp.tv_sec > 0 );
@@ -1558,9 +1599,8 @@ TEST_CASE( "mcp3208Ctrl synchronized delay controller uses read latency EMA", "[
     REQUIRE( app.m_values[0] == 99 );
 
     // The next reference re-arms at the corrected phase.
-    app.m_firstSemaphore        = false;
-    app.m_avgSemaphorePeriod_ns = 500000.0;
-    app.m_alpha                 = 0.0f;
+    app.m_syncFramesReceived = 100;
+    app.qualifyClock( anchor + 500000, 101 );
     REQUIRE( app.processSyncReference( anchor + 500000 ) == 0 );
     REQUIRE( app.m_synchroDelay == Approx( 407400.0f ) );
     REQUIRE( app.m_syncSchedule.m_phase == Approx( 32400.0 ).margin( 1.0 ) );
@@ -1715,6 +1755,9 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     app.m_duplicateReferences     = 1;
     app.m_scheduleFailures        = 4;
     REQUIRE( app.m_syncSchedule.arm( 1000000000, 500000, 8000, 0, 40000, 20000 ) );
+    app.qualifyClock( 2000000000, 100 );
+    app.m_wfsClockSpan_s = 0.0075;
+    REQUIRE( app.m_wfsClock.valid() );
 
     REQUIRE( app.reconfig() == 0 );
     REQUIRE( app.m_synchroSemaphore == nullptr );
@@ -1769,6 +1812,9 @@ TEST_CASE( "mcp3208Ctrl reconfig clears cached synchronization state", "[mcp3208
     REQUIRE( app.m_coalescedWakes == 0 );
     REQUIRE( app.m_duplicateReferences == 0 );
     REQUIRE( app.m_scheduleFailures == 0 );
+    REQUIRE_FALSE( app.m_wfsClock.valid() );
+    REQUIRE( app.m_wfsClock.m_count == 0 );
+    REQUIRE( app.m_wfsClockSpan_s == Approx( 0.0 ) );
 }
 
 } // namespace mcp3208CtrlTest

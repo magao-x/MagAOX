@@ -10,6 +10,7 @@
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
 #include "../../magaox_git_version.h"
 #include "dependencies/MCP3208.h" // Included for the MCP3208 device interface
+#include "../../libMagAOX/app/wfsClock.hpp"
 #include "../../libMagAOX/app/wfsScanSchedule.hpp"
 
 #ifdef __linux__
@@ -40,9 +41,10 @@ namespace app
  * ImageStreamIO semaphore. Synchronized, `fps` (`accel.fps`, INDI `fps`) is an upper limit: each WFS
  * semaphore arms the highest integer number of scans whose rate does not exceed it (8 kHz at a 2 kHz or
  * 500 Hz WFS, 7.7 kHz at 700 Hz, for an 8 kHz limit), uniformly spaced across that WFS period, with the
- * scan grid aligned to the WFS phase model (`wfsScan::syncSchedule`). The count follows the measured WFS
- * period, which restarts after a persistent rate change. Scans are never free-running: a period without
- * a new semaphore produces no further scans.
+ * scan grid aligned to the WFS phase model (`wfsScan::syncSchedule`). The WFS period and each frame's
+ * scan anchor come from a ten-second least-squares fit of semaphore arrivals on WFS frame IDs
+ * (`wfsScan::rollingWfsClock`), so semaphore jitter moves neither; the fit restarts after a persistent
+ * WFS rate change. Scans are never free-running: a period without a new semaphore produces no further scans.
  *
  * \ingroup mcp3208Ctrl
  */
@@ -73,12 +75,6 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     /// Nominal SPI time of one 24-bit channel transfer at the default rate; a floor on the scan service estimate.
     static constexpr double c_channelReadNominal_ns = 24e9 / MCP3208Lib::MCP3208::DEFAULT_SPI_BAUD;
-
-    /// Relative difference from the WFS period estimate that counts a semaphore interval toward a cadence change.
-    static constexpr double c_cadenceChangeFraction = 0.1;
-
-    /// Consecutive differing semaphore intervals that restart the WFS period estimate.
-    static constexpr unsigned c_cadenceChangeIntervals = 3;
 
     /** \name Configurable Parameters - Data
      * @{
@@ -116,6 +112,11 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     double m_cadenceGuard_ns{ 20e3 }; ///< Reserved per-frame margin protecting synchronized cadence from overruns.
 
     double m_spinLead_ns{ 50e3 }; ///< Synchronized: poll instead of sleeping this long before each scan deadline.
+
+    int m_wfsFitMinEvents{
+        16 }; ///< Consistent WFS references that qualify the rolling clock, at start or a rate change.
+
+    double m_wfsCadenceTolerance{ 0.1 }; ///< Rolling clock arrival gate, as a fraction of the WFS period (plus jitter).
 
     float m_alpha{ 0.01f }; ///< Global exponential moving-average coefficient applied to timing smoothers.
 
@@ -283,9 +284,13 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
 
     uint64_t m_scheduleFailures{ 0 }; ///< WFS references with a measured period whose scans could not be fitted.
 
-    unsigned m_cadenceOutliers{ 0 }; ///< Consecutive semaphore intervals differing from the WFS period estimate.
+    /// Ten-second fit of semaphore arrivals on WFS frame IDs: the scans' WFS period and per-frame anchor.
+    wfsScan::rollingWfsClock m_wfsClock;
 
-    uint64_t m_cadenceResets{ 0 }; ///< WFS period estimate restarts after a persistent WFS rate change.
+    double m_wfsClockSpan_s{ 0.0 }; ///< Span of the clock's history, copied for INDI after each reference [s].
+
+    /// INDI property exposing the rolling WFS clock fit.
+    pcf::IndiProperty m_indiP_wfsClock;
 
     ///@}
 
@@ -344,7 +349,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /// Handle one WFS reference: track producer metadata, update the delay model, and arm this period's scans.
     /**
      * \returns 0 when scans were armed.
-     * \returns 1 when the reference armed no scans (repeated frame ID, no measured period yet, or no fit).
+     * \returns 1 when the reference armed no scans (repeated frame ID, WFS clock not yet qualified, or no fit).
      * \returns -1 on a critical timing error.
      */
     int processSyncReference( int64_t arrival /**< [in] semaphore arrival on the monotonic clock, in nanoseconds */ );
@@ -395,7 +400,10 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     void updateSynchroDelayController( double desiredDelay_ns /**< [in] the unconstrained synchronized-delay command */ );
 
     /// Update synchronized trigger timing from the current semaphore arrival.
-    void updateTriggerTiming( const timespec &atime /**< [in] the semaphore-arrival timestamp */ );
+    /** Without a fitted period, the period is an EMA of semaphore intervals, starting from the first.
+     */
+    void updateTriggerTiming( const timespec &atime /**< [in] the semaphore-arrival timestamp */,
+                              double fittedPeriod_ns = 0.0 /**< [in] the rolling clock's WFS period, 0 if unfitted */ );
 
     /// Publish acquisition timing diagnostics to the INDI read-only property.
     /** The exported `trigger_interval_us` value reports measured current-to-previous trigger interval.
@@ -407,7 +415,7 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     /// Publish the runtime timing-source switch state to the INDI property.
     void updateTimingSourceIndi();
 
-    /// Publish the WFS scan schedule diagnostics to the INDI read-only property.
+    /// Publish the WFS scan schedule and rolling WFS clock diagnostics to their INDI read-only properties.
     void updateSyncTimingIndi();
 
     ///@}
@@ -560,11 +568,16 @@ inline timespec mcp3208Ctrl::nsToTimespec( double ns )
     return t;
 }
 
-void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
+void mcp3208Ctrl::updateTriggerTiming( const timespec &atime, double fittedPeriod_ns )
 {
     double dt_ns = 0.0;
 
-    if( !m_firstSemaphore )
+    if( fittedPeriod_ns > 0.0 )
+    {
+        m_avgSemaphorePeriod_ns = fittedPeriod_ns;
+        m_firstSemaphore        = false;
+    }
+    else if( !m_firstSemaphore )
     {
         dt_ns = timespecToNs( atime ) - timespecToNs( m_lastAtime );
 
@@ -572,19 +585,6 @@ void mcp3208Ctrl::updateTriggerTiming( const timespec &atime )
         if( m_syncProducerFrameValid && m_syncProducerFrameDelta > 1 )
         {
             dt_ns /= static_cast<double>( m_syncProducerFrameDelta );
-        }
-
-        // A WFS rate change is followed at once: after c_cadenceChangeIntervals consecutive intervals more than
-        // c_cadenceChangeFraction from the estimate, restart it. Isolated outliers (jitter) only enter the EMA.
-        const bool outlier = m_avgSemaphorePeriod_ns > 0.0 && std::fabs( dt_ns - m_avgSemaphorePeriod_ns ) >
-                                                                  c_cadenceChangeFraction * m_avgSemaphorePeriod_ns;
-        m_cadenceOutliers = outlier ? m_cadenceOutliers + 1 : 0;
-
-        if( m_cadenceOutliers >= c_cadenceChangeIntervals )
-        {
-            m_avgSemaphorePeriod_ns = 0.0;
-            m_cadenceOutliers       = 0;
-            ++m_cadenceResets;
         }
 
         // Start from the first measured interval, so the scan count is right from the second reference.
@@ -796,6 +796,28 @@ void mcp3208Ctrl::setupConfig()
         "Nanoseconds before each synchronized scan deadline to stop sleeping and poll, so the core is awake when "
         "the read starts (a read after sleeping is slower). 0 sleeps to the deadline. Default is 50000." );
 
+    config.add( "synchro.wfsFitMinEvents",
+                "",
+                "synchro.wfsFitMinEvents",
+                argType::Required,
+                "synchro",
+                "wfsFitMinEvents",
+                false,
+                "int",
+                "Consistent WFS semaphores that qualify the ten-second rolling WFS clock at start and after a WFS rate "
+                "change; no scans until then. 2 to 4096, default 16." );
+
+    config.add( "synchro.wfsCadenceTolerance",
+                "",
+                "synchro.wfsCadenceTolerance",
+                argType::Required,
+                "synchro",
+                "wfsCadenceTolerance",
+                false,
+                "double",
+                "Rolling WFS clock arrival gate as a fraction of the WFS period (at least 20 us and 6x the fitted "
+                "jitter). 0.01 to 0.5, default 0.1." );
+
     config.add( "synchro.alpha",
                 "",
                 "synchro.alpha",
@@ -889,6 +911,8 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_delayLockFracThreshold, "synchro.delayLockFracThreshold" );
     _config( m_cadenceGuard_ns, "synchro.cadenceGuard_ns" );
     _config( m_spinLead_ns, "synchro.spinLead_ns" );
+    _config( m_wfsFitMinEvents, "synchro.wfsFitMinEvents" );
+    _config( m_wfsCadenceTolerance, "synchro.wfsCadenceTolerance" );
     _config( m_alpha, "synchro.alpha" );
 
     _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
@@ -952,6 +976,11 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     {
         m_spinLead_ns = 0.0;
     }
+
+    m_wfsFitMinEvents      = std::clamp( m_wfsFitMinEvents, 2, 4096 );
+    m_wfsCadenceTolerance  = std::clamp( m_wfsCadenceTolerance, 0.01, 0.5 );
+    m_wfsClock.m_minEvents = static_cast<unsigned>( m_wfsFitMinEvents );
+    m_wfsClock.m_tolerance = m_wfsCadenceTolerance;
 
     if( m_alpha < 0.0f )
     {
@@ -1084,10 +1113,24 @@ int mcp3208Ctrl::appStartup()
                               "max_lateness_us",
                               "coalesced_wakes",
                               "duplicate_references",
-                              "schedule_failures",
-                              "cadence_resets" } )
+                              "schedule_failures" } )
     {
         m_indiP_syncTiming.add( pcf::IndiElement( name ) );
+    }
+
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_wfsClock, "wfsClock", "Rolling WFS clock", "Diagnostics" );
+    for( const char *name : { "valid",
+                              "events",
+                              "span_s",
+                              "fps",
+                              "period_us",
+                              "jitter_us",
+                              "arrival_error_us",
+                              "drift_us",
+                              "rejected",
+                              "resets" } )
+    {
+        m_indiP_wfsClock.add( pcf::IndiElement( name ) );
     }
 
     if( m_fpsDevice != "" )
@@ -1281,8 +1324,7 @@ void mcp3208Ctrl::updateSyncTimingIndi()
                                 "max_lateness_us",
                                 "coalesced_wakes",
                                 "duplicate_references",
-                                "schedule_failures",
-                                "cadence_resets" },
+                                "schedule_failures" },
                               { static_cast<double>( schedule.m_count ),
                                 schedule.fps(),
                                 schedule.m_interval * 1e-3,
@@ -1292,8 +1334,31 @@ void mcp3208Ctrl::updateSyncTimingIndi()
                                 m_maxLateness_ns * 1e-3,
                                 static_cast<double>( m_coalescedWakes ),
                                 static_cast<double>( m_duplicateReferences ),
-                                static_cast<double>( m_scheduleFailures ),
-                                static_cast<double>( m_cadenceResets ) } );
+                                static_cast<double>( m_scheduleFailures ) } );
+
+    const auto &clock = m_wfsClock;
+
+    updatesIfChanged<double>( m_indiP_wfsClock,
+                              { "valid",
+                                "events",
+                                "span_s",
+                                "fps",
+                                "period_us",
+                                "jitter_us",
+                                "arrival_error_us",
+                                "drift_us",
+                                "rejected",
+                                "resets" },
+                              { clock.valid() ? 1.0 : 0.0,
+                                static_cast<double>( clock.m_count ),
+                                m_wfsClockSpan_s,
+                                clock.m_period > 0 ? 1e9 / clock.m_period : 0.0,
+                                clock.m_period * 1e-3,
+                                clock.m_jitter * 1e-3,
+                                clock.m_arrivalError * 1e-3,
+                                clock.m_drift * 1e-3,
+                                static_cast<double>( clock.m_rejected ),
+                                static_cast<double>( clock.m_resets ) } );
 }
 
 int mcp3208Ctrl::appLogic()
@@ -1633,8 +1698,8 @@ void mcp3208Ctrl::resetSynchroAcquisitionState()
     m_coalescedWakes          = 0;
     m_duplicateReferences     = 0;
     m_scheduleFailures        = 0;
-    m_cadenceOutliers         = 0;
-    m_cadenceResets           = 0;
+    m_wfsClock.reset();
+    m_wfsClockSpan_s = 0.0;
 }
 
 void mcp3208Ctrl::updateEffectiveTimingSource()
@@ -1934,17 +1999,29 @@ int mcp3208Ctrl::processSyncReference( int64_t arrival )
         return log<software_critical, -1>( { __FILE__, __LINE__, errno, 0, "clock_gettime" } );
     }
 
+    // The scans use the ten-second fit: its period, and this frame's fitted arrival as their anchor, so semaphore
+    // jitter (e.g. over TCP) moves neither. A rejected outlier still uses the fit; none until it qualifies.
+    const uint64_t id = m_synchroStream.md != nullptr ? m_syncProducerFrameId : m_syncFramesReceived;
+    m_wfsClock.observe( id, arrival );
+    m_wfsClockSpan_s  = m_wfsClock.span();
+    const bool fitted = m_wfsClock.valid();
+
     // Carry the controller's correction across changes of the modelled target.
     const double correction =
         m_firstReadLatency ? 0.0 : static_cast<double>( m_synchroDelay ) - static_cast<double>( m_synchroDelayTarget );
 
-    updateTriggerTiming( m_atime );
+    updateTriggerTiming( m_atime, fitted ? m_wfsClock.m_period : 0.0 );
+
+    if( !fitted )
+    {
+        return 1;
+    }
 
     const double service = std::max( m_avgNonDelayService_ns, m_numChannels * c_channelReadNominal_ns );
     m_delayBudget_ns     = std::max( 0.0, m_wfsPeriodMeasured_ns - service - m_cadenceGuard_ns );
     m_synchroDelay       = static_cast<float>( static_cast<double>( m_synchroDelayTarget ) + correction );
 
-    if( !m_syncSchedule.arm( arrival,
+    if( !m_syncSchedule.arm( m_wfsClock.reference( id ),
                              m_wfsPeriodMeasured_ns,
                              m_fps,
                              static_cast<double>( m_synchroDelay ),
