@@ -8,6 +8,7 @@
 #include "ui_statusCombo.h"
 
 #include "xWidget.hpp"
+#include "../stage/stagePowerState.hpp"
 #include "../../lib/multiIndiSubscriber.hpp"
 
 namespace xqt
@@ -165,10 +166,12 @@ class statusCombo : public xWidget
     /// Decide whether the widget should show the value instead of FSM text.
     bool shouldShowValue() const;
 
+    /// Decide whether the dropdown and its Go button accept input.
+    virtual bool selectionEnabled() const;
+
     /// Update styling that reflects whether the combo box is in edit mode.
     virtual void paintEvent( QPaintEvent *e /**< [in] Qt paint event being processed */ );
 
-    /// Generated Qt UI backing this summary widget.
     Ui::statusCombo ui; ///< Generated UI facade for the summary selector.
 };
 
@@ -267,7 +270,12 @@ QString statusCombo::formatValue()
 
 bool statusCombo::shouldShowValue() const
 {
-    return ( m_fsmState == "READY" || m_fsmState == "OPERATING" || ( m_fsmState == "POWEROFF" && m_parked ) );
+    return m_fsmState == "READY" || m_fsmState == "OPERATING" || ( m_parked && stageParkedPositionState( m_fsmState ) );
+}
+
+bool statusCombo::selectionEnabled() const
+{
+    return ( m_property != "presetName" && m_property != "filterName" ) || !stageParkedPositionState( m_fsmState );
 }
 
 void statusCombo::subscribe()
@@ -319,17 +327,25 @@ void statusCombo::onDisconnect()
     ui.status->clear();
     ui.status->setPlaceholderText( "" );
     ui.status->setCurrentIndex( -1 );
+    statusCombo::updateGUI();
 }
 
 void statusCombo::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
-    return handleSetProperty( ipRecv );
+    if( ipRecv.getDevice() == m_device && ipRecv.getName() == "parked" )
+    {
+        m_parked = false;
+    }
+
+    handleSetProperty( ipRecv );
 }
 
 void statusCombo::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getDevice() != m_device )
+    {
         return;
+    }
 
     if( ipRecv.getName() == "parked" )
     {
@@ -371,50 +387,25 @@ void statusCombo::handleDelProperty( const pcf::IndiProperty &ipRecv )
 void statusCombo::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getDevice() != m_device )
+    {
         return;
+    }
 
     if( ipRecv.getName() == "fsm" )
     {
         if( ipRecv.find( "state" ) )
         {
-            std::string fsmState = ipRecv["state"].get();
-            bool        showVal  = false;
-
-            if( fsmState != m_fsmState )
-            {
-                m_valChanged = true;
-            }
-
-            m_fsmState = fsmState;
-            showVal    = shouldShowValue();
-
-            if( showVal != m_showVal )
-            {
-                m_valChanged = true;
-                m_showVal    = showVal;
-            }
+            const std::string state = ipRecv["state"].get();
+            m_valChanged            = m_valChanged || state != m_fsmState;
+            m_fsmState              = state;
         }
     }
     else if( ipRecv.getName() == "parked" )
     {
-        if( ipRecv.find( "current" ) )
+        if( ipRecv.find( "current" ) || ipRecv.getType() != pcf::IndiProperty::Number )
         {
-            bool parked  = ( ipRecv["current"].get<int>() != 0 );
-            bool showVal = false;
-
-            if( parked != m_parked )
-            {
-                m_valChanged = true;
-            }
-
-            m_parked = parked;
-            showVal  = shouldShowValue();
-
-            if( showVal != m_showVal )
-            {
-                m_valChanged = true;
-                m_showVal    = showVal;
-            }
+            m_parked = ipRecv.getType() == pcf::IndiProperty::Number &&
+                       QString::fromStdString( ipRecv["current"].get() ).toDouble() == 1;
         }
     }
     else if( ipRecv.getName() == m_property )
@@ -441,6 +432,7 @@ void statusCombo::handleSetProperty( const pcf::IndiProperty &ipRecv )
                     if( name != "" && name != "none" )
                     {
                         ui.status->addItem( name );
+                        m_valChanged = true;
                     }
                 }
 
@@ -472,6 +464,9 @@ void statusCombo::handleSetProperty( const pcf::IndiProperty &ipRecv )
         }
     }
 
+    const bool showVal = shouldShowValue();
+    m_valChanged       = m_valChanged || showVal != m_showVal;
+    m_showVal          = showVal;
     emit doUpdateGUI();
 }
 
@@ -490,39 +485,45 @@ void statusCombo::changeEvent( QEvent *e )
 
 void statusCombo::updateGUI()
 {
+    const bool selectable = selectionEnabled();
+    ui.status->setEnabled( selectable );
+    ui.buttonGo->setEnabled( selectable );
+
+    if( !selectable )
+    {
+        ui.status->hidePopup();
+
+        if( m_statusEditing == STARTED || m_statusCommandPending || ui.status->currentIndex() >= 0 )
+        {
+            m_statusEditing        = STOPPED;
+            m_statusCommandPending = false;
+            m_statusRequested.clear();
+            m_statusEditTimer->stop();
+            m_valChanged = true;
+        }
+    }
+
     if( m_statusEditing == STARTED || m_statusCommandPending )
     {
         return;
     }
 
-    if( isEnabled() )
+    if( m_valChanged )
     {
-        if( m_showVal )
-        {
-            if( m_valChanged )
-            {
-                QString value = formatValue();
-                ui.status->setPlaceholderText( value );
-                ui.status->setCurrentIndex( -1 );
-                m_valChanged = false;
-            }
-        }
-        else
-        {
-            if( m_valChanged )
-            {
-                ui.status->setPlaceholderText( m_fsmState.c_str() );
-                ui.status->setCurrentIndex( -1 );
-                m_valChanged = false;
-            }
-        }
+        ui.status->setPlaceholderText( m_showVal ? formatValue() : QString::fromStdString( m_fsmState ) );
+        ui.status->setCurrentIndex( -1 );
+        m_valChanged = false;
     }
-
-} // updateGUI()
+}
 
 void statusCombo::on_status_activated( int index )
 {
     static_cast<void>( index );
+
+    if( !isEnabled() || !selectionEnabled() )
+    {
+        return;
+    }
 
     m_statusEditing        = STARTED;
     m_statusCommandPending = false;
@@ -533,6 +534,11 @@ void statusCombo::on_status_activated( int index )
 
 void statusCombo::on_buttonGo_pressed()
 {
+    if( !isEnabled() || !selectionEnabled() )
+    {
+        return;
+    }
+
     std::string selection = ui.status->currentText().toStdString();
 
     if( selection == "" )
@@ -596,7 +602,7 @@ void statusCombo::on_buttonGo_pressed()
 
 void statusCombo::on_buttonCtrl_pressed()
 {
-    if( m_ctrlWidget )
+    if( isEnabled() && m_ctrlWidget )
     {
         m_ctrlWidget->show();
     }

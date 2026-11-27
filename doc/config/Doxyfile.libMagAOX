@@ -831,7 +831,13 @@ INPUT                  = libMagAOX \
                          gui/widgets/pupilGuide/tests/pupilGuide_test.cpp \
                          gui/widgets/coronAlign/coronAlign.hpp \
                          gui/widgets/coronAlign/tests/coronAlign_test.cpp \
+                         gui/widgets/camera/camera.hpp \
+                         gui/widgets/camera/tests/camera_test.cpp \
+                         gui/widgets/psfAcq/psfAcq.hpp \
                          gui/widgets/stage/stage.hpp \
+                         gui/widgets/stage/stagePowerState.hpp \
+                         gui/widgets/xWidgets/statusEntry.hpp \
+                         gui/widgets/xWidgets/statusLineEdit.hpp \
                          gui/widgets/xWidgets/stageStatus.hpp \
                          gui/widgets/xWidgets/stagePairStatus.hpp \
                          gui/widgets/xWidgets/statusCombo.hpp \
@@ -2164,7 +2170,7 @@ INCLUDE_FILE_PATTERNS  =
 # recursively expanded use the := operator instead of the = operator.
 # This tag requires that the tag ENABLE_PREPROCESSING is set to YES.
 
-PREDEFINED             = __attribute__(x)= XINSTGRAPH_TEST_DOXYGEN_REF ZABERCTRL_TEST_DOXYGEN_REF PVCAMCTRL_TEST_DOXYGEN_REF PUPILGUIDE_GUI_TEST_DOXYGEN_REF CORONALIGN_GUI_TEST_DOXYGEN_REF MULTIINDI_TEST_DOXYGEN_REF LOGGER_TEST_DOXYGEN_REF SMC100CCCTRL_TEST_DOXYGEN_REF
+PREDEFINED             = __attribute__(x)= XINSTGRAPH_TEST_DOXYGEN_REF ZABERCTRL_TEST_DOXYGEN_REF PVCAMCTRL_TEST_DOXYGEN_REF PUPILGUIDE_GUI_TEST_DOXYGEN_REF CORONALIGN_GUI_TEST_DOXYGEN_REF CAMERA_GUI_TEST_DOXYGEN_REF MULTIINDI_TEST_DOXYGEN_REF LOGGER_TEST_DOXYGEN_REF SMC100CCCTRL_TEST_DOXYGEN_REF
 
 # If the MACRO_EXPANSION and EXPAND_ONLY_PREDEF tags are set to YES then this
 # tag can be used to specify a list of macro names that should be expanded. The

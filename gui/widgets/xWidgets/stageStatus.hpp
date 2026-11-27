@@ -72,6 +72,9 @@ class stageStatus : public statusCombo
     void handleSetProperty( const pcf::IndiProperty &ipRecv /**< [in] Received property definition or update.*/ );
 
   protected:
+    /// Allow commands only once the controller reports a live position state and a preset property.
+    bool selectionEnabled() const override;
+
     /// Return `true` when the property name is a selectable preset/filter switch.
     bool isSelectionProperty( const std::string &propertyName /**< [in] property name to test */ ) const;
 };
@@ -100,7 +103,9 @@ QString stageStatus::formatValue()
     if( m_value == "" || m_value == "none" )
     {
         if( !m_positionValid )
+        {
             return "---";
+        }
         char pstr[64];
         snprintf( pstr, sizeof( pstr ), "%0.4f", m_position );
         return QString( pstr );
@@ -140,7 +145,14 @@ void stageStatus::onDisconnect()
 void stageStatus::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getDevice() != m_device )
+    {
         return;
+    }
+    if( ipRecv.getName() == "parked" )
+    {
+        statusCombo::handleDefProperty( ipRecv );
+        return;
+    }
     if( ipRecv.getName() == "position" || ipRecv.getName() == "filter" )
     {
         m_positionProperty = ipRecv.getName();
@@ -153,7 +165,9 @@ void stageStatus::handleDefProperty( const pcf::IndiProperty &ipRecv )
 void stageStatus::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getDevice() != m_device )
+    {
         return;
+    }
 
     if( isSelectionProperty( ipRecv.getName() ) && ( m_property == "" || m_property == ipRecv.getName() ) )
     {
@@ -167,24 +181,32 @@ void stageStatus::handleSetProperty( const pcf::IndiProperty &ipRecv )
             bool  valid = false;
             float pos   = 0;
             if( ipRecv.getType() == pcf::IndiProperty::Number && ipRecv.find( "current" ) )
+            {
                 pos = QString::fromStdString( ipRecv["current"].get() ).toFloat( &valid );
+            }
             valid = valid && std::isfinite( pos );
             if( valid != m_positionValid || pos != m_position )
+            {
                 m_valChanged = true;
+            }
             m_positionProperty = ipRecv.getName();
             m_positionValid    = valid;
             if( valid )
+            {
                 m_position = pos;
+            }
         }
     }
 
-    statusCombo::handleSetProperty( ipRecv ); // always emit updateGUI
+    statusCombo::handleSetProperty( ipRecv );
 }
 
 void stageStatus::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getDevice() != m_device )
+    {
         return;
+    }
 
     bool clearSelectionProperty = ( ipRecv.getName() == m_property && isSelectionProperty( ipRecv.getName() ) );
 
@@ -209,6 +231,11 @@ void stageStatus::handleDelProperty( const pcf::IndiProperty &ipRecv )
 bool stageStatus::isSelectionProperty( const std::string &propertyName ) const
 {
     return ( propertyName == "presetName" || propertyName == "filterName" );
+}
+
+bool stageStatus::selectionEnabled() const
+{
+    return !m_property.empty() && ( m_fsmState == "READY" || m_fsmState == "OPERATING" );
 }
 
 } // namespace xqt

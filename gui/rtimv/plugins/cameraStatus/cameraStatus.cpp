@@ -5,6 +5,7 @@
  */
 
 #include "cameraStatus.hpp"
+#include "../../../widgets/stage/stagePowerState.hpp"
 
 #define errPrint( expl ) std::cerr << "cameraStatus: " << __FILE__ << " " << __LINE__ << " " << expl << std::endl;
 
@@ -493,11 +494,7 @@ int cameraStatus::updateOverlay()
                 parked = ( atoi( m_blob ) != 0 );
             }
 
-            if( fwstate == "READY" || fwstate == "OPERATING" ||
-                ( parked && ( fwstate == "UNINITIALIZED" || fwstate == "INITIALIZED" || fwstate == "NODEVICE" ||
-                              fwstate == "POWEROFF" || fwstate == "POWERON" || fwstate == "NOTCONNECTED" ||
-                              fwstate == "LOGGEDIN" || fwstate == "CONFIGURING" || fwstate == "CONNECTED" ||
-                              fwstate == "NOTHOMED" ) ) )
+            if( fwstate == "READY" || fwstate == "OPERATING" || ( parked && xqt::stageParkedPositionState( fwstate ) ) )
             {
                 std::string filn;
 

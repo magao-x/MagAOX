@@ -10,12 +10,13 @@
 
 #include "ui_stage.h"
 
+#include "stagePowerState.hpp"
 #include "../xWidgets/xWidget.hpp"
 
 namespace xqt
 {
 
-/// Stage control widget with parked-poweroff display support.
+/// Stage controls with read-only position and preset displays during parked power transitions.
 /** Readiness, numeric movement inputs, slider range, and preset choices are
  * independent observations. Named property loss clears only its dependents;
  * whole-device/FSM loss resets all cached state and unsent edits. Numeric
@@ -212,6 +213,7 @@ stage::stage( const std::string &stageName, QWidget *Parent, Qt::WindowFlags f )
     ui.setPoint->setProperty( "isStatus", true );
 
     ui.position->setAlignment( Qt::AlignCenter );
+    ui.setPoint->setPlaceholderText( "---" );
     ui.stepSize->setAlignment( Qt::AlignCenter );
 
     m_setPointEditTimer = new QTimer( this );
@@ -229,7 +231,9 @@ stage::~stage()
 void stage::subscribe()
 {
     if( !m_parent )
+    {
         return;
+    }
 
     m_parent->addSubscriberProperty( this, m_stageName, "fsm" );
     m_parent->addSubscriberProperty( this, m_stageName, "maxpos" );
@@ -306,23 +310,39 @@ void stage::onDisconnect()
 void stage::handleDefProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getDevice() != m_stageName )
+    {
         return;
+    }
     if( ipRecv.getName() == "position" || ipRecv.getName() == "filter" )
     {
         m_positionValid   = false;
         m_targetAvailable = false;
     }
     if( ipRecv.getName() == "maxpos" )
+    {
         m_maxPosValid = false;
+    }
     if( ipRecv.getName() == "fsm" )
+    {
         m_appState.clear();
+    }
+    if( ipRecv.getName() == "parked" )
+    {
+        m_parked = false;
+    }
+    if( ipRecv.getName() == "presetName" || ipRecv.getName() == "filterName" )
+    {
+        m_setPoint.clear();
+    }
     handleSetProperty( ipRecv );
 }
 
 void stage::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getDevice() != m_stageName )
+    {
         return;
+    }
 
     if( ipRecv.getName() == "parked" )
     {
@@ -338,7 +358,9 @@ void stage::handleDelProperty( const pcf::IndiProperty &ipRecv )
         return;
     }
     if( name == "maxpos" )
+    {
         m_maxPosValid = false;
+    }
     else if( ( name == "position" && !m_filterWheel ) || ( name == "filter" && m_filterWheel ) )
     {
         m_positionValid    = false;
@@ -357,20 +379,28 @@ void stage::handleDelProperty( const pcf::IndiProperty &ipRecv )
         m_setPointEditTimer->stop();
         ui.setPoint->clear();
         if( name == "filterName" )
+        {
             m_maxPosValid = false;
+        }
     }
     else
+    {
         return;
+    }
     emit doUpdateGUI();
 }
 
 bool stage::readNumber( const pcf::IndiProperty &property, const std::string &element, double &value )
 {
     if( property.getType() != pcf::IndiProperty::Number || !property.find( element ) )
+    {
         return false;
+    }
     std::istringstream input( property[element].get() );
     if( !( input >> value ) )
+    {
         return false;
+    }
     input >> std::ws;
     return input.eof() && std::isfinite( value );
 }
@@ -383,7 +413,9 @@ bool stage::motionReady() const
 void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getDevice() != m_stageName )
+    {
         return;
+    }
 
     if( ipRecv.getName() == "fsm" )
     {
@@ -391,20 +423,28 @@ void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
         {
             m_appState = ipRecv["state"].get<std::string>();
             if( !m_appState.empty() )
+            {
                 setWindowTitle( m_winTitle.c_str() );
+            }
         }
         else
+        {
             m_appState.clear();
+        }
     }
     else if( ipRecv.getName() == "maxpos" )
     {
         if( ipRecv.find( "value" ) || ipRecv.getType() != pcf::IndiProperty::Number )
+        {
             m_maxPosValid = readNumber( ipRecv, "value", m_maxPos ) && m_maxPos > 0;
+        }
     }
     else if( ipRecv.getName() == "position" || ipRecv.getName() == "filter" )
     {
         if( ipRecv.getName() == "filter" )
+        {
             m_filterWheel = true;
+        }
         if( ipRecv.getType() != pcf::IndiProperty::Number )
         {
             m_positionValid   = false;
@@ -413,7 +453,9 @@ void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
         else
         {
             if( ipRecv.find( "target" ) )
+            {
                 m_targetAvailable = true;
+            }
             if( ipRecv.find( "current" ) )
             {
                 double value    = 0;
@@ -428,14 +470,19 @@ void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
     }
     else if( ipRecv.getName() == "parked" )
     {
-        if( ipRecv.find( "current" ) )
-            m_parked = ipRecv["current"].get<int>() != 0;
+        if( ipRecv.find( "current" ) || ipRecv.getType() != pcf::IndiProperty::Number )
+        {
+            double parked = 0;
+            m_parked      = readNumber( ipRecv, "current", parked ) && parked == 1;
+        }
     }
 
     if( ipRecv.getName() == "presetName" || ipRecv.getName() == "filterName" )
     {
         if( ipRecv.getName() == "filterName" )
+        {
             m_filterWheel = true;
+        }
 
         syncSetPointOptions( ipRecv );
 
@@ -453,26 +500,19 @@ void stage::handleSetProperty( const pcf::IndiProperty &ipRecv )
                               << "\n";
                 }
 
-                newName    = it->second.getName();
-                m_setPoint = newName;
-
-                if( m_setPointCommandPending && newName == m_setPointRequested )
-                {
-                    if( m_setPointEditTimer )
-                    {
-                        m_setPointEditTimer->stop();
-                    }
-
-                    m_setPointEditing        = STOPPED;
-                    m_setPointCommandPending = false;
-                    m_setPointRequested.clear();
-                }
-
-                if( m_setPointEditing != STARTED && !m_setPointCommandPending )
-                {
-                    ui.setPoint->setCurrentText( m_setPoint.c_str() );
-                }
+                newName = it->second.getName();
             }
+        }
+
+        if( !newName.empty() || ipRecv.find( m_setPoint ) )
+        {
+            m_setPoint = newName;
+        }
+
+        if( m_setPointCommandPending && m_setPoint == m_setPointRequested )
+        {
+            m_setPointEditTimer->stop();
+            setPointEditTimerOut();
         }
 
         if( m_filterWheel )
@@ -524,106 +564,48 @@ void stage::syncSetPointOptions( const pcf::IndiProperty &ipRecv )
 
 void stage::updateGUI()
 {
-    bool parkedPowerOff = ( m_appState == "POWEROFF" && m_parked );
+    const bool ready    = m_appState == "READY";
+    const bool active   = ready || m_appState == "OPERATING" || m_appState == "HOMING" || m_appState == "CONFIGURING";
+    const bool notHomed = m_appState == "NOTHOMED";
+    const bool parkedPosition = m_parked && stageParkedPositionState( m_appState );
+    const bool showPosition   = active || notHomed || parkedPosition;
+    const bool canConfigure   = active && !parkedPosition;
+    const bool canSelect      = canConfigure && !m_presets.empty();
+    const bool numeric        = motionReady();
 
-    if( m_appState != "READY" && m_appState != "OPERATING" && m_appState != "CONFIGURING" && m_appState != "NOTHOMED" &&
-        m_appState != "HOMING" && !parkedPowerOff )
-    {
-        ui.stageName->setEnabled( false );
-        ui.fsmState->setEnabled( false );
-        ui.setPoint->setEnabled( false );
-        ui.setPointGo->setEnabled( false );
-        ui.positionSlider->setEnabled( false );
-        ui.position->setText( "---" );
-        ui.position->setEnabled( false );
-        ui.stepSize->setEnabled( false );
-
-        ui.posMinus->setEnabled( false );
-        ui.posPlus->setEnabled( false );
-        ui.posStepMulTen->setEnabled( false );
-        ui.posStepDivTen->setEnabled( false );
-
-        ui.home->setEnabled( false );
-        ui.stop->setEnabled( false );
-
-        return;
-    }
-
-    if( parkedPowerOff )
-    {
-        ui.stageName->setEnabled( true );
-        ui.fsmState->setEnabled( true );
-        ui.setPoint->setEnabled( false );
-        ui.setPointGo->setEnabled( false );
-        ui.positionSlider->setEnabled( false );
-        ui.position->setEnabled( true );
-        ui.stepSize->setEnabled( false );
-
-        ui.posMinus->setEnabled( false );
-        ui.posPlus->setEnabled( false );
-        ui.posStepMulTen->setEnabled( false );
-        ui.posStepDivTen->setEnabled( false );
-
-        ui.home->setEnabled( false );
-        ui.stop->setEnabled( false );
-    }
-    else if( m_appState == "READY" || m_appState == "OPERATING" || m_appState == "HOMING" ||
-             m_appState == "CONFIGURING" )
-    {
-        ui.stageName->setEnabled( true );
-        ui.fsmState->setEnabled( true );
-        ui.setPoint->setEnabled( true );
-        ui.stepSize->setEnabled( true );
-        ui.posStepMulTen->setEnabled( true );
-        ui.posStepDivTen->setEnabled( true );
-        ui.stop->setEnabled( true );
-
-        if( m_appState == "READY" )
-        {
-            ui.setPointGo->setEnabled( true );
-            ui.positionSlider->setEnabled( true );
-            ui.position->setEnabled( true );
-            ui.posMinus->setEnabled( true );
-            ui.posPlus->setEnabled( true );
-            ui.home->setEnabled( true );
-        }
-        else
-        {
-            ui.setPointGo->setEnabled( false );
-            ui.positionSlider->setEnabled( false );
-            ui.position->setEnabled( false );
-            ui.posMinus->setEnabled( false );
-            ui.posPlus->setEnabled( false );
-            ui.home->setEnabled( false );
-        }
-    }
-    else if( m_appState == "NOTHOMED" )
-    {
-        ui.stageName->setEnabled( true );
-        ui.fsmState->setEnabled( true );
-        ui.setPoint->setEnabled( false );
-        ui.stepSize->setEnabled( false );
-        ui.posStepMulTen->setEnabled( false );
-        ui.posStepDivTen->setEnabled( false );
-        ui.stop->setEnabled( false );
-
-        ui.setPointGo->setEnabled( false );
-        ui.positionSlider->setEnabled( false );
-        ui.position->setEnabled( false );
-        ui.posMinus->setEnabled( false );
-        ui.posPlus->setEnabled( false );
-        ui.home->setEnabled( true );
-    }
-
-    const bool numeric = motionReady();
+    ui.stageName->setEnabled( showPosition );
+    ui.fsmState->setEnabled( showPosition );
+    ui.setPoint->setEnabled( canSelect );
+    ui.setPointGo->setEnabled( ready && canSelect );
     ui.positionSlider->setEnabled( numeric && m_maxPosValid );
-    ui.position->setEnabled( ui.position->isEnabled() && m_positionValid && ( m_targetAvailable || parkedPowerOff ) );
+    ui.stepSize->setEnabled( canConfigure );
+    ui.posStepMulTen->setEnabled( canConfigure );
+    ui.posStepDivTen->setEnabled( canConfigure );
     ui.posMinus->setEnabled( numeric );
     ui.posPlus->setEnabled( numeric );
-    ui.setPointGo->setEnabled( ui.setPointGo->isEnabled() && !m_presets.empty() );
-    ui.setPoint->setEnabled( ui.setPoint->isEnabled() && !m_presets.empty() );
+    ui.home->setEnabled( ready || notHomed );
+    ui.stop->setEnabled( canConfigure );
 
-    if( !m_positionValid )
+    if( !canConfigure )
+    {
+        ui.stepSize->setText( QString::number( m_step ) );
+    }
+
+    if( !canSelect )
+    {
+        ui.setPoint->hidePopup();
+        m_setPointEditTimer->stop();
+        setPointEditTimerOut();
+    }
+    else if( m_setPointEditing != STARTED && !m_setPointCommandPending )
+    {
+        ui.setPoint->setCurrentIndex( ui.setPoint->findText( QString::fromStdString( m_setPoint ) ) );
+    }
+
+    ui.position->readOnly( !numeric );
+    ui.position->setEnabled( numeric || ( parkedPosition && m_positionValid ) );
+
+    if( !showPosition || !m_positionValid )
     {
         ui.position->setText( "---" );
     }
@@ -637,11 +619,11 @@ void stage::updateGUI()
         ui.position->setText( QString::number( m_position ) );
     }
 
-    if( m_positionValid && m_maxPosValid )
+    if( showPosition && m_positionValid && m_maxPosValid )
+    {
         ui.positionSlider->setValue( m_position / m_maxPos * 100. );
-    // ui.position->updateGUI();
-
-} // updateGUI()
+    }
+}
 
 void stage::clear_focus()
 {
@@ -650,6 +632,11 @@ void stage::clear_focus()
 void stage::on_setPoint_activated( int index )
 {
     static_cast<void>( index );
+
+    if( !ui.setPoint->isEnabled() )
+    {
+        return;
+    }
 
     m_setPointEditing        = STARTED;
     m_setPointCommandPending = false;
@@ -661,7 +648,9 @@ void stage::on_setPoint_activated( int index )
 void stage::on_setPointGo_pressed()
 {
     if( !isEnabled() || m_appState != "READY" )
+    {
         return;
+    }
     std::string selection = ui.setPoint->currentText().toStdString();
 
     if( selection == "" )
@@ -739,7 +728,9 @@ void stage::on_setPointGo_pressed()
 void stage::on_positionSlider_sliderMoved( double s )
 {
     if( !motionReady() || !m_maxPosValid )
+    {
         return;
+    }
     double epos = s / 100.0 * m_maxPos;
 
     ui.position->setEditText( QString::number( epos ) );
@@ -748,7 +739,9 @@ void stage::on_positionSlider_sliderMoved( double s )
 void stage::on_positionSlider_sliderReleased()
 {
     if( !motionReady() || !m_maxPosValid )
+    {
         return;
+    }
     ui.position->stopEditing();
 
     double s      = ui.positionSlider->value();
@@ -776,7 +769,9 @@ void stage::on_positionSlider_sliderReleased()
 void stage::on_position_returnPressed()
 {
     if( !motionReady() )
+    {
         return;
+    }
     double newPos = ui.position->editText().toDouble();
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
@@ -800,6 +795,11 @@ void stage::on_position_returnPressed()
 
 void stage::on_stepSize_editingFinished()
 {
+    if( !ui.stepSize->isEnabled() )
+    {
+        return;
+    }
+
     m_step = ui.stepSize->text().toDouble();
     ui.stepSize->setText( QString::number( m_step ) );
 }
@@ -807,7 +807,9 @@ void stage::on_stepSize_editingFinished()
 void stage::on_posMinus_pressed()
 {
     if( !motionReady() )
+    {
         return;
+    }
     double newPos = m_position - m_step;
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
@@ -830,7 +832,9 @@ void stage::on_posMinus_pressed()
 void stage::on_posPlus_pressed()
 {
     if( !motionReady() )
+    {
         return;
+    }
     double newPos = m_position + m_step;
 
     pcf::IndiProperty ip( pcf::IndiProperty::Number );
@@ -852,18 +856,33 @@ void stage::on_posPlus_pressed()
 
 void stage::on_posStepMulTen_pressed()
 {
+    if( !ui.posStepMulTen->isEnabled() )
+    {
+        return;
+    }
+
     m_step *= 10.0;
     ui.stepSize->setText( QString::number( m_step ) );
 }
 
 void stage::on_posStepDivTen_pressed()
 {
+    if( !ui.posStepDivTen->isEnabled() )
+    {
+        return;
+    }
+
     m_step /= 10.0;
     ui.stepSize->setText( QString::number( m_step ) );
 }
 
 void stage::on_home_pressed()
 {
+    if( !ui.home->isEnabled() )
+    {
+        return;
+    }
+
     pcf::IndiProperty ipFreq( pcf::IndiProperty::Switch );
 
     ipFreq.setDevice( m_stageName );
@@ -876,6 +895,11 @@ void stage::on_home_pressed()
 
 void stage::on_stop_pressed()
 {
+    if( !ui.stop->isEnabled() )
+    {
+        return;
+    }
+
     pcf::IndiProperty ipFreq( pcf::IndiProperty::Switch );
 
     ipFreq.setDevice( m_stageName );
@@ -891,7 +915,7 @@ void stage::setPointEditTimerOut()
     m_setPointEditing        = STOPPED;
     m_setPointCommandPending = false;
     m_setPointRequested.clear();
-    ui.setPoint->setCurrentText( m_setPoint.c_str() );
+    ui.setPoint->setCurrentIndex( ui.setPoint->findText( QString::fromStdString( m_setPoint ) ) );
     update();
 }
 

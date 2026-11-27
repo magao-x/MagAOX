@@ -5,9 +5,12 @@
 #define CATCH_CONFIG_RUNNER
 #include "../../../../tests/testXWC.hpp"
 
+#include <cstdlib>
+#include <initializer_list>
 #include <QApplication>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QTemporaryFile>
 #include "../../../lib/tests/offlineIndiPublisher.hpp"
 #include "../camera.hpp"
 
@@ -29,8 +32,8 @@ class Widget
 
     xqt::camera m_widget; ///< Actual shared camera widget under test.
 
-    /// Register and display the real panel with the socket-free publisher.
-    Widget();
+    /// Configure, register, and display the real panel with the socket-free publisher.
+    Widget( const std::string &stageNames = "" /**< [in] Optional comma-separated list of associated stages. */ );
 
     /// Deliver one current property definition through queued dispatch.
     void publish( const pcf::IndiProperty &property /**< [in] Property definition. */ );
@@ -59,8 +62,21 @@ void events()
     }
 }
 
-Widget::Widget() : m_widget( m_device )
+Widget::Widget( const std::string &stageNames ) : m_widget( m_device )
 {
+    if( !stageNames.empty() )
+    {
+        QTemporaryFile configFile;
+        REQUIRE( configFile.open() );
+        REQUIRE( configFile.write( QByteArray::fromStdString( "[camera]\nstages=" + stageNames + "\n" ) ) > 0 );
+        configFile.close();
+
+        mx::app::appConfigurator config;
+        m_widget.setupConfig( config );
+        REQUIRE( config.readConfig( configFile.fileName().toStdString() ) == 0 );
+        m_widget.loadConfig( config );
+    }
+
     m_publisher.addSubscriber( &m_widget );
     m_widget.show();
     events();
@@ -133,7 +149,7 @@ TEST_CASE( "Camera EM-gain-off discovery and command", "[cameraGUI]" )
     REQUIRE( button != nullptr );
     REQUIRE( button->isVisible() );
     REQUIRE( button->isEnabled() );
-    REQUIRE( button->text() == "EM gain off" );
+    REQUIRE( button->text() == "off" );
     widget.support();
     REQUIRE( widget.m_widget.findChildren<QPushButton *>( "emGainOff" ).size() == 1 );
     REQUIRE( widget.m_publisher.m_commands.empty() );
@@ -276,7 +292,7 @@ TEST_CASE( "Camera averaging time sends a numeric target", "[cameraGUI]" )
     CHECK( entry->inputText().toDouble() == 2.75 );
 }
 
-/// The optional command occupies its own row beside the existing gain, synchronization, and averaging controls.
+/// The optional command sits beside the gain entry regardless of property discovery order.
 /** \ingroup cameraGUI_unit_test */
 TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
 {
@@ -289,6 +305,12 @@ TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
     Widget widget;
     widget.ready();
 
+    const bool requestFirst = GENERATE( false, true );
+    if( requestFirst )
+    {
+        widget.support();
+    }
+
     for( const auto *name : { "temp_ccd", "emgain" } )
     {
         pcf::IndiProperty number( pcf::IndiProperty::Number, widget.m_device, name );
@@ -298,7 +320,11 @@ TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
         widget.publish( number );
     }
 
-    widget.support();
+    if( !requestFirst )
+    {
+        widget.support();
+    }
+
     pcf::IndiProperty synchro( pcf::IndiProperty::Switch, widget.m_device, "synchro" );
     synchro.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
     widget.publish( synchro );
@@ -324,12 +350,268 @@ TEST_CASE( "Camera EM-gain-off layout with existing controls", "[cameraGUI]" )
         controls.push_back( control );
     }
 
+    const QRect gain   = controls[0]->geometry();
+    const QRect button = controls[1]->geometry();
+    CHECK( gain.right() < button.left() );
+    CHECK( std::abs( gain.center().y() - button.center().y() ) <= 1 );
+
+    auto *fsm = widget.m_widget.findChild<xqt::fsmDisplay *>( "fsmState" );
+    REQUIRE( fsm != nullptr );
+    CHECK( fsm->geometry().bottom() == controls.back()->geometry().bottom() );
+
     const QString screenshot = qEnvironmentVariable( "CAMERA_GUI_SCREENSHOT" );
 
     if( !screenshot.isEmpty() )
     {
         REQUIRE( widget.m_widget.grab().save( screenshot ) );
     }
+}
+
+/// Temperature controls stay at the top and ordered settings align with the bottom of the stage column.
+/** \ingroup cameraGUI_unit_test */
+TEST_CASE( "Camera packs optional controls in discovery-independent order", "[cameraGUI]" )
+{
+    // clang-format off
+    #ifdef CAMERA_GUI_TEST_DOXYGEN_REF
+    xqt::camera::setup_vshiftSpd; xqt::camera::setup_expTime; xqt::camera::setup_fps;
+    xqt::camera::setup_emGain; xqt::camera::setup_synchro;
+    xqt::camera::setup_modes; xqt::camera::setup_roiStatus;
+    xqt::camera::setup_temp_ccd; xqt::camera::setup_tempStatus;
+    #endif
+    // clang-format on
+    Widget widget( "stage1,stage2,stage3,stage4,stage5,stage6,stage7" );
+    widget.ready();
+    REQUIRE( widget.m_widget.findChildren<xqt::stageStatus *>().size() == 7 );
+
+    const auto checkRows = [&]( std::initializer_list<const char *> names )
+    {
+        widget.m_widget.adjustSize();
+        events();
+
+        QWidget *previous = nullptr;
+        for( const char *name : names )
+        {
+            CAPTURE( name );
+            auto *control = widget.m_widget.findChild<QWidget *>( name );
+            REQUIRE( control != nullptr );
+            REQUIRE( control->isVisible() );
+
+            if( previous )
+            {
+                CHECK( previous->geometry().bottom() + 1 == control->geometry().top() );
+            }
+
+            previous = control;
+        }
+    };
+
+    pcf::IndiProperty synchro( pcf::IndiProperty::Switch, widget.m_device, "synchro" );
+    synchro.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
+    widget.publish( synchro );
+    widget.support();
+
+    for( const auto *name : { "emgain", "exptime" } )
+    {
+        pcf::IndiProperty property( pcf::IndiProperty::Number, widget.m_device, name );
+        property.add( pcf::IndiElement( "current", 1.0 ) );
+        widget.publish( property );
+    }
+
+    pcf::IndiProperty vshift( pcf::IndiProperty::Switch, widget.m_device, "vshift_speed" );
+    vshift.add( pcf::IndiElement( "fast", pcf::IndiElement::On ) );
+    widget.publish( vshift );
+
+    checkRows( { "vshiftSpd", "expTime", "emgain", "synchro" } );
+
+    auto *heading      = widget.m_widget.findChild<QWidget *>( "lab_camName" );
+    auto *lastStage    = widget.m_widget.findChild<xqt::stageStatus *>( "stage7" );
+    auto *firstSetting = widget.m_widget.findChild<QWidget *>( "vshiftSpd" );
+    auto *lastSetting  = widget.m_widget.findChild<QWidget *>( "synchro" );
+    REQUIRE( heading != nullptr );
+    REQUIRE( lastStage != nullptr );
+    REQUIRE( firstSetting != nullptr );
+    REQUIRE( lastSetting != nullptr );
+    CHECK( firstSetting->geometry().top() > heading->geometry().top() );
+    CHECK( lastSetting->geometry().bottom() == lastStage->geometry().bottom() );
+
+    auto *exposure = widget.m_widget.findChild<xqt::statusEntry *>( "expTime" );
+    REQUIRE( exposure != nullptr );
+    auto *field = exposure->findChild<QLineEdit *>( "value" );
+    REQUIRE( field != nullptr );
+    CHECK( field->height() == field->sizeHint().height() );
+
+    widget.m_widget.resize( widget.m_widget.width(), widget.m_widget.height() + 200 );
+    events();
+    CHECK( field->height() == field->sizeHint().height() );
+    CHECK( lastSetting->geometry().bottom() == lastStage->geometry().bottom() );
+
+    pcf::IndiProperty tempControl( pcf::IndiProperty::Text, widget.m_device, "temp_control" );
+    tempControl.add( pcf::IndiElement( "status", "READY" ) );
+    widget.publish( tempControl );
+    pcf::IndiProperty tempCCD( pcf::IndiProperty::Number, widget.m_device, "temp_ccd" );
+    tempCCD.add( pcf::IndiElement( "current", -45.0 ) );
+    widget.publish( tempCCD );
+
+    checkRows( { "tempCCD", "tempStatus" } );
+    auto *temperature       = widget.m_widget.findChild<QWidget *>( "tempCCD" );
+    auto *temperatureStatus = widget.m_widget.findChild<QWidget *>( "tempStatus" );
+    REQUIRE( temperature != nullptr );
+    REQUIRE( temperatureStatus != nullptr );
+    CHECK( temperature->geometry().top() == heading->geometry().top() );
+    CHECK( temperatureStatus->geometry().bottom() + 1 < firstSetting->geometry().top() );
+    CHECK( lastSetting->geometry().bottom() == lastStage->geometry().bottom() );
+
+    pcf::IndiProperty fps( pcf::IndiProperty::Number, widget.m_device, "fps" );
+    fps.add( pcf::IndiElement( "current", 1.0 ) );
+    widget.publish( fps );
+    pcf::IndiProperty mode( pcf::IndiProperty::Switch, widget.m_device, "mode" );
+    mode.add( pcf::IndiElement( "full", pcf::IndiElement::On ) );
+    widget.publish( mode );
+    pcf::IndiProperty roi( pcf::IndiProperty::Switch, widget.m_device, "roi_set" );
+    roi.add( pcf::IndiElement( "request", pcf::IndiElement::Off ) );
+    widget.publish( roi );
+
+    checkRows( { "roiStatus", "modes", "vshiftSpd", "expTime", "fps", "emgain", "synchro" } );
+    CHECK( field->height() == field->sizeHint().height() );
+    CHECK( lastSetting->geometry().bottom() == lastStage->geometry().bottom() );
+}
+
+/// Parked stage and wheel readouts survive power transitions while every motion input is blocked.
+/** \ingroup cameraGUI_unit_test */
+TEST_CASE( "Parked camera stages and wheels are read-only through power cycles", "[cameraGUI][stageGUI]" )
+{
+    // clang-format off
+    #ifdef CAMERA_GUI_TEST_DOXYGEN_REF
+    xqt::camera::setEnableDisable;
+    xqt::stageStatus::selectionEnabled; xqt::statusCombo::updateGUI;
+    xqt::statusCombo::on_buttonGo_pressed; xqt::statusCombo::on_buttonCtrl_pressed;
+    xqt::stage::updateGUI; xqt::stage::on_setPointGo_pressed;
+    xqt::stage::on_position_returnPressed; xqt::stage::on_home_pressed; xqt::stage::on_stop_pressed;
+    #endif
+    // clang-format on
+    const bool        wheel  = GENERATE( false, true );
+    const std::string device = wheel ? "wheel_test" : "stage_test";
+    Widget            widget( device );
+    widget.ready( "POWEROFF" );
+
+    const auto state = [&]( const std::string &value )
+    {
+        pcf::IndiProperty fsm( pcf::IndiProperty::Text, device, "fsm" );
+        fsm.add( pcf::IndiElement( "state", value ) );
+        widget.publish( fsm );
+    };
+    state( "POWEROFF" );
+
+    pcf::IndiProperty position( pcf::IndiProperty::Number, device, wheel ? "filter" : "position" );
+    position.add( pcf::IndiElement( "current", 2.5 ) );
+    position.add( pcf::IndiElement( "target", 2.5 ) );
+    widget.publish( position );
+    pcf::IndiProperty parked( pcf::IndiProperty::Number, device, "parked" );
+    parked.add( pcf::IndiElement( "current", 1 ) );
+    widget.publish( parked );
+    pcf::IndiProperty presets( pcf::IndiProperty::Switch, device, wheel ? "filterName" : "presetName" );
+    presets.add( pcf::IndiElement( "current", pcf::IndiElement::On ) );
+    presets.add( pcf::IndiElement( "other", pcf::IndiElement::Off ) );
+    widget.publish( presets );
+
+    auto *summary = widget.m_widget.findChild<xqt::stageStatus *>( QString::fromStdString( device ) );
+    REQUIRE( summary != nullptr );
+    auto *dialog = qobject_cast<xqt::stage *>( summary->ctrlWidget() );
+    REQUIRE( dialog != nullptr );
+    auto *summaryChoice = summary->findChild<QComboBox *>( "status" );
+    auto *summaryGo     = summary->findChild<QAbstractButton *>( "buttonGo" );
+    auto *launcher      = summary->findChild<QAbstractButton *>( "buttonCtrl" );
+    auto *choice        = dialog->findChild<QComboBox *>( "setPoint" );
+    auto *field         = dialog->findChild<xqt::statusLineEdit *>( "position" );
+    REQUIRE( summaryChoice != nullptr );
+    REQUIRE( summaryGo != nullptr );
+    REQUIRE( launcher != nullptr );
+    REQUIRE( choice != nullptr );
+    REQUIRE( field != nullptr );
+    REQUIRE( launcher->isEnabled() );
+    REQUIRE_FALSE( summaryChoice->isEnabled() );
+    REQUIRE( summaryChoice->placeholderText() == "current" );
+    REQUIRE( field->text() == "2.5" );
+
+    state( "READY" );
+    REQUIRE( summaryChoice->isEnabled() );
+    REQUIRE( choice->isEnabled() );
+    REQUIRE_FALSE( field->isReadOnly() );
+
+    summaryChoice->setCurrentText( "other" );
+    summary->on_status_activated( summaryChoice->currentIndex() );
+    choice->setCurrentText( "other" );
+    dialog->on_setPoint_activated( choice->currentIndex() );
+    field->setEditText( "99" );
+
+    for( const auto *transition : { "POWEROFF", "POWERON", "NODEVICE", "NOTCONNECTED", "CONNECTED" } )
+    {
+        CAPTURE( transition );
+        state( transition );
+        widget.state( transition );
+        REQUIRE( launcher->isEnabled() );
+        launcher->click();
+        REQUIRE( dialog->isVisible() );
+        REQUIRE_FALSE( summaryChoice->isEnabled() );
+        REQUIRE_FALSE( summaryGo->isEnabled() );
+        REQUIRE( summaryChoice->placeholderText() == "current" );
+        REQUIRE( summaryChoice->currentIndex() == -1 );
+        REQUIRE_FALSE( choice->isEnabled() );
+        REQUIRE( choice->currentText() == "current" );
+        REQUIRE( field->isReadOnly() );
+        REQUIRE( field->isEnabled() );
+        REQUIRE( field->text() == "2.5" );
+
+        for( const auto *name : { "setPointGo",
+                                  "positionSlider",
+                                  "stepSize",
+                                  "posMinus",
+                                  "posPlus",
+                                  "posStepMulTen",
+                                  "posStepDivTen",
+                                  "home",
+                                  "stop" } )
+        {
+            auto *control = dialog->findChild<QWidget *>( name );
+            REQUIRE( control != nullptr );
+            CHECK_FALSE( control->isEnabled() );
+        }
+
+        dialog->on_setPointGo_pressed();
+        dialog->on_position_returnPressed();
+        dialog->on_positionSlider_sliderReleased();
+        dialog->on_posPlus_pressed();
+        dialog->on_posMinus_pressed();
+        dialog->on_home_pressed();
+        dialog->on_stop_pressed();
+        REQUIRE( widget.m_publisher.m_commands.empty() );
+    }
+
+    state( "POWEROFF" );
+    summaryChoice->setCurrentText( "other" );
+    summary->on_buttonGo_pressed();
+    REQUIRE( widget.m_publisher.m_commands.empty() );
+    presets["current"].setSwitchState( pcf::IndiElement::Off );
+    widget.publish( presets );
+    REQUIRE( summaryChoice->placeholderText() == "2.5000" );
+    REQUIRE( choice->currentIndex() == -1 );
+    REQUIRE( field->text() == "2.5" );
+    parked["current"].set( 0 );
+    widget.publish( parked );
+    REQUIRE( summaryChoice->placeholderText() == "POWEROFF" );
+    REQUIRE_FALSE( summaryChoice->isEnabled() );
+
+    state( "READY" );
+    REQUIRE( summaryChoice->isEnabled() );
+    REQUIRE( choice->isEnabled() );
+    REQUIRE_FALSE( field->isReadOnly() );
+    REQUIRE( field->editText().isEmpty() );
+    REQUIRE( widget.m_publisher.m_commands.empty() );
+    summaryChoice->setCurrentText( "other" );
+    summaryGo->click();
+    REQUIRE( widget.m_publisher.m_commands.size() == 1 );
+    REQUIRE( widget.m_publisher.m_commands.back().getDevice() == device );
+    REQUIRE( widget.m_publisher.m_commands.back().getName() == presets.getName() );
 }
 
 /// A psfAcq helper advertising acquire_star adds the star-acquisition panel below the existing left-column controls.
@@ -383,7 +665,7 @@ TEST_CASE( "Camera star-acquisition panel discovery and command", "[cameraGUI]" 
     events();
     auto *takeDarks = widget.m_widget.findChild<QWidget *>( "takeDarks" );
     REQUIRE( takeDarks != nullptr );
-    REQUIRE_FALSE( takeDarks->geometry().intersects( panel->geometry() ) );
+    REQUIRE( takeDarks->geometry().bottom() < panel->geometry().top() );
 
     button->click();
     REQUIRE( widget.m_publisher.m_commands.size() == 1 );

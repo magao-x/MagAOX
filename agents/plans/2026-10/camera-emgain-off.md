@@ -36,9 +36,15 @@ was committed as `0269288` on `jrmales/camera-temperature-cautions` in
 - PICam and Andor retain their conventional-amplifier behavior: no EM-gain SDK
   call is necessary while the selected amplifier is already non-multiplying.
 - The shared camera GUI discovers `emgain_off.request` and displays an
-  **EM gain off** button below the gain entry. It sends only the standard request,
-  with no knowledge of the camera's numeric choice. Deletion/disconnection clears
-  support; reconnect requires fresh capability and FSM information.
+  **off** button to the right of the gain entry in a shared horizontal
+  layout. The camera determines the numeric gain for the standard request.
+  Deletion and disconnection clear support. Reconnect requires fresh capability
+  and FSM information.
+- The camera settings and stage controls use independent columns. Optional
+  camera settings appear in a fixed order as discovered, and unused rows collapse.
+  A stretch between the temperature controls and the other camera settings
+  keeps the fields at their preferred height and aligns the column bottoms.
+  When temperature controls are absent, the stretch starts at the top.
 
 ## Affected files
 
