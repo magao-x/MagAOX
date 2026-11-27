@@ -4,6 +4,7 @@
  */
 #include "../../tests/testXWC.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <climits>
@@ -182,8 +183,8 @@ TEST_CASE( "Device search accepts case-insensitive abbreviations", "[cursesINDI]
     REQUIRE( cursesINDI::findSearchRow( elements, "cWfS" ) == 4 );
     REQUIRE( cursesINDI::findSearchRow( elements, "cfw" ) == -1 );
     REQUIRE( cursesINDI::findSearchRow( elements, "cc" ) == -1 );
-    REQUIRE( cursesINDI::findSearchRow( elements, "camwfd" ) == -1 );
-    REQUIRE( cursesINDI::findSearchRow( elements, "camwfss" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "camwfd" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "camwfss" ) == 4 );
 }
 
 /** \brief Prefer a prefix over a substring and a substring over a subsequence.
@@ -243,7 +244,8 @@ TEST_CASE( "Device search selects again as the query is shortened", "[cursesINDI
     const cursesINDI::elementMapT elements{ { "camvis.p.e", { "camvis.p", "camvis", "p", "e", 0 } },
                                             { "camwfs.p.e", { "camwfs.p", "camwfs", "p", "e", 1 } } };
 
-    REQUIRE( cursesINDI::findSearchRow( elements, "camwfsx" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "camwfsxy" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "camwfsx" ) == 1 );
     REQUIRE( cursesINDI::findSearchRow( elements, "camwfs" ) == 1 );
     REQUIRE( cursesINDI::findSearchRow( elements, "camw" ) == 1 );
     REQUIRE( cursesINDI::findSearchRow( elements, "cam" ) == 0 );
@@ -561,6 +563,138 @@ TEST_CASE( "Filtered selection survives property updates", "[cursesINDI][filter]
     client.keyPressed( 0x1f & 'l' );
     REQUIRE( client.m_cellContents.size() == 3 );
     REQUIRE( selected( client ) == "camwfs.exposure.current" );
+}
+
+/** \brief Accept one edit per long segment, keeping short queries and field boundaries strict.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Search tolerates a single typo within each long field", "[cursesINDI][ranking]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::findSearchRow;
+    cursesINDI::searchSegmentRank;
+#endif
+    // clang-format on
+    const cursesINDI::elementMapT elements{
+        { "camwfs.exposure.current", { "camwfs.exposure", "camwfs", "exposure", "current", 0 } } };
+
+    for( const auto &query : { "camwsf",
+                               "camwgs",
+                               "camwfss",
+                               "camws",
+                               "camwf",
+                               "amwfs",
+                               "xcamwfs",
+                               "camwfs",
+                               "cwfs",
+                               "CAMWSF.EXPOSRUE.CURRNET" } )
+    {
+        CAPTURE( query );
+        CHECK( cursesINDI::findSearchRow( elements, query ) == 0 );
+    }
+
+    for( const auto &query : { "camwxy", "camwfsxy", "cam.wfs", "camwfs.exposurecurrent", "camwfs..." } )
+    {
+        CAPTURE( query );
+        CHECK( cursesINDI::findSearchRow( elements, query ) == -1 );
+    }
+
+    const cursesINDI::elementMapT shortFields{ { "cam.fsm.on", { "cam.fsm", "cam", "fsm", "on", 0 } } };
+    CHECK( cursesINDI::findSearchRow( shortFields, "cma" ) == -1 );
+    CHECK( cursesINDI::findSearchRow( shortFields, ".fms" ) == -1 );
+    CHECK( cursesINDI::findSearchRow( shortFields, "..no" ) == -1 );
+}
+
+/** \brief Order filtered matches by relevance with alphabetical ties and preserve navigated selections.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Filter ranks exact matches before prefixes substrings typos and subsequences", "[cursesINDI][ranking]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::redrawTable;
+    cursesINDI::moveCurrent;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+
+    for( const auto &device : { "autojay-camflowfs", "camwfd", "camwfs", "camwfs-b", "camwfs-a", "other-camwfs" } )
+    {
+        client.handleDefProperty( property( device, "fsm", "state" ) );
+    }
+
+    client.redrawTable();
+    client.keyPressed( 0x1f & 'f' );
+
+    for( char ch : std::string( "camwfs" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 6 );
+    int row = 0;
+
+    for( const auto &device : { "camwfs", "camwfs-a", "camwfs-b", "other-camwfs", "camwfd", "autojay-camflowfs" } )
+    {
+        CAPTURE( device );
+        CHECK( client.knownElements.at( std::string( device ) + ".fsm.state" ).tableRow == row++ );
+    }
+
+    REQUIRE( selected( client ) == "camwfs.fsm.state" );
+    client.moveCurrent( 5, 3 );
+    REQUIRE( selected( client ) == "autojay-camflowfs.fsm.state" );
+    client.handleDefProperty( property( "camwfs", "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "autojay-camflowfs.fsm.state" );
+    REQUIRE( client.m_currY == 5 );
+    client.keyPressed( 0x1f & 'f' );
+    REQUIRE( selected( client ) == "autojay-camflowfs.fsm.state" );
+    client.keyPressed( KEY_BACKSPACE );
+    client.keyPressed( 's' );
+    REQUIRE( selected( client ) == "camwfs.aaa.current" );
+    REQUIRE( client.m_startRow == 0 );
+    REQUIRE( client.m_currY == 0 );
+    client.keyPressed( 0x1f & 'l' );
+    REQUIRE( client.knownElements.at( "autojay-camflowfs.fsm.state" ).tableRow == 0 );
+    REQUIRE( selected( client ) == "camwfs.aaa.current" );
+}
+
+/** \brief Rank typo matches in later fields and use displayed order when a ranked selection disappears.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Ranked filter uses property and element scores and visible deletion fallback", "[cursesINDI][ranking]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::redrawTable;
+    cursesINDI::handleDelProperty;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "cam", "exposrue", "current" ) );
+    auto exposure = property( "cam", "exposure", "currnet" );
+    exposure.add( pcf::IndiElement( "current", "fixture" ) );
+    client.handleDefProperty( exposure );
+    client.redrawTable();
+    client.keyPressed( 0x1f & 'f' );
+
+    for( char ch : std::string( "cam.exposure.current" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 3 );
+    REQUIRE( client.knownElements.at( "cam.exposure.current" ).tableRow == 0 );
+    REQUIRE( client.knownElements.at( "cam.exposure.currnet" ).tableRow == 1 );
+    REQUIRE( client.knownElements.at( "cam.exposrue.current" ).tableRow == 2 );
+    client.handleDelProperty( exposure );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "cam.exposrue.current" );
 }
 
 /** \brief Preserve the selected element and column when rows are inserted or removed before it.

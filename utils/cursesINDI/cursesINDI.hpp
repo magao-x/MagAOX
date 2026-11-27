@@ -2,6 +2,7 @@
  * \brief A curses-based terminal client for browsing and editing INDI properties.
  */
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <climits>
@@ -201,7 +202,7 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     /// Iterator type of elementMapT.
     typedef elementMapT::iterator elementMapIteratorT;
 
-    /// All elements of the properties in knownProps, in table order.
+    /// All elements of the properties in knownProps, in alphabetical field order.
     elementMapT knownElements;
 
     /// Identity of the selected element, retained when table rows are reordered or deleted.
@@ -260,7 +261,7 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     void drawThreadExec();
 
     /// Rebuild the table contents from knownElements and redraw it.
-    void redrawTable();
+    void redrawTable( bool selectBest = false /**< [in] select the first result after editing a filter */ );
 
     /// Update changed property states and element values in place.
     void updateTable();
@@ -281,23 +282,30 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     /// Handle a key press from the user.
     void keyPressed( int ch /**< [in] the key code */ );
 
+    /// Sentinel rank for fields that do not match the query.
+    static constexpr int noSearchMatch = 5;
+
+    /// Test whether two case-folded fields differ by at most one insertion, deletion, substitution, or adjacent swap.
+    static bool withinOneEdit( std::string_view field, /**< [in] candidate field */
+                               std::string_view query /**< [in] query segment */ );
+
     /// Rank a field against one case-folded search segment without crossing field boundaries.
-    /** \returns 0 for a prefix (including an empty segment), 1 for a substring,
-     * 2 for a subsequence, or 3 for no match
+    /** \returns 0 for exact or empty, 1 for prefix, 2 for substring, 3 for one typo,
+     * 4 for subsequence, or noSearchMatch. Typo matching requires at least four query characters.
      */
     static int searchSegmentRank( std::string      field, /**< [in] device, property, or element name */
                                   std::string_view query /**< [in] lowercase query segment */ );
 
-    /// Rank all query segments against an element; a rank of 3 in any field means no match.
+    /// Rank all query segments against an element; noSearchMatch in any field excludes the element.
     static std::array<int, 3> searchElementRank( const elementSpec &element, /**< [in] candidate element */
                                                  std::string query /**< [in] dot-separated search or filter text */ );
 
     /// Find the first displayed row matching a case-insensitive device.property.element query.
-    /** Rank prefixes, substrings, and subsequences in device, property, then element order.
-     * Empty or omitted segments match any name; ties retain table order.
+    /** Compare match quality in device, property, then element order.
+     * Empty or omitted segments match any name; ties retain alphabetical field order.
      * \returns -1 for an empty query, more than three segments, or no displayed match
      */
-    static int findSearchRow( const elementMapT &elements, /**< [in] elements in table order */
+    static int findSearchRow( const elementMapT &elements, /**< [in] elements in alphabetical field order */
                               std::string        query /**< [in] dot-separated search text */ );
 
     /// Update a dot-separated query, jumping to its best match or filtering the table.
@@ -679,7 +687,7 @@ inline void cursesINDI::drawThreadExec()
     }
 }
 
-void cursesINDI::redrawTable()
+void cursesINDI::redrawTable( bool selectBest )
 {
     std::lock_guard<std::mutex> lock( m_drawMutex );
 
@@ -691,7 +699,8 @@ void cursesINDI::redrawTable()
 
     bool fsmAlerts = false;
 
-    std::set<std::string> alertDev;
+    std::set<std::string>                                           alertDev;
+    std::vector<std::pair<std::array<int, 3>, elementMapIteratorT>> visible;
 
     for( elementMapIteratorT es = knownElements.begin(); es != knownElements.end(); ++es )
     {
@@ -707,16 +716,29 @@ void cursesINDI::redrawTable()
 
         es->second.tableRow = -1;
 
-        if( m_filtering )
-        {
-            auto rank = searchElementRank( es->second, m_deviceTarget );
+        auto rank = m_filtering ? searchElementRank( es->second, m_deviceTarget ) : std::array<int, 3>{};
 
-            if( rank[0] == 3 || rank[1] == 3 || rank[2] == 3 )
-            {
-                continue;
-            }
+        if( rank[0] == noSearchMatch || rank[1] == noSearchMatch || rank[2] == noSearchMatch )
+        {
+            continue;
         }
 
+        visible.emplace_back( rank, es );
+    }
+
+    if( m_filtering )
+    {
+        std::stable_sort( visible.begin(),
+                          visible.end(),
+                          []( const auto &left, const auto &right )
+                          {
+                              return left.first < right.first;
+                          } );
+    }
+
+    for( const auto &entry : visible )
+    {
+        auto                     es = entry.second;
         std::vector<std::string> s;
 
         s.resize( m_colFraction.size() );
@@ -740,24 +762,30 @@ void cursesINDI::redrawTable()
     }
     else
     {
-        // Keep the selected identity; otherwise use its next visible successor or the last visible row.
-        auto selected = knownElements.lower_bound( m_selectedKey );
+        // Preserve identity on updates; a removed filtered row falls back to its displayed position.
+        size_t row      = 0;
+        auto   selected = knownElements.lower_bound( m_selectedKey );
 
-        while( selected != knownElements.end() && selected->second.tableRow < 0 )
+        if( !selectBest && m_filtering )
         {
-            ++selected;
+            row = std::min( m_startRow + m_currY, visible.size() - 1 );
+
+            if( selected != knownElements.end() && selected->first == m_selectedKey && selected->second.tableRow >= 0 )
+            {
+                row = selected->second.tableRow;
+            }
         }
-
-        if( selected == knownElements.end() )
+        else if( !selectBest )
         {
-            do
+            if( selected == knownElements.end() )
             {
                 --selected;
-            } while( selected->second.tableRow < 0 );
+            }
+
+            row = selected->second.tableRow;
         }
 
-        size_t row = selected->second.tableRow;
-        m_startRow = row > m_currY ? row - m_currY : 0;
+        m_startRow = !selectBest && row > m_currY ? row - m_currY : 0;
         m_currY    = row - m_startRow;
     }
 
@@ -1055,6 +1083,36 @@ void cursesINDI::_moveCurrent( int nextY, int nextX )
     }
 }
 
+inline bool cursesINDI::withinOneEdit( std::string_view field, std::string_view query )
+{
+    if( field.size() > query.size() + 1 || query.size() > field.size() + 1 )
+    {
+        return false;
+    }
+
+    size_t i = 0;
+
+    while( i < field.size() && i < query.size() && field[i] == query[i] )
+    {
+        ++i;
+    }
+
+    if( i == field.size() || i == query.size() )
+    {
+        return true;
+    }
+
+    if( field.size() == query.size() )
+    {
+        return field.substr( i + 1 ) == query.substr( i + 1 ) ||
+               ( i + 1 < field.size() && field[i] == query[i + 1] && field[i + 1] == query[i] &&
+                 field.substr( i + 2 ) == query.substr( i + 2 ) );
+    }
+
+    return field.size() > query.size() ? field.substr( i + 1 ) == query.substr( i )
+                                       : field.substr( i ) == query.substr( i + 1 );
+}
+
 inline int cursesINDI::searchSegmentRank( std::string field, std::string_view query )
 {
     for( char &ch : field )
@@ -1062,16 +1120,26 @@ inline int cursesINDI::searchSegmentRank( std::string field, std::string_view qu
         ch = std::tolower( static_cast<unsigned char>( ch ) );
     }
 
-    auto position = field.find( query );
-
-    if( position == 0 )
+    if( query.empty() || field == query )
     {
         return 0;
     }
 
-    if( position != std::string::npos )
+    auto position = field.find( query );
+
+    if( position == 0 )
     {
         return 1;
+    }
+
+    if( position != std::string::npos )
+    {
+        return 2;
+    }
+
+    if( query.size() >= 4 && withinOneEdit( field, query ) )
+    {
+        return 3;
     }
 
     size_t matched = 0;
@@ -1084,12 +1152,12 @@ inline int cursesINDI::searchSegmentRank( std::string field, std::string_view qu
 
             if( matched == query.size() )
             {
-                return 2;
+                return 4;
             }
         }
     }
 
-    return 3;
+    return noSearchMatch;
 }
 
 inline std::array<int, 3> cursesINDI::searchElementRank( const elementSpec &element, std::string query )
@@ -1114,7 +1182,7 @@ inline std::array<int, 3> cursesINDI::searchElementRank( const elementSpec &elem
 
         if( i == segments.size() - 1 )
         {
-            return { 3, 3, 3 };
+            return { noSearchMatch, noSearchMatch, noSearchMatch };
         }
 
         remaining.remove_prefix( period + 1 );
@@ -1132,7 +1200,7 @@ inline int cursesINDI::findSearchRow( const elementMapT &elements, std::string q
         return -1;
     }
 
-    std::array<int, 3> bestRank{ 3, 3, 3 };
+    std::array<int, 3> bestRank{ noSearchMatch, noSearchMatch, noSearchMatch };
     int                bestRow = -1;
 
     for( const auto &[key, element] : elements )
@@ -1144,7 +1212,7 @@ inline int cursesINDI::findSearchRow( const elementMapT &elements, std::string q
 
         auto rank = searchElementRank( element, query );
 
-        if( rank[0] == 3 || rank[1] == 3 || rank[2] == 3 )
+        if( rank[0] == noSearchMatch || rank[1] == noSearchMatch || rank[2] == noSearchMatch )
         {
             continue;
         }
@@ -1161,6 +1229,8 @@ inline int cursesINDI::findSearchRow( const elementMapT &elements, std::string q
 
 void cursesINDI::deviceSearch( int ch )
 {
+    bool selectBest;
+
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_drawMutex );
 
@@ -1183,6 +1253,7 @@ void cursesINDI::deviceSearch( int ch )
         }
 
         m_deviceSearching = true;
+        selectBest        = m_filtering;
         wclear( w_interactWin );
         wprintw( w_interactWin, "%s: %s", m_filtering ? "filter" : "search", m_deviceTarget.c_str() );
         wrefresh( w_interactWin );
@@ -1201,7 +1272,7 @@ void cursesINDI::deviceSearch( int ch )
         }
     }
 
-    redrawTable();
+    redrawTable( selectBest );
 }
 
 void cursesINDI::keyPressed( int ch )
