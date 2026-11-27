@@ -11,12 +11,11 @@ int main()
 
     cursesINDI *ci;
 
+#ifdef DEBUG_TMPOUT
     //This is for debugging
     std::ofstream *fpout{ nullptr };
-
-#ifdef DEBUG_TMPOUT
-    std::string fname = "/tmp/cursesINDI_DEBUG.txt";
-    fpout             = new std::ofstream;
+    std::string    fname = "/tmp/cursesINDI_DEBUG.txt";
+    fpout                = new std::ofstream;
     fpout->open( fname );
 #endif
 
@@ -90,8 +89,6 @@ retry:
         }
     }
 
-    WINDOW *topWin;
-
     int ch;
 
     initscr();
@@ -103,11 +100,6 @@ retry:
     noecho(); /* Don't echo() while we do getch */
 
     ci->startUp();
-
-    topWin = newwin( 1, COLS, 0, 0 );
-    wprintw( topWin, "cursesINDI | arrows: move | Ctrl+L: clear + search | Ctrl+F: filter | Ctrl+C: quit" );
-    keypad( topWin, TRUE );
-    wrefresh( topWin );
 
     ci->cursStat( 0 );
 
@@ -152,85 +144,7 @@ retry:
         }
         halfdelay( 10 );
 
-        int nextX = ci->m_currX;
-        int nextY = ci->m_currY;
-
-        switch( ch0 )
-        {
-        case KEY_LEFT:
-            nextX -= npress;
-            if( fpout )
-            {
-                *fpout << "left: " << npress << std::endl;
-            }
-            break;
-        case KEY_RIGHT:
-            nextX += npress;
-            if( fpout )
-            {
-                *fpout << "right: " << npress << std::endl;
-            }
-            break;
-        case KEY_UP:
-            nextY -= npress;
-            if( fpout )
-            {
-                *fpout << "up: " << npress << std::endl;
-            }
-            break;
-        case KEY_DOWN:
-            nextY += npress;
-            if( fpout )
-            {
-                *fpout << "down: " << npress << std::endl;
-            }
-            break;
-        case KEY_PPAGE:
-            nextY -= ci->m_gridWin.size() - 1;
-            if( fpout )
-            {
-                *fpout << "ppage: " << npress << std::endl;
-            }
-            break;
-        case KEY_NPAGE:
-            nextY += ci->m_gridWin.size() - 1;
-            if( fpout )
-            {
-                *fpout << "npage: " << npress << std::endl;
-            }
-            break;
-        case KEY_RESIZE:
-            ci->draw();
-            if( fpout )
-            {
-                *fpout << "resizes: " << npress << std::endl;
-            }
-            continue;
-        default:
-            if( fpout )
-            {
-                *fpout << "other: " << npress << std::endl;
-            }
-            ci->keyPressed( ch0 );
-            if( ci->m_shutdown )
-            {
-                break;
-            }
-            continue;
-            break;
-        }
-
-        int maxX = ci->m_gridWin[0].size() - 1;
-        if( nextX < 1 )
-        {
-            nextX = 1;
-        }
-        if( nextX >= maxX )
-        {
-            nextX = maxX;
-        }
-
-        ci->moveCurrent( nextY, nextX );
+        ci->keyPressed( ch0, npress );
 
         ci->cursStat( 0 );
 

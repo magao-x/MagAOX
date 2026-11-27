@@ -116,6 +116,9 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     /// Current curses cursor visibility, as passed to curs_set.
     int m_cursStat{ 1 };
 
+    /// Window showing the title, mode, and keyboard shortcuts. Owned by this class.
+    WINDOW *w_topWin{ nullptr };
+
     /// Window for user prompts and input (search, edit, confirm).  Owned by this class.
     WINDOW *w_interactWin{ nullptr };
 
@@ -214,6 +217,12 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     /// True while the query hides nonmatching rows, including while navigating the results.
     bool m_filtering{ false };
 
+    /// Enable h/j/k/l navigation and require explicit focus before typing search queries.
+    bool m_vimMode{ false };
+
+    /// Pending decimal count for the next h/j/k/l motion; zero means no count.
+    int m_vimCount{ 0 };
+
     /// The dot-separated device, property, and element query typed so far.
     std::string m_deviceTarget;
 
@@ -275,12 +284,17 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     );
 
     /// Move the selected cell and update the prompt windows.  The caller must hold m_drawMutex.
-    void _moveCurrent( int nextY, /**< [in] the new row */
-                       int nextX  /**< [in] the new column */
+    void _moveCurrent( int  nextY,                /**< [in] the new row */
+                       int  nextX,                /**< [in] the new column */
+                       bool refreshPrompt = false /**< [in] redraw the prompt after changing input mode */
     );
 
-    /// Handle a key press from the user.
-    void keyPressed( int ch /**< [in] the key code */ );
+    /// Handle a key press, applying held-key repeats to navigation.
+    void keyPressed( int ch, /**< [in] the key code */
+                     int repeats = 1 /**< [in] consecutive presses of the same key */ );
+
+    /// Draw the title and shortcuts; the caller must hold the draw mutex.
+    void drawHeader();
 
     /// Sentinel rank for fields that do not match the query.
     static constexpr int noSearchMatch = 5;
@@ -369,6 +383,11 @@ cursesINDI::cursesINDI( const std::string &szName, const std::string &szVersion,
 
 cursesINDI::~cursesINDI()
 {
+    if( w_topWin )
+    {
+        delwin( w_topWin );
+    }
+
     if( w_interactWin )
     {
         delwin( w_interactWin );
@@ -617,6 +636,12 @@ void cursesINDI::shutDown()
     m_drawThread.join();
 
     m_cellContents.clear();
+
+    if( w_topWin )
+    {
+        delwin( w_topWin );
+    }
+    w_topWin = nullptr;
 
     if( w_interactWin )
     {
@@ -983,10 +1008,15 @@ void cursesINDI::moveCurrent( int nextY, int nextX )
 {
     std::lock_guard<std::mutex> lock( m_drawMutex );
 
-    _moveCurrent( nextY, nextX );
+    if( m_vimMode )
+    {
+        m_deviceSearching = false;
+    }
+
+    _moveCurrent( nextY, nextX, m_vimMode );
 }
 
-void cursesINDI::_moveCurrent( int nextY, int nextX )
+void cursesINDI::_moveCurrent( int nextY, int nextX, bool refreshPrompt )
 {
     int         currX       = m_currX;
     int         currY       = m_currY;
@@ -1025,17 +1055,19 @@ void cursesINDI::_moveCurrent( int nextY, int nextX )
 
     if( nextX == 1 )
     {
-        if( currX != nextX )
+        if( currX != nextX || refreshPrompt )
         {
             wclear( w_interactWin );
+
             wprintw( w_interactWin,
                      "%s: %s",
                      m_filtering ? "filter" : "search",
-                     m_deviceSearching || m_filtering ? m_deviceTarget.c_str() : "" );
+                     m_deviceSearching || m_filtering || m_vimMode ? m_deviceTarget.c_str() : "" );
+
             wrefresh( w_interactWin );
         }
     }
-    else if( currY != nextY || currX == 1 || selectedKey != m_selectedKey )
+    else if( currY != nextY || currX == 1 || selectedKey != m_selectedKey || refreshPrompt )
     {
         wclear( w_interactWin );
         if( m_currY + m_startRow >= m_cellContents.size() )
@@ -1238,6 +1270,13 @@ void cursesINDI::deviceSearch( int ch )
         {
             m_deviceTarget.pop_back();
         }
+        else if( ch == ( 0x1f & 'h' ) && ( m_deviceSearching || m_filtering ) && !m_deviceTarget.empty() )
+        {
+            // Ctrl+Backspace sends Ctrl+H in legacy terminal input. Skip a trailing separator.
+            size_t end    = m_deviceTarget.size() - ( m_deviceTarget.back() == '.' );
+            auto   period = end == 0 ? std::string::npos : m_deviceTarget.rfind( '.', end - 1 );
+            m_deviceTarget.resize( period == std::string::npos ? 0 : period + 1 );
+        }
         else if( ch >= 0 && ch <= UCHAR_MAX && std::isprint( static_cast<unsigned char>( ch ) ) )
         {
             if( !m_deviceSearching && !m_filtering )
@@ -1275,8 +1314,126 @@ void cursesINDI::deviceSearch( int ch )
     redrawTable( selectBest );
 }
 
-void cursesINDI::keyPressed( int ch )
+void cursesINDI::keyPressed( int ch, int repeats )
 {
+    if( m_vimMode && !m_deviceSearching && ch >= '0' && ch <= '9' )
+    {
+        for( int i = 0; i < repeats; ++i )
+        {
+            m_vimCount = std::min<int64_t>( static_cast<int64_t>( m_vimCount ) * 10 + ch - '0', INT_MAX );
+        }
+
+        return;
+    }
+
+    int count  = m_vimCount;
+    m_vimCount = 0;
+
+    if( ch == ( 0x1f & 'v' ) ||
+        ( m_vimMode && ( ch == 27 || ( m_deviceSearching && ( ch == '\n' || ch == '\r' || ch == KEY_ENTER ) ) ) ) )
+    {
+        std::lock_guard<std::mutex> lock( m_drawMutex );
+
+        if( ch == ( 0x1f & 'v' ) )
+        {
+            m_vimMode = !m_vimMode;
+        }
+
+        m_deviceSearching = false;
+
+        // Enter ends query input without replacing the visible query with a cell prompt.
+        if( ch == ( 0x1f & 'v' ) || ch == 27 )
+        {
+            _moveCurrent( m_currY, m_currX, true );
+        }
+
+        drawHeader();
+        return;
+    }
+
+    if( ch == KEY_RESIZE )
+    {
+        std::lock_guard<std::mutex> lock( m_drawMutex );
+        draw();
+        return;
+    }
+
+    int     direction = ch;
+    int64_t steps     = repeats;
+
+    if( m_vimMode && !m_deviceSearching )
+    {
+        switch( ch )
+        {
+        case 'h':
+            direction = KEY_LEFT;
+            break;
+        case 'j':
+            direction = KEY_DOWN;
+            break;
+        case 'k':
+            direction = KEY_UP;
+            break;
+        case 'l':
+            direction = KEY_RIGHT;
+            break;
+        }
+
+        if( direction != ch )
+        {
+            // The count applies to the first press, not subsequent coalesced key repeats.
+            steps += std::max( 1, count ) - 1;
+        }
+        else if( ch == ( 0x1f & 'u' ) || ch == ( 0x1f & 'd' ) )
+        {
+            direction = ch == ( 0x1f & 'u' ) ? KEY_UP : KEY_DOWN;
+            steps *= std::max( 1, static_cast<int>( tabHeight() ) / 2 );
+        }
+    }
+
+    int64_t nextX  = m_currX;
+    int64_t nextY  = m_currY;
+    bool    moving = true;
+
+    switch( direction )
+    {
+    case KEY_LEFT:
+        nextX -= steps;
+        break;
+    case KEY_RIGHT:
+        nextX += steps;
+        break;
+    case KEY_UP:
+        nextY -= steps;
+        break;
+    case KEY_DOWN:
+        nextY += steps;
+        break;
+    case KEY_PPAGE:
+        nextY -= tabHeight() - 1;
+        break;
+    case KEY_NPAGE:
+        nextY += tabHeight() - 1;
+        break;
+    default:
+        moving = false;
+        break;
+    }
+
+    if( moving )
+    {
+        if( !m_cellContents.empty() && !m_gridWin.empty() && m_gridWin[0].size() > 1 )
+        {
+            nextX = std::clamp<int64_t>( nextX, 1, m_gridWin[0].size() - 1 );
+            nextY = std::clamp<int64_t>( nextY,
+                                         -static_cast<int64_t>( m_startRow ),
+                                         static_cast<int64_t>( m_cellContents.size() ) - 1 - m_startRow );
+            moveCurrent( nextY, nextX );
+        }
+
+        return;
+    }
+
     if( ch == ( 0x1f & 'l' ) || ch == ( 0x1f & 'f' ) )
     {
         bool redraw;
@@ -1308,7 +1465,7 @@ void cursesINDI::keyPressed( int ch )
     }
 
     // Queries accept input from the device column or after explicit shortcut focus.
-    if( m_currX == 1 || m_deviceSearching )
+    if( ( m_currX == 1 && !m_vimMode ) || m_deviceSearching )
     {
         deviceSearch( ch );
         return;
@@ -1643,8 +1800,54 @@ void cursesINDI::keyPressed( int ch )
     wrefresh( w_interactWin );
 }
 
+inline void cursesINDI::drawHeader()
+{
+    if( !w_topWin )
+    {
+        w_topWin = newwin( 1, COLS, 0, 0 );
+    }
+    else
+    {
+        wresize( w_topWin, 1, COLS );
+    }
+
+    wclear( w_topWin );
+    wprintw( w_topWin, "curses" );
+
+    if( m_vimMode )
+    {
+        wattron( w_topWin, A_BOLD | A_REVERSE );
+        wprintw( w_topWin, "VI" );
+        wattroff( w_topWin, A_BOLD | A_REVERSE );
+        wprintw( w_topWin, "NDI" );
+    }
+    else
+    {
+        wprintw( w_topWin, "INDI" );
+    }
+
+    wprintw( w_topWin, " | Ctrl+L clear+search | Ctrl+F filter | Ctrl+V VI " );
+
+    if( m_vimMode )
+    {
+        wattron( w_topWin, A_BOLD | A_REVERSE );
+        wprintw( w_topWin, "on" );
+        wattroff( w_topWin, A_BOLD | A_REVERSE );
+    }
+    else
+    {
+        wprintw( w_topWin, "off" );
+    }
+
+    wprintw( w_topWin, " | Ctrl+C quit" );
+
+    wrefresh( w_topWin );
+}
+
 inline int cursesINDI::postDraw()
 {
+    drawHeader();
+
     //if(fpout) *fpout << "post draw" << std::endl;
 
     if( w_countWin )
