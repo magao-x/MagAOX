@@ -236,5 +236,8 @@ Branch `ml/qwpTracker` (this app's feature branch; not yet merged to `dev`).
   from the stage position, not the last command, so a run of skipped targets is sent once the drift exceeds the
   deadband. Manual targets and the one-shot retry are not filtered. Tested by "a tracking target within the deadband
   of the stage position is not sent" and "the deadband does not apply to manual targets".
+- **One stage at a time (agreed 2026-11-27):** handled in `elliptecLowLevel`, not qwptrack, so it applies to every
+  client and sees motion directly; see `elliptec-lowlevel-split.md`. qwptrack still sends to both READY stages; the
+  low level holds the second until the first stops.
 - **Open:** whether stage2 times out on isolated moves (hardware) or only under tracking (command pattern). Treating a
   device `0x02` as judged-by-position in `elliptecDevice` is a possible low-level follow-up.

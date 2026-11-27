@@ -425,6 +425,43 @@ TEST_CASE( "elliptecDevice idle status reports", "[elliptecLowLevel]" )
     REQUIRE( dev.lastError().empty() );
 }
 
+/// A held motion request: replaced by a newer one, reported as the motion it will become, and dropped on disconnect.
+/** \ingroup elliptecLowLevel_unit_test
+ */
+TEST_CASE( "elliptecDevice holds one motion request", "[elliptecLowLevel]" )
+{
+#ifdef ELLIPTECLOWLEVEL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecDevice::queue( op, deg );
+    MagAOX::app::elliptecDevice::queued();
+    MagAOX::app::elliptecDevice::queuedDeg();
+    MagAOX::app::elliptecDevice::clearQueued();
+    MagAOX::app::elliptecDevice::stateString();
+    // clang-format on
+#endif
+
+    elliptecDevice dev = identifiedDevice();
+    REQUIRE( dev.queued() == elliptecDevice::Pending::None );
+
+    dev.queue( elliptecDevice::Pending::Move, 30 );
+    dev.queue( elliptecDevice::Pending::Move, 45 );
+    REQUIRE( dev.queued() == elliptecDevice::Pending::Move );
+    REQUIRE( dev.queuedDeg() == 45 );
+    REQUIRE( dev.moving() == 0 ); // held, not moving
+    REQUIRE( dev.stateString() == "OPERATING" );
+
+    dev.queue( elliptecDevice::Pending::Home );
+    REQUIRE( dev.stateString() == "HOMING" );
+
+    dev.clearQueued();
+    REQUIRE( dev.queued() == elliptecDevice::Pending::None );
+    REQUIRE( dev.stateString() == "NOTHOMED" );
+
+    dev.queue( elliptecDevice::Pending::Optimize );
+    dev.disconnect();
+    REQUIRE( dev.queued() == elliptecDevice::Pending::None );
+}
+
 /// A reconnect keeps the homed flag; power-off clears it.
 /** \ingroup elliptecLowLevel_unit_test
  */

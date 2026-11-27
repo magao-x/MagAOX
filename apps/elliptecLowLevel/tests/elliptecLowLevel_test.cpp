@@ -382,18 +382,25 @@ TEST_CASE( "elliptecLowLevel tolerates silent, falsely idle motion", "[elliptecL
     REQUIRE_FALSE( app.visited( "qwp2", "NOTCONNECTED" ) );
 }
 
-/// A silent, moving mount does not stall the other mount on the bus.
+/// A silent, moving mount does not stall polling of the other, which moves only once the first has stopped.
 /** \ingroup elliptecLowLevel_unit_test
  */
-TEST_CASE( "elliptecLowLevel keeps polling one mount while the other moves silently", "[elliptecLowLevel]" )
+TEST_CASE( "elliptecLowLevel moves one mount at a time and keeps polling the other", "[elliptecLowLevel]" )
 {
+#ifdef ELLIPTECLOWLEVEL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecLowLevel::requestMotion_( dev, op, deg );
+    MagAOX::app::elliptecLowLevel::dispatch_();
+    // clang-format on
+#endif
+
     fakeElliptecBus bus;
     bus.addDevice( '1', "12100017" );
     bus.addDevice( '2', "12100070" );
     bus.configure( '1',
                    []( simElliptec &d )
                    {
-                       d.motionMs = 4000;
+                       d.motionMs = 1500;
                        d.hardwareQuirks( 0 );
                    } );
     bus.configure( '2',
@@ -402,26 +409,139 @@ TEST_CASE( "elliptecLowLevel keeps polling one mount while the other moves silen
                        d.motionMs = 200;
                    } );
 
-    elliptecLowLevel_test app( "ell-isolation", bus.slavePath() );
+    elliptecLowLevel_test app( "ell-one-at-a-time", bus.slavePath() );
     app.addStage( "qwp1", '1' );
     app.addStage( "qwp2", '2' );
     connectStages( app, { "qwp1", "qwp2" } );
 
     REQUIRE( app.target( "qwp1", 90.0 ) == 0 );
     REQUIRE( app.target( "qwp2", 90.0 ) == 0 );
+    REQUIRE( bus.count( '1', "ma" ) == 1 );
+    REQUIRE( bus.count( '2', "ma" ) == 0 );
+    REQUIRE( app.curr( "qwp2" ) == "OPERATING" ); // held, so clients wait for it
+    REQUIRE( app.device( "qwp2" ).queued() == MagAOX::app::elliptecDevice::Pending::Move );
 
-    auto start = std::chrono::steady_clock::now();
+    // QWP2 is polled, but not moved, while QWP1 moves silently.
+    size_t polls      = bus.count( '2', "gp" );
+    bool   overlapped = false;
     REQUIRE( app.runUntil(
         [&]()
         {
-            return app.pos( "qwp2" ) > 89.9 && app.device( "qwp2" ).moving() == 0;
+            overlapped = overlapped || ( bus.busy( '1' ) && bus.busy( '2' ) );
+            return app.device( "qwp1" ).moving() == 0;
+        },
+        5000 ) );
+    REQUIRE( bus.count( '2', "gp" ) > polls + 5 );
+    REQUIRE( app.pos( "qwp1" ) == Approx( 90.0 ).margin( 0.01 ) );
+
+    REQUIRE( app.runUntil(
+        [&]()
+        {
+            overlapped = overlapped || ( bus.busy( '1' ) && bus.busy( '2' ) );
+            return app.device( "qwp2" ).moving() == 0 && app.curr( "qwp2" ) != "OPERATING";
         },
         3000 ) );
-    double elapsed = std::chrono::duration<double>( std::chrono::steady_clock::now() - start ).count();
+    REQUIRE_FALSE( overlapped );
+    REQUIRE( bus.count( '2', "ma" ) == 1 );
+    REQUIRE( app.pos( "qwp2" ) == Approx( 90.0 ).margin( 0.01 ) );
+}
 
-    REQUIRE( elapsed < 2.0 );
-    REQUIRE( bus.busy( '1' ) );
-    REQUIRE( app.curr( "qwp1" ) == "OPERATING" );
+/// Held requests: the latest replaces an older one, devices take turns, and a halt drops the request.
+/** \ingroup elliptecLowLevel_unit_test
+ */
+TEST_CASE( "elliptecLowLevel holds one request per mount and serves them in turn", "[elliptecLowLevel]" )
+{
+#ifdef ELLIPTECLOWLEVEL_TEST_DOXYGEN_REF
+    // clang-format off
+    MagAOX::app::elliptecLowLevel::requestMotion_( dev, op, deg );
+    MagAOX::app::elliptecLowLevel::dispatch_();
+    MagAOX::app::elliptecLowLevel::halt_( dev );
+    // clang-format on
+#endif
+
+    fakeElliptecBus bus;
+    bus.addDevice( '1', "12100017" );
+    bus.addDevice( '2', "12100070" );
+    for( char a : { '1', '2' } )
+    {
+        bus.configure( a,
+                       []( simElliptec &d )
+                       {
+                           d.motionMs = 600;
+                       } );
+    }
+
+    elliptecLowLevel_test app( "ell-held", bus.slavePath() );
+    app.addStage( "qwp1", '1' );
+    app.addStage( "qwp2", '2' );
+    connectStages( app, { "qwp1", "qwp2" } );
+
+    auto idle = [&]()
+    {
+        return app.device( "qwp1" ).moving() == 0 && app.device( "qwp2" ).moving() == 0 &&
+               app.device( "qwp1" ).queued() == MagAOX::app::elliptecDevice::Pending::None &&
+               app.device( "qwp2" ).queued() == MagAOX::app::elliptecDevice::Pending::None;
+    };
+
+    SECTION( "the latest request replaces a held one" )
+    {
+        REQUIRE( app.target( "qwp1", 30.0 ) == 0 );
+        REQUIRE( app.target( "qwp2", 50.0 ) == 0 );
+        REQUIRE( app.target( "qwp2", 70.0 ) == 0 );
+        REQUIRE( app.runUntil( idle, 5000 ) );
+
+        REQUIRE( bus.count( '2', "ma" ) == 1 );
+        REQUIRE( app.pos( "qwp2" ) == Approx( 70.0 ).margin( 0.01 ) );
+    }
+
+    SECTION( "a moving mount is not retargeted; its new target waits its turn after the other mount" )
+    {
+        REQUIRE( app.target( "qwp1", 30.0 ) == 0 );
+        REQUIRE( app.target( "qwp2", 50.0 ) == 0 );
+        REQUIRE( app.target( "qwp1", 60.0 ) == 0 ); // held: QWP1 is moving
+        REQUIRE( bus.count( '1', "ma" ) == 1 );
+
+        // QWP2 waited longer, so it moves before QWP1's second target.
+        REQUIRE( app.runUntil(
+            [&]()
+            {
+                return bus.count( '2', "ma" ) == 1;
+            },
+            3000 ) );
+        REQUIRE( bus.count( '1', "ma" ) == 1 );
+
+        REQUIRE( app.runUntil( idle, 5000 ) );
+        REQUIRE( bus.count( '1', "ma" ) == 2 );
+        REQUIRE( app.pos( "qwp1" ) == Approx( 60.0 ).margin( 0.01 ) );
+        REQUIRE( app.pos( "qwp2" ) == Approx( 50.0 ).margin( 0.01 ) );
+    }
+
+    SECTION( "a halt drops a held request" )
+    {
+        REQUIRE( app.target( "qwp1", 30.0 ) == 0 );
+        REQUIRE( app.target( "qwp2", 50.0 ) == 0 );
+        REQUIRE( app.halt( "qwp2" ) == 0 );
+        REQUIRE( app.curr( "qwp2" ) == "NOTHOMED" );
+
+        REQUIRE( app.runUntil( idle, 5000 ) );
+        REQUIRE( bus.count( '2', "ma" ) == 0 );
+    }
+
+    SECTION( "a held home reports HOMING" )
+    {
+        REQUIRE( app.target( "qwp1", 30.0 ) == 0 );
+        REQUIRE( app.home( "qwp2" ) == 0 );
+        REQUIRE( app.curr( "qwp2" ) == "HOMING" );
+        REQUIRE( bus.count( '2', "ho" ) == 0 );
+
+        REQUIRE( app.runUntil(
+            [&]()
+            {
+                return app.curr( "qwp2" ) == "READY";
+            },
+            5000 ) );
+        REQUIRE( bus.count( '2', "ho" ) == 1 );
+    }
 }
 
 /// One mount dropping out leaves the other working; it is re-identified when it answers again.

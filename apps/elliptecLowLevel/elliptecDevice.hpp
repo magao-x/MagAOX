@@ -53,7 +53,7 @@ bool parseHex( const std::string &s,    /**< [in] source text */
 /// State of one Elliptec device on a shared bus, identified by its address.
 /** Holds no I/O. The bus owner sends commands, parses replies, and reports them here; this class decides what the
  * replies mean: identification from `in`, the pending operation and its target, completion by position, error
- * latching, and missed-reply accounting.
+ * latching, missed-reply accounting, and the one motion request held while the bus is busy.
  *
  * Observed ELL21 behavior this accommodates: motion commands are not acknowledged, most queries go unanswered while
  * the stage moves, and `gs` can report idle (`GS00`) mid-motion. So an operation with a target completes only when a
@@ -202,6 +202,20 @@ class elliptecDevice
     /// Record that an optimize was sent.
     void beginOptimize();
 
+    /// Hold a motion request until the bus is free, replacing any request already held.
+    void queue( Pending op,     /**< [in] the operation to hold, not `Pending::None` */
+                double  deg = 0 /**< [in] target angle in degrees, for `Pending::Move` */
+    );
+
+    /// The motion request held for the bus, or `Pending::None`.
+    Pending queued() const;
+
+    /// Target angle in degrees of the held request (meaningful for `Pending::Move`).
+    double queuedDeg() const;
+
+    /// Drop the held motion request.
+    void clearQueued();
+
     /// Record that a stop was requested and the device's reply code.
     /**
      * \returns true if the device reported the stop as unsupported (`GS03`)
@@ -227,6 +241,7 @@ class elliptecDevice
     const std::string &lastError() const;
 
     /// State string published in `curr_state` while powered and the port is open.
+    /** A held request reports as the motion it will become, HOMING or OPERATING, so clients wait for it. */
     std::string stateString() const;
 
     ///@}
@@ -235,7 +250,8 @@ class elliptecDevice
      * @{
      */
 
-    /// Forget identification and any operation in progress, keeping the homed flag (communication loss).
+    /// Forget identification, any operation in progress, and any held request, keeping the homed flag (communication
+    /// loss).
     void disconnect();
 
     /// Reset everything that power-off invalidates, including the homed flag.
@@ -292,6 +308,12 @@ class elliptecDevice
 
     /// Operation in progress.
     Pending m_pending{ Pending::None };
+
+    /// Motion request held until the bus is free.
+    Pending m_queued{ Pending::None };
+
+    /// Target angle in degrees of the held request.
+    double m_queuedDeg{ 0 };
 
     /// Time the operation in progress was commanded.
     std::chrono::steady_clock::time_point m_pendingStart;
@@ -701,6 +723,27 @@ inline void elliptecDevice::beginOptimize()
     begin_( Pending::Optimize );
 }
 
+inline void elliptecDevice::queue( Pending op, double deg )
+{
+    m_queued    = op;
+    m_queuedDeg = deg;
+}
+
+inline elliptecDevice::Pending elliptecDevice::queued() const
+{
+    return m_queued;
+}
+
+inline double elliptecDevice::queuedDeg() const
+{
+    return m_queuedDeg;
+}
+
+inline void elliptecDevice::clearQueued()
+{
+    m_queued = Pending::None;
+}
+
 inline bool elliptecDevice::stopRequested( int replyCode )
 {
     if( m_pending != Pending::None )
@@ -862,12 +905,12 @@ inline std::string elliptecDevice::stateString() const
     }
 
     int mv = moving();
-    if( mv == 2 )
+    if( mv == 2 || ( mv == 0 && m_queued == Pending::Home ) )
     {
         return "HOMING";
     }
 
-    if( mv == 1 )
+    if( mv == 1 || m_queued != Pending::None )
     {
         return "OPERATING";
     }
@@ -879,6 +922,7 @@ inline void elliptecDevice::disconnect()
 {
     m_identified    = false;
     m_pending       = Pending::None;
+    m_queued        = Pending::None;
     m_hasTarget     = false;
     m_latchedError  = 0;
     m_stopRequested = false;
