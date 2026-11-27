@@ -24,7 +24,8 @@ HEADERS += ../camera.hpp \
            ../../xWidgets/stageStatus.hpp \
            ../../roi/roi.hpp \
            ../../stage/stage.hpp \
-           ../shutterStatus.hpp
+           ../shutterStatus.hpp \
+           ../../psfAcq/psfAcq.hpp
 
 FORMS += ../camera.ui \
          ../../xWidgets/fsmDisplay.ui \
@@ -35,6 +36,7 @@ FORMS += ../camera.ui \
          ../../roi/roi.ui \
          ../../stage/stage.ui \
          ../shutterStatus.ui \
+         ../../psfAcq/psfAcq.ui \
          ../../xWidgets/selectionSw.ui
 
 LIBS += $$PWD/../../../../INDI/libcommon/libcommon.a $$PWD/../../../../INDI/liblilxml/liblilxml.a

@@ -185,7 +185,7 @@ class psfAcq : public MagAOXApp<true>,
     double m_acqQuitTime {0};
     double m_acqPauseTime{2};
 
-    int m_current_acq_star {-1}; // active star index used for seeing output
+    int m_current_acq_star {-1}; // star index used for seeing output: m_seeing_star if set, else 0
     int m_temp_acq_star {-1};
     bool m_updated{ false };
     float m_x{ 0 };
@@ -213,7 +213,7 @@ class psfAcq : public MagAOXApp<true>,
     int m_num_stars{ 0 };
     float m_seeing{ 0 };
     int m_acquire_star{ -1 }; // Testing for user to select star
-    int m_seeing_star { -1 }; // star index exposed for seeing source; auto-set to 0 when stars are present
+    int m_seeing_star { -1 }; // user-selected seeing star, -1 for automatic (star 0); cleared when that star is lost
     int m_x_center{};     // 'center' of image or hot spot
     int m_y_center{};
 
@@ -564,7 +564,7 @@ inline int psfAcq::appLogic()
 
     updateIfChanged( m_indiP_num_stars, "current", m_num_stars );
     updateIfChanged( m_indiP_seeing, "current", m_seeing );
-    updateIfChanged( m_indiP_seeing_star, "current", m_seeing_star );
+    updateIfChanged( m_indiP_seeing_star, "current", m_current_acq_star );
     updateIfChanged( m_indiP_seeing_star, "target", m_seeing_star );
 
     for( size_t n = 0; n < m_detectedStars.size() ; ++n )
@@ -578,6 +578,7 @@ inline int psfAcq::appLogic()
         updateIfChanged( m_detectedStars[n].prop(), "y", m_detectedStars[n].y );
         updateIfChanged( m_detectedStars[n].prop(), "peak", m_detectedStars[n].max );
         updateIfChanged( m_detectedStars[n].prop(), "fwhm", m_detectedStars[n].fwhm );
+        updateIfChanged( m_detectedStars[n].prop(), "seeing", m_detectedStars[n].seeing );
     }
     return 0;
 }
@@ -857,9 +858,14 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
         m_num_stars = static_cast<int>( m_detectedStars.size() );
         if( m_num_stars > 0 )
         {
-            m_seeing_star = 0;
-            m_current_acq_star = 0;
-            m_seeing = m_detectedStars[0].seeing;
+            // Keep a user-selected seeing star while it is tracked, otherwise use star 0.
+            if( m_seeing_star >= m_num_stars )
+            {
+                m_seeing_star = -1;
+            }
+
+            m_current_acq_star = ( m_seeing_star >= 0 ) ? m_seeing_star : 0;
+            m_seeing = m_detectedStars[m_current_acq_star].seeing;
             if( !std::isfinite( m_seeing ) )
             {
                 m_seeing = 0;
@@ -1038,6 +1044,8 @@ void psfAcq::registerStarProperty( Star &star, std::size_t rankIndex )
     star.prop()["peak"].set( star.max );
     star.prop().add( pcf::IndiElement( "fwhm" ) );
     star.prop()["fwhm"].set( star.fwhm );
+    star.prop().add( pcf::IndiElement( "seeing" ) );
+    star.prop()["seeing"].set( star.seeing );
     registerIndiPropertyReadOnly( star.prop() );
 }
 
@@ -1267,20 +1275,11 @@ INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_seeing_star )( const pcf::IndiProperty &i
         return -1;
     }
 
-    static_cast<void>( target );
-
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
-        // Force automatic seeing source selection.
-        if( m_num_stars > 0 )
-        {
-            m_seeing_star = 0;
-        }
-        else
-        {
-            m_seeing_star = -1;
-        }
+        // processImage falls back to star 0 if this star is not tracked.
+        m_seeing_star = std::max( static_cast<int>( target ), -1 );
     }
 
     log<text_log>( "set seeing_star = " + std::to_string( m_seeing_star ), logPrio::LOG_NOTICE );

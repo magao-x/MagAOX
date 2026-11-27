@@ -21,6 +21,8 @@
 #include "camera/roiStatus.hpp"
 #include "camera/shutterStatus.hpp"
 
+#include "psfAcq/psfAcq.hpp"
+
 #include "stage/stage.hpp"
 
 #include <QThread>
@@ -39,6 +41,7 @@ class camera : public xWidget
     std::string m_camName;  ///< INDI device name of the camera.
     std::string m_darkName; ///< INDI device name of the dark-frame helper app.
     std::string m_avgName;  ///< INDI device name of the averaging helper app.
+    std::string m_acqName;  ///< INDI device name of the psfAcq star-acquisition helper app.
 
     fsmDisplay *ui_fsmState{ nullptr }; ///< Camera FSM status display.
 
@@ -87,6 +90,8 @@ class camera : public xWidget
     toggleSlider *ui_synchro{ nullptr }; ///< Synchronization toggle control.
 
     QPushButton *ui_takeDarks{ nullptr }; ///< Button requesting a new dark acquisition.
+
+    psfAcq *ui_psfAcq{ nullptr }; ///< Optional star-acquisition panel, enabled by its own device state.
 
     float m_temp{ -99 }; ///< Cached detector temperature placeholder used during initialization.
 
@@ -205,6 +210,9 @@ class camera : public xWidget
     /// Creates the take-darks button.
     void setup_takeDarks();
 
+    /// Creates the star-acquisition panel for the psfAcq helper app.
+    void setup_psfAcq();
+
     /// Sends the goto-focus request.
     void gotoFocus();
 
@@ -273,6 +281,9 @@ class camera : public xWidget
     /// Queues creation of the take-darks button.
     void add_takeDarks();
 
+    /// Queues creation of the star-acquisition panel.
+    void add_psfAcq();
+
   private:
     /// Resets cached focus-property state when the camera disconnects or removes focus support.
     void clearFocusState();
@@ -296,6 +307,7 @@ camera::camera( std::string &camName, QWidget *Parent, Qt::WindowFlags f ) : xWi
 {
     m_darkName = m_camName + "-dark";
     m_avgName  = m_camName + "-avg";
+    m_acqName  = m_camName + "-acq";
 
     ui.setupUi( this );
 
@@ -330,6 +342,8 @@ camera::camera( std::string &camName, QWidget *Parent, Qt::WindowFlags f ) : xWi
     connect( this, SIGNAL( add_synchro() ), this, SLOT( setup_synchro() ) );
 
     connect( this, SIGNAL( add_takeDarks() ), this, SLOT( setup_takeDarks() ) );
+
+    connect( this, SIGNAL( add_psfAcq() ), this, SLOT( setup_psfAcq() ) );
 
     QSpacerItem *holder = new QSpacerItem( 10, 0, QSizePolicy::Expanding, QSizePolicy::Expanding );
     ui.grid->addItem( holder, 2, 1, 1, 1 );
@@ -368,6 +382,8 @@ void camera::subscribe()
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_darkName, "start" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_avgName, "" );
     m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_avgName, "avgTime" );
+    m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_acqName, "" );
+    m_parent->addSubscriberProperty( (multiIndiSubscriber *)this, m_acqName, "acquire_star" );
 
     m_parent->addSubscriber( ui_fsmState );
 
@@ -406,6 +422,11 @@ void camera::subscribe()
         m_parent->addSubscriber( ui_avgTime );
     if( ui_synchro )
         m_parent->addSubscriber( ui_synchro );
+
+    if( ui_psfAcq )
+    {
+        m_parent->addSubscriber( ui_psfAcq );
+    }
 
     return;
 }
@@ -456,6 +477,11 @@ void camera::onConnect()
 
     if( ui_synchro )
         ui_synchro->onConnect();
+
+    if( ui_psfAcq )
+    {
+        ui_psfAcq->onConnect();
+    }
 
     clearFocus();
     clearFocusState();
@@ -513,6 +539,11 @@ void camera::onDisconnect()
 
     if( ui_synchro )
         ui_synchro->onDisconnect();
+
+    if( ui_psfAcq )
+    {
+        ui_psfAcq->onDisconnect();
+    }
 
     clearFocus();
     clearFocusState();
@@ -573,8 +604,11 @@ void camera::handleDelProperty( const pcf::IndiProperty &ipRecv )
 
 void camera::handleSetProperty( const pcf::IndiProperty &ipRecv )
 {
-    if( ipRecv.getDevice() != m_camName && ipRecv.getDevice() != m_darkName && ipRecv.getDevice() != m_avgName )
+    if( ipRecv.getDevice() != m_camName && ipRecv.getDevice() != m_darkName && ipRecv.getDevice() != m_avgName &&
+        ipRecv.getDevice() != m_acqName )
+    {
         return;
+    }
 
     if( ipRecv.getDevice() == m_camName )
     {
@@ -759,6 +793,14 @@ void camera::handleSetProperty( const pcf::IndiProperty &ipRecv )
         if( !ui_avgTime )
         {
             emit add_avgTime( false );
+        }
+    }
+    else if( ipRecv.getDevice() == m_acqName )
+    {
+        // Only a psfAcq app exposes acquire_star; the panel then tracks that app on its own.
+        if( ipRecv.getName() == "acquire_star" && !ui_psfAcq )
+        {
+            emit add_psfAcq();
         }
     }
 
@@ -1260,6 +1302,21 @@ void camera::setup_takeDarks()
     layoutLeftColumnControls();
 }
 
+void camera::setup_psfAcq()
+{
+    if( ui_psfAcq )
+    {
+        return;
+    }
+
+    ui_psfAcq = new psfAcq( m_acqName, this );
+    ui_psfAcq->setObjectName( QString::fromUtf8( "psfAcq" ) );
+
+    layoutLeftColumnControls();
+
+    m_parent->addSubscriber( ui_psfAcq );
+}
+
 void camera::gotoFocus()
 {
     pcf::IndiProperty ipFreq( pcf::IndiProperty::Switch );
@@ -1351,6 +1408,13 @@ void camera::layoutLeftColumnControls()
     {
         ui.grid->removeWidget( ui_takeDarks );
         ui.grid->addWidget( ui_takeDarks, row, 0, 1, 1, Qt::AlignHCenter );
+        ++row;
+    }
+
+    if( ui_psfAcq )
+    {
+        ui.grid->removeWidget( ui_psfAcq );
+        ui.grid->addWidget( ui_psfAcq, row, 0, 1, 1 );
     }
 }
 
