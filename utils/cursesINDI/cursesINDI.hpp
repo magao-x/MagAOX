@@ -196,6 +196,9 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     /// All elements of the properties in knownProps, in table order.
     elementMapT knownElements;
 
+    /// Identity of the selected element, retained when table rows are reordered or deleted.
+    std::string m_selectedKey;
+
     /// True while search owns keyboard input, including after Ctrl+L from another column.
     bool m_deviceSearching{ false };
 
@@ -388,6 +391,8 @@ void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
 
 void cursesINDI::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::mutex> lock( m_drawMutex );
+
     //if(fpout) *fpout << "got delete property" << std::endl;
 
     if( ipRecv.hasValidDevice() )
@@ -675,6 +680,26 @@ void cursesINDI::redrawTable()
         es->second.tableRow = m_cellContents.size() - 1;
     }
 
+    if( knownElements.empty() )
+    {
+        m_startRow = 0;
+        m_currY    = 0;
+    }
+    else
+    {
+        // Keep the selected identity; if removed, use its successor or the last remaining row.
+        auto selected = knownElements.lower_bound( m_selectedKey );
+
+        if( selected == knownElements.end() )
+        {
+            --selected;
+        }
+
+        size_t row = selected->second.tableRow;
+        m_startRow = row > m_currY ? row - m_currY : 0;
+        m_currY    = row - m_startRow;
+    }
+
     draw();
 
     //if(fpout) *fpout << "fsmAlerts: " << fsmAlerts << "\n";
@@ -841,18 +866,11 @@ void cursesINDI::updateCurVal()
     cursStat( 0 );
     wclear( w_curvalWin );
 
-    auto it = knownElements.begin();
-    while( it != knownElements.end() )
-    {
-        if( (size_t)it->second.tableRow == m_currY + m_startRow )
-        {
-            break;
-        }
-        ++it;
-    }
+    auto it = knownElements.find( m_selectedKey );
 
     if( it == knownElements.end() )
     {
+        wrefresh( w_curvalWin );
         wrefresh( w_interactWin );
         cursStat( cs );
         return;
@@ -881,10 +899,22 @@ void cursesINDI::moveCurrent( int nextY, int nextX )
 
 void cursesINDI::_moveCurrent( int nextY, int nextX )
 {
-    int currX = m_currX;
-    int currY = m_currY;
+    int         currX       = m_currX;
+    int         currY       = m_currY;
+    std::string selectedKey = m_selectedKey;
 
     moveSelected( nextY, nextX );
+
+    m_selectedKey.clear();
+
+    for( const auto &[key, element] : knownElements )
+    {
+        if( element.tableRow >= 0 && static_cast<size_t>( element.tableRow ) == m_startRow + m_currY )
+        {
+            m_selectedKey = key;
+            break;
+        }
+    }
 
     //if(fpout) *fpout << "moved: " << nextX << " " << nextY << " " << currX << "->" << m_currX << " " << currY << "->"
     //<< m_currY << std::endl;
@@ -913,7 +943,7 @@ void cursesINDI::_moveCurrent( int nextY, int nextX )
             wrefresh( w_interactWin );
         }
     }
-    else if( currY != nextY || currX == 1 )
+    else if( currY != nextY || currX == 1 || selectedKey != m_selectedKey )
     {
         wclear( w_interactWin );
         if( m_currY + m_startRow >= knownElements.size() )

@@ -1,15 +1,172 @@
 /** \file cursesINDI_test.cpp
- * \brief Offline tests for cursesINDI dot-separated search selection.
+ * \brief Offline tests for cursesINDI search and selection across table updates.
  * \ingroup cursesINDI_unit_test
  */
-#include "../../tests/catch2/catch.hpp"
+#include "../../tests/testXWC.hpp"
 
+#include <array>
+#include <cctype>
+#include <climits>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <string_view>
+#include <thread>
+
+#include "../../INDI/libcommon/IndiClient.hpp"
+#include "../cursesINDI/cursesTableGrid.hpp"
+
+/// \cond CURSESINDI_TEST_HARNESS
+namespace pcf
+{
+/// Replace the network client while retaining the real property and thread-state types.
+class OfflineIndiClient : public IndiConnection
+{
+  public:
+    /// Construct without creating sockets or starting any threads.
+    OfflineIndiClient( const std::string &name,     /**< [in] client name */
+                       const std::string &version,  /**< [in] client version */
+                       const std::string &protocol, /**< [in] protocol version */
+                       const std::string &address,  /**< [in] unused server address */
+                       int                port /**< [in] unused server port */ );
+
+    /// Discard subscription requests from synthetic property definitions.
+    void sendGetProperties( const IndiProperty &property /**< [in] unused property */ );
+
+    /// Reject any attempted property edit in these read-only tests.
+    void sendNewProperty( const IndiProperty &property /**< [in] unused property */ );
+
+    /// Reject network message dispatch; tests call property callbacks directly.
+    void dispatch( const IndiMessage::Type &type, /**< [in] unused message type */
+                   const IndiProperty      &property /**< [in] unused property */ ) override;
+
+    /// Reject starting the network processing loop.
+    void update() override;
+};
+
+OfflineIndiClient::OfflineIndiClient(
+    const std::string &name, const std::string &version, const std::string &protocol, const std::string &, int )
+    : IndiConnection( name, version, protocol )
+{
+}
+
+void OfflineIndiClient::sendGetProperties( const IndiProperty & )
+{
+}
+
+void OfflineIndiClient::sendNewProperty( const IndiProperty & )
+{
+    FAIL( "Offline selection tests must not edit properties" );
+}
+
+void OfflineIndiClient::dispatch( const IndiMessage::Type &, const IndiProperty & )
+{
+    FAIL( "Offline selection tests must not dispatch network messages" );
+}
+
+void OfflineIndiClient::update()
+{
+    FAIL( "Offline selection tests must not run the network loop" );
+}
+} // namespace pcf
+/// \endcond
+
+// Dependencies are included above so only the app's base and log opens are replaced.
+#define IndiClient OfflineIndiClient
+#define open( ... ) open( "/dev/null" )
 #include "../cursesINDI/cursesINDI.hpp"
+#undef open
+#undef IndiClient
 
 namespace libXWCTest
 {
 namespace cursesINDITest
 {
+
+/// \cond CURSESINDI_TEST_HARNESS
+/// Own a headless curses screen and a client with no network transport or background threads.
+struct Screen
+{
+    FILE                       *m_input{ nullptr };  ///< Local input stream owned by the fixture.
+    FILE                       *m_output{ nullptr }; ///< Temporary screen output owned by the fixture.
+    SCREEN                     *m_screen{ nullptr }; ///< Curses screen owned by the fixture.
+    std::unique_ptr<cursesINDI> m_client;            ///< Client destroyed before the screen.
+
+    /// Initialize the screen and only the windows used by callbacks and navigation.
+    Screen();
+
+    /// Release all windows, then the screen and streams.
+    ~Screen();
+};
+
+Screen::Screen()
+{
+    m_input  = fopen( "/dev/null", "r" );
+    m_output = tmpfile();
+    REQUIRE( m_input );
+    REQUIRE( m_output );
+    m_screen = newterm( "xterm", m_output, m_input );
+    REQUIRE( m_screen );
+    resizeterm( 30, 120 );
+
+    m_client                 = std::make_unique<cursesINDI>( "offline-selection-test", "1", "1" );
+    m_client->w_interactWin  = newwin( 1, 100, 3, 1 );
+    m_client->w_curvalWin    = newwin( 1, 100, 4, 1 );
+    m_client->w_attentionWin = newwin( 1, 100, 2, 1 );
+}
+
+Screen::~Screen()
+{
+    for( const auto &row : m_client->m_gridWin )
+    {
+        for( WINDOW *window : row )
+        {
+            delwin( window );
+        }
+    }
+
+    if( m_client->m_boxWin )
+    {
+        delwin( m_client->m_boxWin );
+    }
+
+    m_client.reset();
+    endwin();
+    delscreen( m_screen );
+    fclose( m_output );
+    fclose( m_input );
+}
+
+/// Create a synthetic property with one element.
+pcf::IndiProperty property( const std::string &device, /**< [in] device name */
+                            const std::string &name = "exposure" /**< [in] property name */ )
+{
+    pcf::IndiProperty result( pcf::IndiProperty::Text );
+    result.setDevice( device );
+    result.setName( name );
+    result.setPerm( pcf::IndiProperty::ReadOnly );
+    result.setState( pcf::IndiProperty::Ok );
+    result.add( pcf::IndiElement( "current", "fixture" ) );
+    return result;
+}
+
+/// Read the selected element identity from the actual rendered table coordinates.
+std::string selected( const cursesINDI &client /**< [in] client with a rendered table */ )
+{
+    for( const auto &[key, element] : client.knownElements )
+    {
+        if( element.tableRow >= 0 && static_cast<size_t>( element.tableRow ) == client.m_startRow + client.m_currY )
+        {
+            return key;
+        }
+    }
+
+    return "";
+}
+/// \endcond
 
 /** \brief Match device names without case sensitivity, allowing skipped letters in order.
  * \ingroup cursesINDI_unit_test
@@ -176,6 +333,148 @@ TEST_CASE( "Segment ranking proceeds from device to property to element", "[curs
 
     REQUIRE( cursesINDI::findSearchRow( elements, "cam.cwf.cwf" ) == 2 );
     REQUIRE( cursesINDI::findSearchRow( elements, "cam.cwf.missing" ) == -1 );
+}
+
+/** \brief Preserve the selected element and column when rows are inserted or removed before it.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Table updates preserve selection identity", "[cursesINDI][selection]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::handleDefProperty;
+    cursesINDI::handleDelProperty;
+    cursesINDI::redrawTable;
+    cursesINDI::moveCurrent;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "camwfs" ) );
+    client.handleDefProperty( property( "zzcamera" ) );
+    client.redrawTable();
+    client.moveCurrent( 0, 3 );
+
+    client.handleDefProperty( property( "camaux" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    REQUIRE( client.m_currY == 0 );
+    REQUIRE( client.m_currX == 3 );
+    REQUIRE( client.m_startRow == 1 );
+
+    client.handleDefProperty( property( "camwfs", "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    REQUIRE( client.m_startRow == 2 );
+
+    client.handleDelProperty( property( "camaux" ) );
+    client.handleDelProperty( property( "camwfs", "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    REQUIRE( client.m_currY == 0 );
+    REQUIRE( client.m_currX == 3 );
+    REQUIRE( client.m_startRow == 0 );
+}
+
+/** \brief Preserve a scrolled selection and explicit search focus through a redraw.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Scrolled selection survives updates and search focus", "[cursesINDI][selection]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::redrawTable;
+    cursesINDI::moveCurrent;
+    cursesINDI::keyPressed;
+    cursesINDI::deviceSearch;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+
+    for( int i = 0; i < 40; ++i )
+    {
+        client.handleDefProperty( property( std::format( "cam{:02}", i ) ) );
+    }
+
+    client.redrawTable();
+    client.moveCurrent( 30, 3 );
+    const auto key   = selected( client );
+    const auto row   = client.m_currY;
+    const auto start = client.m_startRow;
+    REQUIRE( start > 0 );
+    client.keyPressed( 0x1f & 'l' );
+    client.handleDefProperty( property( "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == key );
+    REQUIRE( client.m_currY == row );
+    REQUIRE( client.m_currX == 3 );
+    REQUIRE( client.m_startRow == start + 1 );
+    REQUIRE( client.m_deviceSearching );
+    REQUIRE( client.m_deviceTarget.empty() );
+
+    client.handleDelProperty( property( "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == key );
+    REQUIRE( client.m_startRow == start );
+
+    for( char ch : std::string( "cam05" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( selected( client ) == "cam05.exposure.current" );
+    client.handleDefProperty( property( "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "cam05.exposure.current" );
+    REQUIRE( client.m_deviceTarget == "cam05" );
+}
+
+/** \brief Fall forward, then backward, when the selection disappears, and handle an empty table.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Selection falls back when selected rows disappear", "[cursesINDI][selection]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::handleDelProperty;
+    cursesINDI::redrawTable;
+    cursesINDI::updateCurVal;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "aaa" ) );
+    client.handleDefProperty( property( "camwfs" ) );
+    client.handleDefProperty( property( "zzz" ) );
+    client.redrawTable();
+    client.moveCurrent( 1, 3 );
+
+    pcf::IndiProperty deleted;
+    deleted.setDevice( "camwfs" );
+    client.handleDelProperty( deleted );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "zzz.exposure.current" );
+    REQUIRE( client.m_currX == 3 );
+
+    client.handleDelProperty( property( "zzz" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "aaa.exposure.current" );
+    REQUIRE( client.m_startRow == 0 );
+    REQUIRE( client.m_currY == 0 );
+
+    client.handleDelProperty( property( "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ).empty() );
+    REQUIRE( client.m_startRow == 0 );
+    REQUIRE( client.m_currY == 0 );
+    char value[100]{};
+    mvwinnstr( client.w_curvalWin, 0, 0, value, sizeof( value ) - 1 );
+    REQUIRE( std::string( value ).find_first_not_of( ' ' ) == std::string::npos );
+
+    client.handleDefProperty( property( "camwfs" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
 }
 
 } // namespace cursesINDITest
