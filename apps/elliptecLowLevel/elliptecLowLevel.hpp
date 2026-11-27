@@ -1,6 +1,5 @@
 /** \file elliptecLowLevel.hpp
  * \brief The MagAO-X low-level controller for a bus of Thorlabs Elliptec devices.
- * \author Miles Lucas
  *
  * \ingroup elliptecLowLevel_files
  */

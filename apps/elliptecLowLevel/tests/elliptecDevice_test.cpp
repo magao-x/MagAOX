@@ -1,6 +1,5 @@
 /** \file elliptecDevice_test.cpp
  * \brief Catch2 unit tests for the per-address Elliptec device state.
- * \author Miles Lucas
  *
  * \ingroup elliptecLowLevel_files
  */

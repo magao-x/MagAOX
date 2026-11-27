@@ -1,6 +1,5 @@
 /** \file elliptecDevice.hpp
  * \brief Per-address state for one Thorlabs Elliptec device on a shared serial bus.
- * \author Miles Lucas
  *
  * \ingroup elliptecLowLevel_files
  */

@@ -1,6 +1,5 @@
 /** \file elliptecLowLevel_test.cpp
  * \brief Catch2 bus-scenario tests for elliptecLowLevel against simulated Elliptec devices.
- * \author Miles Lucas
  *
  * The simulated bus follows the ELLx protocol manual (Issue 12) and can reproduce the ELL21 behavior observed on
  * hardware: motion commands not acknowledged, queries mostly unanswered while moving, and false idle replies.
