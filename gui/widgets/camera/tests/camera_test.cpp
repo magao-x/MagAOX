@@ -1,5 +1,5 @@
 /** \file camera_test.cpp
- * \brief Offline discovery, lifecycle, and command tests for camera controls.
+ * rief Offline discovery, lifecycle, and command tests for camera controls and the star-acquisition panel.
  * \ingroup cameraGUI_unit_test
  */
 #define CATCH_CONFIG_RUNNER
@@ -612,6 +612,72 @@ TEST_CASE( "Parked camera stages and wheels are read-only through power cycles",
     REQUIRE( widget.m_publisher.m_commands.size() == 1 );
     REQUIRE( widget.m_publisher.m_commands.back().getDevice() == device );
     REQUIRE( widget.m_publisher.m_commands.back().getName() == presets.getName() );
+}
+
+/// A psfAcq helper advertising acquire_star adds the star-acquisition panel below the existing left-column controls.
+/** \ingroup cameraGUI_unit_test */
+TEST_CASE( "Camera star-acquisition panel discovery and command", "[cameraGUI]" )
+{
+    // clang-format off
+    #ifdef CAMERA_GUI_TEST_DOXYGEN_REF
+    xqt::camera::handleSetProperty; xqt::camera::setup_psfAcq; xqt::camera::layoutLeftColumnControls;
+    xqt::psfAcq::on_button_acquire_pressed;
+    #endif
+    // clang-format on
+    Widget widget;
+    widget.ready();
+    const std::string acqName = widget.m_device + "-acq";
+
+    pcf::IndiProperty unrelated( pcf::IndiProperty::Number, acqName, "num_stars" );
+    unrelated.add( pcf::IndiElement( "current", "0" ) );
+    widget.publish( unrelated );
+    REQUIRE( widget.m_widget.findChild<xqt::psfAcq *>( "psfAcq" ) == nullptr );
+
+    pcf::IndiProperty dark( pcf::IndiProperty::Switch, widget.m_device + "-dark", "start" );
+    dark.add( pcf::IndiElement( "toggle", pcf::IndiElement::Off ) );
+    widget.publish( dark );
+
+    pcf::IndiProperty acquire( pcf::IndiProperty::Number, acqName, "acquire_star" );
+    acquire.add( pcf::IndiElement( "current", "-1" ) );
+    acquire.add( pcf::IndiElement( "target", "-1" ) );
+    widget.publish( acquire );
+    widget.publish( acquire );
+    REQUIRE( widget.m_widget.findChildren<xqt::psfAcq *>( "psfAcq" ).size() == 1 );
+    auto *panel = widget.m_widget.findChild<xqt::psfAcq *>( "psfAcq" );
+    REQUIRE( panel->isVisible() );
+
+    pcf::IndiProperty fsm( pcf::IndiProperty::Text, acqName, "fsm" );
+    fsm.add( pcf::IndiElement( "state", "OPERATING" ) );
+    widget.publish( fsm );
+    pcf::IndiProperty star( pcf::IndiProperty::Number, acqName, "star_0" );
+    for( const auto *name : { "x", "y", "peak", "fwhm", "seeing" } )
+    {
+        star.add( pcf::IndiElement( name, "0.9" ) );
+    }
+    widget.publish( star );
+    panel->updateGUI();
+
+    auto *button = panel->findChild<QPushButton *>( "button_acquire" );
+    REQUIRE( button->isEnabled() );
+    REQUIRE( panel->findChild<QLabel *>( "val_seeing" )->text() == "0.90\"" );
+
+    widget.m_widget.adjustSize();
+    events();
+    auto *takeDarks = widget.m_widget.findChild<QWidget *>( "takeDarks" );
+    REQUIRE( takeDarks != nullptr );
+    REQUIRE( takeDarks->geometry().bottom() < panel->geometry().top() );
+
+    button->click();
+    REQUIRE( widget.m_publisher.m_commands.size() == 1 );
+    REQUIRE( widget.m_publisher.m_commands.back().getDevice() == acqName );
+    REQUIRE( widget.m_publisher.m_commands.back().getName() == "acquire_star" );
+    REQUIRE( widget.m_publisher.m_commands.back()["target"].get<int>() == 0 );
+
+    const QString screenshot = qEnvironmentVariable( "CAMERA_GUI_ACQ_SCREENSHOT" );
+    if( !screenshot.isEmpty() )
+    {
+        REQUIRE( widget.m_widget.grab().save( screenshot ) );
+    }
 }
 
 } // namespace cameraGUITest

@@ -24,6 +24,7 @@ HEADERS += ../../widgets/camera/camera.hpp \
            ../../widgets/roi/roi.hpp \
            ../../widgets/stage/stage.hpp \
            ../../widgets/camera/shutterStatus.hpp \
+           ../../widgets/psfAcq/psfAcq.hpp \
            ../../lib/multiIndiManager.hpp
 
 SOURCES += cameraGUI_main.cpp
@@ -37,6 +38,7 @@ FORMS += ../../widgets/camera/camera.ui \
          ../../widgets/roi/roi.ui \
          ../../widgets/stage/stage.ui \
          ../../widgets/camera/shutterStatus.ui \
+         ../../widgets/psfAcq/psfAcq.ui \
          ../../widgets/xWidgets/selectionSw.ui
 
 LIBS += ../../../INDI/libcommon/libcommon.a \

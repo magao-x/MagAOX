@@ -1,0 +1,15 @@
+TEMPLATE = app
+TARGET = psfAcq_test
+QT += widgets
+CONFIG += console c++20 link_pkgconfig
+CONFIG -= app_bundle
+PKGCONFIG += mxlib
+MOC_DIR = moc/
+OBJECTS_DIR = obj/
+UI_DIR = ui/
+MAKEFILE = makefile.psfAcq_test
+SOURCES += psfAcq_test.cpp
+HEADERS += ../psfAcq.hpp ../../xWidgets/xWidget.hpp
+FORMS += ../psfAcq.ui
+INCLUDEPATH += ../../xWidgets
+LIBS += ../../../../INDI/libcommon/libcommon.a ../../../../INDI/liblilxml/liblilxml.a

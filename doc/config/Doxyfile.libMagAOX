@@ -833,6 +833,7 @@ INPUT                  = libMagAOX \
                          gui/widgets/coronAlign/tests/coronAlign_test.cpp \
                          gui/widgets/camera/camera.hpp \
                          gui/widgets/camera/tests/camera_test.cpp \
+                         gui/widgets/psfAcq/psfAcq.hpp \
                          gui/widgets/stage/stage.hpp \
                          gui/widgets/stage/stagePowerState.hpp \
                          gui/widgets/xWidgets/statusEntry.hpp \
