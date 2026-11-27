@@ -72,6 +72,11 @@ $ less tests/results/latest/run.log
  * \ingroup unit_test
  */
 
+/** \defgroup cursesINDI_unit_test cursesINDI Unit Tests
+ * \brief Offline dot-separated search matching and selection tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup sysMonitor_unit_test sysMonitor Unit Tests
  * \brief Offline system diagnostic collectors, publication, and lifecycle tests.
  * \ingroup application_unit_test
