@@ -2,6 +2,9 @@
  * \brief A curses-based terminal client for browsing and editing INDI properties.
  */
 
+#include <array>
+#include <cctype>
+#include <climits>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -9,6 +12,7 @@
 #include <thread>
 #include <mutex>
 #include <set>
+#include <string_view>
 
 #include "../../INDI/libcommon/IndiClient.hpp"
 #include "cursesTableGrid.hpp"
@@ -95,7 +99,7 @@ std::string displayValue( pcf::IndiProperty &ip, /**< [in] the INDI property */
 
 /// Terminal INDI client which displays every known element in a curses table.
 /** Connects to the INDI server on localhost:7624, tracks all defined properties,
- * and lets the user navigate, search by device, and edit writable elements.
+ * and lets the user navigate, search device.property.element names, and edit writable elements.
  * INDI messages are written to a log file which can be followed in another terminal.
  */
 class cursesINDI : public pcf::IndiClient, public cursesTableGrid
@@ -192,10 +196,10 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     /// All elements of the properties in knownProps, in table order.
     elementMapT knownElements;
 
-    /// True while the user is typing a device search in the device column.
+    /// True while search owns keyboard input, including after Ctrl+L from another column.
     bool m_deviceSearching{ false };
 
-    /// The device search string typed so far.
+    /// The dot-separated device, property, and element query typed so far.
     std::string m_deviceTarget;
 
     /// Store a newly defined or updated property and its elements, and schedule a redraw or update.
@@ -263,50 +267,35 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     /// Handle a key press from the user.
     void keyPressed( int ch /**< [in] the key code */ );
 
-    /// If a key is pressed in column 1 (the device column), this function searchs for devices alphabetically.
+    /// Rank a field against one case-folded search segment without crossing field boundaries.
+    /** \returns 0 for a prefix (including an empty segment), 1 for a substring,
+     * 2 for a subsequence, or 3 for no match
+     */
+    static int searchSegmentRank( std::string      field, /**< [in] device, property, or element name */
+                                  std::string_view query /**< [in] lowercase query segment */ );
+
+    /// Find the first displayed row matching a case-insensitive device.property.element query.
+    /** Rank prefixes, substrings, and subsequences in device, property, then element order.
+     * Empty or omitted segments match any name; ties retain table order.
+     * \returns -1 for an empty query, more than three segments, or no displayed match
+     */
+    static int findSearchRow( const elementMapT &elements, /**< [in] elements in table order */
+                              std::string        query /**< [in] dot-separated search text */ );
+
+    /// Update a dot-separated search and jump to its best match while preserving table order.
     void deviceSearch( int ch /**< [in] the key code */ );
 
     /// Recreate the element count window after the table is drawn.
     /**
      * \returns the result of postPrint
      */
-    virtual int postDraw()
-    {
-        //if(fpout) *fpout << "post draw" << std::endl;
-
-        if( w_countWin )
-        {
-            wclear( w_countWin );
-            delwin( w_countWin );
-        }
-        w_countWin = newwin( 1, m_minWidth, m_yTop + tabHeight() + 1, m_xLeft );
-
-        return postPrint();
-    }
+    virtual int postDraw();
 
     /// Print the count of displayed elements in the count window.
     /**
      * \returns 0
      */
-    virtual int postPrint()
-    {
-        if( !w_countWin )
-        {
-            return 0;
-        }
-
-        int shown = tabHeight();
-        if( m_cellContents.size() - m_startRow < (size_t)shown )
-        {
-            shown = m_cellContents.size() - m_startRow;
-        }
-
-        wclear( w_countWin );
-        wprintw( w_countWin, "%i/%zu elements shown.", shown, knownElements.size() );
-        wrefresh( w_countWin );
-
-        return 0;
-    }
+    virtual int postPrint();
 };
 
 cursesINDI::cursesINDI( const std::string &szName, const std::string &szVersion, const std::string &szProtocolVersion )
@@ -900,7 +889,7 @@ void cursesINDI::_moveCurrent( int nextY, int nextX )
     //if(fpout) *fpout << "moved: " << nextX << " " << nextY << " " << currX << "->" << m_currX << " " << currY << "->"
     //<< m_currY << std::endl;
 
-    if( m_deviceSearching && nextX != 1 )
+    if( m_deviceSearching && nextX != 1 && ( nextX != currX || nextY != currY ) )
     {
         wclear( w_interactWin );
         wrefresh( w_interactWin );
@@ -909,12 +898,18 @@ void cursesINDI::_moveCurrent( int nextY, int nextX )
 
     updateCurVal();
 
+    // Background redraws must preserve search focus without moving the selected cell.
+    if( m_deviceSearching && nextX != 1 )
+    {
+        return;
+    }
+
     if( nextX == 1 )
     {
         if( currX != nextX )
         {
             wclear( w_interactWin );
-            wprintw( w_interactWin, "search: " );
+            wprintw( w_interactWin, "search: %s", m_deviceSearching ? m_deviceTarget.c_str() : "" );
             wrefresh( w_interactWin );
         }
     }
@@ -966,100 +961,166 @@ void cursesINDI::_moveCurrent( int nextY, int nextX )
     }
 }
 
+inline int cursesINDI::searchSegmentRank( std::string field, std::string_view query )
+{
+    for( char &ch : field )
+    {
+        ch = std::tolower( static_cast<unsigned char>( ch ) );
+    }
+
+    auto position = field.find( query );
+
+    if( position == 0 )
+    {
+        return 0;
+    }
+
+    if( position != std::string::npos )
+    {
+        return 1;
+    }
+
+    size_t matched = 0;
+
+    for( char ch : field )
+    {
+        if( ch == query[matched] )
+        {
+            ++matched;
+
+            if( matched == query.size() )
+            {
+                return 2;
+            }
+        }
+    }
+
+    return 3;
+}
+
+inline int cursesINDI::findSearchRow( const elementMapT &elements, std::string query )
+{
+    if( query.empty() )
+    {
+        return -1;
+    }
+
+    for( char &ch : query )
+    {
+        ch = std::tolower( static_cast<unsigned char>( ch ) );
+    }
+
+    std::array<std::string_view, 3> segments{};
+    std::string_view                remaining = query;
+
+    for( size_t i = 0; i < segments.size(); ++i )
+    {
+        auto period = remaining.find( '.' );
+        segments[i] = remaining.substr( 0, period );
+
+        if( period == std::string_view::npos )
+        {
+            break;
+        }
+
+        if( i == segments.size() - 1 )
+        {
+            return -1;
+        }
+
+        remaining.remove_prefix( period + 1 );
+    }
+
+    std::array<int, 3> bestRank{ 3, 3, 3 };
+    int                bestRow = -1;
+
+    for( const auto &[key, element] : elements )
+    {
+        if( element.tableRow < 0 )
+        {
+            continue;
+        }
+
+        std::array<int, 3> rank{ searchSegmentRank( element.device, segments[0] ),
+                                 searchSegmentRank( element.propertyName, segments[1] ),
+                                 searchSegmentRank( element.name, segments[2] ) };
+
+        if( rank[0] == 3 || rank[1] == 3 || rank[2] == 3 )
+        {
+            continue;
+        }
+
+        if( rank < bestRank )
+        {
+            bestRank = rank;
+            bestRow  = element.tableRow;
+        }
+    }
+
+    return bestRow;
+}
+
 void cursesINDI::deviceSearch( int ch )
 {
-    bool updated = false;
-    if( m_deviceSearching == true )
-    {
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_drawMutex );
 
-        // CTRL+L clears search bar
-        if( ( ch == ( 0x1f & 'l' ) ) && ( m_deviceTarget.size() > 0 ) )
+        if( ch == KEY_BACKSPACE && m_deviceSearching && !m_deviceTarget.empty() )
         {
-            std::lock_guard<std::mutex> lock( m_drawMutex );
-            m_deviceTarget = "search: ";
-            wclear( w_interactWin );
-            wprintw( w_interactWin, "%s", m_deviceTarget.c_str() );
-            wrefresh( w_interactWin );
-            m_deviceSearching = false;
-            return;
+            m_deviceTarget.pop_back();
         }
-        else if( ( ch == KEY_BACKSPACE ) && ( m_deviceTarget.size() > 0 ) )
+        else if( ch >= 0 && ch <= UCHAR_MAX && std::isprint( static_cast<unsigned char>( ch ) ) )
         {
-            std::lock_guard<std::mutex> lock( m_drawMutex );
-            m_deviceTarget.erase( m_deviceTarget.size() - 1, 1 );
-            wprintw( w_interactWin, "\b \b" );
-            wrefresh( w_interactWin );
-            return;
-        }
-        else if( std::isprint( ch ) )
-        {
-            m_deviceTarget += ch;
-            updated = true;
+            if( !m_deviceSearching )
+            {
+                m_deviceTarget.clear();
+            }
+
+            m_deviceTarget += static_cast<char>( ch );
         }
         else
         {
             return;
         }
-    }
-    else if( std::isprint( ch ) )
-    {
-        m_deviceTarget = ch;
-        updated        = true;
-    }
-    else
-    {
-        return;
-    }
 
-    m_deviceSearching = true;
-
-    if( updated )
-    {
-        std::lock_guard<std::mutex> lock( m_drawMutex );
-        wprintw( w_interactWin, "%c", ch );
+        m_deviceSearching = true;
+        wclear( w_interactWin );
+        wprintw( w_interactWin, "search: %s", m_deviceTarget.c_str() );
         wrefresh( w_interactWin );
+
+        int row = findSearchRow( knownElements, m_deviceTarget );
+
+        if( row < 0 )
+        {
+            return;
+        }
+
+        m_startRow = row;
+        _moveCurrent( 0, 1 );
     }
-
-    //if(fpout) *fpout << "device searching: " << m_deviceTarget << std::endl;
-    if( m_deviceTarget.size() == 0 )
-    {
-        return;
-    }
-
-    auto it = knownElements.lower_bound( m_deviceTarget );
-
-    //if(fpout) *fpout << "new row: " << it->second.tableRow << " " << m_startRow << " " <<
-    //it->second.tableRow-m_startRow << "\n";
-
-    if( it->second.tableRow == -1 )
-    {
-        return;
-    }
-
-    m_startRow = it->second.tableRow;
-
-    moveCurrent( 0, 1 );
 
     redrawTable();
-
-    return;
 }
 
 void cursesINDI::keyPressed( int ch )
 {
-
-    //If in first column, do device selection
-    if( m_currX == 1 )
+    if( ch == ( 0x1f & 'l' ) )
     {
-        deviceSearch( ch );
+        std::lock_guard<std::mutex> lock( m_drawMutex );
+
+        m_deviceTarget.clear();
+        m_deviceSearching = true;
+        wclear( w_interactWin );
+        wprintw( w_interactWin, "search: " );
+        wrefresh( w_interactWin );
         return;
     }
 
-    if( m_deviceSearching )
+    // Search accepts input from the device column or after an explicit Ctrl+L focus.
+    if( m_currX == 1 || m_deviceSearching )
     {
-        wclear( w_interactWin );
-        wrefresh( w_interactWin );
-        m_deviceSearching = false;
+        deviceSearch( ch );
+        return;
     }
 
     switch( ch )
@@ -1389,4 +1450,38 @@ void cursesINDI::keyPressed( int ch )
     std::lock_guard<std::mutex> lock( m_drawMutex );
     cursStat( 0 );
     wrefresh( w_interactWin );
+}
+
+inline int cursesINDI::postDraw()
+{
+    //if(fpout) *fpout << "post draw" << std::endl;
+
+    if( w_countWin )
+    {
+        wclear( w_countWin );
+        delwin( w_countWin );
+    }
+    w_countWin = newwin( 1, m_minWidth, m_yTop + tabHeight() + 1, m_xLeft );
+
+    return postPrint();
+}
+
+inline int cursesINDI::postPrint()
+{
+    if( !w_countWin )
+    {
+        return 0;
+    }
+
+    int shown = tabHeight();
+    if( m_cellContents.size() - m_startRow < (size_t)shown )
+    {
+        shown = m_cellContents.size() - m_startRow;
+    }
+
+    wclear( w_countWin );
+    wprintw( w_countWin, "%i/%zu elements shown.", shown, knownElements.size() );
+    wrefresh( w_countWin );
+
+    return 0;
 }
