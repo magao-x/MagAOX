@@ -1,6 +1,5 @@
 /** \file psfAcq_test.cpp
  * \brief Catch2 tests for the psfAcq app.
- * \author Jared R. Males (jaredmales@gmail.com)
  *
  * \ingroup psfAcq_files
  */
