@@ -45,7 +45,7 @@ destFolders=()
 for remote in icc rtc; do
     for folder in "${dataFolders[@]}"; do
         if ! mount | grep -q "on /srv/$remote/$folder"; then
-            echo "NFS mount appears not to be active for on /srv/$remote/$folder"
+            echo "NFS mount appears not to be active on /srv/$remote/$folder"
             exit 1
         else
             sourceFolders+=("/srv/$remote/$folder/")
@@ -76,6 +76,8 @@ for index in "${!sourceFolders[@]}"; do
     writeLog "$srcPath -> $destPath"
 done
 
+failedFolders=()
+
 for index in "${!sourceFolders[@]}"; do
     srcPath="${sourceFolders[$index]}"
     destPath="${destFolders[$index]}"
@@ -83,6 +85,18 @@ for index in "${!sourceFolders[@]}"; do
     cmd="$rsyncWithOptions $srcPath $destPath"
     writeLog "Start: $cmd"
     $cmd 2>&1 | tee -a "$logOutputPath"
-    writeLog "End: [exit: $?] $cmd"
+    rc=${PIPESTATUS[0]}
+    if [[ $rc == 24 ]]; then
+        writeLog "Warning, files vanished during transfer from $srcPath"
+        writeLog "Finished: [exit: $rc] $cmd"
+    elif [[ $rc != 0 ]]; then
+        failedFolders+=("$srcPath")
+        writeLog "Failed: [exit: $rc] $cmd"
+    else
+        writeLog "Success: $cmd"
+    fi
 done
 
+if [[ ${#failedFolders[@]} != 0 ]]; then
+    exitWithError "Failed to rsync: ${failedFolders[*]}"
+fi
