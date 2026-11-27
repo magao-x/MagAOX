@@ -77,3 +77,32 @@ Implementation status (2026-11-19):
 - Bugs found by the new tests and fixed: text INDI values read with `get<std::string>()` stop at the first space (now `getValue()`); `REG_INDI_NEWPROP_NOCB` recreates the property, so elements must be added after registration (status/stageNamePos); a late `GS03` reply to a stop could be latched as a motion error.
 - Both apps added to `apps_icc` and `all_buildable_apps` in the top-level Makefile.
 - Test-build note: `tests/Makefile.one` does not track header dependencies, so a test must be rebuilt (delete its `.o`) after header-only changes.
+
+## One Motion at a Time on the Bus (agreed 2026-11-27)
+
+- **Finding:** on 2026-11-27 `stageqwprot2` failed nearly every tracking move with the device-reported
+  `mechanical time out` (status `0x02`), while `stageqwprot1` mostly completed. qwptrack commanded both stages in the
+  same pass, so both ELL21s ran together on one bus and supply. Serializing serial I/O (`m_indiMutex`) does not
+  serialize motion, since `ma` returns long before the move ends.
+- **Decision:** `elliptecLowLevel` moves one device at a time, always (no config). A move, home, or optimize request
+  goes into a length-1, latest-wins slot on its `elliptecDevice` (`queue()`/`queued()`), and `dispatch_()` sends it
+  when no device on the bus is moving, including motion not commanded here. This also holds a new target for a device
+  that is itself moving, instead of retargeting it mid-move, which the ELL21 does not do reliably (see the follow-up in
+  `qwpTracker-tracking-law.md`). Devices holding requests are served round-robin from the one after the device that
+  moved last, so a stage that keeps receiving targets cannot keep the other waiting; a lone device is never delayed.
+- **Behavior:**
+  - `dispatch_()` runs after each callback request and after each poll pass, so the next device starts in the same
+    loop that the previous one finished.
+  - A device holding a request publishes OPERATING (HOMING for a home), so `elliptecCtrl` and qwptrack wait for it;
+    `tgt_pos` is published when the request is accepted.
+  - A request is checked with `motionAllowed()` when it arrives (rejected during the device's own home or optimize,
+    as before) and again when it is sent. The move timeout starts when it is sent.
+  - A halt drops the device's held request. Velocity and save are sent at once. A disconnect or power-off drops it.
+- **Cost:** a tracking update now takes the sum of both moves. A device that stalls without reporting an error
+  holds the other for up to `motion.moveTimeoutSec`; an optimize holds the bus for its whole run.
+- **Tests:** `elliptecDevice holds one motion request`; `elliptecLowLevel moves one mount at a time and keeps polling
+  the other` (replaces "keeps polling one mount while the other moves silently", which required overlapping motion);
+  `elliptecLowLevel holds one request per mount and serves them in turn` (latest wins, turn order with a held
+  self-retarget, halt drops, held home reports HOMING).
+- **Open:** whether simultaneous motion was the cause of the stage2 timeouts. There is no switch to compare; an A/B
+  needs a build from before this change.

@@ -47,8 +47,10 @@ namespace app
  * ELL21 mounts do not reliably accept a new target mid-move.  A stage that stops more than `retry.tolerance` from its
  * last command is sent that command once more.
  *
- * While tracking, targets follow `computeTargets()` on every K-mirror update.  When not tracking, targets are set
- * manually through the `qwp1` and `qwp2` properties.
+ * While tracking, targets follow `computeTargets()` on every K-mirror update.  A tracking target within
+ * `track.deadband` of the stage's current position is not sent, so the stages are not stepped continuously in moves too
+ * small for the ELL21 to make reliably.  When not tracking, targets are set manually through the `qwp1` and `qwp2`
+ * properties.
  *
  * The tracking law is a per-filter lookup table of fast-axis angles against K-mirror angle, read at startup from
  * `<calib>/<law.dir>/qwp_law_<filter>.csv`, one file per filter named after the filter wheel's (default `fwsci1`)
@@ -142,6 +144,9 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
     /// The distance, in degrees, from the last command beyond which a stopped stage has missed its target.
     float m_retryTol{ 0.5 };
 
+    /// The distance, in degrees, from the stage's current position within which a tracking target is not sent.
+    float m_deadband{ 0.5 };
+
     ///@}
 
     std::map<std::string, qwpLaw> m_laws; ///< The tracking laws loaded at startup, keyed by filter name.
@@ -229,6 +234,13 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
      */
     static float wrap360( float deg /**< [in] the angle, in degrees */ );
 
+    /// The shorter angular distance between two angles on a 360 degree circle.
+    /**
+     * \returns the distance in degrees, in [0, 180]
+     */
+    static float dist360( float a, /**< [in] the first angle, in degrees */
+                          float b /**< [in] the second angle, in degrees */ );
+
     /// Fold an angle to [0, 180), the period of a QWP fast axis.
     /**
      * \returns the folded angle in degrees
@@ -270,7 +282,8 @@ class qwpTracker : public MagAOXApp<true>, public dev::telemeter<qwpTracker>
     /** Takes `m_indiMutex`; the caller must not hold it.  Commands are sent after the mutex is released.  A stage that
      * is moving (OPERATING) keeps its target pending, and receives only the latest target once it is READY.  A stage
      * that has stopped more than `m_retryTol` from its last command, with no newer target pending, is sent that
-     * command once more.
+     * command once more.  While tracking, a target within `m_deadband` of the stage position is not sent, except as
+     * that retry.
      *
      * \returns 0 on success
      * \returns -1 if a stage command could not be sent
@@ -492,6 +505,17 @@ void qwpTracker::setupConfig()
         "The distance, in degrees, from its last command beyond which a stopped stage is sent that command once "
         "more.  Default is 0.5, matching elliptecLowLevel motion.targetTolerance." );
 
+    config.add( "track.deadband",
+                "",
+                "track.deadband",
+                argType::Required,
+                "track",
+                "deadband",
+                false,
+                "float",
+                "The distance, in degrees, from the stage's current position within which a tracking target is not "
+                "sent.  Default is 0.5." );
+
     TELEMETER_SETUP_CONFIG( config );
 }
 
@@ -515,6 +539,7 @@ int qwpTracker::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_filterDevName, "filter.devName" );
     _config( m_lawDir, "law.dir" );
     _config( m_retryTol, "retry.tolerance" );
+    _config( m_deadband, "track.deadband" );
 
     TELEMETER_LOAD_CONFIG( _config );
 
@@ -726,18 +751,18 @@ float qwpTracker::stageToFast( float stage, float zero, int sign )
     return fold180( sign * ( stage - zero ) );
 }
 
+float qwpTracker::dist360( float a, float b )
+{
+    float d = wrap360( a - b );
+    return std::min( d, 360 - d );
+}
+
 float qwpTracker::fastToStage( float fast, float zero, int sign, float stageCur )
 {
     float s0 = wrap360( zero + sign * fast );
     float s1 = wrap360( s0 + 180 );
 
-    auto dist = []( float a, float b )
-    {
-        float d = wrap360( a - b );
-        return std::min( d, 360 - d );
-    };
-
-    return ( dist( s0, stageCur ) <= dist( s1, stageCur ) ) ? s0 : s1;
+    return ( dist360( s0, stageCur ) <= dist360( s1, stageCur ) ) ? s0 : s1;
 }
 
 stateCodes::stateCodeT
@@ -835,9 +860,7 @@ int qwpTracker::updateStages()
             {
                 q.settled = false;
 
-                float d = wrap360( q.stagePos - q.lastSent );
-
-                if( q.haveSent && !q.pending && !q.retried && std::min( d, 360 - d ) > m_retryTol )
+                if( q.haveSent && !q.pending && !q.retried && dist360( q.stagePos, q.lastSent ) > m_retryTol )
                 {
                     q.pending  = true;
                     q.haveSent = false;
@@ -856,6 +879,11 @@ int qwpTracker::updateStages()
             float s = fastToStage( q.fastTgt, q.zero, q.sign, q.stagePos );
 
             if( q.haveSent && s == q.lastSent )
+            {
+                continue;
+            }
+
+            if( m_tracking && !retry[n] && dist360( s, q.stagePos ) <= m_deadband )
             {
                 continue;
             }

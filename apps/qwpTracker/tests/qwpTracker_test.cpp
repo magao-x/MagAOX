@@ -32,6 +32,7 @@ class qwpTracker_test : public qwpTracker
 {
   public:
     using qwpTracker::computeTargets;
+    using qwpTracker::m_deadband;
     using qwpTracker::m_filter;
     using qwpTracker::m_filterDevName;
     using qwpTracker::m_haveK;
@@ -442,6 +443,7 @@ TEST_CASE( "qwpTracker configuration", "[qwpTracker]" )
         REQUIRE( app.m_filterDevName == "fwsci1" );
         REQUIRE( app.m_lawDir == "qwptrack" );
         REQUIRE( app.m_retryTol == Approx( 0.5 ) );
+        REQUIRE( app.m_deadband == Approx( 0.5 ) );
     }
 
     SECTION( "overrides" )
@@ -452,7 +454,8 @@ TEST_CASE( "qwpTracker configuration", "[qwpTracker]" )
                                      "[k]\ndevName=kk\n"
                                      "[filter]\ndevName=fw\n"
                                      "[law]\ndir=laws\n"
-                                     "[retry]\ntolerance=0.2\n" ) == 0 );
+                                     "[retry]\ntolerance=0.2\n"
+                                     "[track]\ndeadband=0.1\n" ) == 0 );
 
         REQUIRE( app.m_qwp[0].zero == Approx( 12.5 ) );
         REQUIRE( app.m_qwp[0].sign == -1 );
@@ -464,6 +467,7 @@ TEST_CASE( "qwpTracker configuration", "[qwpTracker]" )
         REQUIRE( app.m_filterDevName == "fw" );
         REQUIRE( app.m_lawDir == "laws" );
         REQUIRE( app.m_retryTol == Approx( 0.2 ) );
+        REQUIRE( app.m_deadband == Approx( 0.1 ) );
     }
 
     SECTION( "invalid sign" )
@@ -660,6 +664,34 @@ TEST_CASE( "qwpTracker tracks the K-mirror", "[qwpTracker]" )
 
         app.move( 0, 10.4 );
         app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+    }
+
+    SECTION( "a tracking target within the deadband of the stage position is not sent" )
+    {
+        app.stagesReady( 0, 0 );
+        app.kPos( 5 );
+        app.track( true );
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+
+        app.move( 0, 10 );
+
+        // qwp1 = 10.4 is within 0.5 of the stage at 10
+        app.kPos( 5.2 );
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 1 );
+
+        // qwp1 = 10.8 is not, and is measured from the stage, not the skipped target
+        app.kPos( 5.4 );
+        app.logic();
+        REQUIRE( app.m_qwp[0].nSent == 2 );
+        REQUIRE( app.m_qwp[0].lastSent == Approx( 10.8 ) );
+    }
+
+    SECTION( "the deadband does not apply to manual targets" )
+    {
+        app.stagesReady( 10, 0 );
+        REQUIRE( app.manual( 0, 10.2 ) == 0 );
         REQUIRE( app.m_qwp[0].nSent == 1 );
     }
 

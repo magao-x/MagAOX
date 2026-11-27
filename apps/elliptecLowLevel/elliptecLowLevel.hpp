@@ -1,6 +1,5 @@
 /** \file elliptecLowLevel.hpp
  * \brief The MagAO-X low-level controller for a bus of Thorlabs Elliptec devices.
- * \author Miles Lucas
  *
  * \ingroup elliptecLowLevel_files
  */
@@ -48,8 +47,15 @@ namespace app
  * | `velocity` | new | velocity percent, raised to the model minimum |
  * | `req_optimize`, `req_save` | new | maintenance, only with `stage.enableMaintenance` |
  *
- * Each loop polls `gp` and `gs` for every configured device in turn. Commands are sent from the INDI callbacks
- * without waiting. Per-device state, completion by position, and failure isolation live in `elliptecDevice`.
+ * Each loop polls `gp` and `gs` for every configured device in turn. Per-device state, completion by position, and
+ * failure isolation live in `elliptecDevice`.
+ *
+ * Only one device on the bus moves at a time, so the mounts never draw motor current together. A move, home, or
+ * optimize request is held by its device, replacing any request it already holds, and is sent when no device is
+ * moving, including the device itself, which the ELL21 does not reliably retarget mid-move. While its request is held
+ * a device reports OPERATING (HOMING for a home). When several devices hold requests they are served round-robin, so
+ * a device that keeps receiving targets cannot keep the others waiting. A request is checked against the device's
+ * own state when it arrives and again when it is sent; a halt drops it. Halt, velocity, and save are sent at once.
  *
  * Threading: all serial I/O is serialized by `m_indiMutex`.
  *
@@ -175,6 +181,9 @@ class elliptecLowLevel : public MagAOXApp<>, public tty::usbDevice
     /// Loops with no device identified before the port is closed and reopened.
     static constexpr int s_maxQuietLoops{ 30 };
 
+    /// Index in `m_devices` of the device whose held request is considered first by `dispatch_()`.
+    size_t m_nextDispatch{ 0 };
+
     ///@}
 
     /** \name INDI Properties - Data
@@ -296,6 +305,21 @@ class elliptecLowLevel : public MagAOXApp<>, public tty::usbDevice
                     elliptecDevice::Event e    /**< [in] what happened */
     );
 
+    /// Hold a motion request for a device and send it if the bus is free.
+    /** Rejected, with a warning, if the device does not allow motion now.
+     * \returns 0 on success or rejection, -1 on a hard port error
+     */
+    int requestMotion_( elliptecDevice         &dev,    /**< [in] the device */
+                        elliptecDevice::Pending op,     /**< [in] the requested operation */
+                        double                  deg = 0 /**< [in] target angle, for a move */
+    );
+
+    /// If no device is moving, send the next held request, taking devices round-robin.
+    /**
+     * \returns 0 on success or nothing to send, -1 on a hard port error
+     */
+    int dispatch_();
+
     /// Send an absolute move in degrees.
     int moveTo_( elliptecDevice &dev, /**< [in] the device */
                  double          deg  /**< [in] target angle */
@@ -304,7 +328,10 @@ class elliptecLowLevel : public MagAOXApp<>, public tty::usbDevice
     /// Send a home.
     int home_( elliptecDevice &dev /**< [in] the device */ );
 
-    /// Send a stop and record the reply.
+    /// Send the optimize routine.
+    int optimize_( elliptecDevice &dev /**< [in] the device */ );
+
+    /// Drop any held request and send a stop, recording the reply.
     int halt_( elliptecDevice &dev /**< [in] the device */ );
 
     /// Set a device's velocity.
@@ -633,9 +660,10 @@ inline int elliptecLowLevel::appLogic()
         log<text_log>( "bus opened on " + m_deviceName );
     }
 
+    int rv = 0;
+
     for( auto &dev : m_devices )
     {
-        int rv = 0;
         if( dev.wrongDevice() )
         {
             continue;
@@ -652,12 +680,23 @@ inline int elliptecLowLevel::appLogic()
 
         if( rv < 0 )
         {
-            log<text_log>( "serial port error; reopening " + m_deviceName, logPrio::LOG_ERROR );
-            disconnectAll_();
-            state( stateCodes::NOTCONNECTED );
-            publish_();
-            return 0;
+            break;
         }
+    }
+
+    // A device that finished this loop frees the bus for the next held request.
+    if( rv >= 0 )
+    {
+        rv = dispatch_();
+    }
+
+    if( rv < 0 )
+    {
+        log<text_log>( "serial port error; reopening " + m_deviceName, logPrio::LOG_ERROR );
+        disconnectAll_();
+        state( stateCodes::NOTCONNECTED );
+        publish_();
+        return 0;
     }
 
     bool anyIdentified = false;
@@ -722,8 +761,7 @@ INDI_NEWCALLBACK_DEFN( elliptecLowLevel, m_indiP_tgt_pos )( const pcf::IndiPrope
     {
         if( ipRecv.find( dev.name() ) )
         {
-            double tgt = ipRecv[dev.name()].get<double>();
-            if( moveTo_( dev, tgt ) < 0 )
+            if( requestMotion_( dev, elliptecDevice::Pending::Move, ipRecv[dev.name()].get<double>() ) < 0 )
             {
                 log<software_error>( { __FILE__, __LINE__, "move failed for " + dev.name() } );
             }
@@ -744,7 +782,7 @@ INDI_NEWCALLBACK_DEFN( elliptecLowLevel, m_indiP_req_home )( const pcf::IndiProp
     {
         if( ipRecv.find( dev.name() ) && ipRecv[dev.name()].getSwitchState() == pcf::IndiElement::On )
         {
-            if( home_( dev ) < 0 )
+            if( requestMotion_( dev, elliptecDevice::Pending::Home ) < 0 )
             {
                 log<software_error>( { __FILE__, __LINE__, "home failed for " + dev.name() } );
             }
@@ -811,21 +849,10 @@ INDI_NEWCALLBACK_DEFN( elliptecLowLevel, m_indiP_req_optimize )( const pcf::Indi
             continue;
         }
 
-        if( !dev.motionAllowed() )
-        {
-            log<text_log>( dev.name() + ": optimize rejected: " + dev.eventText(), logPrio::LOG_WARNING );
-            continue;
-        }
-
-        if( send_( dev.address(), m_cmdOptimize ) < 0 )
+        if( requestMotion_( dev, elliptecDevice::Pending::Optimize ) < 0 )
         {
             log<software_error>( { __FILE__, __LINE__, "optimize failed for " + dev.name() } );
-            continue;
         }
-
-        dev.beginOptimize();
-        log<text_log>( dev.name() + ": motor optimization started; this may take several minutes",
-                       logPrio::LOG_NOTICE );
     }
 
     publish_();
@@ -1265,7 +1292,98 @@ inline int elliptecLowLevel::moveTo_( elliptecDevice &dev, double deg )
     }
 
     dev.beginMove( p );
-    setElement_( m_indiP_tgt_pos, dev.name(), elliptec::wrapDeg( deg ) );
+    return 0;
+}
+
+inline int elliptecLowLevel::optimize_( elliptecDevice &dev )
+{
+    if( !dev.motionAllowed() )
+    {
+        log<text_log>( dev.name() + ": optimize rejected: " + dev.eventText(), logPrio::LOG_WARNING );
+        return 0;
+    }
+
+    if( send_( dev.address(), m_cmdOptimize ) < 0 )
+    {
+        return -1;
+    }
+
+    dev.beginOptimize();
+    log<text_log>( dev.name() + ": motor optimization started; this may take several minutes", logPrio::LOG_NOTICE );
+    return 0;
+}
+
+inline int elliptecLowLevel::requestMotion_( elliptecDevice &dev, elliptecDevice::Pending op, double deg )
+{
+    if( !dev.motionAllowed() )
+    {
+        const char *what = ( op == elliptecDevice::Pending::Home )       ? "home"
+                           : ( op == elliptecDevice::Pending::Optimize ) ? "optimize"
+                                                                         : "move";
+        log<text_log>( dev.name() + ": " + what + " rejected: " + dev.eventText(), logPrio::LOG_WARNING );
+        return 0;
+    }
+
+    dev.queue( op, deg );
+
+    if( op == elliptecDevice::Pending::Move )
+    {
+        setElement_( m_indiP_tgt_pos, dev.name(), elliptec::wrapDeg( deg ) );
+    }
+
+    return dispatch_();
+}
+
+inline int elliptecLowLevel::dispatch_()
+{
+    for( const auto &dev : m_devices )
+    {
+        if( dev.moving() != 0 )
+        {
+            return 0;
+        }
+    }
+
+    for( size_t i = 0; i < m_devices.size(); ++i )
+    {
+        size_t          n   = ( m_nextDispatch + i ) % m_devices.size();
+        elliptecDevice &dev = m_devices[n];
+
+        elliptecDevice::Pending op = dev.queued();
+        if( op == elliptecDevice::Pending::None )
+        {
+            continue;
+        }
+
+        dev.clearQueued();
+
+        int rv = 0;
+        switch( op )
+        {
+        case elliptecDevice::Pending::Move:
+            rv = moveTo_( dev, dev.queuedDeg() );
+            break;
+        case elliptecDevice::Pending::Home:
+            rv = home_( dev );
+            break;
+        default:
+            rv = optimize_( dev );
+            break;
+        }
+
+        if( rv < 0 )
+        {
+            return -1;
+        }
+
+        // A request rejected now (the device changed state while it was held) lets the next device go.
+        if( dev.pending() != elliptecDevice::Pending::None )
+        {
+            m_nextDispatch = ( n + 1 ) % m_devices.size();
+            return 0;
+        }
+    }
+
     return 0;
 }
 
@@ -1289,6 +1407,8 @@ inline int elliptecLowLevel::home_( elliptecDevice &dev )
 
 inline int elliptecLowLevel::halt_( elliptecDevice &dev )
 {
+    dev.clearQueued();
+
     if( !dev.identified() )
     {
         return 0;

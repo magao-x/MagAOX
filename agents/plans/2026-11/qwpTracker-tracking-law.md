@@ -222,3 +222,22 @@ Branch `ml/qwpTracker` (this app's feature branch; not yet merged to `dev`).
 - Separately observed: qwptrack fell to `NOTCONNECTED` on each tracking stop, meaning one stage was in a state other
   than READY/HOMING/NOTHOMED/OPERATING; resolved by power cycling the stages. While tracking, `trackerState` reports
   `OPERATING` regardless, which hid this (possible follow-up).
+
+## Tracking Deadband (2026-11-27)
+
+- **Finding:** the `elliptecqwp` log on 2026-11-27 shows `stageqwprot2` failing nearly every tracking move with
+  `move failed: mechanical time out` (device status `0x02`, reported by the ELL21 itself, not a software timeout),
+  plus occasional `stopped away from target`, about once per 4 s, while `stageqwprot1` mostly completes. Re-running
+  the motor optimization did not help. qwptrack sent a new target on every K-mirror update whenever the stage was
+  READY, filtered only by an exact compare with the last command, so the stages were stepped almost continuously in
+  moves often smaller than the 0.5 deg the low level can verify.
+- **Fix:** while tracking, a target within `[track] deadband` (default 0.5 deg, matching `retry.tolerance` and
+  `elliptecLowLevel` `motion.targetTolerance`) of the stage's current position is not sent. The distance is measured
+  from the stage position, not the last command, so a run of skipped targets is sent once the drift exceeds the
+  deadband. Manual targets and the one-shot retry are not filtered. Tested by "a tracking target within the deadband
+  of the stage position is not sent" and "the deadband does not apply to manual targets".
+- **One stage at a time (agreed 2026-11-27):** handled in `elliptecLowLevel`, not qwptrack, so it applies to every
+  client and sees motion directly; see `elliptec-lowlevel-split.md`. qwptrack still sends to both READY stages; the
+  low level holds the second until the first stops.
+- **Open:** whether stage2 times out on isolated moves (hardware) or only under tracking (command pattern). Treating a
+  device `0x02` as judged-by-position in `elliptecDevice` is a possible low-level follow-up.
