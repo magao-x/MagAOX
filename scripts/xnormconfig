@@ -1,4 +1,4 @@
 #!/bin/bash
 
 sudo chown -R xdev:magaox-dev /opt/MagAOX/config/
-sudo chmod -R g+w /opt/MagAOX/config/
+sudo chmod -R u=rwX,g=rwX,o=rX /opt/MagAOX/config/
