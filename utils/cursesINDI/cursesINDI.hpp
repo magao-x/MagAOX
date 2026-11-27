@@ -184,8 +184,16 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
         int         tableRow{ -1 }; ///< The row of this element in the table, -1 if not displayed
     };
 
-    /// Map of elements keyed by their device.property.element key.
-    typedef std::map<std::string, elementSpec> elementMapT;
+    /// Compare dotted element keys by device, property, then element.
+    struct elementKeyLess
+    {
+        /// Order each field lexicographically, keeping a name before names extending it.
+        bool operator()( std::string_view left, /**< [in] first device.property.element key */
+                         std::string_view right /**< [in] second device.property.element key */ ) const;
+    };
+
+    /// Map of elements keyed by device.property.element and ordered by its separate fields.
+    typedef std::map<std::string, elementSpec, elementKeyLess> elementMapT;
 
     /// Value type of elementMapT.
     typedef elementMapT::value_type elementMapValueT;
@@ -300,6 +308,31 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
      */
     virtual int postPrint();
 };
+
+inline bool cursesINDI::elementKeyLess::operator()( std::string_view left, std::string_view right ) const
+{
+    for( int field = 0; field < 2; ++field )
+    {
+        auto leftPeriod  = left.find( '.' );
+        auto rightPeriod = right.find( '.' );
+        int  comparison  = left.substr( 0, leftPeriod ).compare( right.substr( 0, rightPeriod ) );
+
+        if( comparison != 0 )
+        {
+            return comparison < 0;
+        }
+
+        if( leftPeriod == std::string_view::npos || rightPeriod == std::string_view::npos )
+        {
+            return leftPeriod == std::string_view::npos && rightPeriod != std::string_view::npos;
+        }
+
+        left.remove_prefix( leftPeriod + 1 );
+        right.remove_prefix( rightPeriod + 1 );
+    }
+
+    return left < right;
+}
 
 cursesINDI::cursesINDI( const std::string &szName, const std::string &szVersion, const std::string &szProtocolVersion )
     : pcf::IndiClient( szName, szVersion, szProtocolVersion, "127.0.0.1", 7624 )

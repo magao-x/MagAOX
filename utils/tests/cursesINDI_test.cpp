@@ -141,15 +141,16 @@ Screen::~Screen()
 }
 
 /// Create a synthetic property with one element.
-pcf::IndiProperty property( const std::string &device, /**< [in] device name */
-                            const std::string &name = "exposure" /**< [in] property name */ )
+pcf::IndiProperty property( const std::string &device,               /**< [in] device name */
+                            const std::string &name    = "exposure", /**< [in] property name */
+                            const std::string &element = "current" /**< [in] element name */ )
 {
     pcf::IndiProperty result( pcf::IndiProperty::Text );
     result.setDevice( device );
     result.setName( name );
     result.setPerm( pcf::IndiProperty::ReadOnly );
     result.setState( pcf::IndiProperty::Ok );
-    result.add( pcf::IndiElement( "current", "fixture" ) );
+    result.add( pcf::IndiElement( element, "fixture" ) );
     return result;
 }
 
@@ -333,6 +334,68 @@ TEST_CASE( "Segment ranking proceeds from device to property to element", "[curs
 
     REQUIRE( cursesINDI::findSearchRow( elements, "cam.cwf.cwf" ) == 2 );
     REQUIRE( cursesINDI::findSearchRow( elements, "cam.cwf.missing" ) == -1 );
+}
+
+/** \brief Order devices by field so an exact camera query precedes its helper's prefix match.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Camera sorts before its helper and wins an exact search", "[cursesINDI][sorting]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::redrawTable;
+    cursesINDI::keyPressed;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "camacq-acq", "fsm", "state" ) );
+    client.handleDefProperty( property( "camacq", "fsm", "state" ) );
+    client.redrawTable();
+    CHECK( client.knownElements.at( "camacq.fsm.state" ).tableRow == 0 );
+    CHECK( client.knownElements.at( "camacq-acq.fsm.state" ).tableRow == 1 );
+    client.moveCurrent( 1, 3 );
+    client.keyPressed( 0x1f & 'l' );
+
+    for( char ch : std::string( "camacq.fsm.state" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    CHECK( selected( client ) == "camacq.fsm.state" );
+}
+
+/** \brief Compare property and element fields within each device and retain selection on updates.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Table orders each field independently", "[cursesINDI][sorting]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::redrawTable;
+    cursesINDI::handleDelProperty;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "camacq-acq", "fsm", "state" ) );
+    client.redrawTable();
+    client.handleDefProperty( property( "camacq", "fsm-acq", "state" ) );
+    auto fsm = property( "camacq", "fsm", "state-acq" );
+    fsm.add( pcf::IndiElement( "state", "fixture" ) );
+    client.handleDefProperty( fsm );
+    client.redrawTable();
+    REQUIRE( client.knownElements.at( "camacq.fsm.state" ).tableRow == 0 );
+    REQUIRE( client.knownElements.at( "camacq.fsm.state-acq" ).tableRow == 1 );
+    REQUIRE( client.knownElements.at( "camacq.fsm-acq.state" ).tableRow == 2 );
+    REQUIRE( client.knownElements.at( "camacq-acq.fsm.state" ).tableRow == 3 );
+    REQUIRE( selected( client ) == "camacq-acq.fsm.state" );
+
+    client.moveCurrent( -static_cast<int>( client.m_startRow ), 3 );
+    REQUIRE( selected( client ) == "camacq.fsm.state" );
+    client.handleDelProperty( fsm );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camacq.fsm-acq.state" );
 }
 
 /** \brief Preserve the selected element and column when rows are inserted or removed before it.
