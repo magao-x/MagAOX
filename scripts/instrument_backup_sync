@@ -20,12 +20,12 @@ if [[ $dest == /mnt/backup ]]; then
     fi
 fi
 
-logOutputPath=/tmp/instrument_backup_sync_$(date +%s).log
+logOutputPath=$(mktemp --suffix=.log /tmp/instrument_backup_sync_$(date +%s)_XXXXXX) || exit 1
+chmod 644 "$logOutputPath"
 
-echo > $logOutputPath
 writeLog() {
     logStr="$(date +"%Y-%m-%dT%H:%M:%SZ") $1"
-    echo $logStr | tee -a $logOutputPath
+    echo "$logStr" | tee -a "$logOutputPath"
 }
 exitWithError() {
     writeLog "$1"
