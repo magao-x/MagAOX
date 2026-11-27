@@ -7,12 +7,15 @@
 #ifndef t2wOffloader_hpp
 #define t2wOffloader_hpp
 
+#include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include <mx/improc/eigenCube.hpp>
 #include <mx/improc/eigenImage.hpp>
 #include <mx/improc/milkImage.hpp>
 #include <mx/sigproc/gramSchmidt.hpp>
+#include <mx/math/floatUtils.hpp>
 #include <mx/math/templateBLAS.hpp>
 
 #include "../../libMagAOX/libMagAOX.hpp" //Note this is included on command line to trigger pch
@@ -35,6 +38,39 @@ namespace app
 /** \defgroup t2wOffloader_files Tweeter to Woofer Offloading
  * \ingroup t2wOffloader
  */
+
+/// A milkImage whose post sets the acquisition time to a supplied stamp instead of the write time.
+/** milkImage::post() sets atime to the write time.  postAtime() keeps the given atime, so a reader can recover the time
+ * of the event the frame describes.  Only for streams this process created (not passive).
+ *
+ * \ingroup t2wOffloader
+ */
+template <typename dataT>
+class atimeMilkImage : public mx::improc::milkImage<dataT>
+{
+  public:
+    /// Update the metadata with the given acquisition time and post all semaphores.
+    /**
+     * \throws mx::exception if the image is not open or ImageStreamIO_UpdateIm_atime fails
+     */
+    void postAtime( const timespec &atime /**< [in] the acquisition time to store in md->atime */ );
+};
+
+template <typename dataT>
+void atimeMilkImage<dataT>::postAtime( const timespec &atime )
+{
+    if( this->m_image == nullptr )
+    {
+        throw( mx::exception( mx::error_t::invalidconfig, "Image is not open" ) );
+    }
+
+    timespec stamp = atime; // ImageStreamIO_UpdateIm_atime takes a non-const pointer
+
+    if( ImageStreamIO_UpdateIm_atime( this->m_image, &stamp ) != IMAGESTREAMIO_SUCCESS )
+    {
+        throw( mx::exception( mx::error_t::liberr, "ImageStreamIO_UpdateIm_atime returned an error" ) );
+    }
+}
 
 /** MagAO-X application to control offloading the tweeter to the woofer.
  *
@@ -76,47 +112,85 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     float m_actLim{ 7.0 }; ///< the upper limit on woofer actuator commands.  default is 7.0.
 
     std::string m_tweeterModeFile; ///< File containing the tweeter modes to use for offloading
-    std::string m_tweeterMaskFile; ///< File containing the tweeter actuator mask.
+    std::string m_tweeterMaskFile; ///< File containing the tweeter pupil mask applied to the tweeter modes.
 
-    std::string m_wooferMaskFile; ///< File containing the woofer actuator mask.
+    std::string m_wooferMaskFile; ///< File containing the woofer actuator mask applied to the woofer modes.
 
-    uint32_t m_maxModes{ 50 }; ///< Maximum number of modes supported by the offloader.
+    uint32_t m_maxModes{ 50 }; ///< Maximum number of modes available for modal offloading.
 
-    uint32_t m_numModes{ 0 }; ///< Number of modes to offload, with zero selecting actuator offloading.
+    uint32_t m_numModes{ 0 }; ///< Number of modes currently offloaded.  0 means actuator (zonal) offloading.
 
-    int m_loopNumber{ 0 }; ///< CACAO loop number used to name the woofer mode and mask streams.
+    int m_loopNumber{ 0 }; ///< The aol loop number used in shmim names.
     ///@}
 
-    mx::improc::eigenImage<realT> m_twRespM;       ///< Response matrix mapping tweeter commands to woofer commands.
-    mx::improc::eigenImage<realT> m_tweeter;       ///< Buffer sized to the tweeter input image.
-    mx::improc::eigenImage<realT> m_woofer;        ///< Accumulated actuator command, held across offload toggles.
-    mx::improc::eigenImage<realT> m_wooferDelta;   ///< Woofer actuator increment for the current frame.
-    mx::improc::eigenImage<realT> m_modeDeltaAmps; ///< Modal increments for the current frame.
+    mx::improc::eigenImage<realT> m_twRespM; ///< Response matrix mapping a tweeter shape to a woofer command.
 
-    mx::improc::milkImage<realT> m_modevalDM;  ///< Shared stream holding the accumulated modal command.
-    mx::improc::milkImage<realT> m_modevalDMf; ///< Shared stream supplying reconstructed woofer modal feedback.
+    /// The latest modal offload change back-projected onto the tweeter, published to m_tweeterOffload.
+    mx::improc::eigenImage<realT> m_tweeter;
 
-    uint64_t m_lastDMf_cnt0{ 0 }; ///< Feedback stream counter last observed by the modal integrator.
-    uint64_t m_updatedDMf{ 0 };   ///< Number of feedback updates incorporated by the modal integrator.
+    mx::improc::eigenImage<realT> m_woofer; ///< The woofer command written to m_dmStream, held across offload toggles.
 
-    mx::improc::eigenImage<realT> m_tweeterMask; ///< Mask used to select valid tweeter actuators.
+    mx::improc::eigenImage<realT> m_wooferDelta; ///< Woofer command change calculated for zonal offloading.
 
-    mx::improc::eigenCube<float> m_tModesOrtho; ///< Orthonormal tweeter modes used for projection.
+    mx::improc::eigenImage<realT> m_modeDeltaAmps; ///< Averaged tweeter shape projected onto m_tModesOrtho.
 
-    mx::improc::milkImage<float> m_wooferMask; ///< Published mask of valid woofer actuators.
+    /// Change in each modal offload command during the latest update, including any modevalDMf resync.
+    /** Holds the previous m_modevalDM values until the change is calculated after the woofer is written.
+     */
+    mx::improc::eigenImage<realT> m_deltavalDM;
 
-    mx::improc::eigenCube<float> m_wModes; ///< Woofer shapes corresponding to the tweeter modes.
+    mx::improc::milkImage<realT> m_modevalDM; ///< Stream aol0_modevalDM holding the current modal offload commands.
 
-    IMAGE *m_wModesStream{ nullptr }; ///< Published stream of woofer mode shapes.
+    mx::improc::milkImage<realT> m_modevalDMf; ///< Stream aol0_modevalDMf, written externally to resync m_modevalDM.
+
+    /// Stream aol<loop>_tweeterOffload publishing m_tweeter after each modal offload.
+    /** Its atime is the CLOCK_ISIO time of the woofer post the offload belongs to; its writetime is its own post.
+     */
+    atimeMilkImage<realT> m_tweeterOffload;
+
+    uint64_t m_lastDMf_cnt0{ 0 }; ///< m_modevalDMf cnt0 at the last check, used to detect new resyncs.
+
+    uint64_t m_updatedDMf{ 0 }; ///< Number of resyncs from m_modevalDMf, reported in appLogic().
+
+    mx::improc::eigenImage<realT> m_tweeterMask; ///< Tweeter pupil mask applied to the tweeter modes.
+
+    mx::improc::eigenCube<float> m_tModesOrtho; ///< Masked, unit-normalized tweeter modes used for offloading.
+
+    mx::improc::milkImage<float> m_wooferMask; ///< Woofer actuator mask, also published as aol<loop>_dmmask.
+
+    mx::improc::eigenCube<float> m_wModes; ///< Woofer modes corresponding to each of m_tModesOrtho.
+
+    IMAGE *m_wModesStream{ nullptr }; ///< Stream aol<loop>_CMmodesDM publishing m_wModes.
 
     float    m_fps{ 0 };  ///< Current FPS from the FPS source.
     uint32_t m_navg{ 0 }; ///< Current navg from the averager
 
-    float m_effFPS{ 0 }; ///< Effective offload update rate after frame averaging.
+    /// INDI device of dmSyncopation, which changes the DM command rate.
+    /** Fixed in code rather than configured, so the config stays compatible with versions without this feature.
+     */
+    const std::string m_syncoSource{ "dmtweeter-synco" };
 
-    IMAGE    m_dmStream;      ///< Open woofer command stream.
-    uint32_t m_dmWidth{ 0 };  ///< Width of the woofer command image.
-    uint32_t m_dmHeight{ 0 }; ///< Height of the woofer command image.
+    float m_syncoMainHz{ 0 }; ///< dmSyncopation's fitted main rate, from its timing.mainHz.
+
+    uint32_t m_syncoSteps{ 0 }; ///< dmSyncopation steps actually running, from its timing.active.  0 when inactive.
+
+    uint32_t m_navgRequested{ 0 };        ///< navg last sent to the averager and not yet reported back.  0 if none.
+    double   m_navgApplied{ 0 };          ///< Frame count active in the averager's running generation.
+    double   m_navgStride{ 0 };           ///< Frames between publications in the active averaging generation.
+    double   m_syncoPrepareHz{ 0 };       ///< Future DM cadence to stage, or zero when no preparation is requested.
+    double   m_syncoOffloadEpoch{ 0 };    ///< Restart identity of the pending preparation.
+    double   m_syncoOffloadSequence{ 0 }; ///< Request identity within the synco instance.
+
+    /// Requested offload rate in Hz, kept by setting the averager's navg.  0 = unmanaged.
+    /** Set only through INDI (offloadRate), so the config stays compatible with versions without this feature.
+     */
+    float m_offloadRate{ 250 };
+
+    float m_effFPS{ 0 }; ///< Effective offload rate, the DM command rate / m_navg.
+
+    IMAGE    m_dmStream;      ///< The woofer DM channel stream, opened in allocate().
+    uint32_t m_dmWidth{ 0 };  ///< The width of the image
+    uint32_t m_dmHeight{ 0 }; ///< The height of the image.
 
     uint8_t m_dmDataType{ 0 }; ///< ImageStreamIO type code of the woofer command stream.
     size_t  m_dmTypeSize{ 0 }; ///< Size of a command pixel in bytes.
@@ -148,12 +222,15 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     /// Read the offloader settings from a configurator.
     int loadConfigImpl( mx::app::appConfigurator &_config /**< [in] The application configuration. */ );
 
-    /// Load the configuration into the application.
+    /// Load the configuration.
     virtual void loadConfig();
 
-    ///@}
-
-    /// Prepare the mode basis and start the stream monitors, INDI properties, and telemetry.
+    /// Startup function
+    /** Registers INDI properties, prepares the modes, and starts the shmim monitor and telemeter.
+     *
+     * \returns 0 on success
+     * \returns -1 on error
+     */
     virtual int appStartup();
 
     /// Implementation of the FSM for t2wOffloader.
@@ -165,25 +242,64 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
 
     /// Shutdown the app.
     /**
-     *
+     * \returns 0 on success
      */
     virtual int appShutdown();
 
-    /// Update the effective offload rate after a frame rate or averaging change.
+    /// Update the effective FPS, and the averager's navg if the offload rate is managed, after any rate input changes.
+    /** The DM command rate feeding the averager is the camera fps, multiplied by dmSyncopation's active step
+     * count while it is running.
+     */
     int updateFPS();
 
-    /// Allocate workspace and connect the woofer command channel for the current tweeter stream.
-    int allocate( const dev::shmimT &dummy /**< [in] Stream monitor tag. */ );
+    /// Check that the averager is running with the requested window and cadence.
+    bool offloadPrepared( uint32_t navg /**< [in] Required frame count and publication stride. */ ) const;
 
-    /// Integrate an averaged tweeter frame into the woofer command when offloading is active.
-    int processImage( void              *curr_src /**< [in] Start of the current tweeter frame. */,
-                      const dev::shmimT &dummy /**< [in] Stream monitor tag. */ );
+    /// The DM command rate feeding the tweeter averager, in Hz.
+    float dmRate() const;
 
-    /// Clear the integrator and publish a zero woofer command.
+    /// Calculate the averager navg that gives a requested offload rate.
+    /**
+     * \returns the nearest navg, at least 1
+     * \returns 0 if the offload rate is unmanaged or the DM rate is unknown
+     */
+    static uint32_t navgForRate( float dmRateHz /**< [in] DM command rate feeding the averager, in Hz */,
+                                 float rateHz /**< [in] requested offload rate in Hz, 0 for unmanaged */ );
+
+    /// Allocate working memory and open or create the woofer and modal streams for the input shmim.
+    /**
+     * \returns 0 on success
+     * \returns -1 if the woofer channel could not be opened
+     */
+    int allocate( const dev::shmimT &dummy /**< [in] tag to differentiate shmimMonitor parents.*/ );
+
+    /// Offload the averaged tweeter shape to the woofer.
+    /** In modal mode, also publishes the offload change as it appears on the tweeter to m_tweeterOffload, with the
+     * CLOCK_ISIO time of the woofer post as its atime.
+     *
+     * \returns 0 always
+     */
+    int processImage( void              *curr_src, /**< [in] pointer to start of current frame.*/
+                      const dev::shmimT &dummy     /**< [in] tag to differentiate shmimMonitor parents.*/
+    );
+
+    /// Zero the woofer command and the modal offload commands.
+    /**
+     * \returns 0 always
+     */
     int zero();
 
-    /// Load the offload calibration and prepare the tweeter and woofer mode bases.
+    /// Read the mode, mask, and response matrix files, then calculate and publish the woofer modes.
+    /**
+     * \returns 0 on success
+     * \returns -1 if the woofer modes stream could not be created
+     */
     int prepareModes();
+
+    /// Back-project the latest modal offload change onto the tweeter.
+    /** Sets m_tweeter to the sum of m_deltavalDM(p) * m_tModesOrtho.image(p) over the offloaded modes.
+     */
+    void calcTweeterOffload();
 
   protected:
     /** \name INDI Interface
@@ -218,17 +334,23 @@ class t2wOffloader : public MagAOXApp<true>, public dev::shmimMonitor<t2wOffload
     /// Start or stop offload updates and release the HO link on a separate state change.
     INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_offloadToggle );
 
-    pcf::IndiProperty m_indiP_fpsSource; ///< Subscription to the input frame rate.
-
-    /// Update the input frame rate from its INDI source.
+    pcf::IndiProperty m_indiP_fpsSource; ///< Property monitoring the fps of m_fpsSource.
     INDI_SETCALLBACK_DECL( t2wOffloader, m_indiP_fpsSource );
 
-    pcf::IndiProperty m_indiP_navgSource; ///< Subscription to the input averaging count.
-
-    /// Update the averaging count from its INDI source.
+    pcf::IndiProperty m_indiP_navgSource; ///< Property monitoring the navg of m_navgSource.
     INDI_SETCALLBACK_DECL( t2wOffloader, m_indiP_navgSource );
 
-    pcf::IndiProperty m_indiP_fps; ///< Published effective offload rate.
+    pcf::IndiProperty m_indiP_navgTarget; ///< Outbound property to request m_navgSource's nAverage.
+
+    pcf::IndiProperty m_indiP_syncoSource; ///< Property monitoring the timing of m_syncoSource.
+    INDI_SETCALLBACK_DECL( t2wOffloader, m_indiP_syncoSource );
+
+    pcf::IndiProperty m_indiP_offloadReady; ///< Synco preparation identity and applied averaging confirmation.
+
+    pcf::IndiProperty m_indiP_fps; ///< Read-only property reporting the effective offload rate.
+
+    pcf::IndiProperty m_indiP_offloadRate; ///< Property to set the requested offload rate, Hz.
+    INDI_NEWCALLBACK_DECL( t2wOffloader, m_indiP_offloadRate );
 
     ///@}
 
@@ -515,10 +637,42 @@ inline int t2wOffloader::appStartup()
 
     REG_INDI_SETPROP( m_indiP_fpsSource, m_fpsSource, std::string( "fps" ) );
     REG_INDI_SETPROP( m_indiP_navgSource, m_navgSource, std::string( "nAverage" ) );
+    REG_INDI_SETPROP( m_indiP_syncoSource, m_syncoSource, std::string( "timing" ) );
+
+    m_indiP_navgTarget = pcf::IndiProperty( pcf::IndiProperty::Number );
+    m_indiP_navgTarget.setDevice( m_navgSource );
+    m_indiP_navgTarget.setName( "nAverage" );
+    m_indiP_navgTarget.add( pcf::IndiElement( "target" ) );
+
+    if( createROIndiNumber( m_indiP_offloadReady, "offloadReady" ) < 0 )
+    {
+        return -1;
+    }
+
+    for( const auto *name : { "epoch", "sequence", "frames" } )
+    {
+        m_indiP_offloadReady.add( pcf::IndiElement( name ) );
+        m_indiP_offloadReady[name] = 0.0;
+    }
+
+    if( registerIndiPropertyReadOnly( m_indiP_offloadReady ) < 0 )
+    {
+        return -1;
+    }
 
     createROIndiNumber( m_indiP_fps, "fps" );
     m_indiP_fps.add( pcf::IndiElement( "current" ) );
     if( registerIndiPropertyReadOnly( m_indiP_fps ) < 0 )
+    {
+        log<software_error>( { "" } );
+        return -1;
+    }
+
+    createStandardIndiNumber<float>( m_indiP_offloadRate, "offloadRate", 0, 10000, 0, "%0.1f" );
+    m_indiP_offloadRate["current"] = m_offloadRate;
+    m_indiP_offloadRate["target"]  = m_offloadRate;
+
+    if( registerIndiPropertyNew( m_indiP_offloadRate, INDI_NEWCALLBACK( m_indiP_offloadRate ) ) < 0 )
     {
         log<software_error>( { "" } );
         return -1;
@@ -543,9 +697,9 @@ inline int t2wOffloader::appLogic()
 
     SHMIMMONITOR_UPDATE_INDI;
 
-    if(lastUpdateDMf != m_updatedDMf)
+    if( lastUpdateDMf != m_updatedDMf )
     {
-        std::cerr << std::format("DMf updated {} times\n", m_updatedDMf - lastUpdateDMf);
+        std::cerr << std::format( "DMf updated {} times\n", m_updatedDMf - lastUpdateDMf );
         lastUpdateDMf = m_updatedDMf;
     }
 
@@ -570,7 +724,9 @@ inline int t2wOffloader::updateFPS()
         effFPS = 0;
     }
     else
-        effFPS = m_fps / m_navg;
+    {
+        effFPS = dmRate() / m_navg;
+    }
 
     if( effFPS != m_effFPS )
     {
@@ -581,7 +737,61 @@ inline int t2wOffloader::updateFPS()
 
     updateIfChanged( m_indiP_fps, "current", m_effFPS );
 
+    const auto targetRate = m_syncoPrepareHz > 0 ? m_syncoPrepareHz : dmRate();
+    const auto navg       = navgForRate( targetRate, m_offloadRate );
+    const bool ready      = offloadPrepared( navg );
+
+    if( m_indiP_offloadReady.find( "frames" ) )
+    {
+        updateIfChanged<double>( m_indiP_offloadReady,
+                                 { "epoch", "sequence", "frames" },
+                                 { m_syncoOffloadEpoch, m_syncoOffloadSequence, ready ? double( navg ) : 0.0 },
+                                 ready ? INDI_OK : INDI_IDLE );
+    }
+
+    // Keep only one request in flight. A pending rollback must be acknowledged before rearming synco.
+    if( navg > 0 && navg != m_navg && m_navgRequested == 0 )
+    {
+        if( sendNewProperty( m_indiP_navgTarget, "target", navg ) == 0 )
+        {
+            m_navgRequested = navg;
+            log<text_log>( std::format( "requested {}.nAverage = {} for {} Hz offloading at a {} Hz DM rate",
+                                        m_navgSource,
+                                        navg,
+                                        m_offloadRate,
+                                        targetRate ),
+                           logPrio::LOG_NOTICE );
+        }
+    }
+
     return 0;
+}
+
+inline bool t2wOffloader::offloadPrepared( uint32_t navg ) const
+{
+    return m_syncoPrepareHz > 0 && navg > 0 && navg == m_navg && navg == m_navgApplied && navg == m_navgStride &&
+           m_navgRequested == 0;
+}
+
+inline float t2wOffloader::dmRate() const
+{
+    if( m_syncoSteps > 0 && m_syncoMainHz > 0 )
+    {
+        return m_syncoSteps * m_syncoMainHz;
+    }
+
+    return m_fps;
+}
+
+inline uint32_t t2wOffloader::navgForRate( float dmRateHz, float rateHz )
+{
+    // mx::math::isFinite is bitwise, so it still rejects NaN/inf under the fast-math build flags.
+    if( !mx::math::isFinite( rateHz ) || !mx::math::isFinite( dmRateHz ) || rateHz <= 0 || dmRateHz <= 0 )
+    {
+        return 0;
+    }
+
+    return std::max<uint32_t>( 1, static_cast<uint32_t>( std::lround( dmRateHz / rateHz ) ) );
 }
 
 inline int t2wOffloader::allocate( const dev::shmimT &dummy )
@@ -636,6 +846,12 @@ inline int t2wOffloader::allocate( const dev::shmimT &dummy )
     m_modevalDMf.create( "aol0_modevalDMf", m_tModesOrtho.planes(), 1 );
 
     m_lastDMf_cnt0 = m_modevalDMf.cnt0();
+
+    m_deltavalDM.resize( m_tModesOrtho.planes(), 1 );
+    m_deltavalDM.setZero();
+
+    m_tweeterOffload.create(
+        std::format( "aol{}_tweeterOffload", m_loopNumber ), shmimMonitorT::m_width, shmimMonitorT::m_height );
 
     ///\todo size checks here.
 
@@ -711,11 +927,17 @@ inline int t2wOffloader::processImage( void *curr_src, const dev::shmimT &dummy 
 
         m_modevalDM.setWrite( true );
 
+        // Save the commands the woofer currently has, before any modevalDMf resync, for the tweeter offload
+        for( int p = 0; p < m_deltavalDM.rows(); ++p )
+        {
+            m_deltavalDM( p, 0 ) = m_modevalDM( p, 0 );
+        }
+
         if( m_modevalDMf.cnt0() > m_lastDMf_cnt0 )
         {
             for( uint32_t p = 0; p < m_modevalDM.rows() && p < m_modevalDMf.rows(); ++p )
             {
-                m_modevalDM( p, 0 ) = m_modevalDMf(p,0);
+                m_modevalDM( p, 0 ) = m_modevalDMf( p, 0 );
             }
 
             ++m_updatedDMf;
@@ -783,6 +1005,22 @@ inline int t2wOffloader::processImage( void *curr_src, const dev::shmimT &dummy 
 
         m_dmStream.md->write = 0;
         ImageStreamIO_sempost( &m_dmStream, -1 );
+
+        // Stamp the woofer post, carried to counterOffload as the tweeter offload's atime for latency measurement
+        timespec wooferStamp;
+        clock_gettime( CLOCK_ISIO, &wooferStamp );
+
+        // Publish the offload as it appears on the tweeter, after the woofer so its timing is unaffected
+        for( int p = 0; p < m_deltavalDM.rows(); ++p )
+        {
+            m_deltavalDM( p, 0 ) = m_modevalDM( p, 0 ) - m_deltavalDM( p, 0 );
+        }
+
+        calcTweeterOffload();
+
+        m_tweeterOffload.setWrite( true );
+        m_tweeterOffload() = m_tweeter;
+        m_tweeterOffload.postAtime( wooferStamp );
     }
 
     return 0;
@@ -908,6 +1146,16 @@ int t2wOffloader::prepareModes()
             m_wModes.rows() * m_wModes.cols() * m_wModes.planes() * sizeof( float ) );
 
     return 0;
+}
+
+inline void t2wOffloader::calcTweeterOffload()
+{
+    m_tweeter.setZero();
+
+    for( uint32_t p = 0; p < m_numModes && p < m_maxModes && p < m_deltavalDM.rows(); ++p )
+    {
+        m_tweeter += m_deltavalDM( p, 0 ) * m_tModesOrtho.image( p );
+    }
 }
 
 INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_gain )( const pcf::IndiProperty &ipRecv )
@@ -1104,13 +1352,92 @@ INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_navgSource )( const pcf::IndiProper
 
     std::lock_guard<std::mutex> guard( m_indiMutex );
 
-    realT navg = ipRecv["current"].get<float>();
+    const auto navg    = ipRecv["current"].get<double>();
+    const auto applied = ipRecv.find( "applied" ) ? ipRecv["applied"].get<double>() : 0.0;
+    const auto stride  = ipRecv.find( "stride" ) ? ipRecv["stride"].get<double>() : 0.0;
 
-    if( navg != m_navg )
+    if( !mx::math::isFinite( navg ) || navg < 1 || navg > std::numeric_limits<uint32_t>::max() ||
+        std::floor( navg ) != navg )
     {
-        m_navg = navg;
+        return 0;
+    }
+
+    if( navg != m_navg || applied != m_navgApplied || stride != m_navgStride || navg == m_navgRequested )
+    {
+        m_navg        = static_cast<uint32_t>( navg );
+        m_navgApplied = applied;
+        m_navgStride  = stride;
+
+        if( navg == m_navgRequested )
+        {
+            m_navgRequested = 0;
+        }
+
         updateFPS();
     }
+
+    return 0;
+}
+
+INDI_SETCALLBACK_DEFN( t2wOffloader, m_indiP_syncoSource )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_syncoSource, ipRecv );
+
+    if( !ipRecv.find( "active" ) || !ipRecv.find( "mainHz" ) )
+    {
+        return 0;
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    float      mainHz   = ipRecv["mainHz"].get<float>();
+    uint32_t   steps    = static_cast<uint32_t>( std::max( 0.0f, ipRecv["active"].get<float>() ) );
+    const auto rate     = ipRecv.find( "offloadPrepareHz" ) ? ipRecv["offloadPrepareHz"].get<double>() : 0.0;
+    const auto epoch    = ipRecv.find( "offloadEpoch" ) ? ipRecv["offloadEpoch"].get<double>() : 0.0;
+    const auto sequence = ipRecv.find( "offloadSequence" ) ? ipRecv["offloadSequence"].get<double>() : 0.0;
+    const bool prepare  = mx::math::isFinite( rate ) && rate > 0 && mx::math::isFinite( epoch ) && epoch > 0 &&
+                         mx::math::isFinite( sequence ) && sequence > 0;
+    const auto prepareHz       = prepare ? rate : 0.0;
+    const auto prepareEpoch    = prepare ? epoch : 0.0;
+    const auto prepareSequence = prepare ? sequence : 0.0;
+
+    if( steps != m_syncoSteps || ( steps > 0 && mainHz != m_syncoMainHz ) || prepareHz != m_syncoPrepareHz ||
+        prepareEpoch != m_syncoOffloadEpoch || prepareSequence != m_syncoOffloadSequence )
+    {
+        m_syncoSteps           = steps;
+        m_syncoMainHz          = mainHz;
+        m_syncoPrepareHz       = prepareHz;
+        m_syncoOffloadEpoch    = prepareEpoch;
+        m_syncoOffloadSequence = prepareSequence;
+        updateFPS();
+    }
+
+    return 0;
+}
+
+INDI_NEWCALLBACK_DEFN( t2wOffloader, m_indiP_offloadRate )( const pcf::IndiProperty &ipRecv )
+{
+    INDI_VALIDATE_CALLBACK_PROPS( m_indiP_offloadRate, ipRecv );
+
+    float target;
+
+    if( indiTargetUpdate( m_indiP_offloadRate, target, ipRecv, true ) < 0 || !mx::math::isFinite( target ) ||
+        target < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__, "invalid offloadRate" } );
+        return -1;
+    }
+
+    std::lock_guard<std::mutex> guard( m_indiMutex );
+
+    m_offloadRate = target;
+
+    updateIfChanged( m_indiP_offloadRate, "current", m_offloadRate );
+    updateIfChanged( m_indiP_offloadRate, "target", m_offloadRate );
+
+    log<text_log>( "set offload rate to " + std::to_string( m_offloadRate ) + " Hz", logPrio::LOG_NOTICE );
+
+    updateFPS();
 
     return 0;
 }

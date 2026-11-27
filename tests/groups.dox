@@ -299,6 +299,11 @@ report from their counters and then returns nonzero. An HTML report therefore do
  * \ingroup application_unit_test
  */
 
+/** \defgroup t2wOffloader_unit_test Tweeter-to-Woofer Offloader Unit Tests
+ * \brief Offline modal offload, cadence selection, and averaging confirmation tests.
+ * \ingroup application_unit_test
+ */
+
 /** \defgroup common_unit_test Common Library Unit Tests
  * \brief Unit tests for shared low-level library helpers.
  * \ingroup unit_test

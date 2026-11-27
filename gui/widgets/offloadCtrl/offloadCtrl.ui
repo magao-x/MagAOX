@@ -182,7 +182,7 @@
               <enum>QFrame::StyledPanel</enum>
              </property>
              <property name="text">
-              <string>No. Avg [frames]</string>
+              <string>Offload Rate (Hz)</string>
              </property>
              <property name="alignment">
               <set>Qt::AlignCenter</set>

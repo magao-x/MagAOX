@@ -78,11 +78,13 @@ apps_rtc = \
 	t2wOffloader \
 	dmSpeckle \
 	dmSyncopation \
+	counterOffload \
 	loopTimingMonitor \
 	w2tcsOffloader \
 	pwfsSlopeCalc \
     kcubeCtrl \
 	dmPokeXCorr \
+	dmTemporalResponse \
 	psfAcq \
 	strehlEstimator \
 	modalFilter \
@@ -142,6 +144,8 @@ all_buildable_apps = \
 	dmPokeXCorr \
 	dmSpeckle \
 	dmSyncopation \
+	counterOffload \
+	dmTemporalResponse \
 	elliptecCtrl \
 	elliptecLowLevel \
 	loopTimingMonitor \
