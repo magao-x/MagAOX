@@ -100,6 +100,9 @@ class loPredCtrlAccPanel : public xWidget
     QPushButton *m_standard{ nullptr };  ///< ddspc_mode.standard selector.
     QPushButton *m_assisted{ nullptr };  ///< ddspc_mode.accel_assisted selector.
     QPushButton *m_assisted2k{ nullptr }; ///< ddspc_mode.accel_assisted_2k: ACC-assisted, one command per WFS frame.
+
+    /// ACC Assisted 2 kHz with the accelerometer read at s_avgFps and s_avgScans scans averaged into each sample.
+    QPushButton *m_assistedAvg{ nullptr };
     QPushButton *m_mainLoop{ nullptr };  ///< ddspc_mode.main_loop selector: standard DDSPC through the main loop.
     QPushButton *m_copy8k{ nullptr };    ///< ddspc_mode.mfilt_copy_8k: the main loop's integrator, every DM slot.
     QPushButton *m_copy2k{ nullptr };    ///< ddspc_mode.mfilt_copy_2k: the main loop's integrator, once per frame.
@@ -118,6 +121,11 @@ class loPredCtrlAccPanel : public xWidget
 
     statusEntry *m_accFpsEntry{ nullptr }; ///< The accelerometer's acquisition rate, its fps property [Hz].
     bool         m_accFpsKnown{ false };   ///< The accelerometer device has published fps.
+    int          m_accAverage{ 0 };        ///< The accelerometer's averaged scans per sample (average); 0 unknown.
+    double       m_accStreamFps{ 0 };      ///< The accelerometer's published sample rate (stream_fps); 0 unknown.
+
+    static constexpr int s_avgFps   = 8000; ///< Accelerometer scan rate of the averaged mode [Hz].
+    static constexpr int s_avgScans = 4;    ///< Scans averaged into each sample in the averaged mode: a 2 kHz stream.
 
     std::function<bool()> m_confirmReset; ///< Reset confirmation.
 
@@ -178,7 +186,13 @@ class loPredCtrlAccPanel : public xWidget
                        const pcf::IndiProperty &property /**< [in] Update or definition. */ );
 
     /// Send a complete ddspc_mode selection with exactly one element on.
-    void sendMode( const char *selected /**< [in] Element to select. */ );
+    void sendMode( const char *selected /**< [in] Element to select. */,
+                   bool averaged = false /**< [in] Also set the accelerometer to s_avgFps averaged by s_avgScans;
+                                            otherwise switch any averaging off. */ );
+
+    /// Send a number target to the accelerometer device.
+    void sendAccTarget( const char *property /**< [in] Accelerometer number property. */,
+                        double      value /**< [in] Target value. */ );
 
     /// Ask for confirmation, then request reset_model.
     void requestReset();

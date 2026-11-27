@@ -875,6 +875,87 @@ TEST_CASE( "loPredCtrlAccGUI sets the accelerometer rate", "[loPredCtrlAccGUI]" 
     QApplication::processEvents();
     CHECK_FALSE( entry->isEnabled() );
 }
+/** \brief The averaged mode sets the accelerometer to 8 kHz averaged by 4 and selects ACC Assisted 2 kHz; any other
+ * mode switches the averaging off; the buttons, status row and banner follow the accelerometer's averaging.
+ */
+TEST_CASE( "loPredCtrlAccGUI selects ACC-assisted 2 kHz with 8 kHz averaged samples", "[loPredCtrlAccGUI]" )
+{
+    // clang-format off
+#ifdef LOPREDCTRLACCGUI_TEST_DOXYGEN_REF
+    xqt::loPredCtrlAccPanel::sendMode;
+    xqt::loPredCtrlAccPanel::sendAccTarget;
+#endif
+    // clang-format on
+    Fixture fixture;
+    fixture.defineAll();
+    auto *averaged   = fixture.widget<QPushButton>( "mode.accel_assisted_2k_avg" );
+    auto *assisted2k = fixture.widget<QPushButton>( "ddspc_mode.accel_assisted_2k" );
+    auto &commands   = fixture.m_publisher.m_commands;
+
+    pcf::IndiProperty mode( pcf::IndiProperty::Switch, "loPredCtrlAcc", "ddspc_mode" );
+    for( const char *element : { "standard", "accel_assisted", "accel_assisted_2k" } )
+    {
+        mode.add( pcf::IndiElement(
+            element, std::strcmp( element, "standard" ) ? pcf::IndiElement::Off : pcf::IndiElement::On ) );
+    }
+    fixture.publish( mode, true );
+    CHECK_FALSE( averaged->isEnabled() ); // No averaging accelerometer yet.
+    CHECK( fixture.status( "accAverage" ) == "---" );
+
+    auto accNumber = [&]( const char *name, double value )
+    {
+        pcf::IndiProperty property( pcf::IndiProperty::Number, "acc000", name );
+        property.add( pcf::IndiElement( "current", value ) );
+        property.add( pcf::IndiElement( "target", value ) );
+        fixture.publish( property, true );
+    };
+    accNumber( "fps", 2000 );
+    accNumber( "average", 1 );
+    accNumber( "stream_fps", 2000 );
+    REQUIRE( averaged->isEnabled() );
+    CHECK( fixture.status( "accAverage" ) == "off (every scan)" );
+
+    averaged->click();
+    QApplication::processEvents();
+    REQUIRE( commands.size() == 3 );
+    CHECK( commands[0].getDevice() == "acc000" );
+    CHECK( commands[0].getName() == "fps" );
+    CHECK( commands[0]["target"].get<double>() == 8000 );
+    CHECK( commands[1].getName() == "average" );
+    CHECK( commands[1]["target"].get<double>() == 4 );
+    CHECK( commands[2].getName() == "ddspc_mode" );
+    CHECK( commands[2]["accel_assisted_2k"].getSwitchState() == pcf::IndiElement::On );
+    CHECK( commands[2]["standard"].getSwitchState() == pcf::IndiElement::Off );
+
+    // The readbacks: 8 kHz scans averaged by 4, ACC Assisted 2 kHz selected.
+    accNumber( "fps", 8000 );
+    accNumber( "average", 4 );
+    accNumber( "stream_fps", 2000 );
+    fixture.publishSwitch( "ddspc_mode", "standard", pcf::IndiElement::Off );
+    fixture.publishSwitch( "ddspc_mode", "accel_assisted_2k", pcf::IndiElement::On );
+    CHECK( averaged->isChecked() );
+    CHECK_FALSE( assisted2k->isChecked() );
+    CHECK( fixture.status( "accAverage" ) == "4 scans per sample (2000 Hz stream)" );
+
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::On );
+    fixture.publishText( "ddspc_control", "requested_mode", "accel_assisted_2k" );
+    fixture.publishText( "ddspc_control", "prediction", "active" );
+    fixture.publishText( "ddspc_control", "main_loop_tt", "zeroed" );
+    CHECK( fixture.widget<QLabel>( "prediction.banner" )->text() ==
+           "PREDICTION ACTIVE: ACC-assisted DDSPC, one command per WFS frame, ACC averaged 4 scans per sample" );
+
+    // Another mode, here the plain ACC Assisted 2 kHz, switches the averaging off.
+    fixture.publishSwitch( "predict", "toggle", pcf::IndiElement::Off );
+    fixture.publishText( "ddspc_control", "prediction", "off" );
+    REQUIRE( assisted2k->isEnabled() );
+    assisted2k->click();
+    QApplication::processEvents();
+    REQUIRE( commands.size() == 5 );
+    CHECK( commands[3].getDevice() == "acc000" );
+    CHECK( commands[3].getName() == "average" );
+    CHECK( commands[3]["target"].get<double>() == 1 );
+    CHECK( commands[4]["accel_assisted_2k"].getSwitchState() == pcf::IndiElement::On );
+}
 } // namespace loPredCtrlAccGUITest
 } // namespace libXWCTest
 

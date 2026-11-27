@@ -183,6 +183,7 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, const std::st
     m_standard       = new QPushButton( QStringLiteral( "Standard" ), modeBox );
     m_assisted       = new QPushButton( QStringLiteral( "ACC Assisted" ), modeBox );
     m_assisted2k     = new QPushButton( QStringLiteral( "ACC Assisted 2 kHz" ), modeBox );
+    m_assistedAvg    = new QPushButton( QStringLiteral( "ACC Assisted 2 kHz (8 kHz avg)" ), modeBox );
     m_mainLoop       = new QPushButton( QStringLiteral( "Main Loop" ), modeBox );
     m_copy8k         = new QPushButton( QStringLiteral( "mfilt Copy 8 kHz" ), modeBox );
     m_copy2k         = new QPushButton( QStringLiteral( "mfilt Copy 2 kHz" ), modeBox );
@@ -194,6 +195,13 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, const std::st
     m_assisted2k->setWhatsThis(
         QStringLiteral( "Standard DDSPC with the ACC in the math: one command per WFS frame from a per-frame fit "
                         "whose regressor includes the newest ACC samples, written on every DM slot of the frame." ) );
+    m_assistedAvg->setObjectName( QStringLiteral( "mode.accel_assisted_2k_avg" ) );
+    m_assistedAvg->setWhatsThis(
+        QStringLiteral( "ACC Assisted 2 kHz with the accelerometer read at %1 Hz and each %2 scans averaged on the "
+                        "Pi into one sample: a steady %3 Hz stream of %2-scan means for the ACC history." )
+            .arg( s_avgFps )
+            .arg( s_avgScans )
+            .arg( s_avgFps / s_avgScans ) );
     m_mainLoop->setObjectName( QStringLiteral( "ddspc_mode.main_loop" ) );
     m_copy8k->setObjectName( QStringLiteral( "ddspc_mode.mfilt_copy_8k" ) );
     m_copy2k->setObjectName( QStringLiteral( "ddspc_mode.mfilt_copy_2k" ) );
@@ -217,7 +225,8 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, const std::st
     auto *copyRow  = new QHBoxLayout; // The mfilt copies, below the controller modes.
     auto *cloneRow = new QHBoxLayout; // The mfilt clones, below the copies.
 
-    for( auto *button : { m_standard, m_assisted, m_assisted2k, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
+    for( auto *button :
+         { m_standard, m_assisted, m_assisted2k, m_assistedAvg, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
     {
         button->setCheckable( true );
         setXwFont( button );
@@ -247,6 +256,13 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, const std::st
              [this]()
              {
                  sendMode( "accel_assisted_2k" );
+             } );
+    connect( m_assistedAvg,
+             &QPushButton::clicked,
+             this,
+             [this]()
+             {
+                 sendMode( "accel_assisted_2k", true );
              } );
     connect( m_mainLoop,
              &QPushButton::clicked,
@@ -425,6 +441,21 @@ loPredCtrlAccPanel::loPredCtrlAccPanel( const std::string &device, const std::st
                 return ratesText();
             } );
     addRow( statusGrid,
+            "accAverage",
+            "ACC averaging",
+            [this]()
+            {
+                if( m_accAverage <= 0 )
+                {
+                    return c_missing;
+                }
+
+                return m_accAverage == 1 ? QStringLiteral( "off (every scan)" )
+                                         : QStringLiteral( "%1 scans per sample (%2 Hz stream)" )
+                                               .arg( m_accAverage )
+                                               .arg( m_accStreamFps, 0, 'f', 0 );
+            } );
+    addRow( statusGrid,
             "safety.output_state",
             "Aux DM output",
             [this]()
@@ -570,6 +601,11 @@ void loPredCtrlAccPanel::subscribe()
     }
 
     m_parent->addSubscriberProperty( this, m_accDevice, "fps" ); // Routed to m_accFpsEntry by handleSetProperty().
+
+    for( const auto *property : { "average", "stream_fps" } ) // mcp3208Ctrl's scan averaging.
+    {
+        m_parent->addSubscriberProperty( this, m_accDevice, property );
+    }
 }
 
 void loPredCtrlAccPanel::onConnect()
@@ -591,7 +627,9 @@ void loPredCtrlAccPanel::onDisconnect()
     setWindowTitle( QString::fromStdString( m_device ) + QStringLiteral( " (disconnected)" ) );
     clearController();
     m_accFpsEntry->onDisconnect();
-    m_accFpsKnown = false;
+    m_accFpsKnown  = false;
+    m_accAverage   = 0;
+    m_accStreamFps = 0;
     refresh();
 }
 
@@ -616,11 +654,27 @@ void loPredCtrlAccPanel::handleDefProperty( const pcf::IndiProperty &property )
 
 void loPredCtrlAccPanel::handleDelProperty( const pcf::IndiProperty &property )
 {
-    // The accelerometer's fps, or the whole accelerometer device, is gone.
-    if( property.getDevice() == m_accDevice && ( property.getName().empty() || property.getName() == "fps" ) )
+    // An accelerometer property, or the whole accelerometer device, is gone.
+    if( property.getDevice() == m_accDevice )
     {
-        m_accFpsKnown = false;
-        m_accFpsEntry->onDisconnect();
+        const auto &name = property.getName();
+
+        if( name.empty() || name == "fps" )
+        {
+            m_accFpsKnown = false;
+            m_accFpsEntry->onDisconnect();
+        }
+
+        if( name.empty() || name == "average" )
+        {
+            m_accAverage = 0;
+        }
+
+        if( name.empty() || name == "stream_fps" )
+        {
+            m_accStreamFps = 0;
+        }
+
         refresh();
         return;
     }
@@ -662,11 +716,34 @@ void loPredCtrlAccPanel::handleDelProperty( const pcf::IndiProperty &property )
 
 void loPredCtrlAccPanel::handleSetProperty( const pcf::IndiProperty &property )
 {
-    if( property.getDevice() == m_accDevice && property.getName() == "fps" )
+    if( property.getDevice() == m_accDevice )
     {
-        m_accFpsKnown = true;
-        refresh(); // Enable the entry first, so it accepts the readback.
-        m_accFpsEntry->handleSetProperty( property );
+        const auto &name = property.getName();
+        double      current;
+
+        if( name == "fps" )
+        {
+            m_accFpsKnown = true;
+            refresh(); // Enable the entry first, so it accepts the readback.
+            m_accFpsEntry->handleSetProperty( property );
+            return;
+        }
+
+        if( ( name == "average" || name == "stream_fps" ) && property.find( "current" ) &&
+            finiteNumber( property["current"].get(), current ) )
+        {
+            if( name == "average" )
+            {
+                m_accAverage = static_cast<int>( std::lround( current ) );
+            }
+            else
+            {
+                m_accStreamFps = current;
+            }
+
+            refresh();
+        }
+
         return;
     }
 
@@ -897,10 +974,22 @@ void loPredCtrlAccPanel::merge( Readback &readback, const pcf::IndiProperty &pro
     }
 }
 
-void loPredCtrlAccPanel::sendMode( const char *selected )
+void loPredCtrlAccPanel::sendMode( const char *selected, bool averaged )
 {
     if( interlock().isEmpty() )
     {
+        // The averaged mode sets the accelerometer to s_avgFps averaged by s_avgScans; every other mode switches any
+        // averaging off, so none runs on averaged data unawares. The rate change applies while prediction is off.
+        if( averaged )
+        {
+            sendAccTarget( "fps", s_avgFps );
+            sendAccTarget( "average", s_avgScans );
+        }
+        else if( m_accAverage > 1 )
+        {
+            sendAccTarget( "average", 1 );
+        }
+
         // Exactly one element on, as the controller's ddspc_mode callback requires.
         pcf::IndiProperty request( pcf::IndiProperty::Switch, m_device, "ddspc_mode" );
         request.setRule( pcf::IndiProperty::OneOfMany );
@@ -927,6 +1016,13 @@ void loPredCtrlAccPanel::sendMode( const char *selected )
     }
 
     refresh(); // The buttons show the readback until the controller reports the new mode.
+}
+
+void loPredCtrlAccPanel::sendAccTarget( const char *property, double value )
+{
+    pcf::IndiProperty request( pcf::IndiProperty::Number, m_accDevice, property );
+    request.add( pcf::IndiElement( "target", value ) );
+    sendNewProperty( request );
 }
 
 void loPredCtrlAccPanel::requestReset()
@@ -970,14 +1066,17 @@ void loPredCtrlAccPanel::refresh()
     m_interlock->setText( blocked.isEmpty() ? QStringLiteral( "Mode change and reset available." ) : blocked );
     m_standard->setChecked( switchState( "ddspc_mode", "standard" ) == pcf::IndiElement::On );
     m_assisted->setChecked( switchState( "ddspc_mode", "accel_assisted" ) == pcf::IndiElement::On );
-    m_assisted2k->setChecked( switchState( "ddspc_mode", "accel_assisted_2k" ) == pcf::IndiElement::On );
+    const bool assisted2k = switchState( "ddspc_mode", "accel_assisted_2k" ) == pcf::IndiElement::On;
+    m_assisted2k->setChecked( assisted2k && m_accAverage <= 1 );
+    m_assistedAvg->setChecked( assisted2k && m_accAverage > 1 );
     m_mainLoop->setChecked( switchState( "ddspc_mode", "main_loop" ) == pcf::IndiElement::On );
     m_copy8k->setChecked( switchState( "ddspc_mode", "mfilt_copy_8k" ) == pcf::IndiElement::On );
     m_copy2k->setChecked( switchState( "ddspc_mode", "mfilt_copy_2k" ) == pcf::IndiElement::On );
     m_clone8k->setChecked( switchState( "ddspc_mode", "mfilt_clone_8k" ) == pcf::IndiElement::On );
     m_clone2k->setChecked( switchState( "ddspc_mode", "mfilt_clone_2k" ) == pcf::IndiElement::On );
 
-    for( auto *button : { m_standard, m_assisted, m_assisted2k, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
+    for( auto *button :
+         { m_standard, m_assisted, m_assisted2k, m_assistedAvg, m_mainLoop, m_copy8k, m_copy2k, m_clone8k, m_clone2k } )
     {
         button->setEnabled( blocked.isEmpty() );
         button->setToolTip( blocked.isEmpty() ? button->whatsThis() : blocked );
@@ -993,6 +1092,19 @@ void loPredCtrlAccPanel::refresh()
             button->setToolTip(
                 QStringLiteral( "This controller has no %1 mode." ).arg( QString::fromStdString( element ) ) );
         }
+    }
+
+    // The averaged mode also needs the controller's accel_assisted_2k and an accelerometer that averages (mcp3208Ctrl).
+    if( switchState( "ddspc_mode", "accel_assisted_2k" ) == pcf::IndiElement::UnknownSwitchState )
+    {
+        m_assistedAvg->setEnabled( false );
+        m_assistedAvg->setToolTip( QStringLiteral( "This controller has no accel_assisted_2k mode." ) );
+    }
+    else if( m_accAverage <= 0 || !m_accFpsKnown )
+    {
+        m_assistedAvg->setEnabled( false );
+        m_assistedAvg->setToolTip( QStringLiteral( "%1 does not offer scan averaging (average and fps)." )
+                                       .arg( QString::fromStdString( m_accDevice ) ) );
     }
 
     m_reset->setEnabled( blocked.isEmpty() && m_readbacks.count( "reset_model" ) );
@@ -1032,7 +1144,11 @@ void loPredCtrlAccPanel::refresh()
         }
         else if( prediction == "active" && mode == "accel_assisted_2k" )
         {
-            banner = QStringLiteral( "PREDICTION ACTIVE: ACC-assisted DDSPC, one command per WFS frame" );
+            banner = m_accAverage > 1
+                         ? QStringLiteral( "PREDICTION ACTIVE: ACC-assisted DDSPC, one command per WFS frame, ACC "
+                                           "averaged %1 scans per sample" )
+                               .arg( m_accAverage )
+                         : QStringLiteral( "PREDICTION ACTIVE: ACC-assisted DDSPC, one command per WFS frame" );
             style  = QStringLiteral( "background: #1e7b34; color: white;" );
         }
         else if( prediction == "active" )
