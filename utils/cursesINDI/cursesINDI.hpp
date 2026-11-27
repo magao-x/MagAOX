@@ -2,6 +2,10 @@
  * \brief A curses-based terminal client for browsing and editing INDI properties.
  */
 
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <climits>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -9,6 +13,7 @@
 #include <thread>
 #include <mutex>
 #include <set>
+#include <string_view>
 
 #include "../../INDI/libcommon/IndiClient.hpp"
 #include "cursesTableGrid.hpp"
@@ -95,7 +100,7 @@ std::string displayValue( pcf::IndiProperty &ip, /**< [in] the INDI property */
 
 /// Terminal INDI client which displays every known element in a curses table.
 /** Connects to the INDI server on localhost:7624, tracks all defined properties,
- * and lets the user navigate, search by device, and edit writable elements.
+ * and lets the user navigate, search device.property.element names, and edit writable elements.
  * INDI messages are written to a log file which can be followed in another terminal.
  */
 class cursesINDI : public pcf::IndiClient, public cursesTableGrid
@@ -110,6 +115,9 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
 
     /// Current curses cursor visibility, as passed to curs_set.
     int m_cursStat{ 1 };
+
+    /// Window showing the title, mode, and keyboard shortcuts. Owned by this class.
+    WINDOW *w_topWin{ nullptr };
 
     /// Window for user prompts and input (search, edit, confirm).  Owned by this class.
     WINDOW *w_interactWin{ nullptr };
@@ -180,8 +188,16 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
         int         tableRow{ -1 }; ///< The row of this element in the table, -1 if not displayed
     };
 
-    /// Map of elements keyed by their device.property.element key.
-    typedef std::map<std::string, elementSpec> elementMapT;
+    /// Compare dotted element keys by device, property, then element.
+    struct elementKeyLess
+    {
+        /// Order each field lexicographically, keeping a name before names extending it.
+        bool operator()( std::string_view left, /**< [in] first device.property.element key */
+                         std::string_view right /**< [in] second device.property.element key */ ) const;
+    };
+
+    /// Map of elements keyed by device.property.element and ordered by its separate fields.
+    typedef std::map<std::string, elementSpec, elementKeyLess> elementMapT;
 
     /// Value type of elementMapT.
     typedef elementMapT::value_type elementMapValueT;
@@ -189,13 +205,25 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     /// Iterator type of elementMapT.
     typedef elementMapT::iterator elementMapIteratorT;
 
-    /// All elements of the properties in knownProps, in table order.
+    /// All elements of the properties in knownProps, in alphabetical field order.
     elementMapT knownElements;
 
-    /// True while the user is typing a device search in the device column.
+    /// Identity of the selected element, retained when table rows are reordered or deleted.
+    std::string m_selectedKey;
+
+    /// True while the query owns keyboard input, including after Ctrl+L or Ctrl+F from another column.
     bool m_deviceSearching{ false };
 
-    /// The device search string typed so far.
+    /// True while the query hides nonmatching rows, including while navigating the results.
+    bool m_filtering{ false };
+
+    /// Enable h/j/k/l navigation and require explicit focus before typing search queries.
+    bool m_vimMode{ false };
+
+    /// Pending decimal count for the next h/j/k/l motion; zero means no count.
+    int m_vimCount{ 0 };
+
+    /// The dot-separated device, property, and element query typed so far.
     std::string m_deviceTarget;
 
     /// Store a newly defined or updated property and its elements, and schedule a redraw or update.
@@ -242,7 +270,7 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     void drawThreadExec();
 
     /// Rebuild the table contents from knownElements and redraw it.
-    void redrawTable();
+    void redrawTable( bool selectBest = false /**< [in] select the first result after editing a filter */ );
 
     /// Update changed property states and element values in place.
     void updateTable();
@@ -256,58 +284,84 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     );
 
     /// Move the selected cell and update the prompt windows.  The caller must hold m_drawMutex.
-    void _moveCurrent( int nextY, /**< [in] the new row */
-                       int nextX  /**< [in] the new column */
+    void _moveCurrent( int  nextY,                /**< [in] the new row */
+                       int  nextX,                /**< [in] the new column */
+                       bool refreshPrompt = false /**< [in] redraw the prompt after changing input mode */
     );
 
-    /// Handle a key press from the user.
-    void keyPressed( int ch /**< [in] the key code */ );
+    /// Handle a key press, applying held-key repeats to navigation.
+    void keyPressed( int ch, /**< [in] the key code */
+                     int repeats = 1 /**< [in] consecutive presses of the same key */ );
 
-    /// If a key is pressed in column 1 (the device column), this function searchs for devices alphabetically.
+    /// Draw the title and shortcuts; the caller must hold the draw mutex.
+    void drawHeader();
+
+    /// Sentinel rank for fields that do not match the query.
+    static constexpr int noSearchMatch = 5;
+
+    /// Test whether two case-folded fields differ by at most one insertion, deletion, substitution, or adjacent swap.
+    static bool withinOneEdit( std::string_view field, /**< [in] candidate field */
+                               std::string_view query /**< [in] query segment */ );
+
+    /// Rank a field against one case-folded search segment without crossing field boundaries.
+    /** \returns 0 for exact or empty, 1 for prefix, 2 for substring, 3 for one typo,
+     * 4 for subsequence, or noSearchMatch. Typo matching requires at least four query characters.
+     */
+    static int searchSegmentRank( std::string      field, /**< [in] device, property, or element name */
+                                  std::string_view query /**< [in] lowercase query segment */ );
+
+    /// Rank all query segments against an element; noSearchMatch in any field excludes the element.
+    static std::array<int, 3> searchElementRank( const elementSpec &element, /**< [in] candidate element */
+                                                 std::string query /**< [in] dot-separated search or filter text */ );
+
+    /// Find the first displayed row matching a case-insensitive device.property.element query.
+    /** Compare match quality in device, property, then element order.
+     * Empty or omitted segments match any name; ties retain alphabetical field order.
+     * \returns -1 for an empty query, more than three segments, or no displayed match
+     */
+    static int findSearchRow( const elementMapT &elements, /**< [in] elements in alphabetical field order */
+                              std::string        query /**< [in] dot-separated search text */ );
+
+    /// Update a dot-separated query, jumping to its best match or filtering the table.
     void deviceSearch( int ch /**< [in] the key code */ );
 
     /// Recreate the element count window after the table is drawn.
     /**
      * \returns the result of postPrint
      */
-    virtual int postDraw()
-    {
-        //if(fpout) *fpout << "post draw" << std::endl;
-
-        if( w_countWin )
-        {
-            wclear( w_countWin );
-            delwin( w_countWin );
-        }
-        w_countWin = newwin( 1, m_minWidth, m_yTop + tabHeight() + 1, m_xLeft );
-
-        return postPrint();
-    }
+    virtual int postDraw();
 
     /// Print the count of displayed elements in the count window.
     /**
      * \returns 0
      */
-    virtual int postPrint()
-    {
-        if( !w_countWin )
-        {
-            return 0;
-        }
-
-        int shown = tabHeight();
-        if( m_cellContents.size() - m_startRow < (size_t)shown )
-        {
-            shown = m_cellContents.size() - m_startRow;
-        }
-
-        wclear( w_countWin );
-        wprintw( w_countWin, "%i/%zu elements shown.", shown, knownElements.size() );
-        wrefresh( w_countWin );
-
-        return 0;
-    }
+    virtual int postPrint();
 };
+
+inline bool cursesINDI::elementKeyLess::operator()( std::string_view left, std::string_view right ) const
+{
+    for( int field = 0; field < 2; ++field )
+    {
+        auto leftPeriod  = left.find( '.' );
+        auto rightPeriod = right.find( '.' );
+        int  comparison  = left.substr( 0, leftPeriod ).compare( right.substr( 0, rightPeriod ) );
+
+        if( comparison != 0 )
+        {
+            return comparison < 0;
+        }
+
+        if( leftPeriod == std::string_view::npos || rightPeriod == std::string_view::npos )
+        {
+            return leftPeriod == std::string_view::npos && rightPeriod != std::string_view::npos;
+        }
+
+        left.remove_prefix( leftPeriod + 1 );
+        right.remove_prefix( rightPeriod + 1 );
+    }
+
+    return left < right;
+}
 
 cursesINDI::cursesINDI( const std::string &szName, const std::string &szVersion, const std::string &szProtocolVersion )
     : pcf::IndiClient( szName, szVersion, szProtocolVersion, "127.0.0.1", 7624 )
@@ -329,6 +383,11 @@ cursesINDI::cursesINDI( const std::string &szName, const std::string &szVersion,
 
 cursesINDI::~cursesINDI()
 {
+    if( w_topWin )
+    {
+        delwin( w_topWin );
+    }
+
     if( w_interactWin )
     {
         delwin( w_interactWin );
@@ -399,6 +458,8 @@ void cursesINDI::handleDefProperty( const pcf::IndiProperty &ipRecv )
 
 void cursesINDI::handleDelProperty( const pcf::IndiProperty &ipRecv )
 {
+    std::lock_guard<std::mutex> lock( m_drawMutex );
+
     //if(fpout) *fpout << "got delete property" << std::endl;
 
     if( ipRecv.hasValidDevice() )
@@ -576,6 +637,12 @@ void cursesINDI::shutDown()
 
     m_cellContents.clear();
 
+    if( w_topWin )
+    {
+        delwin( w_topWin );
+    }
+    w_topWin = nullptr;
+
     if( w_interactWin )
     {
         delwin( w_interactWin );
@@ -645,7 +712,7 @@ inline void cursesINDI::drawThreadExec()
     }
 }
 
-void cursesINDI::redrawTable()
+void cursesINDI::redrawTable( bool selectBest )
 {
     std::lock_guard<std::mutex> lock( m_drawMutex );
 
@@ -657,7 +724,8 @@ void cursesINDI::redrawTable()
 
     bool fsmAlerts = false;
 
-    std::set<std::string> alertDev;
+    std::set<std::string>                                           alertDev;
+    std::vector<std::pair<std::array<int, 3>, elementMapIteratorT>> visible;
 
     for( elementMapIteratorT es = knownElements.begin(); es != knownElements.end(); ++es )
     {
@@ -670,6 +738,32 @@ void cursesINDI::redrawTable()
             fsmAlerts = true;
             alertDev.insert( knownProps[es->second.propKey].getDevice() );
         }
+
+        es->second.tableRow = -1;
+
+        auto rank = m_filtering ? searchElementRank( es->second, m_deviceTarget ) : std::array<int, 3>{};
+
+        if( rank[0] == noSearchMatch || rank[1] == noSearchMatch || rank[2] == noSearchMatch )
+        {
+            continue;
+        }
+
+        visible.emplace_back( rank, es );
+    }
+
+    if( m_filtering )
+    {
+        std::stable_sort( visible.begin(),
+                          visible.end(),
+                          []( const auto &left, const auto &right )
+                          {
+                              return left.first < right.first;
+                          } );
+    }
+
+    for( const auto &entry : visible )
+    {
+        auto                     es = entry.second;
         std::vector<std::string> s;
 
         s.resize( m_colFraction.size() );
@@ -684,6 +778,40 @@ void cursesINDI::redrawTable()
 
         m_cellContents.push_back( s );
         es->second.tableRow = m_cellContents.size() - 1;
+    }
+
+    if( m_cellContents.empty() )
+    {
+        m_startRow = 0;
+        m_currY    = 0;
+    }
+    else
+    {
+        // Preserve identity on updates; a removed filtered row falls back to its displayed position.
+        size_t row      = 0;
+        auto   selected = knownElements.lower_bound( m_selectedKey );
+
+        if( !selectBest && m_filtering )
+        {
+            row = std::min( m_startRow + m_currY, visible.size() - 1 );
+
+            if( selected != knownElements.end() && selected->first == m_selectedKey && selected->second.tableRow >= 0 )
+            {
+                row = selected->second.tableRow;
+            }
+        }
+        else if( !selectBest )
+        {
+            if( selected == knownElements.end() )
+            {
+                --selected;
+            }
+
+            row = selected->second.tableRow;
+        }
+
+        m_startRow = !selectBest && row > m_currY ? row - m_currY : 0;
+        m_currY    = row - m_startRow;
     }
 
     draw();
@@ -852,18 +980,11 @@ void cursesINDI::updateCurVal()
     cursStat( 0 );
     wclear( w_curvalWin );
 
-    auto it = knownElements.begin();
-    while( it != knownElements.end() )
-    {
-        if( (size_t)it->second.tableRow == m_currY + m_startRow )
-        {
-            break;
-        }
-        ++it;
-    }
+    auto it = knownElements.find( m_selectedKey );
 
     if( it == knownElements.end() )
     {
+        wrefresh( w_curvalWin );
         wrefresh( w_interactWin );
         cursStat( cs );
         return;
@@ -887,20 +1008,37 @@ void cursesINDI::moveCurrent( int nextY, int nextX )
 {
     std::lock_guard<std::mutex> lock( m_drawMutex );
 
-    _moveCurrent( nextY, nextX );
+    if( m_vimMode )
+    {
+        m_deviceSearching = false;
+    }
+
+    _moveCurrent( nextY, nextX, m_vimMode );
 }
 
-void cursesINDI::_moveCurrent( int nextY, int nextX )
+void cursesINDI::_moveCurrent( int nextY, int nextX, bool refreshPrompt )
 {
-    int currX = m_currX;
-    int currY = m_currY;
+    int         currX       = m_currX;
+    int         currY       = m_currY;
+    std::string selectedKey = m_selectedKey;
 
     moveSelected( nextY, nextX );
+
+    m_selectedKey.clear();
+
+    for( const auto &[key, element] : knownElements )
+    {
+        if( element.tableRow >= 0 && static_cast<size_t>( element.tableRow ) == m_startRow + m_currY )
+        {
+            m_selectedKey = key;
+            break;
+        }
+    }
 
     //if(fpout) *fpout << "moved: " << nextX << " " << nextY << " " << currX << "->" << m_currX << " " << currY << "->"
     //<< m_currY << std::endl;
 
-    if( m_deviceSearching && nextX != 1 )
+    if( m_deviceSearching && nextX != 1 && ( nextX != currX || nextY != currY ) )
     {
         wclear( w_interactWin );
         wrefresh( w_interactWin );
@@ -909,19 +1047,30 @@ void cursesINDI::_moveCurrent( int nextY, int nextX )
 
     updateCurVal();
 
+    // Background redraws must preserve search focus without moving the selected cell.
+    if( m_deviceSearching && nextX != 1 )
+    {
+        return;
+    }
+
     if( nextX == 1 )
     {
-        if( currX != nextX )
+        if( currX != nextX || refreshPrompt )
         {
             wclear( w_interactWin );
-            wprintw( w_interactWin, "search: " );
+
+            wprintw( w_interactWin,
+                     "%s: %s",
+                     m_filtering ? "filter" : "search",
+                     m_deviceSearching || m_filtering || m_vimMode ? m_deviceTarget.c_str() : "" );
+
             wrefresh( w_interactWin );
         }
     }
-    else if( currY != nextY || currX == 1 )
+    else if( currY != nextY || currX == 1 || selectedKey != m_selectedKey || refreshPrompt )
     {
         wclear( w_interactWin );
-        if( m_currY + m_startRow >= knownElements.size() )
+        if( m_currY + m_startRow >= m_cellContents.size() )
         {
             wrefresh( w_interactWin );
             return;
@@ -966,107 +1115,367 @@ void cursesINDI::_moveCurrent( int nextY, int nextX )
     }
 }
 
+inline bool cursesINDI::withinOneEdit( std::string_view field, std::string_view query )
+{
+    if( field.size() > query.size() + 1 || query.size() > field.size() + 1 )
+    {
+        return false;
+    }
+
+    size_t i = 0;
+
+    while( i < field.size() && i < query.size() && field[i] == query[i] )
+    {
+        ++i;
+    }
+
+    if( i == field.size() || i == query.size() )
+    {
+        return true;
+    }
+
+    if( field.size() == query.size() )
+    {
+        return field.substr( i + 1 ) == query.substr( i + 1 ) ||
+               ( i + 1 < field.size() && field[i] == query[i + 1] && field[i + 1] == query[i] &&
+                 field.substr( i + 2 ) == query.substr( i + 2 ) );
+    }
+
+    return field.size() > query.size() ? field.substr( i + 1 ) == query.substr( i )
+                                       : field.substr( i ) == query.substr( i + 1 );
+}
+
+inline int cursesINDI::searchSegmentRank( std::string field, std::string_view query )
+{
+    for( char &ch : field )
+    {
+        ch = std::tolower( static_cast<unsigned char>( ch ) );
+    }
+
+    if( query.empty() || field == query )
+    {
+        return 0;
+    }
+
+    auto position = field.find( query );
+
+    if( position == 0 )
+    {
+        return 1;
+    }
+
+    if( position != std::string::npos )
+    {
+        return 2;
+    }
+
+    if( query.size() >= 4 && withinOneEdit( field, query ) )
+    {
+        return 3;
+    }
+
+    size_t matched = 0;
+
+    for( char ch : field )
+    {
+        if( ch == query[matched] )
+        {
+            ++matched;
+
+            if( matched == query.size() )
+            {
+                return 4;
+            }
+        }
+    }
+
+    return noSearchMatch;
+}
+
+inline std::array<int, 3> cursesINDI::searchElementRank( const elementSpec &element, std::string query )
+{
+    for( char &ch : query )
+    {
+        ch = std::tolower( static_cast<unsigned char>( ch ) );
+    }
+
+    std::array<std::string_view, 3> segments{};
+    std::string_view                remaining = query;
+
+    for( size_t i = 0; i < segments.size(); ++i )
+    {
+        auto period = remaining.find( '.' );
+        segments[i] = remaining.substr( 0, period );
+
+        if( period == std::string_view::npos )
+        {
+            break;
+        }
+
+        if( i == segments.size() - 1 )
+        {
+            return { noSearchMatch, noSearchMatch, noSearchMatch };
+        }
+
+        remaining.remove_prefix( period + 1 );
+    }
+
+    return { searchSegmentRank( element.device, segments[0] ),
+             searchSegmentRank( element.propertyName, segments[1] ),
+             searchSegmentRank( element.name, segments[2] ) };
+}
+
+inline int cursesINDI::findSearchRow( const elementMapT &elements, std::string query )
+{
+    if( query.empty() )
+    {
+        return -1;
+    }
+
+    std::array<int, 3> bestRank{ noSearchMatch, noSearchMatch, noSearchMatch };
+    int                bestRow = -1;
+
+    for( const auto &[key, element] : elements )
+    {
+        if( element.tableRow < 0 )
+        {
+            continue;
+        }
+
+        auto rank = searchElementRank( element, query );
+
+        if( rank[0] == noSearchMatch || rank[1] == noSearchMatch || rank[2] == noSearchMatch )
+        {
+            continue;
+        }
+
+        if( rank < bestRank )
+        {
+            bestRank = rank;
+            bestRow  = element.tableRow;
+        }
+    }
+
+    return bestRow;
+}
+
 void cursesINDI::deviceSearch( int ch )
 {
-    bool updated = false;
-    if( m_deviceSearching == true )
-    {
+    bool selectBest;
 
-        // CTRL+L clears search bar
-        if( ( ch == ( 0x1f & 'l' ) ) && ( m_deviceTarget.size() > 0 ) )
+    { //mutex scope
+        std::lock_guard<std::mutex> lock( m_drawMutex );
+
+        if( ch == KEY_BACKSPACE && ( m_deviceSearching || m_filtering ) && !m_deviceTarget.empty() )
         {
-            std::lock_guard<std::mutex> lock( m_drawMutex );
-            m_deviceTarget = "search: ";
-            wclear( w_interactWin );
-            wprintw( w_interactWin, "%s", m_deviceTarget.c_str() );
-            wrefresh( w_interactWin );
-            m_deviceSearching = false;
-            return;
+            m_deviceTarget.pop_back();
         }
-        else if( ( ch == KEY_BACKSPACE ) && ( m_deviceTarget.size() > 0 ) )
+        else if( ch == ( 0x1f & 'h' ) && ( m_deviceSearching || m_filtering ) && !m_deviceTarget.empty() )
         {
-            std::lock_guard<std::mutex> lock( m_drawMutex );
-            m_deviceTarget.erase( m_deviceTarget.size() - 1, 1 );
-            wprintw( w_interactWin, "\b \b" );
-            wrefresh( w_interactWin );
-            return;
+            // Ctrl+Backspace sends Ctrl+H in legacy terminal input. Skip a trailing separator.
+            size_t end    = m_deviceTarget.size() - ( m_deviceTarget.back() == '.' );
+            auto   period = end == 0 ? std::string::npos : m_deviceTarget.rfind( '.', end - 1 );
+            m_deviceTarget.resize( period == std::string::npos ? 0 : period + 1 );
         }
-        else if( std::isprint( ch ) )
+        else if( ch >= 0 && ch <= UCHAR_MAX && std::isprint( static_cast<unsigned char>( ch ) ) )
         {
-            m_deviceTarget += ch;
-            updated = true;
+            if( !m_deviceSearching && !m_filtering )
+            {
+                m_deviceTarget.clear();
+            }
+
+            m_deviceTarget += static_cast<char>( ch );
         }
         else
         {
             return;
         }
-    }
-    else if( std::isprint( ch ) )
-    {
-        m_deviceTarget = ch;
-        updated        = true;
-    }
-    else
-    {
-        return;
-    }
 
-    m_deviceSearching = true;
-
-    if( updated )
-    {
-        std::lock_guard<std::mutex> lock( m_drawMutex );
-        wprintw( w_interactWin, "%c", ch );
+        m_deviceSearching = true;
+        selectBest        = m_filtering;
+        wclear( w_interactWin );
+        wprintw( w_interactWin, "%s: %s", m_filtering ? "filter" : "search", m_deviceTarget.c_str() );
         wrefresh( w_interactWin );
+
+        if( !m_filtering )
+        {
+            int row = findSearchRow( knownElements, m_deviceTarget );
+
+            if( row < 0 )
+            {
+                return;
+            }
+
+            m_startRow = row;
+            _moveCurrent( 0, 1 );
+        }
     }
 
-    //if(fpout) *fpout << "device searching: " << m_deviceTarget << std::endl;
-    if( m_deviceTarget.size() == 0 )
-    {
-        return;
-    }
-
-    auto it = knownElements.lower_bound( m_deviceTarget );
-
-    //if(fpout) *fpout << "new row: " << it->second.tableRow << " " << m_startRow << " " <<
-    //it->second.tableRow-m_startRow << "\n";
-
-    if( it->second.tableRow == -1 )
-    {
-        return;
-    }
-
-    m_startRow = it->second.tableRow;
-
-    moveCurrent( 0, 1 );
-
-    redrawTable();
-
-    return;
+    redrawTable( selectBest );
 }
 
-void cursesINDI::keyPressed( int ch )
+void cursesINDI::keyPressed( int ch, int repeats )
 {
+    if( m_vimMode && !m_deviceSearching && ch >= '0' && ch <= '9' )
+    {
+        for( int i = 0; i < repeats; ++i )
+        {
+            m_vimCount = std::min<int64_t>( static_cast<int64_t>( m_vimCount ) * 10 + ch - '0', INT_MAX );
+        }
 
-    //If in first column, do device selection
-    if( m_currX == 1 )
+        return;
+    }
+
+    int count  = m_vimCount;
+    m_vimCount = 0;
+
+    if( ch == ( 0x1f & 'v' ) ||
+        ( m_vimMode && ( ch == 27 || ( m_deviceSearching && ( ch == '\n' || ch == '\r' || ch == KEY_ENTER ) ) ) ) )
+    {
+        std::lock_guard<std::mutex> lock( m_drawMutex );
+
+        if( ch == ( 0x1f & 'v' ) )
+        {
+            m_vimMode = !m_vimMode;
+        }
+
+        m_deviceSearching = false;
+
+        // Enter ends query input without replacing the visible query with a cell prompt.
+        if( ch == ( 0x1f & 'v' ) || ch == 27 )
+        {
+            _moveCurrent( m_currY, m_currX, true );
+        }
+
+        drawHeader();
+        return;
+    }
+
+    if( ch == KEY_RESIZE )
+    {
+        std::lock_guard<std::mutex> lock( m_drawMutex );
+        draw();
+        return;
+    }
+
+    int     direction = ch;
+    int64_t steps     = repeats;
+
+    if( m_vimMode && !m_deviceSearching )
+    {
+        switch( ch )
+        {
+        case 'h':
+            direction = KEY_LEFT;
+            break;
+        case 'j':
+            direction = KEY_DOWN;
+            break;
+        case 'k':
+            direction = KEY_UP;
+            break;
+        case 'l':
+            direction = KEY_RIGHT;
+            break;
+        }
+
+        if( direction != ch )
+        {
+            // The count applies to the first press, not subsequent coalesced key repeats.
+            steps += std::max( 1, count ) - 1;
+        }
+        else if( ch == ( 0x1f & 'u' ) || ch == ( 0x1f & 'd' ) )
+        {
+            direction = ch == ( 0x1f & 'u' ) ? KEY_UP : KEY_DOWN;
+            steps *= std::max( 1, static_cast<int>( tabHeight() ) / 2 );
+        }
+    }
+
+    int64_t nextX  = m_currX;
+    int64_t nextY  = m_currY;
+    bool    moving = true;
+
+    switch( direction )
+    {
+    case KEY_LEFT:
+        nextX -= steps;
+        break;
+    case KEY_RIGHT:
+        nextX += steps;
+        break;
+    case KEY_UP:
+        nextY -= steps;
+        break;
+    case KEY_DOWN:
+        nextY += steps;
+        break;
+    case KEY_PPAGE:
+        nextY -= tabHeight() - 1;
+        break;
+    case KEY_NPAGE:
+        nextY += tabHeight() - 1;
+        break;
+    default:
+        moving = false;
+        break;
+    }
+
+    if( moving )
+    {
+        if( !m_cellContents.empty() && !m_gridWin.empty() && m_gridWin[0].size() > 1 )
+        {
+            nextX = std::clamp<int64_t>( nextX, 1, m_gridWin[0].size() - 1 );
+            nextY = std::clamp<int64_t>( nextY,
+                                         -static_cast<int64_t>( m_startRow ),
+                                         static_cast<int64_t>( m_cellContents.size() ) - 1 - m_startRow );
+            moveCurrent( nextY, nextX );
+        }
+
+        return;
+    }
+
+    if( ch == ( 0x1f & 'l' ) || ch == ( 0x1f & 'f' ) )
+    {
+        bool redraw;
+
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_drawMutex );
+
+            bool filtering = ch == ( 0x1f & 'f' );
+            redraw         = m_filtering != filtering;
+
+            if( !m_filtering || !filtering )
+            {
+                m_deviceTarget.clear();
+            }
+
+            m_filtering       = filtering;
+            m_deviceSearching = true;
+            wclear( w_interactWin );
+            wprintw( w_interactWin, "%s: %s", m_filtering ? "filter" : "search", m_deviceTarget.c_str() );
+            wrefresh( w_interactWin );
+        }
+
+        if( redraw )
+        {
+            redrawTable();
+        }
+
+        return;
+    }
+
+    // Queries accept input from the device column or after explicit shortcut focus.
+    if( ( m_currX == 1 && !m_vimMode ) || m_deviceSearching )
     {
         deviceSearch( ch );
         return;
-    }
-
-    if( m_deviceSearching )
-    {
-        wclear( w_interactWin );
-        wrefresh( w_interactWin );
-        m_deviceSearching = false;
     }
 
     switch( ch )
     {
     case 'e':
     {
-        if( m_currY + m_startRow >= knownElements.size() )
+        if( m_currY + m_startRow >= m_cellContents.size() )
         {
             break;
         }
@@ -1212,7 +1621,7 @@ void cursesINDI::keyPressed( int ch )
     } //case 'e'
     case 't':
     {
-        if( m_currY + m_startRow >= knownElements.size() )
+        if( m_currY + m_startRow >= m_cellContents.size() )
         {
             break;
         }
@@ -1303,7 +1712,7 @@ void cursesINDI::keyPressed( int ch )
     } //case 't'
     case 'p':
     {
-        if( m_currY + m_startRow >= knownElements.size() )
+        if( m_currY + m_startRow >= m_cellContents.size() )
         {
             break;
         }
@@ -1389,4 +1798,90 @@ void cursesINDI::keyPressed( int ch )
     std::lock_guard<std::mutex> lock( m_drawMutex );
     cursStat( 0 );
     wrefresh( w_interactWin );
+}
+
+inline void cursesINDI::drawHeader()
+{
+    if( !w_topWin )
+    {
+        w_topWin = newwin( 1, COLS, 0, 0 );
+    }
+    else
+    {
+        wresize( w_topWin, 1, COLS );
+    }
+
+    wclear( w_topWin );
+    wprintw( w_topWin, "curses" );
+
+    if( m_vimMode )
+    {
+        wattron( w_topWin, A_BOLD | A_REVERSE );
+        wprintw( w_topWin, "VI" );
+        wattroff( w_topWin, A_BOLD | A_REVERSE );
+        wprintw( w_topWin, "NDI" );
+    }
+    else
+    {
+        wprintw( w_topWin, "INDI" );
+    }
+
+    wprintw( w_topWin, " | Ctrl+L clear+search | Ctrl+F filter | Ctrl+V VI " );
+
+    if( m_vimMode )
+    {
+        wattron( w_topWin, A_BOLD | A_REVERSE );
+        wprintw( w_topWin, "on" );
+        wattroff( w_topWin, A_BOLD | A_REVERSE );
+    }
+    else
+    {
+        wprintw( w_topWin, "off" );
+    }
+
+    wprintw( w_topWin, " | Ctrl+C quit" );
+
+    wrefresh( w_topWin );
+}
+
+inline int cursesINDI::postDraw()
+{
+    drawHeader();
+
+    //if(fpout) *fpout << "post draw" << std::endl;
+
+    if( w_countWin )
+    {
+        wclear( w_countWin );
+        delwin( w_countWin );
+    }
+    w_countWin = newwin( 1, m_minWidth, m_yTop + tabHeight() + 1, m_xLeft );
+
+    return postPrint();
+}
+
+inline int cursesINDI::postPrint()
+{
+    if( !w_countWin )
+    {
+        return 0;
+    }
+
+    int shown = tabHeight();
+    if( m_cellContents.size() - m_startRow < (size_t)shown )
+    {
+        shown = m_cellContents.size() - m_startRow;
+    }
+
+    wclear( w_countWin );
+    wprintw( w_countWin, "%i/%zu elements shown.", shown, knownElements.size() );
+
+    if( m_filtering )
+    {
+        wprintw( w_countWin, " %zu matching filter: %s", m_cellContents.size(), m_deviceTarget.c_str() );
+    }
+
+    wrefresh( w_countWin );
+
+    return 0;
 }

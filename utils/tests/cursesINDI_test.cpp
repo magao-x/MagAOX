@@ -1,27 +1,1252 @@
-/** \file template_test.cpp
-  * \brief Catch2 tests for the template app.
-  *
-  * History:
-  */
-#include "../../tests/catch2/catch.hpp"
+/** \file cursesINDI_test.cpp
+ * \brief Offline tests for cursesINDI search, filtering, and selection across table updates.
+ * \ingroup cursesINDI_unit_test
+ */
+#include "../../tests/testXWC.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <climits>
 #include <filesystem>
-#include "../cursesINDI/cursesINDI.hpp"
+#include <format>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <set>
+#include <string_view>
+#include <thread>
+
+#include "../../INDI/libcommon/IndiClient.hpp"
 #include "../cursesINDI/cursesTableGrid.hpp"
 
-namespace template_test
+/// \cond CURSESINDI_TEST_HARNESS
+namespace pcf
 {
-
-SCENARIO( "xxxx", "[template]" )
+/// Replace the network client while retaining the real property and thread-state types.
+class OfflineIndiClient : public IndiConnection
 {
-   GIVEN("xxxxx")
-   {
-      WHEN("xxxx")
-      {
-         int rv = 0;
+  public:
+    /// Construct without creating sockets or starting any threads.
+    OfflineIndiClient( const std::string &name,     /**< [in] client name */
+                       const std::string &version,  /**< [in] client version */
+                       const std::string &protocol, /**< [in] protocol version */
+                       const std::string &address,  /**< [in] unused server address */
+                       int                port /**< [in] unused server port */ );
 
-         REQUIRE(rv == 0);
-      }
-   }
+    /// Discard subscription requests from synthetic property definitions.
+    void sendGetProperties( const IndiProperty &property /**< [in] unused property */ );
+
+    /// Reject any attempted property edit in these read-only tests.
+    void sendNewProperty( const IndiProperty &property /**< [in] unused property */ );
+
+    /// Reject network message dispatch; tests call property callbacks directly.
+    void dispatch( const IndiMessage::Type &type, /**< [in] unused message type */
+                   const IndiProperty      &property /**< [in] unused property */ ) override;
+
+    /// Reject starting the network processing loop.
+    void update() override;
+};
+
+OfflineIndiClient::OfflineIndiClient(
+    const std::string &name, const std::string &version, const std::string &protocol, const std::string &, int )
+    : IndiConnection( name, version, protocol )
+{
 }
-} //namespace template_test
+
+void OfflineIndiClient::sendGetProperties( const IndiProperty & )
+{
+}
+
+void OfflineIndiClient::sendNewProperty( const IndiProperty & )
+{
+    FAIL( "Offline selection tests must not edit properties" );
+}
+
+void OfflineIndiClient::dispatch( const IndiMessage::Type &, const IndiProperty & )
+{
+    FAIL( "Offline selection tests must not dispatch network messages" );
+}
+
+void OfflineIndiClient::update()
+{
+    FAIL( "Offline selection tests must not run the network loop" );
+}
+} // namespace pcf
+/// \endcond
+
+// Dependencies are included above so only the app's base and log opens are replaced.
+#define IndiClient OfflineIndiClient
+#define open( ... ) open( "/dev/null" )
+#include "../cursesINDI/cursesINDI.hpp"
+#undef open
+#undef IndiClient
+
+namespace libXWCTest
+{
+namespace cursesINDITest
+{
+
+/// \cond CURSESINDI_TEST_HARNESS
+/// Own a headless curses screen and a client with no network transport or background threads.
+struct Screen
+{
+    FILE                       *m_input{ nullptr };  ///< Local input stream owned by the fixture.
+    FILE                       *m_output{ nullptr }; ///< Temporary screen output owned by the fixture.
+    SCREEN                     *m_screen{ nullptr }; ///< Curses screen owned by the fixture.
+    std::unique_ptr<cursesINDI> m_client;            ///< Client destroyed before the screen.
+
+    /// Initialize the screen and only the windows used by callbacks and navigation.
+    Screen();
+
+    /// Release all windows, then the screen and streams.
+    ~Screen();
+};
+
+Screen::Screen()
+{
+    m_input  = fopen( "/dev/null", "r" );
+    m_output = tmpfile();
+    REQUIRE( m_input );
+    REQUIRE( m_output );
+    m_screen = newterm( "xterm", m_output, m_input );
+    REQUIRE( m_screen );
+    resizeterm( 30, 120 );
+
+    m_client                 = std::make_unique<cursesINDI>( "offline-selection-test", "1", "1" );
+    m_client->w_interactWin  = newwin( 1, 100, 3, 1 );
+    m_client->w_curvalWin    = newwin( 1, 100, 4, 1 );
+    m_client->w_attentionWin = newwin( 1, 100, 2, 1 );
+}
+
+Screen::~Screen()
+{
+    for( const auto &row : m_client->m_gridWin )
+    {
+        for( WINDOW *window : row )
+        {
+            delwin( window );
+        }
+    }
+
+    if( m_client->m_boxWin )
+    {
+        delwin( m_client->m_boxWin );
+    }
+
+    m_client.reset();
+    endwin();
+    delscreen( m_screen );
+    fclose( m_output );
+    fclose( m_input );
+}
+
+/// Create a synthetic property with one element.
+pcf::IndiProperty property( const std::string &device,               /**< [in] device name */
+                            const std::string &name    = "exposure", /**< [in] property name */
+                            const std::string &element = "current" /**< [in] element name */ )
+{
+    pcf::IndiProperty result( pcf::IndiProperty::Text );
+    result.setDevice( device );
+    result.setName( name );
+    result.setPerm( pcf::IndiProperty::ReadOnly );
+    result.setState( pcf::IndiProperty::Ok );
+    result.add( pcf::IndiElement( element, "fixture" ) );
+    return result;
+}
+
+/// Read the selected element identity from the actual rendered table coordinates.
+std::string selected( const cursesINDI &client /**< [in] client with a rendered table */ )
+{
+    for( const auto &[key, element] : client.knownElements )
+    {
+        if( element.tableRow >= 0 && static_cast<size_t>( element.tableRow ) == client.m_startRow + client.m_currY )
+        {
+            return key;
+        }
+    }
+
+    return "";
+}
+/// \endcond
+
+/** \brief Match device names without case sensitivity, allowing skipped letters in order.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Device search accepts case-insensitive abbreviations", "[cursesINDI]" )
+{
+    const cursesINDI::elementMapT elements{ { "camWFS.fsm.state", { "camWFS.fsm", "camWFS", "fsm", "state", 4 } } };
+
+    REQUIRE( cursesINDI::findSearchRow( elements, "camwfs" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "CAM" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "WFS" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cWfS" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cfw" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cc" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "camwfd" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "camwfss" ) == 4 );
+}
+
+/** \brief Prefer a prefix over a substring and a substring over a subsequence.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Device search ranks match categories", "[cursesINDI]" )
+{
+    cursesINDI::elementMapT elements{ { "acxwyfz.p.e", { "acxwyfz.p", "acxwyfz", "p", "e", 0 } },
+                                      { "bcwf.p.e", { "bcwf.p", "bcwf", "p", "e", 1 } },
+                                      { "cwfCam.p.e", { "cwfCam.p", "cwfCam", "p", "e", 2 } } };
+
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwf" ) == 2 );
+
+    elements.erase( "cwfCam.p.e" );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwf" ) == 1 );
+
+    elements.erase( "bcwf.p.e" );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwf" ) == 0 );
+}
+
+/** \brief Break equal-rank ties in table order and select the device's first displayed row.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Device search preserves alphabetical ties and first rows", "[cursesINDI]" )
+{
+    const cursesINDI::elementMapT elements{ { "camwfs.a.a", { "camwfs.a", "camwfs", "a", "a", 4 } },
+                                            { "camwfs.a.b", { "camwfs.a", "camwfs", "a", "b", 5 } },
+                                            { "camwoofer.a.a", { "camwoofer.a", "camwoofer", "a", "a", 7 } } };
+
+    REQUIRE( cursesINDI::findSearchRow( elements, "cam" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "amw" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cw" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwo" ) == 7 );
+}
+
+/** \brief Leave selection unchanged for empty queries, no matches, or undisplayed devices.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Unqualified search only matches displayed devices", "[cursesINDI]" )
+{
+    const cursesINDI::elementMapT elements{ { "camera.wfs.target", { "camera.wfs", "camera", "wfs", "target", 0 } },
+                                            { "wfs.p.e", { "wfs.p", "wfs", "p", "e", -1 } } };
+
+    REQUIRE( cursesINDI::findSearchRow( {}, "cam" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "zzzz" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "wfs" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "target" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "camera.wfs" ) == 0 );
+}
+
+/** \brief Re-evaluate a shortened query independently of the previous match.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Device search selects again as the query is shortened", "[cursesINDI]" )
+{
+    const cursesINDI::elementMapT elements{ { "camvis.p.e", { "camvis.p", "camvis", "p", "e", 0 } },
+                                            { "camwfs.p.e", { "camwfs.p", "camwfs", "p", "e", 1 } } };
+
+    REQUIRE( cursesINDI::findSearchRow( elements, "camwfsxy" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "camwfsx" ) == 1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "camwfs" ) == 1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "camw" ) == 1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cam" ) == 0 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "" ) == -1 );
+}
+
+/** \brief Fuzzy-match each query segment only against its corresponding name field.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Periods keep fuzzy matches within their fields", "[cursesINDI]" )
+{
+    const cursesINDI::elementMapT elements{
+        { "camWFS.exposureTime.current", { "camWFS.exposureTime", "camWFS", "exposureTime", "current", 4 } } };
+
+    REQUIRE( cursesINDI::findSearchRow( elements, "CWFS.XPT.CRR" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs.exp.cur" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs.exp" ) == 4 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cam.wfs" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs.exptcurrent" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs.cur.exp" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs.exp.cur.extra" ) == -1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs.exp.cur." ) == -1 );
+}
+
+/** \brief Empty segments leave their fields unrestricted while typing or deleting periods.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Empty search segments preserve field positions", "[cursesINDI]" )
+{
+    const cursesINDI::elementMapT elements{
+        { "camwfs.exposure.current", { "camwfs.exposure", "camwfs", "exposure", "current", 0 } },
+        { "camwfs.exposure.target", { "camwfs.exposure", "camwfs", "exposure", "target", 1 } } };
+
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs." ) == 0 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs.exp." ) == 0 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs.exp.tgt" ) == 1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs.exp." ) == 0 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs.exp" ) == 0 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cwfs..tgt" ) == 1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, ".exp.tgt" ) == 1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "..tgt" ) == 1 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "." ) == 0 );
+    REQUIRE( cursesINDI::findSearchRow( elements, ".." ) == 0 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "..." ) == -1 );
+}
+
+/** \brief Rank property and element matches by category before breaking ties in table order.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Each search field uses prefix substring and subsequence ranking", "[cursesINDI]" )
+{
+    SECTION( "Property ranking" )
+    {
+        cursesINDI::elementMapT elements{ { "cam.acxwyfz.e", { "cam.acxwyfz", "cam", "acxwyfz", "e", 0 } },
+                                          { "cam.bcwf.e", { "cam.bcwf", "cam", "bcwf", "e", 1 } },
+                                          { "cam.cwfCam.e", { "cam.cwfCam", "cam", "cwfCam", "e", 2 } } };
+
+        REQUIRE( cursesINDI::findSearchRow( elements, "cam.cwf" ) == 2 );
+        elements.erase( "cam.cwfCam.e" );
+        REQUIRE( cursesINDI::findSearchRow( elements, "cam.cwf" ) == 1 );
+        elements.erase( "cam.bcwf.e" );
+        REQUIRE( cursesINDI::findSearchRow( elements, "cam.cwf" ) == 0 );
+    }
+
+    SECTION( "Element ranking" )
+    {
+        cursesINDI::elementMapT elements{ { "cam.p.acxwyfz", { "cam.p", "cam", "p", "acxwyfz", 0 } },
+                                          { "cam.p.bcwf", { "cam.p", "cam", "p", "bcwf", 1 } },
+                                          { "cam.p.cwfCam", { "cam.p", "cam", "p", "cwfCam", 2 } } };
+
+        REQUIRE( cursesINDI::findSearchRow( elements, "cam.p.cwf" ) == 2 );
+        elements.erase( "cam.p.cwfCam" );
+        REQUIRE( cursesINDI::findSearchRow( elements, "cam.p.cwf" ) == 1 );
+        elements.erase( "cam.p.bcwf" );
+        REQUIRE( cursesINDI::findSearchRow( elements, "cam.p.cwf" ) == 0 );
+    }
+}
+
+/** \brief Earlier fields take ranking priority and equal ranks retain alphabetical order.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Segment ranking proceeds from device to property to element", "[cursesINDI]" )
+{
+    const cursesINDI::elementMapT elements{ { "acam.cwf.cwf", { "acam.cwf", "acam", "cwf", "cwf", 0 } },
+                                            { "cam.acxwyfz.cwf", { "cam.acxwyfz", "cam", "acxwyfz", "cwf", 1 } },
+                                            { "cam.bcwf.acxwyfz", { "cam.bcwf", "cam", "bcwf", "acxwyfz", 2 } },
+                                            { "cam.bcwf.bcxwyfz", { "cam.bcwf", "cam", "bcwf", "bcxwyfz", 3 } } };
+
+    REQUIRE( cursesINDI::findSearchRow( elements, "cam.cwf.cwf" ) == 2 );
+    REQUIRE( cursesINDI::findSearchRow( elements, "cam.cwf.missing" ) == -1 );
+}
+
+/** \brief Order devices by field so an exact camera query precedes its helper's prefix match.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Camera sorts before its helper and wins an exact search", "[cursesINDI][sorting]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::redrawTable;
+    cursesINDI::keyPressed;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "camacq-acq", "fsm", "state" ) );
+    client.handleDefProperty( property( "camacq", "fsm", "state" ) );
+    client.redrawTable();
+    CHECK( client.knownElements.at( "camacq.fsm.state" ).tableRow == 0 );
+    CHECK( client.knownElements.at( "camacq-acq.fsm.state" ).tableRow == 1 );
+    client.moveCurrent( 1, 3 );
+    client.keyPressed( 0x1f & 'l' );
+
+    for( char ch : std::string( "camacq.fsm.state" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    CHECK( selected( client ) == "camacq.fsm.state" );
+}
+
+/** \brief Compare property and element fields within each device and retain selection on updates.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Table orders each field independently", "[cursesINDI][sorting]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::redrawTable;
+    cursesINDI::handleDelProperty;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "camacq-acq", "fsm", "state" ) );
+    client.redrawTable();
+    client.handleDefProperty( property( "camacq", "fsm-acq", "state" ) );
+    auto fsm = property( "camacq", "fsm", "state-acq" );
+    fsm.add( pcf::IndiElement( "state", "fixture" ) );
+    client.handleDefProperty( fsm );
+    client.redrawTable();
+    REQUIRE( client.knownElements.at( "camacq.fsm.state" ).tableRow == 0 );
+    REQUIRE( client.knownElements.at( "camacq.fsm.state-acq" ).tableRow == 1 );
+    REQUIRE( client.knownElements.at( "camacq.fsm-acq.state" ).tableRow == 2 );
+    REQUIRE( client.knownElements.at( "camacq-acq.fsm.state" ).tableRow == 3 );
+    REQUIRE( selected( client ) == "camacq-acq.fsm.state" );
+
+    client.moveCurrent( -static_cast<int>( client.m_startRow ), 3 );
+    REQUIRE( selected( client ) == "camacq.fsm.state" );
+    client.handleDelProperty( fsm );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camacq.fsm-acq.state" );
+}
+
+/** \brief Filter with the same case-insensitive, dot-separated fuzzy matching as search.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Fuzzy filter hides nonmatches and backspace restores them", "[cursesINDI][filter]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::searchElementRank;
+    cursesINDI::redrawTable;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "camwfs", "fsm", "state" ) );
+    client.handleDefProperty( property( "camwfs", "exposure", "current" ) );
+    client.handleDefProperty( property( "camwoofer", "fsm", "state" ) );
+    client.handleDefProperty( property( "motor", "fsm", "state" ) );
+    client.redrawTable();
+    client.keyPressed( 0x1f & 'f' );
+
+    for( char ch : std::string( "CW.FM.ST" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 2 );
+    REQUIRE( client.knownElements.size() == 4 );
+    REQUIRE( client.knownElements.at( "camwfs.fsm.state" ).tableRow == 0 );
+    REQUIRE( client.knownElements.at( "camwoofer.fsm.state" ).tableRow == 1 );
+    REQUIRE( client.knownElements.at( "camwfs.exposure.current" ).tableRow == -1 );
+    REQUIRE( client.knownElements.at( "motor.fsm.state" ).tableRow == -1 );
+
+    client.keyPressed( 'Z' );
+    REQUIRE( client.m_cellContents.empty() );
+    REQUIRE( selected( client ).empty() );
+    client.keyPressed( KEY_BACKSPACE );
+    REQUIRE( client.m_cellContents.size() == 2 );
+
+    client.keyPressed( '.' ); // A fourth segment is invalid, even when empty.
+    REQUIRE( client.m_cellContents.empty() );
+    REQUIRE( selected( client ).empty() );
+    REQUIRE( client.m_startRow == 0 );
+    REQUIRE( client.m_currY == 0 );
+    char value[100]{};
+    mvwinnstr( client.w_curvalWin, 0, 0, value, sizeof( value ) - 1 );
+    REQUIRE( std::string( value ).find_first_not_of( ' ' ) == std::string::npos );
+    client.keyPressed( KEY_BACKSPACE );
+    REQUIRE( client.m_cellContents.size() == 2 );
+
+    while( !client.m_deviceTarget.empty() )
+    {
+        client.keyPressed( KEY_BACKSPACE );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 4 );
+
+    for( char ch : std::string( ".EX.CUR" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 1 );
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+}
+
+/** \brief Delete query segments using the legacy Ctrl+Backspace code and refresh filtered results.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Ctrl Backspace removes query segments", "[cursesINDI][search][filter]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::deviceSearch;
+#endif
+    // clang-format on
+    bool   filtering = GENERATE( false, true );
+    bool   vim       = GENERATE( false, true );
+    Screen screen;
+    auto  &client   = *screen.m_client;
+    auto   exposure = property( "cam", "exposure", "current" );
+    exposure.add( pcf::IndiElement( "target", "fixture" ) );
+    client.handleDefProperty( exposure );
+    client.handleDefProperty( property( "cam", "gain" ) );
+    client.handleDefProperty( property( "motor" ) );
+    client.redrawTable();
+
+    if( vim )
+    {
+        client.keyPressed( 0x1f & 'v' );
+    }
+
+    client.keyPressed( filtering ? ( 0x1f & 'f' ) : ( 0x1f & 'l' ) );
+
+    for( char ch : std::string( "cam.exposure.current" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == ( filtering ? 1 : 4 ) );
+
+    if( vim )
+    {
+        client.keyPressed( '\n' );
+        client.keyPressed( 0x1f & 'h' );
+        REQUIRE( client.m_deviceTarget == "cam.exposure.current" );
+        client.keyPressed( filtering ? ( 0x1f & 'f' ) : ( 0x1f & 'l' ) );
+
+        if( !filtering )
+        {
+            for( char ch : std::string( "cam.exposure.current" ) )
+            {
+                client.keyPressed( ch );
+            }
+        }
+    }
+
+    const std::array<std::string, 3> targets{ "cam.exposure.", "cam.", "" };
+
+    for( size_t i = 0; i < targets.size(); ++i )
+    {
+        client.keyPressed( 0x1f & 'h' );
+        REQUIRE( client.m_deviceTarget == targets[i] );
+        REQUIRE( client.m_cellContents.size() == ( filtering ? i + 2 : 4 ) );
+        REQUIRE( client.m_deviceSearching );
+        char prompt[101]{};
+        mvwinnstr( client.w_interactWin, 0, 0, prompt, 100 );
+        REQUIRE( std::string( prompt ).starts_with( std::string( filtering ? "filter: " : "search: " ) + targets[i] ) );
+    }
+
+    client.keyPressed( 0x1f & 'h' );
+    REQUIRE( client.m_deviceTarget.empty() );
+    REQUIRE( client.m_cellContents.size() == 4 );
+}
+
+/** \brief Preserve empty wildcard segments while deleting leading or consecutive periods safely.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Ctrl Backspace handles wildcard query segments", "[cursesINDI][search]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::deviceSearch;
+#endif
+    // clang-format on
+    auto [query, expected] = GENERATE(
+        std::pair{ ".current", "." }, std::pair{ "cam..", "cam." }, std::pair{ ".", "" }, std::pair{ "cam", "" } );
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.redrawTable();
+    client.keyPressed( 0x1f & 'l' );
+
+    for( char ch : std::string( query ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    client.keyPressed( 0x1f & 'h' );
+    REQUIRE( client.m_deviceTarget == expected );
+}
+
+/** \brief Keep filters while navigating, refocus with Ctrl+F, and return to search with Ctrl+L.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Filter mode is explicit and persists while navigating", "[cursesINDI][filter]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::moveCurrent;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "aaa" ) );
+    client.handleDefProperty( property( "camwfs" ) );
+    client.handleDefProperty( property( "camwoofer" ) );
+    client.redrawTable();
+    REQUIRE_FALSE( client.m_filtering );
+    client.moveCurrent( 1, 3 );
+    client.keyPressed( 0x1f & 'f' );
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    REQUIRE( client.m_currX == 3 );
+    REQUIRE( client.m_currY == 1 );
+
+    for( char ch : std::string( "cw" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 2 );
+    client.moveCurrent( 1, 3 );
+    REQUIRE( selected( client ) == "camwoofer.exposure.current" );
+    REQUIRE_FALSE( client.m_deviceSearching );
+    REQUIRE( client.m_filtering );
+    client.keyPressed( 0x1f & 'f' );
+    REQUIRE( client.m_deviceSearching );
+    REQUIRE( client.m_deviceTarget == "cw" );
+    REQUIRE( client.m_cellContents.size() == 2 );
+    client.keyPressed( 0x1f & 'l' );
+    REQUIRE_FALSE( client.m_filtering );
+    REQUIRE( client.m_deviceSearching );
+    REQUIRE( client.m_deviceTarget.empty() );
+    REQUIRE( client.m_cellContents.size() == 3 );
+    REQUIRE( selected( client ) == "camwoofer.exposure.current" );
+    client.keyPressed( 'a' );
+    REQUIRE( selected( client ) == "aaa.exposure.current" );
+    REQUIRE( client.m_cellContents.size() == 3 );
+}
+
+/** \brief Apply filters to arriving properties and choose only visible rows after deletion.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Filtered selection survives property updates", "[cursesINDI][filter]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::handleDefProperty;
+    cursesINDI::handleDelProperty;
+    cursesINDI::redrawTable;
+    cursesINDI::updateTable;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "camwfs" ) );
+    client.redrawTable();
+    client.keyPressed( 0x1f & 'f' );
+
+    for( char ch : std::string( "cam" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    client.handleDefProperty( property( "aaa" ) );
+    client.handleDefProperty( property( "camaux" ) );
+    client.handleDefProperty( property( "camwoofer" ) );
+    client.handleDefProperty( property( "zzz" ) );
+    client.redrawTable();
+    REQUIRE( client.m_cellContents.size() == 3 );
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    client.updateTable();
+    client.handleDelProperty( property( "camwfs" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwoofer.exposure.current" );
+    client.handleDelProperty( property( "camwoofer" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camaux.exposure.current" );
+    client.handleDelProperty( property( "camaux" ) );
+    client.redrawTable();
+    REQUIRE( client.m_cellContents.empty() );
+    REQUIRE( selected( client ).empty() );
+    client.handleDefProperty( property( "camwfs" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    client.keyPressed( 0x1f & 'l' );
+    REQUIRE( client.m_cellContents.size() == 3 );
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+}
+
+/** \brief Accept one edit per long segment, keeping short queries and field boundaries strict.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Search tolerates a single typo within each long field", "[cursesINDI][ranking]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::findSearchRow;
+    cursesINDI::searchSegmentRank;
+#endif
+    // clang-format on
+    const cursesINDI::elementMapT elements{
+        { "camwfs.exposure.current", { "camwfs.exposure", "camwfs", "exposure", "current", 0 } } };
+
+    for( const auto &query : { "camwsf",
+                               "camwgs",
+                               "camwfss",
+                               "camws",
+                               "camwf",
+                               "amwfs",
+                               "xcamwfs",
+                               "camwfs",
+                               "cwfs",
+                               "CAMWSF.EXPOSRUE.CURRNET" } )
+    {
+        CAPTURE( query );
+        CHECK( cursesINDI::findSearchRow( elements, query ) == 0 );
+    }
+
+    for( const auto &query : { "camwxy", "camwfsxy", "cam.wfs", "camwfs.exposurecurrent", "camwfs..." } )
+    {
+        CAPTURE( query );
+        CHECK( cursesINDI::findSearchRow( elements, query ) == -1 );
+    }
+
+    const cursesINDI::elementMapT shortFields{ { "cam.fsm.on", { "cam.fsm", "cam", "fsm", "on", 0 } } };
+    CHECK( cursesINDI::findSearchRow( shortFields, "cma" ) == -1 );
+    CHECK( cursesINDI::findSearchRow( shortFields, ".fms" ) == -1 );
+    CHECK( cursesINDI::findSearchRow( shortFields, "..no" ) == -1 );
+}
+
+/** \brief Order filtered matches by relevance with alphabetical ties and preserve navigated selections.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Filter ranks exact matches before prefixes substrings typos and subsequences", "[cursesINDI][ranking]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::redrawTable;
+    cursesINDI::moveCurrent;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+
+    for( const auto &device : { "autojay-camflowfs", "camwfd", "camwfs", "camwfs-b", "camwfs-a", "other-camwfs" } )
+    {
+        client.handleDefProperty( property( device, "fsm", "state" ) );
+    }
+
+    client.redrawTable();
+    client.keyPressed( 0x1f & 'f' );
+
+    for( char ch : std::string( "camwfs" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 6 );
+    int row = 0;
+
+    for( const auto &device : { "camwfs", "camwfs-a", "camwfs-b", "other-camwfs", "camwfd", "autojay-camflowfs" } )
+    {
+        CAPTURE( device );
+        CHECK( client.knownElements.at( std::string( device ) + ".fsm.state" ).tableRow == row++ );
+    }
+
+    REQUIRE( selected( client ) == "camwfs.fsm.state" );
+    client.moveCurrent( 5, 3 );
+    REQUIRE( selected( client ) == "autojay-camflowfs.fsm.state" );
+    client.handleDefProperty( property( "camwfs", "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "autojay-camflowfs.fsm.state" );
+    REQUIRE( client.m_currY == 5 );
+    client.keyPressed( 0x1f & 'f' );
+    REQUIRE( selected( client ) == "autojay-camflowfs.fsm.state" );
+    client.keyPressed( KEY_BACKSPACE );
+    client.keyPressed( 's' );
+    REQUIRE( selected( client ) == "camwfs.aaa.current" );
+    REQUIRE( client.m_startRow == 0 );
+    REQUIRE( client.m_currY == 0 );
+    client.keyPressed( 0x1f & 'l' );
+    REQUIRE( client.knownElements.at( "autojay-camflowfs.fsm.state" ).tableRow == 0 );
+    REQUIRE( selected( client ) == "camwfs.aaa.current" );
+}
+
+/** \brief Rank typo matches in later fields and use displayed order when a ranked selection disappears.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Ranked filter uses property and element scores and visible deletion fallback", "[cursesINDI][ranking]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::redrawTable;
+    cursesINDI::handleDelProperty;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "cam", "exposrue", "current" ) );
+    auto exposure = property( "cam", "exposure", "currnet" );
+    exposure.add( pcf::IndiElement( "current", "fixture" ) );
+    client.handleDefProperty( exposure );
+    client.redrawTable();
+    client.keyPressed( 0x1f & 'f' );
+
+    for( char ch : std::string( "cam.exposure.current" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 3 );
+    REQUIRE( client.knownElements.at( "cam.exposure.current" ).tableRow == 0 );
+    REQUIRE( client.knownElements.at( "cam.exposure.currnet" ).tableRow == 1 );
+    REQUIRE( client.knownElements.at( "cam.exposrue.current" ).tableRow == 2 );
+    client.handleDelProperty( exposure );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "cam.exposrue.current" );
+}
+
+/** \brief Keep automatic device search by default and enable only the four requested vim directions.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Vim directions are opt-in and preserve default typing", "[cursesINDI][vim]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::moveCurrent;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+
+    for( int i = 0; i < 40; ++i )
+    {
+        client.handleDefProperty( property( std::format( "cam{:02}", i ) ) );
+    }
+
+    client.redrawTable();
+    client.moveCurrent( 0, 1 );
+    REQUIRE_FALSE( client.m_vimMode );
+    client.keyPressed( 'j' );
+    REQUIRE( client.m_deviceTarget == "j" );
+    REQUIRE( client.m_currY == 0 );
+    client.keyPressed( 0x1f & 'v' );
+    REQUIRE( client.m_vimMode );
+    REQUIRE_FALSE( client.m_deviceSearching );
+    client.keyPressed( 'j' );
+    REQUIRE( client.m_currY == 1 );
+    REQUIRE( client.m_deviceTarget == "j" );
+    client.keyPressed( 'k' );
+    REQUIRE( client.m_currY == 0 );
+    client.keyPressed( 'l' );
+    REQUIRE( client.m_currX == 2 );
+    client.keyPressed( 'h' );
+    REQUIRE( client.m_currX == 1 );
+    client.keyPressed( 'h', 5 );
+    REQUIRE( client.m_currX == 1 );
+    client.keyPressed( 'l', 10 );
+    REQUIRE( client.m_currX == 4 );
+    client.keyPressed( 'j', 30 );
+    REQUIRE( selected( client ) == "cam30.exposure.current" );
+    REQUIRE( client.m_startRow > 0 );
+    client.keyPressed( 'k', 30 );
+    REQUIRE( selected( client ) == "cam00.exposure.current" );
+    client.keyPressed( KEY_LEFT, 3 );
+    client.keyPressed( KEY_DOWN, 2 );
+    REQUIRE( client.m_currX == 1 );
+    REQUIRE( selected( client ) == "cam02.exposure.current" );
+    client.keyPressed( 'x' );
+    REQUIRE( client.m_deviceTarget == "j" );
+    client.keyPressed( 0x1f & 'v' );
+    REQUIRE_FALSE( client.m_vimMode );
+    client.keyPressed( 'k' );
+    REQUIRE( client.m_deviceTarget == "k" );
+    REQUIRE( selected( client ) == "cam02.exposure.current" );
+}
+
+/** \brief Explicit query input accepts motion letters; Enter restores vim navigation without clearing results.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Vim navigation coexists with search and filtering", "[cursesINDI][vim]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::redrawTable;
+#endif
+    // clang-format on
+    int    enter = GENERATE( static_cast<int>( '\n' ), static_cast<int>( '\r' ), KEY_ENTER );
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "hjkl" ) );
+    client.handleDefProperty( property( "hjkl-helper" ) );
+    client.handleDefProperty( property( "other" ) );
+    client.redrawTable();
+    client.moveCurrent( 0, 1 );
+    client.keyPressed( 0x1f & 'v' );
+    client.keyPressed( 0x1f & 'l' );
+
+    for( char ch : std::string( "hjkl" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_deviceTarget == "hjkl" );
+    REQUIRE( client.m_deviceSearching );
+    REQUIRE( selected( client ) == "hjkl.exposure.current" );
+    client.redrawTable();
+    REQUIRE( client.m_deviceSearching );
+    client.keyPressed( enter );
+    REQUIRE_FALSE( client.m_deviceSearching );
+    REQUIRE( selected( client ) == "hjkl.exposure.current" );
+    REQUIRE( client.m_deviceTarget == "hjkl" );
+    char prompt[101]{};
+    mvwinnstr( client.w_interactWin, 0, 0, prompt, 100 );
+    REQUIRE( std::string( prompt ).starts_with( "search: hjkl" ) );
+    client.keyPressed( KEY_DOWN );
+    REQUIRE_FALSE( client.m_deviceSearching );
+    REQUIRE( selected( client ) == "hjkl-helper.exposure.current" );
+    client.keyPressed( 'j' );
+    REQUIRE( selected( client ) == "other.exposure.current" );
+    size_t filterColumn = GENERATE( size_t{ 1 }, size_t{ 3 } );
+    client.moveCurrent( client.m_currY, filterColumn );
+    client.keyPressed( 0x1f & 'f' );
+
+    for( char ch : std::string( "hjkl" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 2 );
+    client.keyPressed( enter );
+    REQUIRE_FALSE( client.m_deviceSearching );
+    REQUIRE( client.m_filtering );
+    REQUIRE( client.m_vimMode );
+    mvwinnstr( client.w_interactWin, 0, 0, prompt, 100 );
+    REQUIRE( std::string( prompt ).starts_with( "filter: hjkl" ) );
+    REQUIRE( client.m_currX == filterColumn );
+    REQUIRE( selected( client ) == "hjkl.exposure.current" );
+    REQUIRE( client.m_cellContents.size() == 2 );
+    client.keyPressed( 'j' );
+    REQUIRE( selected( client ) == "hjkl-helper.exposure.current" );
+    REQUIRE( client.m_deviceTarget == "hjkl" );
+    client.keyPressed( 0x1f & 'f' );
+    REQUIRE( client.m_deviceSearching );
+    client.keyPressed( KEY_BACKSPACE );
+    REQUIRE( client.m_deviceTarget == "hjk" );
+    client.keyPressed( 0x1f & 'l' );
+    REQUIRE_FALSE( client.m_filtering );
+    REQUIRE( client.m_cellContents.size() == 3 );
+}
+
+/** \brief Counted motions cross view boundaries, clamp to table edges, and consume or cancel their count.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Vim motion counts apply once and clamp safely", "[cursesINDI][vim]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+
+    for( int i = 0; i < 80; ++i )
+    {
+        client.handleDefProperty( property( std::format( "cam{:02}", i ) ) );
+    }
+
+    client.redrawTable();
+    client.moveCurrent( 0, 1 );
+    client.keyPressed( 0x1f & 'v' );
+    client.keyPressed( '1' );
+    client.keyPressed( '2' );
+    client.keyPressed( 'j' );
+    REQUIRE( selected( client ) == "cam12.exposure.current" );
+    client.keyPressed( 'j' );
+    REQUIRE( selected( client ) == "cam13.exposure.current" );
+    client.keyPressed( '1', 2 ); // The input loop groups consecutive identical digits.
+    client.keyPressed( 'k' );
+    REQUIRE( selected( client ) == "cam02.exposure.current" );
+    client.keyPressed( '2' );
+    client.keyPressed( 'l' );
+    REQUIRE( client.m_currX == 3 );
+    client.keyPressed( '2' );
+    client.keyPressed( 'h' );
+    REQUIRE( client.m_currX == 1 );
+    client.keyPressed( '9', 20 );
+    client.keyPressed( 'j', 2 );
+    REQUIRE( selected( client ) == "cam79.exposure.current" );
+    client.keyPressed( '9', 20 );
+    client.keyPressed( 'k' );
+    REQUIRE( selected( client ) == "cam00.exposure.current" );
+    client.keyPressed( '2' );
+    client.keyPressed( 'j', 2 );
+    REQUIRE( selected( client ) == "cam03.exposure.current" );
+    client.keyPressed( '3' );
+    client.keyPressed( 'k' );
+    REQUIRE( selected( client ) == "cam00.exposure.current" );
+    int cancel = GENERATE( 27, static_cast<int>( 'x' ), KEY_RIGHT, 0x1f & 'l', 0x1f & 'f', 0x1f & 'v' );
+    client.keyPressed( '5' );
+    client.keyPressed( cancel );
+
+    if( !client.m_vimMode )
+    {
+        client.keyPressed( 0x1f & 'v' );
+    }
+
+    client.keyPressed( '\n' );
+    client.keyPressed( 'j' );
+    REQUIRE( selected( client ) == "cam01.exposure.current" );
+}
+
+/** \brief Half-page motions use the visible table height and leave query typing and default mode alone.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Vim half-page movements follow the viewport", "[cursesINDI][vim]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+
+    for( int i = 0; i < 80; ++i )
+    {
+        client.handleDefProperty( property( std::format( "cam{:02}", i ) ) );
+    }
+
+    client.redrawTable();
+    client.moveCurrent( 0, 1 );
+    client.keyPressed( 0x1f & 'd' );
+    REQUIRE( selected( client ) == "cam00.exposure.current" );
+    client.keyPressed( 0x1f & 'v' );
+    int height = GENERATE( 20, 30, 40 );
+    resizeterm( height, 120 );
+    client.keyPressed( KEY_RESIZE );
+    int half = std::max( 1, static_cast<int>( client.tabHeight() ) / 2 );
+    client.keyPressed( 0x1f & 'd' );
+    REQUIRE( selected( client ) == std::format( "cam{:02}.exposure.current", half ) );
+    client.keyPressed( 0x1f & 'd' );
+    REQUIRE( selected( client ) == std::format( "cam{:02}.exposure.current", 2 * half ) );
+    client.keyPressed( 0x1f & 'u' );
+    REQUIRE( selected( client ) == std::format( "cam{:02}.exposure.current", half ) );
+    client.keyPressed( 0x1f & 'u', 100 );
+    REQUIRE( selected( client ) == "cam00.exposure.current" );
+    client.keyPressed( 0x1f & 'd', 100 );
+    REQUIRE( selected( client ) == "cam79.exposure.current" );
+    client.keyPressed( 0x1f & 'f' );
+
+    for( char ch : std::string( "cam01" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    auto selection = selected( client );
+    client.keyPressed( 0x1f & 'u' );
+    client.keyPressed( 0x1f & 'd' );
+    REQUIRE( selected( client ) == selection );
+    REQUIRE( client.m_deviceTarget == "cam01" );
+    REQUIRE( client.m_vimCount == 0 );
+    client.keyPressed( '\n' );
+    client.keyPressed( 0x1f & 'd', 100 );
+    REQUIRE_FALSE( selected( client ).empty() );
+    REQUIRE( client.m_deviceTarget == "cam01" );
+    client.keyPressed( 0x1f & 'f' );
+    client.keyPressed( 'z', 1 );
+    client.keyPressed( 'z', 1 );
+    client.keyPressed( 'z', 1 );
+    REQUIRE( client.m_cellContents.empty() );
+    client.keyPressed( '\n' );
+    client.keyPressed( 0x1f & 'u' );
+    client.keyPressed( '9' );
+    client.keyPressed( 'j' );
+    REQUIRE( client.m_cellContents.empty() );
+}
+
+/** \brief Show the ordered shortcut hints and highlight VI and the enabled mode state, including after resize.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Header displays optional vim mode and highlighted title", "[cursesINDI][vim]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::drawHeader;
+    cursesINDI::keyPressed;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.redrawTable();
+    char header[121]{};
+    mvwinnstr( client.w_topWin, 0, 0, header, sizeof( header ) - 1 );
+    REQUIRE( std::string( header ).starts_with( "cursesINDI " ) );
+    mvwinnstr( client.w_topWin, 0, 0, header, sizeof( header ) - 1 );
+    REQUIRE( std::string( header ).find( "Ctrl+V VI off | Ctrl+C quit" ) != std::string::npos );
+    client.keyPressed( 0x1f & 'v' );
+    mvwinnstr( client.w_topWin, 0, 0, header, sizeof( header ) - 1 );
+    REQUIRE( std::string( header ).starts_with( "cursesVINDI " ) );
+    REQUIRE( ( mvwinch( client.w_topWin, 0, 6 ) & A_REVERSE ) != 0 );
+    REQUIRE( ( mvwinch( client.w_topWin, 0, 7 ) & A_REVERSE ) != 0 );
+    REQUIRE( ( mvwinch( client.w_topWin, 0, 8 ) & A_REVERSE ) == 0 );
+    mvwinnstr( client.w_topWin, 0, 0, header, sizeof( header ) - 1 );
+    REQUIRE( std::string( header ).find( "Ctrl+V VI on | Ctrl+C quit" ) != std::string::npos );
+    auto on = std::string( header ).find( "on |" );
+    REQUIRE( on != std::string::npos );
+    REQUIRE( ( mvwinch( client.w_topWin, 0, on ) & A_REVERSE ) != 0 );
+    REQUIRE( ( mvwinch( client.w_topWin, 0, on + 1 ) & A_REVERSE ) != 0 );
+    REQUIRE( ( mvwinch( client.w_topWin, 0, on + 2 ) & A_REVERSE ) == 0 );
+    REQUIRE( std::string( header ).find( "Esc" ) == std::string::npos );
+    resizeterm( 30, 80 );
+    client.keyPressed( KEY_RESIZE );
+    mvwinnstr( client.w_topWin, 0, 0, header, 79 );
+    REQUIRE( std::string( header ).find( "Ctrl+C quit" ) != std::string::npos );
+    mvwinnstr( client.w_topWin, 0, 0, header, 79 );
+    REQUIRE( std::string( header ).find( "Ctrl+L clear+search" ) != std::string::npos );
+    REQUIRE( std::string( header ).find( "Ctrl+F filter" ) != std::string::npos );
+    client.keyPressed( 0x1f & 'v' );
+    mvwinnstr( client.w_topWin, 0, 0, header, 79 );
+    REQUIRE( std::string( header ).starts_with( "cursesINDI " ) );
+    REQUIRE( ( mvwinch( client.w_topWin, 0, 6 ) & A_REVERSE ) == 0 );
+    mvwinnstr( client.w_topWin, 0, 0, header, 79 );
+    auto off = std::string( header ).find( "off |" );
+    REQUIRE( off != std::string::npos );
+    REQUIRE( ( mvwinch( client.w_topWin, 0, off ) & A_REVERSE ) == 0 );
+}
+
+/** \brief Preserve the selected element and column when rows are inserted or removed before it.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Table updates preserve selection identity", "[cursesINDI][selection]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::handleDefProperty;
+    cursesINDI::handleDelProperty;
+    cursesINDI::redrawTable;
+    cursesINDI::moveCurrent;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "camwfs" ) );
+    client.handleDefProperty( property( "zzcamera" ) );
+    client.redrawTable();
+    client.moveCurrent( 0, 3 );
+
+    client.handleDefProperty( property( "camaux" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    REQUIRE( client.m_currY == 0 );
+    REQUIRE( client.m_currX == 3 );
+    REQUIRE( client.m_startRow == 1 );
+
+    client.handleDefProperty( property( "camwfs", "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    REQUIRE( client.m_startRow == 2 );
+
+    client.handleDelProperty( property( "camaux" ) );
+    client.handleDelProperty( property( "camwfs", "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    REQUIRE( client.m_currY == 0 );
+    REQUIRE( client.m_currX == 3 );
+    REQUIRE( client.m_startRow == 0 );
+}
+
+/** \brief Preserve a scrolled selection and explicit search focus through a redraw.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Scrolled selection survives updates and search focus", "[cursesINDI][selection]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::redrawTable;
+    cursesINDI::moveCurrent;
+    cursesINDI::keyPressed;
+    cursesINDI::deviceSearch;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+
+    for( int i = 0; i < 40; ++i )
+    {
+        client.handleDefProperty( property( std::format( "cam{:02}", i ) ) );
+    }
+
+    client.redrawTable();
+    client.moveCurrent( 30, 3 );
+    const auto key   = selected( client );
+    const auto row   = client.m_currY;
+    const auto start = client.m_startRow;
+    REQUIRE( start > 0 );
+    client.keyPressed( 0x1f & 'l' );
+    client.handleDefProperty( property( "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == key );
+    REQUIRE( client.m_currY == row );
+    REQUIRE( client.m_currX == 3 );
+    REQUIRE( client.m_startRow == start + 1 );
+    REQUIRE( client.m_deviceSearching );
+    REQUIRE( client.m_deviceTarget.empty() );
+
+    client.handleDelProperty( property( "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == key );
+    REQUIRE( client.m_startRow == start );
+
+    for( char ch : std::string( "cam05" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( selected( client ) == "cam05.exposure.current" );
+    client.handleDefProperty( property( "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "cam05.exposure.current" );
+    REQUIRE( client.m_deviceTarget == "cam05" );
+}
+
+/** \brief Fall forward, then backward, when the selection disappears, and handle an empty table.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Selection falls back when selected rows disappear", "[cursesINDI][selection]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::handleDelProperty;
+    cursesINDI::redrawTable;
+    cursesINDI::updateCurVal;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "aaa" ) );
+    client.handleDefProperty( property( "camwfs" ) );
+    client.handleDefProperty( property( "zzz" ) );
+    client.redrawTable();
+    client.moveCurrent( 1, 3 );
+
+    pcf::IndiProperty deleted;
+    deleted.setDevice( "camwfs" );
+    client.handleDelProperty( deleted );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "zzz.exposure.current" );
+    REQUIRE( client.m_currX == 3 );
+
+    client.handleDelProperty( property( "zzz" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "aaa.exposure.current" );
+    REQUIRE( client.m_startRow == 0 );
+    REQUIRE( client.m_currY == 0 );
+
+    client.handleDelProperty( property( "aaa" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ).empty() );
+    REQUIRE( client.m_startRow == 0 );
+    REQUIRE( client.m_currY == 0 );
+    char value[100]{};
+    mvwinnstr( client.w_curvalWin, 0, 0, value, sizeof( value ) - 1 );
+    REQUIRE( std::string( value ).find_first_not_of( ' ' ) == std::string::npos );
+
+    client.handleDefProperty( property( "camwfs" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+}
+
+} // namespace cursesINDITest
+} // namespace libXWCTest
