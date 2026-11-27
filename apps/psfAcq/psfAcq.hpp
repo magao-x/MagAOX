@@ -55,7 +55,7 @@ struct Star
 {
 public:
 
-    /// Monotonic identifier used as a stable tie-breaker across equal-brightness stars.
+    /// Monotonic track id, stable while the star is tracked; published as `star_N.id` and used to select stars.
     std::size_t id{ 0 };
 
     /// Star row coordinate in image pixel space.
@@ -75,59 +75,6 @@ public:
 
     /// Consecutive frames where this star was not updated.
     int missedFrames{ 0 };
-
-private:
-
-    /// Owned INDI property for this star's exported fit values.
-    std::unique_ptr<pcf::IndiProperty> m_prop;
-
-public:
-    /// Default constructor.
-    Star() = default;
-
-    /// Disable copy constructor because the star owns a unique INDI property instance.
-    Star( const Star & ) = delete;
-
-    /// Disable copy assignment because the star owns a unique INDI property instance.
-    Star & operator=( const Star & ) = delete;
-
-    /// Enable move constructor.
-    Star( Star && ) noexcept = default;
-
-    /// Enable move assignment.
-    Star & operator=( Star && ) noexcept = default;
-
-    /// Access the owned INDI property.
-    pcf::IndiProperty & prop()
-    {
-        if( !m_prop )
-        {
-            throw std::runtime_error( "attempt to access nullptr prop" );
-        }
-
-        return *m_prop;
-    }
-
-    /// Check whether an INDI property has been allocated.
-    bool hasProp() const
-    {
-        return static_cast<bool>( m_prop );
-    }
-
-    /// Allocate the star's INDI property if needed.
-    void allocate()
-    {
-        if( !m_prop )
-        {
-            m_prop = std::make_unique<pcf::IndiProperty>();
-        }
-    }
-
-    /// Release the star's INDI property.
-    void deallocate()
-    {
-        m_prop.reset();
-    }
 };
 
 /// The MagAO-X PSF Fitter
@@ -185,7 +132,7 @@ class psfAcq : public MagAOXApp<true>,
     double m_acqQuitTime {0};
     double m_acqPauseTime{2};
 
-    int m_current_acq_star {-1}; // star index used for seeing output: m_seeing_star if set, else 0
+    int m_current_acq_star {-1}; // track id used for seeing output: m_seeing_star if tracked, else the brightest star
     int m_temp_acq_star {-1};
     bool m_updated{ false };
     float m_x{ 0 };
@@ -212,8 +159,8 @@ class psfAcq : public MagAOXApp<true>,
     int m_old_num_stars{ 0 };
     int m_num_stars{ 0 };
     float m_seeing{ 0 };
-    int m_acquire_star{ -1 }; // Testing for user to select star
-    int m_seeing_star { -1 }; // user-selected seeing star, -1 for automatic (star 0); cleared when that star is lost
+    int m_acquire_star{ -1 }; // track id requested for acquisition, -1 for none
+    int m_seeing_star { -1 }; // user-selected seeing track id, -1 for automatic (brightest); cleared when that track is lost
     int m_x_center{};     // 'center' of image or hot spot
     int m_y_center{};
 
@@ -250,31 +197,40 @@ class psfAcq : public MagAOXApp<true>,
     /// Emit one telemetry record per star sample.
     int emitStarTelemetry( const std::vector<starTelemSample> &starTelemetryValues /**< [in] per-star telemetry samples to emit. */ );
 
-    /// Remove one tracked star and its INDI property/callback registration.
+    /// Remove one tracked star.
     /** Caller must hold `m_indiMutex`.
      */
     void removeStar( size_t index /**< [in] index of the tracked star to remove. */ );
 
-    /// Delete star INDI properties and reset tracked acquisition stars.
+    /// Clear tracked acquisition stars; their `star_N` slots then publish empty values.
     /** Caller must hold `m_indiMutex`.
      */
     void resetAcq();
 
-    /// Register one tracked star's read-only INDI property using a rank-based label.
-    /** Caller must hold `m_indiMutex`.
-     */
-    void registerStarProperty( Star &star,                  /**< [in,out] tracked star to register. */
-                               std::size_t rankIndex /**< [in] brightness rank label index, `star_<rankIndex>`. */ );
-
-    /// Remove one tracked star's INDI property without erasing the star state.
-    /** Caller must hold `m_indiMutex`.
-     */
-    void unregisterStarProperty( Star &star /**< [in,out] tracked star to unregister. */ );
-
-    /// Sort tracked stars by brightness and ensure labels are `star_0`, `star_1`, ...
+    /// Sort tracked stars by brightness, so the rank-N star is published in `star_N`.
     /** Caller must hold `m_indiMutex`.
      */
     void relabelStarsByBrightness();
+
+    /// Find a tracked star by its track id.
+    /** Caller must hold `m_indiMutex`.
+     * \returns the star's index in `m_detectedStars`, or -1 if that track is not present.
+     */
+    int starIndexById( int id /**< [in] track id, as published in `star_N.id`. */ ) const;
+
+    /// Select the star used for the published seeing.
+    /** Uses the `seeing_star` track while it is present, otherwise the brightest star.
+     * Caller must hold `m_indiMutex`.
+     */
+    void selectSeeingStar();
+
+    /// Compute the telescope nudge that moves a tracked star to the acquisition center.
+    /** Caller must hold `m_indiMutex`.
+     * \returns 0 on success, -1 if the track is not present.
+     */
+    int acquireNudge( int     id,           /**< [in] track id of the star to acquire. */
+                      double &nudgeXArcsec, /**< [out] nudge sent as `pyrNudge.y`, in arcsec. */
+                      double &nudgeYArcsec  /**< [out] nudge sent as `pyrNudge.x`, in arcsec. */ );
 
     // Working memory for poke fitting
     mx::math::fit::fitGaussian2Dsym<float> m_gfit;
@@ -334,6 +290,15 @@ class psfAcq : public MagAOXApp<true>,
      */
 
     pcf::IndiProperty m_indiP_num_stars;
+
+    /// Fixed `star_N` slots, one per possible tracked star (`fitter.max_loops`), registered at startup.
+    /** Slot N holds the rank-N star, or s_emptyStarValue in every element when fewer stars are tracked.
+     * Sized once in appStartup, because registration keeps pointers to the elements.
+     */
+    std::vector<pcf::IndiProperty> m_indiP_stars;
+
+    /// Value published in every element of an empty `star_N` slot.
+    static constexpr float s_emptyStarValue = -1;
 
     pcf::IndiProperty m_indiP_seeing;
 
@@ -524,15 +489,34 @@ inline int psfAcq::appStartup()
        return -1;
     }
 
-    // INDI prop for user to select star
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_acquire_star, "acquire_star", 0, 20, 1, "%d", "", "" );
+    // INDI prop for user to select the star to acquire, by track id (star_N.id)
+    CREATE_REG_INDI_NEW_NUMBERF(
+        m_indiP_acquire_star, "acquire_star", -1, std::numeric_limits<int>::max(), 1, "%d", "", "" );
     m_indiP_acquire_star["current"].setValue( m_acquire_star );
     m_indiP_acquire_star["target"].setValue( m_acquire_star );
 
-    // INDI prop for user to select seeing star
-    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_seeing_star, "seeing_star", 0, 20, 1, "%d", "", "" );
+    // INDI prop for user to select the seeing star, by track id (star_N.id); -1 for the brightest star
+    CREATE_REG_INDI_NEW_NUMBERF(
+        m_indiP_seeing_star, "seeing_star", -1, std::numeric_limits<int>::max(), 1, "%d", "", "" );
     m_indiP_seeing_star["current"].setValue( m_seeing_star );
     m_indiP_seeing_star["target"].setValue( m_seeing_star );
+
+    // Fixed star_N slots, filled by brightness rank in appLogic
+    m_indiP_stars.resize( std::max( m_max_loops, 0 ) );
+
+    for( std::size_t n = 0; n < m_indiP_stars.size(); ++n )
+    {
+        createROIndiNumber(
+            m_indiP_stars[n], "star_" + std::to_string( n ), "Star " + std::to_string( n ) + " Properties", "Star Acq" );
+
+        for( const char *el : { "x", "y", "peak", "fwhm", "seeing", "id" } )
+        {
+            m_indiP_stars[n].add( pcf::IndiElement( el ) );
+            m_indiP_stars[n][el].set( s_emptyStarValue );
+        }
+
+        registerIndiPropertyReadOnly( m_indiP_stars[n] );
+    }
 
     // number of stars INDI prop
     createROIndiNumber(m_indiP_num_stars, "num_stars");
@@ -567,19 +551,23 @@ inline int psfAcq::appLogic()
     updateIfChanged( m_indiP_seeing_star, "current", m_current_acq_star );
     updateIfChanged( m_indiP_seeing_star, "target", m_seeing_star );
 
-    for( size_t n = 0; n < m_detectedStars.size() ; ++n )
+    // Slot N publishes the rank-N star, all elements in one update so its id and values stay consistent.
+    static const std::vector<std::string> starElements{ "x", "y", "peak", "fwhm", "seeing", "id" };
+
+    for( std::size_t n = 0; n < m_indiP_stars.size(); ++n )
     {
-        if( !m_detectedStars[n].hasProp() )
+        std::vector<float> vals( starElements.size(), s_emptyStarValue );
+
+        if( n < m_detectedStars.size() )
         {
-            continue;
+            const Star &star = m_detectedStars[n];
+
+            vals = { star.x, star.y, star.max, star.fwhm, star.seeing, static_cast<float>( star.id ) };
         }
 
-        updateIfChanged( m_detectedStars[n].prop(), "x", m_detectedStars[n].x );
-        updateIfChanged( m_detectedStars[n].prop(), "y", m_detectedStars[n].y );
-        updateIfChanged( m_detectedStars[n].prop(), "peak", m_detectedStars[n].max );
-        updateIfChanged( m_detectedStars[n].prop(), "fwhm", m_detectedStars[n].fwhm );
-        updateIfChanged( m_detectedStars[n].prop(), "seeing", m_detectedStars[n].seeing );
+        updateIfChanged( m_indiP_stars[n], starElements, vals );
     }
+
     return 0;
 }
 
@@ -701,6 +689,7 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
     int loopCount = 0;
 
     bool sendNudge = false;
+    int rejectedAcquire = -1;
     double nudgeXArcsec = 0;
     double nudgeYArcsec = 0;
     std::vector<starTelemSample> loopExitTelemSamples;
@@ -832,45 +821,30 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
 
         relabelStarsByBrightness();
 
-        const int starCount = static_cast<int>( m_detectedStars.size() );
-        if( m_acquire_star >= starCount || m_acquire_star < -1 )
+        // Acquire by track id, so a brightness-rank swap cannot redirect the nudge to another star.
+        if( m_acquire_star >= 0 )
         {
-            m_acquire_star = -1;
-        }
+            if( acquireNudge( m_acquire_star, nudgeXArcsec, nudgeYArcsec ) == 0 )
+            {
+                m_acqQuitTime = mx::sys::get_curr_time();
+                m_temp_acq_star = m_acquire_star;
+                sendNudge = true;
 
-        if( m_acquire_star >= 0 && m_acquire_star < starCount )
-        {
-            m_acqQuitTime = mx::sys::get_curr_time();
-            m_temp_acq_star = m_acquire_star;
+                resetAcq();
+            }
+            else
+            {
+                rejectedAcquire = m_acquire_star;
+            }
 
-            int deltaX = static_cast<int>( m_detectedStars[m_acquire_star].x ) - m_x_center;
-            int deltaY = static_cast<int>( m_detectedStars[m_acquire_star].y ) - m_y_center;
-
-            // Negative signs move the scope opposite the current star offset.
-            nudgeXArcsec = -1 * static_cast<double>( deltaY ) * m_plate_scale;
-            nudgeYArcsec = -1 * static_cast<double>( deltaX ) * m_plate_scale;
-            sendNudge = true;
-
-            resetAcq();
             m_acquire_star = -1;
         }
 
         m_num_stars = static_cast<int>( m_detectedStars.size() );
+        selectSeeingStar();
+
         if( m_num_stars > 0 )
         {
-            // Keep a user-selected seeing star while it is tracked, otherwise use star 0.
-            if( m_seeing_star >= m_num_stars )
-            {
-                m_seeing_star = -1;
-            }
-
-            m_current_acq_star = ( m_seeing_star >= 0 ) ? m_seeing_star : 0;
-            m_seeing = m_detectedStars[m_current_acq_star].seeing;
-            if( !std::isfinite( m_seeing ) )
-            {
-                m_seeing = 0;
-            }
-
             loopExitTelemSamples.reserve( m_detectedStars.size() );
             for( const auto &star : m_detectedStars )
             {
@@ -883,14 +857,14 @@ inline int psfAcq::processImage( void *curr_src, const dev::shmimT &dummy )
                 loopExitTelemSamples.push_back( { star.x, star.y, star.max, star.fwhm, star.seeing } );
             }
         }
-        else
-        {
-            m_seeing = 0;
-            m_seeing_star = -1;
-            m_current_acq_star = -1;
-        }
 
         m_updated = true;
+    }
+
+    if( rejectedAcquire >= 0 )
+    {
+        log<text_log>( "acquire_star track " + std::to_string( rejectedAcquire ) + " is no longer tracked, not acquiring",
+                       logPrio::LOG_WARNING );
     }
 
     if( !loopExitTelemSamples.empty() )
@@ -1020,57 +994,6 @@ inline int psfAcq::recordTelem( const telem_psfacq *telemTag )
     return emitStarTelemetry( starTelemetryValues );
 }
 
-void psfAcq::registerStarProperty( Star &star, std::size_t rankIndex )
-{
-    // Caller must hold m_indiMutex.
-    if( star.hasProp() )
-    {
-        unregisterStarProperty( star );
-    }
-
-    star.allocate();
-
-    std::string starPrefix = "star_" + std::to_string( rankIndex );
-    createROIndiNumber(
-        star.prop(),
-        starPrefix,
-        "Star " + std::to_string( rankIndex ) + " Properties",
-        "Star Acq" );
-    star.prop().add( pcf::IndiElement( "x" ) );
-    star.prop()["x"].set( star.x );
-    star.prop().add( pcf::IndiElement( "y" ) );
-    star.prop()["y"].set( star.y );
-    star.prop().add( pcf::IndiElement( "peak" ) );
-    star.prop()["peak"].set( star.max );
-    star.prop().add( pcf::IndiElement( "fwhm" ) );
-    star.prop()["fwhm"].set( star.fwhm );
-    star.prop().add( pcf::IndiElement( "seeing" ) );
-    star.prop()["seeing"].set( star.seeing );
-    registerIndiPropertyReadOnly( star.prop() );
-}
-
-void psfAcq::unregisterStarProperty( Star &star )
-{
-    // Caller must hold m_indiMutex.
-    if( !star.hasProp() )
-    {
-        return;
-    }
-
-    std::string uniqueKey = star.prop().createUniqueKey();
-    if( m_indiDriver )
-    {
-        m_indiDriver->sendDelProperty( star.prop() );
-    }
-
-    if( !uniqueKey.empty() && !m_indiNewCallBacks.erase( uniqueKey ) )
-    {
-        log<software_error>( { __FILE__, __LINE__, "failed to erase " + uniqueKey } );
-    }
-
-    star.deallocate();
-}
-
 void psfAcq::relabelStarsByBrightness()
 {
     // Caller must hold m_indiMutex.
@@ -1093,38 +1016,6 @@ void psfAcq::relabelStarsByBrightness()
 
             return lhs.id < rhs.id;
         } );
-
-    bool labelsAlreadyMatch = true;
-    for( std::size_t n = 0; n < m_detectedStars.size(); ++n )
-    {
-        if( !m_detectedStars[n].hasProp() )
-        {
-            labelsAlreadyMatch = false;
-            break;
-        }
-
-        std::string desiredName = "star_" + std::to_string( n );
-        if( m_detectedStars[n].prop().getName() != desiredName )
-        {
-            labelsAlreadyMatch = false;
-            break;
-        }
-    }
-
-    if( labelsAlreadyMatch )
-    {
-        return;
-    }
-
-    for( auto &star : m_detectedStars )
-    {
-        unregisterStarProperty( star );
-    }
-
-    for( std::size_t n = 0; n < m_detectedStars.size(); ++n )
-    {
-        registerStarProperty( m_detectedStars[n], n );
-    }
 }
 
 void psfAcq::removeStar( size_t index )
@@ -1135,7 +1026,6 @@ void psfAcq::removeStar( size_t index )
         return;
     }
 
-    unregisterStarProperty( m_detectedStars[index] );
     m_detectedStars.erase( m_detectedStars.begin() + index );
 }
 
@@ -1232,7 +1122,7 @@ INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_recordSeeing )(const pcf::IndiProperty &i
     return -1;
 }
 
-// For user to select acquisition star number
+// For user to select the acquisition star by track id
 INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_acquire_star )( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getName() != m_indiP_acquire_star.getName() )
@@ -1258,7 +1148,7 @@ INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_acquire_star )( const pcf::IndiProperty &
     return 0;
 }
 
-// For user to select seeing star number
+// For user to select the seeing star by track id
 INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_seeing_star )( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getName() != m_indiP_seeing_star.getName() )
@@ -1278,7 +1168,7 @@ INDI_NEWCALLBACK_DEFN( psfAcq, m_indiP_seeing_star )( const pcf::IndiProperty &i
     { //mutex scope
         std::lock_guard<std::mutex> guard( m_indiMutex );
 
-        // processImage falls back to star 0 if this star is not tracked.
+        // selectSeeingStar falls back to the brightest star if this track is not present.
         m_seeing_star = std::max( static_cast<int>( target ), -1 );
     }
 

@@ -654,6 +654,7 @@ TEST_CASE( "Camera star-acquisition panel discovery and command", "[cameraGUI]" 
     {
         star.add( pcf::IndiElement( name, "0.9" ) );
     }
+    star.add( pcf::IndiElement( "id", "7" ) );
     widget.publish( star );
     panel->updateGUI();
 
@@ -671,7 +672,7 @@ TEST_CASE( "Camera star-acquisition panel discovery and command", "[cameraGUI]" 
     REQUIRE( widget.m_publisher.m_commands.size() == 1 );
     REQUIRE( widget.m_publisher.m_commands.back().getDevice() == acqName );
     REQUIRE( widget.m_publisher.m_commands.back().getName() == "acquire_star" );
-    REQUIRE( widget.m_publisher.m_commands.back()["target"].get<int>() == 0 );
+    REQUIRE( widget.m_publisher.m_commands.back()["target"].get<int>() == 7 );
 
     const QString screenshot = qEnvironmentVariable( "CAMERA_GUI_ACQ_SCREENSHOT" );
     if( !screenshot.isEmpty() )

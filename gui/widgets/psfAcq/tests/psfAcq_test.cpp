@@ -1,5 +1,5 @@
 /** \file psfAcq_test.cpp
- * \brief Offline star list, seeing display, seeing-star selection, and acquire command tests for the psfAcq GUI widget.
+ * \brief Offline star list, seeing display, track-id selection, and acquire command tests for the psfAcq GUI widget.
  * \ingroup psfAcqGUI_unit_test
  */
 #define CATCH_CONFIG_RUNNER
@@ -27,11 +27,13 @@ class Widget : public xqt::psfAcq
     /// Deliver the device FSM state.
     void fsm( const std::string &state /**< [in] FSM state string. */ );
 
-    /// Define one `star_N` property with a seeing value and refresh the widget.
-    void star( int n /**< [in] Star index. */, double seeing /**< [in] Seeing in arcsec. */ );
+    /// Define one `star_N` property with a seeing value and track id, and refresh the widget.
+    void star( int    n /**< [in] Brightness rank. */,
+               double seeing /**< [in] Seeing in arcsec. */,
+               int    id /**< [in] Track id. */ );
 
-    /// Deliver the star the device uses for its published seeing and refresh the widget.
-    void seeingStar( int n /**< [in] Star index, or -1 for none. */ );
+    /// Deliver the track the device uses for its published seeing and refresh the widget.
+    void seeingStar( int id /**< [in] Track id, or -1 for none. */ );
 
     /// Delete one `star_N` property and refresh the widget.
     void delStar( int n /**< [in] Star index. */ );
@@ -54,7 +56,7 @@ void Widget::fsm( const std::string &state )
     updateGUI();
 }
 
-void Widget::star( int n, double seeing )
+void Widget::star( int n, double seeing, int id )
 {
     pcf::IndiProperty p( pcf::IndiProperty::Number, "camacq-acq", "star_" + std::to_string( n ) );
     for( const auto &el : { "x", "y", "peak", "fwhm" } )
@@ -64,15 +66,17 @@ void Widget::star( int n, double seeing )
     }
     p.add( pcf::IndiElement( "seeing" ) );
     p["seeing"] = seeing;
+    p.add( pcf::IndiElement( "id" ) );
+    p["id"] = id;
     handleDefProperty( p );
     updateGUI();
 }
 
-void Widget::seeingStar( int n )
+void Widget::seeingStar( int id )
 {
     pcf::IndiProperty p( pcf::IndiProperty::Number, "camacq-acq", "seeing_star" );
     p.add( pcf::IndiElement( "current" ) );
-    p["current"] = n;
+    p["current"] = id;
     handleSetProperty( p );
     updateGUI();
 }
@@ -98,8 +102,8 @@ TEST_CASE( "psfAcq widget parses star property names", "[psfAcqGUI]" )
     CHECK( xqt::psfAcq::starIndex( "seeing_star" ) == -1 );
 }
 
-/** \brief Detected stars populate the list, star 0 is selected by default with its seeing shown, and selections are
- * sent.
+/** \brief Detected stars populate the list, the brightest is selected by default with its seeing shown, and
+ * selections are sent as track ids.
  * \ingroup psfAcqGUI_unit_test
  */
 TEST_CASE( "psfAcq widget selects a star, shows its seeing, and acquires it", "[psfAcqGUI]" )
@@ -120,12 +124,14 @@ TEST_CASE( "psfAcq widget selects a star, shows its seeing, and acquires it", "[
     REQUIRE( seeing );
     REQUIRE( acquire );
 
-    widget.star( 1, 1.25 );
-    CHECK( combo->currentData().toInt() == 1 );
+    // Track ids differ from ranks so rank/id confusion fails.
+    widget.star( 1, 1.25, 11 );
+    CHECK( combo->currentData().toInt() == 11 );
 
-    widget.star( 0, 0.85 );
+    widget.star( 0, 0.85, 10 );
     CHECK( combo->count() == 2 );
-    CHECK( combo->currentData().toInt() == 0 );
+    CHECK( combo->currentData().toInt() == 10 );
+    CHECK( combo->itemText( 0 ) == "Star 0 (#10)" );
     CHECK_FALSE( acquire->isEnabled() );
     CHECK( seeing->text() == "0.85\"" );
 
@@ -140,23 +146,23 @@ TEST_CASE( "psfAcq widget selects a star, shows its seeing, and acquires it", "[
     CHECK( seeing->text() == "1.25\"" );
     REQUIRE( widget.m_sent.size() == 1 );
     CHECK( widget.m_sent.back().getName() == "seeing_star" );
-    CHECK( widget.m_sent.back()["target"].get<int>() == 1 );
-    widget.seeingStar( 1 );
+    CHECK( widget.m_sent.back()["target"].get<int>() == 11 );
+    widget.seeingStar( 11 );
 
-    widget.star( 2, 2.0 );
+    widget.star( 2, 2.0, 12 );
     CHECK( combo->count() == 3 );
-    CHECK( combo->currentData().toInt() == 1 );
+    CHECK( combo->currentData().toInt() == 11 );
 
     widget.on_button_acquire_pressed();
     REQUIRE( widget.m_sent.size() == 2 );
     CHECK( widget.m_sent.back().getDevice() == "camacq-acq" );
     CHECK( widget.m_sent.back().getName() == "acquire_star" );
-    CHECK( widget.m_sent.back()["target"].get<int>() == 1 );
+    CHECK( widget.m_sent.back()["target"].get<int>() == 11 );
 
-    widget.seeingStar( 0 );
+    widget.seeingStar( 10 );
     widget.delStar( 1 );
     CHECK( combo->count() == 2 );
-    CHECK( combo->currentData().toInt() == 0 );
+    CHECK( combo->currentData().toInt() == 10 );
     CHECK( seeing->text() == "0.85\"" );
 
     widget.onDisconnect();
@@ -164,6 +170,59 @@ TEST_CASE( "psfAcq widget selects a star, shows its seeing, and acquires it", "[
     CHECK_FALSE( acquire->isEnabled() );
     widget.on_button_acquire_pressed();
     CHECK( widget.m_sent.size() == 2 );
+}
+
+/** \brief A brightness-rank swap keeps the selected track, its seeing, and its acquire target; empty slots are not
+ * listed and a lost track is not acquired.
+ * \ingroup psfAcqGUI_unit_test
+ */
+TEST_CASE( "psfAcq widget keeps the selected track across a brightness swap", "[psfAcqGUI]" )
+{
+    // clang-format off
+#ifdef PSFACQ_GUI_TEST_DOXYGEN_REF
+    xqt::psfAcq::updateGUI; xqt::psfAcq::starRank; xqt::psfAcq::on_button_acquire_pressed;
+#endif
+    // clang-format on
+    std::string name = "camacq-acq";
+    Widget      widget( name );
+
+    auto *combo  = widget.findChild<QComboBox *>( "combo_star" );
+    auto *seeing = widget.findChild<QLabel *>( "val_seeing" );
+    REQUIRE( combo );
+    REQUIRE( seeing );
+
+    widget.fsm( "OPERATING" );
+    widget.star( 0, 0.80, 10 );
+    widget.star( 1, 1.30, 11 );
+
+    combo->setCurrentIndex( 1 );
+    emit combo->activated( 1 );
+    widget.seeingStar( 11 );
+    CHECK( seeing->text() == "1.30\"" );
+
+    // The device rewrites its fixed star_N slots in the new rank order.
+    widget.star( 0, 1.30, 11 );
+    widget.star( 1, 0.80, 10 );
+
+    CHECK( combo->itemText( 0 ) == "Star 0 (#11)" );
+    CHECK( combo->currentData().toInt() == 11 );
+    CHECK( seeing->text() == "1.30\"" );
+
+    widget.on_button_acquire_pressed();
+    REQUIRE( widget.m_sent.back().getName() == "acquire_star" );
+    CHECK( widget.m_sent.back()["target"].get<int>() == 11 );
+
+    // An emptied slot (id -1) is not listed, and a track emptied before the list refreshes is not acquired.
+    widget.star( 1, -1, -1 );
+    CHECK( combo->count() == 1 );
+
+    const std::size_t sent = widget.m_sent.size();
+    pcf::IndiProperty empty( pcf::IndiProperty::Number, "camacq-acq", "star_0" );
+    empty.add( pcf::IndiElement( "id" ) );
+    empty["id"] = -1;
+    widget.handleSetProperty( empty );
+    widget.on_button_acquire_pressed();
+    CHECK( widget.m_sent.size() == sent );
 }
 } // namespace psfAcqGUITest
 } // namespace libXWCTest
