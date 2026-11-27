@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-set -ex
+set -x
+if [[ $EUID != 0 ]]; then
+    echo "Must be run as root (sudo)"
+    exit 1
+fi
 if [[ $(hostname) != "exao1" ]]; then
     echo "Must run on exao1"
     exit 1
@@ -9,40 +13,105 @@ if [[ -z "$1" ]]; then
 else
     dest="$1"
 fi
-
-declare -a dataFolders=("opt/MagAOX/rawimages" "opt/MagAOX/telem" "opt/MagAOX/cacao" "opt/MagAOX/logs" "opt/MagAOX/calib")
-
 if [[ $dest == /mnt/backup ]]; then
-    if ! mount | grep -q "on $dest"; then
-        echo "External drive mount appears not to be active for $dest"
+    if ! mount | grep -q "on /mnt/backup"; then
+        echo "External drive mount appears not to be active for /mnt/backup"
         exit 1
     fi
 fi
+
+logOutputPath=$(mktemp --suffix=.log /tmp/instrument_backup_sync_$(date +%s)_XXXXXX) || exit 1
+chmod 644 "$logOutputPath"
+
+writeLog() {
+    logStr="$(date +"%Y-%m-%dT%H:%M:%SZ") $1"
+    echo "$logStr" | tee -a "$logOutputPath"
+}
+exitWithError() {
+    writeLog "$1"
+    exit 1
+}
+remindPath() {
+    echo "Log in $logOutputPath"
+}
+remindPath
+trap remindPath EXIT
+
+
+declare -a dataFolders=("opt/MagAOX/rawimages" "opt/MagAOX/telem" "opt/MagAOX/cacao" "opt/MagAOX/logs" "opt/MagAOX/calib")
+sourceFolders=()
+destFolders=()
+
 for remote in icc rtc; do
     for folder in "${dataFolders[@]}"; do
         if ! mount | grep -q "on /srv/$remote/$folder"; then
-            echo "NFS mount appears not to be active for on /srv/$remote/$folder"
+            echo "NFS mount appears not to be active on /srv/$remote/$folder"
             exit 1
+        else
+            sourceFolders+=("/srv/$remote/$folder/")
+            destFolders+=("$dest/$remote/$folder/")
         fi
     done
 done
 
-rsyncWithOptions="rsync -rt --info=progress2 --info=name0 $extraRsyncOptions"
-
-for remote in rtc icc; do
-    for folder in "${dataFolders[@]}"; do
-        mkdir -p "$dest/$remote/$folder/"
-        $rsyncWithOptions "/srv/$remote/$folder/" "$dest/$remote/$folder/"
-    done
-done
-
 for folder in "${dataFolders[@]}"; do
-    mkdir -p "$dest/aoc/$folder"
-    $rsyncWithOptions "/$folder/" "$dest/aoc/$folder"
+    sourceFolders+=("/$folder/")
+    destFolders+=("$dest/aoc/$folder/")
 done
-for home in /home/*; do
-	if [[ $(basename $home) != "data" && $(basename $home) != "guestobs" ]]; then
-        mkdir -p "$dest/aoc/$home/"
-        $rsyncWithOptions "$home/" "$dest/aoc/$home/"
+
+for homeDir in /home/*; do
+	homeName="$(basename $homeDir)"
+	if [[ "$homeName" == "data" || "$homeName" == "guestobs" ]]; then continue; fi
+        sourceFolders+=("/home/$homeName/")
+        destFolders+=("$dest/aoc/home/$homeName/")
+done
+
+# Regenerable caches and tool installs, anchored to each source root, e.g. /home/<user>/.cache/
+# (patterns must not contain spaces)
+declare -a excludePatterns=(
+    "/.cache/"
+    "/.vscode/"
+    "/.vscode-server/"
+    "/.vscode-server-insiders/"
+    "/.cursor-server/"
+    "/.local/share/uv/"
+    "/.venv/"
+    "/.conda/pkgs/"
+    "/.rustup/"
+    "/.cargo/registry/"
+    "/.cargo/git/"
+)
+rsyncWithOptions="rsync -rt --info=progress2 --info=name0 ${excludePatterns[*]/#/--exclude=} $extraRsyncOptions"
+
+writeLog "Syncing:"
+
+for index in "${!sourceFolders[@]}"; do
+    srcPath="${sourceFolders[$index]}"
+    destPath="${destFolders[$index]}"
+    writeLog "$srcPath -> $destPath"
+done
+
+failedFolders=()
+
+for index in "${!sourceFolders[@]}"; do
+    srcPath="${sourceFolders[$index]}"
+    destPath="${destFolders[$index]}"
+    mkdir -p "$destPath"
+    cmd="$rsyncWithOptions $srcPath $destPath"
+    writeLog "Start: $cmd"
+    $cmd 2>&1 | tee -a "$logOutputPath"
+    rc=${PIPESTATUS[0]}
+    if [[ $rc == 24 ]]; then
+        writeLog "Warning, files vanished during transfer from $srcPath"
+        writeLog "Finished: [exit: $rc] $cmd"
+    elif [[ $rc != 0 ]]; then
+        failedFolders+=("$srcPath")
+        writeLog "Failed: [exit: $rc] $cmd"
+    else
+        writeLog "Success: $cmd"
     fi
 done
+
+if [[ ${#failedFolders[@]} != 0 ]]; then
+    exitWithError "Failed to rsync: ${failedFolders[*]}"
+fi
