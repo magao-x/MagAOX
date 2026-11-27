@@ -1,0 +1,62 @@
+/// \file telem_counteroffload.fbs
+/// \brief counterOffload state, settings, cumulative counters and latency summary.
+namespace MagAOX.logger;
+
+table Telem_counteroffload_fb
+{
+   /// whether new offloads are accepted
+   enabled:bool;
+
+   /// whether a calibration run is in progress
+   calibrating:bool;
+
+   /// scale applied to each new offload
+   gain:float;
+
+   /// fraction of the completed contribution removed after each published slot
+   leak:float;
+
+   /// ramp start after the woofer command, us
+   ramp_start_us:float;
+
+   /// ramp duration, us
+   ramp_duration_us:float;
+
+   /// offset added to the input receipt time to give the ramp reference, us
+   time_offset_us:float;
+
+   /// command clip limit
+   max_command:float;
+
+   /// dmSyncopation slot period, us; -1 until measured
+   slot_us:float;
+
+   /// offload updates accepted since startup
+   events:ulong;
+
+   /// commands published since startup
+   published:ulong;
+
+   /// commands not published since startup
+   failed:ulong;
+
+   /// offloads that waited at least a whole slot since startup
+   missed:ulong;
+
+   /// slots in which the command or the accumulator was clipped since startup
+   clipped:ulong;
+
+   /// offloads folded without a ramp because the ramp pool was full, since startup
+   overflows:ulong;
+
+   /// mean receipt-to-publication pipeline time over the latency window, us; -1 if no data
+   pipeline_us:float;
+
+   /// RMS of the pipeline time over the latency window, us; -1 if no data
+   pipeline_rms_us:float;
+
+   /// largest compute time over the latency window, us; -1 if no data
+   compute_max_us:float;
+}
+
+root_type Telem_counteroffload_fb;

@@ -81,6 +81,7 @@ INCLUDEDEPS= \
 	logger/types/telem_chrony_status.hpp \
 	logger/types/telem_cooler.hpp \
 	logger/types/telem_coreloads.hpp \
+	logger/types/telem_counteroffload.hpp \
 	logger/types/telem_coretemps.hpp \
 	logger/types/telem_dmmodes.hpp \
 	logger/types/telem_dmspeck.hpp \
