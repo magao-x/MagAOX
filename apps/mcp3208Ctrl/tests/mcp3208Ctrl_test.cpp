@@ -7,6 +7,7 @@
 
 #include "../../../tests/testXWC.hpp"
 
+#include <deque>
 #include <vector>
 
 #define protected public
@@ -20,6 +21,7 @@ namespace
 struct mcp3208StubState
 {
     std::vector<unsigned short> m_channelValues;     ///< Values returned for each channel read.
+    std::deque<unsigned short>  m_sequence; ///< Values returned in order, one per read, before m_channelValues.
     std::vector<int>            m_readOrder;         ///< Order in which channels were sampled.
     int                         m_connectCalls{ 0 }; ///< Number of stubbed connect calls.
 };
@@ -35,6 +37,7 @@ mcp3208StubState &stubState()
 void resetStubState()
 {
     stubState().m_channelValues.clear();
+    stubState().m_sequence.clear();
     stubState().m_readOrder.clear();
     stubState().m_connectCalls = 0;
 }
@@ -89,6 +92,13 @@ void MCP3208::disconnect()
 unsigned short MCP3208::read( const std::uint8_t channel, const Mode ) const
 {
     stubState().m_readOrder.push_back( static_cast<int>( channel ) );
+
+    if( !stubState().m_sequence.empty() )
+    {
+        const unsigned short value = stubState().m_sequence.front();
+        stubState().m_sequence.pop_front();
+        return value;
+    }
 
     if( static_cast<size_t>( channel ) < stubState().m_channelValues.size() )
     {
@@ -173,6 +183,29 @@ class mcp3208Ctrl_test : public mcp3208Ctrl
         ip.setName( m_fpsProperty );
         ip.add( pcf::IndiElement( m_fpsElement ) );
         ip[m_fpsElement].setValue( current );
+        return ip;
+    }
+
+    /// Initialize the averaged-scan INDI property used by the callback tests.
+    void setupAverageProperty()
+    {
+        m_indiP_average = pcf::IndiProperty( pcf::IndiProperty::Number );
+        m_indiP_average.setName( "average" );
+        m_indiP_average.add( pcf::IndiElement( "current" ) );
+        m_indiP_average["current"].setValue( m_average.load() );
+        m_indiP_average.add( pcf::IndiElement( "target" ) );
+        m_indiP_average["target"].setValue( m_average.load() );
+    }
+
+    /// Build an INDI property update for the averaged-scan callback.
+    pcf::IndiProperty makeAverageUpdate( const double target /**< [in] requested scans per published frame */ )
+    {
+        pcf::IndiProperty ip( pcf::IndiProperty::Number );
+        ip.setName( "average" );
+        ip.add( pcf::IndiElement( "current" ) );
+        ip["current"].setValue( target );
+        ip.add( pcf::IndiElement( "target" ) );
+        ip["target"].setValue( target );
         return ip;
     }
 
@@ -471,6 +504,63 @@ TEST_CASE( "mcp3208Ctrl configuration overrides load synchronized settings", "[m
     REQUIRE( synchronized.loadConfigImpl( synchronized.config ) == 0 );
     REQUIRE( synchronized.m_timingSource == mcp3208Ctrl::TimingSource::Semaphore );
     REQUIRE( synchronized.m_effectiveTimingSource == mcp3208Ctrl::TimingSource::Semaphore );
+}
+
+/// Verify each published frame is the rounded mean of `average` scans, and fps() reports the published rate.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl publishes the rounded mean of average scans", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+
+    XWCTEST_DOXYGEN_REF( app.acquireScanReading() );
+
+    resetStubState();
+    app.m_timingSource          = mcp3208Ctrl::TimingSource::Integrator;
+    app.m_effectiveTimingSource = mcp3208Ctrl::TimingSource::Integrator;
+    app.m_numChannels           = 2;
+    app.m_values.assign( 2, 0 );
+    app.m_trigger    = 0.0f;
+    app.m_gain       = 0.0f;
+    app.m_time_start = std::chrono::high_resolution_clock::now();
+    app.m_fps        = 8000;
+
+    // Four 8 kHz scans, channel 0 then channel 1, published as one 2 kHz frame of their means.
+    app.m_average          = 4;
+    stubState().m_sequence = { 100, 1000, 101, 1001, 103, 1003, 104, 1006 };
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( stubState().m_readOrder == std::vector<int>( { 0, 1, 0, 1, 0, 1, 0, 1 } ) );
+    REQUIRE( app.m_values == std::vector<uint16_t>( { 102, 1003 } ) ); // 408/4, and 4010/4 = 1002.5 rounded up.
+    REQUIRE( app.fps() == Approx( 2000.0f ) );
+
+    // Without averaging, every scan is published as read.
+    app.m_average          = 1;
+    stubState().m_sequence = { 7, 9 };
+    REQUIRE( app.acquireAndCheckValid() == 0 );
+    REQUIRE( app.m_values == std::vector<uint16_t>( { 7, 9 } ) );
+    REQUIRE( app.fps() == Approx( 8000.0f ) );
+}
+
+/// Verify the averaged-scan callback accepts whole numbers in [1, 16] and keeps the current count otherwise.
+/**
+ * \ingroup mcp3208Ctrl_unit_test
+ */
+TEST_CASE( "mcp3208Ctrl average callback sets the scans per published frame", "[mcp3208Ctrl]" )
+{
+    mcp3208Ctrl_test app;
+    app.setupAverageProperty();
+
+    XWCTEST_DOXYGEN_REF( app.newCallBack_m_indiP_average( app.makeAverageUpdate( 4.0 ) ) );
+
+    REQUIRE( app.newCallBack_m_indiP_average( app.makeAverageUpdate( 4.0 ) ) == 0 );
+    REQUIRE( app.m_average.load() == 4 );
+
+    for( const double rejected : { 0.0, 17.0, 2.5 } )
+    {
+        REQUIRE( app.newCallBack_m_indiP_average( app.makeAverageUpdate( rejected ) ) == 0 );
+        REQUIRE( app.m_average.load() == 4 );
+    }
 }
 
 /// Verify an out-of-range `accel.fps` keeps the default rate limit.

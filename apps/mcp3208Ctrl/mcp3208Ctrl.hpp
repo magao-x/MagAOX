@@ -39,7 +39,9 @@ namespace app
  *
  * The controller can either acquire on its internal timer loop or synchronize reads to an
  * ImageStreamIO semaphore. By default (`synchro.timingSource=integrator`) it reads free-running on the internal timer
- * at `accel.fps`, whatever the WFS does; `fps.device` only reports the WFS rate. Synchronized, `fps` (`accel.fps`, INDI
+ * at `accel.fps`, whatever the WFS does; `fps.device` only reports the WFS rate. With `accel.average` (INDI `average`)
+ * N > 1, each published frame is the rounded mean of N consecutive scans, so the stream runs at fps/N (`stream_fps`):
+ * 8 kHz scans averaged by 4 give a 2 kHz stream of 4-scan means. Synchronized, `fps` (`accel.fps`, INDI
  * `fps`) is an upper limit: each WFS semaphore arms the highest integer number of scans whose rate does not exceed it
  * (8 kHz at a 2 kHz or 500 Hz WFS, 7.7 kHz at 700 Hz, for an 8 kHz limit), uniformly spaced across that WFS period,
  * with the first scan at the fitted WFS arrival plus the optional signed `synchroDelay` offset (no built-in delay;
@@ -150,6 +152,21 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
     INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_fps );
 
     float m_fps{ 8000 }; ///< The target acquisition rate in frames per second.
+
+    /// Scans averaged into each published frame (accel.average, INDI average, 1-16): 1 publishes every scan. Set by
+    /// INDI and read by the acquisition thread.
+    std::atomic<int> m_average{ 1 };
+
+    std::vector<uint32_t> m_sums; ///< Per-channel sums of the scans in the frame being averaged; acquisition thread.
+
+    /// INDI property setting the scans averaged into each published frame.
+    pcf::IndiProperty m_indiP_average;
+
+    /// Handle updates to the averaged-scan count.
+    INDI_NEWCALLBACK_DECL( mcp3208Ctrl, m_indiP_average );
+
+    /// INDI property reporting the published stream rate, fps/average, for stream consumers such as modalPSDs.
+    pcf::IndiProperty m_indiP_streamFps;
 
     /// INDI property subscription used to follow an external fps source.
     pcf::IndiProperty m_indiP_fpsSource;
@@ -494,9 +511,9 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      */
     int configureAcquisition();
 
-    /// Report the current acquisition rate metadata to the framegrabber.
+    /// Report the published frame rate to the framegrabber: the scan rate divided by the averaged-scan count.
     /**
-     * \returns the current fps value.
+     * \returns fps/average.
      */
     float fps();
 
@@ -507,13 +524,21 @@ class mcp3208Ctrl : public MagAOXApp<true>, public dev::frameGrabber<mcp3208Ctrl
      */
     int startAcquisition();
 
-    /// Acquire one sample and indicate whether it should be published.
+    /// Acquire one published frame: the mean of `average` scans, or one scan without averaging.
     /**
      * \returns 0 when a new sample is ready.
      * \returns 1 when no new sample should be published.
      * \returns -1 on a critical error.
      */
     int acquireAndCheckValid();
+
+    /// Acquire one scan with the active timing source, falling back from semaphore to timer timing when needed.
+    /**
+     * \returns 0 when a new scan is ready.
+     * \returns 1 when no new scan should be used.
+     * \returns -1 on a critical error.
+     */
+    int acquireScanReading();
 
     /// Copy the current MCP3208 values into the output image buffer.
     /**
@@ -882,6 +907,17 @@ void mcp3208Ctrl::setupConfig()
                 "float",
                 "Global EMA coefficient for synchronized timing smoothers. Default is 0.01." );
 
+    config.add( "accel.average",
+                "",
+                "accel.average",
+                argType::Required,
+                "accel",
+                "average",
+                false,
+                "int",
+                "Scans averaged into each published frame, 1-16: the stream runs at fps/average (8000 Hz averaged by 4 "
+                "gives a 2 kHz stream of 4-scan means). Also the INDI average target. Default is 1 (every scan)." );
+
     config.add( "accel.fps",
                 "",
                 "accel.fps",
@@ -974,6 +1010,19 @@ int mcp3208Ctrl::loadConfigImpl( mx::app::appConfigurator &_config )
     _config( m_alpha, "synchro.alpha" );
 
     _config( m_numChannels, "accel.numChannels" ); // making number of mcp3208 channels we read out configurable
+
+    int average = m_average.load();
+    _config( average, "accel.average" );
+
+    if( average >= 1 && average <= 16 )
+    {
+        m_average = average;
+    }
+    else
+    {
+        log<text_log>( "accel.average must be in [1, 16]; keeping " + std::to_string( m_average.load() ),
+                       logPrio::LOG_WARNING );
+    }
 
     float fps = m_fps;
     _config( fps, "accel.fps" );
@@ -1107,6 +1156,14 @@ int mcp3208Ctrl::appStartup()
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_fps, "fps", 0, 10000, 1, "%d", "", "" );
     m_indiP_fps["current"].setValue( m_fps );
     m_indiP_fps["target"].setValue( m_fps );
+
+    // INDI prop for user to set the scans averaged into each published frame, and the resulting stream rate
+    CREATE_REG_INDI_NEW_NUMBERF( m_indiP_average, "average", 1, 16, 1, "%d", "", "" );
+    m_indiP_average["current"].setValue( m_average.load() );
+    m_indiP_average["target"].setValue( m_average.load() );
+    CREATE_REG_INDI_RO_NUMBER( m_indiP_streamFps, "stream_fps", "Published stream rate", "" );
+    m_indiP_streamFps.add( pcf::IndiElement( "current" ) );
+    m_indiP_streamFps["current"].setValue( fps() );
 
     // INDI prop for user to set global timing EMA alpha
     CREATE_REG_INDI_NEW_NUMBERF( m_indiP_alpha, "alpha", 0.0, 1.0, 0.00001, "%.5f", "", "" );
@@ -1442,6 +1499,10 @@ int mcp3208Ctrl::appLogic()
 
     updatesIfChanged<float>( m_indiP_fps, { "current", "target" }, { m_fps, m_fps } );
 
+    updatesIfChanged<int>( m_indiP_average, { "current", "target" }, { m_average.load(), m_average.load() } );
+
+    updateIfChanged<float>( m_indiP_streamFps, "current", fps() );
+
     updatesIfChanged<float>( m_indiP_alpha, { "current", "target" }, { m_alpha, m_alpha } );
 
     updatesIfChanged<int>( m_indiP_numChannels, { "current", "target" }, { m_numChannels, m_numChannels } );
@@ -1518,7 +1579,7 @@ int mcp3208Ctrl::numChannels()
 
 float mcp3208Ctrl::fps()
 {
-    return m_fps;
+    return m_fps / std::clamp( m_average.load(), 1, 16 );
 }
 
 int mcp3208Ctrl::startAcquisition()
@@ -1566,6 +1627,43 @@ int mcp3208Ctrl::startAcquisition()
 }
 
 int mcp3208Ctrl::acquireAndCheckValid()
+{
+    // Each published frame is the mean of `average` consecutive scans: 8 kHz scans averaged by 4 give a 2 kHz stream
+    // of 4-scan means. The frame keeps the newest scan's timestamp, (average-1)/2 scans after the mean's centre.
+    const int average = std::clamp( m_average.load(), 1, 16 );
+    m_sums.assign( m_values.size(), 0 );
+
+    for( int scan = 0; scan < average; ++scan )
+    {
+        if( scan > 0 && ( m_shutdown || m_reconfig ) )
+        {
+            return 1; // An incomplete average is never published.
+        }
+
+        const int rv = acquireScanReading();
+        if( rv != 0 )
+        {
+            return rv;
+        }
+
+        for( size_t channel = 0; channel < m_values.size(); ++channel )
+        {
+            m_sums[channel] += m_values[channel];
+        }
+    }
+
+    if( average > 1 )
+    {
+        for( size_t channel = 0; channel < m_values.size(); ++channel )
+        {
+            m_values[channel] = static_cast<uint16_t>( ( m_sums[channel] + average / 2 ) / average ); // Rounded mean.
+        }
+    }
+
+    return 0;
+}
+
+int mcp3208Ctrl::acquireScanReading()
 {
     if( m_timingSource == TimingSource::Semaphore )
     {
@@ -2287,6 +2385,34 @@ int mcp3208Ctrl::recordTelem( const telem_fgtimings * )
 }
 
 // INDI callback handling for fps configuration.
+INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_average )( const pcf::IndiProperty &ipRecv )
+{
+    if( ipRecv.getName() != m_indiP_average.getName() )
+    {
+        log<software_error>( { __FILE__, __LINE__, "wrong INDI property received." } );
+        return -1;
+    }
+
+    float target;
+
+    if( indiTargetUpdate( m_indiP_average, target, ipRecv, true ) < 0 )
+    {
+        log<software_error>( { __FILE__, __LINE__ } );
+        return -1;
+    }
+
+    if( !( target >= 1 && target <= 16 ) || target != std::floor( target ) )
+    {
+        log<text_log>( "average must be a whole number in [1, 16]; keeping " + std::to_string( m_average.load() ),
+                       logPrio::LOG_WARNING );
+        return 0;
+    }
+
+    m_average = static_cast<int>( target ); // The next frame averages this many scans.
+    log<text_log>( "set average = " + std::to_string( m_average.load() ) + " scans per published frame" );
+    return 0;
+}
+
 INDI_NEWCALLBACK_DEFN( mcp3208Ctrl, m_indiP_fps )( const pcf::IndiProperty &ipRecv )
 {
     if( ipRecv.getName() != m_indiP_fps.getName() )
