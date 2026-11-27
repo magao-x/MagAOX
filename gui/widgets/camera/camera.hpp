@@ -283,9 +283,6 @@ class camera : public xWidget
     /// Whether the advertised EM-gain-off request can currently be sent.
     bool canSetEMGainOff() const;
 
-    /// Returns the base row used for left-column controls beneath the stage widgets.
-    int leftColumnBaseRow() const;
-
     /// Repositions optional left-column controls after stage or focus changes.
     void layoutLeftColumnControls();
 
@@ -331,12 +328,9 @@ camera::camera( std::string &camName, QWidget *Parent, Qt::WindowFlags f ) : xWi
 
     connect( this, SIGNAL( add_takeDarks() ), this, SLOT( setup_takeDarks() ) );
 
-    QSpacerItem *holder = new QSpacerItem( 10, 0, QSizePolicy::Expanding, QSizePolicy::Expanding );
-    ui.grid->addItem( holder, 2, 1, 1, 1 );
-
     ui_fsmState = new xqt::fsmDisplay( this );
     ui_fsmState->setObjectName( QString::fromUtf8( "fsmState" ) );
-    ui.grid->addWidget( ui_fsmState, 1, 0, 1, 1 );
+    ui.leftColumn->addWidget( ui_fsmState, 1, 0 );
     ui_fsmState->device( m_camName );
 
     QFont qf = ui.lab_camName->font();
@@ -942,7 +936,9 @@ void camera::updateGUI()
 void camera::setup_temp_ccd( bool ro )
 {
     if( ui_tempCCD )
+    {
         return;
+    }
 
     ui_tempCCD = new statusEntry( this );
     ui_tempCCD->setObjectName( QString::fromUtf8( "tempCCD" ) );
@@ -950,7 +946,7 @@ void camera::setup_temp_ccd( bool ro )
     ui_tempCCD->highlightChanges( false );
     ui_tempCCD->readOnly( ro );
 
-    ui.grid->addWidget( ui_tempCCD, 0, 1, 1, 1 );
+    ui.temperatureControls->insertWidget( 0, ui_tempCCD );
 
     ui_tempCCD->onDisconnect();
 
@@ -960,13 +956,15 @@ void camera::setup_temp_ccd( bool ro )
 void camera::setup_tempStatus()
 {
     if( ui_tempStatus )
+    {
         return;
+    }
 
     ui_tempStatus =
         new statusDisplay( m_camName, "temp_control", "status", "Temp. Ctrl.", "", this, Qt::WindowFlags() );
     ui_tempStatus->setObjectName( QString::fromUtf8( "tempStatus" ) );
 
-    ui.grid->addWidget( ui_tempStatus, 1, 1, 1, 1 );
+    ui.temperatureControls->addWidget( ui_tempStatus );
 
     ui_tempStatus->onDisconnect();
 
@@ -983,7 +981,7 @@ void camera::setup_reconfigure()
     ui_reconfigure->setText( "reconfigure" );
     ui_reconfigure->setMaximumWidth( 200 );
     connect( ui_reconfigure, SIGNAL( pressed() ), this, SLOT( reconfigure() ) );
-    ui.grid->addWidget( ui_reconfigure, 3, 0, 1, 1, Qt::AlignHCenter );
+    ui.leftColumn->addWidget( ui_reconfigure, 3, 0, Qt::AlignHCenter );
 }
 
 void camera::reconfigure()
@@ -1009,7 +1007,7 @@ void camera::setup_stage()
 
     ui_stage[n]->setObjectName( QString::fromUtf8( m_stageNames[n].c_str() ) );
 
-    ui.grid->addWidget( ui_stage[n], 4 + n, 0, 1, 1 );
+    ui.leftColumn->addWidget( ui_stage[n], 4 + n, 0 );
 
     ui_stage[n]->onDisconnect();
 
@@ -1055,7 +1053,7 @@ void camera::setup_roiStatus()
     ui_roiStatus = new roiStatus( m_camName, this );
     ui_roiStatus->setObjectName( QString::fromUtf8( "roiStatus" ) );
 
-    ui.grid->addWidget( ui_roiStatus, 3, 1, 1, 1 );
+    ui.rightColumn->addWidget( ui_roiStatus, 2, 0 );
 
     ui_roiStatus->onDisconnect();
 
@@ -1071,7 +1069,7 @@ void camera::setup_modes()
 
     ui_modes->setObjectName( QString::fromUtf8( "modes" ) );
 
-    ui.grid->addWidget( ui_modes, 3, 1, 1, 1 );
+    ui.rightColumn->addWidget( ui_modes, 3, 0 );
 
     ui_modes->onDisconnect();
 
@@ -1088,7 +1086,7 @@ void camera::setup_readoutSpd()
 
     ui_readoutSpd->setObjectName( QString::fromUtf8( "readoutSpd" ) );
 
-    ui.grid->addWidget( ui_readoutSpd, 4, 1, 1, 1 );
+    ui.rightColumn->addWidget( ui_readoutSpd, 4, 0 );
 
     ui_readoutSpd->onDisconnect();
 
@@ -1105,7 +1103,7 @@ void camera::setup_vshiftSpd()
 
     ui_vshiftSpd->setObjectName( QString::fromUtf8( "vshiftSpd" ) );
 
-    ui.grid->addWidget( ui_vshiftSpd, 5, 1, 1, 1 );
+    ui.rightColumn->addWidget( ui_vshiftSpd, 5, 0 );
 
     ui_vshiftSpd->onDisconnect();
 
@@ -1120,7 +1118,7 @@ void camera::setup_cropMode()
     ui_cropMode = new toggleSlider( m_camName, "roi_crop_mode", "Crop Mode", this );
     ui_cropMode->setObjectName( QString::fromUtf8( "cropMode" ) );
 
-    ui.grid->addWidget( ui_cropMode, 6, 1, 1, 1 );
+    ui.rightColumn->addWidget( ui_cropMode, 6, 0 );
 
     ui_cropMode->onDisconnect();
 
@@ -1138,7 +1136,7 @@ void camera::setup_expTime( bool ro )
     ui_expTime->highlightChanges( true );
     ui_expTime->readOnly( ro );
 
-    ui.grid->addWidget( ui_expTime, 7, 1, 1, 1 );
+    ui.rightColumn->addWidget( ui_expTime, 7, 0 );
 
     ui_expTime->onDisconnect();
 
@@ -1156,7 +1154,7 @@ void camera::setup_fps( bool ro )
     ui_fps->highlightChanges( true );
     ui_fps->readOnly( ro );
 
-    ui.grid->addWidget( ui_fps, 8, 1, 1, 1 );
+    ui.rightColumn->addWidget( ui_fps, 8, 0 );
 
     ui_fps->onDisconnect();
 
@@ -1166,7 +1164,9 @@ void camera::setup_fps( bool ro )
 void camera::setup_emGain( bool ro )
 {
     if( ui_emGain )
+    {
         return;
+    }
 
     ui_emGain = new statusEntry( this );
     ui_emGain->setObjectName( QString::fromUtf8( "emgain" ) );
@@ -1174,7 +1174,7 @@ void camera::setup_emGain( bool ro )
     ui_emGain->highlightChanges( true );
     ui_emGain->readOnly( ro );
 
-    ui.grid->addWidget( ui_emGain, 9, 1, 1, 1 );
+    ui.emGainRow->insertWidget( 0, ui_emGain, 1 );
 
     ui_emGain->onDisconnect();
 
@@ -1184,18 +1184,21 @@ void camera::setup_emGain( bool ro )
 void camera::setup_emGainOff()
 {
     if( ui_emGainOff )
+    {
         return;
+    }
 
     ui_emGainOff = new QPushButton( this );
     ui_emGainOff->setObjectName( QString::fromUtf8( "emGainOff" ) );
-    ui_emGainOff->setText( "EM gain off" );
+    ui_emGainOff->setText( "off" );
     ui_emGainOff->setToolTip( "Set EM gain to the camera's non-multiplying value." );
     ui_emGainOff->setMaximumWidth( 200 );
     ui_emGainOff->setFocusPolicy( Qt::NoFocus );
     ui_emGainOff->setVisible( m_connected && m_emGainOffPresent );
     ui_emGainOff->setEnabled( canSetEMGainOff() );
     connect( ui_emGainOff, SIGNAL( pressed() ), this, SLOT( emGainOff() ) );
-    ui.grid->addWidget( ui_emGainOff, 10, 1, 1, 1, Qt::AlignHCenter );
+
+    ui.emGainRow->addWidget( ui_emGainOff, 0, Qt::AlignVCenter );
 }
 
 void camera::emGainOff()
@@ -1221,7 +1224,7 @@ void camera::setup_avgTime( bool ro )
     ui_avgTime->highlightChanges( true );
     ui_avgTime->readOnly( ro );
 
-    ui.grid->addWidget( ui_avgTime, 12, 1, 1, 1 );
+    ui.rightColumn->addWidget( ui_avgTime, 11, 0 );
 
     ui_avgTime->onDisconnect();
 
@@ -1236,7 +1239,7 @@ void camera::setup_synchro()
     ui_synchro = new toggleSlider( m_camName, "synchro", "Synchro", this );
     ui_synchro->setObjectName( QString::fromUtf8( "synchro" ) );
 
-    ui.grid->addWidget( ui_synchro, 11, 1, 1, 1 );
+    ui.rightColumn->addWidget( ui_synchro, 10, 0 );
 
     ui_synchro->onDisconnect();
 
@@ -1313,42 +1316,31 @@ bool camera::canSetEMGainOff() const
            ( m_appState == "READY" || m_appState == "OPERATING" || m_appState == "CONFIGURING" );
 }
 
-int camera::leftColumnBaseRow() const
-{
-    int doff = 0;
-    if( ui_stage.size() > 4 )
-    {
-        doff = ui_stage.size() - 4;
-    }
-
-    return 8 + doff;
-}
-
 void camera::layoutLeftColumnControls()
 {
-    int row = leftColumnBaseRow();
+    int row = 4 + ui_stage.size();
 
     if( ui_focus )
     {
-        ui.grid->removeWidget( ui_focus );
+        ui.leftColumn->removeWidget( ui_focus );
         if( m_gotoFocusPresent )
         {
-            ui.grid->addWidget( ui_focus, row, 0, 1, 1, Qt::AlignHCenter );
+            ui.leftColumn->addWidget( ui_focus, row, 0, Qt::AlignHCenter );
             ++row;
         }
     }
 
     if( ui_shutterStatus )
     {
-        ui.grid->removeWidget( ui_shutterStatus );
-        ui.grid->addWidget( ui_shutterStatus, row, 0, 1, 1 );
+        ui.leftColumn->removeWidget( ui_shutterStatus );
+        ui.leftColumn->addWidget( ui_shutterStatus, row, 0 );
         ++row;
     }
 
     if( ui_takeDarks )
     {
-        ui.grid->removeWidget( ui_takeDarks );
-        ui.grid->addWidget( ui_takeDarks, row, 0, 1, 1, Qt::AlignHCenter );
+        ui.leftColumn->removeWidget( ui_takeDarks );
+        ui.leftColumn->addWidget( ui_takeDarks, row, 0, Qt::AlignHCenter );
     }
 }
 
