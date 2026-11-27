@@ -1,4 +1,6 @@
-
+/** \file cursesINDI.cpp
+ * \brief Terminal entrypoint and keyboard event loop for cursesINDI.
+ */
 //#define DEBUG_TMPOUT
 
 
@@ -8,6 +10,7 @@
 
 
 
+/// Connect to INDI and run the terminal interface until shutdown.
 int main()
 {
 
@@ -114,7 +117,7 @@ retry:
 
 
    topWin = newwin(1, COLS, 0, 0);
-   wprintw(topWin, "cursesINDI (arrow keys move, ctrl-c to quit)");
+   wprintw(topWin, "cursesINDI | arrows: move | Ctrl+L: clear + search | Ctrl+F: filter | Ctrl+C: quit");
    keypad(topWin, TRUE);
    wrefresh(topWin);
 

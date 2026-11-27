@@ -1,5 +1,5 @@
 /** \file cursesINDI_test.cpp
- * \brief Offline tests for cursesINDI search and selection across table updates.
+ * \brief Offline tests for cursesINDI search, filtering, and selection across table updates.
  * \ingroup cursesINDI_unit_test
  */
 #include "../../tests/testXWC.hpp"
@@ -396,6 +396,171 @@ TEST_CASE( "Table orders each field independently", "[cursesINDI][sorting]" )
     client.handleDelProperty( fsm );
     client.redrawTable();
     REQUIRE( selected( client ) == "camacq.fsm-acq.state" );
+}
+
+/** \brief Filter with the same case-insensitive, dot-separated fuzzy matching as search.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Fuzzy filter hides nonmatches and backspace restores them", "[cursesINDI][filter]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::searchElementRank;
+    cursesINDI::redrawTable;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "camwfs", "fsm", "state" ) );
+    client.handleDefProperty( property( "camwfs", "exposure", "current" ) );
+    client.handleDefProperty( property( "camwoofer", "fsm", "state" ) );
+    client.handleDefProperty( property( "motor", "fsm", "state" ) );
+    client.redrawTable();
+    client.keyPressed( 0x1f & 'f' );
+
+    for( char ch : std::string( "CW.FM.ST" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 2 );
+    REQUIRE( client.knownElements.size() == 4 );
+    REQUIRE( client.knownElements.at( "camwfs.fsm.state" ).tableRow == 0 );
+    REQUIRE( client.knownElements.at( "camwoofer.fsm.state" ).tableRow == 1 );
+    REQUIRE( client.knownElements.at( "camwfs.exposure.current" ).tableRow == -1 );
+    REQUIRE( client.knownElements.at( "motor.fsm.state" ).tableRow == -1 );
+
+    client.keyPressed( 'Z' );
+    REQUIRE( client.m_cellContents.empty() );
+    REQUIRE( selected( client ).empty() );
+    client.keyPressed( KEY_BACKSPACE );
+    REQUIRE( client.m_cellContents.size() == 2 );
+
+    client.keyPressed( '.' ); // A fourth segment is invalid, even when empty.
+    REQUIRE( client.m_cellContents.empty() );
+    REQUIRE( selected( client ).empty() );
+    REQUIRE( client.m_startRow == 0 );
+    REQUIRE( client.m_currY == 0 );
+    char value[100]{};
+    mvwinnstr( client.w_curvalWin, 0, 0, value, sizeof( value ) - 1 );
+    REQUIRE( std::string( value ).find_first_not_of( ' ' ) == std::string::npos );
+    client.keyPressed( KEY_BACKSPACE );
+    REQUIRE( client.m_cellContents.size() == 2 );
+
+    while( !client.m_deviceTarget.empty() )
+    {
+        client.keyPressed( KEY_BACKSPACE );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 4 );
+
+    for( char ch : std::string( ".EX.CUR" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 1 );
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+}
+
+/** \brief Keep filters while navigating, refocus with Ctrl+F, and return to search with Ctrl+L.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Filter mode is explicit and persists while navigating", "[cursesINDI][filter]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::keyPressed;
+    cursesINDI::moveCurrent;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "aaa" ) );
+    client.handleDefProperty( property( "camwfs" ) );
+    client.handleDefProperty( property( "camwoofer" ) );
+    client.redrawTable();
+    REQUIRE_FALSE( client.m_filtering );
+    client.moveCurrent( 1, 3 );
+    client.keyPressed( 0x1f & 'f' );
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    REQUIRE( client.m_currX == 3 );
+    REQUIRE( client.m_currY == 1 );
+
+    for( char ch : std::string( "cw" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    REQUIRE( client.m_cellContents.size() == 2 );
+    client.moveCurrent( 1, 3 );
+    REQUIRE( selected( client ) == "camwoofer.exposure.current" );
+    REQUIRE_FALSE( client.m_deviceSearching );
+    REQUIRE( client.m_filtering );
+    client.keyPressed( 0x1f & 'f' );
+    REQUIRE( client.m_deviceSearching );
+    REQUIRE( client.m_deviceTarget == "cw" );
+    REQUIRE( client.m_cellContents.size() == 2 );
+    client.keyPressed( 0x1f & 'l' );
+    REQUIRE_FALSE( client.m_filtering );
+    REQUIRE( client.m_deviceSearching );
+    REQUIRE( client.m_deviceTarget.empty() );
+    REQUIRE( client.m_cellContents.size() == 3 );
+    REQUIRE( selected( client ) == "camwoofer.exposure.current" );
+    client.keyPressed( 'a' );
+    REQUIRE( selected( client ) == "aaa.exposure.current" );
+    REQUIRE( client.m_cellContents.size() == 3 );
+}
+
+/** \brief Apply filters to arriving properties and choose only visible rows after deletion.
+ * \ingroup cursesINDI_unit_test
+ */
+TEST_CASE( "Filtered selection survives property updates", "[cursesINDI][filter]" )
+{
+    // clang-format off
+#ifdef CURSESINDI_TEST_DOXYGEN_REF
+    cursesINDI::handleDefProperty;
+    cursesINDI::handleDelProperty;
+    cursesINDI::redrawTable;
+    cursesINDI::updateTable;
+#endif
+    // clang-format on
+    Screen screen;
+    auto  &client = *screen.m_client;
+    client.handleDefProperty( property( "camwfs" ) );
+    client.redrawTable();
+    client.keyPressed( 0x1f & 'f' );
+
+    for( char ch : std::string( "cam" ) )
+    {
+        client.keyPressed( ch );
+    }
+
+    client.handleDefProperty( property( "aaa" ) );
+    client.handleDefProperty( property( "camaux" ) );
+    client.handleDefProperty( property( "camwoofer" ) );
+    client.handleDefProperty( property( "zzz" ) );
+    client.redrawTable();
+    REQUIRE( client.m_cellContents.size() == 3 );
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    client.updateTable();
+    client.handleDelProperty( property( "camwfs" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwoofer.exposure.current" );
+    client.handleDelProperty( property( "camwoofer" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camaux.exposure.current" );
+    client.handleDelProperty( property( "camaux" ) );
+    client.redrawTable();
+    REQUIRE( client.m_cellContents.empty() );
+    REQUIRE( selected( client ).empty() );
+    client.handleDefProperty( property( "camwfs" ) );
+    client.redrawTable();
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
+    client.keyPressed( 0x1f & 'l' );
+    REQUIRE( client.m_cellContents.size() == 3 );
+    REQUIRE( selected( client ) == "camwfs.exposure.current" );
 }
 
 /** \brief Preserve the selected element and column when rows are inserted or removed before it.

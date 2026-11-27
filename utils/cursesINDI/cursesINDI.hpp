@@ -207,8 +207,11 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     /// Identity of the selected element, retained when table rows are reordered or deleted.
     std::string m_selectedKey;
 
-    /// True while search owns keyboard input, including after Ctrl+L from another column.
+    /// True while the query owns keyboard input, including after Ctrl+L or Ctrl+F from another column.
     bool m_deviceSearching{ false };
+
+    /// True while the query hides nonmatching rows, including while navigating the results.
+    bool m_filtering{ false };
 
     /// The dot-separated device, property, and element query typed so far.
     std::string m_deviceTarget;
@@ -285,6 +288,10 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     static int searchSegmentRank( std::string      field, /**< [in] device, property, or element name */
                                   std::string_view query /**< [in] lowercase query segment */ );
 
+    /// Rank all query segments against an element; a rank of 3 in any field means no match.
+    static std::array<int, 3> searchElementRank( const elementSpec &element, /**< [in] candidate element */
+                                                 std::string query /**< [in] dot-separated search or filter text */ );
+
     /// Find the first displayed row matching a case-insensitive device.property.element query.
     /** Rank prefixes, substrings, and subsequences in device, property, then element order.
      * Empty or omitted segments match any name; ties retain table order.
@@ -293,7 +300,7 @@ class cursesINDI : public pcf::IndiClient, public cursesTableGrid
     static int findSearchRow( const elementMapT &elements, /**< [in] elements in table order */
                               std::string        query /**< [in] dot-separated search text */ );
 
-    /// Update a dot-separated search and jump to its best match while preserving table order.
+    /// Update a dot-separated query, jumping to its best match or filtering the table.
     void deviceSearch( int ch /**< [in] the key code */ );
 
     /// Recreate the element count window after the table is drawn.
@@ -697,6 +704,19 @@ void cursesINDI::redrawTable()
             fsmAlerts = true;
             alertDev.insert( knownProps[es->second.propKey].getDevice() );
         }
+
+        es->second.tableRow = -1;
+
+        if( m_filtering )
+        {
+            auto rank = searchElementRank( es->second, m_deviceTarget );
+
+            if( rank[0] == 3 || rank[1] == 3 || rank[2] == 3 )
+            {
+                continue;
+            }
+        }
+
         std::vector<std::string> s;
 
         s.resize( m_colFraction.size() );
@@ -713,19 +733,27 @@ void cursesINDI::redrawTable()
         es->second.tableRow = m_cellContents.size() - 1;
     }
 
-    if( knownElements.empty() )
+    if( m_cellContents.empty() )
     {
         m_startRow = 0;
         m_currY    = 0;
     }
     else
     {
-        // Keep the selected identity; if removed, use its successor or the last remaining row.
+        // Keep the selected identity; otherwise use its next visible successor or the last visible row.
         auto selected = knownElements.lower_bound( m_selectedKey );
+
+        while( selected != knownElements.end() && selected->second.tableRow < 0 )
+        {
+            ++selected;
+        }
 
         if( selected == knownElements.end() )
         {
-            --selected;
+            do
+            {
+                --selected;
+            } while( selected->second.tableRow < 0 );
         }
 
         size_t row = selected->second.tableRow;
@@ -972,14 +1000,17 @@ void cursesINDI::_moveCurrent( int nextY, int nextX )
         if( currX != nextX )
         {
             wclear( w_interactWin );
-            wprintw( w_interactWin, "search: %s", m_deviceSearching ? m_deviceTarget.c_str() : "" );
+            wprintw( w_interactWin,
+                     "%s: %s",
+                     m_filtering ? "filter" : "search",
+                     m_deviceSearching || m_filtering ? m_deviceTarget.c_str() : "" );
             wrefresh( w_interactWin );
         }
     }
     else if( currY != nextY || currX == 1 || selectedKey != m_selectedKey )
     {
         wclear( w_interactWin );
-        if( m_currY + m_startRow >= knownElements.size() )
+        if( m_currY + m_startRow >= m_cellContents.size() )
         {
             wrefresh( w_interactWin );
             return;
@@ -1061,13 +1092,8 @@ inline int cursesINDI::searchSegmentRank( std::string field, std::string_view qu
     return 3;
 }
 
-inline int cursesINDI::findSearchRow( const elementMapT &elements, std::string query )
+inline std::array<int, 3> cursesINDI::searchElementRank( const elementSpec &element, std::string query )
 {
-    if( query.empty() )
-    {
-        return -1;
-    }
-
     for( char &ch : query )
     {
         ch = std::tolower( static_cast<unsigned char>( ch ) );
@@ -1088,10 +1114,22 @@ inline int cursesINDI::findSearchRow( const elementMapT &elements, std::string q
 
         if( i == segments.size() - 1 )
         {
-            return -1;
+            return { 3, 3, 3 };
         }
 
         remaining.remove_prefix( period + 1 );
+    }
+
+    return { searchSegmentRank( element.device, segments[0] ),
+             searchSegmentRank( element.propertyName, segments[1] ),
+             searchSegmentRank( element.name, segments[2] ) };
+}
+
+inline int cursesINDI::findSearchRow( const elementMapT &elements, std::string query )
+{
+    if( query.empty() )
+    {
+        return -1;
     }
 
     std::array<int, 3> bestRank{ 3, 3, 3 };
@@ -1104,9 +1142,7 @@ inline int cursesINDI::findSearchRow( const elementMapT &elements, std::string q
             continue;
         }
 
-        std::array<int, 3> rank{ searchSegmentRank( element.device, segments[0] ),
-                                 searchSegmentRank( element.propertyName, segments[1] ),
-                                 searchSegmentRank( element.name, segments[2] ) };
+        auto rank = searchElementRank( element, query );
 
         if( rank[0] == 3 || rank[1] == 3 || rank[2] == 3 )
         {
@@ -1128,13 +1164,13 @@ void cursesINDI::deviceSearch( int ch )
     { //mutex scope
         std::lock_guard<std::mutex> lock( m_drawMutex );
 
-        if( ch == KEY_BACKSPACE && m_deviceSearching && !m_deviceTarget.empty() )
+        if( ch == KEY_BACKSPACE && ( m_deviceSearching || m_filtering ) && !m_deviceTarget.empty() )
         {
             m_deviceTarget.pop_back();
         }
         else if( ch >= 0 && ch <= UCHAR_MAX && std::isprint( static_cast<unsigned char>( ch ) ) )
         {
-            if( !m_deviceSearching )
+            if( !m_deviceSearching && !m_filtering )
             {
                 m_deviceTarget.clear();
             }
@@ -1148,18 +1184,21 @@ void cursesINDI::deviceSearch( int ch )
 
         m_deviceSearching = true;
         wclear( w_interactWin );
-        wprintw( w_interactWin, "search: %s", m_deviceTarget.c_str() );
+        wprintw( w_interactWin, "%s: %s", m_filtering ? "filter" : "search", m_deviceTarget.c_str() );
         wrefresh( w_interactWin );
 
-        int row = findSearchRow( knownElements, m_deviceTarget );
-
-        if( row < 0 )
+        if( !m_filtering )
         {
-            return;
-        }
+            int row = findSearchRow( knownElements, m_deviceTarget );
 
-        m_startRow = row;
-        _moveCurrent( 0, 1 );
+            if( row < 0 )
+            {
+                return;
+            }
+
+            m_startRow = row;
+            _moveCurrent( 0, 1 );
+        }
     }
 
     redrawTable();
@@ -1167,19 +1206,37 @@ void cursesINDI::deviceSearch( int ch )
 
 void cursesINDI::keyPressed( int ch )
 {
-    if( ch == ( 0x1f & 'l' ) )
+    if( ch == ( 0x1f & 'l' ) || ch == ( 0x1f & 'f' ) )
     {
-        std::lock_guard<std::mutex> lock( m_drawMutex );
+        bool redraw;
 
-        m_deviceTarget.clear();
-        m_deviceSearching = true;
-        wclear( w_interactWin );
-        wprintw( w_interactWin, "search: " );
-        wrefresh( w_interactWin );
+        { //mutex scope
+            std::lock_guard<std::mutex> lock( m_drawMutex );
+
+            bool filtering = ch == ( 0x1f & 'f' );
+            redraw         = m_filtering != filtering;
+
+            if( !m_filtering || !filtering )
+            {
+                m_deviceTarget.clear();
+            }
+
+            m_filtering       = filtering;
+            m_deviceSearching = true;
+            wclear( w_interactWin );
+            wprintw( w_interactWin, "%s: %s", m_filtering ? "filter" : "search", m_deviceTarget.c_str() );
+            wrefresh( w_interactWin );
+        }
+
+        if( redraw )
+        {
+            redrawTable();
+        }
+
         return;
     }
 
-    // Search accepts input from the device column or after an explicit Ctrl+L focus.
+    // Queries accept input from the device column or after explicit shortcut focus.
     if( m_currX == 1 || m_deviceSearching )
     {
         deviceSearch( ch );
@@ -1190,7 +1247,7 @@ void cursesINDI::keyPressed( int ch )
     {
     case 'e':
     {
-        if( m_currY + m_startRow >= knownElements.size() )
+        if( m_currY + m_startRow >= m_cellContents.size() )
         {
             break;
         }
@@ -1336,7 +1393,7 @@ void cursesINDI::keyPressed( int ch )
     } //case 'e'
     case 't':
     {
-        if( m_currY + m_startRow >= knownElements.size() )
+        if( m_currY + m_startRow >= m_cellContents.size() )
         {
             break;
         }
@@ -1427,7 +1484,7 @@ void cursesINDI::keyPressed( int ch )
     } //case 't'
     case 'p':
     {
-        if( m_currY + m_startRow >= knownElements.size() )
+        if( m_currY + m_startRow >= m_cellContents.size() )
         {
             break;
         }
@@ -1544,6 +1601,12 @@ inline int cursesINDI::postPrint()
 
     wclear( w_countWin );
     wprintw( w_countWin, "%i/%zu elements shown.", shown, knownElements.size() );
+
+    if( m_filtering )
+    {
+        wprintw( w_countWin, " %zu matching filter: %s", m_cellContents.size(), m_deviceTarget.c_str() );
+    }
+
     wrefresh( w_countWin );
 
     return 0;
