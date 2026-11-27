@@ -219,6 +219,8 @@ getINDI 'loPredCtrlAcc.ddspc_control.*'   # requested_mode=accel_assisted_2k; wa
 setINDI -s 'loPredCtrlAcc.learn.toggle=Off'
 ```
 
+**8 kHz averaged ACC.** loPredCtrlAccGUI's "ACC Assisted 2 kHz (8 kHz avg)" button runs this same mode with acc000 reading at 8 kHz and averaging each 4 scans on the Pi (mcp3208Ctrl `average`): it sets `acc000.fps=8000` and `acc000.average=4`, then selects `accel_assisted_2k`. acc000 then publishes a steady 2 kHz stream of 4-scan means (`acc000.stream_fps`), detected here as `acc_ratio` 1, so the ACC history holds the newest `accel_history` averaged samples. By hand: `setINDI -n 'acc000.fps.target=8000'`, `setINDI -n 'acc000.average.target=4'`, then select `accel_assisted_2k`; `average=1` turns the averaging off. Design: `agents/plans/2026-11/ddspc-assisted-2k-avg.md`.
+
 It trains its own fit, separate from both the standard and the per-slot assisted fits; `assisted_qualification.model` reads `2k <state>`. In an offline simulation with an informative ACC it halved standard's residual. Design: `agents/plans/2026-11/ddspc-assisted-2k.md`.
 
 ## 60 s publication check
